@@ -1,0 +1,1027 @@
+{
+  "templates": [
+    {
+      "id": "campaign-poster",
+      "name": "品牌海报",
+      "category": "poster-and-campaigns",
+      "description": "适合联名款、主 KV、时尚广告、竖版视觉主图",
+      "triggers": [
+        "海报",
+        "KV",
+        "联名",
+        "广告",
+        "campaign",
+        "poster",
+        "主视觉"
+      ],
+      "required_focus": [
+        "品牌气质",
+        "文字留白",
+        "场景分布",
+        "全身或主视觉构图",
+        "高质量商业摄影感"
+      ],
+      "ask_fields": [
+        "品牌或联名关系",
+        "海报用途与投放比例",
+        "主体是人物、商品还是人物+商品",
+        "是否需要预留标题、logo、slogan、安全区",
+        "必须出现或必须避免的视觉元素"
+      ],
+      "required_slot_fields": [
+        "style_family",
+        "scene",
+        "wardrobe",
+        "composition",
+        "lighting",
+        "mood",
+        "text_policy"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "campaign_intent",
+        "scene_hierarchy",
+        "wardrobe_product_focus",
+        "pose_expression",
+        "lighting_palette",
+        "composition_layout",
+        "typography_safe_area",
+        "commercial_finish"
+      ],
+      "composition_bias": [
+        "9:16 vertical hero poster, full-body or dominant subject, clear hierarchy",
+        "reserved clean space for later logo, campaign claim, and co-branded lockup",
+        "subject scale large enough for outdoor-ad or social-feed impact"
+      ],
+      "quality_rules": [
+        "每条 prompt 必须明确海报用途，而不是普通写真",
+        "场景必须有商业海报层级，不能只有白底或空背景",
+        "服装或产品必须是可读的卖点，不要被姿势遮挡",
+        "构图必须说明全身、半身或主视觉裁切规则",
+        "文字安全区只描述留白，不让模型直接生成可读文字"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "fake logo",
+        "cropped feet",
+        "cheap catalog look",
+        "plain empty background",
+        "busy typography",
+        "low-detail fabric"
+      ],
+      "anti_patterns": [
+        "把主 KV 写成普通棚拍人像",
+        "没有场景层级，只剩白底人物",
+        "生成真实品牌 logo 或可读商标文字",
+        "全身海报却裁掉脚或手",
+        "同一批 prompt 只替换少量形容词"
+      ],
+      "template_doc": "references/templates/poster-and-campaigns/campaign-poster.md",
+      "variants": [
+        {
+          "id": "co-brand-kv",
+          "name": "联名主 KV",
+          "description": "双方品牌调性同屏，主视觉强，预留联名锁定区"
+        },
+        {
+          "id": "product-hero",
+          "name": "产品主视觉",
+          "description": "商品和材质可读性优先"
+        },
+        {
+          "id": "people-hero",
+          "name": "人物主视觉",
+          "description": "人物眼神、姿态、品牌气质优先"
+        },
+        {
+          "id": "campaign-extension",
+          "name": "Campaign 延展",
+          "description": "同一视觉系统下多场景扩展"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "camera-language",
+          "field": "camera_language",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "full-body vertical hero framing",
+            "walking turn-back poster motion",
+            "subtle low-angle fashion perspective"
+          ]
+        },
+        {
+          "name": "commercial-role",
+          "field": "commercial_role",
+          "strategy": "cycle",
+          "options": [
+            "master KV",
+            "product-benefit poster",
+            "campaign extension visual"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "soft premium studio light",
+              "directional rim light",
+              "diffused window light"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "expensive restraint",
+              "calm luxury",
+              "editorial confidence"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      }
+    },
+    {
+      "id": "studio-editorial",
+      "name": "棚拍大片",
+      "category": "portraits-and-characters",
+      "description": "适合极简背景、摄影棚灯光、时尚编辑感画面",
+      "triggers": [
+        "摄影棚",
+        "棚拍",
+        "studio",
+        "editorial",
+        "棚内"
+      ],
+      "required_focus": [
+        "灯光控制",
+        "材质细节",
+        "姿态变化",
+        "背景纯净度"
+      ],
+      "ask_fields": [
+        "棚拍背景颜色或材质",
+        "主光、轮廓光、补光方向",
+        "人物景别和姿态范围",
+        "服装材质与重点细节"
+      ],
+      "required_slot_fields": [
+        "style_family",
+        "scene",
+        "wardrobe",
+        "composition",
+        "lighting"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "studio_setup",
+        "wardrobe_material",
+        "pose_expression",
+        "lighting_control",
+        "composition_layout",
+        "editorial_finish"
+      ],
+      "composition_bias": [
+        "controlled studio framing with clean edges",
+        "subject fills most of the vertical frame without accidental crop"
+      ],
+      "quality_rules": [
+        "灯光必须写清方向和作用",
+        "面料质感必须可读",
+        "背景要干净但不能显得廉价"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "harsh flash",
+        "over-smoothed skin",
+        "wrinkled backdrop",
+        "cropped limbs"
+      ],
+      "anti_patterns": [
+        "只写高级感但不写灯光结构",
+        "背景杂乱影响主体",
+        "姿态和构图在大批量里重复"
+      ]
+    },
+    {
+      "id": "ecommerce-clean",
+      "name": "电商纯净图",
+      "category": "product-visuals",
+      "description": "适合电商主图、平衡展示信息和商品可读性",
+      "triggers": [
+        "电商",
+        "主图",
+        "ecommerce",
+        "商品图",
+        "详情页"
+      ],
+      "required_focus": [
+        "商品可读性",
+        "背景干净",
+        "构图稳定",
+        "减少风格噪声"
+      ],
+      "ask_fields": [
+        "商品或服装核心卖点",
+        "背景是纯白、浅灰还是轻场景",
+        "是否需要多角度或细节展示",
+        "是否需要电商平台安全区"
+      ],
+      "required_slot_fields": [
+        "scene",
+        "wardrobe",
+        "composition",
+        "text_policy"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "product_readability",
+        "clean_scene",
+        "wardrobe_product_focus",
+        "lighting_palette",
+        "composition_layout",
+        "commercial_finish"
+      ],
+      "composition_bias": [
+        "stable product-first composition",
+        "clean background with no distracting props"
+      ],
+      "quality_rules": [
+        "商品结构和面料必须清晰",
+        "背景不能抢主体",
+        "避免过度电影感导致商品不可读"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "fake logo",
+        "cluttered background",
+        "low-detail product",
+        "distorted garment"
+      ],
+      "anti_patterns": [
+        "为了氛围牺牲商品展示",
+        "背景元素比商品更醒目",
+        "色彩过饱和影响真实质感"
+      ]
+    },
+    {
+      "id": "lookbook",
+      "name": "Lookbook",
+      "category": "grids-and-collages",
+      "description": "适合系列服装轮换、款式展示、场景变化控制",
+      "triggers": [
+        "lookbook",
+        "系列",
+        "款式",
+        "造型册"
+      ],
+      "required_focus": [
+        "款式轮换",
+        "场景节奏",
+        "模特姿态变化",
+        "整体系列一致性"
+      ],
+      "ask_fields": [
+        "系列款式数量和款式差异",
+        "是否同一模特保持一致",
+        "场景是统一还是分章节变化",
+        "每张图偏展示、氛围还是封面"
+      ],
+      "required_slot_fields": [
+        "style_family",
+        "scene",
+        "wardrobe",
+        "composition"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "series_context",
+        "scene_hierarchy",
+        "wardrobe_product_focus",
+        "pose_expression",
+        "lighting_palette",
+        "composition_layout",
+        "lookbook_consistency"
+      ],
+      "composition_bias": [
+        "consistent series framing with controlled variation",
+        "wardrobe remains readable across the full batch"
+      ],
+      "quality_rules": [
+        "每条 prompt 必须体现款式差异",
+        "同系列需要保持相机语言和色彩统一",
+        "姿态变化要服务于服装展示"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "inconsistent model identity",
+        "duplicate outfit",
+        "cropped garment",
+        "messy background"
+      ],
+      "anti_patterns": [
+        "只换场景不换款式",
+        "同批画面风格完全漂移",
+        "服装细节被姿态遮住"
+      ]
+    },
+    {
+      "id": "portrait-kv",
+      "name": "肖像主视觉",
+      "category": "portraits-and-characters",
+      "description": "适合近景、半身、人物气质主导的品牌视觉",
+      "triggers": [
+        "肖像",
+        "半身",
+        "portrait",
+        "close-up",
+        "近景"
+      ],
+      "required_focus": [
+        "面部表现",
+        "眼神",
+        "光线层次",
+        "主视觉集中度"
+      ],
+      "ask_fields": [
+        "人物气质和表情方向",
+        "近景、半身还是头肩构图",
+        "背景氛围与品牌调性",
+        "是否需要标题留白"
+      ],
+      "required_slot_fields": [
+        "style_family",
+        "scene",
+        "composition",
+        "lighting",
+        "mood"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "portrait_intent",
+        "scene_hierarchy",
+        "pose_expression",
+        "lighting_palette",
+        "composition_layout",
+        "typography_safe_area",
+        "commercial_finish"
+      ],
+      "composition_bias": [
+        "face-led key visual with controlled background depth",
+        "strong eye contact and clean headroom for editorial layout"
+      ],
+      "quality_rules": [
+        "眼神和表情必须具体",
+        "脸部光线不能被强氛围吞掉",
+        "背景只服务人物气质"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "fake logo",
+        "distorted face",
+        "over-smoothed skin",
+        "dead eyes",
+        "busy background"
+      ],
+      "anti_patterns": [
+        "只写美但没有表情方向",
+        "背景戏太多削弱肖像",
+        "多个 prompt 眼神完全相同"
+      ]
+    },
+    {
+      "id": "image-edit",
+      "name": "图像编辑",
+      "category": "editing-workflows",
+      "description": "适合已有图片基础上的改背景、改服装、局部修正",
+      "triggers": [
+        "编辑",
+        "修图",
+        "改图",
+        "局部",
+        "edit"
+      ],
+      "required_focus": [
+        "编辑目标",
+        "保留内容",
+        "局部变化边界",
+        "一致性"
+      ],
+      "ask_fields": [
+        "原图路径或参考图",
+        "需要保留的主体和区域",
+        "需要修改的局部边界",
+        "修改后的目标风格",
+        "是否允许整体重绘"
+      ],
+      "required_slot_fields": [
+        "scene",
+        "wardrobe",
+        "composition",
+        "negative_prompt"
+      ],
+      "prompt_sections": [
+        "edit_goal",
+        "preserve_rules",
+        "change_boundary",
+        "target_scene_style",
+        "consistency_rules",
+        "quality_constraints"
+      ],
+      "composition_bias": [
+        "preserve original subject geometry unless explicitly changed",
+        "edited area blends with original light, perspective, and texture"
+      ],
+      "quality_rules": [
+        "必须明确保留什么",
+        "必须明确修改边界",
+        "结果要与原图光线和透视一致"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "identity drift",
+        "mismatched lighting",
+        "blurry edit boundary",
+        "warped texture"
+      ],
+      "anti_patterns": [
+        "没有保留规则就做大幅重绘",
+        "局部编辑边界模糊",
+        "修改区域光线与原图不一致"
+      ]
+    },
+    {
+      "id": "cinematic-storyboard",
+      "name": "电影分镜",
+      "category": "cinematic-sequences",
+      "description": "适合连续镜头、剧情化视觉、广告片分镜、情绪叙事组图",
+      "triggers": [
+        "分镜",
+        "电影",
+        "短片",
+        "storyboard",
+        "cinematic",
+        "剧情",
+        "镜头序列"
+      ],
+      "required_focus": [
+        "镜头连续性",
+        "叙事节点",
+        "镜头景别",
+        "光线情绪",
+        "角色动作前后关系"
+      ],
+      "ask_fields": [
+        "故事主题和每组镜头数量",
+        "主角是否固定",
+        "镜头顺序是开场、推进、高潮还是收束",
+        "需要横版电影感还是竖版短视频感",
+        "是否需要每张保留字幕或标题安全区"
+      ],
+      "required_slot_fields": [
+        "style_family",
+        "scene",
+        "composition",
+        "lighting",
+        "mood"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "story_beat",
+        "scene_hierarchy",
+        "camera_language",
+        "pose_expression",
+        "lighting_palette",
+        "composition_layout",
+        "continuity_rules",
+        "commercial_finish"
+      ],
+      "composition_bias": [
+        "clear shot scale and camera movement language",
+        "each image feels like one frame from a larger sequence",
+        "preserve character and scene continuity across variants"
+      ],
+      "quality_rules": [
+        "每条 prompt 必须有明确叙事节点",
+        "镜头语言要具体，不能只写电影感",
+        "同组图片要保持角色、场景、色彩连续",
+        "分镜之间需要动作或情绪递进"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "inconsistent character",
+        "random scene jump",
+        "unclear action",
+        "flat lighting"
+      ],
+      "anti_patterns": [
+        "只有氛围没有镜头动作",
+        "每张图像互相无关",
+        "景别和构图不服务叙事",
+        "同一序列里角色外观漂移"
+      ],
+      "template_doc": "references/templates/cinematic-sequences/cinematic-storyboard.md",
+      "variants": [
+        {
+          "id": "four-beat-ad",
+          "name": "四段广告片",
+          "description": "开场、揭示、高潮、收束"
+        },
+        {
+          "id": "micro-film",
+          "name": "微电影",
+          "description": "连续微电影镜头"
+        },
+        {
+          "id": "vertical-short",
+          "name": "竖版短片",
+          "description": "短视频分镜封面"
+        },
+        {
+          "id": "mood-sequence",
+          "name": "情绪递进",
+          "description": "情绪组图"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "story-beat",
+          "field": "story_beat",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "opening hook",
+            "product reveal",
+            "emotional turn",
+            "closing hero frame"
+          ]
+        },
+        {
+          "name": "camera-language",
+          "field": "camera_language",
+          "strategy": "cycle",
+          "options": [
+            "wide establishing shot",
+            "medium action frame",
+            "close emotional frame",
+            "hero end frame"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "cinematic motivated light",
+              "consistent sequence palette"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "narrative tension",
+              "premium restraint",
+              "emotional progression"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      }
+    },
+    {
+      "id": "social-grid",
+      "name": "社媒九宫格",
+      "category": "social-campaigns",
+      "description": "适合小红书、Instagram、品牌社媒九宫格、系列内容矩阵",
+      "triggers": [
+        "九宫格",
+        "社媒",
+        "小红书",
+        "instagram",
+        "feed",
+        "宫格",
+        "社交媒体"
+      ],
+      "required_focus": [
+        "封面与内页节奏",
+        "色彩统一",
+        "内容角色分工",
+        "可裁切安全区",
+        "系列识别度"
+      ],
+      "ask_fields": [
+        "需要 3、6、9 还是更多张",
+        "每张在社媒中的角色：封面、细节、场景、情绪、卖点",
+        "是否需要统一色彩或统一背景",
+        "是否预留标题和贴纸空间",
+        "平台比例和裁切要求"
+      ],
+      "required_slot_fields": [
+        "style_family",
+        "scene",
+        "wardrobe",
+        "composition",
+        "text_policy"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "grid_role",
+        "scene_hierarchy",
+        "wardrobe_product_focus",
+        "pose_expression",
+        "lighting_palette",
+        "composition_layout",
+        "typography_safe_area",
+        "series_consistency"
+      ],
+      "composition_bias": [
+        "works as one tile in a coherent social feed grid",
+        "clear focal point after square or vertical crop",
+        "consistent palette with varied role per tile"
+      ],
+      "quality_rules": [
+        "每张图要有明确社媒角色",
+        "同组色彩和品牌调性必须统一",
+        "封面图和细节图不能全部长得一样",
+        "需要考虑平台裁切后的主体完整性"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "fake UI sticker",
+        "messy feed",
+        "inconsistent palette",
+        "cropped product"
+      ],
+      "anti_patterns": [
+        "九张图只是随机拼图",
+        "没有封面、细节、氛围的角色差异",
+        "社媒图直接生成大量不可控文字",
+        "主体在裁切后不可读"
+      ],
+      "template_doc": "references/templates/social-campaigns/social-grid.md",
+      "variants": [
+        {
+          "id": "nine-grid-launch",
+          "name": "九宫格上新",
+          "description": "品牌上新九宫格"
+        },
+        {
+          "id": "cover-detail-mood",
+          "name": "封面细节氛围",
+          "description": "封面、细节、氛围三段式"
+        },
+        {
+          "id": "ugc-polished",
+          "name": "高级 UGC",
+          "description": "自然但商业可控"
+        },
+        {
+          "id": "brand-feed-system",
+          "name": "品牌 Feed 系统",
+          "description": "统一色彩和系列识别"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "grid-role",
+          "field": "grid_role",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "cover tile",
+            "material detail tile",
+            "lifestyle mood tile",
+            "product benefit tile"
+          ]
+        },
+        {
+          "name": "crop-safety",
+          "field": "crop_safety",
+          "strategy": "cycle",
+          "options": [
+            "square-safe center crop",
+            "vertical-safe crop",
+            "clean focal-point crop"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "mood",
+            "values": [
+              "premium social editorial",
+              "approachable polished lifestyle"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "composition",
+            "values": [
+              "square-crop-safe vertical composition"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ab-ad-test",
+      "name": "广告 A/B 测试组",
+      "category": "performance-creatives",
+      "description": "适合批量测试不同卖点、构图、情绪、场景和 CTA 留白方向",
+      "triggers": [
+        "A/B",
+        "ab test",
+        "投放",
+        "素材测试",
+        "广告组",
+        "转化",
+        "测试组"
+      ],
+      "required_focus": [
+        "变量隔离",
+        "卖点表达",
+        "目标人群",
+        "对照组一致性",
+        "可复盘命名"
+      ],
+      "ask_fields": [
+        "要测试的核心变量是什么",
+        "每个变量需要几张",
+        "目标人群和投放场景",
+        "主卖点和不能改变的控制项",
+        "是否需要 CTA 或文案留白"
+      ],
+      "required_slot_fields": [
+        "style_family",
+        "scene",
+        "wardrobe",
+        "composition",
+        "text_policy"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "ad_test_hypothesis",
+        "controlled_variables",
+        "scene_hierarchy",
+        "wardrobe_product_focus",
+        "lighting_palette",
+        "composition_layout",
+        "typography_safe_area",
+        "commercial_finish"
+      ],
+      "composition_bias": [
+        "one clear tested creative variable per image",
+        "stable baseline across comparison groups",
+        "layout leaves space for later headline or CTA"
+      ],
+      "quality_rules": [
+        "每条 prompt 必须能看出测试变量",
+        "非测试变量要保持稳定",
+        "命名和 metadata 需要支持复盘",
+        "不要让多个变量同时变化导致不可分析"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "fake logo",
+        "uncontrolled variable drift",
+        "unclear product benefit",
+        "cluttered layout"
+      ],
+      "anti_patterns": [
+        "每张都随机变化导致无法 A/B 对比",
+        "没有明确卖点假设",
+        "投放素材像艺术图但没有转化结构",
+        "文案区被主体或背景占满"
+      ],
+      "template_doc": "references/templates/performance-creatives/ab-ad-test.md",
+      "variants": [
+        {
+          "id": "single-variable",
+          "name": "单变量测试",
+          "description": "每张只变化一个核心变量"
+        },
+        {
+          "id": "benefit-stack",
+          "name": "卖点栈测试",
+          "description": "比较不同利益点表达"
+        },
+        {
+          "id": "audience-angle",
+          "name": "人群角度测试",
+          "description": "比较不同目标人群场景"
+        },
+        {
+          "id": "layout-test",
+          "name": "版式测试",
+          "description": "比较 CTA 和标题安全区"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "ad-hypothesis",
+          "field": "ad_test_hypothesis",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "avoid_repeat_within_batch": true,
+          "options": [
+            "test product clarity against lifestyle desire",
+            "test direct gaze against candid motion",
+            "test matte fabric texture against body-line silhouette"
+          ]
+        },
+        {
+          "name": "camera-language",
+          "field": "camera_language",
+          "strategy": "cycle",
+          "options": [
+            "front-facing full-body hero camera language",
+            "walking turn-back camera language"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "controlled_variables",
+            "values": [
+              "keep subject, product, visual quality, and layout baseline stable"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "commercial_role",
+            "values": [
+              "paid-social ad creative",
+              "conversion-oriented hero visual"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail-page-set",
+      "name": "详情页组图",
+      "category": "product-visuals",
+      "description": "适合电商详情页、卖点拆解、材质细节、场景展示和主图组合",
+      "triggers": [
+        "详情页",
+        "卖点",
+        "材质细节",
+        "detail page",
+        "产品组图",
+        "五张图"
+      ],
+      "required_focus": [
+        "主图与细节图分工",
+        "卖点拆解",
+        "材质可读性",
+        "尺寸和版式统一",
+        "商品信息层级"
+      ],
+      "ask_fields": [
+        "详情页需要几张图",
+        "每张图对应什么卖点",
+        "是否需要局部特写、穿着场景、包装或平铺",
+        "平台尺寸和安全区",
+        "是否需要统一背景或统一模特"
+      ],
+      "required_slot_fields": [
+        "scene",
+        "wardrobe",
+        "composition",
+        "text_policy"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "detail_page_role",
+        "product_readability",
+        "scene_hierarchy",
+        "wardrobe_product_focus",
+        "lighting_palette",
+        "composition_layout",
+        "typography_safe_area",
+        "commercial_finish"
+      ],
+      "composition_bias": [
+        "product benefit is immediately readable",
+        "layout supports later labels, arrows, or copy blocks",
+        "mix hero, lifestyle, and close-detail roles across the set"
+      ],
+      "quality_rules": [
+        "每张图必须有详情页角色",
+        "材质、版型、功能卖点必须清楚",
+        "不能全是同一种主图",
+        "留白只给后期排版，不直接生成文字"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable text",
+        "fake label",
+        "low-detail material",
+        "unclear product shape",
+        "cluttered props"
+      ],
+      "anti_patterns": [
+        "详情页组图没有卖点分工",
+        "局部特写缺少材质信息",
+        "背景和道具抢商品",
+        "所有图片都是同一角度"
+      ],
+      "template_doc": "references/templates/product-visuals/detail-page-set.md",
+      "variants": [
+        {
+          "id": "hero-plus-details",
+          "name": "主图加细节",
+          "description": "主图和多张细节图组合"
+        },
+        {
+          "id": "benefit-breakdown",
+          "name": "卖点拆解",
+          "description": "每张图讲一个卖点"
+        },
+        {
+          "id": "fit-and-material",
+          "name": "版型材质",
+          "description": "版型和面料展示"
+        },
+        {
+          "id": "lifestyle-proof",
+          "name": "场景证明",
+          "description": "使用场景增强可信度"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "detail-page-role",
+          "field": "detail_page_role",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "hero product image",
+            "material close detail",
+            "fit demonstration",
+            "lifestyle use case"
+          ]
+        },
+        {
+          "name": "benefit-angle",
+          "field": "benefit_angle",
+          "strategy": "cycle",
+          "options": [
+            "comfort",
+            "support",
+            "invisible fit",
+            "premium fabric"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "clean commercial softbox light",
+              "material-readable highlights"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "composition",
+            "values": [
+              "product-first ecommerce composition"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "presets": [
+    {
+      "id": "safe_2k_poster",
+      "name": "安全 2K 海报",
+      "description": "适合 9:16 原生 2K 海报，保守并发，默认先预览。",
+      "aliases": ["安全2K", "2K海报", "原生2K", "safe 2k", "safe_2k"],
+      "values": {
+        "batch_size": 30,
+        "width": 1440,
+        "height": 2560,
+        "aspect_ratio_label": "9:16",
+        "concurrency": 6,
+        "retry_count": 1,
+        "timeout_seconds": 450,
+        "output_format": "png",
+        "preview_count": 12,
+        "contact_sheet": true,
+        "require_confirmation": true,
+        "sample_size": 20,
+        "stage_size": 200,
+        "auto_pause": true,
+        "max_consecutive_failures": 10,
+        "max_batch_failure_rate": 0.3
+      }
+    },
+    {
+      "id": "large_batch_stable",
+      "name": "稳定大批量",
+      "description": "适合 300-1000 张长期跑批，带样本批、分阶段和自动暂停保护。",
+      "aliases": ["稳定大批量", "大批量稳定", "1000张", "批量稳定", "large batch"],
+      "values": {
+        "batch_size": 30,
+        "width": 1440,
+        "height": 2560,
+        "aspect_ratio_label": "9:16",
+        "concurrency": 8,
+        "retry_count": 1,
+        "timeout_seconds": 450,
+        "output_format": "png",
+        "preview_count": 12,
+        "contact_sheet": true,
+        "require_confirmation": true,
+        "sample_size": 20,
+        "stage_size": 200,
+        "auto_pause": true,
+        "max_consecutive_failures": 10,
+        "max_batch_failure_rate": 0.3,
+        "skip_existing": true
+      }
+    },
+    {
+      "id": "fast_preview",
+      "name": "快速预览",
+      "description": "适合先看方向的小批量快速验证。",
+      "aliases": ["快速预览", "先看小样", "小样", "fast preview", "preview"],
+      "values": {
+        "batch_size": 10,
+        "width": 1024,
+        "height": 1536,
+        "aspect_ratio_label": "2:3",
+        "concurrency": 4,
+        "retry_count": 0,
+        "timeout_seconds": 240,
+        "output_format": "png",
+        "preview_count": 8,
+        "contact_sheet": true,
+        "require_confirmation": true,
+        "sample_size": 10,
+        "stage_size": 50,
+        "auto_pause": true,
+        "max_consecutive_failures": 5,
+        "max_batch_failure_rate": 0.4
+      }
+    },
+    {
+      "id": "provider_stress_safe",
+      "name": "Provider 保守模式",
+      "description": "适合 provider 不稳定或限流明显时，降低并发和失败冲击面。",
+      "aliases": ["保守模式", "低并发", "限流保护", "provider safe"],
+      "values": {
+        "batch_size": 10,
+        "width": 1440,
+        "height": 2560,
+        "aspect_ratio_label": "9:16",
+        "concurrency": 3,
+        "retry_count": 2,
+        "timeout_seconds": 600,
+        "output_format": "png",
+        "preview_count": 8,
+        "contact_sheet": true,
+        "require_confirmation": true,
+        "sample_size": 10,
+        "stage_size": 100,
+        "auto_pause": true,
+        "max_consecutive_failures": 5,
+        "max_batch_failure_rate": 0.25,
+        "skip_existing": true
+      }
+    }
+  ]
+}
