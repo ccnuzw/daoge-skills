@@ -145,3 +145,8 @@ If you install manually, overwrite the local skill folder with the updated `inte
 - DAOGE is optimized for Codex usage.
 - The skill itself does not store provider secrets; `.env` stays in your project.
 - Large runs are expected. DAOGE includes preview, staging, pause, rerun, and reporting workflows to keep batch generation stable.
+
+## Maintainer docs
+
+- Release notes template: `docs/release_notes_template_zh.md`
+- Release SOP: `docs/release_sop_zh.md`
