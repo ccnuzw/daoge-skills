@@ -1,9 +1,11 @@
 const FIELD_LABELS_ZH = {
+  provider: '生图 Provider',
   run_preset: 'DAOGE 运行预设',
   content_brief: '内容主题',
   output_mode: '输出模式',
   style_requirements: '风格要求',
   source_files: '参考文件',
+  source_images: '参考图片',
   total_count: '总张数',
   batch_size: '每批张数',
   width: '图片宽度',
@@ -28,6 +30,33 @@ const FIELD_LABELS_ZH = {
   identity_policy: '身份策略',
   negative_requirements: '负向要求',
   run_label: '运行标签',
+  storyboard_plan: '分镜板规划',
+  shot_id: '分镜 ID',
+  shot_label: '分镜标题',
+  slot_id: '槽位 ID',
+  slot_role: '槽位角色',
+  layout_region_id: '版式区域 ID',
+  board_id: '分镜板 ID',
+  timecode: '时间码',
+  reference_images: '垫图 / 参考图',
+  reference_mode: '参考模式',
+  mask_image: '遮罩图',
+  edit_source: '编辑底图来源',
+  edit_source_output: '编辑底图文件',
+  requestMode: '执行模式',
+  reference_notes: '参考图说明',
+  reference_bindings: '参考绑定文件',
+  reference_assets: '参考图片资产',
+  slot_assignments: '分镜绑定',
+  asset_id: '素材 ID',
+  priority: '优先级',
+  prompt_hints: '提示钩子',
+  continuity_notes: '连续性备注',
+  visual_elements: '视觉元素',
+  voiceover: '旁白',
+  music: '配乐',
+  sound_effects: '音效',
+  camera_move: '运镜',
   notes: '备注',
   slug: '标识名',
   title: '标题',
@@ -70,6 +99,7 @@ const SOURCE_LABELS_ZH = {
   default: '来自 DAOGE 默认选择',
   none: '未使用',
   strategy: '来自策略规划',
+  storyboard: '来自分镜板清单',
   autofill: '来自自动补全',
   template: '来自模板',
   preset: '来自 DAOGE 运行预设',
@@ -119,6 +149,21 @@ function translateValidationMessage(message) {
 
   match = text.match(/^Missing required prompt field: (.+)$/);
   if (match) return `提示词缺少必填字段：${labelField(match[1])}`;
+
+  match = text.match(/^(.+) prompts request sizes that are invalid for the current provider\/model$/);
+  if (match) return `有 ${match[1]} 条提示词尺寸不符合当前生图 Provider / 模型限制`;
+
+  match = text.match(/^Size (.+)x(.+) must use width and height that are multiples of (.+)$/);
+  if (match) return `尺寸 ${match[1]} x ${match[2]} 不合法：宽和高都必须是 ${match[3]} 的倍数`;
+
+  match = text.match(/^Size (.+)x(.+) exceeds the maximum aspect ratio (.+) for (.+)$/);
+  if (match) return `尺寸 ${match[1]} x ${match[2]} 不合法：对 ${match[4]} 来说长宽比超过 ${match[3]}`;
+
+  match = text.match(/^Size (.+)x(.+) is below the minimum pixel budget (.+) for (.+); current pixels: (.+); try at least (.+)$/);
+  if (match) return `尺寸 ${match[1]} x ${match[2]} 不合法：当前仅 ${match[5]} 像素，低于 ${match[4]} 的最小像素预算 ${match[3]}，建议至少改到 ${match[6]}`;
+
+  match = text.match(/^Size (.+)x(.+) exceeds the maximum pixel budget (.+) for (.+); current pixels: (.+)$/);
+  if (match) return `尺寸 ${match[1]} x ${match[2]} 不合法：当前 ${match[5]} 像素，超过 ${match[4]} 的最大像素预算 ${match[3]}`;
 
   return text;
 }

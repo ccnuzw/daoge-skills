@@ -1,152 +1,199 @@
 # DAOGE Skills
 
-DAOGE is a Chinese-first interactive batch image generation skill for Codex.
+DAOGE Skills 是一个面向 Codex 的技能仓库，目前主打中文工作流下的批量生图能力。
 
-This repository currently distributes one Codex skill:
+当前仓库包含的核心 skill：
 
-- `interactive-image-batch`
+- `skills/interactive-image-batch`
 
-It is designed for guided, repeatable, large-batch image generation runs driven by dialogue, optional markdown prompt libraries, and a local `.env` for provider credentials.
+它适合需要下面这些能力的场景：
 
-## What DAOGE does
+- 批量文生图
+- 带参考图的图生图
+- 带 mask 的局部重绘
+- 口播分镜板 / 故事板 / 连续分镜任务
+- 从 Markdown 提示词库生成成批 prompts
+- 带预检、预览、分批执行、失败续跑、结果汇总的稳定工作流
 
-- Chinese-first guided intake for batch image generation
-- Prompt preview before execution
-- Native size image generation
-- Batch, staged-run, sample-run, and auto-pause controls
-- Retry, timeout, concurrency, and skip-existing controls
-- Failure rerun workflow with manifests and reports
-- Project-level and global Codex installation compatibility
+---
 
-## Repository layout
+## 这个仓库解决什么问题
 
-```text
-skills/
-  interactive-image-batch/
-    SKILL.md
-    agents/openai.yaml
-    scripts/
-    references/
-```
+很多“批量生图脚本”只做一件事：
 
-## Install with `npx skills`
+- 读一个 prompts 文件
+- 调一次接口
+- 出错就结束
 
-Install project-level for Codex:
+DAOGE 走的是另一条路线：
+
+- 先把需求结构化
+- 再把 prompt 分发策略显式化
+- 再批量执行
+- 最后把失败、复跑、看板、结果归档全部做出来
+
+它更像一个完整生产工作流，而不是一个临时调用器。
+
+---
+
+## 当前包含的 skill
+
+### `interactive-image-batch`
+
+这是仓库当前的主 skill，能力包括：
+
+- 中文优先的对话式 intake
+- `task_spec.json` / `prompt_strategy.json` / `prompts.generated.json` 工作流
+- prompt preview / preflight dashboard
+- batch / staged run / sample run
+- retry / timeout / concurrency / skip-existing
+- failure rerun / resume manifest
+- storyboard / reference bindings / slot-based generation
+- 文生图 / 图生图 / 局部重绘
+
+完整说明见：
+
+- [`skills/interactive-image-batch/README.md`](./skills/interactive-image-batch/README.md)
+- [`skills/interactive-image-batch/SKILL.md`](./skills/interactive-image-batch/SKILL.md)
+
+---
+
+## 安装
+
+### 用 `npx skills` 安装
+
+项目级安装：
 
 ```bash
 npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch
 ```
 
-Install global for Codex:
+全局安装：
 
 ```bash
 npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
 ```
 
-Install directly from the skill path:
+也可以直接从 skill 路径安装：
 
 ```bash
 npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/interactive-image-batch -a codex
 ```
 
-After installation, restart Codex so the new skill is picked up cleanly.
+安装后建议重启 Codex。
 
-## Manual install
+### 手动安装
 
-If you do not want to use `npx skills`, copy the `interactive-image-batch` folder into one of these locations:
+把 `skills/interactive-image-batch` 复制到以下任一目录：
 
-- Project-level: `.agents/skills/interactive-image-batch/`
-- Global: `~/.codex/skills/interactive-image-batch/`
+- 项目级：`.agents/skills/interactive-image-batch/`
+- 全局：`~/.codex/skills/interactive-image-batch/`
 
-DAOGE rerun commands also tolerate these fallback runner locations:
+---
 
-- `./.agents/skills/interactive-image-batch/`
-- `./.codex/skills/interactive-image-batch/`
-- `~/.codex/skills/interactive-image-batch/`
+## 运行时配置
 
-## Runtime config
-
-Create `.env` in your project root:
+在项目根目录准备 `.env`：
 
 ```env
 OPENAI_BASE_URL=
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-image-2
+OPENAI_RESPONSES_MODEL=gpt-5.4
 ```
 
-Required:
+必填：
 
 - `OPENAI_BASE_URL`
 - `OPENAI_API_KEY`
 
-Optional:
+常用：
 
 - `OPENAI_MODEL`
+- `OPENAI_RESPONSES_MODEL`
 
-If `OPENAI_MODEL` is omitted, DAOGE defaults to `gpt-image-2`.
+其中：
 
-Runtime controls such as total count, batch size, concurrency, retry count, timeout, size, aspect ratio, preview mode, staged execution, and prompt source are injected through dialogue instead of `.env`.
+- `OPENAI_MODEL` 是真正的出图模型
+- `OPENAI_RESPONSES_MODEL` 是 Responses 路径下的顶层调度模型
 
-## Basic usage
+---
 
-Wake up DAOGE in Chinese and let it guide the run:
+## 路由策略
 
-- `刀哥，我来了`
-- `刀哥，来跑批`
-- `刀哥，生图`
-- `刀哥，起来干活`
-- `刀哥，开始批量生图`
-- `DAOGE，开工`
+仓库当前采用“成功率优先”的策略，而不是强行把所有模式统一到一个 API。
 
-You can provide:
+### 文生图
 
-- direct creative requirements
-- a markdown prompt library path
-- target total count
-- output mode such as poster, e-commerce visual, illustration, or other
-- explicit runtime requirements such as 2K, 9:16, concurrency, retries, timeout, staged execution, and preview preference
+- 默认走 `Images API`
+- 如果 provider 更适合 `Responses`，可以开启 `Responses`
+- 开启后失败会自动 fallback
 
-## Recommended verification after install
+### 无 mask 图生图
 
-Use one of these checks:
+- 支持 `Responses` 优先
+- 失败时自动回退到 `Images API edits`
 
-1. Restart Codex and ask for:
+### 带 mask 的局部重绘
+
+- 固定走 `Images API edits`
+
+这样设计的目的很明确：
+
+- 保留现代路径
+- 但不牺牲稳定性
+
+---
+
+## 仓库结构
 
 ```text
-刀哥，我来了
+.
+├── README.md
+├── docs/
+└── skills/
+    └── interactive-image-batch/
+        ├── README.md
+        ├── SKILL.md
+        ├── agents/
+        ├── references/
+        └── scripts/
 ```
 
-2. Or ask Codex to use the skill explicitly:
+- `README.md`
+  - 仓库首页说明
+- `docs/`
+  - 维护和发布相关文档
+- `skills/interactive-image-batch/README.md`
+  - 这个 skill 的完整介绍与使用方式
+- `skills/interactive-image-batch/SKILL.md`
+  - skill 行为规范与内部工作流
 
-```text
-使用 interactive-image-batch，先帮我确认这次批量生图参数
-```
+---
 
-If the skill is discovered correctly, DAOGE should answer in Chinese and enter the guided intake flow.
+## 推荐阅读顺序
 
-## Updating
+如果你是第一次接触这个仓库，建议按这个顺序看：
 
-Project-level reinstall:
+1. 仓库首页 `README.md`
+2. `skills/interactive-image-batch/README.md`
+3. `skills/interactive-image-batch/SKILL.md`
+4. `skills/interactive-image-batch/references/`
+5. `skills/interactive-image-batch/scripts/`
 
-```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch
-```
+---
 
-Global reinstall:
+## 维护说明
 
-```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
-```
+当前仓库以 `main` 作为默认主线。
 
-If you install manually, overwrite the local skill folder with the updated `interactive-image-batch` directory and restart Codex.
+如果你要看 skill 的完整展示页，请直接进入：
 
-## Notes
+- [`skills/interactive-image-batch/README.md`](./skills/interactive-image-batch/README.md)
 
-- DAOGE is optimized for Codex usage.
-- The skill itself does not store provider secrets; `.env` stays in your project.
-- Large runs are expected. DAOGE includes preview, staging, pause, rerun, and reporting workflows to keep batch generation stable.
+---
 
-## Maintainer docs
+## Maintainer Docs
 
-- Release notes template: `docs/release_notes_template_zh.md`
-- Release SOP: `docs/release_sop_zh.md`
+- [`docs/release_notes_template_zh.md`](./docs/release_notes_template_zh.md)
+- [`docs/release_sop_zh.md`](./docs/release_sop_zh.md)

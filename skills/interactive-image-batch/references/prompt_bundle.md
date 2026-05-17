@@ -41,6 +41,7 @@ For batches larger than 30, also check:
 - prompt text is long enough to carry scene, product, lighting, composition, and text-safety signals
 - template-required slot fields are present when DAOGE selected a template
 - native output sizes are explicit and width/height are multiples of 16
+- provider/model-specific size budgets are satisfied before execution
 - campaign-poster prompts include campaign/KV intent, scene signal, full-body or hero framing, and typography-safe-space language
 
 ## Human review outputs
@@ -61,6 +62,7 @@ Hard-fail validation when:
 - more than 10% of items have empty prompt text
 - slug collisions exist and would overwrite outputs
 - any requested per-item size is not a multiple of 16
+- any requested size violates provider/model pixel-budget or aspect-ratio limits
 - strict quality mode is enabled and template-required fields are missing
 
 ## When to warn only

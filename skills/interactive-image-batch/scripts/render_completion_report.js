@@ -3,8 +3,7 @@ const path = require('path');
 
 function portableRunnerPreambleLines() {
   return [
-    'DAOGE_RUNNER="${DAOGE_RUNNER_PATH:-./.agents/skills/interactive-image-batch/scripts/run_batch.js}"',
-    'if [ ! -f "$DAOGE_RUNNER" ]; then DAOGE_RUNNER="./.codex/skills/interactive-image-batch/scripts/run_batch.js"; fi',
+    'DAOGE_RUNNER="${DAOGE_RUNNER_PATH:-./.codex/skills/interactive-image-batch/scripts/run_batch.js}"',
     'if [ ! -f "$DAOGE_RUNNER" ]; then DAOGE_RUNNER="${CODEX_HOME:-$HOME/.codex}/skills/interactive-image-batch/scripts/run_batch.js"; fi',
   ];
 }
@@ -49,6 +48,18 @@ function topSuccessful(results, limit = 8) {
   return results.filter((item) => item.ok && !item.skipped).slice(0, limit);
 }
 
+function uniqueSlotIds(items) {
+  return Array.from(new Set((items || [])
+    .map((item) => String(item.slotId || item.slot_id || '').trim())
+    .filter(Boolean)));
+}
+
+function isLocalEditResult(item) {
+  const requestMode = String(item.requestMode || item.request_mode || '').trim();
+  const editSource = String(item.editSource || item.edit_source || '').trim();
+  return requestMode === 'masked-edit' || editSource === 'previous-output';
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args['manifest-file']) throw new Error('Missing required flag: --manifest-file');
@@ -63,6 +74,12 @@ function main() {
   const failed = topFailed(allResults);
   const successful = topSuccessful(allResults);
   const skipped = allResults.filter((item) => item.skipped);
+  const executed = allResults.filter((item) => !item.skipped);
+  const attemptedLocalEdits = executed.filter(isLocalEditResult);
+  const successfulLocalEdits = successful.filter(isLocalEditResult);
+  const generatedSlotIds = uniqueSlotIds(executed);
+  const attemptedLocalEditSlotIds = uniqueSlotIds(attemptedLocalEdits);
+  const successfulLocalEditSlotIds = uniqueSlotIds(successfulLocalEdits);
   const contactSheetPath = path.join(path.dirname(manifestPath), 'contact_sheet.png');
   const selectionBoardPath = path.join(path.dirname(manifestPath), 'selection_board.md');
   const operationsReportPath = path.join(path.dirname(manifestPath), 'operations_report.md');
@@ -100,6 +117,15 @@ function main() {
     `- 每批数量: ${manifest.batchSize ?? '未记录'}`,
     `- 默认尺寸: ${manifest.defaultSize || '未记录'}`,
     `- 模型: ${manifest.model || '未记录'}`,
+    '',
+    '## 2. 槽位结果',
+    '',
+    `- 本轮参与生成的槽位数: ${generatedSlotIds.length}`,
+    `- 本轮参与生成的槽位: ${generatedSlotIds.length ? generatedSlotIds.join(', ') : '未记录'}`,
+    `- 尝试局部编辑的槽位数: ${attemptedLocalEditSlotIds.length}`,
+    `- 尝试局部编辑的槽位: ${attemptedLocalEditSlotIds.length ? attemptedLocalEditSlotIds.join(', ') : '无'}`,
+    `- 成功完成局部编辑的槽位数: ${successfulLocalEditSlotIds.length}`,
+    `- 成功完成局部编辑的槽位: ${successfulLocalEditSlotIds.length ? successfulLocalEditSlotIds.join(', ') : '无'}`,
     '',
     '## 2. 批次结果',
     '',

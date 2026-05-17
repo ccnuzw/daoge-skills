@@ -88,6 +88,16 @@ function formatPromptFieldSources(counts) {
   });
 }
 
+function formatSizeIssues(sizeIssues) {
+  const list = Array.isArray(sizeIssues) ? sizeIssues : [];
+  if (!list.length) return ['- 无'];
+  return list.slice(0, 12).map((item) => {
+    const prefix = item.index !== undefined ? `- #${item.index} / ${item.size}` : `- ${item.size}`;
+    const detail = item.displayIssue || translateValidationMessage(item.issue || '');
+    return `${prefix}: ${detail}`;
+  });
+}
+
 function sumValues(record) {
   return Object.values(record || {}).reduce((acc, value) => acc + Number(value || 0), 0);
 }
@@ -168,6 +178,53 @@ function buildReadiness(taskSpec, validation, gates) {
   };
 }
 
+function formatStoryboardSummary(storyboard) {
+  if (!storyboard) return ['未启用 storyboard_plan'];
+  const summary = storyboard.summary || {};
+  const roleCounts = Object.entries(summary.role_counts || {});
+  const referenceBindings = storyboard.reference_bindings || null;
+  return [
+    `布局 ID: ${summary.layout_id || '未提供'}`,
+    `分镜板 ID: ${summary.board_id || '未提供'}`,
+    `生成模式: ${summary.generation_mode || '未提供'}`,
+    `参考图模式: ${summary.reference_mode || '未提供'}`,
+    `参考绑定: ${referenceBindings?.path || '未提供'}`,
+    `画布尺寸: ${summary.canvas?.width || '?'} x ${summary.canvas?.height || '?'}`,
+    `可生图槽位数: ${summary.generation_slot_count || 0}`,
+    `局部编辑槽位数: ${summary.local_edit_slot_count || 0}`,
+    `遮罩槽位数: ${summary.mask_slot_count || 0}`,
+    `槽位角色分布: ${roleCounts.length ? roleCounts.map(([role, count]) => `${role} ${count}`).join(', ') : '未提供'}`,
+    `参考模式分布: ${Object.entries(summary.reference_mode_counts || {}).length ? Object.entries(summary.reference_mode_counts || {}).map(([mode, count]) => `${mode} ${count}`).join(', ') : '未提供'}`,
+  ];
+}
+
+function summarizeEditSignals(prompts) {
+  const items = Array.isArray(prompts) ? prompts : [];
+  const promptCount = items.length;
+  const selectedSlotIds = Array.from(new Set(items.map((item) => String(item.slot_id || '').trim()).filter(Boolean)));
+  const localEditSlotIds = Array.from(new Set(items
+    .filter((item) => {
+      const mode = String(item.reference_mode || '').trim();
+      const source = String(item.edit_source || '').trim();
+      return source === 'previous-output' || mode === 'masked-edit';
+    })
+    .map((item) => String(item.slot_id || '').trim())
+    .filter(Boolean)));
+  const editSourceCount = items.filter((item) => String(item.edit_source || '').trim() === 'previous-output').length;
+  const maskCount = items.filter((item) => Boolean(item.mask_image)).length;
+  const localEditCount = localEditSlotIds.length;
+  const selectionScope = promptCount <= 6 ? '局部小范围任务' : '常规任务';
+  return {
+    promptCount,
+    selectedSlotIds,
+    localEditSlotIds,
+    editSourceCount,
+    maskCount,
+    localEditCount,
+    selectionScope,
+  };
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const required = ['task-spec', 'strategy-file', 'prompts-file', 'validation-report', 'preview-file', 'plan-file', 'summary-file', 'mode-file'];
@@ -191,6 +248,7 @@ function main() {
   const validation = readJson(validationPath);
   const batchPlan = readJson(planPath);
   const modeDetection = readJson(modePath);
+  const storyboard = args['storyboard-file'] && fs.existsSync(path.resolve(args['storyboard-file'])) ? readJson(args['storyboard-file']) : null;
   const template = modeDetection.detected_template || {};
   const templateDocument = modeDetection.template_document || {};
   const gates = validation.qualityGates || {};
@@ -202,7 +260,9 @@ function main() {
   const promptFieldSources = collectFieldSources(draftPrompts.length ? draftPrompts : prompts);
   const taskFieldSources = taskSpec.field_sources || {};
   const readiness = buildReadiness(taskSpec, validation, gates);
+  const editSignals = summarizeEditSignals(prompts);
   const runtimeSourceFields = [
+    'provider',
     'batch_size',
     'width',
     'height',
@@ -260,7 +320,9 @@ function main() {
     `- DAOGE 模板: ${template.name || '未检测'}`,
     `- 模板文档: ${templateDocument.exists ? templateDocument.path : (template.template_doc || '未设置')}`,
     `- 参考来源数量: ${(taskSpec.source_files || []).length}`,
+    `- 参考图片数量: ${(taskSpec.source_images || []).length}`,
     `- 运行标签: ${taskSpec.run_label || '未设置'}`,
+    `- 生图 Provider: ${taskSpec.provider || 'openai'}`,
     `- 运行预设: ${taskSpec.run_preset?.name || taskSpec.run_preset?.id || '未设置'}${taskSpec.run_preset?.explicit === false ? '（DAOGE 默认）' : ''}`,
     `- 模板变体: ${matrixPlan?.templateVariant?.name || matrixPlan?.templateVariant?.id || strategy.template_variant?.name || strategy.template_variant?.id || '未设置'}`,
     '',
@@ -300,6 +362,29 @@ function main() {
     '',
     formatList(taskSpec.style_requirements),
     '',
+    '### 分镜板摘要',
+    '',
+    formatList(formatStoryboardSummary(storyboard), '未启用 storyboard_plan'),
+    '',
+    '### 局部编辑识别',
+    '',
+    formatList([
+      `任务范围: ${editSignals.selectionScope}`,
+      `当前提示词条数: ${editSignals.promptCount}`,
+      `当前生图槽位: ${editSignals.selectedSlotIds.length ? editSignals.selectedSlotIds.join(', ') : '未识别'}`,
+      `局部编辑槽位数: ${editSignals.localEditCount}`,
+      `复用上一轮结果做底图: ${editSignals.editSourceCount}`,
+      `带遮罩槽位数: ${editSignals.maskCount}`,
+      `局部编辑目标分镜: ${editSignals.localEditSlotIds.length ? editSignals.localEditSlotIds.join(', ') : '未识别'}`,
+    ], '未识别到局部编辑特征'),
+    '',
+    ...(storyboard ? [
+      '### 分镜板校验提醒',
+      '',
+      formatList(storyboard.warnings, '无'),
+      '',
+    ] : []),
+    '',
     '### 变化要求',
     '',
     formatList(taskSpec.variation_requirements),
@@ -307,6 +392,7 @@ function main() {
     '## 2. 执行参数',
     '',
     `- 总张数: ${taskSpec.total_count}`,
+    `- 生图 Provider: ${taskSpec.provider || 'openai'}`,
     `- 每批张数: ${taskSpec.batch_size}`,
     `- 批次数量: ${batchPlan.length}`,
     `- 分辨率: ${taskSpec.width} x ${taskSpec.height}`,
@@ -390,6 +476,10 @@ function main() {
     '',
     formatList((validation.errors || []).map(translateValidationMessage), '无'),
     '',
+    '### 尺寸问题明细',
+    '',
+    ...formatSizeIssues(gates.sizeIssues),
+    '',
     '## 5. 批次计划',
     '',
     ...batchPlan.map((item) => `- 第 ${item.batchNumber} 批: ${item.promptCount} 条 (${item.firstIndex} -> ${item.lastIndex})`),
@@ -398,14 +488,18 @@ function main() {
     '',
   ];
 
-  samplePrompts(prompts, 3).forEach((item, index) => {
-    lines.push(`### 样例 ${index + 1}`);
-    lines.push(`- 标题: ${item.title || item.slug || `prompt-${index + 1}`}`);
-    lines.push(`- 风格族: ${item.style_family || '未设置'}`);
-    lines.push(`- 场景: ${item.scene || '未设置'}`);
-    lines.push(`- 服装: ${item.wardrobe || '未设置'}`);
-    lines.push(`- 构图: ${item.composition || '未设置'}`);
-    const draftItem = draftByIndex.get(String(item.index)) || {};
+    samplePrompts(prompts, 3).forEach((item, index) => {
+      lines.push(`### 样例 ${index + 1}`);
+      lines.push(`- 标题: ${item.title || item.slug || `prompt-${index + 1}`}`);
+      lines.push(`- 槽位 ID: ${item.slot_id || '未设置'}`);
+      lines.push(`- 风格族: ${item.style_family || '未设置'}`);
+      lines.push(`- 场景: ${item.scene || '未设置'}`);
+      lines.push(`- 服装: ${item.wardrobe || '未设置'}`);
+      lines.push(`- 构图: ${item.composition || '未设置'}`);
+      lines.push(`- 参考模式: ${item.reference_mode || '未设置'}`);
+      lines.push(`- 编辑底图来源: ${item.edit_source || '未设置'}`);
+      lines.push(`- 遮罩图: ${item.mask_image ? '已提供' : '未提供'}`);
+      const draftItem = draftByIndex.get(String(item.index)) || {};
     const variantSignature = item.variant_signature || draftItem.variant_signature;
     if (variantSignature) lines.push(`- 变体签名: ${variantSignature}`);
     lines.push('- 正向提示词:');

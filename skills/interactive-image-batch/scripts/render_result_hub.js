@@ -3,8 +3,7 @@ const path = require('path');
 
 function portableRunnerPreambleLines() {
   return [
-    'DAOGE_RUNNER="${DAOGE_RUNNER_PATH:-./.agents/skills/interactive-image-batch/scripts/run_batch.js}"',
-    'if [ ! -f "$DAOGE_RUNNER" ]; then DAOGE_RUNNER="./.codex/skills/interactive-image-batch/scripts/run_batch.js"; fi',
+    'DAOGE_RUNNER="${DAOGE_RUNNER_PATH:-./.codex/skills/interactive-image-batch/scripts/run_batch.js}"',
     'if [ ! -f "$DAOGE_RUNNER" ]; then DAOGE_RUNNER="${CODEX_HOME:-$HOME/.codex}/skills/interactive-image-batch/scripts/run_batch.js"; fi',
   ];
 }
@@ -45,6 +44,18 @@ function topSuccessful(results, limit = 6) {
   return results.filter((item) => item.ok && !item.skipped).slice(0, limit);
 }
 
+function uniqueSlotIds(items) {
+  return Array.from(new Set((items || [])
+    .map((item) => String(item.slotId || item.slot_id || '').trim())
+    .filter(Boolean)));
+}
+
+function isLocalEditResult(item) {
+  const requestMode = String(item.requestMode || item.request_mode || '').trim();
+  const editSource = String(item.editSource || item.edit_source || '').trim();
+  return requestMode === 'masked-edit' || editSource === 'previous-output';
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args['manifest-file']) throw new Error('Missing required flag: --manifest-file');
@@ -63,6 +74,12 @@ function main() {
   const allResults = batchManifests.flatMap((batch) => batch.results || []);
   const successful = topSuccessful(allResults);
   const skipped = allResults.filter((item) => item.skipped).length;
+  const executed = allResults.filter((item) => !item.skipped);
+  const attemptedLocalEdits = executed.filter(isLocalEditResult);
+  const successfulLocalEdits = successful.filter(isLocalEditResult);
+  const generatedSlotIds = uniqueSlotIds(executed);
+  const attemptedLocalEditSlotIds = uniqueSlotIds(attemptedLocalEdits);
+  const successfulLocalEditSlotIds = uniqueSlotIds(successfulLocalEdits);
   const hasFailures = Number(manifest.failed || 0) > 0;
   const lines = [
     '# DAOGE 结果总入口',
@@ -85,6 +102,9 @@ function main() {
     `- 默认尺寸: ${manifest.defaultSize || '未记录'}`,
     `- 是否暂停: ${manifest.paused ? '是' : '否'}`,
     `- 暂停原因: ${manifest.pauseReason || '无'}`,
+    `- 参与生成槽位: ${generatedSlotIds.length ? generatedSlotIds.join(', ') : '未记录'}`,
+    `- 尝试局部编辑槽位: ${attemptedLocalEditSlotIds.length ? attemptedLocalEditSlotIds.join(', ') : '无'}`,
+    `- 成功局部编辑槽位: ${successfulLocalEditSlotIds.length ? successfulLocalEditSlotIds.join(', ') : '无'}`,
     '',
     '## 3. 如何找图',
     '',

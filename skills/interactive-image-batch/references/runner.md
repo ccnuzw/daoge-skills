@@ -21,6 +21,22 @@ Recommended fields:
 - `source_refs`
 - `negative_prompt`
 - `notes`
+- `board_id`
+- `slot_id`
+- `slot_role`
+- `shot_id`
+- `shot_label`
+- `layout_region_id`
+- `timecode`
+- `reference_images`
+- `mask_image`
+- `reference_notes`
+- `prompt_hints`
+- `continuity_notes`
+- `voiceover`
+- `music`
+- `sound_effects`
+- `camera_move`
 
 Optional per-item request overrides:
 
@@ -99,6 +115,7 @@ The preview file should be treated as the human review surface. It should summar
 - wardrobe distribution
 - batch plan
 - representative prompt samples
+- when in storyboard mode, show slot roles, shot ids, timecodes, and reference-image counts
 
 ## Runner flags
 
@@ -139,6 +156,9 @@ Optional flags:
 - `--run-label <value>` optional output label
 - `--resume-manifest <path>` rerun prompts referenced by a previous root `manifest.json`
 - `--failed-only <true|false>` default `true` when `--resume-manifest` is present
+- `--select-indexes <csv>` rerun only specific prompt indexes, e.g. `3,5,9`
+- `--select-slot-ids <csv>` rerun only specific storyboard slots, e.g. `shot_3,kv`
+- `--reuse-output-as-reference <true|false>` when used with `--resume-manifest`, inject the previous successful output as the first reference image for the selected slot
 - `--dry-run <true|false>` write plans/manifests without calling the image API
 - `--skip-existing <true|false>` skip a prompt when the expected image and metadata already exist in the target batch folder
 - `--stage-size <number>` split large runs into stages by prompt count; default disabled
@@ -147,6 +167,65 @@ Optional flags:
 - `--auto-pause <true|false>` enable pause policy checks; default `true`
 - `--max-consecutive-failures <number>` pause when consecutive failures reach this threshold; default `0` disabled
 - `--max-batch-failure-rate <number>` pause when one batch exceeds this failure rate, e.g. `0.3`; default `1.1` disabled
+
+For storyboard board workflows:
+
+- validate `task_spec.storyboard_plan` first
+- run `scripts/validate_storyboard_bundle.js`
+- pass `--storyboard-file /abs/path/storyboard_bundle.validation.json` into `scripts/scaffold_prompt_bundle.js`
+- slots may mix `reference-assisted` and `prompt-only` modes
+- slots with `reference_images` now route to `images/edits`
+- slots with both `reference_images` and `mask_image` now route to `images/edits + mask`
+- `prompt-only` slots continue to use `images/generations`
+- provider-side behavior still depends on model capabilities; masks are guidance, not pixel-perfect guarantees
+- for “只改单格” workflows, prefer `--resume-manifest + --select-slot-ids + --reuse-output-as-reference true`
+- when `--resume-manifest` is combined with `--select-indexes` or `--select-slot-ids`, DAOGE now defaults `--failed-only` to `false`, because this is usually an explicit local-edit rerun instead of a failed-only rerun
+- if you really want “只改失败项里的某几个分镜”, then add `--failed-only true` explicitly
+
+Recommended local-edit patterns:
+
+- only regenerate one storyboard shot and use the previous output as the edit base
+- regenerate one storyboard shot and add a new mask for regional changes
+- regenerate one slot by index when no slot id is available
+
+Chinese intent mapping:
+
+- `只改分镜3` -> `--resume-manifest ... --select-slot-ids shot_3`
+- `只改第3格` -> `--resume-manifest ... --select-indexes 3`
+- `复用上一轮结果做底图` -> `--reuse-output-as-reference true`
+- `我补一张遮罩图，只改右下角礼盒` -> slot prompt item should carry `mask_image`, then run with `--reuse-output-as-reference true`
+
+Example: rerun only `shot_3` and use the previous output as the edit base:
+
+```bash
+node scripts/run_batch.js \
+  --prompts-file /abs/path/prompts.generated.json \
+  --resume-manifest /abs/path/manifest.json \
+  --select-slot-ids shot_3 \
+  --reuse-output-as-reference true \
+  --batch-size 1 \
+  --concurrency 1
+```
+
+Example: rerun only `shot_3`, reuse the previous output, and force masked local edit:
+
+```bash
+node scripts/run_batch.js \
+  --prompts-file /abs/path/prompts.generated.json \
+  --resume-manifest /abs/path/manifest.json \
+  --select-slot-ids shot_3 \
+  --reuse-output-as-reference true \
+  --batch-size 1 \
+  --concurrency 1
+```
+
+Notes for masked local edit:
+
+- the prompt item for `shot_3` should already include `mask_image`
+- DAOGE will then auto-route that slot to `images/edits + mask`
+- in preview and result metadata, this should show up as:
+  - `参考模式: masked-edit`
+  - `编辑底图来源: previous-output`
 
 ## Environment
 

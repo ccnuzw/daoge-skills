@@ -64,6 +64,11 @@ function enrichStrategyFromTemplate(strategyPath, modePath, outputPath) {
   return outputPath;
 }
 
+function hasStoryboardPlan(taskSpecPath) {
+  const taskSpec = readJson(taskSpecPath);
+  return Boolean(taskSpec.storyboard_plan && taskSpec.storyboard_plan.enabled);
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const taskSpecPath = required(args, 'task-spec');
@@ -87,6 +92,7 @@ function main() {
   const daogeSummary = path.join(outputDir, 'daoge_run_summary.md');
   const daogePreflight = path.join(outputDir, 'daoge_preflight_dashboard.md');
   const daogeModeDetection = path.join(outputDir, 'daoge_mode_detection.json');
+  const storyboardBundleValidation = path.join(outputDir, 'storyboard_bundle.validation.json');
 
   runNode(path.join(scriptsDir, 'validate_task_spec.js'), [
     '--task-spec', taskSpecPath,
@@ -106,11 +112,20 @@ function main() {
     '--output-file', daogeModeDetection,
   ]);
 
+  const storyboardEnabled = hasStoryboardPlan(normalizedTaskSpec);
+  if (storyboardEnabled) {
+    runNode(path.join(scriptsDir, 'validate_storyboard_bundle.js'), [
+      '--task-spec', normalizedTaskSpec,
+      '--output-file', storyboardBundleValidation,
+    ]);
+  }
+
   enrichStrategyFromTemplate(normalizedStrategy, daogeModeDetection, enrichedStrategy);
 
   runNode(path.join(scriptsDir, 'scaffold_prompt_bundle.js'), [
     '--strategy-file', enrichedStrategy,
     '--mode-file', daogeModeDetection,
+    ...(storyboardEnabled ? ['--storyboard-file', storyboardBundleValidation] : []),
     '--output-file', promptSlots,
     '--matrix-plan-file', variantMatrixPlan,
   ]);
@@ -151,6 +166,7 @@ function main() {
     '--mode-file', daogeModeDetection,
     '--draft-file', promptDraftBundle,
     '--matrix-plan-file', variantMatrixPlan,
+    ...(storyboardEnabled ? ['--storyboard-file', storyboardBundleValidation] : []),
     '--output-file', daogePreflight,
   ]);
 
@@ -162,6 +178,7 @@ function main() {
     promptSlots,
     variantMatrixPlan,
     promptDraftBundle,
+    storyboardBundleValidation: storyboardEnabled ? storyboardBundleValidation : null,
     promptValidationReport,
     promptPreview,
     batchPlan,

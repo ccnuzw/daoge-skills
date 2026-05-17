@@ -30,6 +30,18 @@ function sanitize(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 400);
 }
 
+function normalizeApiPathOverride(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  return text;
+}
+
+function resolveProviderPathOverride({ baseUrl, model, kind, explicitOverride }) {
+  const normalizedExplicit = normalizeApiPathOverride(explicitOverride);
+  if (normalizedExplicit) return normalizedExplicit;
+  return null;
+}
+
 function shellQuote(value) {
   return `'${String(value || '').replace(/'/g, `'\"'\"'`)}'`;
 }
@@ -82,8 +94,7 @@ function sleep(ms) {
 
 function portableRunnerPreambleLines() {
   return [
-    'DAOGE_RUNNER="${DAOGE_RUNNER_PATH:-./.agents/skills/interactive-image-batch/scripts/run_batch.js}"',
-    'if [ ! -f "$DAOGE_RUNNER" ]; then DAOGE_RUNNER="./.codex/skills/interactive-image-batch/scripts/run_batch.js"; fi',
+    'DAOGE_RUNNER="${DAOGE_RUNNER_PATH:-./.codex/skills/interactive-image-batch/scripts/run_batch.js}"',
     'if [ ! -f "$DAOGE_RUNNER" ]; then DAOGE_RUNNER="${CODEX_HOME:-$HOME/.codex}/skills/interactive-image-batch/scripts/run_batch.js"; fi',
   ];
 }
@@ -131,6 +142,137 @@ function buildFileParts(item, ordinal) {
   return { index, slug, fileBase: `${index}_${slug}` };
 }
 
+function ensureArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === '') return [];
+  return [value];
+}
+
+function ensureStringArray(value) {
+  return ensureArray(value).map((item) => String(item).trim()).filter(Boolean);
+}
+
+function detectMimeType(filePath) {
+  const ext = String(path.extname(filePath || '')).trim().toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  return 'application/octet-stream';
+}
+
+function fileToDataUrl(filePath) {
+  const absolutePath = path.resolve(filePath);
+  if (!fs.existsSync(absolutePath)) throw new Error(`reference file not found: ${absolutePath}`);
+  const mime = detectMimeType(absolutePath);
+  const b64 = fs.readFileSync(absolutePath).toString('base64');
+  return `data:${mime};base64,${b64}`;
+}
+
+function resolveReferenceMode(item) {
+  return String(item.reference_mode || item.referenceMode || '').trim().toLowerCase();
+}
+
+function resolveMaskImage(item) {
+  const params = item.params || {};
+  return String(params.mask_image || item.mask_image || item.edit_mask || '').trim() || null;
+}
+
+function resolveReferenceImages(item) {
+  const params = item.params || {};
+  return Array.from(new Set([
+    ...ensureStringArray(item.reference_images || item.referenceImages),
+    ...ensureStringArray(params.reference_images),
+  ]));
+}
+
+function buildOperationMode(item) {
+  const explicitMode = resolveReferenceMode(item);
+  const referenceImages = resolveReferenceImages(item);
+  const maskImage = resolveMaskImage(item);
+  if (maskImage && !referenceImages.length) {
+    throw new Error(`Slot ${item.slot_id || item.slug || item.index || 'unknown'} has mask_image but no reference_images`);
+  }
+  if (maskImage) return { mode: 'masked-edit', referenceImages, maskImage };
+  if (referenceImages.length) return { mode: 'reference-assisted', referenceImages, maskImage: null };
+  if (explicitMode === 'reference-assisted') {
+    throw new Error(`Slot ${item.slot_id || item.slug || item.index || 'unknown'} is reference-assisted but has no reference_images`);
+  }
+  if (explicitMode === 'masked-edit') {
+    throw new Error(`Slot ${item.slot_id || item.slug || item.index || 'unknown'} is masked-edit but has no reference_images/mask_image`);
+  }
+  return { mode: 'prompt-only', referenceImages: [], maskImage: null };
+}
+
+function supportsResponsesReferenceMode(pathOverride, operationMode) {
+  if (operationMode === 'masked-edit') return false;
+  return /\/responses(?:\/|$)/i.test(String(pathOverride || '').trim());
+}
+
+function supportsResponsesGenerateMode(pathOverride) {
+  return /\/responses(?:\/|$)/i.test(String(pathOverride || '').trim());
+}
+
+function parseSseEvents(text) {
+  const chunks = String(text || '').split(/\n\n/);
+  const events = [];
+  for (const rawChunk of chunks) {
+    const lines = rawChunk.split(/\n/);
+    let eventType = null;
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith('event:')) eventType = line.slice(6).trim();
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+    }
+    if (!dataLines.length) continue;
+    const dataText = dataLines.join('\n');
+    if (dataText === '[DONE]') {
+      events.push({ type: eventType || 'done', done: true, data: null });
+      continue;
+    }
+    try {
+      events.push({ type: eventType || 'message', done: false, data: JSON.parse(dataText) });
+    } catch {
+      events.push({ type: eventType || 'message', done: false, data: { raw: dataText } });
+    }
+  }
+  return events;
+}
+
+function extractResponsesImagePayload(text) {
+  const events = parseSseEvents(text);
+  let finalB64 = null;
+  let revisedPrompt = null;
+  let responseModel = null;
+  let responseSize = null;
+  let errorMessage = null;
+
+  for (const event of events) {
+    const data = event.data || {};
+    if (data.error && !errorMessage) {
+      errorMessage = typeof data.error === 'string' ? data.error : sanitize(JSON.stringify(data.error));
+    }
+    if (data.response?.model && !responseModel) responseModel = data.response.model;
+
+    const responseOutput = Array.isArray(data.response?.output) ? data.response.output : [];
+    for (const item of responseOutput) {
+      if (item?.type === 'image_generation_call' && item?.result) {
+        finalB64 = item.result;
+        revisedPrompt = item.revised_prompt || revisedPrompt;
+        responseSize = item.size || responseSize;
+      }
+    }
+
+    if (data.item?.type === 'image_generation_call' && data.item?.result) {
+      finalB64 = data.item.result;
+      revisedPrompt = data.item.revised_prompt || revisedPrompt;
+      responseSize = data.item.size || responseSize;
+    }
+  }
+
+  return { finalB64, revisedPrompt, responseModel, responseSize, errorMessage };
+}
+
 function findExistingResult(item, ctx) {
   const { index, slug, fileBase } = buildFileParts(item, ctx.ordinal);
   const req = buildRequestConfig(item, ctx);
@@ -154,26 +296,33 @@ function findExistingResult(item, ctx) {
 }
 
 async function requestImage({ baseUrl, apiKey, model, prompt, size, outputFormat, timeoutMs }) {
-  const normalizedBase = String(baseUrl || '').trim().replace(/\/+$/, '');
-  const endpoint = /\/v1$/i.test(normalizedBase)
-    ? `${normalizedBase}/images/generations`
-    : /\/images\/generations$/i.test(normalizedBase)
-      ? normalizedBase
-      : `${normalizedBase}/v1/images/generations`;
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  const endpoint = buildApiEndpoint(baseUrl, 'generations', {
+    overridePath: resolveProviderPathOverride({
+      baseUrl,
       model,
-      size,
-      output_format: outputFormat,
-      prompt,
+      kind: 'generations',
+      explicitOverride: arguments[0].generatePath,
     }),
-    signal: AbortSignal.timeout(timeoutMs),
   });
+  let res;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        size,
+        output_format: outputFormat,
+        prompt,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw new Error(`fetch failed for ${endpoint}: ${sanitize(error?.message || error)}`);
+  }
 
   const text = await res.text();
   let json;
@@ -183,16 +332,281 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, outputFormat
     throw new Error(`non-json response (${res.status}): ${text.slice(0, 300)}`);
   }
 
-  if (!res.ok || !json?.data?.[0]?.b64_json) {
+  const payload = extractImagePayload(json);
+  if (!res.ok || !payload?.b64) {
     throw new Error(`http ${res.status}: ${sanitize(json?.error?.message || 'missing image payload')}`);
   }
 
   return {
-    b64: json.data[0].b64_json,
-    revisedPrompt: json.data[0].revised_prompt || null,
+    b64: payload.b64,
+    revisedPrompt: payload.revisedPrompt,
     responseSize: json.size || null,
     responseModel: json.model || model,
   };
+}
+
+async function requestResponsesImageGenerate({ baseUrl, apiKey, toolModel, responsesModel, prompt, size, outputFormat, timeoutMs, generatePath }) {
+  const endpoint = buildApiEndpoint(baseUrl, 'generations', {
+    overridePath: resolveProviderPathOverride({
+      baseUrl,
+      model: toolModel,
+      kind: 'generations',
+      explicitOverride: generatePath,
+    }),
+  });
+
+  const requestBody = {
+    model: responsesModel,
+    input: [
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: prompt },
+        ],
+      },
+    ],
+    stream: true,
+    tools: [
+      {
+        type: 'image_generation',
+        model: toolModel,
+        partial_images: 2,
+        size,
+        output_format: outputFormat,
+      },
+    ],
+  };
+
+  let res;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw new Error(`fetch failed for ${endpoint}: ${sanitize(error?.message || error)}`);
+  }
+
+  const text = await res.text();
+  const payload = extractResponsesImagePayload(text);
+  if (!res.ok) {
+    throw new Error(`http ${res.status}: ${sanitize(payload.errorMessage || text.slice(0, 300) || 'responses image generation failed')}`);
+  }
+  if (!payload.finalB64) {
+    throw new Error(`responses image generation returned no final image payload from ${endpoint}`);
+  }
+
+  return {
+    b64: payload.finalB64,
+    revisedPrompt: payload.revisedPrompt,
+    responseSize: payload.responseSize || size,
+    responseModel: payload.responseModel || responsesModel,
+  };
+}
+
+function buildApiEndpoint(baseUrl, kind, options = {}) {
+  const normalizedBase = String(baseUrl || '').trim().replace(/\/+$/, '');
+  const overridePath = normalizeApiPathOverride(options.overridePath);
+  if (overridePath) {
+    if (/^https?:\/\//i.test(overridePath)) return overridePath.replace(/\/+$/, '');
+    const normalizedOverride = overridePath.startsWith('/') ? overridePath : `/${overridePath}`;
+    return `${normalizedBase}${normalizedOverride}`.replace(/\/+$/, '');
+  }
+  if (kind === 'edits') {
+    if (/\/v1$/i.test(normalizedBase)) return `${normalizedBase}/images/edits`;
+    if (/\/images\/edits$/i.test(normalizedBase)) return normalizedBase;
+    return `${normalizedBase}/v1/images/edits`;
+  }
+  if (/\/v1$/i.test(normalizedBase)) return `${normalizedBase}/images/generations`;
+  if (/\/images\/generations$/i.test(normalizedBase)) return normalizedBase;
+  return `${normalizedBase}/v1/images/generations`;
+}
+
+function extractImagePayload(json) {
+  const directData = json?.data?.[0];
+  if (directData?.b64_json) {
+    return {
+      b64: directData.b64_json,
+      revisedPrompt: directData.revised_prompt || null,
+    };
+  }
+  if (directData?.base64) {
+    return {
+      b64: directData.base64,
+      revisedPrompt: directData.revised_prompt || null,
+    };
+  }
+
+  const outputs = Array.isArray(json?.output) ? json.output : [];
+  for (const output of outputs) {
+    const contents = Array.isArray(output?.content) ? output.content : [];
+    for (const content of contents) {
+      const candidate = content?.image_base64 || content?.b64_json || content?.base64;
+      if (candidate) {
+        return {
+          b64: candidate,
+          revisedPrompt: content?.revised_prompt || output?.revised_prompt || null,
+        };
+      }
+    }
+  }
+
+  if (json?.image_base64 || json?.b64_json || json?.base64) {
+    return {
+      b64: json.image_base64 || json.b64_json || json.base64,
+      revisedPrompt: json?.revised_prompt || null,
+    };
+  }
+
+  return null;
+}
+
+function appendFileToForm(form, fieldName, filePath) {
+  const absolutePath = path.resolve(filePath);
+  if (!fs.existsSync(absolutePath)) throw new Error(`reference file not found: ${absolutePath}`);
+  const buffer = fs.readFileSync(absolutePath);
+  const blob = new Blob([buffer], { type: detectMimeType(absolutePath) });
+  form.append(fieldName, blob, path.basename(absolutePath));
+}
+
+async function requestImageEdit({ baseUrl, apiKey, model, prompt, size, outputFormat, timeoutMs, referenceImages, maskImage, editPath }) {
+  const endpoint = buildApiEndpoint(baseUrl, 'edits', {
+    overridePath: resolveProviderPathOverride({
+      baseUrl,
+      model,
+      kind: 'edits',
+      explicitOverride: editPath,
+    }),
+  });
+  const form = new FormData();
+  form.append('model', model);
+  form.append('prompt', prompt);
+  form.append('size', size);
+  form.append('output_format', outputFormat);
+  referenceImages.forEach((imagePath) => appendFileToForm(form, 'image[]', imagePath));
+  if (maskImage) appendFileToForm(form, 'mask', maskImage);
+
+  let res;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: form,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw new Error(`fetch failed for ${endpoint}: ${sanitize(error?.message || error)}`);
+  }
+
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`non-json response (${res.status}): ${text.slice(0, 300)}`);
+  }
+
+  const payload = extractImagePayload(json);
+  if (!res.ok || !payload?.b64) {
+    throw new Error(`http ${res.status}: ${sanitize(json?.error?.message || 'missing image payload')}`);
+  }
+
+  return {
+    b64: payload.b64,
+    revisedPrompt: payload.revisedPrompt,
+    responseSize: json.size || null,
+    responseModel: json.model || model,
+  };
+}
+
+async function requestResponsesImageEdit({ baseUrl, apiKey, toolModel, responsesModel, prompt, size, outputFormat, timeoutMs, referenceImages, editPath }) {
+  const endpoint = buildApiEndpoint(baseUrl, 'edits', {
+    overridePath: resolveProviderPathOverride({
+      baseUrl,
+      model: toolModel,
+      kind: 'edits',
+      explicitOverride: editPath,
+    }),
+  });
+
+  const requestBody = {
+    model: responsesModel,
+    input: [
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: prompt },
+          ...referenceImages.map((imagePath) => ({
+            type: 'input_image',
+            image_url: fileToDataUrl(imagePath),
+          })),
+        ],
+      },
+    ],
+    stream: true,
+    tools: [
+      {
+        type: 'image_generation',
+        model: toolModel,
+        partial_images: 2,
+        size,
+        output_format: outputFormat,
+      },
+    ],
+  };
+
+  let res;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw new Error(`fetch failed for ${endpoint}: ${sanitize(error?.message || error)}`);
+  }
+
+  const text = await res.text();
+  const payload = extractResponsesImagePayload(text);
+  if (!res.ok) {
+    throw new Error(`http ${res.status}: ${sanitize(payload.errorMessage || text.slice(0, 300) || 'responses image edit failed')}`);
+  }
+  if (!payload.finalB64) {
+    throw new Error(`responses image edit returned no final image payload from ${endpoint}`);
+  }
+
+  return {
+    b64: payload.finalB64,
+    revisedPrompt: payload.revisedPrompt,
+    responseSize: payload.responseSize || size,
+    responseModel: payload.responseModel || responsesModel,
+  };
+}
+
+async function requestWithFallback({ primary, fallback, fileBase, label }) {
+  try {
+    return await primary();
+  } catch (primaryError) {
+    console.log(`[fallback] ${fileBase} ${label}: ${sanitize(primaryError?.message || primaryError)} -> Images API`);
+    try {
+      return await fallback();
+    } catch (fallbackError) {
+      throw new Error(`${sanitize(primaryError?.message || primaryError)} | fallback failed: ${sanitize(fallbackError?.message || fallbackError)}`);
+    }
+  }
 }
 
 async function generateOne(item, ctx) {
@@ -208,6 +622,7 @@ async function generateOne(item, ctx) {
   }
 
   const req = buildRequestConfig(item, ctx);
+  const operation = buildOperationMode(item);
   const outputPath = path.join(ctx.outDir, `${fileBase}_${req.size}.${req.outputFormat}`);
   const metaPath = path.join(ctx.outDir, `${fileBase}.json`);
 
@@ -215,15 +630,85 @@ async function generateOne(item, ctx) {
     console.log(`[start] ${fileBase} attempt ${attempt}`);
     const startedAt = new Date().toISOString();
     try {
-      const result = await requestImage({
-        baseUrl: ctx.baseUrl,
-        apiKey: ctx.apiKey,
-        model: req.model,
-        prompt,
-        size: req.size,
-        outputFormat: req.outputFormat,
-        timeoutMs: req.timeoutMs,
-      });
+      let result;
+      if (operation.mode === 'prompt-only') {
+        result = supportsResponsesGenerateMode(ctx.generatePath)
+          ? await requestWithFallback({
+            fileBase,
+            label: 'responses prompt-only',
+            primary: () => requestResponsesImageGenerate({
+              baseUrl: ctx.baseUrl,
+              apiKey: ctx.apiKey,
+              toolModel: req.model,
+              responsesModel: ctx.responsesModel,
+              prompt,
+              size: req.size,
+              outputFormat: req.outputFormat,
+              timeoutMs: req.timeoutMs,
+              generatePath: ctx.generatePath,
+            }),
+            fallback: () => requestImage({
+              baseUrl: ctx.baseUrl,
+              apiKey: ctx.apiKey,
+              model: req.model,
+              prompt,
+              size: req.size,
+              outputFormat: req.outputFormat,
+              timeoutMs: req.timeoutMs,
+            }),
+          })
+          : await requestImage({
+            baseUrl: ctx.baseUrl,
+            apiKey: ctx.apiKey,
+            model: req.model,
+            prompt,
+            size: req.size,
+            outputFormat: req.outputFormat,
+            timeoutMs: req.timeoutMs,
+          });
+      } else if (supportsResponsesReferenceMode(ctx.editPath, operation.mode)) {
+        result = await requestWithFallback({
+          fileBase,
+          label: 'responses reference-assisted',
+          primary: () => requestResponsesImageEdit({
+            baseUrl: ctx.baseUrl,
+            apiKey: ctx.apiKey,
+            toolModel: req.model,
+            responsesModel: ctx.responsesModel,
+            prompt,
+            size: req.size,
+            outputFormat: req.outputFormat,
+            timeoutMs: req.timeoutMs,
+            referenceImages: operation.referenceImages,
+            editPath: ctx.editPath,
+          }),
+          fallback: () => requestImageEdit({
+            baseUrl: ctx.baseUrl,
+            apiKey: ctx.apiKey,
+            model: req.model,
+            prompt,
+            size: req.size,
+            outputFormat: req.outputFormat,
+            timeoutMs: req.timeoutMs,
+            referenceImages: operation.referenceImages,
+            maskImage: operation.maskImage,
+            editPath: '',
+          }),
+        });
+      } else {
+        result = await requestImageEdit({
+          baseUrl: ctx.baseUrl,
+          apiKey: ctx.apiKey,
+          model: req.model,
+          prompt,
+          size: req.size,
+          outputFormat: req.outputFormat,
+          timeoutMs: req.timeoutMs,
+          referenceImages: operation.referenceImages,
+          maskImage: operation.maskImage,
+          editPath: operation.mode === 'masked-edit' ? '' : ctx.editPath,
+        });
+      }
 
       fs.writeFileSync(outputPath, Buffer.from(result.b64, 'base64'));
       const meta = {
@@ -238,6 +723,7 @@ async function generateOne(item, ctx) {
         responseSize: result.responseSize,
         requestModel: req.model,
         responseModel: result.responseModel,
+        requestMode: operation.mode,
         prompt,
         negativePrompt: item.negative_prompt || null,
         styleFamily: item.style_family || null,
@@ -248,6 +734,24 @@ async function generateOne(item, ctx) {
         composition: item.composition || null,
         textPolicy: item.text_policy || null,
         sourceRefs: item.source_refs || [],
+        boardId: item.board_id || null,
+        slotId: item.slot_id || null,
+        slotRole: item.slot_role || null,
+        shotId: item.shot_id || null,
+        shotLabel: item.shot_label || null,
+        layoutRegionId: item.layout_region_id || null,
+        timecode: item.timecode || null,
+        referenceImages: item.reference_images || [],
+        maskImage: resolveMaskImage(item),
+        referenceNotes: item.reference_notes || [],
+        promptHints: item.prompt_hints || [],
+        continuityNotes: item.continuity_notes || [],
+        editSource: item.edit_source || null,
+        editSourceOutput: item.edit_source_output || null,
+        voiceover: item.voiceover || null,
+        music: item.music || null,
+        soundEffects: item.sound_effects || null,
+        cameraMove: item.camera_move || null,
         notes: item.notes || null,
         revisedPrompt: result.revisedPrompt,
       };
@@ -270,6 +774,7 @@ async function generateOne(item, ctx) {
         output: null,
         requestedSize: req.size,
         requestModel: req.model,
+        requestMode: operation.mode,
         prompt,
         error: message,
       };
@@ -345,6 +850,16 @@ function normalizeIndex(value) {
   return String(value || '').replace(/^0+/, '') || '0';
 }
 
+function parseCsvSet(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const values = String(value).split(',').map((item) => item.trim()).filter(Boolean);
+  return values.length ? new Set(values) : null;
+}
+
+function hasExplicitSelectionArgs(args) {
+  return Boolean(parseCsvSet(args['select-indexes']) || parseCsvSet(args['select-slot-ids']));
+}
+
 function selectResumePrompts(promptPool, resumeManifestPath, failedOnly) {
   if (!resumeManifestPath) return promptPool;
   const manifest = readJson(resumeManifestPath);
@@ -368,6 +883,67 @@ function selectResumePrompts(promptPool, resumeManifestPath, failedOnly) {
     throw new Error(`No prompts matched ${failedOnly ? 'failed' : 'resume'} results from ${resumeManifestPath}; prompt indexes or slugs may have changed`);
   }
   return selected;
+}
+
+function selectExplicitPrompts(promptPool, args) {
+  const selectedIndexes = parseCsvSet(args['select-indexes']);
+  const selectedSlotIds = parseCsvSet(args['select-slot-ids']);
+  if (!selectedIndexes && !selectedSlotIds) return promptPool;
+
+  const selected = promptPool.filter((item, index) => {
+    const indexMatch = selectedIndexes ? selectedIndexes.has(normalizeIndex(item.index ?? index + 1)) : false;
+    const slotMatch = selectedSlotIds ? selectedSlotIds.has(String(item.slot_id || '').trim()) : false;
+    return indexMatch || slotMatch;
+  });
+
+  if (!selected.length) {
+    throw new Error('No prompts matched --select-indexes/--select-slot-ids');
+  }
+  return selected;
+}
+
+function buildManifestResultLookup(resumeManifestPath) {
+  if (!resumeManifestPath) return null;
+  const manifest = readJson(resumeManifestPath);
+  const results = collectManifestResults(manifest);
+  const byIndex = new Map();
+  const byIndexSlug = new Map();
+  results.forEach((item) => {
+    if (!item.ok || !item.output) return;
+    const indexKey = normalizeIndex(item.index);
+    const slugKey = normalizeSlug(item.slug);
+    if (!byIndex.has(indexKey)) byIndex.set(indexKey, item);
+    if (slugKey) byIndexSlug.set(`${indexKey}|${slugKey}`, item);
+  });
+  return { byIndex, byIndexSlug };
+}
+
+function applyPreviousOutputReuse(promptPool, resumeManifestPath, reuseOutputAsReference) {
+  if (!reuseOutputAsReference) return promptPool;
+  if (!resumeManifestPath) {
+    throw new Error('--reuse-output-as-reference requires --resume-manifest');
+  }
+  const lookup = buildManifestResultLookup(resumeManifestPath);
+  return promptPool.map((item, index) => {
+    const indexKey = normalizeIndex(item.index ?? index + 1);
+    const slugKey = normalizeSlug(item.slug);
+    const match = lookup.byIndexSlug.get(`${indexKey}|${slugKey}`) || lookup.byIndex.get(indexKey);
+    if (!match?.output) {
+      throw new Error(`No successful previous output found for prompt ${indexKey}${slugKey ? ` (${slugKey})` : ''}`);
+    }
+    const referenceImages = Array.from(new Set([match.output, ...resolveReferenceImages(item)]));
+    const next = {
+      ...item,
+      reference_images: referenceImages,
+      edit_source: 'previous-output',
+      edit_source_output: match.output,
+    };
+    const existingMode = resolveReferenceMode(item);
+    if (!existingMode || existingMode === 'prompt-only') {
+      next.reference_mode = resolveMaskImage(item) ? 'masked-edit' : 'reference-assisted';
+    }
+    return next;
+  });
 }
 
 function writeRerunPlan(outputDir, resumeManifestPath, prompts) {
@@ -412,10 +988,24 @@ function countBy(items, key) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count }));
 }
 
+function uniqueSlotIds(items) {
+  return Array.from(new Set((items || [])
+    .map((item) => String(item.slotId || item.slot_id || '').trim())
+    .filter(Boolean)));
+}
+
+function isLocalEditResult(item) {
+  const requestMode = String(item.requestMode || item.request_mode || '').trim();
+  const editSource = String(item.editSource || item.edit_source || '').trim();
+  return requestMode === 'masked-edit' || editSource === 'previous-output';
+}
+
 function createSelectionArtifacts(outputDir, manifest, allResults) {
   const successful = allResults.filter((item) => item.ok && !item.skipped);
   const failed = allResults.filter((item) => !item.ok);
   const skipped = allResults.filter((item) => item.skipped);
+  const executed = allResults.filter((item) => !item.skipped);
+  const localEditResults = executed.filter(isLocalEditResult);
   const needsReview = successful.filter((item) => !item.output || !fs.existsSync(item.output));
   const rerunCandidates = failed.map((item) => ({
     index: item.index,
@@ -439,25 +1029,34 @@ function createSelectionArtifacts(outputDir, manifest, allResults) {
   writeJson(artifacts.skippedFile, skipped);
   writeJson(artifacts.needsReviewFile, needsReview);
   writeJson(artifacts.rerunCandidatesFile, rerunCandidates);
+  const generatedSlots = uniqueSlotIds(executed);
+  const localEditSlots = uniqueSlotIds(localEditResults);
 
   const lines = [
-    '# DAOGE Selection Board',
+    '# DAOGE 筛选与补跑入口',
     '',
-    `- Output dir: ${outputDir}`,
-    `- Success: ${successful.length}`,
-    `- Failed: ${failed.length}`,
-    `- Skipped existing: ${skipped.length}`,
-    `- Needs review: ${needsReview.length}`,
+    '我是 DAOGE。',
+    '这份文件用于快速看成功/失败，并给你现成的补跑入口。',
     '',
-    '## Success Samples',
+    '## 1. 当前结果摘要',
     '',
-    ...(successful.length ? successful.slice(0, 30).map((item) => `- ${item.index} / ${item.title || item.slug}: ${item.output}`) : ['- None']),
+    `- 输出目录: ${outputDir}`,
+    `- 成功张数: ${successful.length}`,
+    `- 失败张数: ${failed.length}`,
+    `- 跳过已完成: ${skipped.length}`,
+    `- 需要人工复核: ${needsReview.length}`,
+    `- 参与生成槽位: ${generatedSlots.length ? generatedSlots.join(', ') : '无'}`,
+    `- 局部编辑槽位: ${localEditSlots.length ? localEditSlots.join(', ') : '无'}`,
     '',
-    '## Failed Items',
+    '## 2. 成功样例',
     '',
-    ...(failed.length ? failed.map((item) => `- ${item.index} / ${item.title || item.slug}: ${item.error || 'unknown'}`) : ['- None']),
+    ...(successful.length ? successful.slice(0, 30).map((item) => `- ${item.index} / ${item.title || item.slug}: ${item.output}`) : ['- 无']),
     '',
-    '## Rerun Command',
+    '## 3. 失败项',
+    '',
+    ...(failed.length ? failed.map((item) => `- ${item.index} / ${item.title || item.slug}: ${item.error || 'unknown'}`) : ['- 无']),
+    '',
+    '## 4. 失败补跑命令',
     '',
     '```bash',
     ...portableRunnerPreambleLines(),
@@ -467,6 +1066,28 @@ function createSelectionArtifacts(outputDir, manifest, allResults) {
     '  --failed-only true',
     '```',
   ];
+  if (localEditSlots.length) {
+    lines.push('');
+    lines.push('## 5. 局部编辑续改命令');
+    lines.push('');
+    lines.push('- 如果你要继续只改本轮已经命中的局部编辑分镜，可以直接复用上一轮结果做底图。');
+    lines.push('');
+    lines.push('```bash');
+    lines.push(...portableRunnerPreambleLines());
+    lines.push('node "$DAOGE_RUNNER" \\');
+    lines.push(`  --prompts-file ${shellQuote(resolvePromptFileForRerun(manifest, outputDir))} \\`);
+    lines.push(`  --resume-manifest ${shellQuote(path.join(outputDir, 'manifest.json'))} \\`);
+    lines.push(`  --select-slot-ids ${localEditSlots.join(',')} \\`);
+    lines.push('  --reuse-output-as-reference true \\');
+    lines.push('  --batch-size 1 \\');
+    lines.push('  --concurrency 1');
+    lines.push('```');
+  }
+  lines.push('');
+  lines.push('## 6. DAOGE 建议');
+  lines.push('');
+  lines.push(failed.length ? '- 先看失败项，再决定是否只补跑失败项。' : '- 当前没有失败项，可以直接进入选图或下一轮微调。');
+  lines.push(localEditSlots.length ? '- 如果只是继续微调同一个分镜，优先走“局部编辑续改命令”，不要整板重跑。' : '- 如果后面要改单格，可以回到 DAOGE 用“只改分镜X”的方式继续。');
   fs.writeFileSync(artifacts.selectionBoard, `${lines.join('\n')}\n`);
   return artifacts;
 }
@@ -475,6 +1096,9 @@ function createOperationsReport(outputDir, manifest, allResults) {
   const successful = allResults.filter((item) => item.ok && !item.skipped);
   const failed = allResults.filter((item) => !item.ok);
   const skipped = allResults.filter((item) => item.skipped);
+  const executed = allResults.filter((item) => !item.skipped);
+  const attemptedLocalEdits = executed.filter(isLocalEditResult);
+  const successfulLocalEdits = successful.filter(isLocalEditResult);
   const total = successful.length + failed.length;
   const successRate = total ? Number((successful.length / total * 100).toFixed(2)) : 0;
   const batchSummaries = (manifest.batches || []).map((batch) => ({
@@ -495,9 +1119,13 @@ function createOperationsReport(outputDir, manifest, allResults) {
     failed: failed.length,
     skipped: skipped.length,
     successRate,
+    generatedSlots: uniqueSlotIds(executed),
+    attemptedLocalEditSlots: uniqueSlotIds(attemptedLocalEdits),
+    successfulLocalEditSlots: uniqueSlotIds(successfulLocalEdits),
     batchSummaries,
     failureReasons: countBy(failed, 'error'),
     distributions: {
+      requestMode: countBy(successful, 'requestMode').slice(0, 12),
       styleFamily: countBy(successful, 'styleFamily').slice(0, 12),
       scene: countBy(successful, 'scene').slice(0, 12),
       wardrobe: countBy(successful, 'wardrobe').slice(0, 12),
@@ -517,6 +1145,9 @@ function createOperationsReport(outputDir, manifest, allResults) {
     `- Success: ${successful.length}`,
     `- Failed: ${failed.length}`,
     `- Skipped existing: ${skipped.length}`,
+    `- Generated slots: ${report.generatedSlots.length ? report.generatedSlots.join(', ') : 'None'}`,
+    `- Attempted local-edit slots: ${report.attemptedLocalEditSlots.length ? report.attemptedLocalEditSlots.join(', ') : 'None'}`,
+    `- Successful local-edit slots: ${report.successfulLocalEditSlots.length ? report.successfulLocalEditSlots.join(', ') : 'None'}`,
     '',
     '## Batch Summary',
     '',
@@ -525,6 +1156,10 @@ function createOperationsReport(outputDir, manifest, allResults) {
     '## Failure Reasons',
     '',
     ...(report.failureReasons.length ? report.failureReasons.map((item) => `- ${item.name}: ${item.count}`) : ['- None']),
+    '',
+    '## Request Modes',
+    '',
+    ...(report.distributions.requestMode.length ? report.distributions.requestMode.map((item) => `- ${item.name}: ${item.count}`) : ['- None']),
     '',
     '## Next Actions',
     '',
@@ -822,6 +1457,9 @@ async function runBatch(batchItems, batchContext) {
     baseUrl: batchContext.baseUrl,
     apiKey: batchContext.apiKey,
     model: batchContext.model,
+    responsesModel: batchContext.responsesModel,
+    generatePath: batchContext.generatePath,
+    editPath: batchContext.editPath,
     width: batchContext.width,
     height: batchContext.height,
     outputFormat: batchContext.outputFormat,
@@ -855,13 +1493,21 @@ async function main() {
   if (!env.OPENAI_BASE_URL || !env.OPENAI_API_KEY) {
     throw new Error(`Missing OPENAI_BASE_URL or OPENAI_API_KEY in ${envFile}`);
   }
+  const generatePathOverride = args['generate-path'] || env.OPENAI_IMAGE_GENERATE_PATH || '';
+  const editPathOverride = args['edit-path'] || env.OPENAI_IMAGE_EDIT_PATH || '';
+  const responsesModel = args['responses-model'] || env.OPENAI_RESPONSES_MODEL || 'gpt-5.4';
 
   const promptsFile = path.resolve(args['prompts-file']);
   const promptPool = JSON.parse(fs.readFileSync(promptsFile, 'utf8'));
   if (!Array.isArray(promptPool)) throw new Error(`Prompt file must be a JSON array: ${promptsFile}`);
   const resumeManifest = args['resume-manifest'] ? path.resolve(args['resume-manifest']) : null;
-  const failedOnly = parseBoolean(args['failed-only'], Boolean(resumeManifest));
+  const explicitSelection = hasExplicitSelectionArgs(args);
+  const failedOnlyDefault = resumeManifest ? !explicitSelection : false;
+  const failedOnly = parseBoolean(args['failed-only'], failedOnlyDefault);
+  const reuseOutputAsReference = parseBoolean(args['reuse-output-as-reference'], false);
   const resumePool = selectResumePrompts(promptPool, resumeManifest, failedOnly);
+  const explicitPool = selectExplicitPrompts(resumePool, args);
+  const preparedPool = applyPreviousOutputReuse(explicitPool, resumeManifest, reuseOutputAsReference);
 
   const width = Math.max(16, Math.floor(parseNumber(args.width, 1440)));
   const height = Math.max(16, Math.floor(parseNumber(args.height, 2560)));
@@ -870,8 +1516,8 @@ async function main() {
   const retryCount = Math.max(0, Math.floor(parseNumber(args['retry-count'], 1)));
   const concurrency = clampNumber(Math.floor(parseNumber(args.concurrency, 3)), 1, 12);
   const offset = Math.max(0, Math.floor(parseNumber(args.offset, 0)));
-  const limit = Math.max(0, Math.floor(parseNumber(args.limit, resumePool.length - offset)));
-  const selectedPrompts = resumePool.slice(offset, offset + limit);
+  const limit = Math.max(0, Math.floor(parseNumber(args.limit, preparedPool.length - offset)));
+  const selectedPrompts = preparedPool.slice(offset, offset + limit);
   if (!selectedPrompts.length) throw new Error('No prompts selected after applying offset/limit');
 
   const batchSize = Math.max(1, Math.floor(parseNumber(args['batch-size'], selectedPrompts.length)));
@@ -917,7 +1563,11 @@ async function main() {
   console.log(`[info] output dir: ${outputDir}`);
   console.log(`[info] prompts: ${selectedPrompts.length}, stages: ${executionPlan.stageCount}, batches: ${batches.length}, batch size: ${batchSize}, concurrency: ${concurrency}, default size: ${width}x${height}, timeout per image: ${timeoutSeconds}s, retry: ${retryCount}`);
   console.log(`[info] prompt source: ${promptsFile}`);
+  if (generatePathOverride) console.log(`[info] generate path override: ${generatePathOverride}`);
+  if (editPathOverride) console.log(`[info] edit path override: ${editPathOverride}`);
   if (resumeManifest) console.log(`[info] resume manifest: ${resumeManifest}, failed only: ${failedOnly}`);
+  if (explicitSelection) console.log('[info] explicit slot/index selection detected; defaulting failed-only to false unless explicitly overridden');
+  if (reuseOutputAsReference) console.log('[info] previous successful outputs will be reused as edit references for selected prompts');
   if (dryRun) {
     const manifest = {
       outputDir,
@@ -1013,6 +1663,9 @@ async function main() {
       baseUrl: env.OPENAI_BASE_URL,
       apiKey: env.OPENAI_API_KEY,
       model: env.OPENAI_MODEL || 'gpt-image-2',
+      responsesModel,
+      generatePath: generatePathOverride,
+      editPath: editPathOverride,
       width,
       height,
       outputFormat,

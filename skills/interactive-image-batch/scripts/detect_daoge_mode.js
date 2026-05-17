@@ -19,15 +19,25 @@ function readJson(filePath) {
 }
 
 function buildCorpus(taskSpec, strategy) {
+  const storyboardSignals = [
+    taskSpec.storyboard_plan?.generation_mode,
+    taskSpec.storyboard_plan?.assembly_mode,
+    taskSpec.storyboard_plan?.reference_mode,
+    taskSpec.storyboard_plan?.layout_manifest,
+    taskSpec.storyboard_plan?.content_manifest,
+    taskSpec.storyboard_plan?.render_config,
+  ];
   return [
     taskSpec.content_brief,
     taskSpec.output_mode,
     ...(taskSpec.style_requirements || []),
+    ...(taskSpec.source_images || []),
     ...(taskSpec.variation_requirements || []),
     strategy.output_mode,
     ...(strategy.scene_pool || []),
     ...(strategy.wardrobe_pool || []),
     ...(strategy.variation_rules || []),
+    ...storyboardSignals,
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -100,6 +110,10 @@ function maybeReadTemplateDoc(template, registryPath) {
 }
 
 function detectMode(taskSpec) {
+  if (taskSpec.storyboard_plan?.enabled) {
+    if (taskSpec.source_images && taskSpec.source_images.length) return 'storyboard-image-edit';
+    return 'storyboard-board';
+  }
   if (taskSpec.source_images && taskSpec.source_images.length) return 'image-edit';
   if (taskSpec.require_confirmation === false) return 'execute-ready';
   return 'prepare-only';

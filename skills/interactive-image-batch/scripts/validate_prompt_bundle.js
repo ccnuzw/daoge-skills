@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { buildSizeValidationIssues, normalizeProvider, resolveRuntimeTarget } = require('./provider_size_rules');
 
 function parseArgs(argv) {
   const args = {};
@@ -110,6 +111,7 @@ function effectiveItemSize(item, taskSpec) {
 
 function buildQualityGates(prompts, taskSpec, args) {
   const strict = parseBoolean(args.strict, false);
+  const runtimeTarget = resolveRuntimeTarget(taskSpec || {});
   const promptTokenSets = prompts.map((item) => new Set(tokenize(getPromptText(item))));
   const promptLengths = prompts.map((item) => getPromptText(item).length);
   const shortPromptThreshold = Math.max(80, Math.floor(parseNumber(args['min-prompt-chars'], 180)));
@@ -165,13 +167,25 @@ function buildQualityGates(prompts, taskSpec, args) {
   prompts.forEach((item, index) => {
     const size = effectiveItemSize(item, taskSpec);
     if (!size) return;
-    if (size.width % 16 !== 0 || size.height % 16 !== 0) {
+    const params = item.params || {};
+    const provider = normalizeProvider(params.provider) || normalizeProvider(taskSpec?.provider) || runtimeTarget.provider;
+    const model = params.model || runtimeTarget.model;
+    const issues = buildSizeValidationIssues({
+      width: size.width,
+      height: size.height,
+      provider,
+      model,
+    });
+    issues.forEach((issue) => {
       sizeIssues.push({
         index: item.index ?? index + 1,
         size: `${size.width}x${size.height}`,
-        issue: 'width and height must be multiples of 16',
+        issue: issue.message,
+        displayIssue: issue.displayMessage,
+        provider,
+        model,
       });
-    }
+    });
   });
 
   const warnings = [];
@@ -183,7 +197,7 @@ function buildQualityGates(prompts, taskSpec, args) {
   if (shortPrompts.length) warnings.push(`${shortPrompts.length} prompts are shorter than ${shortPromptThreshold} characters`);
   if (nearDuplicatePairs.length) warnings.push(`${nearDuplicatePairs.length} near-duplicate prompt pairs detected at threshold ${nearDuplicateThreshold}`);
   if (missingTemplateTotal) warnings.push(`Template required fields are missing ${missingTemplateTotal} times`);
-  if (sizeIssues.length) errors.push(`${sizeIssues.length} prompts request sizes that are not multiples of 16`);
+  if (sizeIssues.length) errors.push(`${sizeIssues.length} prompts request sizes that are invalid for the current provider/model`);
   if (campaignPosterIssues.missingCampaignIntent.length) warnings.push(`${campaignPosterIssues.missingCampaignIntent.length} campaign-poster prompts may miss campaign/KV intent`);
   if (campaignPosterIssues.missingFullBodySignal.length) warnings.push(`${campaignPosterIssues.missingFullBodySignal.length} campaign-poster prompts may miss full-body signal`);
   if (campaignPosterIssues.missingTextSafeSignal.length) warnings.push(`${campaignPosterIssues.missingTextSafeSignal.length} campaign-poster prompts may miss typography-safe-space signal`);
@@ -222,6 +236,7 @@ function main() {
   if (args['task-spec']) {
     taskSpec = JSON.parse(fs.readFileSync(path.resolve(args['task-spec']), 'utf8'));
   }
+  const storyboardEnabled = Boolean(taskSpec?.storyboard_plan?.enabled);
 
   const missing = {
     index: 0,
@@ -284,7 +299,7 @@ function main() {
 
   const familyCounts = countBy(prompts, 'style_family');
   const topFamily = topCounts(familyCounts, 1)[0];
-  if (topFamily && topFamily.name !== '(missing)' && topFamily.count / Math.max(prompts.length, 1) > 0.8) {
+  if (!storyboardEnabled && topFamily && topFamily.name !== '(missing)' && topFamily.count / Math.max(prompts.length, 1) > 0.8) {
     warnings.push(`Style family is highly concentrated: ${topFamily.name} = ${topFamily.count}/${prompts.length}`);
   }
 

@@ -1,0 +1,30 @@
+{
+  "layout_id": "left_info_6grid_bottom_kv",
+  "board_role": "storyboard-board",
+  "canvas": {
+    "width": 2560,
+    "height": 1440,
+    "aspect_ratio": "16:9",
+    "background": "#111111"
+  },
+  "regions": [
+    { "id": "brand_panel", "role": "brand_panel", "x": 64, "y": 64, "width": 620, "height": 860, "notes": "左侧品牌信息区" },
+    { "id": "shot_1", "role": "shot", "sequence": 1, "x": 736, "y": 64, "width": 560, "height": 260, "aspect_ratio": "16:9" },
+    { "id": "shot_2", "role": "shot", "sequence": 2, "x": 1320, "y": 64, "width": 560, "height": 260, "aspect_ratio": "16:9" },
+    { "id": "shot_3", "role": "shot", "sequence": 3, "x": 1904, "y": 64, "width": 560, "height": 260, "aspect_ratio": "16:9" },
+    { "id": "shot_4", "role": "shot", "sequence": 4, "x": 736, "y": 348, "width": 560, "height": 260, "aspect_ratio": "16:9" },
+    { "id": "shot_5", "role": "shot", "sequence": 5, "x": 1320, "y": 348, "width": 560, "height": 260, "aspect_ratio": "16:9" },
+    { "id": "shot_6", "role": "shot", "sequence": 6, "x": 1904, "y": 348, "width": 560, "height": 260, "aspect_ratio": "16:9" },
+    { "id": "kv", "role": "kv", "x": 64, "y": 964, "width": 2400, "height": 360, "aspect_ratio": "16:9", "notes": "底部 KV 收尾区" }
+  ],
+  "bindings": {
+    "brand_panel": "brand_panel",
+    "shot_1": "shot_1",
+    "shot_2": "shot_2",
+    "shot_3": "shot_3",
+    "shot_4": "shot_4",
+    "shot_5": "shot_5",
+    "shot_6": "shot_6",
+    "kv": "kv"
+  }
+}

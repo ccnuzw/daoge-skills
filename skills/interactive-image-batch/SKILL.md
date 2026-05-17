@@ -21,7 +21,11 @@ Support an experienced-user fast path. When the user already sounds like a repea
 2. Before generating prompts, run a guided intake pass. Use [references/guided_intake.md](references/guided_intake.md) and [references/dialogue_templates_zh.md](references/dialogue_templates_zh.md). First perform a natural-language extraction pass on the user's original sentence or paragraph: extract any explicit content, mode, count, size, preset, timeout, retry, concurrency, preview preference, markdown file path, style retention, or text-layout signals before asking questions. Do not proceed until the required conversation fields are explicit. For first-time or uncertain users, start with the novice-first menu instead of the full parameter form, and only expand into full custom parameters when the user asks for it. The default startup shape should be two-step: first choose task type, then choose run mode. Whenever possible, show copyable example replies so the user can answer by picking rather than composing.
 3. Read any markdown or prompt-library files explicitly referenced in the request. If the user chooses the `md 文件驱动` branch, prefer asking only for the file path, generation target, total count, style-retention rule, and typography policy before you read and synthesize the library.
 4. Build a `task_spec.json` before prompt generation. Use [references/task_spec.md](references/task_spec.md) for the schema and normalization rules.
+4.1. If the user is building a storyboard board with per-shot references or variable layout, also read [references/storyboard_board_mode.md](references/storyboard_board_mode.md). Keep layout, content, and render policy as separate manifests instead of collapsing them into one fixed prompt schema.
+4.2. If the user uploads images in the chat rather than passing file paths, treat the attachments as storyboard reference assets and ask for or infer a `reference_bindings.json` mapping. If the user says "按上传顺序对应", bind assets to slots in that order. If only some slots have references, mark the rest `prompt-only`.
+4.3. If the user uploads an extra image and says it is a mask / 遮罩图 for one slot, keep it separate from normal references. Bind it through `reference_bindings.json -> slot_assignments[].mask_asset_ids`, then surface that slot as `masked-edit` in preview and preflight.
 5. Run `scripts/validate_task_spec.js --task-spec /abs/path/task_spec.json` to normalize defaults and catch missing fields. The validator applies the DAOGE runtime preset layer from [references/run_presets_zh.json](references/run_presets_zh.json): explicit dialogue values win, preset values only fill missing runtime controls, and the normalized spec records `field_sources`.
+5.1. If `task_spec.storyboard_plan.enabled=true`, run `scripts/validate_storyboard_bundle.js --task-spec /abs/path/task_spec.normalized.json` and treat its `slot_blueprint` / `generation_slots` as the storyboard-slot contract.
 6. If validation fails because a required content or style field is missing, go back to dialogue in Chinese and resolve it. Runtime controls may be supplied by `run_preset`, but content intent must not be guessed.
 7. Extract style signals from referenced files instead of copying them verbatim when the user wants a different output mode.
 8. Build a `prompt_strategy.json` before generating prompts. Use [references/prompt_strategy.md](references/prompt_strategy.md) for the schema and planning rules.
@@ -30,6 +34,8 @@ Support an experienced-user fast path. When the user already sounds like a repea
 11. Treat the detected template as a writing contract, not only a label. Carry its required fields, prompt section order, negative terms, quality rules, anti-patterns, template variants, default variant axes, and autofill policy into the prompt slots.
 12. When the task needs stronger variation, add `variant_axes` to `prompt_strategy.json` for matrix-controlled fields such as `camera_language`, `lighting`, `mood`, `grid_role`, `story_beat`, `ad_test_hypothesis`, `detail_page_role`, `gesture`, or `exposure_signal`. If the strategy does not define axes, the prepare script may inherit template defaults.
 13. Run `scripts/scaffold_prompt_bundle.js --strategy-file /abs/path/prompt_strategy.normalized.json --mode-file /abs/path/daoge_mode_detection.json` to create `prompt_slots.json`.
+13.1. In storyboard mode, also pass `--storyboard-file /abs/path/storyboard_bundle.validation.json` so prompt slots inherit `shot_id`, `slot_role`, `reference_images`, `continuity_notes`, and `camera_move`.
+13.2. If a `reference_bindings.json` exists, pass it through the storyboard validator so the slot-to-image mapping can be checked before preview.
 14. Run `scripts/materialize_prompt_drafts.js --slots-file /abs/path/prompt_slots.json` to create `prompt_draft_bundle.json`. Draft prompts should follow the selected template section order and visibly include assigned `variant_axes`.
 15. Refine `prompt_draft_bundle.json` into `prompts.generated.json` by polishing `generation_prompt` and `negative_prompt` while preserving the scaffolded metadata, template fields, `variant_axes`, and `variant_signature`.
 16. Treat dialogue as the primary source of truth for:
@@ -66,8 +72,42 @@ Support an experienced-user fast path. When the user already sounds like a repea
 30. Verify outputs with the script manifest and local size checks before claiming completion.
 31. If any images fail, do not manually reconstruct a prompt subset. Use `scripts/run_batch.js --resume-manifest /abs/path/manifest.json --failed-only true` with the original `prompts.generated.json` to rerun only failed items into a new output directory.
 32. For interrupted same-directory runs, use `--skip-existing true` so completed image+metadata pairs are skipped and only missing items are generated.
+32.1. If the user says they only want to change one storyboard shot or one local region, switch to local-edit mode instead of failed-rerun mode. Prefer `--resume-manifest + --select-slot-ids/--select-indexes + --reuse-output-as-reference true`, and ask whether a new `mask_image` exists.
+33. When users upload images plus a long prompt for a storyboard board, keep the interaction friendly and structured:
+   - first confirm the number of images received
+   - then ask which slot each image should map to
+   - then ask which slots should remain prompt-only
+   - then echo back the inferred `reference_bindings.json` before preparing
 33. For large runs, prefer staged execution: use `--sample-size`, `--stop-after-sample`, `--stage-size`, `--max-consecutive-failures`, and `--max-batch-failure-rate`.
 34. After execution, use the operational artifacts for review and next actions: `job_state.json`, `checkpoint.json`, `stage_plan.json`, `success.json`, `failed.json`, `skipped.json`, `needs_review.json`, `rerun_candidates.json`, `selection_board.md`, `operations_report.md`, and the global `generated_images/daoge_run_index.md`.
+35. For storyboard local-edit tasks, explicitly surface whether each selected slot is:
+   - `prompt-only`
+   - `reference-assisted`
+   - `masked-edit`
+   - reusing `previous-output` as the edit base
+
+## Transport policy
+
+- Favor success rate over forcing one unified API.
+- `prompt-only`:
+  - default path: `POST /v1/images/generations`
+  - optional modern path: `POST /v1/responses` with `image_generation`
+  - when `--generate-path /v1/responses` is enabled, try Responses first and fall back to Images API on failure
+- `reference-assisted` means one or more `reference_images` and no `mask_image`
+  - default path: `POST /v1/images/edits`
+  - provider-specific modern path: `POST /v1/responses` with `image_generation` and `input_image`
+  - when `--edit-path /v1/responses` is enabled, try Responses first and fall back to Images API edits on failure
+- `masked-edit` means `reference_images` plus `mask_image`, or any explicit local inpainting request
+  - fixed safe path: `POST /v1/images/edits` with multipart `FormData`
+  - do not route masked edits through the Responses bridge in this runner unless that path has been separately implemented and verified
+- Recommended defaults for production reliability:
+  - prompt-only: keep Images API unless the provider clearly prefers Responses
+  - reference-assisted: use Responses first only if you have already verified that provider path
+  - masked-edit: keep Images API
+- Configuration knobs:
+  - prompt-only Responses: `--generate-path /v1/responses`
+  - reference-assisted Responses: `--edit-path /v1/responses`
+  - top-level Responses model: `--responses-model <model>` or `OPENAI_RESPONSES_MODEL=<model>`
 
 When the source file is a style library rather than a ready-to-run prompt file, read [references/prompt_synthesis.md](references/prompt_synthesis.md) and convert the library into reusable dimensions before generating prompts.
 
@@ -219,6 +259,7 @@ The LLM should then revise the draft bundle into `prompts.generated.json` instea
 - Do not rely on hardcoded prompt sources.
 - Use native size output. Do not upscale and present that as native output.
 - For failed reruns, pass the previous root `manifest.json` via `--resume-manifest` and keep `--failed-only true` unless the user asks to rerun all selected items.
+- For explicit local-edit reruns with `--select-indexes` or `--select-slot-ids`, the runner should behave like “selected slot rerun” rather than “failed-only rerun”. If needed, users can still force `--failed-only true`.
 - For interrupted runs into the same directory, pass `--skip-existing true`.
 - For 300-1000 image jobs, use a sample stage first and set auto-pause thresholds. A typical safe pattern is `--sample-size 20 --stop-after-sample true --stage-size 200 --batch-size 30 --max-consecutive-failures 10 --max-batch-failure-rate 0.3`.
 - For identity-sensitive requests involving real people, avoid claiming exact face preservation unless the workflow and policy clearly allow it.

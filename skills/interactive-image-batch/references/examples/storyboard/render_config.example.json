@@ -1,0 +1,15 @@
+{
+  "render_mode": "storyboard_board",
+  "generation_mode": "per-slot",
+  "assembly_mode": "external-compositor",
+  "reference_mode": "hybrid",
+  "layout_manifest": "./layout_manifest.example.json",
+  "content_manifest": "./content_manifest.example.json",
+  "reference_bindings": "./reference_bindings.example.json",
+  "output_name": "kenggee-hehuan-storyboard-board",
+  "policies": {
+    "allow_variable_layout": true,
+    "preserve_reference_metadata": true,
+    "skip_non_image_slots": true
+  }
+}

@@ -152,6 +152,15 @@ const PRODUCT_TRAITS = {
   mood: ['clear and commercial', 'premium and readable', 'product-led confidence', 'precise conversion-oriented polish'],
 };
 
+const STORYBOARD_TRAITS = {
+  descriptor: 'cinematic storyboard frame for a premium commercial sequence',
+  layoutEmphasis: ['left info panel, six-shot grid, bottom KV', 'clear grid hierarchy with board-wide continuity', 'reserved safe zones for brand lockup', 'each frame reads as one commercial beat'],
+  signalEmphasis: ['product integrity', 'steam layers', 'packaging hierarchy', 'logo clarity', 'gesture continuity', 'shot-to-shot transition'],
+  lighting: ['warm side backlight with layered steam', 'dark luxury food lighting with rim highlights', 'cinematic practical glow with deep contrast'],
+  palette: ['deep green, orange gold, vermilion, and warm black', 'kitchen-dark premium tones with controlled highlights', 'brand-consistent food advertising palette'],
+  mood: ['board-consistent premium food advertising', 'cinematic continuity with editorial restraint', 'high-end storyboard sequence'],
+};
+
 const SCENE_ANCHORS = {
   'bedroom morning light': ['white sheets, sheer curtains, and soft linen textures', 'sunlit bedding, pale walls, and quiet hotel-grade styling', 'crisp white bedding and an airy morning window edge'],
   'designer kitchen': ['stone island, brushed metal accents, and clean architectural lines', 'minimal cabinetry, matte surfaces, and bright luxury-residence details', 'sleek counters, quiet reflections, and restrained interior styling'],
@@ -197,6 +206,7 @@ function buildCorpus(item) {
 
 function assetMode(item) {
   if (item.asset_mode) return String(item.asset_mode).trim().toLowerCase();
+  if (item.board_id || item.slot_id || item.layout_region_id || item.slot_role) return 'storyboard';
   if (item.subject_type) return String(item.subject_type).trim().toLowerCase();
   const corpus = buildCorpus(item);
   const humanSignals = ['full-body', 'head-to-toe', 'female model', 'fashion model', 'portrait', 'lingerie', 'gaze', 'pose', 'waist', 'shoulder', 'skin texture'];
@@ -212,6 +222,7 @@ function assetMode(item) {
 }
 
 function traitSetFor(item, mode) {
+  if (mode === 'storyboard') return STORYBOARD_TRAITS;
   if (mode === 'human') {
     const familyKey = String(item.style_family || '').trim().toLowerCase();
     return HUMAN_FAMILY_TRAITS[familyKey] || HUMAN_FAMILY_TRAITS.default;
@@ -222,6 +233,9 @@ function traitSetFor(item, mode) {
 }
 
 function baseSubject(item, mode, traits) {
+  if (mode === 'storyboard') {
+    return `Premium storyboard board frame, ${traits.descriptor}`;
+  }
   if (mode === 'human') {
     return `Adult East Asian female fashion model, photoreal premium commercial poster, ${traits.descriptor}`;
   }
@@ -250,6 +264,12 @@ function variantAxisSummary(item) {
       return label && value ? `${label}: ${value}` : null;
     })
     .filter(Boolean);
+}
+
+function storyboardSummary(label, items) {
+  const list = ensureList(items);
+  if (!list.length) return '';
+  return `${label}: ${list.join('; ')}`;
 }
 
 function buildDraftPrompt(item) {
@@ -285,6 +305,12 @@ function buildDraftPrompt(item) {
   const detailPageRole = firstNonEmpty(item.detail_page_role, item.product_role, pick(['hero product image', 'material close detail', 'fit demonstration', 'lifestyle use case', 'benefit breakdown image'], seed, 13));
   const nonHumanFocus = firstNonEmpty(item.signal_emphasis, exposureSignal, pick(traits.signalEmphasis || [], seed, 14));
   const nonHumanLayout = firstNonEmpty(item.layout_emphasis, editorialNuance, pick(traits.layoutEmphasis || [], seed, 15));
+  const referenceNotes = storyboardSummary('Reference intent', item.reference_notes);
+  const promptHints = storyboardSummary('Shot hints', item.prompt_hints);
+  const continuityNotes = storyboardSummary('Continuity', item.continuity_notes);
+  const visualElements = storyboardSummary('Visual elements', item.visual_elements);
+  const motionNote = firstNonEmpty(item.camera_move, item.camera_language);
+  const voiceoverNote = item.voiceover ? `Voiceover mood: ${item.voiceover}` : '';
 
   const sectionValues = {
     subject_baseline: baseSubject(item, mode, traits),
@@ -316,10 +342,10 @@ function buildDraftPrompt(item) {
       compositionBias || '',
     ].filter(Boolean).join('. '),
     typography_safe_area: item.text_policy ? `Text policy: ${item.text_policy}; leave clean layout-safe negative space, do not generate readable typography` : 'leave clean layout-safe negative space, do not generate readable typography',
-    commercial_finish: [posterCue, qualityRule, editorialNuance, mode !== 'human' ? nonHumanLayout : null].filter(Boolean).join('. '),
-    story_beat: `${storyBeat}; visible narrative progression, one clear moment in the sequence`,
-    camera_language: cameraLanguage ? `Camera language: ${cameraLanguage}; precise shot scale, angle, and visual rhythm` : '',
-    continuity_rules: [controlledVariables, 'keep character, palette, scene logic, and wardrobe continuity across the sequence'].filter(Boolean).join('. '),
+    commercial_finish: [posterCue, qualityRule, editorialNuance, voiceoverNote, mode !== 'human' ? nonHumanLayout : null].filter(Boolean).join('. '),
+    story_beat: [storyBeat, promptHints, visualElements, 'visible narrative progression, one clear moment in the sequence'].filter(Boolean).join('. '),
+    camera_language: cameraLanguage ? `Camera language: ${cameraLanguage}; ${motionNote || 'precise shot scale, angle, and visual rhythm'}` : '',
+    continuity_rules: [controlledVariables, continuityNotes, referenceNotes, 'keep character, palette, scene logic, and wardrobe continuity across the sequence'].filter(Boolean).join('. '),
     grid_role: `${gridRole}; this image must work as a distinct tile in a coherent social feed`,
     series_consistency: [controlledVariables, 'consistent palette and brand system while preserving tile-level variation'].filter(Boolean).join('. '),
     ad_test_hypothesis: `${adHypothesis}; isolate one creative variable and keep the baseline stable`,
@@ -367,10 +393,16 @@ function buildDraftPrompt(item) {
   pushIf(parts, palette ? `Palette: ${ensureList(palette).join(', ')}` : '');
   pushIf(parts, mood ? `Mood: ${ensureList(mood).join(', ')}` : '');
   pushIf(parts, gradeDetail ? `Intensity: ${gradeDetail}` : '');
+  pushIf(parts, promptHints);
+  pushIf(parts, visualElements);
+  pushIf(parts, continuityNotes);
+  pushIf(parts, referenceNotes);
   pushIf(parts, mode === 'human' && textureCue ? `Material cue: ${textureCue}` : '');
   pushIf(parts, editorialNuance ? `Editorial nuance: ${editorialNuance}` : '');
   pushIf(parts, compositionDetail ? `Composition detail: ${compositionDetail}` : '');
   pushIf(parts, composition ? `Poster framing: ${composition}` : '');
+  pushIf(parts, motionNote ? `Camera movement: ${motionNote}` : '');
+  pushIf(parts, voiceoverNote);
   pushIf(parts, posterCue ? `Poster finish: ${posterCue}` : '');
   pushIf(parts, item.text_policy ? `Text policy: ${item.text_policy}` : '');
   pushIf(parts, variantSummary.length ? `Variant matrix: ${variantSummary.join('; ')}` : '');

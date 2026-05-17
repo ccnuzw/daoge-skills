@@ -1,0 +1,56 @@
+{
+  "board_id": "kenggee-hehuan-board-01",
+  "reference_mode": "hybrid",
+  "reference_assets": [
+    {
+      "asset_id": "ref_01",
+      "path": "./refs/hehuan_pack_front.png",
+      "label": "主盒正面",
+      "notes": "包装主参考"
+    },
+    {
+      "asset_id": "ref_02",
+      "path": "./refs/hehuan_lighting_reference.jpg",
+      "label": "布光参考",
+      "notes": "光扫和暖侧逆光"
+    },
+    {
+      "asset_id": "mask_01",
+      "asset_type": "mask",
+      "path": "./refs/shot3_mask.png",
+      "label": "分镜3局部遮罩",
+      "notes": "只改右下角礼盒区域"
+    }
+  ],
+  "slot_assignments": [
+    {
+      "slot_id": "shot_1",
+      "asset_ids": ["ref_01", "ref_02"],
+      "reference_mode": "reference-assisted",
+      "priority": "main",
+      "notes": "第一格需要主盒和布光"
+    },
+    {
+      "slot_id": "shot_2",
+      "asset_ids": ["ref_02"],
+      "reference_mode": "reference-assisted",
+      "priority": "light"
+    },
+    {
+      "slot_id": "shot_3",
+      "asset_ids": ["ref_01"],
+      "mask_asset_ids": ["mask_01"],
+      "reference_mode": "masked-edit",
+      "notes": "复用参考图并挂遮罩，局部编辑"
+    },
+    {
+      "slot_id": "kv",
+      "asset_ids": [],
+      "reference_mode": "prompt-only"
+    }
+  ],
+  "defaults": {
+    "unassigned_slot_mode": "prompt-only",
+    "unassigned_asset_policy": "ignore"
+  }
+}

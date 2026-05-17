@@ -1,0 +1,145 @@
+{
+  "board_id": "kenggee-hehuan-board-01",
+  "board_title": "KENGEE 仟吉 田园粽·合欢 分镜版",
+  "board_theme": "黑金国潮、真实商业食品摄影、电影广告大片感",
+  "brand_panel": {
+    "title_lines": [
+      "KENGEE 仟吉",
+      "田园粽·合欢",
+      "彩丝系合欢，艾草映朱门"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "左侧只做品牌信息排版，不走生图"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "asset_mode": "product",
+      "reference_mode": "reference-assisted",
+      "shot_label": "0-2s 光扫揭示主盒",
+      "timecode": "0-2s",
+      "scene": "黑场中朱门窗影扫过桌面，礼盒暖光显形",
+      "prompt_hints": [
+        "包装正面、logo、品名最后落到清晰焦点",
+        "前景有五彩绳和家书边角形成层次"
+      ],
+      "reference_notes": [
+        "包装结构和主色必须准确",
+        "只参考门影和布光，不要照抄整体排版"
+      ],
+      "continuity_notes": [
+        "光扫方向延续到下一格开盒",
+        "保持无人物"
+      ],
+      "camera_move": "低角度慢推，最后拉焦锁定 logo",
+      "voiceover": "端午到了，把合欢摆上桌。",
+      "music": "低柔古琴与低频弦乐",
+      "sound_effects": "清风、布料轻响、轻微光扫声",
+      "reference_images": [
+        "./refs/hehuan_pack_front.png",
+        "./refs/hehuan_lighting_reference.jpg"
+      ]
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "asset_mode": "product",
+      "reference_mode": "prompt-only",
+      "shot_label": "2-4s 开盒层次",
+      "timecode": "2-4s",
+      "scene": "礼盒盒盖打开，内托、小盒、包装层次清楚",
+      "prompt_hints": [
+        "前景粽叶或竹器虚化掠过",
+        "不塞特殊食材"
+      ],
+      "continuity_notes": [
+        "承接第一格光扫",
+        "维持同一桌面和包装色彩"
+      ],
+      "camera_move": "侧向滑轨横移，前景遮挡揭示开盒层次"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "asset_mode": "product",
+      "reference_mode": "prompt-only",
+      "shot_label": "4-6s 完整粽子热香",
+      "timecode": "4-6s",
+      "scene": "完整粽子热香展示",
+      "prompt_hints": [
+        "粽叶湿润反光，棉线勒痕清晰",
+        "蒸汽自然分层，不切开不露馅"
+      ],
+      "continuity_notes": [
+        "蒸汽动势延续到第四格空镜"
+      ],
+      "camera_move": "70mm 微距慢推，从叶面水珠拉焦到完整粽身"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "shot",
+      "sequence": 4,
+      "asset_mode": "product",
+      "reference_mode": "prompt-only",
+      "shot_label": "6-8.5s 端午器物空镜",
+      "timecode": "6-8.5s",
+      "scene": "朱门光影、艾草、五彩绳、青瓷茶盏、竹编托盘组成空镜",
+      "prompt_hints": [
+        "年轻空桌人文感",
+        "主盒只在边缘虚化出现"
+      ],
+      "camera_move": "俯拍缓慢下降，延续上一格蒸汽与暖光"
+    },
+    {
+      "slot_id": "shot_5",
+      "role": "shot",
+      "sequence": 5,
+      "asset_mode": "product",
+      "reference_mode": "prompt-only",
+      "shot_label": "8.5-11.5s 礼赠陈列",
+      "timecode": "8.5-11.5s",
+      "scene": "完整粽子、茶盏、家书和竹编托盘围合成礼赠陈列",
+      "prompt_hints": [
+        "强调完整粽形、节日心意和礼赠质感"
+      ],
+      "camera_move": "低机位轻环绕 10-15 度，焦点从粽子转向后方虚化小包装盒"
+    },
+    {
+      "slot_id": "shot_6",
+      "role": "shot",
+      "sequence": 6,
+      "asset_mode": "product",
+      "reference_mode": "prompt-only",
+      "shot_label": "11.5-15s 品牌落版",
+      "timecode": "11.5-15s",
+      "scene": "主盒、开盒、完整粽子与品牌信息同屏清晰",
+      "prompt_hints": [
+        "景深由浅到深，最后稳定定格"
+      ],
+      "voiceover": "田园粽·合欢，经典雅致，口味丰富。"
+    },
+    {
+      "slot_id": "kv",
+      "role": "kv",
+      "sequence": 7,
+      "asset_mode": "product",
+      "reference_mode": "prompt-only",
+      "shot_label": "独立电影广告 KV 收尾",
+      "scene": "主盒与开盒同框，前景只放完整粽子、粽叶、艾草、五彩绳、青瓷茶盏、竹编托盘、家书和朱门光影",
+      "prompt_hints": [
+        "主盒、开盒、完整粽子、品牌 logo、品名和 slogan 同屏清晰"
+      ],
+      "continuity_notes": [
+        "承接六格的整体色调和礼赠气质"
+      ]
+    }
+  ]
+}

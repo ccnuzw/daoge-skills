@@ -21,6 +21,7 @@ Always try to extract these signals first:
 - `content_brief`
 - `output_mode`
 - `source_files`
+- `source_images`
 - `style_requirements`
 - `total_count`
 - `run_preset`
@@ -41,6 +42,8 @@ Rules:
 - If the user says `先预览`, infer `require_confirmation=true`.
 - If the user says `直接开始`, infer `require_confirmation=false`.
 - If the user gives a markdown file path plus a generation goal in one sentence, go straight into `md 文件驱动` intake and ask only for the missing items.
+- If the user says this is a `分镜版`, `分镜板`, `六格分镜`, `每格都有垫图`, or `布局不固定`, switch to storyboard intake and ask for `layout_manifest / content_manifest / render_config` or equivalent structure.
+- If the user says only some slots有垫图、其余靠提示词生成，按混合模式处理，不要默认全量参考图。
 - If the user gives direct execution language such as `刀哥，来跑批`, `刀哥，生图`, `刀哥，开始跑`, or a complete md/prompt-json task sentence, switch to the experienced-user fast lane.
 
 The first reply after extraction should look like:
@@ -67,6 +70,11 @@ These must be explicitly established in dialogue before the run starts:
 - style source:
   - either `source_files`
   - or non-empty `style_requirements`
+- if this is a storyboard board:
+  - `storyboard_plan`
+  - and the linked `layout_manifest` + `content_manifest` + `render_config`
+  - optionally `reference_bindings`
+  - support a mix of `reference-assisted` and `prompt-only` slots
 - `total_count`
 - runtime plan:
   - explicit 每批张数、图片宽高、并发数、失败重试次数、单张超时秒数
@@ -76,6 +84,88 @@ These must be explicitly established in dialogue before the run starts:
 - confirmation mode:
   - either `require_confirmation=true`
   - or the user explicitly says to start immediately
+
+## Uploaded storyboard references
+
+When the user uploads multiple images in chat for a storyboard board, DAOGE should not immediately assume file-to-shot mapping.
+
+Use this checklist:
+
+1. confirm how many images were received
+2. confirm how many storyboard slots need image generation
+3. ask whether the mapping follows upload order
+4. ask which slots are `prompt-only`
+5. ask whether any image should map to multiple slots
+6. echo back a draft `reference_bindings.json`
+
+Suggested grouped prompt:
+
+```text
+我先帮你把参考图和分镜对上。
+
+当前我收到：
+- 参考图：X 张
+- 目标分镜：Y 格
+
+你直接告诉我三件事就行：
+- 是否按上传顺序对应
+- 哪些分镜不用图，直接走 prompt-only
+- 有没有一张图要给多个分镜复用
+
+我会先整理 reference_bindings.json，再继续预览。
+```
+
+If the user also uploads a mask image for one slot, extend the checklist with:
+
+7. which uploaded image is the mask
+8. which slot it belongs to
+9. what region should change
+
+Suggested grouped prompt:
+
+```text
+如果你这次还补了遮罩图，我再多确认三件事：
+- 哪一张是遮罩图
+- 这张遮罩图对应哪个分镜
+- 这次只改哪个局部
+
+我会把它写进 reference_bindings.json 的 mask_asset_ids，不会和普通参考图混掉。
+```
+
+## Single-slot edit intake
+
+When the user says they only want to change one storyboard shot or one local region, DAOGE should switch to edit-intake instead of full rerun-intake.
+
+Ask these four things:
+
+1. which slot to change
+2. whether to reuse the previous generated output as the edit base
+3. whether a new mask image is provided
+4. what exactly should change and what must stay unchanged
+
+Suggested grouped prompt:
+
+```text
+我理解你这次不是整板重做，而是只改单格。
+
+你直接告诉我这四件事：
+- 改哪一个分镜：例如 分镜3 / shot_3
+- 是否直接复用上一轮成图做底图
+- 有没有新的遮罩图
+- 只改什么，不要改什么
+
+我会优先走单格局部编辑，不重跑整板。
+```
+
+Intent normalization hints:
+
+- `只改分镜3 / 只改第3格 / 只改 shot_3` -> target the selected slot only
+- `复用上一轮结果做底图 / 用上一版继续修` -> `reuse_output_as_reference=true`
+- `我补一张遮罩图 / 我传一个 mask` -> expect or attach `mask_image`
+- `只改蒸汽 / 只改右下角礼盒 / 只改盒盖高光` -> keep this in prompt constraints as “只改什么”
+- `盒身别动 / 构图不变 / 其他分镜别动` -> keep this in prompt constraints as “不要改什么”
+
+If the user gives both “selected slot” and “reuse previous output” clearly, DAOGE should treat it as local edit by default instead of failed-only rerun logic.
 
 ## Stability notes
 
@@ -120,6 +210,13 @@ Rules:
 If the provider benefits from native sizes aligned to hardware limits, confirm that `width` and `height` are legal for the target provider.
 
 For the current local workflow, prefer widths and heights that are multiples of `16`.
+For `openai` + `gpt-image-2`, also require:
+
+- total pixels between `655360` and `8294400`
+- aspect ratio no wider than `3:1`
+- examples:
+  - `1024x576` is invalid because `589824` pixels is below the minimum budget
+  - `1280x720`, `1536x864`, `1024x1024`, and `1024x1536` are valid examples
 
 ## Intake template
 
@@ -198,6 +295,7 @@ Suggested grouping:
 4. Variation and layout
    - variation requirements
    - text policy
+   - if it is a storyboard board: whether references are global or per-slot, and whether layout is fixed or variable
 5. Execution gate
    - preview first or start immediately
 

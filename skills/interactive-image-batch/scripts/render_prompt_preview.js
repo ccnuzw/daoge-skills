@@ -61,6 +61,17 @@ function topLabel(entries, fallback = '未指定') {
   return entries[0]?.name || fallback;
 }
 
+function formatEditMode(item) {
+  const mode = String(item.reference_mode || '').trim() || 'prompt-only';
+  const source = String(item.edit_source || '').trim();
+  if (source === 'previous-output') {
+    return mode === 'masked-edit' ? '局部编辑：复用上一轮结果 + 遮罩' : '局部编辑：复用上一轮结果';
+  }
+  if (mode === 'masked-edit') return '局部编辑：参考图 + 遮罩';
+  if (mode === 'reference-assisted') return '参考图辅助';
+  return '纯提示词生成';
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args['prompts-file']) throw new Error('Missing required flag: --prompts-file');
@@ -88,7 +99,12 @@ function main() {
     scene: topCounts(countBy(prompts, 'scene')),
     wardrobe: topCounts(countBy(prompts, 'wardrobe')),
     composition: topCounts(countBy(prompts, 'composition')),
+    slot_role: topCounts(countBy(prompts, 'slot_role')),
   };
+  const storyboardMode = prompts.some((item) => item.slot_id || item.shot_id || item.layout_region_id);
+  const boardIds = Array.from(new Set(prompts.map((item) => item.board_id).filter(Boolean)));
+  const referenceModes = topCounts(countBy(prompts, 'reference_mode'));
+  const editSources = topCounts(countBy(prompts, 'edit_source'));
 
   const previewItems = prompts.slice(0, previewCount);
   const lines = [
@@ -106,6 +122,13 @@ function main() {
     `- 每批数量: ${batchSize}`,
     `- 批次数量: ${batches.length}`,
     `- 预览数量: ${previewItems.length}`,
+    ...(storyboardMode ? [
+      `- 分镜板模式: 是`,
+      `- 分镜板数量: ${boardIds.length || 1}`,
+      `- 主要槽位角色: ${topLabel(distributions.slot_role)}`,
+      `- 参考模式: ${topLabel(referenceModes)}`,
+      `- 编辑底图来源: ${topLabel(editSources, '未使用')}`,
+    ] : []),
     '',
     '## 分布摘要',
     '',
@@ -119,6 +142,9 @@ function main() {
     ...distributions.wardrobe.map((item) => `  - ${item.name}: ${item.count}`),
     '- 构图:',
     ...distributions.composition.map((item) => `  - ${item.name}: ${item.count}`),
+    ...(storyboardMode ? ['- 槽位角色:', ...distributions.slot_role.map((item) => `  - ${item.name}: ${item.count}`)] : []),
+    ...(storyboardMode ? ['- 参考模式:', ...referenceModes.map((item) => `  - ${item.name}: ${item.count}`)] : []),
+    ...(storyboardMode ? ['- 编辑底图来源:', ...editSources.map((item) => `  - ${item.name}: ${item.count}`)] : []),
     '',
     '## DAOGE 摘要',
     '',
@@ -139,6 +165,13 @@ function main() {
     [
       bullet(labelField('slug'), item.slug),
       bullet(labelField('style_family'), item.style_family),
+      bullet(labelField('board_id'), item.board_id),
+      bullet(labelField('slot_id'), item.slot_id),
+      bullet(labelField('slot_role'), item.slot_role),
+      bullet(labelField('shot_id'), item.shot_id),
+      bullet(labelField('shot_label'), item.shot_label),
+      bullet(labelField('layout_region_id'), item.layout_region_id),
+      bullet(labelField('timecode'), item.timecode),
       bullet(labelField('style_variant'), item.style_variant),
       bullet(labelField('purity_grade'), item.purity_grade),
       bullet(labelField('scene'), item.scene),
@@ -153,6 +186,19 @@ function main() {
       bullet(labelField('palette'), Array.isArray(item.palette) ? item.palette.join(', ') : item.palette),
       bullet(labelField('mood'), item.mood),
       bullet(labelField('composition'), item.composition),
+      bullet(labelField('reference_images'), Array.isArray(item.reference_images) ? `${item.reference_images.length} 张` : item.reference_images),
+      bullet(labelField('reference_mode'), item.reference_mode),
+      bullet('分镜执行策略', formatEditMode(item)),
+      bullet(labelField('mask_image'), item.mask_image ? '已提供' : null),
+      bullet(labelField('edit_source'), item.edit_source),
+      bullet(labelField('edit_source_output'), item.edit_source_output ? path.basename(item.edit_source_output) : null),
+      bullet(labelField('reference_notes'), Array.isArray(item.reference_notes) ? item.reference_notes.join(' / ') : item.reference_notes),
+      bullet(labelField('prompt_hints'), Array.isArray(item.prompt_hints) ? item.prompt_hints.join(' / ') : item.prompt_hints),
+      bullet(labelField('continuity_notes'), Array.isArray(item.continuity_notes) ? item.continuity_notes.join(' / ') : item.continuity_notes),
+      bullet(labelField('voiceover'), item.voiceover),
+      bullet(labelField('music'), item.music),
+      bullet(labelField('sound_effects'), item.sound_effects),
+      bullet(labelField('camera_move'), item.camera_move),
       bullet(labelField('text_policy'), item.text_policy),
       bullet(labelField('source_refs'), Array.isArray(item.source_refs) ? item.source_refs.join(', ') : item.source_refs),
       bullet(labelField('notes'), item.notes),
