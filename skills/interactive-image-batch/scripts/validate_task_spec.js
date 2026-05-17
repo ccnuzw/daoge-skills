@@ -1,21 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const { buildSizeValidationIssues, normalizeProvider, resolveRuntimeTarget } = require('./provider_size_rules');
+const { parseArgs } = require('./script_utils');
 
 const DEFAULT_RUN_PRESET_ID = 'safe_2k_poster';
-
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (!token.startsWith('--')) continue;
-    const key = token.slice(2);
-    const value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : 'true';
-    args[key] = value;
-    if (value !== 'true') i += 1;
-  }
-  return args;
-}
 
 function parseNumber(value, fallback) {
   const next = Number(value);

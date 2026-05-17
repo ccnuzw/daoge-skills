@@ -507,6 +507,54 @@ node scripts/run_batch.js \
 
 ---
 
+## 脚本分层
+
+当前脚本已经做了基础模块化，不再把 runner 全部逻辑堆在一个大文件里。
+
+### runner 主入口
+
+- `scripts/run_batch.js`
+  - 只保留参数解析、执行编排、阶段控制、结果汇总
+
+### runner 子模块
+
+- `scripts/run_batch_cli.js`
+  - runner CLI 参数与命令拼接辅助
+- `scripts/run_batch_selection.js`
+  - `resume-manifest`、`failed-only`、`select-slot-ids`、`reuse-output-as-reference`
+- `scripts/run_batch_transport.js`
+  - `images/generations`、`images/edits`、`responses` 路径与 fallback
+- `scripts/run_batch_executor.js`
+  - 单条执行、批次执行、contact sheet
+- `scripts/run_batch_runtime.js`
+  - job state、checkpoint、暂停策略、进度日志
+- `scripts/run_batch_artifacts.js`
+  - `success.json`、`failed.json`、`selection_board.md`、`operations_report.md`
+- `scripts/run_batch_shared.js`
+  - runner 内部共享纯函数
+- `scripts/script_utils.js`
+  - 跨脚本共用的 `parseArgs/readJson/writeJson/chunkArray/resolvePromptFileForRerun`
+
+### prepare / preflight 主链路
+
+- `scripts/daoge_prepare_run.js`
+- `scripts/validate_task_spec.js`
+- `scripts/validate_prompt_strategy.js`
+- `scripts/detect_daoge_mode.js`
+- `scripts/scaffold_prompt_bundle.js`
+- `scripts/materialize_prompt_drafts.js`
+- `scripts/validate_prompt_bundle.js`
+- `scripts/render_prompt_preview.js`
+- `scripts/render_preflight_dashboard.js`
+
+分层目标是：
+
+- 主入口保留编排语义
+- 请求层、续跑层、产物层、运行态拆开
+- 改动某一层时，尽量不影响整条 runner 链路
+
+---
+
 ## 目录结构
 
 ```text
@@ -555,6 +603,36 @@ interactive-image-batch/
 - 对 `masked-edit` 保守处理
 
 这让它更适合真实生产，而不是只适合 demo。
+
+---
+
+## 开发与回归
+
+这个 skill 现在自带最小自动化 smoke tests。
+
+统一回归入口：
+
+```bash
+skills/interactive-image-batch/scripts/run_smoke_tests.sh
+```
+
+它会顺序执行：
+
+- `scripts/*.js` 全量 `node --check`
+- `skills/interactive-image-batch/tests/smoke.test.js`
+
+当前 smoke 覆盖：
+
+- `run_batch.js --dry-run`
+- `daoge_prepare_run.js` 最小 preflight
+- mock provider 下的 `prompt-only` 执行路径
+- mock provider 下的 `reference-assisted` 执行路径
+
+建议规则：
+
+- 改 `scripts/` 后先跑一次统一 smoke
+- 改 `run_batch*`、`render_*`、`validate_*`、`daoge_prepare_run.js` 时不要跳过回归
+- 新增执行分支时，优先补 fixture 和 smoke tests，再继续扩功能
 
 ---
 

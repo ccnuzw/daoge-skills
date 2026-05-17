@@ -1,24 +1,8 @@
 const fs = require('fs');
 const path = require('path');
+const { parseArgs, readJson } = require('./script_utils');
 const { labelField, labelSource, formatFieldSource, translateValidationMessage } = require('./display_labels_zh');
 const { brandHeader, quickReplyBlock, userFocusBlock } = require('./daoge_brand_zh');
-
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (!token.startsWith('--')) continue;
-    const key = token.slice(2);
-    const value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : 'true';
-    args[key] = value;
-    if (value !== 'true') i += 1;
-  }
-  return args;
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
-}
 
 function formatList(items, fallback = '未提供') {
   const list = Array.isArray(items) ? items.filter(Boolean) : [];

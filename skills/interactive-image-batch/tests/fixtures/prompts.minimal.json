@@ -1,0 +1,30 @@
+[
+  {
+    "index": 1,
+    "slug": "hero-fashion-studio",
+    "title": "Hero Fashion Studio",
+    "style_family": "hero-fashion",
+    "scene": "studio backdrop",
+    "wardrobe": "tailored black suit",
+    "lighting": "soft premium studio light",
+    "mood": "controlled luxury",
+    "composition": "full-body vertical poster",
+    "text_policy": "leave top and bottom clean for later typography",
+    "negative_prompt": "no watermark, no readable text",
+    "generation_prompt": "Photoreal full-body fashion campaign poster, tailored black suit, premium studio backdrop, soft premium studio light, controlled luxury mood, clean vertical hierarchy, leave top and bottom clean for later typography."
+  },
+  {
+    "index": 2,
+    "slug": "quiet-luxury-window",
+    "title": "Quiet Luxury Window",
+    "style_family": "quiet-luxury",
+    "scene": "window light interior",
+    "wardrobe": "ivory silk dress",
+    "lighting": "directional window light",
+    "mood": "quiet luxury",
+    "composition": "full-body window poster",
+    "text_policy": "leave top and bottom clean for later typography",
+    "negative_prompt": "no watermark, no readable text",
+    "generation_prompt": "Photoreal full-body campaign poster, ivory silk dress, window light interior, directional natural light, quiet luxury tone, elegant body line, leave top and bottom clean for later typography."
+  }
+]

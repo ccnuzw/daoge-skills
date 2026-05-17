@@ -1,30 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const { parseArgs, chunkArray } = require('./script_utils');
 const { labelField } = require('./display_labels_zh');
 const { brandHeader, quickReplyBlock, userFocusBlock } = require('./daoge_brand_zh');
-
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (!token.startsWith('--')) continue;
-    const key = token.slice(2);
-    const value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : 'true';
-    args[key] = value;
-    if (value !== 'true') i += 1;
-  }
-  return args;
-}
 
 function parseNumber(value, fallback) {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;
-}
-
-function chunkArray(items, chunkSize) {
-  const out = [];
-  for (let i = 0; i < items.length; i += chunkSize) out.push(items.slice(i, i + chunkSize));
-  return out;
 }
 
 function countBy(items, key) {

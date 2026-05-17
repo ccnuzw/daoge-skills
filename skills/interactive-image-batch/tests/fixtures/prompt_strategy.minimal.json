@@ -1,0 +1,22 @@
+{
+  "content_brief": "高端时尚竖版海报",
+  "source_files": [],
+  "output_mode": "photoreal campaign poster",
+  "variation_requirements": ["avoid near-duplicates", "rotate scenes and wardrobe"],
+  "total_count": 2,
+  "batch_size": 1,
+  "style_families": [
+    { "name": "hero-fashion", "count": 1 },
+    { "name": "quiet-luxury", "count": 1 }
+  ],
+  "grade_distribution": [
+    { "name": "S", "count": 1 },
+    { "name": "A", "count": 1 }
+  ],
+  "scene_pool": ["studio backdrop", "window light interior"],
+  "wardrobe_pool": ["tailored black suit", "ivory silk dress"],
+  "composition_pool": ["full-body vertical poster", "full-body window poster"],
+  "text_policy": "leave top and bottom clean for later typography",
+  "negative_policy": "no watermark, no readable text",
+  "variation_rules": ["avoid identical scene+wardrobe pairs"]
+}

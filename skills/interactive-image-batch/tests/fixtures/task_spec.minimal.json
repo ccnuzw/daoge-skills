@@ -1,0 +1,17 @@
+{
+  "content_brief": "高端时尚竖版海报",
+  "output_mode": "photoreal campaign poster",
+  "style_requirements": ["full-body", "9:16 poster", "leave typography space"],
+  "source_files": [],
+  "total_count": 2,
+  "batch_size": 1,
+  "concurrency": 1,
+  "retry_count": 1,
+  "timeout_seconds": 450,
+  "width": 1440,
+  "height": 2560,
+  "variation_requirements": ["avoid near-duplicates", "rotate scenes and wardrobe"],
+  "text_policy": "leave top and bottom clean for later typography",
+  "preview_count": 2,
+  "require_confirmation": true
+}

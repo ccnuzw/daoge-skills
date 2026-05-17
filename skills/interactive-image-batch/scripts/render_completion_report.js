@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { parseArgs, readJson, fileExists, resolvePromptFileForRerun } = require('./script_utils');
 
 function portableRunnerPreambleLines() {
   return [
@@ -10,34 +11,6 @@ function portableRunnerPreambleLines() {
 
 function shellQuote(value) {
   return `'${String(value || '').replace(/'/g, `'\"'\"'`)}'`;
-}
-
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (!token.startsWith('--')) continue;
-    const key = token.slice(2);
-    const value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : 'true';
-    args[key] = value;
-    if (value !== 'true') i += 1;
-  }
-  return args;
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
-}
-
-function exists(filePath) {
-  return fs.existsSync(path.resolve(filePath));
-}
-
-function resolvePromptFileForRerun(manifest, outputDir) {
-  const localPromptCopy = path.join(outputDir, 'prompts.generated.json');
-  if (manifest.promptSnapshot && exists(manifest.promptSnapshot)) return manifest.promptSnapshot;
-  if (exists(localPromptCopy)) return localPromptCopy;
-  return manifest.promptSource || localPromptCopy;
 }
 
 function topFailed(results, limit = 8) {
@@ -94,9 +67,9 @@ function main() {
     '',
     '## 0. 先看这里',
     '',
-    `- DAOGE 结果总入口: ${exists(resultHubPath) ? resultHubPath : '尚未生成'}`,
+    `- DAOGE 结果总入口: ${fileExists(resultHubPath) ? resultHubPath : '尚未生成'}`,
     `- 最终图片目录: ${manifest.outputDir || path.dirname(manifestPath)}`,
-    `- 失败补跑入口: ${exists(selectionBoardPath) ? selectionBoardPath : '尚未生成'}`,
+    `- 失败补跑入口: ${fileExists(selectionBoardPath) ? selectionBoardPath : '尚未生成'}`,
     '',
     '## 1. 执行结果',
     '',
@@ -159,31 +132,31 @@ function main() {
   lines.push('## 5. 关键文件');
   lines.push('');
   lines.push(`- 根 manifest: ${manifestPath}`);
-  if (exists(resultHubPath)) {
+  if (fileExists(resultHubPath)) {
     lines.push(`- DAOGE 结果总入口: ${resultHubPath}`);
   }
   lines.push(`- 批次计划: ${path.join(path.dirname(manifestPath), 'batch_plan.json')}`);
   lines.push(`- Prompt 文件: ${path.join(path.dirname(manifestPath), 'prompts.generated.json')}`);
   lines.push(`- README: ${path.join(path.dirname(manifestPath), 'README.md')}`);
-  if (manifest.jobState && exists(manifest.jobState)) {
+  if (manifest.jobState && fileExists(manifest.jobState)) {
     lines.push(`- 任务状态: ${manifest.jobState}`);
   }
-  if (manifest.checkpoint && exists(manifest.checkpoint)) {
+  if (manifest.checkpoint && fileExists(manifest.checkpoint)) {
     lines.push(`- 检查点: ${manifest.checkpoint}`);
   }
-  if (manifest.stagePlan && exists(manifest.stagePlan)) {
+  if (manifest.stagePlan && fileExists(manifest.stagePlan)) {
     lines.push(`- 阶段计划: ${manifest.stagePlan}`);
   }
-  if (exists(contactSheetPath)) {
+  if (fileExists(contactSheetPath)) {
     lines.push(`- 联系表: ${contactSheetPath}`);
   }
-  if (exists(selectionBoardPath)) {
+  if (fileExists(selectionBoardPath)) {
     lines.push(`- 筛选看板: ${selectionBoardPath}`);
   }
-  if (exists(operationsReportPath)) {
+  if (fileExists(operationsReportPath)) {
     lines.push(`- 运营复盘: ${operationsReportPath}`);
   }
-  if (exists(runIndexPath)) {
+  if (fileExists(runIndexPath)) {
     lines.push(`- 运行总索引: ${runIndexPath}`);
   }
   lines.push('');

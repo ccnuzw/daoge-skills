@@ -1,19 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (!token.startsWith('--')) continue;
-    const key = token.slice(2);
-    const value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : 'true';
-    args[key] = value;
-    if (value !== 'true') i += 1;
-  }
-  return args;
-}
+const { parseArgs, readJson, writeJson } = require('./script_utils');
 
 function required(args, key) {
   if (!args[key]) throw new Error(`Missing required flag: --${key}`);
@@ -26,14 +14,6 @@ function runNode(scriptPath, cliArgs) {
 
 function ensureFile(filePath) {
   if (!fs.existsSync(filePath)) throw new Error(`Required file not found: ${filePath}`);
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
-}
-
-function writeJson(filePath, value) {
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
 }
 
 function mergeAutofillPolicy(strategyPolicy, templatePolicy) {

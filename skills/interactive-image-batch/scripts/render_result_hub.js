@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { parseArgs, readJson, fileExists, resolvePromptFileForRerun } = require('./script_utils');
 
 function portableRunnerPreambleLines() {
   return [
@@ -10,34 +11,6 @@ function portableRunnerPreambleLines() {
 
 function shellQuote(value) {
   return `'${String(value || '').replace(/'/g, `'\"'\"'`)}'`;
-}
-
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (!token.startsWith('--')) continue;
-    const key = token.slice(2);
-    const value = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : 'true';
-    args[key] = value;
-    if (value !== 'true') i += 1;
-  }
-  return args;
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
-}
-
-function exists(filePath) {
-  return fs.existsSync(path.resolve(filePath));
-}
-
-function resolvePromptFileForRerun(manifest, outputDir) {
-  const localPromptCopy = path.join(outputDir, 'prompts.generated.json');
-  if (manifest.promptSnapshot && exists(manifest.promptSnapshot)) return manifest.promptSnapshot;
-  if (exists(localPromptCopy)) return localPromptCopy;
-  return manifest.promptSource || localPromptCopy;
 }
 
 function topSuccessful(results, limit = 6) {
@@ -89,9 +62,9 @@ function main() {
     '',
     '## 1. 三个最常用入口',
     '',
-    `- 本次总览: ${exists(completionReportPath) ? completionReportPath : '尚未生成 daoge_completion_report.md'}`,
+    `- 本次总览: ${fileExists(completionReportPath) ? completionReportPath : '尚未生成 daoge_completion_report.md'}`,
     `- 最终图片目录: ${outputDir}`,
-    `- 失败补跑入口: ${exists(selectionBoardPath) ? selectionBoardPath : '尚未生成 selection_board.md'}`,
+    `- 失败补跑入口: ${fileExists(selectionBoardPath) ? selectionBoardPath : '尚未生成 selection_board.md'}`,
     '',
     '## 2. 本轮结果摘要',
     '',
@@ -114,12 +87,12 @@ function main() {
     '',
     '## 4. 快速查看文件',
     '',
-    `- 完成报告: ${exists(completionReportPath) ? completionReportPath : '未生成'}`,
-    `- 筛选看板: ${exists(selectionBoardPath) ? selectionBoardPath : '未生成'}`,
-    `- 运营复盘: ${exists(operationsReportPath) ? operationsReportPath : '未生成'}`,
-    `- 预检总览: ${exists(preflightPath) ? preflightPath : '未生成'}`,
-    `- Prompt 预览: ${exists(promptPreviewPath) ? promptPreviewPath : '未生成'}`,
-    `- 运行总索引: ${exists(runIndexPath) ? runIndexPath : '未生成'}`,
+    `- 完成报告: ${fileExists(completionReportPath) ? completionReportPath : '未生成'}`,
+    `- 筛选看板: ${fileExists(selectionBoardPath) ? selectionBoardPath : '未生成'}`,
+    `- 运营复盘: ${fileExists(operationsReportPath) ? operationsReportPath : '未生成'}`,
+    `- 预检总览: ${fileExists(preflightPath) ? preflightPath : '未生成'}`,
+    `- Prompt 预览: ${fileExists(promptPreviewPath) ? promptPreviewPath : '未生成'}`,
+    `- 运行总索引: ${fileExists(runIndexPath) ? runIndexPath : '未生成'}`,
     '',
     '## 5. 成功样例',
     '',

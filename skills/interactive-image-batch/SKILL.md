@@ -326,6 +326,18 @@ node scripts/run_batch.js \
   --max-batch-failure-rate 0.3
 ```
 
+Runner / prepare implementation is now modularized. When inspecting or patching local code, use these boundaries:
+
+- `scripts/run_batch.js`: orchestration entrypoint
+- `scripts/run_batch_cli.js`: runner CLI helpers
+- `scripts/run_batch_selection.js`: rerun and selection logic
+- `scripts/run_batch_transport.js`: provider transport and fallback
+- `scripts/run_batch_executor.js`: per-item execution and batch execution
+- `scripts/run_batch_runtime.js`: state, checkpoint, pause policy, progress logs
+- `scripts/run_batch_artifacts.js`: completion artifacts and review files
+- `scripts/run_batch_shared.js`: runner-shared pure helpers
+- `scripts/script_utils.js`: cross-script CLI / JSON / chunk helpers
+
 ## Output expectations
 
 - Save generated files under a timestamped directory inside `generated_images/` unless the user specifies another location.
@@ -356,3 +368,10 @@ node scripts/run_batch.js \
 - Run local verification before saying the batch is done.
 - At minimum, inspect `manifest.json` and validate dimensions on representative outputs with `sips`.
 - If the user did not explicitly say to start immediately, confirm that the run was approved after preview before calling the runner.
+- After modifying local scripts, prefer the bundled smoke entrypoint:
+
+```bash
+skills/interactive-image-batch/scripts/run_smoke_tests.sh
+```
+
+- This should pass before you claim the skill still works end-to-end.

@@ -312,3 +312,27 @@ node scripts/run_batch.js \
 
 - It does not synthesize prompts for you. The agent must create the prompt JSON before running it.
 - Prompt bundle slugs should be unique and stable. Use a numeric prefix or equivalent strategy instead of relying on truncated natural-language slugs alone.
+
+## Smoke tests
+
+For local regression after changing runner / prepare / preview scripts, use the bundled smoke entrypoint:
+
+```bash
+skills/interactive-image-batch/scripts/run_smoke_tests.sh
+```
+
+This runs:
+
+- `node --check` for every `scripts/*.js`
+- `node --test skills/interactive-image-batch/tests/smoke.test.js`
+
+Current smoke coverage includes:
+
+- `run_batch.js --dry-run`
+- `daoge_prepare_run.js` minimal preflight pipeline
+- mock-provider `prompt-only` execution
+- mock-provider `reference-assisted` execution
+
+Recommended rule:
+
+- if you modify `run_batch.js`, `run_batch_*`, `render_*`, `validate_*`, or `daoge_prepare_run.js`, run smoke tests before claiming the skill still works
