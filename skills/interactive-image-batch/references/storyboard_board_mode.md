@@ -50,6 +50,7 @@
     - `reference-assisted` -> `images/edits`
     - `masked-edit` -> `images/edits + mask`
   - 在 preview / preflight 中看见 storyboard 摘要
+  - 对会导致执行失败的参考图/遮罩图缺失做阻断校验，而不是只给 warning
 
 - 仍未完成：
   - 还没有做联网实跑级别的 provider 回归验证

@@ -776,6 +776,34 @@ async function generateOne(item, ctx) {
         requestModel: req.model,
         requestMode: operation.mode,
         prompt,
+        negativePrompt: item.negative_prompt || null,
+        styleFamily: item.style_family || null,
+        scene: item.scene || null,
+        wardrobe: item.wardrobe || null,
+        lighting: item.lighting || null,
+        mood: item.mood || null,
+        composition: item.composition || null,
+        textPolicy: item.text_policy || null,
+        sourceRefs: item.source_refs || [],
+        boardId: item.board_id || null,
+        slotId: item.slot_id || null,
+        slotRole: item.slot_role || null,
+        shotId: item.shot_id || null,
+        shotLabel: item.shot_label || null,
+        layoutRegionId: item.layout_region_id || null,
+        timecode: item.timecode || null,
+        referenceImages: item.reference_images || [],
+        maskImage: resolveMaskImage(item),
+        referenceNotes: item.reference_notes || [],
+        promptHints: item.prompt_hints || [],
+        continuityNotes: item.continuity_notes || [],
+        editSource: item.edit_source || null,
+        editSourceOutput: item.edit_source_output || null,
+        voiceover: item.voiceover || null,
+        music: item.music || null,
+        soundEffects: item.sound_effects || null,
+        cameraMove: item.camera_move || null,
+        notes: item.notes || null,
         error: message,
       };
       fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
@@ -808,8 +836,13 @@ function buildContactSheet(outDir, successfulFiles) {
   const sample = successfulFiles.slice(0, 20);
   const tempDir = path.join(outDir, '_contact_tmp');
   fs.mkdirSync(tempDir, { recursive: true });
+  const tempInputPattern = path.join(tempDir, '%02d.png');
   sample.forEach((file, index) => {
-    fs.copyFileSync(file, path.join(tempDir, `${String(index + 1).padStart(2, '0')}${path.extname(file)}`));
+    execFileSync('ffmpeg', [
+      '-y',
+      '-i', file,
+      path.join(tempDir, `${String(index + 1).padStart(2, '0')}.png`),
+    ], { stdio: 'ignore' });
   });
 
   const cols = sample.length > 10 ? 4 : 2;
@@ -819,7 +852,7 @@ function buildContactSheet(outDir, successfulFiles) {
     execFileSync('ffmpeg', [
       '-y',
       '-framerate', '1',
-      '-i', path.join(tempDir, `%02d${path.extname(sample[0])}`),
+      '-i', tempInputPattern,
       '-frames:v', '1',
       '-vf', `scale=240:426:force_original_aspect_ratio=decrease,pad=240:426:(ow-iw)/2:(oh-ih)/2:white,tile=${cols}x${rows}:padding=12:margin=12:color=white`,
       output,
@@ -850,6 +883,10 @@ function normalizeIndex(value) {
   return String(value || '').replace(/^0+/, '') || '0';
 }
 
+function normalizeSlotId(value) {
+  return String(value || '').trim();
+}
+
 function parseCsvSet(value) {
   if (value === undefined || value === null || value === '') return null;
   const values = String(value).split(',').map((item) => item.trim()).filter(Boolean);
@@ -866,13 +903,18 @@ function selectResumePrompts(promptPool, resumeManifestPath, failedOnly) {
   const results = collectManifestResults(manifest);
   const selectedResults = failedOnly ? results.filter((item) => !item.ok) : results;
   const wanted = new Map();
+  const wantedSlotIds = new Set();
   selectedResults.forEach((item) => {
     const indexKey = normalizeIndex(item.index);
     const slugKey = normalizeSlug(item.slug);
+    const slotIdKey = normalizeSlotId(item.slotId || item.slot_id);
     if (!wanted.has(indexKey)) wanted.set(indexKey, new Set());
     if (slugKey && slugKey !== 'image') wanted.get(indexKey).add(slugKey);
+    if (slotIdKey) wantedSlotIds.add(slotIdKey);
   });
   const selected = promptPool.filter((item, index) => {
+    const slotIdKey = normalizeSlotId(item.slot_id || item.slotId);
+    if (slotIdKey) return wantedSlotIds.has(slotIdKey);
     const indexKey = normalizeIndex(item.index ?? index + 1);
     if (!wanted.has(indexKey)) return false;
     const allowedSlugs = wanted.get(indexKey);
@@ -908,14 +950,17 @@ function buildManifestResultLookup(resumeManifestPath) {
   const results = collectManifestResults(manifest);
   const byIndex = new Map();
   const byIndexSlug = new Map();
+  const bySlotId = new Map();
   results.forEach((item) => {
     if (!item.ok || !item.output) return;
     const indexKey = normalizeIndex(item.index);
     const slugKey = normalizeSlug(item.slug);
+    const slotIdKey = normalizeSlotId(item.slotId || item.slot_id);
     if (!byIndex.has(indexKey)) byIndex.set(indexKey, item);
     if (slugKey) byIndexSlug.set(`${indexKey}|${slugKey}`, item);
+    if (slotIdKey && !bySlotId.has(slotIdKey)) bySlotId.set(slotIdKey, item);
   });
-  return { byIndex, byIndexSlug };
+  return { byIndex, byIndexSlug, bySlotId };
 }
 
 function applyPreviousOutputReuse(promptPool, resumeManifestPath, reuseOutputAsReference) {
@@ -927,9 +972,16 @@ function applyPreviousOutputReuse(promptPool, resumeManifestPath, reuseOutputAsR
   return promptPool.map((item, index) => {
     const indexKey = normalizeIndex(item.index ?? index + 1);
     const slugKey = normalizeSlug(item.slug);
-    const match = lookup.byIndexSlug.get(`${indexKey}|${slugKey}`) || lookup.byIndex.get(indexKey);
+    const slotIdKey = normalizeSlotId(item.slot_id || item.slotId);
+    const hasStoryboardIdentity = Boolean(slotIdKey);
+    const match = hasStoryboardIdentity
+      ? lookup.bySlotId.get(slotIdKey)
+      : (lookup.byIndexSlug.get(`${indexKey}|${slugKey}`) || (slugKey ? null : lookup.byIndex.get(indexKey)));
     if (!match?.output) {
-      throw new Error(`No successful previous output found for prompt ${indexKey}${slugKey ? ` (${slugKey})` : ''}`);
+      const identity = hasStoryboardIdentity
+        ? `slot ${slotIdKey}`
+        : `prompt ${indexKey}${slugKey ? ` (${slugKey})` : ''}`;
+      throw new Error(`No successful previous output found for ${identity}`);
     }
     const referenceImages = Array.from(new Set([match.output, ...resolveReferenceImages(item)]));
     const next = {

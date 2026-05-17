@@ -63,6 +63,23 @@ function scoreTemplate(template, corpus) {
   return (template.triggers || []).reduce((acc, trigger) => acc + scoreTrigger(corpus, trigger), 0);
 }
 
+function candidateCategoriesForMode(mode, taskSpec, strategy) {
+  const outputSignals = [
+    taskSpec.output_mode,
+    strategy.output_mode,
+    ...(taskSpec.style_requirements || []),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (mode === 'storyboard-board' || mode === 'storyboard-image-edit') return new Set(['cinematic-sequences']);
+  if (mode === 'image-edit') return new Set(['editing-workflows']);
+  if (/(详情页|卖点|产品组图|detail page|product)/i.test(outputSignals)) return new Set(['product-visuals']);
+  if (/(肖像|半身|portrait|close-up|studio|editorial)/i.test(outputSignals)) return new Set(['portraits-and-characters']);
+  if (/(九宫格|社媒|instagram|feed|social)/i.test(outputSignals)) return new Set(['social-campaigns', 'grids-and-collages']);
+  if (/(a\/b|ab test|投放|素材测试|转化)/i.test(outputSignals)) return new Set(['performance-creatives']);
+  if (/(海报|广告|主视觉|campaign|poster|kv)/i.test(outputSignals)) return new Set(['poster-and-campaigns']);
+  return null;
+}
+
 function createGenericTemplate() {
   return {
     id: 'generic',
@@ -83,8 +100,13 @@ function createGenericTemplate() {
   };
 }
 
-function detectTemplate(registry, corpus) {
-  const scored = (registry.templates || []).map((template) => ({
+function detectTemplate(registry, corpus, options = {}) {
+  const allowedCategories = options.allowedCategories;
+  const pool = (registry.templates || []).filter((template) => {
+    if (!allowedCategories || !allowedCategories.size) return true;
+    return allowedCategories.has(String(template.category || '').trim());
+  });
+  const scored = pool.map((template) => ({
     ...template,
     score: scoreTemplate(template, corpus),
   })).sort((a, b) => b.score - a.score);
@@ -130,8 +152,9 @@ function main() {
   const registry = readJson(registryPath);
 
   const corpus = buildCorpus(taskSpec, strategy);
-  const template = detectTemplate(registry, corpus);
   const mode = detectMode(taskSpec);
+  const allowedCategories = candidateCategoriesForMode(mode, taskSpec, strategy);
+  const template = detectTemplate(registry, corpus, { allowedCategories });
 
   const result = {
     detected_mode: mode,

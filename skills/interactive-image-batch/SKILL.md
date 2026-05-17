@@ -68,11 +68,13 @@ Support an experienced-user fast path. When the user already sounds like a repea
 26. Require explicit confirmation after `prepare` unless the normalized task spec says `require_confirmation=false`.
 27. Only skip preview or confirmation when the user explicitly says to start immediately.
 28. The preflight dashboard must present a Chinese red/yellow/green readiness conclusion. Red means do not run yet, yellow means runnable but adjustment is recommended, green means ready to execute.
+28.1. If a slot is `reference-assisted` or `masked-edit`, missing `reference_images` or `mask_image` that would cause execution to fail must be surfaced as blocking preflight errors rather than warnings.
 29. After user confirmation, trigger `execute` mode with `scripts/run_batch.js` and explicit CLI arguments derived from the normalized task spec, including `sample_size`, `stage_size`, `auto_pause`, `max_consecutive_failures`, `max_batch_failure_rate`, and `skip_existing` when present.
 30. Verify outputs with the script manifest and local size checks before claiming completion.
 31. If any images fail, do not manually reconstruct a prompt subset. Use `scripts/run_batch.js --resume-manifest /abs/path/manifest.json --failed-only true` with the original `prompts.generated.json` to rerun only failed items into a new output directory.
 32. For interrupted same-directory runs, use `--skip-existing true` so completed image+metadata pairs are skipped and only missing items are generated.
 32.1. If the user says they only want to change one storyboard shot or one local region, switch to local-edit mode instead of failed-rerun mode. Prefer `--resume-manifest + --select-slot-ids/--select-indexes + --reuse-output-as-reference true`, and ask whether a new `mask_image` exists.
+32.2. When `--reuse-output-as-reference true` is used for storyboard or local-edit tasks, prefer matching previous successful outputs by `slot_id`. Do not silently fall back to a looser match if that would risk binding the wrong previous output.
 33. When users upload images plus a long prompt for a storyboard board, keep the interaction friendly and structured:
    - first confirm the number of images received
    - then ask which slot each image should map to

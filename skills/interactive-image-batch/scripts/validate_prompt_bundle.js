@@ -89,6 +89,14 @@ function jaccard(a, b) {
   return intersection / (a.size + b.size - intersection);
 }
 
+function bucketKeyForPrompt(item, tokenSet) {
+  const styleFamily = String(item.style_family || '').trim() || '(missing-style)';
+  const templateId = String(item.daoge_template_id || '').trim() || '(missing-template)';
+  const variantSignature = String(item.variant_signature || '').trim() || '(no-variant)';
+  const sortedTokens = Array.from(tokenSet).sort().slice(0, 8).join('|');
+  return `${templateId}::${styleFamily}::${variantSignature}::${sortedTokens}`;
+}
+
 function hasAny(text, terms) {
   const haystack = normalizeText(text);
   return terms.some((term) => haystack.includes(normalizeText(term)));
@@ -117,18 +125,31 @@ function buildQualityGates(prompts, taskSpec, args) {
   const shortPromptThreshold = Math.max(80, Math.floor(parseNumber(args['min-prompt-chars'], 180)));
   const nearDuplicateThreshold = Math.min(0.98, Math.max(0.65, parseNumber(args['near-duplicate-threshold'], 0.86)));
   const nearDuplicatePairs = [];
+  const bucketedIndexes = new Map();
 
-  for (let i = 0; i < promptTokenSets.length; i += 1) {
-    for (let j = i + 1; j < promptTokenSets.length; j += 1) {
-      const score = jaccard(promptTokenSets[i], promptTokenSets[j]);
-      if (score >= nearDuplicateThreshold) {
-        nearDuplicatePairs.push({
-          left: prompts[i].index ?? i + 1,
-          right: prompts[j].index ?? j + 1,
-          score: Number(score.toFixed(3)),
-        });
-        if (nearDuplicatePairs.length >= 50) break;
+  promptTokenSets.forEach((tokenSet, index) => {
+    const bucketKey = bucketKeyForPrompt(prompts[index], tokenSet);
+    if (!bucketedIndexes.has(bucketKey)) bucketedIndexes.set(bucketKey, []);
+    bucketedIndexes.get(bucketKey).push(index);
+  });
+
+  for (const indexes of bucketedIndexes.values()) {
+    if (indexes.length < 2) continue;
+    for (let i = 0; i < indexes.length; i += 1) {
+      for (let j = i + 1; j < indexes.length; j += 1) {
+        const leftIndex = indexes[i];
+        const rightIndex = indexes[j];
+        const score = jaccard(promptTokenSets[leftIndex], promptTokenSets[rightIndex]);
+        if (score >= nearDuplicateThreshold) {
+          nearDuplicatePairs.push({
+            left: prompts[leftIndex].index ?? leftIndex + 1,
+            right: prompts[rightIndex].index ?? rightIndex + 1,
+            score: Number(score.toFixed(3)),
+          });
+          if (nearDuplicatePairs.length >= 50) break;
+        }
       }
+      if (nearDuplicatePairs.length >= 50) break;
     }
     if (nearDuplicatePairs.length >= 50) break;
   }
@@ -213,6 +234,7 @@ function buildQualityGates(prompts, taskSpec, args) {
       minPromptChars: shortPromptThreshold,
       nearDuplicateThreshold,
     },
+    nearDuplicateBuckets: bucketedIndexes.size,
     shortPrompts,
     nearDuplicatePairs,
     templateMissing,

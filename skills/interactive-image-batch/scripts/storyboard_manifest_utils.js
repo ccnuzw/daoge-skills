@@ -210,6 +210,10 @@ function buildStoryboardBlueprint({ layout, content, render, referenceBindings, 
     assignmentsBySlotId.get(assignment.slot_id).push(assignment);
   });
 
+  function hasMissingPaths(paths) {
+    return ensureArray(paths).some((filePath) => filePath && !fs.existsSync(filePath));
+  }
+
   ensureArray(layout.bindings).forEach((binding) => {
     if (!regionById.has(binding.region_id)) errors.push(`layout binding 指向了不存在的 region: ${binding.region_id}`);
     if (!slotById.has(binding.slot_id)) errors.push(`layout binding 指向了不存在的 slot: ${binding.slot_id}`);
@@ -294,13 +298,22 @@ function buildStoryboardBlueprint({ layout, content, render, referenceBindings, 
     });
     if (item.mask_image && !fs.existsSync(item.mask_image)) warnings.push(`slot ${item.slot_id} 的遮罩图不存在: ${item.mask_image}`);
     if (item.reference_mode === 'masked-edit' && !item.mask_image) errors.push(`slot ${item.slot_id} 被标记为 masked-edit，但没有 mask_image`);
+    if (item.reference_mode === 'reference-assisted' && !ensureArray(item.reference_images).length) {
+      errors.push(`slot ${item.slot_id} 被标记为 reference-assisted，但没有 reference_images`);
+    }
+    if ((item.reference_mode === 'reference-assisted' || item.reference_mode === 'masked-edit') && hasMissingPaths(item.reference_images)) {
+      errors.push(`slot ${item.slot_id} 的参考图缺失，执行阶段会失败`);
+    }
+    if (item.reference_mode === 'masked-edit' && item.mask_image && !fs.existsSync(item.mask_image)) {
+      errors.push(`slot ${item.slot_id} 的遮罩图缺失，执行阶段会失败`);
+    }
   });
 
   if (!blueprint.some((item) => item.slot_role === 'shot')) warnings.push('storyboard blueprint 中没有 role=shot 的分镜格');
   if (!blueprint.some((item) => item.slot_role === 'kv')) warnings.push('storyboard blueprint 中没有 role=kv 的收尾画面');
   if (!blueprint.some((item) => item.slot_role === 'brand_panel')) warnings.push('storyboard blueprint 中没有 role=brand_panel 的信息区');
   if (render.reference_mode === 'hard-reference') {
-    warnings.push('当前 runner 仅保留 reference_images 元数据，尚未把硬参考图真正发送给 provider');
+    warnings.push('当前 runner 会尝试把 reference_images 发送给 provider，但不同 provider 的硬参考效果仍依赖接口兼容性与模型能力');
   }
 
   if (referenceBindings && ensureArray(referenceBindings.assets).length) {

@@ -165,6 +165,7 @@
 - 如果显式开启 `--edit-path /v1/responses`
   - 先走 `Responses API`
   - 失败自动 fallback 到 `Images API edits`
+- 如果槽位被判定为 `reference-assisted`，但 `reference_images` 缺失或文件不存在，预检应直接阻断，而不是放到执行阶段再报错
 
 ### `masked-edit`
 
@@ -178,6 +179,7 @@
 - 固定：`POST /v1/images/edits`
 
 当前 runner **不会**把 `masked-edit` 强行切到 `Responses`，因为这条链路在不同 provider 上兼容性差，风险更高。
+- 如果槽位被判定为 `masked-edit`，但 `reference_images` 或 `mask_image` 缺失，预检应直接阻断，因为执行阶段一定失败
 
 ### 为什么这么设计
 
@@ -481,6 +483,7 @@ node scripts/run_batch.js \
 - `--select-slot-ids`
 - `--select-indexes`
 - `--reuse-output-as-reference true`
+- 对 storyboard / local-edit，优先按 `slot_id` 复用上一轮成功输出，避免因为 prompt 顺序变化误绑到底图
 
 ---
 

@@ -174,11 +174,13 @@ For storyboard board workflows:
 - run `scripts/validate_storyboard_bundle.js`
 - pass `--storyboard-file /abs/path/storyboard_bundle.validation.json` into `scripts/scaffold_prompt_bundle.js`
 - slots may mix `reference-assisted` and `prompt-only` modes
+- missing `reference_images` / `mask_image` for `reference-assisted` or `masked-edit` slots should block preflight, because execution would fail later
 - slots with `reference_images` now route to `images/edits`
 - slots with both `reference_images` and `mask_image` now route to `images/edits + mask`
 - `prompt-only` slots continue to use `images/generations`
 - provider-side behavior still depends on model capabilities; masks are guidance, not pixel-perfect guarantees
 - for “只改单格” workflows, prefer `--resume-manifest + --select-slot-ids + --reuse-output-as-reference true`
+- when `--reuse-output-as-reference true` is used for storyboard/local-edit reruns, match previous outputs by `slot_id` whenever available to avoid reusing the wrong base image
 - when `--resume-manifest` is combined with `--select-indexes` or `--select-slot-ids`, DAOGE now defaults `--failed-only` to `false`, because this is usually an explicit local-edit rerun instead of a failed-only rerun
 - if you really want “只改失败项里的某几个分镜”, then add `--failed-only true` explicitly
 
