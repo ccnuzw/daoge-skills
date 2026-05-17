@@ -296,3 +296,147 @@ test('run_batch executes reference-assisted against mock edits provider', async 
     assert.equal(fs.existsSync(success[0].output), true);
   });
 });
+
+test('run_batch executes masked-edit against mock edits provider', async () => {
+  await withMockImageServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/v1/images/edits') {
+      req.on('data', () => {});
+      req.on('end', () => {
+        const contentType = req.headers['content-type'] || '';
+        assert.match(String(contentType), /multipart\/form-data/i);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          created: Date.now(),
+          data: [{ b64_json: tinyPngBase64(), revised_prompt: 'mock masked edit revised prompt' }],
+          model: 'gpt-image-2',
+          size: '1440x2560',
+        }));
+      });
+      return;
+    }
+    res.writeHead(404);
+    res.end('not found');
+  }, async (baseUrl) => {
+    const tempDir = makeTempDir('interactive-image-batch-exec-masked-');
+    const outputDir = path.join(tempDir, 'out');
+    const envFile = path.join(tempDir, '.env');
+    const promptsFile = path.join(tempDir, 'prompts.generated.json');
+    const refImage = path.join(tempDir, 'ref.png');
+    const maskImage = path.join(tempDir, 'mask.png');
+
+    writeMockEnv(envFile, baseUrl);
+    fs.writeFileSync(refImage, Buffer.from(tinyPngBase64(), 'base64'));
+    fs.writeFileSync(maskImage, Buffer.from(tinyPngBase64(), 'base64'));
+    fs.writeFileSync(promptsFile, JSON.stringify([
+      {
+        index: 1,
+        slug: 'masked-edit-test',
+        title: 'Masked Edit Test',
+        style_family: 'hero-fashion',
+        scene: 'studio backdrop',
+        wardrobe: 'tailored black suit',
+        lighting: 'soft premium studio light',
+        mood: 'controlled luxury',
+        composition: 'full-body vertical poster',
+        text_policy: 'leave top and bottom clean for later typography',
+        reference_mode: 'masked-edit',
+        reference_images: [refImage],
+        mask_image: maskImage,
+        generation_prompt: 'Photoreal masked local edit for a premium campaign poster.',
+      },
+    ], null, 2));
+
+    const { stdout } = await runNodeAsync('run_batch.js', [
+      '--prompts-file', promptsFile,
+      '--env-file', envFile,
+      '--output-dir', outputDir,
+      '--batch-size', '1',
+      '--concurrency', '1',
+      '--contact-sheet', 'false',
+    ]);
+
+    assert.match(stdout, /\[done\]/);
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.success, 1);
+    assert.equal(manifest.failed, 0);
+
+    const success = JSON.parse(fs.readFileSync(path.join(outputDir, 'success.json'), 'utf8'));
+    assert.equal(success.length, 1);
+    assert.equal(success[0].requestMode, 'masked-edit');
+    assert.equal(fs.existsSync(success[0].output), true);
+    assert.equal(path.resolve(success[0].maskImage), path.resolve(maskImage));
+  });
+});
+
+test('run_batch preserves storyboard slot metadata in execution outputs', async () => {
+  await withMockImageServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/v1/images/generations') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', () => {
+        const payload = JSON.parse(body);
+        assert.match(payload.prompt, /storyboard/i);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          created: Date.now(),
+          data: [{ b64_json: tinyPngBase64(), revised_prompt: 'mock storyboard revised prompt' }],
+          model: 'gpt-image-2',
+          size: '1440x2560',
+        }));
+      });
+      return;
+    }
+    res.writeHead(404);
+    res.end('not found');
+  }, async (baseUrl) => {
+    const tempDir = makeTempDir('interactive-image-batch-storyboard-');
+    const outputDir = path.join(tempDir, 'out');
+    const envFile = path.join(tempDir, '.env');
+    const promptsFile = path.join(tempDir, 'prompts.generated.json');
+
+    writeMockEnv(envFile, baseUrl);
+    fs.writeFileSync(promptsFile, JSON.stringify([
+      {
+        index: 1,
+        slug: 'storyboard-shot-1',
+        title: 'Storyboard Shot 1',
+        board_id: 'board_alpha',
+        slot_id: 'shot_001',
+        slot_role: 'hero',
+        shot_id: 'shot_001',
+        shot_label: 'Opening Hero',
+        layout_region_id: 'region_a',
+        timecode: '00:00-00:03',
+        camera_move: 'slow push-in',
+        continuity_notes: ['keep same wardrobe and hair silhouette'],
+        generation_prompt: 'Storyboard hero shot, premium opening frame, controlled cinematic poster language.',
+      },
+    ], null, 2));
+
+    const { stdout } = await runNodeAsync('run_batch.js', [
+      '--prompts-file', promptsFile,
+      '--env-file', envFile,
+      '--output-dir', outputDir,
+      '--batch-size', '1',
+      '--concurrency', '1',
+      '--contact-sheet', 'false',
+    ]);
+
+    assert.match(stdout, /\[done\]/);
+
+    const success = JSON.parse(fs.readFileSync(path.join(outputDir, 'success.json'), 'utf8'));
+    assert.equal(success.length, 1);
+    assert.equal(success[0].boardId, 'board_alpha');
+    assert.equal(success[0].slotId, 'shot_001');
+    assert.equal(success[0].slotRole, 'hero');
+    assert.equal(success[0].shotId, 'shot_001');
+    assert.equal(success[0].shotLabel, 'Opening Hero');
+    assert.equal(success[0].layoutRegionId, 'region_a');
+    assert.equal(success[0].timecode, '00:00-00:03');
+    assert.equal(success[0].cameraMove, 'slow push-in');
+    assert.deepEqual(success[0].continuityNotes, ['keep same wardrobe and hair silhouette']);
+  });
+});
