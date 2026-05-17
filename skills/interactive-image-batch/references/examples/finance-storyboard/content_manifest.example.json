@@ -1,0 +1,214 @@
+{
+  "board_id": "finance-oral-storyboard-board-01",
+  "board_title": "Yomi米姐 半导体财经口播分镜板",
+  "board_theme": "深蓝科技财经感、蓝金演播厅、统一虚拟主理人、导演式横版整板分镜",
+  "brand_panel": {
+    "title_lines": [
+      "Yomi米姐",
+      "半导体行情口播分镜版",
+      "主题：半导体逆势狂飙，芯片行情凭什么火？"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "左侧信息排版区，不单独生图"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "reference-assisted",
+      "shot_label": "1 行情钩子",
+      "timecode": "0-5s",
+      "scene": "Yomi米姐在蓝金演播厅开场，背后叠加半导体行情上涨图层，形成强钩子",
+      "prompt_hints": [
+        "人物正面开场，气场清晰",
+        "上涨图层和科技蓝金框体同屏",
+        "强调板块突然走强的热度"
+      ],
+      "continuity_notes": [
+        "人物形象与后续全板统一",
+        "演播厅光色统一为深蓝蓝金"
+      ],
+      "camera_move": "中景开场，轻微推进",
+      "voiceover": "大家好，我是Yomi米姐。最近半导体板块涨势凶猛。",
+      "music": "电子脉冲与财经演播厅氛围底乐",
+      "sound_effects": "数据上升提示音、轻微行情跳动声"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "reference-assisted",
+      "shot_label": "2 板块上涨但多数人不懂逻辑",
+      "timecode": "5-10s",
+      "scene": "Yomi米姐切入解释段，背后保留上涨图层和信息屏，强调多数人只看热闹不懂门道",
+      "prompt_hints": [
+        "保留同一人物和演播厅",
+        "信息层更强，突出逻辑拆解感"
+      ],
+      "continuity_notes": [
+        "承接开场图层方向",
+        "人物不要换脸换装"
+      ],
+      "camera_move": "中近景稳定讲解",
+      "voiceover": "但很多人只看热闹，不懂门道。"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "hybrid",
+      "shot_label": "3 中国制造底座 + 全球技术浪潮",
+      "timecode": "10-15s",
+      "scene": "数字城市、制造基地与全球技术扩散画面叠加，Yomi米姐引出产业底座与技术浪潮",
+      "prompt_hints": [
+        "强化制造底座和全球技术连接",
+        "保留人物作为讲解锚点或信息层前景"
+      ],
+      "continuity_notes": [
+        "科技蓝金视觉延续",
+        "不要跳成完全无关场景"
+      ],
+      "camera_move": "从屏幕场景切入到人物讲解"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "shot",
+      "sequence": 4,
+      "reference_mode": "reference-assisted",
+      "shot_label": "4 米姐抛出问题并给答案",
+      "timecode": "15-20s",
+      "scene": "Yomi米姐近景提问，身旁出现芯片与信息屏，形成问答转折",
+      "prompt_hints": [
+        "近景人物为主",
+        "问题抛出时要有思考和权威感"
+      ],
+      "continuity_notes": [
+        "人物继续统一",
+        "演播厅框体延续"
+      ],
+      "camera_move": "近景轻推，停在手势和表情"
+    },
+    {
+      "slot_id": "shot_5",
+      "role": "shot",
+      "sequence": 5,
+      "reference_mode": "reference-assisted",
+      "shot_label": "5 核心答案：内外共振",
+      "timecode": "20-25s",
+      "scene": "Yomi米姐与AI芯片核心视觉同屏，突出内外共振的中心答案",
+      "prompt_hints": [
+        "芯片主视觉清晰",
+        "人物与芯片同框，形成答案揭示感"
+      ],
+      "continuity_notes": [
+        "颜色和人物统一"
+      ],
+      "camera_move": "中景定格式揭示"
+    },
+    {
+      "slot_id": "shot_6",
+      "role": "shot",
+      "sequence": 6,
+      "reference_mode": "hybrid",
+      "shot_label": "6 去库存结束 + 海外AI算力拉动",
+      "timecode": "25-31s",
+      "scene": "库存周期隐喻与AI算力模块并置，表达去库存结束和数据中心需求爆发",
+      "prompt_hints": [
+        "算力模块和数据中心信息清晰",
+        "人物可弱化但风格不断"
+      ],
+      "continuity_notes": [
+        "仍在同一条视频逻辑中"
+      ],
+      "camera_move": "双层信息叠化"
+    },
+    {
+      "slot_id": "shot_7",
+      "role": "shot",
+      "sequence": 7,
+      "reference_mode": "hybrid",
+      "shot_label": "7 国产替代提速",
+      "timecode": "31-37s",
+      "scene": "产业链环状结构、技术中枢和替代路径同时出现，表达国产替代提速",
+      "prompt_hints": [
+        "强调产业链补全和技术推进",
+        "保持高阶科技可视化"
+      ],
+      "continuity_notes": [
+        "继续维持同一视觉系统"
+      ],
+      "camera_move": "环形结构视角展开"
+    },
+    {
+      "slot_id": "shot_8",
+      "role": "shot",
+      "sequence": 8,
+      "reference_mode": "reference-assisted",
+      "shot_label": "8 芯片如何影响普通人生活",
+      "timecode": "37-43s",
+      "scene": "Yomi米姐讲解产业链全息模型，延展到手机、汽车、家电、AI终端等生活场景",
+      "prompt_hints": [
+        "人物讲解 + 产业链全息模型",
+        "生活终端场景作为信息层补全"
+      ],
+      "continuity_notes": [
+        "仍是同一主播和同一演播厅气质"
+      ],
+      "camera_move": "人物前景，终端图层依次浮现"
+    },
+    {
+      "slot_id": "shot_9",
+      "role": "shot",
+      "sequence": 9,
+      "reference_mode": "reference-assisted",
+      "shot_label": "9 长期主义",
+      "timecode": "43-50s",
+      "scene": "Yomi米姐全身稳定口播，背景偏向低碳工厂与长期成长隐喻，强调长期主义",
+      "prompt_hints": [
+        "全身站位稳定",
+        "情绪更沉稳，强调长期视角"
+      ],
+      "continuity_notes": [
+        "人物不要漂移"
+      ],
+      "camera_move": "全身定场，中慢镜收束"
+    },
+    {
+      "slot_id": "shot_10",
+      "role": "shot",
+      "sequence": 10,
+      "reference_mode": "reference-assisted",
+      "shot_label": "10 风险提示 + AI涨乐 CTA",
+      "timecode": "50-60s",
+      "scene": "Yomi米姐完成风险提示，收口到AI涨乐CTA，背后叠加增长图层和品牌收束视觉",
+      "prompt_hints": [
+        "风险提示文字区留白清晰",
+        "收尾要有结束感和品牌召唤感"
+      ],
+      "continuity_notes": [
+        "回到演播厅主场景完成收尾"
+      ],
+      "camera_move": "中景收尾，轻微后拉"
+    },
+    {
+      "slot_id": "kv_final",
+      "role": "kv",
+      "sequence": 11,
+      "reference_mode": "reference-assisted",
+      "shot_label": "底部收尾KV",
+      "scene": "Yomi米姐主形象、AI芯片、演播厅、产业链、行情图层和关键字同屏组成整板收尾KV",
+      "prompt_hints": [
+        "关键词清晰：内外共振 / AI算力 / 国产替代 / 长期主义 / 高波动",
+        "人物与产业各占一半"
+      ],
+      "continuity_notes": [
+        "承接全板统一人物和色调"
+      ]
+    }
+  ]
+}

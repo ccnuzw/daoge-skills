@@ -92,6 +92,27 @@
 - 批量任务可以分阶段推进
 - 后续选图和复跑都有依据
 
+### 4. 可复用模板模式
+
+除了通用工作流，这个 skill 也支持模板化复用。
+
+当前已经内置并适合长期复用的方向包括：
+
+- `campaign-poster`
+- `cinematic-storyboard`
+- `finance-oral-storyboard`
+
+其中 `finance-oral-storyboard` 适合：
+
+- 财经口播分镜板
+- 导演式横版整板分镜
+- 虚拟主理人连续口播提案板
+- 左信息区 + 右侧分镜网格 + 底部KV 的整板任务
+
+对应示例包见：
+
+- `references/examples/finance-storyboard/`
+
 ---
 
 ## 工作流概览

@@ -1,0 +1,34 @@
+{
+  "board_id": "finance-oral-storyboard-board-01",
+  "reference_mode": "hybrid",
+  "reference_assets": [
+    { "asset_id": "host_master_a", "path": "./refs/yomi_host_opening.png", "label": "人物主母版A" },
+    { "asset_id": "host_master_b", "path": "./refs/yomi_host_chip_reveal.png", "label": "人物主母版B" },
+    { "asset_id": "host_closeup", "path": "./refs/yomi_closeup_explain.png", "label": "人物近景讲解" },
+    { "asset_id": "host_fullbody", "path": "./refs/yomi_fullbody_wrapup.png", "label": "人物全身收束" },
+    { "asset_id": "studio_base", "path": "./refs/blue_gold_studio.png", "label": "蓝金演播厅底板" },
+    { "asset_id": "market_overlay", "path": "./refs/market_rise_overlay.png", "label": "行情上涨图层" },
+    { "asset_id": "chip_core", "path": "./refs/ai_chip_core.png", "label": "AI芯片主视觉" },
+    { "asset_id": "compute_module", "path": "./refs/compute_module.png", "label": "算力模块" },
+    { "asset_id": "factory_base", "path": "./refs/manufacturing_base.png", "label": "制造基地" },
+    { "asset_id": "industry_ring", "path": "./refs/industry_ring.png", "label": "产业链环状结构" },
+    { "asset_id": "global_wave", "path": "./refs/global_tech_wave.png", "label": "全球技术扩散" }
+  ],
+  "slot_assignments": [
+    { "slot_id": "shot_1", "asset_ids": ["host_master_a", "market_overlay", "studio_base"], "reference_mode": "reference-assisted", "notes": "开场人物+行情钩子，强绑定" },
+    { "slot_id": "shot_2", "asset_ids": ["host_closeup", "market_overlay"], "reference_mode": "reference-assisted", "notes": "逻辑拆解，强绑定" },
+    { "slot_id": "shot_3", "asset_ids": ["factory_base", "global_wave"], "reference_mode": "hybrid", "notes": "制造底座+全球浪潮" },
+    { "slot_id": "shot_4", "asset_ids": ["host_closeup", "studio_base"], "reference_mode": "reference-assisted", "notes": "近景提问，强绑定" },
+    { "slot_id": "shot_5", "asset_ids": ["host_master_b", "chip_core"], "reference_mode": "reference-assisted", "notes": "核心答案内外共振，强绑定" },
+    { "slot_id": "shot_6", "asset_ids": ["compute_module"], "reference_mode": "hybrid", "notes": "去库存+海外AI算力" },
+    { "slot_id": "shot_7", "asset_ids": ["industry_ring", "studio_base"], "reference_mode": "hybrid", "notes": "国产替代提速" },
+    { "slot_id": "shot_8", "asset_ids": ["host_closeup", "industry_ring"], "reference_mode": "reference-assisted", "notes": "影响普通人生活，强绑定" },
+    { "slot_id": "shot_9", "asset_ids": ["host_fullbody", "studio_base"], "reference_mode": "reference-assisted", "notes": "长期主义，强绑定" },
+    { "slot_id": "shot_10", "asset_ids": ["host_fullbody", "market_overlay"], "reference_mode": "reference-assisted", "notes": "风险提示+CTA，强绑定" },
+    { "slot_id": "kv_final", "asset_ids": ["host_master_b", "chip_core", "host_fullbody"], "reference_mode": "reference-assisted", "notes": "人物与产业各占一半的收尾KV" }
+  ],
+  "defaults": {
+    "unassigned_slot_mode": "prompt-only",
+    "unassigned_asset_policy": "ignore"
+  }
+}

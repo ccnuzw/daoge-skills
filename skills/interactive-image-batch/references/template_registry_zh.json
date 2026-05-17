@@ -463,6 +463,150 @@
       ]
     },
     {
+      "id": "finance-oral-storyboard",
+      "name": "财经口播分镜板",
+      "category": "cinematic-sequences",
+      "description": "适合财经科普口播、虚拟主理人解说、导演式横版整板分镜、内容提案板",
+      "triggers": [
+        "财经口播",
+        "口播分镜",
+        "口播版",
+        "导演分镜板",
+        "财经分镜",
+        "内容分镜板",
+        "解说分镜",
+        "演播厅分镜",
+        "storyboard board",
+        "finance storyboard"
+      ],
+      "required_focus": [
+        "主持人统一性",
+        "镜头连续性",
+        "内容逻辑拆解",
+        "信息区/分镜区/KV区结构",
+        "中文字段可读性"
+      ],
+      "ask_fields": [
+        "主题与时长",
+        "整板还是拆图",
+        "主持人是否固定为同一人",
+        "人物锚点来自哪里",
+        "中文字段需要多高可读性",
+        "哪些镜头必须强绑定参考图"
+      ],
+      "required_slot_fields": [
+        "style_family",
+        "scene",
+        "composition",
+        "text_policy",
+        "reference_mode"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "board_structure",
+        "story_beat",
+        "camera_language",
+        "studio_palette",
+        "continuity_rules",
+        "text_readability",
+        "closing_kv"
+      ],
+      "composition_bias": [
+        "single horizontal storyboard proposal board",
+        "left information panel, right continuous shot grid, bottom closing kv",
+        "reads like a real director storyboard board rather than an advertising poster"
+      ],
+      "quality_rules": [
+        "必须明确同一主持人是否全板统一",
+        "必须明确是整板分镜，不是普通海报",
+        "镜头逻辑要连续，不能是互不相关的拼贴",
+        "中文字段要至少保证重点信息清晰可读"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "real human presenter",
+        "different face each panel",
+        "garbled chinese text",
+        "cheap collage",
+        "livestream sales cover",
+        "ppt screenshot"
+      ],
+      "anti_patterns": [
+        "误做成营销海报",
+        "每格人物不统一",
+        "只堆科技元素，没有分镜板结构",
+        "机械平均分配参考图",
+        "文字全部沦为乱码装饰"
+      ],
+      "template_doc": "references/templates/cinematic-sequences/finance-oral-storyboard.md",
+      "variants": [
+        {
+          "id": "horizontal-board",
+          "name": "横版整板",
+          "description": "左信息区 + 右侧分镜 + 底部KV"
+        },
+        {
+          "id": "host-led",
+          "name": "主持人主导",
+          "description": "人物镜头比重更高"
+        },
+        {
+          "id": "industry-led",
+          "name": "产业信息主导",
+          "description": "产业链、算力、芯片信息权重更高"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "story-beat",
+          "field": "story_beat",
+          "strategy": "cycle",
+          "options": [
+            "opening hook",
+            "logic breakdown",
+            "key answer reveal",
+            "industry expansion",
+            "closing wrap-up"
+          ]
+        },
+        {
+          "name": "camera-language",
+          "field": "camera_language",
+          "strategy": "cycle",
+          "options": [
+            "medium presenter shot",
+            "close explanation shot",
+            "information-led composite shot",
+            "full-body wrap-up shot"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "deep navy financial studio lighting",
+              "blue-gold anchor desk glow",
+              "restrained market-heat red accents"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "professional trust",
+              "restrained intensity",
+              "analytical confidence"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      }
+    },
+    {
       "id": "cinematic-storyboard",
       "name": "电影分镜",
       "category": "cinematic-sequences",
