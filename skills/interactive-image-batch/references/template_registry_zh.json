@@ -463,21 +463,30 @@
       ]
     },
     {
-      "id": "finance-oral-storyboard",
-      "name": "财经口播分镜板",
+      "id": "oral-storyboard-board",
+      "name": "口播分镜板",
       "category": "cinematic-sequences",
-      "description": "适合财经科普口播、虚拟主理人解说、导演式横版整板分镜、内容提案板",
+      "description": "适合跨领域口播解说、虚拟主理人提案板、导演式横版整板分镜、内容策划板",
       "triggers": [
-        "财经口播",
+        "口播分镜板",
         "口播分镜",
         "口播版",
+        "口播板",
+        "主理人口播",
+        "主持人口播",
+        "解说分镜板",
         "导演分镜板",
+        "横版整板分镜",
+        "内容提案板",
+        "storyboard board",
+        "oral storyboard",
+        "host-led storyboard",
+        "口播分镜",
+        "财经口播",
         "财经分镜",
         "内容分镜板",
         "解说分镜",
-        "演播厅分镜",
-        "storyboard board",
-        "finance storyboard"
+        "演播厅分镜"
       ],
       "required_focus": [
         "主持人统一性",
@@ -492,7 +501,8 @@
         "主持人是否固定为同一人",
         "人物锚点来自哪里",
         "中文字段需要多高可读性",
-        "哪些镜头必须强绑定参考图"
+        "哪些镜头必须强绑定参考图",
+        "底部KV更偏人物、产品、产业还是混合收尾"
       ],
       "required_slot_fields": [
         "style_family",
@@ -538,7 +548,7 @@
         "机械平均分配参考图",
         "文字全部沦为乱码装饰"
       ],
-      "template_doc": "references/templates/cinematic-sequences/finance-oral-storyboard.md",
+      "template_doc": "references/templates/cinematic-sequences/oral-storyboard-board.md",
       "variants": [
         {
           "id": "horizontal-board",

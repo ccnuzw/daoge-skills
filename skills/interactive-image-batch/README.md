@@ -100,13 +100,13 @@
 
 - `campaign-poster`
 - `cinematic-storyboard`
-- `finance-oral-storyboard`
+- `oral-storyboard-board`
 
-其中 `finance-oral-storyboard` 适合：
+其中 `oral-storyboard-board` 适合：
 
-- 财经口播分镜板
+- 跨领域口播分镜板
 - 导演式横版整板分镜
-- 虚拟主理人连续口播提案板
+- 虚拟主理人 / 主持人口播提案板
 - 左信息区 + 右侧分镜网格 + 底部KV 的整板任务
 
 对应示例包见：
