@@ -201,6 +201,41 @@
 
 ---
 
+## 安装到 Codex
+
+### 用 `npx skills` 安装
+
+项目级安装：
+
+```bash
+npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch
+```
+
+全局安装：
+
+```bash
+npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
+```
+
+也可以直接从 skill 路径安装：
+
+```bash
+npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/interactive-image-batch -a codex
+```
+
+安装完成后建议重启 Codex。
+
+### 手动安装
+
+把 `skills/interactive-image-batch` 复制到以下任一目录：
+
+- 项目级：`.agents/skills/interactive-image-batch/`
+- 全局：`~/.codex/skills/interactive-image-batch/`
+
+如果你是手动覆盖更新，也建议重启 Codex，让新版本 skill 被重新加载。
+
+---
+
 ## 快速开始
 
 ### 1. 准备环境
