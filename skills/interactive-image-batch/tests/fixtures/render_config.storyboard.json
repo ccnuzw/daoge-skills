@@ -1,0 +1,8 @@
+{
+  "render_mode": "storyboard_board",
+  "generation_mode": "per-slot",
+  "assembly_mode": "external-compositor",
+  "reference_mode": "hybrid",
+  "layout_manifest": "./layout_manifest.storyboard.json",
+  "content_manifest": "./content_manifest.storyboard.json"
+}

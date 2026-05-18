@@ -1,0 +1,23 @@
+{
+  "content_brief": "口播分镜板最小测试",
+  "output_mode": "storyboard board",
+  "style_requirements": ["storyboard", "per-slot generation", "clean layout"],
+  "source_files": [],
+  "total_count": 2,
+  "batch_size": 1,
+  "concurrency": 1,
+  "retry_count": 1,
+  "timeout_seconds": 450,
+  "width": 1440,
+  "height": 2560,
+  "variation_requirements": ["preserve shot order", "avoid near-duplicates"],
+  "text_policy": "leave caption zones clean",
+  "preview_count": 2,
+  "require_confirmation": true,
+  "storyboard_plan": {
+    "enabled": true,
+    "layout_manifest": "./layout_manifest.storyboard.json",
+    "content_manifest": "./content_manifest.storyboard.json",
+    "render_config": "./render_config.storyboard.json"
+  }
+}

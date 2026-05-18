@@ -1,0 +1,39 @@
+{
+  "layout_id": "storyboard_layout_minimal",
+  "board_role": "storyboard-board",
+  "canvas": {
+    "width": 1440,
+    "height": 2560,
+    "aspect_ratio": "9:16"
+  },
+  "regions": [
+    {
+      "id": "region_shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "x": 0,
+      "y": 0,
+      "width": 720,
+      "height": 1280
+    },
+    {
+      "id": "region_shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "x": 720,
+      "y": 0,
+      "width": 720,
+      "height": 1280
+    }
+  ],
+  "bindings": [
+    {
+      "region_id": "region_shot_1",
+      "slot_id": "shot_1"
+    },
+    {
+      "region_id": "region_shot_2",
+      "slot_id": "shot_2"
+    }
+  ]
+}

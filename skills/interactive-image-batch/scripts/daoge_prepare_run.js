@@ -51,7 +51,7 @@ function hasStoryboardPlan(taskSpecPath) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const taskSpecPath = required(args, 'task-spec');
+  let taskSpecPath = required(args, 'task-spec');
   const strategyPath = required(args, 'strategy-file');
   const promptsFile = required(args, 'prompts-file');
 
@@ -73,6 +73,72 @@ function main() {
   const daogePreflight = path.join(outputDir, 'daoge_preflight_dashboard.md');
   const daogeModeDetection = path.join(outputDir, 'daoge_mode_detection.json');
   const storyboardBundleValidation = path.join(outputDir, 'storyboard_bundle.validation.json');
+  const importedReferenceBindings = path.join(outputDir, 'reference_bindings.imported.json');
+  const importedTaskSpec = path.join(outputDir, 'task_spec.with_imported_assets.json');
+  const importedReferenceAnalysis = path.join(outputDir, 'reference_asset_analysis.json');
+  const bindingIntentDraft = path.join(outputDir, 'binding_intent_draft.json');
+  const bindingPlan = path.join(outputDir, 'binding_plan.json');
+  const bindingConfirmation = path.join(outputDir, 'binding_confirmation.md');
+  const bindingConversationCard = path.join(outputDir, 'binding_conversation_card.md');
+
+  if (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') {
+    if ((args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') && args['binding-text']) {
+      const draftArgs = [
+        '--task-spec', taskSpecPath,
+        '--binding-text', args['binding-text'],
+        '--output-file', bindingIntentDraft,
+      ];
+      if (args.references) draftArgs.push('--references', args.references);
+      if (args['slot-order']) draftArgs.push('--slot-order', args['slot-order']);
+      if (args['generate-only']) draftArgs.push('--generate-only', args['generate-only']);
+      if (args['env-file']) draftArgs.push('--env-file', path.resolve(args['env-file']));
+      if (args['responses-model']) draftArgs.push('--responses-model', args['responses-model']);
+      runNode(path.join(scriptsDir, 'generate_binding_intent_draft.js'), draftArgs);
+
+      const planArgs = [
+        '--draft-file', bindingIntentDraft,
+        '--output-file', bindingPlan,
+      ];
+      if (args.references) planArgs.push('--references', args.references);
+      runNode(path.join(scriptsDir, 'plan_binding_from_draft.js'), planArgs);
+    }
+
+    const importArgs = [
+      '--task-spec', taskSpecPath,
+      '--output-dir', outputDir,
+      '--output-file', importedReferenceBindings,
+      '--task-spec-output', importedTaskSpec,
+      '--analysis-report-file', importedReferenceAnalysis,
+    ];
+    if (args['assets-manifest']) importArgs.push('--assets-manifest', path.resolve(args['assets-manifest']));
+    if (args.references) importArgs.push('--references', args.references);
+    if (args.masks) importArgs.push('--masks', args.masks);
+    if (args['slot-order']) importArgs.push('--slot-order', args['slot-order']);
+    if (args['binding-text']) importArgs.push('--binding-text', args['binding-text']);
+    if ((args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') && args['binding-text']) {
+      importArgs.push('--binding-draft-file', bindingIntentDraft);
+      importArgs.push('--binding-plan-file', bindingPlan);
+    }
+    if (args['generate-only']) importArgs.push('--generate-only', args['generate-only']);
+    if (args['assets-dir']) importArgs.push('--assets-dir', path.resolve(args['assets-dir']));
+    if (args['enable-vision-analysis']) importArgs.push('--enable-vision-analysis', args['enable-vision-analysis']);
+    if (args['env-file']) importArgs.push('--env-file', path.resolve(args['env-file']));
+    if (args['responses-model']) importArgs.push('--responses-model', args['responses-model']);
+    if (args['vision-timeout-ms']) importArgs.push('--vision-timeout-ms', args['vision-timeout-ms']);
+    runNode(path.join(scriptsDir, 'import_reference_assets.js'), importArgs);
+    runNode(path.join(scriptsDir, 'render_binding_confirmation.js'), [
+      '--analysis-file', importedReferenceAnalysis,
+      '--bindings-file', importedReferenceBindings,
+      ...((args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? ['--plan-file', bindingPlan] : []),
+      '--output-file', bindingConfirmation,
+    ]);
+    runNode(path.join(scriptsDir, 'render_binding_conversation_card.js'), [
+      '--bindings-file', importedReferenceBindings,
+      ...((args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? ['--plan-file', bindingPlan] : []),
+      '--output-file', bindingConversationCard,
+    ]);
+    taskSpecPath = importedTaskSpec;
+  }
 
   runNode(path.join(scriptsDir, 'validate_task_spec.js'), [
     '--task-spec', taskSpecPath,
@@ -159,12 +225,17 @@ function main() {
     variantMatrixPlan,
     promptDraftBundle,
     storyboardBundleValidation: storyboardEnabled ? storyboardBundleValidation : null,
+    importedReferenceAnalysis: (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') ? importedReferenceAnalysis : null,
+    bindingConfirmation: (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') ? bindingConfirmation : null,
+    bindingConversationCard: (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') ? bindingConversationCard : null,
     promptValidationReport,
     promptPreview,
     batchPlan,
     daogeSummary,
     daogeModeDetection,
     daogePreflight,
+    bindingIntentDraft: (args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? bindingIntentDraft : null,
+    bindingPlan: (args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? bindingPlan : null,
   }, null, 2));
 }
 

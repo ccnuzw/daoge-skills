@@ -318,6 +318,192 @@ node scripts/run_batch.js \
   --responses-model gpt-5.4
 ```
 
+### 6. 桌面端 / 附件素材导入到 storyboard
+
+如果你的参考图和遮罩图来自桌面端上传、聊天附件、临时下载目录，不想自己手动整理成固定路径，可以先走素材导入层：
+
+```bash
+node scripts/import_reference_assets.js \
+  --task-spec /abs/path/task_spec.storyboard.json \
+  --output-dir /abs/path/run_output \
+  --references /abs/path/ref_01.png,/abs/path/ref_02.png \
+  --masks /abs/path/mask_01.png \
+  --slot-order shot_1,shot_2,shot_3
+```
+
+它会自动完成：
+
+- 把素材复制到 `run_output/assets/reference/` 和 `run_output/assets/masks/`
+- 生成 `reference_bindings.imported.json`
+- 生成带更新后的 `storyboard_plan.reference_bindings` 的 `task_spec.with_imported_assets.json`
+
+如果你已经有更明确的素材说明，也可以直接用 `assets_manifest.json`：
+
+```json
+{
+  "reference_assets": [
+    { "path": "/abs/path/desktop_ref.png", "slot_id": "shot_1", "label": "桌面上传参考图" }
+  ],
+  "mask_assets": [
+    { "path": "/abs/path/desktop_mask.png", "slot_id": "shot_2", "label": "遮罩图", "notes": "只改右下角" }
+  ]
+}
+```
+
+然后在 prepare 阶段直接接入：
+
+```bash
+node scripts/daoge_prepare_run.js \
+  --task-spec /abs/path/task_spec.storyboard.json \
+  --strategy-file /abs/path/prompt_strategy.json \
+  --prompts-file /abs/path/prompts.generated.json \
+  --output-dir /abs/path/run_output \
+  --import-reference-assets true \
+  --assets-manifest /abs/path/assets_manifest.json
+```
+
+这条链路适合“素材来源很多、路径不稳定、但想保持 preflight 强校验”的场景。
+
+当前素材接入层分成两级：
+
+- 规则分析层：默认可用
+  - 根据文件名、`slot_id`、`shot_3`、`mask`、`遮罩` 这类信号自动推断
+  - 会按 slot 顺序做兜底绑定
+  - 会输出 `reference_asset_analysis.json`
+- 视觉分析层：可选启用
+  - 通过 `--enable-vision-analysis true`
+  - 会读取图片内容并返回推荐的 `slot_id` / `reference` / `mask`
+  - 高置信度推荐会用于没有显式 `slot_id` 的素材
+  - 它是“推荐增强层”，不是无条件覆盖用户显式绑定
+
+视觉分析示例：
+
+```bash
+node scripts/import_reference_assets.js \
+  --task-spec /abs/path/task_spec.storyboard.json \
+  --output-dir /abs/path/run_output \
+  --references /abs/path/desktop_upload_01.png \
+  --enable-vision-analysis true \
+  --env-file /abs/path/.env
+```
+
+### 7. 自然语言绑定入口
+
+如果你已经知道素材和分镜的大致关系，但不想自己手写 `assets_manifest.json`，现在也可以直接给中文绑定说明。
+
+例如：
+
+```bash
+node scripts/import_reference_assets.js \
+  --task-spec /abs/path/task_spec.storyboard.json \
+  --output-dir /abs/path/run_output \
+  --references /abs/path/1.png,/abs/path/2.png,/abs/path/3.png \
+  --slot-order shot_1,shot_2 \
+  --binding-text "前两张按上传顺序对应 shot_1、shot_2，最后一张是 shot_2 的遮罩图"
+```
+
+或直接接入 prepare：
+
+```bash
+node scripts/daoge_prepare_run.js \
+  --task-spec /abs/path/task_spec.storyboard.json \
+  --strategy-file /abs/path/prompt_strategy.json \
+  --prompts-file /abs/path/prompts.generated.json \
+  --output-dir /abs/path/run_output \
+  --import-reference-assets true \
+  --references /abs/path/1.png,/abs/path/2.png \
+  --slot-order shot_1,shot_2 \
+  --binding-text "第一张给 shot_1，最后一张是 shot_2 的遮罩图"
+```
+
+当前支持的自然语言模式主要包括：
+
+- `按上传顺序对应 shot_1、shot_2`
+- `第一张给 shot_1`
+- `最后一张是 shot_2 的遮罩图`
+- `前两张按顺序给 shot_1 和 shot_2`
+
+这层的目标是减少手工写 JSON，不是完全替代显式绑定。复杂多图场景下，仍然推荐你最终看一眼 `reference_asset_analysis.json`。
+
+### 8. LLM 绑定意图草案与绑定规划器
+
+如果你希望系统先“理解你的中文说明”，再落成正式绑定，而不是直接靠规则解析，可以启用 LLM 规划链路。
+
+这条链路会分成两步：
+
+1. `binding_intent_draft.json`
+   - LLM 负责理解用户说明
+   - 输出候选 `asset_intents`、`slot_order`、`prompt_only_slots`
+2. `binding_plan.json`
+   - 规划器把草案规整成可执行的 `reference_assets` / `mask_assets`
+   - 然后再交给导入器落盘和生成 `reference_bindings.imported.json`
+
+示例：
+
+```bash
+node scripts/daoge_prepare_run.js \
+  --task-spec /abs/path/task_spec.storyboard.json \
+  --strategy-file /abs/path/prompt_strategy.json \
+  --prompts-file /abs/path/prompts.generated.json \
+  --output-dir /abs/path/run_output \
+  --import-reference-assets true \
+  --use-llm-binding-planner true \
+  --references /abs/path/1.png,/abs/path/2.png \
+  --slot-order shot_1,shot_2 \
+  --binding-text "第一张给 shot_1，最后一张是 shot_2 的遮罩图" \
+  --env-file /abs/path/.env
+```
+
+这条链路的设计原则是：
+
+- LLM 只产出 `draft`
+- 规划器产出 `plan`
+- 导入器只消费 `plan`
+
+这样做是为了避免让 LLM 直接改最终执行绑定。
+
+另外，prepare 现在会额外生成：
+
+- `binding_confirmation.md`
+
+它会把当前绑定理解整理成一段人能直接确认的话，例如：
+
+- 第 1 张 -> `shot_1`（参考图）
+- 第 2 张 -> `shot_2`（遮罩图）
+- 哪些 slot 保持 `prompt-only`
+
+这份摘要就是给你在真正执行前快速确认用的，不用只盯着 JSON。
+
+### 9. 真实 provider 联网回归
+
+如果你想验证当前 `.env` 对应的真实 provider 是否真的能跑通 `prompt-only / reference-assisted / masked-edit`，现在有单独脚本：
+
+```bash
+node scripts/run_real_provider_smoke.js \
+  --env-file /abs/path/.env \
+  --output-dir /abs/path/real_provider_smoke
+```
+
+默认它只做安全预检，不会直接发真实请求。  
+只有你显式加上：
+
+```bash
+--confirm-live-run true
+```
+
+它才会真正执行最小真实 smoke。
+
+产物包括：
+
+- `real_provider_smoke_report.md`
+
+这份报告会明确写出：
+
+- 是否真的执行了联网调用
+- 当前使用的模型位
+- 每个模式是否执行
+- 输出目录在哪里
+
 ---
 
 ## Prompt 文件格式

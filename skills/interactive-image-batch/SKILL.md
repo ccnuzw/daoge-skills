@@ -24,6 +24,16 @@ Support an experienced-user fast path. When the user already sounds like a repea
 4.1. If the user is building a storyboard board with per-shot references or variable layout, also read [references/storyboard_board_mode.md](references/storyboard_board_mode.md). Keep layout, content, and render policy as separate manifests instead of collapsing them into one fixed prompt schema.
 4.2. If the user uploads images in the chat rather than passing file paths, treat the attachments as storyboard reference assets and ask for or infer a `reference_bindings.json` mapping. If the user says "按上传顺序对应", bind assets to slots in that order. If only some slots have references, mark the rest `prompt-only`.
 4.3. If the user uploads an extra image and says it is a mask / 遮罩图 for one slot, keep it separate from normal references. Bind it through `reference_bindings.json -> slot_assignments[].mask_asset_ids`, then surface that slot as `masked-edit` in preview and preflight.
+4.4. When the assets come from unstable desktop/chat paths, prefer `scripts/import_reference_assets.js` before storyboard validation. It should copy uploaded files into the current run directory, create `reference_bindings.imported.json`, and emit `task_spec.with_imported_assets.json` so downstream validation uses stable paths instead of transient attachment locations.
+4.5. The asset importer now has two inference layers:
+   - rule inference: filename / label / notes / slot-order heuristics, enabled by default
+   - vision inference: optional `--enable-vision-analysis true`, used as a recommendation layer for unbound assets when `.env` provides a working Responses endpoint
+   Keep explicit user slot assignments authoritative. Use vision inference to improve defaults, not to silently override confirmed mappings.
+4.6. If the user gives a short Chinese binding sentence instead of a JSON manifest, prefer `--binding-text "<中文说明>"`. Supported patterns include sequential bindings such as `前两张按上传顺序对应 shot_1、shot_2`, explicit ordinals such as `第一张给 shot_1`, and mask statements such as `最后一张是 shot_2 的遮罩图`.
+4.7. If the user wants the system to understand a richer Chinese binding description before execution, prefer the two-step planner:
+   - `scripts/generate_binding_intent_draft.js` to produce `binding_intent_draft.json`
+   - `scripts/plan_binding_from_draft.js` to normalize it into `binding_plan.json`
+   Then pass the plan into `import_reference_assets.js`. Do not let the LLM draft directly become the final execution binding without the planner step.
 5. Run `scripts/validate_task_spec.js --task-spec /abs/path/task_spec.json` to normalize defaults and catch missing fields. The validator applies the DAOGE runtime preset layer from [references/run_presets_zh.json](references/run_presets_zh.json): explicit dialogue values win, preset values only fill missing runtime controls, and the normalized spec records `field_sources`.
 5.1. If `task_spec.storyboard_plan.enabled=true`, run `scripts/validate_storyboard_bundle.js --task-spec /abs/path/task_spec.normalized.json` and treat its `slot_blueprint` / `generation_slots` as the storyboard-slot contract.
 6. If validation fails because a required content or style field is missing, go back to dialogue in Chinese and resolve it. Runtime controls may be supplied by `run_preset`, but content intent must not be guessed.
@@ -57,6 +67,7 @@ Support an experienced-user fast path. When the user already sounds like a repea
 22. Build a prompt file before generating images. Save it as `prompts.generated.json`.
 23. Run `scripts/validate_prompt_bundle.js --prompts-file /abs/path/prompts.generated.json --task-spec /abs/path/task_spec.normalized.json`. Treat `qualityGates` in the report as the preflight quality gate: surface near-duplicates, short prompts, missing template-required fields, campaign-poster omissions, and size issues before execution.
 24. When the required dialogue parameters are explicit or supplied by `run_preset`, trigger `prepare` mode. Use `scripts/daoge_prepare_run.js` as the default unified preflight entrypoint.
+24.1. If storyboard mode uses uploaded desktop/chat assets, pass `--import-reference-assets true` and either `--assets-manifest /abs/path/assets_manifest.json` or `--references/--masks + --slot-order` so prepare can import, classify, and bind those assets before preflight.
 25. By default, `prepare` should generate:
    - `prompt_preview.md`
    - `batch_plan.json`

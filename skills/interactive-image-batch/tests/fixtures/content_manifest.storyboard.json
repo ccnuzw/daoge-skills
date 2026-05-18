@@ -1,0 +1,31 @@
+{
+  "board_id": "storyboard_board_minimal",
+  "board_title": "Storyboard Minimal",
+  "board_theme": "clean product storyboard",
+  "slots": [
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "asset_mode": "product",
+      "reference_mode": "prompt-only",
+      "shot_label": "Opening",
+      "scene": "hero product reveal",
+      "prompt_hints": [
+        "clean opening frame"
+      ]
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "asset_mode": "product",
+      "reference_mode": "prompt-only",
+      "shot_label": "Local Edit",
+      "scene": "product close-up with editable corner",
+      "prompt_hints": [
+        "reserve lower-right zone for local change"
+      ]
+    }
+  ]
+}

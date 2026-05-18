@@ -240,7 +240,12 @@ function buildStoryboardBlueprint({ layout, content, render, referenceBindings, 
       ...resolvedAssignmentAssets,
     ]));
     const resolvedMaskImage = slot.mask_image || resolvedAssignmentMasks[0] || null;
-    const referenceMode = slot.reference_mode || slotAssignments[0]?.reference_mode || (resolvedMaskImage ? 'masked-edit' : (combinedReferenceImages.length ? 'reference-assisted' : 'prompt-only'));
+    const slotReferenceMode = ensureString(slot.reference_mode);
+    const assignedReferenceMode = ensureString(slotAssignments[0]?.reference_mode);
+    const derivedReferenceMode = resolvedMaskImage ? 'masked-edit' : (combinedReferenceImages.length ? 'reference-assisted' : 'prompt-only');
+    const referenceMode = derivedReferenceMode !== 'prompt-only'
+      ? derivedReferenceMode
+      : (slotReferenceMode || assignedReferenceMode || 'prompt-only');
 
     const item = {
       board_id: content.board_id,
