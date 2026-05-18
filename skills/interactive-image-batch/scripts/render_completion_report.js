@@ -56,6 +56,7 @@ function main() {
   const contactSheetPath = path.join(path.dirname(manifestPath), 'contact_sheet.png');
   const selectionBoardPath = path.join(path.dirname(manifestPath), 'selection_board.md');
   const operationsReportPath = path.join(path.dirname(manifestPath), 'operations_report.md');
+  const reviewBoardPath = path.join(path.dirname(manifestPath), 'review_board.html');
   const resultHubPath = path.join(path.dirname(manifestPath), 'daoge_result_hub.md');
   const runIndexPath = path.join(path.dirname(path.dirname(manifestPath)), 'daoge_run_index.md');
 
@@ -152,6 +153,9 @@ function main() {
   }
   if (fileExists(selectionBoardPath)) {
     lines.push(`- 筛选看板: ${selectionBoardPath}`);
+  }
+  if (fileExists(reviewBoardPath)) {
+    lines.push(`- HTML 审阅看板: ${reviewBoardPath}`);
   }
   if (fileExists(operationsReportPath)) {
     lines.push(`- 运营复盘: ${operationsReportPath}`);

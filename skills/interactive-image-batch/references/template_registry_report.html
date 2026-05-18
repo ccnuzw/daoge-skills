@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DAOGE Template Registry Report</title>
+  <link rel="stylesheet" href="portal_shared.css" />
+  <script defer src="portal_shared.js"></script>
+  <style>
+    :root {
+      --bg: #0e1318;
+      --panel: rgba(255,255,255,0.06);
+      --panel-border: rgba(255,255,255,0.1);
+      --text-main: #f3efe6;
+      --text-sub: rgba(243,239,230,0.68);
+      --accent: #d9b36d;
+      --green: #7cc5a3;
+      --yellow: #e2c070;
+      --red: #ff8c7a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(217,179,109,0.18), transparent 26%),
+        linear-gradient(135deg, #0a0f13 0%, #101720 45%, #0e1318 100%);
+      color: var(--text-main);
+      font-family: "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+    }
+    .shell {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px 24px 56px;
+    }
+    .hero, .section {
+      border: 1px solid var(--panel-border);
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border-radius: 24px;
+      box-shadow: 0 18px 48px rgba(0,0,0,0.24);
+    }
+    .hero {
+      padding: 28px 28px 24px;
+      background:
+        linear-gradient(160deg, rgba(217,179,109,0.16), transparent 38%),
+        rgba(255,255,255,0.04);
+      margin-bottom: 20px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      color: var(--accent);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.1;
+    }
+    .hero-copy {
+      margin: 0;
+      color: var(--text-sub);
+      line-height: 1.7;
+      max-width: 76ch;
+    }
+    .metric-grid, .section-grid, .template-grid {
+      display: grid;
+      gap: 16px;
+    }
+    .metric-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 20px;
+    }
+    .section {
+      padding: 22px;
+      margin-top: 18px;
+    }
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 20px;
+    }
+    .metric-card, .info-card, .template-card {
+      border-radius: 20px;
+      padding: 18px 18px 20px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .metric-label {
+      color: var(--text-sub);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .metric-value {
+      font-size: 30px;
+      font-weight: 700;
+    }
+    .section-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .template-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .info-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text-sub);
+      line-height: 1.7;
+    }
+    .empty-state {
+      color: var(--text-sub);
+      line-height: 1.6;
+    }
+    .meta-list {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .meta-row {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .meta-row:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .meta-label {
+      color: var(--text-sub);
+      font-size: 12px;
+    }
+    .meta-value {
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+    .template-card h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      color: var(--accent);
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      margin-bottom: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .status-ok {
+      color: var(--green);
+      background: rgba(124,197,163,0.12);
+    }
+    .status-warn {
+      color: var(--yellow);
+      background: rgba(226,192,112,0.12);
+    }
+    .status-fail {
+      color: var(--red);
+      background: rgba(255,140,122,0.12);
+    }
+    @media (max-width: 1080px) {
+      .metric-grid,
+      .section-grid,
+      .template-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body data-portal-page="template-registry-report">
+  <div class="shell">
+    <section class="hero">
+      <div class="eyebrow">DAOGE Template Governance</div>
+      <h1>模板主链校验看板</h1>
+      <p class="hero-copy">这个看板用于检查模板注册表、模板文档路径和模板章节骨架是否保持一致。它不是运行时结果页，而是模板治理和维护页。</p>
+      <div class="metric-grid">
+        <article class="metric-card">
+          <div class="metric-label">模板总数</div>
+          <div class="metric-value">11</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">错误数</div>
+          <div class="metric-value"></div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">警告数</div>
+          <div class="metric-value"></div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">校验结果</div>
+          <div class="metric-value">通过</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>分类与健康状态</h2>
+      <div class="section-grid">
+        <article class="info-card">
+          <h3>分类分布</h3>
+          <ul class="info-list"><li>cinematic-sequences: 2</li><li>editing-workflows: 1</li><li>grids-and-collages: 1</li><li>performance-creatives: 1</li><li>portraits-and-characters: 2</li><li>poster-and-campaigns: 1</li><li>product-visuals: 2</li><li>social-campaigns: 1</li></ul>
+        </article>
+        <article class="info-card">
+          <h3>健康状态</h3>
+          <ul class="info-list"><li>完全通过: 11</li><li>仅警告: 0</li><li>失败: 0</li><li>注册表: /Users/apple/Progame/newfeng/skills/interactive-image-batch/references/template_registry_zh.json</li></ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>模板明细</h2>
+      <div class="template-grid">
+        
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>campaign-poster</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">poster-and-campaigns</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/poster-and-campaigns/campaign-poster.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>studio-editorial</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">portraits-and-characters</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/portraits-and-characters/studio-editorial.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>ecommerce-clean</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">product-visuals</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/product-visuals/ecommerce-clean.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>lookbook</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">grids-and-collages</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/grids-and-collages/lookbook.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>portrait-kv</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">portraits-and-characters</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/portraits-and-characters/portrait-kv.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>image-edit</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">editing-workflows</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/editing-workflows/image-edit.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>oral-storyboard-board</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">cinematic-sequences</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/cinematic-sequences/oral-storyboard-board.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>cinematic-storyboard</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">cinematic-sequences</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/cinematic-sequences/cinematic-storyboard.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>social-grid</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">social-campaigns</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/social-campaigns/social-grid.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>ab-ad-test</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">performance-creatives</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/performance-creatives/ab-ad-test.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+            <article class="template-card">
+              <div class="status-pill status-ok">通过</div>
+              <h3>detail-page-set</h3>
+              <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">product-visuals</div></div>
+                <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">是</div></div>
+                <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">references/templates/product-visuals/detail-page-set.md</div></div>
+                <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">无</div></div>
+              </div>
+              <div class="section-grid">
+                <article class="info-card">
+                  <h3>错误</h3>
+                  <div class="empty-state">无</div>
+                </article>
+                <article class="info-card">
+                  <h3>警告</h3>
+                  <div class="empty-state">无</div>
+                </article>
+              </div>
+            </article>
+          
+      </div>
+    </section>
+  </div>
+</body>
+</html>

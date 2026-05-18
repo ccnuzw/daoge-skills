@@ -8,6 +8,14 @@ REPO_ROOT="$(cd "$SKILL_ROOT/../.." && pwd)"
 echo "[smoke] syntax check: scripts/*.js"
 find "$SKILL_ROOT/scripts" -maxdepth 1 -name '*.js' -print0 | xargs -0 -I{} node --check '{}'
 
+echo "[smoke] template mainline validation"
+(
+  cd "$SKILL_ROOT"
+  node scripts/validate_template_registry.js
+  node scripts/render_template_registry_report.js \
+    --report-file "$SKILL_ROOT/references/template_registry_validation_report.json"
+)
+
 echo "[smoke] node tests: skills/interactive-image-batch/tests/smoke.test.js"
 (
   cd "$REPO_ROOT"

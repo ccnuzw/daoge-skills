@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { parseArgs, readJson, writeJson } = require('./script_utils');
+const { ensurePortalUiAssets } = require('./portal_ui_shared');
 
 function required(args, key) {
   if (!args[key]) throw new Error(`Missing required flag: --${key}`);
@@ -57,6 +58,7 @@ function main() {
 
   const outputDir = path.resolve(args['output-dir'] || path.dirname(promptsFile));
   fs.mkdirSync(outputDir, { recursive: true });
+  ensurePortalUiAssets(outputDir);
 
   const scriptsDir = __dirname;
   const normalizedTaskSpec = path.join(outputDir, 'task_spec.normalized.json');
@@ -68,14 +70,17 @@ function main() {
   const promptDraftBundle = path.join(outputDir, 'prompt_draft_bundle.json');
   const promptValidationReport = path.join(outputDir, 'prompt_validation_report.json');
   const promptPreview = path.join(outputDir, 'prompt_preview.md');
+  const promptPreviewBoard = path.join(outputDir, 'prompt_preview.html');
   const batchPlan = path.join(outputDir, 'batch_plan.json');
   const daogeSummary = path.join(outputDir, 'daoge_run_summary.md');
   const daogePreflight = path.join(outputDir, 'daoge_preflight_dashboard.md');
+  const preflightBoard = path.join(outputDir, 'preflight_board.html');
   const daogeModeDetection = path.join(outputDir, 'daoge_mode_detection.json');
   const storyboardBundleValidation = path.join(outputDir, 'storyboard_bundle.validation.json');
   const importedReferenceBindings = path.join(outputDir, 'reference_bindings.imported.json');
   const importedTaskSpec = path.join(outputDir, 'task_spec.with_imported_assets.json');
   const importedReferenceAnalysis = path.join(outputDir, 'reference_asset_analysis.json');
+  const assetsBoard = path.join(outputDir, 'assets_board.html');
   const bindingIntentDraft = path.join(outputDir, 'binding_intent_draft.json');
   const bindingPlan = path.join(outputDir, 'binding_plan.json');
   const bindingConfirmation = path.join(outputDir, 'binding_confirmation.md');
@@ -137,6 +142,11 @@ function main() {
       ...((args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? ['--plan-file', bindingPlan] : []),
       '--output-file', bindingConversationCard,
     ]);
+    runNode(path.join(scriptsDir, 'render_assets_board.js'), [
+      '--bindings-file', importedReferenceBindings,
+      '--analysis-file', importedReferenceAnalysis,
+      '--output-file', assetsBoard,
+    ]);
     taskSpecPath = importedTaskSpec;
   }
 
@@ -196,7 +206,17 @@ function main() {
     '--summary-file', daogeSummary,
   ].filter((item) => item !== ''));
 
+  runNode(path.join(scriptsDir, 'render_prompt_preview_board.js'), [
+    '--prompts-file', promptsFile,
+    '--plan-file', batchPlan,
+    '--summary-file', daogeSummary,
+    '--markdown-file', promptPreview,
+    '--preview-count', String(args['preview-count'] || ''),
+    '--output-file', promptPreviewBoard,
+  ].filter((item) => item !== ''));
+
   ensureFile(promptPreview);
+  ensureFile(promptPreviewBoard);
   ensureFile(batchPlan);
   ensureFile(daogeSummary);
   ensureFile(promptValidationReport);
@@ -216,6 +236,19 @@ function main() {
     '--output-file', daogePreflight,
   ]);
 
+  runNode(path.join(scriptsDir, 'render_preflight_board.js'), [
+    '--task-spec', normalizedTaskSpec,
+    '--strategy-file', enrichedStrategy,
+    '--prompts-file', promptsFile,
+    '--validation-report', promptValidationReport,
+    '--preview-file', promptPreview,
+    '--plan-file', batchPlan,
+    '--summary-file', daogeSummary,
+    '--mode-file', daogeModeDetection,
+    ...(storyboardEnabled ? ['--storyboard-file', storyboardBundleValidation] : []),
+    '--output-file', preflightBoard,
+  ]);
+
   console.log(JSON.stringify({
     outputDir,
     normalizedTaskSpec,
@@ -226,14 +259,17 @@ function main() {
     promptDraftBundle,
     storyboardBundleValidation: storyboardEnabled ? storyboardBundleValidation : null,
     importedReferenceAnalysis: (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') ? importedReferenceAnalysis : null,
+    assetsBoard: (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') ? assetsBoard : null,
     bindingConfirmation: (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') ? bindingConfirmation : null,
     bindingConversationCard: (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') ? bindingConversationCard : null,
     promptValidationReport,
     promptPreview,
+    promptPreviewBoard,
     batchPlan,
     daogeSummary,
     daogeModeDetection,
     daogePreflight,
+    preflightBoard,
     bindingIntentDraft: (args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? bindingIntentDraft : null,
     bindingPlan: (args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? bindingPlan : null,
   }, null, 2));

@@ -209,7 +209,8 @@
         "只写高级感但不写灯光结构",
         "背景杂乱影响主体",
         "姿态和构图在大批量里重复"
-      ]
+      ],
+      "template_doc": "references/templates/portraits-and-characters/studio-editorial.md"
     },
     {
       "id": "ecommerce-clean",
@@ -271,7 +272,8 @@
         "为了氛围牺牲商品展示",
         "背景元素比商品更醒目",
         "色彩过饱和影响真实质感"
-      ]
+      ],
+      "template_doc": "references/templates/product-visuals/ecommerce-clean.md"
     },
     {
       "id": "lookbook",
@@ -333,7 +335,8 @@
         "只换场景不换款式",
         "同批画面风格完全漂移",
         "服装细节被姿态遮住"
-      ]
+      ],
+      "template_doc": "references/templates/grids-and-collages/lookbook.md"
     },
     {
       "id": "portrait-kv",
@@ -398,7 +401,8 @@
         "只写美但没有表情方向",
         "背景戏太多削弱肖像",
         "多个 prompt 眼神完全相同"
-      ]
+      ],
+      "template_doc": "references/templates/portraits-and-characters/portrait-kv.md"
     },
     {
       "id": "image-edit",
@@ -460,7 +464,8 @@
         "没有保留规则就做大幅重绘",
         "局部编辑边界模糊",
         "修改区域光线与原图不一致"
-      ]
+      ],
+      "template_doc": "references/templates/editing-workflows/image-edit.md"
     },
     {
       "id": "oral-storyboard-board",

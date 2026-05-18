@@ -90,6 +90,10 @@ Use `scripts/render_prompt_preview.js` to create:
 - `prompt_preview.md`
 - `batch_plan.json`
 
+Use `scripts/render_prompt_preview_board.js` to create:
+
+- `prompt_preview.html`
+
 Use `scripts/validate_prompt_bundle.js` to create:
 
 - `prompt_validation_report.json`
@@ -116,6 +120,11 @@ The preview file should be treated as the human review surface. It should summar
 - batch plan
 - representative prompt samples
 - when in storyboard mode, show slot roles, shot ids, timecodes, and reference-image counts
+
+When both versions exist:
+
+- prefer `prompt_preview.html` for the primary user-facing portal flow
+- keep `prompt_preview.md` as the archival / debug companion surface
 
 ## Runner flags
 
@@ -250,9 +259,10 @@ Optional:
   - `skipped.json`
   - `needs_review.json`
   - `rerun_candidates.json`
-  - `selection_board.md`
-  - `operations_report.json`
-  - `operations_report.md`
+- `selection_board.md`
+- `review_board.html`
+- `operations_report.json`
+- `operations_report.md`
   - `contact_sheet_index.md`
   - `job_state.json`
   - `checkpoint.json`
@@ -332,6 +342,8 @@ Current smoke coverage includes:
 - `daoge_prepare_run.js` minimal preflight pipeline
 - mock-provider `prompt-only` execution
 - mock-provider `reference-assisted` execution
+- `render_review_board.js` HTML 审阅看板
+  - includes lightweight risk tags and heuristic review scores for keep / review / rerun decisions
 
 Recommended rule:
 

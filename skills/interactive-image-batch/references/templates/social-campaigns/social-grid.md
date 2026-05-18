@@ -2,6 +2,20 @@
 
 用于小红书、Instagram、品牌 Feed、九宫格和系列内容矩阵。
 
+## 适用范围
+
+- 3 / 6 / 9 格内容矩阵
+- Feed 统一视觉系统
+- 封面、细节、氛围混排
+- 社媒首屏或宫格预览型内容
+
+## 不适用范围
+
+- 单张广告海报
+- 详情页卖点拆解图
+- 连续叙事型分镜
+- 只需要一张封面的简单任务
+
 ## 必问字段
 
 - 需要 3、6、9 还是更多张
@@ -9,6 +23,15 @@
 - 是否统一色彩、背景、模特或商品
 - 平台比例和裁切规则
 - 是否预留标题、贴纸或信息区
+
+## 推荐字段
+
+- `grid_role`
+- `text_policy`
+- `variation_requirements`
+- `palette`
+- `composition`
+- `crop_safety`
 
 ## 模板变体
 
@@ -29,6 +52,13 @@
 - `text_policy`: leave clean social caption or sticker-safe space, no readable generated text
 - `composition`: square-crop-safe vertical composition
 - `mood`: premium social editorial, approachable but polished
+
+## 强约束
+
+- 每张图都必须有明确宫格角色
+- 统一视觉系统优先于单张炫技
+- 必须考虑平台裁切安全区
+- 不要把社媒矩阵做成一组互不关联的单图
 
 ## 反模式
 

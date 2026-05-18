@@ -126,6 +126,11 @@ test('run_batch dry-run produces expected artifacts', () => {
     'selection_board.md',
     'operations_report.json',
     'contact_sheet_index.md',
+    'daoge_portal.html',
+    'completion_board.html',
+    'run_overview.html',
+    'rerun_board.html',
+    'review_board.html',
   ].forEach((name) => {
     assert.equal(fs.existsSync(path.join(outputDir, name)), true, `missing ${name}`);
   });
@@ -164,10 +169,12 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
     'prompt_draft_bundle.json',
     'prompt_validation_report.json',
     'prompt_preview.md',
+    'prompt_preview.html',
     'batch_plan.json',
     'daoge_run_summary.md',
     'daoge_mode_detection.json',
     'daoge_preflight_dashboard.md',
+    'preflight_board.html',
   ].forEach((name) => {
     assert.equal(fs.existsSync(path.join(outputDir, name)), true, `missing ${name}`);
   });
@@ -181,6 +188,68 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
 
   const preflight = fs.readFileSync(path.join(outputDir, 'daoge_preflight_dashboard.md'), 'utf8');
   assert.match(preflight, /绿灯|可以直接开跑/i);
+
+  const preflightBoard = fs.readFileSync(path.join(outputDir, 'preflight_board.html'), 'utf8');
+  assert.match(preflightBoard, /DAOGE 预检总览/);
+  assert.match(preflightBoard, /关键入口/);
+  assert.match(preflightBoard, /质量门禁/);
+
+  const promptPreviewBoard = fs.readFileSync(path.join(outputDir, 'prompt_preview.html'), 'utf8');
+  assert.match(promptPreviewBoard, /DAOGE Prompt 预览/);
+  assert.match(promptPreviewBoard, /批次计划/);
+  assert.match(promptPreviewBoard, /Prompt 样例/);
+});
+
+test('validate_template_registry reports healthy template mainline', () => {
+  const tempDir = makeTempDir('interactive-image-batch-template-registry-');
+  const reportFile = path.join(tempDir, 'template_registry_validation_report.json');
+
+  const stdout = runNode('validate_template_registry.js', [
+    '--output-file', reportFile,
+  ]);
+
+  const summary = JSON.parse(stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(fs.existsSync(reportFile), true);
+
+  const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+  assert.equal(report.ok, true);
+  assert.ok(report.templateCount >= 10);
+  assert.equal(report.errorCount, 0);
+
+  const campaignPoster = report.templates.find((item) => item.id === 'campaign-poster');
+  assert.ok(campaignPoster);
+  assert.equal(campaignPoster.docExists, true);
+  assert.equal(campaignPoster.missingDocSections.length, 0);
+});
+
+test('render_template_registry_report writes markdown and html reports', () => {
+  const tempDir = makeTempDir('interactive-image-batch-template-report-');
+  const reportFile = path.join(tempDir, 'template_registry_validation_report.json');
+  const markdownFile = path.join(tempDir, 'template_registry_report.md');
+  const htmlFile = path.join(tempDir, 'template_registry_report.html');
+
+  runNode('validate_template_registry.js', [
+    '--output-file', reportFile,
+  ]);
+
+  const stdout = runNode('render_template_registry_report.js', [
+    '--report-file', reportFile,
+    '--markdown-file', markdownFile,
+    '--html-file', htmlFile,
+  ]);
+
+  const summary = JSON.parse(stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(fs.existsSync(markdownFile), true);
+  assert.equal(fs.existsSync(htmlFile), true);
+
+  const markdown = fs.readFileSync(markdownFile, 'utf8');
+  const html = fs.readFileSync(htmlFile, 'utf8');
+  assert.match(markdown, /# 模板主链校验报告/);
+  assert.match(markdown, /### campaign-poster/);
+  assert.match(html, /模板主链校验看板/);
+  assert.match(html, /campaign-poster/);
 });
 
 test('run_batch executes prompt-only against mock images provider', async () => {
@@ -596,12 +665,16 @@ test('daoge_prepare_run can import storyboard assets before preflight', () => {
 
   const importedBindings = JSON.parse(fs.readFileSync(path.join(outputDir, 'reference_bindings.imported.json'), 'utf8'));
   const storyboardValidation = JSON.parse(fs.readFileSync(path.join(outputDir, 'storyboard_bundle.validation.json'), 'utf8'));
+  const assetsBoard = fs.readFileSync(path.join(outputDir, 'assets_board.html'), 'utf8');
 
   assert.equal(importedBindings.reference_assets.length, 2);
   assert.equal(storyboardValidation.ok, true);
   assert.equal(storyboardValidation.generation_slots.length, 2);
   assert.equal(storyboardValidation.generation_slots[0].reference_mode, 'reference-assisted');
   assert.equal(storyboardValidation.generation_slots[1].reference_mode, 'masked-edit');
+  assert.match(assetsBoard, /DAOGE 资产看板/);
+  assert.match(assetsBoard, /绑定关系/);
+  assert.match(assetsBoard, /资产卡片/);
 });
 
 test('import_reference_assets can apply vision recommendations when enabled', async () => {
@@ -948,6 +1021,813 @@ test('render_storyboard_board assembles storyboard html from validation bundle a
   assert.match(html, /Opening Shot/);
   assert.match(html, /shot_1\.png/);
   assert.match(html, /Brand/);
+  assert.match(html, /结果摘要/);
+  assert.match(html, /分组导航/);
+  assert.match(html, /总镜头/);
+  assert.match(html, /失败 \/ 缺图/);
+  assert.match(html, /Board ID/);
+  assert.match(html, /先看哪里/);
+  assert.match(html, /已有画面|暂无画面/);
+  assert.match(html, /href="#slot-shot_1"/);
+  assert.match(html, /id="slot-shot_1"/);
+  assert.match(html, /focus-banner/);
+  assert.match(html, /当前焦点/);
+  assert.match(html, /is-focused/);
+  assert.match(html, /applyFocusFromHash/);
+  assert.match(html, /已出图|待复核|执行失败|缺图/);
+});
+
+test('render_review_board assembles html review dashboard from execution artifacts', () => {
+  const tempDir = makeTempDir('interactive-image-batch-review-board-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const successFile = path.join(outputDir, 'success.json');
+  const failedFile = path.join(outputDir, 'failed.json');
+  const needsReviewFile = path.join(outputDir, 'needs_review.json');
+  const rerunCandidatesFile = path.join(outputDir, 'rerun_candidates.json');
+  const operationsReportFile = path.join(outputDir, 'operations_report.json');
+  const reviewBoardFile = path.join(outputDir, 'review_board.html');
+  const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
+  const keepImage = path.join(outputDir, 'keep.png');
+  const reviewImage = path.join(outputDir, 'review.png');
+
+  fs.writeFileSync(keepImage, Buffer.from(tinyPngBase64(), 'base64'));
+  fs.writeFileSync(reviewImage, Buffer.from(tinyPngBase64(), 'base64'));
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    generatedAt: new Date().toISOString(),
+    success: 2,
+    failed: 1,
+    batches: [],
+  }, null, 2));
+  fs.writeFileSync(successFile, JSON.stringify([
+    {
+      ok: true,
+      index: '001',
+      slug: 'keep-item',
+      title: 'Keep Item',
+      output: keepImage,
+      requestMode: 'prompt-only',
+      slotId: 'shot_1',
+      scene: 'hero reveal',
+      composition: 'full-body portrait',
+    },
+    {
+      ok: true,
+      index: '002',
+      slug: 'review-item',
+      title: 'Review Item',
+      output: reviewImage,
+      requestMode: 'masked-edit',
+      slotId: 'shot_2',
+      revisedPrompt: 'only edit lower-right corner',
+    }
+  ], null, 2));
+  fs.writeFileSync(failedFile, JSON.stringify([
+    {
+      ok: false,
+      index: '003',
+      slug: 'failed-item',
+      title: 'Failed Item',
+      error: 'provider timeout',
+      requestMode: 'reference-assisted',
+      slotId: 'shot_3',
+    }
+  ], null, 2));
+  fs.writeFileSync(needsReviewFile, JSON.stringify([
+    {
+      ok: true,
+      index: '002',
+      slug: 'review-item',
+      title: 'Review Item',
+      output: reviewImage,
+      requestMode: 'masked-edit',
+      slotId: 'shot_2',
+      revisedPrompt: 'only edit lower-right corner',
+    }
+  ], null, 2));
+  fs.writeFileSync(rerunCandidatesFile, JSON.stringify([
+    {
+      index: '003',
+      slug: 'failed-item',
+      title: 'Failed Item',
+      slotId: 'shot_3',
+      requestMode: 'reference-assisted',
+      error: 'provider timeout',
+    }
+  ], null, 2));
+  fs.writeFileSync(operationsReportFile, JSON.stringify({
+    distributions: {
+      requestMode: [
+        { name: 'prompt-only', count: 1 },
+        { name: 'masked-edit', count: 1 }
+      ]
+    }
+  }, null, 2));
+  fs.writeFileSync(storyboardBoardFile, '<html><body><div id="slot-shot_1"></div><div id="slot-shot_2"></div></body></html>');
+  fs.writeFileSync(path.join(outputDir, 'assets_board.html'), '<html><body><div id="slot-shot_1"></div></body></html>');
+
+  runNode('render_review_board.js', [
+    '--manifest-file', manifestFile,
+    '--output-file', reviewBoardFile,
+  ]);
+
+  const html = fs.readFileSync(reviewBoardFile, 'utf8');
+  assert.match(html, /DAOGE 结果审阅看板/);
+  assert.match(html, /建议保留/);
+  assert.match(html, /建议复核/);
+  assert.match(html, /建议重跑/);
+  assert.match(html, /平均审阅分/);
+  assert.match(html, /审阅分/);
+  assert.match(html, /section-summary/);
+  assert.match(html, /status-legend/);
+  assert.match(html, /先看哪里/);
+  assert.match(html, /结果摘要/);
+  assert.match(html, /状态图例/);
+  assert.match(html, /分组导航/);
+  assert.match(html, /处理优先级/);
+  assert.match(html, /展开更多细节/);
+  assert.match(html, /card-details/);
+  assert.match(html, /card-notes-primary/);
+  assert.match(html, /数量/);
+  assert.match(html, /均分/);
+  assert.match(html, /保留/);
+  assert.match(html, /复核/);
+  assert.match(html, /重跑/);
+  assert.match(html, /需检查文案留白|局部编辑边界风险|需检查遮罩融合感/);
+  assert.match(html, /id="review-search"/);
+  assert.match(html, /id="review-status"/);
+  assert.match(html, /id="review-mode"/);
+  assert.match(html, /id="review-sort"/);
+  assert.match(html, /id="review-density"/);
+  assert.match(html, /审阅模式/);
+  assert.match(html, /画廊模式/);
+  assert.match(html, /gallery-density/);
+  assert.match(html, /查看整板位置/);
+  assert.match(html, /查看素材来源/);
+  assert.match(html, /storyboard_board\.html#slot-shot_1/);
+  assert.match(html, /assets_board\.html#slot-shot_1/);
+  assert.match(html, /当前展示全部结果|当前筛选后展示/);
+  assert.match(html, /addEventListener\('input', applyFilters\)/);
+  assert.match(html, /Keep Item/);
+  assert.match(html, /Review Item/);
+  assert.match(html, /Failed Item/);
+});
+
+test('render_result_hub writes guided navigation for review and storyboard flow', () => {
+  const tempDir = makeTempDir('interactive-image-batch-result-hub-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const completionReportFile = path.join(outputDir, 'daoge_completion_report.md');
+  const reviewBoardFile = path.join(outputDir, 'review_board.html');
+  const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
+  const selectionBoardFile = path.join(outputDir, 'selection_board.md');
+  const hubFile = path.join(outputDir, 'daoge_result_hub.md');
+
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    success: 2,
+    failed: 1,
+    batchCount: 2,
+    defaultSize: '1024x1024',
+    paused: false,
+    pauseReason: '',
+    batches: [
+      {
+        results: [
+          { ok: true, index: '001', title: 'Keep Item', output: path.join(outputDir, 'keep.png'), slotId: 'shot_1' },
+          { ok: true, index: '002', title: 'Review Item', output: path.join(outputDir, 'review.png'), slotId: 'shot_2', requestMode: 'masked-edit' },
+          { ok: false, index: '003', title: 'Failed Item', output: null, slotId: 'shot_3' }
+        ]
+      }
+    ]
+  }, null, 2));
+  fs.writeFileSync(completionReportFile, '# completion');
+  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
+  fs.writeFileSync(storyboardBoardFile, '<html>storyboard</html>');
+  fs.writeFileSync(selectionBoardFile, '# selection');
+
+  runNode('render_result_hub.js', [
+    '--manifest-file', manifestFile,
+    '--output-file', hubFile,
+  ]);
+
+  const markdown = fs.readFileSync(hubFile, 'utf8');
+  assert.match(markdown, /推荐浏览顺序/);
+  assert.match(markdown, /先看 HTML 审阅看板/);
+  assert.match(markdown, /再看 Storyboard 装板/);
+  assert.match(markdown, /入口之间怎么联动/);
+  assert.match(markdown, /查看整板位置/);
+  assert.match(markdown, /默认浏览路径：审阅看板 -> Storyboard 装板 -> 完成报告/);
+});
+
+test('render_result_hub_board writes html portal-style result navigation', () => {
+  const tempDir = makeTempDir('interactive-image-batch-result-hub-board-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const hubBoardFile = path.join(outputDir, 'result_hub.html');
+  const hubMarkdownFile = path.join(outputDir, 'daoge_result_hub.md');
+  const completionBoardFile = path.join(outputDir, 'completion_board.html');
+  const reviewBoardFile = path.join(outputDir, 'review_board.html');
+  const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
+  const rerunBoardFile = path.join(outputDir, 'rerun_board.html');
+  const runOverviewFile = path.join(outputDir, 'run_overview.html');
+
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    success: 2,
+    failed: 1,
+    batchCount: 2,
+    defaultSize: '1024x1024',
+    paused: false,
+    pauseReason: '',
+    batches: [
+      {
+        results: [
+          { ok: true, index: '001', title: 'Keep Item', output: path.join(outputDir, 'keep.png'), slotId: 'shot_1' },
+          { ok: true, index: '002', title: 'Review Item', output: path.join(outputDir, 'review.png'), slotId: 'shot_2', requestMode: 'masked-edit' },
+          { ok: false, index: '003', title: 'Failed Item', output: null, slotId: 'shot_3' }
+        ]
+      }
+    ]
+  }, null, 2));
+  fs.writeFileSync(hubMarkdownFile, '# hub');
+  fs.writeFileSync(completionBoardFile, '<html>completion</html>');
+  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
+  fs.writeFileSync(storyboardBoardFile, '<html>storyboard</html>');
+  fs.writeFileSync(rerunBoardFile, '<html>rerun</html>');
+  fs.writeFileSync(runOverviewFile, '<html>overview</html>');
+
+  runNode('render_result_hub_board.js', [
+    '--manifest-file', manifestFile,
+    '--output-file', hubBoardFile,
+  ]);
+
+  const html = fs.readFileSync(hubBoardFile, 'utf8');
+  assert.match(html, /DAOGE 结果总入口/);
+  assert.match(html, /推荐浏览顺序/);
+  assert.match(html, /先看审阅看板/);
+  assert.match(html, /再看 Storyboard 装板/);
+  assert.match(html, /看完这一页后，下一步去哪/);
+  assert.match(html, /完成报告/);
+  assert.match(html, /失败补跑/);
+  assert.match(html, /结果总入口 Markdown/);
+});
+
+test('render_portal_home writes unified html portal shell', () => {
+  const tempDir = makeTempDir('interactive-image-batch-portal-home-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const portalFile = path.join(outputDir, 'daoge_portal.html');
+  const reviewBoardFile = path.join(outputDir, 'review_board.html');
+  const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
+  const completionBoardFile = path.join(outputDir, 'completion_board.html');
+  const runOverviewFile = path.join(outputDir, 'run_overview.html');
+  const preflightBoardFile = path.join(outputDir, 'preflight_board.html');
+  const promptPreviewBoardFile = path.join(outputDir, 'prompt_preview.html');
+  const assetsBoardFile = path.join(outputDir, 'assets_board.html');
+  const selectionBoardFile = path.join(outputDir, 'selection_board.md');
+  const rerunBoardFile = path.join(outputDir, 'rerun_board.html');
+
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    success: 2,
+    failed: 1,
+    selectedCount: 3,
+    batchCount: 2,
+  }, null, 2));
+  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
+  fs.writeFileSync(storyboardBoardFile, '<html>storyboard</html>');
+  fs.writeFileSync(completionBoardFile, '<html>completion</html>');
+  fs.writeFileSync(runOverviewFile, '<html>run overview</html>');
+  fs.writeFileSync(preflightBoardFile, '<html>preflight</html>');
+  fs.writeFileSync(promptPreviewBoardFile, '<html>prompt preview</html>');
+  fs.writeFileSync(assetsBoardFile, '<html>assets</html>');
+  fs.writeFileSync(rerunBoardFile, '<html>rerun</html>');
+  fs.writeFileSync(selectionBoardFile, '# selection');
+
+  runNode('render_portal_home.js', [
+    '--manifest-file', manifestFile,
+    '--output-file', portalFile,
+  ]);
+
+  const html = fs.readFileSync(portalFile, 'utf8');
+  assert.match(html, /DAOGE 用户门户/);
+  assert.match(html, /推荐浏览顺序/);
+  assert.match(html, /四个最常用入口/);
+  assert.match(html, /Prompt 预览/);
+  assert.match(html, /预检总览/);
+  assert.match(html, /资产看板/);
+  assert.match(html, /运行概览/);
+  assert.match(html, /失败补跑看板/);
+  assert.match(html, /HTML 审阅看板/);
+  assert.match(html, /Storyboard 装板/);
+  assert.match(html, /完成报告/);
+  assert.match(html, /失败补跑入口/);
+  assert.match(html, /准备阶段先看 Prompt 预览和预检总览/);
+  assert.match(html, /如果你现在只想完成一件事/);
+});
+
+test('render_completion_board writes html completion summary', () => {
+  const tempDir = makeTempDir('interactive-image-batch-completion-board-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const portalFile = path.join(outputDir, 'daoge_portal.html');
+  const reviewBoardFile = path.join(outputDir, 'review_board.html');
+  const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
+  const resultHubFile = path.join(outputDir, 'daoge_result_hub.md');
+  const boardFile = path.join(outputDir, 'completion_board.html');
+
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    success: 2,
+    failed: 1,
+    skipped: 0,
+    batchCount: 2,
+    defaultSize: '1024x1024',
+    model: 'gpt-image-2',
+    promptSource: path.join(outputDir, 'prompts.generated.json'),
+    batches: [
+      {
+        results: [
+          { ok: true, index: '001', title: 'Keep Item', output: path.join(outputDir, 'keep.png'), slotId: 'shot_1' },
+          { ok: true, index: '002', title: 'Review Item', output: path.join(outputDir, 'review.png'), slotId: 'shot_2', requestMode: 'masked-edit' },
+          { ok: false, index: '003', title: 'Failed Item', error: 'provider timeout', slotId: 'shot_3' }
+        ]
+      }
+    ]
+  }, null, 2));
+  fs.writeFileSync(portalFile, '<html>portal</html>');
+  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
+  fs.writeFileSync(storyboardBoardFile, '<html>storyboard</html>');
+  fs.writeFileSync(resultHubFile, '# hub');
+
+  runNode('render_completion_board.js', [
+    '--manifest-file', manifestFile,
+    '--output-file', boardFile,
+  ]);
+
+  const html = fs.readFileSync(boardFile, 'utf8');
+  assert.match(html, /DAOGE 完成报告/);
+  assert.match(html, /返回 DAOGE 门户/);
+  assert.match(html, /审阅看板/);
+  assert.match(html, /Storyboard 装板/);
+  assert.match(html, /成功张数/);
+  assert.match(html, /失败张数/);
+  assert.match(html, /执行与槽位摘要/);
+  assert.match(html, /样例与下一步/);
+  assert.match(html, /看完完成报告后，建议这样继续/);
+});
+
+test('render_preflight_board writes html preflight summary', () => {
+  const tempDir = makeTempDir('interactive-image-batch-preflight-board-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const taskSpecFile = path.join(outputDir, 'task_spec.normalized.json');
+  const strategyFile = path.join(outputDir, 'prompt_strategy.enriched.json');
+  const promptsFile = path.join(outputDir, 'prompts.generated.json');
+  const validationFile = path.join(outputDir, 'prompt_validation_report.json');
+  const previewFile = path.join(outputDir, 'prompt_preview.md');
+  const summaryFile = path.join(outputDir, 'daoge_run_summary.md');
+  const planFile = path.join(outputDir, 'batch_plan.json');
+  const modeFile = path.join(outputDir, 'daoge_mode_detection.json');
+  const boardFile = path.join(outputDir, 'preflight_board.html');
+
+  fs.writeFileSync(taskSpecFile, JSON.stringify({
+    content_brief: '高端运动品牌广告海报',
+    output_mode: 'prompt-only',
+    total_count: 4,
+    width: 1024,
+    height: 1024,
+    batch_size: 2,
+    concurrency: 2,
+    retry_count: 1,
+    timeout_seconds: 300,
+    output_format: 'png',
+    provider: 'openai',
+    require_confirmation: true,
+    style_requirements: ['高级质感', '品牌海报'],
+    variation_requirements: ['不同构图', '不同场景'],
+    source_images: [],
+  }, null, 2));
+  fs.writeFileSync(strategyFile, JSON.stringify({
+    template_variant: { id: 'hero-poster', name: 'Hero Poster' },
+  }, null, 2));
+  fs.writeFileSync(promptsFile, JSON.stringify([
+    { index: '001', title: 'Poster 1', style_family: 'brand', scene: 'studio', wardrobe: 'coat', composition: 'full body' },
+    { index: '002', title: 'Poster 2', style_family: 'brand', scene: 'urban', wardrobe: 'jacket', composition: 'wide shot' },
+  ], null, 2));
+  fs.writeFileSync(validationFile, JSON.stringify({
+    ok: true,
+    promptCount: 2,
+    errors: [],
+    warnings: [],
+    missing: {},
+    duplicatePromptCount: 0,
+    slugCollisions: [],
+    distributions: {
+      style_family: [{ name: 'brand', count: 2 }],
+      scene: [{ name: 'studio', count: 1 }, { name: 'urban', count: 1 }],
+      wardrobe: [{ name: 'coat', count: 1 }, { name: 'jacket', count: 1 }],
+      composition: [{ name: 'full body', count: 1 }, { name: 'wide shot', count: 1 }],
+    },
+    qualityGates: {
+      strict: false,
+      shortPrompts: [],
+      nearDuplicatePairs: [],
+      templateMissing: {},
+      sizeIssues: [],
+    },
+  }, null, 2));
+  fs.writeFileSync(previewFile, '# Prompt Preview\n');
+  fs.writeFileSync(summaryFile, '# Summary\n');
+  fs.writeFileSync(planFile, JSON.stringify([
+    { batchNumber: 1, promptCount: 2, firstIndex: '001', lastIndex: '002' },
+    { batchNumber: 2, promptCount: 2, firstIndex: '003', lastIndex: '004' },
+  ], null, 2));
+  fs.writeFileSync(modeFile, JSON.stringify({
+    detected_mode: 'prepare-only',
+    detected_template: {
+      id: 'campaign-poster',
+      name: 'Campaign Poster',
+      template_doc: 'references/templates/poster-and-campaigns/campaign-poster.md',
+    },
+  }, null, 2));
+
+  runNode('render_preflight_board.js', [
+    '--task-spec', taskSpecFile,
+    '--strategy-file', strategyFile,
+    '--prompts-file', promptsFile,
+    '--validation-report', validationFile,
+    '--preview-file', previewFile,
+    '--plan-file', planFile,
+    '--summary-file', summaryFile,
+    '--mode-file', modeFile,
+    '--output-file', boardFile,
+  ]);
+
+  const html = fs.readFileSync(boardFile, 'utf8');
+  assert.match(html, /DAOGE 预检总览/);
+  assert.match(html, /任务定义/);
+  assert.match(html, /执行参数/);
+  assert.match(html, /质量门禁/);
+  assert.match(html, /关键入口/);
+});
+
+test('render_prompt_preview_board writes html prompt summary', () => {
+  const tempDir = makeTempDir('interactive-image-batch-prompt-preview-board-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const promptsFile = path.join(outputDir, 'prompts.generated.json');
+  const planFile = path.join(outputDir, 'batch_plan.json');
+  const summaryFile = path.join(outputDir, 'daoge_run_summary.md');
+  const markdownFile = path.join(outputDir, 'prompt_preview.md');
+  const preflightBoardFile = path.join(outputDir, 'preflight_board.html');
+  const boardFile = path.join(outputDir, 'prompt_preview.html');
+
+  fs.writeFileSync(promptsFile, JSON.stringify([
+    {
+      index: '001',
+      title: 'Poster 1',
+      style_family: 'brand',
+      purity_grade: 'hero',
+      scene: 'studio',
+      wardrobe: 'coat',
+      composition: 'full body',
+      prompt: 'Photoreal studio poster with premium fashion styling',
+    },
+    {
+      index: '002',
+      title: 'Poster 2',
+      style_family: 'brand',
+      purity_grade: 'hero',
+      scene: 'urban',
+      wardrobe: 'jacket',
+      composition: 'wide shot',
+      prompt: 'Photoreal urban poster with cinematic framing',
+    }
+  ], null, 2));
+  fs.writeFileSync(planFile, JSON.stringify([
+    { batchNumber: 1, promptCount: 2, firstIndex: '001', lastIndex: '002' }
+  ], null, 2));
+  fs.writeFileSync(summaryFile, '# summary');
+  fs.writeFileSync(markdownFile, '# prompt preview');
+  fs.writeFileSync(preflightBoardFile, '<html>preflight</html>');
+
+  runNode('render_prompt_preview_board.js', [
+    '--prompts-file', promptsFile,
+    '--plan-file', planFile,
+    '--summary-file', summaryFile,
+    '--markdown-file', markdownFile,
+    '--preview-count', '2',
+    '--output-file', boardFile,
+  ]);
+
+  const html = fs.readFileSync(boardFile, 'utf8');
+  assert.match(html, /DAOGE Prompt 预览/);
+  assert.match(html, /分布概览/);
+  assert.match(html, /批次计划/);
+  assert.match(html, /Prompt 样例/);
+  assert.match(html, /返回预检总览/);
+});
+
+test('render_assets_board writes html asset summary', () => {
+  const tempDir = makeTempDir('interactive-image-batch-assets-board-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const bindingsFile = path.join(outputDir, 'reference_bindings.imported.json');
+  const analysisFile = path.join(outputDir, 'reference_asset_analysis.json');
+  const assetImage = path.join(outputDir, 'shot_1-ref_01.png');
+  const maskImage = path.join(outputDir, 'shot_2-mask_01.png');
+  const boardFile = path.join(outputDir, 'assets_board.html');
+  const preflightBoardFile = path.join(outputDir, 'preflight_board.html');
+  const promptPreviewBoardFile = path.join(outputDir, 'prompt_preview.html');
+
+  fs.writeFileSync(assetImage, Buffer.from(tinyPngBase64(), 'base64'));
+  fs.writeFileSync(maskImage, Buffer.from(tinyPngBase64(), 'base64'));
+  fs.writeFileSync(preflightBoardFile, '<html>preflight</html>');
+  fs.writeFileSync(promptPreviewBoardFile, '<html>prompt preview</html>');
+
+  fs.writeFileSync(bindingsFile, JSON.stringify({
+    reference_assets: [
+      { asset_id: 'ref_01', path: 'shot_1-ref_01.png', asset_type: 'reference', label: '主参考图', notes: '桌面上传' },
+      { asset_id: 'mask_01', path: 'shot_2-mask_01.png', asset_type: 'mask', label: '局部遮罩', notes: '右下角' },
+    ],
+    slot_assignments: [
+      { slot_id: 'shot_1', asset_ids: ['ref_01'], mask_asset_ids: [], reference_mode: 'reference-assisted' },
+      { slot_id: 'shot_2', asset_ids: [], mask_asset_ids: ['mask_01'], reference_mode: 'masked-edit' },
+    ],
+  }, null, 2));
+
+  fs.writeFileSync(analysisFile, JSON.stringify({
+    naturalLanguageBindings: {
+      explicitAssignments: [
+        { asset_index: 0, slot_id: 'shot_1', type: 'reference' },
+        { asset_index: 1, slot_id: 'shot_2', type: 'mask' },
+      ],
+    },
+    visionAnalysis: {
+      enabled: true,
+      reason: 'mocked',
+    },
+    ruleAssignments: [
+      {
+        path: assetImage,
+        inferred_slot_id: 'shot_1',
+        inferred_type: 'reference',
+        inference: { reason: 'filename-slot-match' },
+        vision_recommendation: { slot_id: 'shot_1', type: 'reference', confidence: 0.93 },
+      },
+      {
+        path: maskImage,
+        inferred_slot_id: 'shot_2',
+        inferred_type: 'mask',
+        inference: { reason: 'filename-slot-match' },
+        vision_recommendation: { slot_id: 'shot_2', type: 'mask', confidence: 0.95 },
+      },
+    ],
+  }, null, 2));
+
+  runNode('render_assets_board.js', [
+    '--bindings-file', bindingsFile,
+    '--analysis-file', analysisFile,
+    '--output-file', boardFile,
+  ]);
+
+  const html = fs.readFileSync(boardFile, 'utf8');
+  assert.match(html, /DAOGE 资产看板/);
+  assert.match(html, /当前阶段/);
+  assert.match(html, /素材阶段/);
+  assert.match(html, /流程位置/);
+  assert.match(html, /绑定关系/);
+  assert.match(html, /资产卡片/);
+  assert.match(html, /主参考图/);
+  assert.match(html, /局部遮罩/);
+  assert.match(html, /id="slot-shot_1"/);
+  assert.match(html, /href="#asset-ref_01"/);
+  assert.match(html, /href="#asset-mask_01"/);
+});
+
+test('render_run_overview writes html run summary', () => {
+  const tempDir = makeTempDir('interactive-image-batch-run-overview-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const operationsReportFile = path.join(outputDir, 'operations_report.json');
+  const reviewBoardFile = path.join(outputDir, 'review_board.html');
+  const completionBoardFile = path.join(outputDir, 'completion_board.html');
+  const selectionBoardFile = path.join(outputDir, 'selection_board.md');
+  const boardFile = path.join(outputDir, 'run_overview.html');
+
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    generatedAt: '2026-05-18T10:00:00.000Z',
+    success: 2,
+    failed: 1,
+    batchCount: 2,
+    batchSize: 1,
+    model: 'gpt-image-2',
+    defaultSize: '1024x1024',
+    paused: false,
+    dryRun: false,
+    batches: [
+      {
+        batchNumber: 1,
+        success: 1,
+        failed: 0,
+        results: [
+          { ok: true, skipped: false, requestMode: 'prompt-only', styleFamily: 'brand', slotRole: 'hero' },
+        ],
+      },
+      {
+        batchNumber: 2,
+        success: 1,
+        failed: 1,
+        results: [
+          { ok: true, skipped: false, requestMode: 'masked-edit', styleFamily: 'brand', slotRole: 'detail' },
+          { ok: false, skipped: false, requestMode: 'masked-edit', styleFamily: 'brand', slotRole: 'detail' },
+        ],
+      },
+    ],
+  }, null, 2));
+
+  fs.writeFileSync(operationsReportFile, JSON.stringify({
+    distributions: {
+      requestMode: [{ name: 'prompt-only', count: 1 }, { name: 'masked-edit', count: 1 }],
+      styleFamily: [{ name: 'brand', count: 2 }],
+      slotRole: [{ name: 'hero', count: 1 }, { name: 'detail', count: 1 }],
+    },
+  }, null, 2));
+  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
+  fs.writeFileSync(completionBoardFile, '<html>completion</html>');
+  fs.writeFileSync(selectionBoardFile, '# selection');
+
+  runNode('render_run_overview.js', [
+    '--manifest-file', manifestFile,
+    '--output-file', boardFile,
+  ]);
+
+  const html = fs.readFileSync(boardFile, 'utf8');
+  assert.match(html, /DAOGE 运行概览/);
+  assert.match(html, /当前 Run/);
+  assert.match(html, /执行阶段/);
+  assert.match(html, /流程位置/);
+  assert.match(html, /run-timeline/);
+  assert.match(html, /准备/);
+  assert.match(html, /预检/);
+  assert.match(html, /执行/);
+  assert.match(html, /审阅/);
+  assert.match(html, /补跑/);
+  assert.match(html, /运行参数/);
+  assert.match(html, /批次与分布/);
+  assert.match(html, /关键入口/);
+  assert.match(html, /Request Mode 分布/);
+});
+
+test('render_rerun_board writes html rerun summary', () => {
+  const tempDir = makeTempDir('interactive-image-batch-rerun-board-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const failedFile = path.join(outputDir, 'failed.json');
+  const needsReviewFile = path.join(outputDir, 'needs_review.json');
+  const rerunCandidatesFile = path.join(outputDir, 'rerun_candidates.json');
+  const runOverviewFile = path.join(outputDir, 'run_overview.html');
+  const reviewBoardFile = path.join(outputDir, 'review_board.html');
+  const completionBoardFile = path.join(outputDir, 'completion_board.html');
+  const selectionBoardFile = path.join(outputDir, 'selection_board.md');
+  const boardFile = path.join(outputDir, 'rerun_board.html');
+
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    promptSource: path.join(outputDir, 'prompts.generated.json'),
+    failed: 1,
+    success: 2,
+  }, null, 2));
+  fs.writeFileSync(failedFile, JSON.stringify([
+    { index: '003', slug: 'failed-item', title: 'Failed Item', slotId: 'shot_3', requestMode: 'reference-assisted', error: 'provider timeout' }
+  ], null, 2));
+  fs.writeFileSync(needsReviewFile, JSON.stringify([
+    { index: '002', slug: 'review-item', title: 'Review Item', slotId: 'shot_2', requestMode: 'masked-edit', revisedPrompt: 'only edit lower-right corner' }
+  ], null, 2));
+  fs.writeFileSync(rerunCandidatesFile, JSON.stringify([
+    { index: '003', slug: 'failed-item', title: 'Failed Item', slotId: 'shot_3', requestMode: 'reference-assisted', error: 'provider timeout' }
+  ], null, 2));
+  fs.writeFileSync(runOverviewFile, '<html>run overview</html>');
+  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
+  fs.writeFileSync(completionBoardFile, '<html>completion</html>');
+  fs.writeFileSync(selectionBoardFile, '# selection');
+
+  runNode('render_rerun_board.js', [
+    '--manifest-file', manifestFile,
+    '--output-file', boardFile,
+  ]);
+
+  const html = fs.readFileSync(boardFile, 'utf8');
+  assert.match(html, /DAOGE 失败补跑看板/);
+  assert.match(html, /失败项/);
+  assert.match(html, /待复核项/);
+  assert.match(html, /推荐命令/);
+  assert.match(html, /provider timeout/);
+});
+
+test('analyze_review_results writes visual review analysis against mock responses provider', async () => {
+  await withMockImageServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/v1/responses') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', () => {
+        const payload = JSON.parse(body);
+        assert.equal(payload.model, 'gpt-5.4');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          output: [
+            {
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify({
+                    items: [
+                      {
+                        output: JSON.parse(payload.input[0].content.find((item) => item.type === 'input_text' && /"output":/.test(item.text)).text).output,
+                        verdict: 'review',
+                        confidence: 0.91,
+                        score: 74,
+                        risk_tags: ['视觉检测：需检查遮罩融合感'],
+                        reason: 'lower-right edit boundary is slightly visible',
+                        next_action: '保留当前图作为方向，但建议局部再修一版',
+                      }
+                    ],
+                  }),
+                },
+              ],
+            },
+          ],
+        }));
+      });
+      return;
+    }
+    res.writeHead(404);
+    res.end('not found');
+  }, async (baseUrl) => {
+    const tempDir = makeTempDir('interactive-image-batch-visual-review-');
+    const outputDir = path.join(tempDir, 'out');
+    const successFile = path.join(outputDir, 'success.json');
+    const envFile = path.join(tempDir, '.env');
+    const outputImage = path.join(outputDir, 'result.png');
+    const analysisFile = path.join(outputDir, 'review_analysis.json');
+
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(outputImage, Buffer.from(tinyPngBase64(), 'base64'));
+    fs.writeFileSync(successFile, JSON.stringify([
+      {
+        ok: true,
+        index: '001',
+        title: 'Visual Review Target',
+        output: outputImage,
+        requestMode: 'masked-edit',
+        slotId: 'shot_2',
+        scene: 'gift box close-up',
+        composition: 'tight product crop',
+      }
+    ], null, 2));
+    fs.writeFileSync(envFile, [
+      `OPENAI_BASE_URL=${baseUrl}/v1`,
+      'OPENAI_API_KEY=test-key',
+      'OPENAI_RESPONSES_MODEL=gpt-5.4',
+    ].join('\n'));
+
+    await runNodeAsync('analyze_review_results.js', [
+      '--success-file', successFile,
+      '--output-file', analysisFile,
+      '--env-file', envFile,
+      '--max-items', '1',
+    ]);
+
+    const analysis = JSON.parse(fs.readFileSync(analysisFile, 'utf8'));
+    assert.equal(analysis.enabled, true);
+    assert.equal(analysis.items.length, 1);
+    assert.equal(analysis.items[0].verdict, 'review');
+    assert.equal(analysis.items[0].score, 74);
+    assert.equal(analysis.items[0].risk_tags[0], '视觉检测：需检查遮罩融合感');
+  });
 });
 
 test('run_real_provider_smoke creates safe preflight report without live execution', () => {

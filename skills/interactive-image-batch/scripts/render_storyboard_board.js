@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const { parseArgs, readJson } = require('./script_utils');
+const { parseArgs, readJson, fileExists } = require('./script_utils');
+const { renderPortalTopLinks, renderPortalContextBar } = require('./portal_shared');
+const { renderPortalHeadAssets } = require('./portal_ui_shared');
 
 function ensureArray(value) {
   if (Array.isArray(value)) return value;
@@ -22,6 +24,24 @@ function findSlotImage(slotId, results) {
   return hit ? hit.output || null : null;
 }
 
+function findSlotResult(slotId, results) {
+  return results.find((item) => String(item.slotId || item.slot_id || '').trim() === String(slotId || '').trim()) || null;
+}
+
+function getReviewState(result, relativeImage) {
+  if (result?.ok === false) return 'failed';
+  if (result?.requestMode === 'masked-edit' || result?.editSource === 'previous-output') return 'needs-review';
+  if (relativeImage) return 'ready';
+  return 'missing';
+}
+
+function getReviewLabel(reviewState) {
+  if (reviewState === 'failed') return '执行失败';
+  if (reviewState === 'needs-review') return '待复核';
+  if (reviewState === 'ready') return '已出图';
+  return '缺图';
+}
+
 function renderBrandPanel(region, content) {
   const titleLines = ensureArray(content?.brand_panel?.title_lines);
   return `
@@ -34,12 +54,17 @@ function renderBrandPanel(region, content) {
   `;
 }
 
-function renderImageRegion(region, slot, outputPath, outputDir) {
+function renderImageRegion(region, slot, result, outputDir) {
+  const outputPath = result?.output || null;
   const relativeImage = outputPath ? path.relative(outputDir, outputPath) : null;
+  const reviewState = getReviewState(result, relativeImage);
+  const reviewLabel = getReviewLabel(reviewState);
+  const anchorId = `slot-${String(slot?.slot_id || region.id || '').trim()}`;
   return `
-    <div class="panel panel-shot" style="left:${region.x}px;top:${region.y}px;width:${region.width}px;height:${region.height}px;">
+    <div id="${escapeHtml(anchorId)}" class="panel panel-shot state-${escapeHtml(reviewState)}" style="left:${region.x}px;top:${region.y}px;width:${region.width}px;height:${region.height}px;">
       <div class="panel-frame ${relativeImage ? 'has-image' : 'missing-image'}">
         ${relativeImage ? `<img src="${escapeHtml(relativeImage)}" alt="${escapeHtml(slot?.shot_label || slot?.slot_id || region.id)}" />` : '<div class="placeholder">No image</div>'}
+        <div class="panel-state">${escapeHtml(reviewLabel)}</div>
       </div>
       <div class="panel-caption">
         <div class="panel-title">${escapeHtml(slot?.shot_label || slot?.slot_id || region.id)}</div>
@@ -63,6 +88,41 @@ function buildBindingMap(layout) {
   return map;
 }
 
+function buildBoardSummary(regions, bindingMap, slotMap, content, results, outputDir) {
+  const slotSummaries = [];
+  const counts = { ready: 0, 'needs-review': 0, failed: 0, missing: 0 };
+
+  regions.forEach((region) => {
+    const slotId = bindingMap.get(region.id) || region.id;
+    const slot = slotMap.get(slotId) || content.slots?.find((item) => item.slot_id === slotId) || null;
+    if (String(region.role || slot?.role || '').trim() === 'brand_panel') return;
+
+    const result = findSlotResult(slotId, results);
+    const outputPath = result?.output || null;
+    const relativeImage = outputPath ? path.relative(outputDir, outputPath) : null;
+    const reviewState = getReviewState(result, relativeImage);
+    counts[reviewState] += 1;
+    slotSummaries.push({
+      slotId,
+      shotLabel: slot?.shot_label || slotId || region.id,
+      timecode: slot?.timecode || '',
+      scene: slot?.scene || '',
+      reviewState,
+      reviewLabel: getReviewLabel(reviewState),
+      hasImage: Boolean(relativeImage),
+    });
+  });
+
+  return {
+    totalSlots: slotSummaries.length,
+    readyCount: counts.ready,
+    needsReviewCount: counts['needs-review'],
+    failedCount: counts.failed,
+    missingCount: counts.missing,
+    slotSummaries,
+  };
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args['storyboard-file']) throw new Error('Missing required flag: --storyboard-file');
@@ -74,13 +134,30 @@ function main() {
   const results = readJson(resultsFile);
   const outputDir = path.resolve(args['output-dir'] || path.dirname(resultsFile));
   const outputPath = path.resolve(args['output-file'] || path.join(outputDir, 'storyboard_board.html'));
-
+  const assetsBoardPath = path.join(outputDir, 'assets_board.html');
   const layout = storyboard.layout || {};
   const content = storyboard.content || {};
   const canvas = layout.canvas || {};
   const regions = ensureArray(layout.regions);
   const bindingMap = buildBindingMap(layout);
   const slotMap = buildSlotMap(storyboard);
+  const boardSummary = buildBoardSummary(regions, bindingMap, slotMap, content, results, outputDir);
+  const boardContextBar = renderPortalContextBar({
+    runLabel: path.basename(outputDir),
+    boardLabel: content.board_id || content.board_title || '',
+    phaseLabel: '整板审阅',
+    flowLabel: '审阅 -> 整板 -> 完成报告',
+    counts: [
+      { label: '已出图', value: boardSummary.readyCount },
+      { label: '待复核', value: boardSummary.needsReviewCount },
+      { label: '失败', value: boardSummary.failedCount },
+      { label: '缺图', value: boardSummary.missingCount },
+    ],
+    hints: [
+      boardSummary.failedCount || boardSummary.missingCount ? '先处理失败 / 缺图，再看镜头节奏' : '当前整板可优先检查镜头节奏与品牌区关系',
+      boardSummary.needsReviewCount ? `${boardSummary.needsReviewCount} 个镜头需要重点复核局部编辑或衔接感` : '当前没有局部编辑高风险镜头',
+    ],
+  });
 
   const body = regions.map((region) => {
     const slotId = bindingMap.get(region.id) || region.id;
@@ -88,8 +165,8 @@ function main() {
     if (String(region.role || slot?.role || '').trim() === 'brand_panel') {
       return renderBrandPanel(region, content);
     }
-    const output = findSlotImage(slotId, results);
-    return renderImageRegion(region, slot, output, outputDir);
+    const result = findSlotResult(slotId, results);
+    return renderImageRegion(region, slot, result, outputDir);
   }).join('\n');
 
   const html = `<!doctype html>
@@ -98,6 +175,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(content.board_title || content.board_id || 'Storyboard Board')}</title>
+${renderPortalHeadAssets()}
   <style>
     :root {
       --board-bg: ${canvas.background || '#0f1115'};
@@ -106,6 +184,10 @@ function main() {
       --text-main: #f4f0e8;
       --text-sub: rgba(244,240,232,0.7);
       --accent: #d7b56d;
+      --ready: #7cc5a3;
+      --review: #e2c070;
+      --failed: #ff8c7a;
+      --summary-shadow: 0 18px 48px rgba(0,0,0,0.24);
     }
     * { box-sizing: border-box; }
     body {
@@ -121,6 +203,160 @@ function main() {
       max-width: min(100vw - 48px, ${canvas.width || 1920}px);
       margin: 0 auto;
     }
+    .top-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 16px;
+    }
+    .top-links a {
+      color: var(--text-main);
+      text-decoration: none;
+      padding: 10px 14px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      font-size: 13px;
+    }
+    .board-overview {
+      display: grid;
+      grid-template-columns: minmax(280px, 1.2fr) minmax(320px, 1fr);
+      gap: 18px;
+      margin-bottom: 22px;
+    }
+    .overview-card {
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(215,181,109,0.10), transparent 42%),
+        rgba(255,255,255,0.04);
+      backdrop-filter: blur(10px);
+      padding: 22px 20px 20px;
+      box-shadow: var(--summary-shadow);
+    }
+    .overview-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      margin-bottom: 14px;
+    }
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .overview-metric {
+      border-radius: 18px;
+      padding: 16px 16px 18px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      min-height: 96px;
+    }
+    .overview-metric-label {
+      color: var(--text-sub);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .overview-metric-value {
+      font-size: 28px;
+      font-weight: 700;
+    }
+    .overview-metric-note {
+      margin-top: 10px;
+      color: var(--text-sub);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .board-meta-list {
+      display: grid;
+      gap: 10px;
+    }
+    .board-meta-item {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 12px;
+      align-items: start;
+      color: var(--text-sub);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .board-meta-item strong {
+      color: var(--text-main);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .slot-nav {
+      display: grid;
+      gap: 10px;
+    }
+    .slot-nav-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 12px;
+      align-items: center;
+      border-radius: 18px;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .slot-nav-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 72px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(14,19,24,0.72);
+      border: 1px solid rgba(255,255,255,0.12);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .slot-nav-pill.state-ready { color: var(--ready); }
+    .slot-nav-pill.state-needs-review { color: var(--review); }
+    .slot-nav-pill.state-failed { color: var(--failed); }
+    .slot-nav-pill.state-missing { color: var(--text-sub); }
+    .slot-nav-main {
+      min-width: 0;
+    }
+    .slot-nav-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .slot-nav-sub {
+      color: var(--text-sub);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .slot-nav-item {
+      color: inherit;
+      text-decoration: none;
+    }
+    .slot-nav-item:hover {
+      border-color: rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.06);
+    }
+    .slot-nav-side {
+      text-align: right;
+      color: var(--text-sub);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .slot-nav-links {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .slot-nav-links a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(215,181,109,0.35);
+      padding-bottom: 1px;
+      font-size: 12px;
+    }
     .board-title {
       margin: 0 0 16px;
       font-size: 28px;
@@ -130,6 +366,35 @@ function main() {
       margin: 0 0 24px;
       color: var(--text-sub);
       font-size: 14px;
+    }
+    .focus-banner {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 18px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(215,181,109,0.24);
+      background:
+        linear-gradient(180deg, rgba(215,181,109,0.12), rgba(255,255,255,0.02)),
+        rgba(255,255,255,0.04);
+      color: var(--text-main);
+      box-shadow: var(--summary-shadow);
+    }
+    .focus-banner.show {
+      display: flex;
+    }
+    .focus-banner-label {
+      color: var(--accent);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      flex: 0 0 auto;
+    }
+    .focus-banner-text {
+      font-size: 14px;
+      color: var(--text-sub);
+      line-height: 1.5;
     }
     .board {
       position: relative;
@@ -146,7 +411,7 @@ function main() {
       border: 1px solid var(--panel-border);
       background: var(--panel-bg);
       backdrop-filter: blur(10px);
-      border-radius: 18px;
+      border-radius: 20px;
       overflow: hidden;
     }
     .panel-frame {
@@ -156,6 +421,7 @@ function main() {
       display: flex;
       align-items: center;
       justify-content: center;
+      position: relative;
     }
     .panel-frame img {
       width: 100%;
@@ -174,23 +440,57 @@ function main() {
       letter-spacing: 0.06em;
       text-transform: uppercase;
     }
+    .panel-state {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      background: rgba(15,17,21,0.75);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .state-ready .panel-state {
+      color: var(--ready);
+    }
+    .state-needs-review .panel-state {
+      color: var(--review);
+    }
+    .state-failed .panel-state {
+      color: var(--failed);
+    }
+    .state-failed {
+      border-color: rgba(255,140,122,0.45);
+    }
+    .state-needs-review {
+      border-color: rgba(226,192,112,0.4);
+    }
+    .panel-shot.is-focused {
+      box-shadow:
+        0 0 0 2px rgba(215,181,109,0.42),
+        0 0 0 8px rgba(215,181,109,0.10),
+        0 20px 50px rgba(0,0,0,0.28);
+      border-color: rgba(215,181,109,0.48);
+    }
     .panel-caption {
-      padding: 12px 14px 14px;
+      padding: 14px 14px 16px;
     }
     .panel-title {
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 700;
-      margin-bottom: 4px;
+      line-height: 1.35;
+      margin-bottom: 8px;
     }
     .panel-meta {
       color: var(--accent);
       font-size: 12px;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
     .panel-scene {
       color: var(--text-sub);
       font-size: 12px;
-      line-height: 1.45;
+      line-height: 1.55;
     }
     .panel-brand {
       display: flex;
@@ -224,14 +524,109 @@ function main() {
     }
   </style>
 </head>
-<body>
+<body data-portal-page="storyboard_board.html">
   <div class="board-shell">
+    <div class="top-links">
+      ${renderPortalTopLinks(outputDir, {
+        currentPage: 'storyboard_board.html',
+      })}
+    </div>
     <h1 class="board-title">${escapeHtml(content.board_title || content.board_id || 'Storyboard Board')}</h1>
     <p class="board-subtitle">${escapeHtml(content.board_theme || '')}</p>
+    ${boardContextBar}
+    <div class="focus-banner" id="focus-banner">
+      <div class="focus-banner-label">当前焦点</div>
+      <div class="focus-banner-text" id="focus-banner-text">当前没有聚焦的分镜槽位。</div>
+    </div>
+    <div class="board-overview">
+      <section class="overview-card">
+        <div class="overview-title">结果摘要</div>
+        <div class="overview-grid">
+          <div class="overview-metric">
+            <div class="overview-metric-label">总镜头</div>
+            <div class="overview-metric-value">${boardSummary.totalSlots}</div>
+            <div class="overview-metric-note">本板实际参与审阅的分镜槽位数</div>
+          </div>
+          <div class="overview-metric">
+            <div class="overview-metric-label">已出图</div>
+            <div class="overview-metric-value">${boardSummary.readyCount}</div>
+            <div class="overview-metric-note">可以先进入整板观感检查</div>
+          </div>
+          <div class="overview-metric">
+            <div class="overview-metric-label">待复核</div>
+            <div class="overview-metric-value">${boardSummary.needsReviewCount}</div>
+            <div class="overview-metric-note">优先看局部编辑、续跑和衔接感</div>
+          </div>
+          <div class="overview-metric">
+            <div class="overview-metric-label">失败 / 缺图</div>
+            <div class="overview-metric-value">${boardSummary.failedCount + boardSummary.missingCount}</div>
+            <div class="overview-metric-note">失败 ${boardSummary.failedCount}，缺图 ${boardSummary.missingCount}</div>
+          </div>
+        </div>
+        <div class="board-meta-list" style="margin-top:14px;">
+          <div class="board-meta-item"><strong>Board ID</strong><span>${escapeHtml(content.board_id || '未设置')}</span></div>
+          <div class="board-meta-item"><strong>主题</strong><span>${escapeHtml(content.board_theme || '未设置')}</span></div>
+          <div class="board-meta-item"><strong>先看哪里</strong><span>先看“失败 / 缺图”，再看“待复核”，最后回到整板检查镜头节奏、品牌区与主画面关系。</span></div>
+        </div>
+      </section>
+      <section class="overview-card">
+        <div class="overview-title">分组导航</div>
+        <div class="slot-nav">
+          ${boardSummary.slotSummaries.map((item) => `
+            <a class="slot-nav-item" href="#slot-${escapeHtml(item.slotId)}">
+              <div class="slot-nav-pill state-${escapeHtml(item.reviewState)}">${escapeHtml(item.reviewLabel)}</div>
+              <div class="slot-nav-main">
+                <div class="slot-nav-title">${escapeHtml(item.shotLabel)}</div>
+                <div class="slot-nav-sub">${escapeHtml(item.slotId)}${item.scene ? ` · ${escapeHtml(item.scene)}` : ''}</div>
+                <div class="slot-nav-links">
+                  ${fileExists(assetsBoardPath) ? `<a href="${escapeHtml(path.relative(outputDir, assetsBoardPath))}#slot-${escapeHtml(item.slotId)}">查看素材来源</a>` : ''}
+                </div>
+              </div>
+              <div class="slot-nav-side">
+                <div>${escapeHtml(item.timecode || '未标时间码')}</div>
+                <div>${item.hasImage ? '已有画面' : '暂无画面'}</div>
+              </div>
+            </a>
+          `).join('')}
+        </div>
+      </section>
+    </div>
     <div class="board">
       ${body}
     </div>
   </div>
+  <script>
+    (() => {
+      const focusBanner = document.getElementById('focus-banner');
+      const focusBannerText = document.getElementById('focus-banner-text');
+
+      function clearFocus() {
+        document.querySelectorAll('.panel-shot.is-focused').forEach((node) => node.classList.remove('is-focused'));
+      }
+
+      function applyFocusFromHash() {
+        const hash = window.location.hash || '';
+        clearFocus();
+        if (!hash || !hash.startsWith('#slot-')) {
+          focusBanner.classList.remove('show');
+          return;
+        }
+        const target = document.querySelector(hash);
+        if (!target) {
+          focusBanner.classList.remove('show');
+          return;
+        }
+        target.classList.add('is-focused');
+        const title = target.querySelector('.panel-title')?.textContent?.trim() || hash.replace(/^#slot-/, '');
+        const meta = target.querySelector('.panel-meta')?.textContent?.trim() || '未标时间码';
+        focusBannerText.textContent = '当前定位到 ' + title + ' · ' + meta + '。你可以先看该格，再回看整板上下文。';
+        focusBanner.classList.add('show');
+      }
+
+      window.addEventListener('hashchange', applyFocusFromHash);
+      applyFocusFromHash();
+    })();
+  </script>
 </body>
 </html>`;
 

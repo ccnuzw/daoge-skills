@@ -19,7 +19,13 @@ const {
 } = require('./run_batch_selection');
 const {
   renderCompletionReport,
+  renderCompletionBoard,
+  renderRunOverview,
+  renderPortalHome,
   renderResultHub,
+  renderReviewBoard,
+  renderRerunBoard,
+  renderVisualReviewAnalysis,
   createOperationalArtifacts,
 } = require('./run_batch_artifacts');
 const {
@@ -262,9 +268,18 @@ async function main() {
     };
     fs.writeFileSync(path.join(outputDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
     const artifacts = createOperationalArtifacts(outputDir, manifest, [], { readJson, writeJson });
+    const reviewBoardPath = renderReviewBoard(outputDir);
+    const rerunBoardPath = renderRerunBoard(outputDir);
+    const portalHomePath = renderPortalHome(outputDir);
+    const completionBoardPath = renderCompletionBoard(outputDir);
+    const runOverviewPath = renderRunOverview(outputDir);
     fs.writeFileSync(path.join(outputDir, 'README.md'), [
       '# Interactive image batch dry run',
       '',
+      `- Portal home: ${portalHomePath}`,
+      `- Completion board: ${completionBoardPath}`,
+      `- Run overview: ${runOverviewPath}`,
+      `- Rerun board: ${rerunBoardPath}`,
       `- Output dir: ${outputDir}`,
       `- Prompt source: ${promptsFile}`,
       `- Prompt snapshot: ${promptsCopyPath}`,
@@ -277,6 +292,7 @@ async function main() {
       `- Failed only: ${failedOnly}`,
       `- Rerun plan: ${rerunPlanPath || 'none'}`,
       `- Selection board: ${artifacts.selection.selectionBoard}`,
+      `- Review board: ${reviewBoardPath}`,
       `- Operations report: ${artifacts.operations.reportMd}`,
       `- Run index: ${artifacts.runIndex.indexMd}`,
     ].join('\n'));
@@ -396,14 +412,32 @@ async function main() {
   }
   fs.writeFileSync(path.join(outputDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   const artifacts = createOperationalArtifacts(outputDir, manifest, allResults, { readJson, writeJson });
+  const visualReviewAnalysisPath = renderVisualReviewAnalysis(outputDir, manifest, {
+    enable: parseBoolean(args['enable-visual-review'], false),
+    envFile,
+    responsesModel,
+    visionTimeoutMs: Number(args['vision-timeout-ms'] || 90000),
+    maxItems: Number(args['review-max-items'] || 8),
+  });
+  const reviewBoardPath = renderReviewBoard(outputDir);
+  const rerunBoardPath = renderRerunBoard(outputDir);
+  const portalHomePath = renderPortalHome(outputDir);
+  const completionBoardPath = renderCompletionBoard(outputDir);
+  const runOverviewPath = renderRunOverview(outputDir);
   let completionReportPath = renderCompletionReport(outputDir);
   const resultHubPath = renderResultHub(outputDir);
 
   const readme = [
     '# DAOGE Run Output',
     '',
+    `- DAOGE portal home: ${portalHomePath}`,
+    `- DAOGE completion board: ${completionBoardPath}`,
+    `- DAOGE run overview: ${runOverviewPath}`,
+    `- DAOGE rerun board: ${rerunBoardPath}`,
     `- DAOGE 结果总入口: ${resultHubPath}`,
     `- DAOGE completion report: ${completionReportPath}`,
+    `- DAOGE review board: ${reviewBoardPath}`,
+    `- Visual review analysis: ${visualReviewAnalysisPath || 'disabled'}`,
     `- Output dir: ${outputDir}`,
     `- Prompt source: ${promptsFile}`,
     `- Success: ${manifest.success}`,
@@ -421,6 +455,7 @@ async function main() {
   console.log(paused ? 'DAOGE 状态：已暂停，等待处理' : 'DAOGE 状态：任务完成');
   console.log(`[DAOGE][执行结果] 成功 ${manifest.success}，失败 ${manifest.failed}，跳过 ${allResults.filter((item) => item.skipped).length}，共 ${selectedPrompts.length} 张`);
   console.log(`[DAOGE][结果入口] 先看这里：${resultHubPath}`);
+  console.log(`[DAOGE][审阅看板] HTML 看板：${reviewBoardPath}`);
   if (paused) {
     console.log(`[DAOGE][下一步建议] ${translatePauseReason(pauseReason)}。建议先处理风险，再决定是否继续续跑。`);
   } else if (manifest.failed > 0) {

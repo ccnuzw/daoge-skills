@@ -2,6 +2,20 @@
 
 用于联名款、主 KV、Campaign 延展、时尚广告和竖版主视觉。
 
+## 适用范围
+
+- 联名主 KV
+- 品牌主视觉海报
+- 人物或产品导向的 Campaign 海报
+- 同一视觉系统下的延展海报
+
+## 不适用范围
+
+- 详情页卖点拆解图
+- 纯电商白底主图
+- 连续叙事型电影分镜
+- 口播分镜板或信息板式任务
+
 ## 必问字段
 
 - 品牌或联名关系
@@ -9,6 +23,16 @@
 - 主体是人物、商品还是人物+商品
 - 是否预留 logo、标题、slogan、CTA 或安全区
 - 必须出现或必须避免的视觉元素
+
+## 推荐字段
+
+- `content_brief`
+- `output_mode`
+- `style_requirements`
+- `text_policy`
+- `variation_requirements`
+- `camera_language`
+- `commercial_role`
 
 ## 模板变体
 
@@ -29,6 +53,13 @@
 - `lighting`: soft premium studio light, directional rim light, diffused window light
 - `mood`: expensive restraint, calm luxury, editorial confidence
 - `camera_language`: full-body vertical hero framing, typography-safe poster composition
+
+## 强约束
+
+- 必须写清这是海报或主视觉，而不是普通写真
+- 必须给出主体层级和留白逻辑
+- 主体裁切规则必须可控，不能高概率裁掉脚、手或商品关键结构
+- 文字安全区只描述留白，不让模型直接生成可读文字
 
 ## 反模式
 

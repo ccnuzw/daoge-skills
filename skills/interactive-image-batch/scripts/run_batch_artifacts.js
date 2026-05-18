@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { shellQuote, portableRunnerPreambleLines } = require('./run_batch_cli');
+const { ensurePortalUiAssets } = require('./portal_ui_shared');
 
 function countBy(items, key) {
   const counts = {};
@@ -147,6 +148,26 @@ function renderCompletionReport(outputDir) {
   return reportPath;
 }
 
+function renderCompletionBoard(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_completion_board.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const boardPath = path.join(outputDir, 'completion_board.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', boardPath], {
+    stdio: 'ignore',
+  });
+  return boardPath;
+}
+
+function renderRunOverview(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_run_overview.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const overviewPath = path.join(outputDir, 'run_overview.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', overviewPath], {
+    stdio: 'ignore',
+  });
+  return overviewPath;
+}
+
 function renderResultHub(outputDir) {
   const scriptPath = path.join(__dirname, 'render_result_hub.js');
   const manifestPath = path.join(outputDir, 'manifest.json');
@@ -155,6 +176,68 @@ function renderResultHub(outputDir) {
     stdio: 'ignore',
   });
   return hubPath;
+}
+
+function renderResultHubBoard(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_result_hub_board.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const hubBoardPath = path.join(outputDir, 'result_hub.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', hubBoardPath], {
+    stdio: 'ignore',
+  });
+  return hubBoardPath;
+}
+
+function renderPortalHome(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_portal_home.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const portalPath = path.join(outputDir, 'daoge_portal.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', portalPath], {
+    stdio: 'ignore',
+  });
+  return portalPath;
+}
+
+function renderReviewBoard(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_review_board.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const reviewBoardPath = path.join(outputDir, 'review_board.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', reviewBoardPath], {
+    stdio: 'ignore',
+  });
+  return reviewBoardPath;
+}
+
+function renderRerunBoard(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_rerun_board.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const rerunBoardPath = path.join(outputDir, 'rerun_board.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', rerunBoardPath], {
+    stdio: 'ignore',
+  });
+  return rerunBoardPath;
+}
+
+function renderVisualReviewAnalysis(outputDir, manifest, options = {}) {
+  if (!options.enable) return null;
+  const successFile = path.join(outputDir, 'success.json');
+  if (!fs.existsSync(successFile)) return null;
+  const scriptPath = path.join(__dirname, 'analyze_review_results.js');
+  const outputFile = path.join(outputDir, 'review_analysis.json');
+  const args = [
+    scriptPath,
+    '--success-file', successFile,
+    '--output-file', outputFile,
+    '--output-dir', outputDir,
+  ];
+  if (options.envFile) args.push('--env-file', options.envFile);
+  if (options.responsesModel) args.push('--responses-model', options.responsesModel);
+  if (options.visionTimeoutMs) args.push('--vision-timeout-ms', String(options.visionTimeoutMs));
+  if (options.maxItems) args.push('--max-items', String(options.maxItems));
+  execFileSync(process.execPath, args, {
+    stdio: 'ignore',
+  });
+  return outputFile;
 }
 
 function updateRunIndex(outputDir, manifest, allResults, artifacts, helpers) {
@@ -199,15 +282,25 @@ function updateRunIndex(outputDir, manifest, allResults, artifacts, helpers) {
 }
 
 function createOperationalArtifacts(outputDir, manifest, allResults, helpers) {
+  ensurePortalUiAssets(outputDir);
   const selection = createSelectionArtifacts(outputDir, manifest, allResults);
   const operations = createOperationsReport(outputDir, manifest, allResults);
   const contactSheetIndex = createContactSheetIndex(outputDir, manifest);
-  const runIndex = updateRunIndex(outputDir, manifest, allResults, { selection, operations, contactSheetIndex }, helpers);
-  return { selection, operations, contactSheetIndex, runIndex };
+  const resultHub = renderResultHub(outputDir);
+  const resultHubBoard = renderResultHubBoard(outputDir);
+  const runIndex = updateRunIndex(outputDir, manifest, allResults, { selection, operations, contactSheetIndex, resultHub, resultHubBoard }, helpers);
+  return { selection, operations, contactSheetIndex, resultHub, resultHubBoard, runIndex };
 }
 
 module.exports = {
   renderCompletionReport,
+  renderCompletionBoard,
+  renderRunOverview,
   renderResultHub,
+  renderResultHubBoard,
+  renderPortalHome,
+  renderReviewBoard,
+  renderRerunBoard,
+  renderVisualReviewAnalysis,
   createOperationalArtifacts,
 };

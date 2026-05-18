@@ -82,7 +82,9 @@
 - `needs_review.json`
 - `rerun_candidates.json`
 - `selection_board.md`
+- `review_board.html`
 - `operations_report.md`
+- `result_hub.html`
 - `daoge_result_hub.md`
 
 这意味着：
@@ -91,6 +93,29 @@
 - 中断后可以跳过已完成项
 - 批量任务可以分阶段推进
 - 后续选图和复跑都有依据
+- 还可以直接打开 HTML 审阅看板做“保留 / 复核 / 重跑”决策
+- HTML 审阅看板会给出基础风险标签和启发式审阅分，方便先做一轮半自动筛选
+
+现在的推荐浏览方式已经升级成 **HTML 门户优先**：
+
+- `daoge_portal.html`
+- `prompt_preview.html`
+- `preflight_board.html`
+- `assets_board.html`
+- `run_overview.html`
+- `review_board.html`
+- `storyboard_board.html`
+- `completion_board.html`
+- `rerun_board.html`
+- `result_hub.html`
+
+Markdown 产物现在更适合作为：
+
+- 归档副本
+- 调试参考
+- 补充说明
+
+而不是主用户入口。
 
 ### 4. 可复用模板模式
 
@@ -805,20 +830,106 @@ skills/interactive-image-batch/scripts/run_smoke_tests.sh
 它会顺序执行：
 
 - `scripts/*.js` 全量 `node --check`
+- `scripts/validate_template_registry.js`
 - `skills/interactive-image-batch/tests/smoke.test.js`
 
 当前 smoke 覆盖：
 
 - `run_batch.js --dry-run`
 - `daoge_prepare_run.js` 最小 preflight
+- `template_registry_zh.json` 与模板文档主链一致性校验
 - mock provider 下的 `prompt-only` 执行路径
 - mock provider 下的 `reference-assisted` 执行路径
 
 建议规则：
 
 - 改 `scripts/` 后先跑一次统一 smoke
+- 改 `references/template_registry_zh.json` 或 `references/templates/*` 后也先跑一次统一 smoke
 - 改 `run_batch*`、`render_*`、`validate_*`、`daoge_prepare_run.js` 时不要跳过回归
 - 新增执行分支时，优先补 fixture 和 smoke tests，再继续扩功能
+- 如果只改模板文档，也不要只靠肉眼检查，至少跑到 `validate_template_registry.js` 为绿
+
+## 模板维护 SOP
+
+如果你要新增、修改或清理模板，推荐固定按下面 4 步走，不要跳步。
+
+### 1. 先判断这是“基础模板”还是“派生模板”
+
+- 如果变化发生在结构层：
+  - 必问字段不同
+  - `prompt_sections` 不同
+  - `quality_rules` 或 `anti_patterns` 不同
+  - 需要独立触发词和主链检测
+  - 这才考虑新增基础模板
+- 如果变化只是行业语义、场景语义或示例差异：
+  - 优先做派生模板文档
+  - 不要急着加入 `template_registry_zh.json`
+
+判断标准以：
+
+- `references/template_authoring_zh.md`
+
+为准。
+
+### 2. 更新模板文档和注册表
+
+基础模板最少要同步两处：
+
+- `references/templates/<category>/<template>.md`
+- `references/template_registry_zh.json`
+
+模板文档至少应具备这些章节：
+
+- `适用范围`
+- `不适用范围`
+- `必问字段`
+- `推荐字段`
+- `模板变体`
+- `推荐 variant_axes`
+- `自动补全建议`
+- `强约束`
+- `反模式`
+
+如果只是派生模板文档，应明确写清：
+
+- 依附的主模板是谁
+- 本文档补充的行业语义是什么
+- 为什么不进入注册表主链
+
+### 3. 跑模板主链校验
+
+最小校验命令：
+
+```bash
+cd skills/interactive-image-batch
+node scripts/validate_template_registry.js
+node scripts/render_template_registry_report.js \
+  --report-file references/template_registry_validation_report.json
+```
+
+你应该至少看到三份产物：
+
+- `references/template_registry_validation_report.json`
+- `references/template_registry_report.md`
+- `references/template_registry_report.html`
+
+如果这里不绿，不要继续往下交付。
+
+### 4. 跑统一 smoke
+
+最终统一入口：
+
+```bash
+skills/interactive-image-batch/scripts/run_smoke_tests.sh
+```
+
+只有这条入口跑通，才说明：
+
+- 脚本语法没坏
+- 模板主链没漂移
+- smoke tests 没被模板改动带崩
+
+建议把它当成模板改动的默认收尾动作，而不是可选动作。
 
 ---
 

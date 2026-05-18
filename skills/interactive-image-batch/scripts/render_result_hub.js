@@ -39,9 +39,12 @@ function main() {
   const outputPath = path.resolve(args['output-file'] || path.join(outputDir, 'daoge_result_hub.md'));
   const completionReportPath = path.join(outputDir, 'daoge_completion_report.md');
   const selectionBoardPath = path.join(outputDir, 'selection_board.md');
+  const rerunBoardPath = path.join(outputDir, 'rerun_board.html');
   const operationsReportPath = path.join(outputDir, 'operations_report.md');
   const promptPreviewPath = path.join(outputDir, 'prompt_preview.md');
   const preflightPath = path.join(outputDir, 'daoge_preflight_dashboard.md');
+  const reviewBoardPath = path.join(outputDir, 'review_board.html');
+  const storyboardBoardPath = path.join(outputDir, 'storyboard_board.html');
   const runIndexPath = path.join(path.dirname(outputDir), 'daoge_run_index.md');
   const batchManifests = Array.isArray(manifest.batches) ? manifest.batches : [];
   const allResults = batchManifests.flatMap((batch) => batch.results || []);
@@ -59,14 +62,23 @@ function main() {
     '',
     '我是 DAOGE。',
     '这份文件只负责把本轮最常用的结果入口收成一页，避免你在多个文件之间来回找。',
+    '如果你只想快速知道先打开哪个文件，就先看下面这组“推荐浏览顺序”。',
     '',
-    '## 1. 三个最常用入口',
+    '## 1. 推荐浏览顺序',
     '',
-    `- 本次总览: ${fileExists(completionReportPath) ? completionReportPath : '尚未生成 daoge_completion_report.md'}`,
-    `- 最终图片目录: ${outputDir}`,
-    `- 失败补跑入口: ${fileExists(selectionBoardPath) ? selectionBoardPath : '尚未生成 selection_board.md'}`,
+    `1. 先看 HTML 审阅看板: ${fileExists(reviewBoardPath) ? reviewBoardPath : '尚未生成 review_board.html'}`,
+    `2. 再看 Storyboard 装板: ${fileExists(storyboardBoardPath) ? storyboardBoardPath : '尚未生成 storyboard_board.html'}`,
+    `3. 再看完成报告: ${fileExists(completionReportPath) ? completionReportPath : '尚未生成 daoge_completion_report.md'}`,
+    `4. 最后按需要处理失败补跑: ${fileExists(rerunBoardPath) ? rerunBoardPath : (fileExists(selectionBoardPath) ? selectionBoardPath : '尚未生成 selection_board.md')}`,
     '',
-    '## 2. 本轮结果摘要',
+    '## 2. 四个最常用入口',
+    '',
+    `- 审阅入口: ${fileExists(reviewBoardPath) ? reviewBoardPath : '尚未生成 review_board.html'}`,
+    `- 整板入口: ${fileExists(storyboardBoardPath) ? storyboardBoardPath : '尚未生成 storyboard_board.html'}`,
+    `- 报告入口: ${fileExists(completionReportPath) ? completionReportPath : '尚未生成 daoge_completion_report.md'}`,
+    `- 图片目录: ${outputDir}`,
+    '',
+    '## 3. 本轮结果摘要',
     '',
     `- 成功张数: ${manifest.success ?? 0}`,
     `- 失败张数: ${manifest.failed ?? 0}`,
@@ -79,26 +91,44 @@ function main() {
     `- 尝试局部编辑槽位: ${attemptedLocalEditSlotIds.length ? attemptedLocalEditSlotIds.join(', ') : '无'}`,
     `- 成功局部编辑槽位: ${successfulLocalEditSlotIds.length ? successfulLocalEditSlotIds.join(', ') : '无'}`,
     '',
-    '## 3. 如何找图',
+    '## 4. 入口之间怎么联动',
+    '',
+    '- 在 HTML 审阅看板里先筛图、切换审阅模式或画廊模式。',
+    '- 如果某张图属于 storyboard 槽位，就从审阅卡里直接点“查看整板位置”。',
+    '- 跳到 storyboard 装板后，会看到当前焦点条和高亮槽位，再判断它在整板里的上下文。',
+    '- 如果还要看执行细节、路径和批次信息，再回到完成报告。',
+    '',
+    '## 5. 如何找图',
     '',
     `- 所有最终图片都在这个目录下: ${outputDir}`,
     '- 图片通常按 `batch_001 / batch_002 / ...` 分批存放',
     '- 每张图旁边会有同名 `.json` 元数据文件，方便后续追溯 prompt 和参数',
     '',
-    '## 4. 快速查看文件',
+    '## 6. 看板与报告入口',
     '',
     `- 完成报告: ${fileExists(completionReportPath) ? completionReportPath : '未生成'}`,
-    `- 筛选看板: ${fileExists(selectionBoardPath) ? selectionBoardPath : '未生成'}`,
+    `- HTML 审阅看板: ${fileExists(reviewBoardPath) ? reviewBoardPath : '未生成'}`,
+    `- Storyboard 装板: ${fileExists(storyboardBoardPath) ? storyboardBoardPath : '未生成'}`,
+    `- 失败补跑看板: ${fileExists(rerunBoardPath) ? rerunBoardPath : '未生成'}`,
+    `- 失败补跑 Markdown 入口: ${fileExists(selectionBoardPath) ? selectionBoardPath : '未生成'}`,
     `- 运营复盘: ${fileExists(operationsReportPath) ? operationsReportPath : '未生成'}`,
     `- 预检总览: ${fileExists(preflightPath) ? preflightPath : '未生成'}`,
     `- Prompt 预览: ${fileExists(promptPreviewPath) ? promptPreviewPath : '未生成'}`,
     `- 运行总索引: ${fileExists(runIndexPath) ? runIndexPath : '未生成'}`,
     '',
-    '## 5. 成功样例',
+    '## 7. 先看什么，取决于你的目标',
+    '',
+    '- 想先选图：先看 HTML 审阅看板。',
+    '- 想确认某张图在整板里的位置：从审阅卡跳到 Storyboard 装板。',
+    '- 想看执行概览和目录结构：看完成报告。',
+    '- 想只找最终图片：直接打开图片目录。',
+    '- 想处理失败项：最后看失败补跑看板。',
+    '',
+    '## 8. 成功样例',
     '',
     ...(successful.length ? successful.map((item) => `- ${item.index} / ${item.title || item.slug}: ${item.output}`) : ['- 暂无成功样例']),
     '',
-    '## 6. 失败补跑',
+    '## 9. 失败补跑',
     '',
   ];
 
@@ -118,11 +148,12 @@ function main() {
   }
 
   lines.push('');
-  lines.push('## 7. DAOGE 建议');
+  lines.push('## 10. DAOGE 建议');
   lines.push('');
-  lines.push('- 先看“本次总览”，再去图片目录选图。');
-  lines.push('- 如果要排查失败或补跑，优先走“失败补跑入口”。');
-  lines.push('- 如果你只想找最终图片，不用先读所有报告，直接打开“最终图片目录”。');
+  lines.push('- 默认浏览路径：审阅看板 -> Storyboard 装板 -> 完成报告。');
+  lines.push('- 如果你是 storyboard 任务，尽量不要只盯单张图，要结合整板焦点位置一起看。');
+  lines.push('- 如果要排查失败或补跑，优先走“失败补跑入口”，不要从总入口直接回到整批执行。');
+  lines.push('- 如果你只想找最终图片，不用先读所有报告，直接打开“图片目录”。');
 
   fs.writeFileSync(outputPath, `${lines.join('\n')}\n`);
   console.log(JSON.stringify({
