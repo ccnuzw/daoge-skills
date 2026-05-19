@@ -6,7 +6,7 @@ const { renderPortalHeadAssets } = require('./portal_ui_shared');
 const { resolveProfile, buildDisplayDistributions } = require('./template_display_profile');
 
 function escapeHtml(text) {
-  return String(text || '')
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -101,14 +101,34 @@ function renderKeyValueRows(items) {
   return items.map((item) => `
     <div class="kv-row">
       <div class="kv-label">${escapeHtml(item.label)}</div>
-      <div class="kv-value">${escapeHtml(item.value)}</div>
+      <div class="kv-value">${escapeHtml(item.value ?? '未提供')}</div>
     </div>
   `).join('');
+}
+
+function formatModeLabel(mode) {
+  const text = String(mode || '').trim();
+  if (!text) return '未检测';
+  if (text === 'prepare-only') return '预检准备阶段';
+  if (text === 'storyboard-board') return '分镜整板预检阶段';
+  return text;
 }
 
 function renderLink(label, href) {
   if (!href) return '';
   return `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+}
+
+function resolveUserFacingTemplateName(taskSpec, modeDetection, strategy) {
+  const outputMode = String(taskSpec.output_mode || '').trim();
+  if (outputMode) return outputMode;
+  const variantName = String(
+    strategy?.template_variant?.display_name ||
+    strategy?.template_variant?.name ||
+    ''
+  ).trim();
+  if (variantName) return variantName;
+  return String(modeDetection?.detected_template?.name || '').trim() || '未检测';
 }
 
 function main() {
@@ -140,6 +160,7 @@ function main() {
   const template = modeDetection.detected_template || {};
   const readiness = buildReadiness(taskSpec, validation, gates);
   const displayProfile = resolveProfile(prompts);
+  const userFacingTemplateName = resolveUserFacingTemplateName(taskSpec, modeDetection, strategy);
   const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
     .map((item) => ({ ...item, counts: item.counts.slice(0, 8) }));
 
@@ -348,7 +369,7 @@ ${renderPortalHeadAssets()}
         </div>
         <div class="metric-card metric-info">
           <div class="metric-label">DAOGE 模板</div>
-          <div class="metric-value">${escapeHtml(template.name || '未检测')}</div>
+          <div class="metric-value">${escapeHtml(userFacingTemplateName)}</div>
         </div>
       </div>
       <div class="metric-grid">
@@ -392,8 +413,8 @@ ${renderPortalHeadAssets()}
             ${renderKeyValueRows([
               { label: '内容主题', value: taskSpec.content_brief || '未提供' },
               { label: '输出模式', value: taskSpec.output_mode || '未提供' },
-              { label: 'DAOGE 模式', value: modeDetection.detected_mode || '未检测' },
-              { label: 'DAOGE 模板', value: template.name || '未检测' },
+              { label: 'DAOGE 模式', value: formatModeLabel(modeDetection.detected_mode) },
+              { label: 'DAOGE 模板', value: userFacingTemplateName },
               { label: '总张数', value: taskSpec.total_count || 0 },
               { label: '运行标签', value: taskSpec.run_label || '未设置' },
             ])}

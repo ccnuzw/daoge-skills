@@ -79,7 +79,7 @@ function candidateCategoriesForMode(mode, taskSpec, strategy) {
   if (/(illustrated scene|concept scene|healing scene|picture-book|storybook|mood scene|插画场景|绘本场景|治愈场景|情绪场景|概念场景)/i.test(outputSignals)) {
     return new Set(['scenes-and-illustrations']);
   }
-  if (/(avatar|profile|头像|贴纸|sticker|selfie|角色头像|icon portrait)/i.test(outputSignals)) {
+  if (/(avatar|头像|贴纸|sticker|selfie|角色头像|icon portrait|profile pic|profile picture|social profile|chat avatar|chat profile|creator profile)/i.test(outputSignals)) {
     return new Set(['avatars-and-profile']);
   }
   if (/(slide|slides|幻灯页|汇报页|visual report|report page|policy slide|explainer slide)/i.test(outputSignals)) {

@@ -258,6 +258,16 @@
           "id": "gesture-sequence-studio",
           "name": "手势序列棚拍",
           "description": "强调动作连续性、手势表达和受控棚拍节奏。"
+        },
+        {
+          "id": "sharp-tailoring-studio",
+          "name": "利落剪裁棚拍",
+          "description": "强调利落剪裁、肩线轮廓和品牌式极简棚拍秩序。"
+        },
+        {
+          "id": "beauty-detail-studio",
+          "name": "美妆细节棚拍",
+          "description": "强调近景皮肤、妆发细节和受控柔光质感。"
         }
       ],
       "tier": "core-commercial",
@@ -557,6 +567,16 @@
           "id": "product-linked-portrait-kv",
           "name": "人物产品联动主视觉",
           "description": "人物仍为视觉中心，同时让产品作为品牌锚点清晰可读。"
+        },
+        {
+          "id": "headline-safe-portrait-kv",
+          "name": "标题留白肖像主视觉",
+          "description": "强调稳定标题留白、近景人像安全区和品牌海报版面兼容。"
+        },
+        {
+          "id": "profile-silhouette-kv",
+          "name": "侧轮廓肖像主视觉",
+          "description": "强调侧脸轮廓、颈肩线条和更克制的气质主视觉表达。"
         }
       ],
       "tier": "core-commercial",

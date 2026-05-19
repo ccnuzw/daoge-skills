@@ -15,6 +15,21 @@ function starterExamples(examples) {
   return examples.filter((item) => item.recommended_start === true);
 }
 
+const STARTER_SHORTLIST_INTENTS = new Set([
+  'portrait',
+  'studio',
+  'ecommerce',
+  'packaging',
+  'cinematic',
+  'oralboard',
+]);
+
+function shortlistStarterExamples(examples) {
+  return starterExamples(examples).filter((item) =>
+    STARTER_SHORTLIST_INTENTS.has(String(item.starter_intent || '').trim().toLowerCase())
+  );
+}
+
 function findStarterByIntent(examples, intent) {
   const normalized = String(intent || '').trim().toLowerCase();
   return starterExamples(examples).find((item) => String(item.starter_intent || '').trim().toLowerCase() === normalized) || null;
@@ -26,7 +41,7 @@ function listExamples(examples) {
 }
 
 function listStarterExamples(examples) {
-  const starters = starterExamples(examples);
+  const starters = shortlistStarterExamples(examples);
   const lines = starters.map((item) => `${item.id}\t${item.name}\t${item.starter_intent || 'unspecified'}\t${item.difficulty || 'unspecified'}\t${item.starter_reason || item.description || ''}`);
   console.log(lines.join('\n'));
 }

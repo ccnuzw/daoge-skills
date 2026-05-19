@@ -1,5 +1,11 @@
 # Examples Index
 
+如果你是第一次使用，不要先从这个文件开始。
+
+请先读：
+
+- [../../START_HERE_中文.md](../../START_HERE_中文.md)
+
 这个目录用于存放 `interactive-image-batch` 的示例输入和示例结构。
 
 约束：
@@ -396,12 +402,16 @@ node scripts/render_example_catalog_board.js
 - `portrait-kv-beauty-crop-kv`
 - `portrait-kv-emotion-contrast-kv`
 - `portrait-kv-product-linked-portrait-kv`
+- `portrait-kv-headline-safe-portrait-kv`
+- `portrait-kv-profile-silhouette-kv`
 - `studio-editorial-high-contrast-studio`
 - `studio-editorial-soft-beauty-studio`
 - `studio-editorial-mono-backdrop-editorial`
 - `studio-editorial-motion-pose-studio`
 - `studio-editorial-couture-minimal-studio`
 - `studio-editorial-gesture-sequence-studio`
+- `studio-editorial-sharp-tailoring-studio`
+- `studio-editorial-beauty-detail-studio`
 - `cinematic-storyboard`
 - `oral-storyboard-board`
 - `finance-oral-storyboard-board`

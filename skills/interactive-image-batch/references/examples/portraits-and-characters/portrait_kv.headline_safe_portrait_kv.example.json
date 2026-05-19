@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "headline-safe-portrait-kv",
+  "content_brief": "做一张适合大标题后期压字的近景人物主视觉，人物仍然要保持情绪集中和品牌气质，但头部上方和一侧必须留出稳定安全区，用于品牌封面和人物海报 KV。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "headline safe portrait key visual",
+    "face-led premium crop with stable layout margin",
+    "brand poster portrait with clean typography safe area"
+  ],
+  "variation_requirements": [
+    "标题留白必须稳定，不能靠临时裁切硬挤出来",
+    "人物表情和眼神仍然要成立，不能因为让版而显得空",
+    "背景必须干净，保证后期压字可读"
+  ],
+  "text_policy": "不生成可读标题，只保留适合品牌主标题和副标题压字的近景安全区。",
+  "sample_variant_axes": {
+    "eye_language": "calm direct brand focus",
+    "crop_scale": "head-and-shoulders safe-area crop",
+    "lighting": "clean face-led poster light",
+    "mood": "premium calm with layout discipline"
+  }
+}

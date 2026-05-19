@@ -1367,6 +1367,21 @@ test('render_example_catalog_board links back into portal navigation', () => {
   ]);
 
   const html = fs.readFileSync(outputFile, 'utf8');
+  assert.match(html, /中文任务入口总览/);
+  assert.match(html, /按任务意图开始/);
+  assert.match(html, /推荐起步/);
+  assert.match(html, /人物与时尚视觉/);
+  assert.match(html, /电商与商业视觉/);
+  assert.match(html, /信息与说明型视觉/);
+  assert.match(html, /分镜与叙事/);
+  assert.match(html, /界面与产品样机/);
+  assert.match(html, /推荐意图入口/);
+  assert.match(html, /catalog-search/);
+  assert.match(html, /只看主链/);
+  assert.match(html, /只看变体/);
+  assert.match(html, /折叠分组/);
+  assert.match(html, /查看模板细节（维护者）|查看变体细节（维护者）/);
+  assert.match(html, /第一次使用优先选它|适合不想先理解模板名的人/);
   assert.match(html, /返回 DAOGE 门户/);
   assert.match(html, /返回结果总入口/);
   assert.match(html, /返回 Prompt 预览/);
@@ -1951,5 +1966,34 @@ test('run_example_catalog_prepare can run third-wave portrait-fashion variants f
     assert.equal(summary.selectedExample.template_variant, item.variant);
     assert.equal(fs.existsSync(summary.preflightBoard), true);
     assert.equal(fs.existsSync(summary.promptPreviewBoard), true);
+  });
+});
+
+test('run_example_catalog_prepare can run fourth-wave portrait-fashion variants from widened catalog', () => {
+  const tempDir = makeTempDir('interactive-image-batch-portrait-fashion-wave4-');
+  const cases = [
+    { exampleId: 'portrait-kv-headline-safe-portrait-kv', variant: 'headline-safe-portrait-kv', templateId: 'portrait-kv' },
+    { exampleId: 'portrait-kv-profile-silhouette-kv', variant: 'profile-silhouette-kv', templateId: 'portrait-kv' },
+    { exampleId: 'studio-editorial-sharp-tailoring-studio', variant: 'sharp-tailoring-studio', templateId: 'studio-editorial' },
+    { exampleId: 'studio-editorial-beauty-detail-studio', variant: 'beauty-detail-studio', templateId: 'studio-editorial' },
+  ];
+
+  cases.forEach((item) => {
+    const outputDir = path.join(tempDir, item.exampleId);
+    const runStdout = runNode('run_example_catalog_prepare.js', [
+      '--example-id', item.exampleId,
+      '--output-dir', outputDir,
+    ]);
+    const summary = JSON.parse(runStdout);
+    assert.equal(summary.selectedExample.id, item.exampleId);
+    assert.equal(summary.selectedExample.template_variant, item.variant);
+    assert.equal(fs.existsSync(summary.preflightBoard), true);
+    assert.equal(fs.existsSync(summary.promptPreviewBoard), true);
+    const modeDetection = JSON.parse(fs.readFileSync(summary.modeDetection, 'utf8'));
+    assert.equal(modeDetection.detected_template.id, item.templateId);
+    const promptValidation = JSON.parse(fs.readFileSync(path.join(summary.prepareOutputDir, 'prompt_validation_report.json'), 'utf8'));
+    assert.equal(promptValidation.duplicatePromptCount, 0);
+    assert.deepEqual(promptValidation.warnings || [], []);
+    assert.equal(promptValidation.qualityGates.ok, true);
   });
 });

@@ -13,8 +13,8 @@ function parseNumber(value, fallback) {
 function countBy(items, key) {
   const counts = {};
   for (const item of items) {
-    const value = item[key];
-    const label = value === undefined || value === null || value === '' ? '(missing)' : String(value).trim();
+    const value = normalizeValue(item[key]);
+    const label = value || '未指定';
     counts[label] = (counts[label] || 0) + 1;
   }
   return counts;
@@ -38,6 +38,14 @@ function shorten(text, max = 240) {
 
 function bullet(label, value) {
   return value ? `- ${label}: ${value}` : null;
+}
+
+function displayTitle(item, fallbackIndex) {
+  const shotLabel = String(item.shot_label || '').trim();
+  if (shotLabel) return shotLabel;
+  const scene = String(item.scene || '').trim();
+  if (scene) return scene;
+  return item.title || item.slug || `prompt-${fallbackIndex}`;
 }
 
 function formatEditMode(item) {
@@ -96,7 +104,7 @@ function main() {
     ...userFocusBlock([
       `数量：共 ${prompts.length} 条提示词，预览 ${previewItems.length} 条`,
       `批次：按每批 ${batchSize} 条拆分，共 ${batches.length} 批`,
-      `方向：主风格族 ${topLabel(distributions.style_family)}，${displayProfile.summaryFields[0]?.label || '主方向'} ${topLabel(displayDistributions[1]?.counts || [])}`,
+      `方向：${displayProfile.summaryFields[0]?.label || '主方向'} ${topLabel(displayDistributions[0]?.counts || [])}，${displayProfile.summaryFields[1]?.label || '次方向'} ${topLabel(displayDistributions[1]?.counts || [])}`,
     ]),
     '',
     `- 提示词来源: ${promptsFile}`,
@@ -109,22 +117,18 @@ function main() {
       `- 分镜板数量: ${boardIds.length || 1}`,
       `- 主要槽位角色: ${topLabel(distributions.slot_role)}`,
       `- 参考模式: ${topLabel(referenceModes)}`,
-      `- 编辑底图来源: ${topLabel(editSources, '未使用')}`,
+      ...(editSources.length ? [`- 编辑底图来源: ${topLabel(editSources, '未使用')}`] : []),
     ] : []),
     '',
     '## 分布摘要',
     '',
-    '- 风格族:',
-    ...distributions.style_family.map((item) => `  - ${item.name}: ${item.count}`),
-    '- 强度等级:',
-    ...distributions.purity_grade.map((item) => `  - ${item.name}: ${item.count}`),
     ...displayDistributions.flatMap((item) => [
       `- ${item.label}:`,
       ...item.counts.map((entry) => `  - ${entry.name}: ${entry.count}`),
     ]),
     ...(storyboardMode ? ['- 槽位角色:', ...distributions.slot_role.map((item) => `  - ${item.name}: ${item.count}`)] : []),
     ...(storyboardMode ? ['- 参考模式:', ...referenceModes.map((item) => `  - ${item.name}: ${item.count}`)] : []),
-    ...(storyboardMode ? ['- 编辑底图来源:', ...editSources.map((item) => `  - ${item.name}: ${item.count}`)] : []),
+    ...(storyboardMode && editSources.length ? ['- 编辑底图来源:', ...editSources.map((item) => `  - ${item.name}: ${item.count}`)] : []),
     '',
     '## DAOGE 摘要',
     '',
@@ -141,10 +145,8 @@ function main() {
   ];
 
   previewItems.forEach((item, idx) => {
-    lines.push(`### ${item.index ?? idx + 1}. ${item.title || item.slug || `prompt-${idx + 1}`}`);
+    lines.push(`### ${item.index ?? idx + 1}. ${displayTitle(item, idx + 1)}`);
     [
-      bullet(labelField('slug'), item.slug),
-      bullet(labelField('style_family'), item.style_family),
       bullet(labelField('board_id'), item.board_id),
       bullet(labelField('slot_id'), item.slot_id),
       bullet(labelField('slot_role'), item.slot_role),
@@ -153,7 +155,6 @@ function main() {
       bullet(labelField('layout_region_id'), item.layout_region_id),
       bullet(labelField('timecode'), item.timecode),
       bullet(labelField('style_variant'), item.style_variant),
-      bullet(labelField('purity_grade'), item.purity_grade),
       ...displayProfile.sampleFields.map((field) => bullet(field.label, normalizeValue(item[field.key]))),
       bullet(labelField('scene_anchor'), item.scene_anchor),
       bullet(labelField('exposure_signal'), item.exposure_signal),
@@ -230,9 +231,7 @@ function main() {
     '',
     '## 主要分布',
     '',
-    `- 主风格族: ${topLabel(distributions.style_family)}`,
-    `- 主强度等级: ${topLabel(distributions.purity_grade)}`,
-    ...displayProfile.summaryFields.map((field, index) => `- ${field.label}: ${topLabel(displayDistributions[index + 1]?.counts || [])}`),
+    ...displayProfile.summaryFields.map((field, index) => `- ${field.label}: ${topLabel(displayDistributions[index]?.counts || [])}`),
     '',
     '## 关键文件',
     '',

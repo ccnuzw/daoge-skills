@@ -769,6 +769,24 @@
       "description": "适合人物仍为主视觉中心，同时产品作为品牌锚点清晰可读的品牌人物海报。"
     },
     {
+      "id": "portrait-kv-headline-safe-portrait-kv",
+      "name": "肖像主视觉 · 标题留白肖像",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "headline-safe-portrait-kv",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.headline_safe_portrait_kv.example.json",
+      "description": "适合强调稳定标题留白、安全区兼容和近景品牌封面版面的肖像主视觉。"
+    },
+    {
+      "id": "portrait-kv-profile-silhouette-kv",
+      "name": "肖像主视觉 · 侧轮廓主视觉",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "profile-silhouette-kv",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.profile_silhouette_kv.example.json",
+      "description": "适合强调侧脸轮廓、颈肩线条和克制高级气质的人物近景主视觉。"
+    },
+    {
       "id": "studio-editorial",
       "name": "棚拍大片",
       "category": "portraits-and-characters",
@@ -834,6 +852,24 @@
       "template_variant": "gesture-sequence-studio",
       "example_file": "references/examples/portraits-and-characters/studio_editorial.gesture_sequence_studio.example.json",
       "description": "适合强调动作连续性、手势表达和受控棚拍节奏的人物大片。"
+    },
+    {
+      "id": "studio-editorial-sharp-tailoring-studio",
+      "name": "棚拍大片 · 利落剪裁棚拍",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "sharp-tailoring-studio",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.sharp_tailoring_studio.example.json",
+      "description": "适合强调肩线、剪裁和利落时尚轮廓的高端棚拍人物任务。"
+    },
+    {
+      "id": "studio-editorial-beauty-detail-studio",
+      "name": "棚拍大片 · 美妆细节棚拍",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "beauty-detail-studio",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.beauty_detail_studio.example.json",
+      "description": "适合强调皮肤、妆发和近景细节层次的美妆型棚拍人物任务。"
     },
     {
       "id": "cinematic-storyboard",

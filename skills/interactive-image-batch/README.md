@@ -1,5 +1,47 @@
 # DAOGE Interactive Image Batch
 
+## 先看这里
+
+如果你是第一次使用这套 skill，先不要直接读完整 README。
+
+先读：
+
+- [START_HERE_中文.md](./START_HERE_中文.md)
+- [references/template_map_zh.md](./references/template_map_zh.md)
+
+这份文档只讲：
+
+- 从哪里开始
+- 按什么任务类型选入口
+- 跑哪条命令
+- 看哪些结果文件
+
+如果你只是想快速上手，优先走这条路径：
+
+```bash
+node scripts/run_example_catalog_prepare.js --starter true
+```
+
+这条命令默认只列最常用的 6 个中文起步入口：
+
+- `portrait`
+- `studio`
+- `ecommerce`
+- `packaging`
+- `cinematic`
+- `oralboard`
+
+如果你已经知道任务类型，也建议第一次先只记这 6 个：
+
+```bash
+node scripts/run_example_catalog_prepare.js --intent portrait
+node scripts/run_example_catalog_prepare.js --intent studio
+node scripts/run_example_catalog_prepare.js --intent ecommerce
+node scripts/run_example_catalog_prepare.js --intent packaging
+node scripts/run_example_catalog_prepare.js --intent cinematic
+node scripts/run_example_catalog_prepare.js --intent oralboard
+```
+
 `interactive-image-batch` 是一套面向 DAOGE / 刀哥工作流的批量生图 skill。
 
 它不是一个“只会读 prompts.json 然后盲跑接口”的简易脚本，而是一套完整的批量生图工作流：
@@ -118,6 +160,15 @@ Markdown 产物现在更适合作为：
 而不是主用户入口。
 
 ### 4. 可复用模板模式
+
+注意：
+
+这一节更偏“能力总览”，不是第一次使用时的推荐入口。
+
+如果你的目标是“先跑起来”，请优先回到：
+
+- [START_HERE_中文.md](./START_HERE_中文.md)
+- `references/examples/README.md`
 
 除了通用工作流，这个 skill 也支持模板化复用。
 
@@ -475,12 +526,16 @@ node scripts/render_example_catalog_board.js
 - `portrait-kv-beauty-crop-kv`
 - `portrait-kv-emotion-contrast-kv`
 - `portrait-kv-product-linked-portrait-kv`
+- `portrait-kv-headline-safe-portrait-kv`
+- `portrait-kv-profile-silhouette-kv`
 - `studio-editorial-high-contrast-studio`
 - `studio-editorial-soft-beauty-studio`
 - `studio-editorial-mono-backdrop-editorial`
 - `studio-editorial-motion-pose-studio`
 - `studio-editorial-couture-minimal-studio`
 - `studio-editorial-gesture-sequence-studio`
+- `studio-editorial-sharp-tailoring-studio`
+- `studio-editorial-beauty-detail-studio`
 - `cinematic-storyboard`
 - `oral-storyboard-board`
 - `finance-oral-storyboard-board`

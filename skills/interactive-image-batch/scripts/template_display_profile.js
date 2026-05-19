@@ -12,7 +12,7 @@ function countBy(items, key) {
   const counts = {};
   for (const item of items) {
     const value = normalizeValue(item[key]);
-    const label = value || '(missing)';
+    const label = value || '未指定';
     counts[label] = (counts[label] || 0) + 1;
   }
   return Object.entries(counts)
@@ -145,17 +145,76 @@ function resolveProfile(prompts) {
         { key: 'composition', label: '主商品构图' },
       ],
       distributionFields: [
-        { key: 'style_family', label: '风格族', shortLabel: 'Style 分布' },
         { key: 'scene', label: '背景控制', shortLabel: '背景控制分布' },
         { key: 'wardrobe', label: '商品展示目标', shortLabel: '商品展示目标分布' },
         { key: 'composition', label: '商品构图', shortLabel: '商品构图分布' },
       ],
       sampleFields: [
-        { key: 'style_family', label: 'Style' },
         { key: 'scene', label: '背景控制' },
         { key: 'wardrobe', label: '商品展示目标' },
         { key: 'lighting', label: '光线控制' },
         { key: 'composition', label: '商品构图' },
+      ],
+    };
+  }
+
+  if (templateId === 'portrait-kv') {
+    return {
+      ...base,
+      heroSummary: '让你先确认人物主视觉方向、镜头角色和版面留白分布，再决定是否继续进入预检或重新改 Prompt。',
+      firstLookCopy: '先看这轮 Prompt 的主人物主视觉方向、镜头角色和版面留白分布，再看批次计划，最后抽查样例 Prompt。如果摘要里的镜头职责或留白方向已经偏离海报目标，不要直接进入执行阶段。',
+      distributionOverviewCopy: '这一页优先展示人物主视觉最关键的几个维度，帮助你快速判断镜头角色、人物状态和版面留白是否适合海报使用。',
+      currentAdvice: [
+        '先确认镜头角色是否符合这轮人物主视觉任务。',
+        '再看人物状态和版面留白，避免情绪强度与标题区发生冲突。',
+        '最后抽查样例 Prompt，确认人物主体、镜头留白和海报气质稳定。',
+      ],
+      summaryFields: [
+        { key: 'scene', label: '主人物镜头' },
+        { key: 'mood', label: '主人物状态' },
+        { key: 'composition', label: '主版面留白' },
+      ],
+      distributionFields: [
+        { key: 'scene', label: '人物镜头', shortLabel: '人物镜头分布' },
+        { key: 'mood', label: '人物状态', shortLabel: '人物状态分布' },
+        { key: 'composition', label: '版面留白', shortLabel: '版面留白分布' },
+      ],
+      sampleFields: [
+        { key: 'scene', label: '人物镜头' },
+        { key: 'mood', label: '人物状态' },
+        { key: 'lighting', label: '光线控制' },
+        { key: 'composition', label: '版面留白' },
+      ],
+    };
+  }
+
+  if (templateId === 'studio-editorial') {
+    return {
+      ...base,
+      heroSummary: '让你先确认棚拍方向、人物动作和版面结构分布，再决定是否继续进入预检或重新改 Prompt。',
+      firstLookCopy: '先看这轮 Prompt 的主棚拍方向、人物动作和版面结构分布，再看批次计划，最后抽查样例 Prompt。如果摘要里的动作节奏或棚拍气质已经偏离编辑片目标，不要直接进入执行阶段。',
+      distributionOverviewCopy: '这一页优先展示棚拍编辑片最关键的几个维度，帮助你快速判断人物动作、棚拍氛围和版面结构是否适合成片使用。',
+      currentAdvice: [
+        '先确认棚拍方向是否符合这轮人物编辑片任务。',
+        '再看人物动作和版面结构，避免动作张力与画面秩序失衡。',
+        '最后抽查样例 Prompt，确认人物状态、背景控制和棚拍气质稳定。',
+      ],
+      summaryFields: [
+        { key: 'scene', label: '主棚拍方向' },
+        { key: 'gesture', label: '主人物动作' },
+        { key: 'composition', label: '主版面结构' },
+      ],
+      distributionFields: [
+        { key: 'scene', label: '棚拍方向', shortLabel: '棚拍方向分布' },
+        { key: 'gesture', label: '人物动作', shortLabel: '人物动作分布' },
+        { key: 'lighting', label: '灯光气质', shortLabel: '灯光气质分布' },
+        { key: 'composition', label: '版面结构', shortLabel: '版面结构分布' },
+      ],
+      sampleFields: [
+        { key: 'scene', label: '棚拍方向' },
+        { key: 'gesture', label: '人物动作' },
+        { key: 'lighting', label: '灯光气质' },
+        { key: 'composition', label: '版面结构' },
       ],
     };
   }
@@ -316,6 +375,68 @@ function resolveProfile(prompts) {
         { key: 'crop_scale', label: '裁切策略' },
         { key: 'background_depth', label: '背景控制' },
         { key: 'composition', label: '头像结构' },
+      ],
+    };
+  }
+
+  if (templateId === 'cinematic-storyboard' || category === 'cinematic-sequences') {
+    return {
+      ...base,
+      heroSummary: '让你先确认镜头推进、画面节奏和关键分镜角色分布，再决定是否继续进入预检或重新改 Prompt。',
+      firstLookCopy: '先看这轮 Prompt 的主镜头类型、主叙事节点和画面节奏分布，再看批次计划，最后抽查样例 Prompt。如果这里已经看出分镜推进不顺，不要直接进入执行阶段。',
+      distributionOverviewCopy: '这一页优先展示分镜任务最关键的几个维度，帮助你快速判断镜头推进、叙事节点和画面节奏是否符合当前故事任务。',
+      currentAdvice: [
+        '先确认镜头推进和叙事节点是否符合当前分镜任务。',
+        '再看画面节奏和分镜角色，避免整组图都像同一镜头重复。',
+        '最后抽查样例 Prompt，确认开场、推进、高潮和收尾职责清楚。',
+      ],
+      summaryFields: [
+        { key: 'scene', label: '主镜头场景' },
+        { key: 'story_beat', label: '主叙事节点' },
+        { key: 'composition', label: '主画面结构' },
+      ],
+      distributionFields: [
+        { key: 'scene', label: '镜头场景', shortLabel: '镜头场景分布' },
+        { key: 'story_beat', label: '叙事节点', shortLabel: '叙事节点分布' },
+        { key: 'camera_language', label: '镜头语言', shortLabel: '镜头语言分布' },
+        { key: 'composition', label: '画面结构', shortLabel: '画面结构分布' },
+      ],
+      sampleFields: [
+        { key: 'scene', label: '镜头场景' },
+        { key: 'story_beat', label: '叙事节点' },
+        { key: 'camera_language', label: '镜头语言' },
+        { key: 'composition', label: '画面结构' },
+      ],
+    };
+  }
+
+  if (templateId === 'oral-storyboard-board') {
+    return {
+      ...base,
+      heroSummary: '让你先确认口播推进、信息区结构和收尾镜头节奏，再决定是否继续进入预检或重新改 Prompt。',
+      firstLookCopy: '先看这轮 Prompt 的主讲解场景、主口播节点和整板结构分布，再看批次计划，最后抽查样例 Prompt。如果这里已经看出口播推进或信息层不对，不要直接进入执行阶段。',
+      distributionOverviewCopy: '这一页优先展示口播分镜整板最关键的几个维度，帮助你快速判断讲解节奏、信息区分工和收尾结构是否符合整板任务。',
+      currentAdvice: [
+        '先确认讲解推进是否符合这轮口播整板目标。',
+        '再看信息区结构和镜头分工，避免每格都在重复同一种讲解动作。',
+        '最后抽查样例 Prompt，确认开场钩子、讲解展开和收尾结论职责清楚。',
+      ],
+      summaryFields: [
+        { key: 'scene', label: '主讲解场景' },
+        { key: 'story_beat', label: '主口播节点' },
+        { key: 'composition', label: '主整板结构' },
+      ],
+      distributionFields: [
+        { key: 'scene', label: '讲解场景', shortLabel: '讲解场景分布' },
+        { key: 'story_beat', label: '口播节点', shortLabel: '口播节点分布' },
+        { key: 'slot_role', label: '分镜角色', shortLabel: '分镜角色分布' },
+        { key: 'composition', label: '整板结构', shortLabel: '整板结构分布' },
+      ],
+      sampleFields: [
+        { key: 'scene', label: '讲解场景' },
+        { key: 'story_beat', label: '口播节点' },
+        { key: 'slot_role', label: '分镜角色' },
+        { key: 'composition', label: '整板结构' },
       ],
     };
   }

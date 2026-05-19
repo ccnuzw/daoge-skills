@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "profile-silhouette-kv",
+  "content_brief": "做一张更强调侧脸轮廓和颈肩线条的人物近景主视觉，整体气质要克制、精致、带一点高级距离感，用于品牌形象封面和人物气质海报。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "profile silhouette portrait key visual",
+    "side-face luxury crop with sculpted contour",
+    "restrained editorial portrait atmosphere"
+  ],
+  "variation_requirements": [
+    "侧脸轮廓必须清晰，不能因为光线塌掉鼻梁和下颌线",
+    "颈肩线条要成立，不能被裁切压坏",
+    "背景和氛围必须服务轮廓表达，不能喧宾夺主"
+  ],
+  "text_policy": "不生成可读标题，只保留适合气质型人物封面排版的近景安全区。",
+  "sample_variant_axes": {
+    "eye_language": "sideward restrained focus",
+    "crop_scale": "profile-led tight crop",
+    "lighting": "sculpted contour side light",
+    "mood": "quiet luxury distance"
+  }
+}

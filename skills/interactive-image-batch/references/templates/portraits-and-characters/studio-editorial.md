@@ -40,6 +40,8 @@
 - `motion-pose-studio`: 姿态与身体动态感更强，但仍维持棚拍控制和服装可读性。
 - `couture-minimal-studio`: 极简高定棚拍，更强调面料秩序、轮廓和高端克制感。
 - `gesture-sequence-studio`: 更强调手势和动作连续性的棚拍序列感。
+- `sharp-tailoring-studio`: 更强调肩线、剪裁和利落轮廓的棚拍人物任务。
+- `beauty-detail-studio`: 更强调近景皮肤、妆发和柔光细节的棚拍人物任务。
 
 ## 推荐 variant_axes
 

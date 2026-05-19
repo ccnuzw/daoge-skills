@@ -40,6 +40,8 @@
 - `beauty-crop-kv`: 以更精确的美容裁切和面部细节可读性为中心。
 - `emotion-contrast-kv`: 以克制但明确的情绪对照和人物表达张力为中心。
 - `product-linked-portrait-kv`: 人物仍是主视觉中心，但产品作为品牌锚点被清楚读到。
+- `headline-safe-portrait-kv`: 以稳定标题留白和人像安全区兼容为中心。
+- `profile-silhouette-kv`: 以侧脸轮廓、颈肩线条和更克制的气质表达为中心。
 
 ## 推荐 variant_axes
 

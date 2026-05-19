@@ -37,12 +37,97 @@ function groupExamples(examples) {
     });
 }
 
+function taskGroups() {
+  return [
+    {
+      id: 'portrait-fashion',
+      title: '人物与时尚视觉',
+      description: '适合人物海报、近景肖像、棚拍大片和系列 Lookbook 这类人物主导任务。',
+      matchCategories: new Set(['portraits-and-characters', 'grids-and-collages']),
+      intentPriority: ['portrait', 'studio', 'lookbook'],
+    },
+    {
+      id: 'commerce-brand',
+      title: '电商与商业视觉',
+      description: '适合电商主图、详情页组图、社媒图、广告测试、品牌海报和包装任务。',
+      matchCategories: new Set(['product-visuals', 'social-campaigns', 'performance-creatives', 'poster-and-campaigns', 'branding-and-packaging']),
+      intentPriority: ['ecommerce', 'detail', 'social', 'abtest', 'poster', 'packaging'],
+    },
+    {
+      id: 'information-explainer',
+      title: '信息与说明型视觉',
+      description: '适合信息图、技术图、学术图、视觉文档页、排版海报和地图路线图。',
+      matchCategories: new Set(['infographics', 'technical-diagrams', 'academic-figures', 'slides-and-visual-docs', 'typography-and-text-layout', 'maps']),
+      intentPriority: ['academic', 'map', 'typography'],
+    },
+    {
+      id: 'assets-edit',
+      title: '资产与编辑',
+      description: '适合头像、图像编辑、资产板、图标板和局部修图类任务。',
+      matchCategories: new Set(['avatars-and-profile', 'editing-workflows', 'assets-and-props']),
+      intentPriority: [],
+    },
+    {
+      id: 'storyboard-narrative',
+      title: '分镜与叙事',
+      description: '适合电影分镜、口播整板、专家解说板、案例见证板和插画叙事场景。',
+      matchCategories: new Set(['cinematic-sequences', 'scenes-and-illustrations']),
+      intentPriority: ['cinematic', 'oralboard', 'financeboard', 'hostboard', 'productboard', 'eduboard', 'expertboard', 'testimonialboard'],
+    },
+    {
+      id: 'ui-interface',
+      title: '界面与产品样机',
+      description: '适合界面视觉稿、产品 mockup、聊天界面、短视频封面式 UI 等任务。',
+      matchCategories: new Set(['ui-mockups']),
+      intentPriority: ['ui'],
+    },
+  ];
+}
+
+function groupExamplesByTask(examples) {
+  const intentMap = new Map(starterIntentCards(examples).map((item) => [item.intent, item]));
+  return taskGroups().map((group) => {
+    const items = examples.filter((item) => group.matchCategories.has(String(item.category || '').trim()));
+    const mainline = [];
+    const variants = [];
+    items.forEach((item) => {
+      if (String(item.id || '').trim() === String(item.template_id || '').trim()) {
+        mainline.push(item);
+      } else {
+        variants.push(item);
+      }
+    });
+    return {
+      ...group,
+      items,
+      mainline,
+      variants,
+      starterCards: group.intentPriority.map((intent) => intentMap.get(intent)).filter(Boolean),
+    };
+  }).filter((group) => group.items.length > 0);
+}
+
 function starterExamples(examples) {
   return examples.filter((item) => item.recommended_start === true);
 }
 
+const STARTER_SHORTLIST_INTENTS = new Set([
+  'portrait',
+  'studio',
+  'ecommerce',
+  'packaging',
+  'cinematic',
+  'oralboard',
+]);
+
+function shortlistStarterExamples(examples) {
+  return starterExamples(examples).filter((item) =>
+    STARTER_SHORTLIST_INTENTS.has(String(item.starter_intent || '').trim().toLowerCase())
+  );
+}
+
 function starterIntentCards(examples) {
-  return starterExamples(examples)
+  return shortlistStarterExamples(examples)
     .filter((item) => item.starter_intent)
     .map((item) => ({
       intent: item.starter_intent,
@@ -53,6 +138,7 @@ function starterIntentCards(examples) {
 }
 
 function renderCard(item, entryType) {
+  const detailSummary = entryType === 'mainline' ? '查看模板细节（维护者）' : '查看变体细节（维护者）';
   return `
     <article class="card" data-entry-type="${entryType}" data-searchable="${escapeHtml(`${item.id} ${item.name} ${item.category} ${item.template_id} ${item.template_variant} ${item.description || ''}`.toLowerCase())}">
       <div class="card-top">
@@ -60,16 +146,22 @@ function renderCard(item, entryType) {
         <span class="entry-tag ${entryType === 'mainline' ? 'entry-tag-main' : 'entry-tag-variant'}">${entryType === 'mainline' ? '主链入口' : '变体入口'}</span>
       </div>
       <div class="copy">${escapeHtml(item.description || '')}</div>
-      <div class="meta">
-        <div class="meta-row"><div class="meta-label">ID</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
-        <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
-        <div class="meta-row"><div class="meta-label">模板</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
-        <div class="meta-row"><div class="meta-label">变体</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
-        <div class="meta-row"><div class="meta-label">示例文件</div><div class="meta-value">${escapeHtml(item.example_file)}</div></div>
+      <div class="quick-tips">
+        <span class="quick-tag">${entryType === 'mainline' ? '适合第一次用这类任务的人' : '适合任务已经明确、需要更细风格控制的人'}</span>
       </div>
       <div class="cmd">node scripts/run_example_catalog_prepare.js \\
   --example-id ${escapeHtml(item.id)} \\
   --output-dir /tmp/daoge-${escapeHtml(item.id)}-demo</div>
+      <details class="card-details">
+        <summary>${detailSummary}</summary>
+        <div class="meta meta-maintainer">
+          <div class="meta-row"><div class="meta-label">内部 ID</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
+          <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
+          <div class="meta-row"><div class="meta-label">模板 ID</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
+          <div class="meta-row"><div class="meta-label">正式变体</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
+          <div class="meta-row"><div class="meta-label">示例文件</div><div class="meta-value">${escapeHtml(item.example_file)}</div></div>
+        </div>
+      </details>
     </article>
   `;
 }
@@ -82,15 +174,21 @@ function renderStarterCard(item) {
         <span class="entry-tag entry-tag-main">推荐起步</span>
       </div>
       <div class="copy">${escapeHtml(item.starter_reason || item.description || '')}</div>
-      <div class="meta">
-        <div class="meta-row"><div class="meta-label">推荐难度</div><div class="meta-value">${escapeHtml(item.difficulty || 'unspecified')}</div></div>
-        <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
-        <div class="meta-row"><div class="meta-label">模板</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
-        <div class="meta-row"><div class="meta-label">变体</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
+      <div class="quick-tips">
+        <span class="quick-tag">推荐难度：${escapeHtml(item.difficulty || '未标注')}</span>
+        <span class="quick-tag">第一次使用优先选它</span>
       </div>
       <div class="cmd">node scripts/run_example_catalog_prepare.js \\
   --example-id ${escapeHtml(item.id)} \\
   --output-dir /tmp/daoge-${escapeHtml(item.id)}-demo</div>
+      <details class="card-details">
+        <summary>查看模板细节（维护者）</summary>
+        <div class="meta meta-maintainer">
+          <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
+          <div class="meta-row"><div class="meta-label">模板 ID</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
+          <div class="meta-row"><div class="meta-label">正式变体</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
+        </div>
+      </details>
     </article>
   `;
 }
@@ -103,13 +201,45 @@ function renderIntentCard(item) {
         <span class="entry-tag entry-tag-main">任务意图</span>
       </div>
       <div class="copy">${escapeHtml(item.reason)}</div>
-      <div class="meta">
-        <div class="meta-row"><div class="meta-label">推荐入口</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
-        <div class="meta-row"><div class="meta-label">入口名称</div><div class="meta-value">${escapeHtml(item.name)}</div></div>
+      <div class="quick-tips">
+        <span class="quick-tag">直接按任务意图起步</span>
+        <span class="quick-tag">适合不想先理解模板名的人</span>
       </div>
       <div class="cmd">node scripts/run_example_catalog_prepare.js \\
   --intent ${escapeHtml(item.intent)} \\
   --output-dir /tmp/daoge-${escapeHtml(item.intent)}-starter</div>
+      <details class="card-details">
+        <summary>查看内部映射（维护者）</summary>
+        <div class="meta meta-maintainer">
+          <div class="meta-row"><div class="meta-label">推荐入口</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
+          <div class="meta-row"><div class="meta-label">入口名称</div><div class="meta-value">${escapeHtml(item.name)}</div></div>
+        </div>
+      </details>
+    </article>
+  `;
+}
+
+function renderTaskStarter(item) {
+  return `
+    <article class="card starter-card">
+      <div class="card-top">
+        <h3>${escapeHtml(item.name)}</h3>
+        <span class="entry-tag entry-tag-main">推荐意图入口</span>
+      </div>
+      <div class="copy">${escapeHtml(item.reason)}</div>
+      <div class="quick-tips">
+        <span class="quick-tag">这类任务建议先走意图入口</span>
+      </div>
+      <div class="cmd">node scripts/run_example_catalog_prepare.js \\
+  --intent ${escapeHtml(item.intent)} \\
+  --output-dir /tmp/daoge-${escapeHtml(item.intent)}-starter</div>
+      <details class="card-details">
+        <summary>查看内部映射（维护者）</summary>
+        <div class="meta meta-maintainer">
+          <div class="meta-row"><div class="meta-label">任务意图</div><div class="meta-value">${escapeHtml(item.intent)}</div></div>
+          <div class="meta-row"><div class="meta-label">对应入口</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
+        </div>
+      </details>
     </article>
   `;
 }
@@ -124,8 +254,8 @@ function main() {
   const promptPreviewFile = path.join(portalDir, 'prompt_preview.html');
   const catalog = readJson(catalogFile);
   const examples = Array.isArray(catalog.examples) ? catalog.examples : [];
-  const grouped = groupExamples(examples);
-  const starters = starterExamples(examples);
+  const grouped = groupExamplesByTask(examples);
+  const starters = shortlistStarterExamples(examples);
   const intentCards = starterIntentCards(examples);
 
   const html = `<!doctype html>
@@ -355,6 +485,23 @@ ${renderPortalHeadAssets()}
       line-height: 1.7;
       font-size: 14px;
     }
+    .quick-tips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0 0;
+    }
+    .quick-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--text-sub);
+      font-size: 12px;
+      line-height: 1.4;
+    }
     .cmd {
       margin-top: 16px;
       padding: 14px 16px;
@@ -366,6 +513,35 @@ ${renderPortalHeadAssets()}
       font-size: 12px;
       line-height: 1.6;
       white-space: pre-wrap;
+    }
+    .card-details {
+      margin-top: 14px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      padding-top: 12px;
+    }
+    .card-details summary {
+      cursor: pointer;
+      color: var(--text-sub);
+      font-size: 13px;
+      list-style: none;
+      user-select: none;
+    }
+    .card-details summary::-webkit-details-marker {
+      display: none;
+    }
+    .card-details summary::before {
+      content: "▸";
+      display: inline-block;
+      margin-right: 8px;
+      color: var(--accent);
+      transition: transform 0.16s ease;
+    }
+    .card-details[open] summary::before {
+      transform: rotate(90deg);
+    }
+    .meta-maintainer {
+      margin-top: 12px;
+      padding-top: 4px;
     }
     @media (max-width: 720px) {
       .shell { padding: 18px 14px 44px; }
@@ -389,17 +565,17 @@ ${renderPortalHeadAssets()}
         })}
       </div>
       <div class="eyebrow">DAOGE Examples</div>
-      <h1>Example Catalog</h1>
-      <p class="hero-copy">这个页面列出当前可直接进入预检 demo 的模板示例。你可以先按模板类型挑选，再通过 CLI 一键生成对应的 DAOGE 预检面板。当前 catalog 已经覆盖 UI 样机、信息图、技术图、学术图、品牌包装、插画场景、地图路线、排版海报、资产道具、头像资产和视觉文档页。</p>
+      <h1>中文任务入口总览</h1>
+      <p class="hero-copy">这个页面现在优先按中文任务组织，而不是先按内部分类组织。你可以先判断自己属于哪类任务，再看推荐意图入口、主链入口和细分变体入口。对第一次使用者来说，先选中文任务，再决定是否继续往下选 variant，会比直接在全部 example 里盲选稳定得多。</p>
     </section>
 
     <section class="section">
-      <div class="copy">当前已覆盖的主链类目包括：UI 样机、信息图、技术图、学术图、品牌包装板、插画场景组、地图路线板、排版海报、资产道具板、头像资产和视觉文档页。这个页面现在已经成为 DAOGE 示例层的统一体验入口。</div>
+      <div class="copy">当前页面优先展示 6 组中文任务：人物与时尚视觉、电商与商业视觉、信息与说明型视觉、资产与编辑、分镜与叙事、界面与产品样机。内部分类仍然保留在卡片详情里，但不再作为普通用户的第一视角。</div>
     </section>
 
     <section class="section">
       <h2 class="section-title">按任务意图开始</h2>
-      <p class="section-copy">如果你还不想先理解模板名，可以直接按任务意图开始。每个意图先只推荐一个起步入口，保证第一次使用时路径清晰。</p>
+      <p class="section-copy">如果你还不想先理解模板名，可以先从这 6 个最高频任务意图开始。第一次使用先不要展开全部入口，先选最像你任务的一类再进预检。</p>
       <div class="grid">
         ${intentCards.map((item) => renderIntentCard(item)).join('')}
       </div>
@@ -407,7 +583,7 @@ ${renderPortalHeadAssets()}
 
     <section class="section">
       <h2 class="section-title">推荐起步</h2>
-      <p class="section-copy">如果你是第一次进入 DAOGE examples，不要先在全部入口里挑。先从下面这些代表入口开始：它们更容易看懂、预检结果更稳定，也更能代表不同任务家族。</p>
+      <p class="section-copy">这里默认只保留 6 个最常用代表入口。它们更容易看懂、预检结果更稳定，也最适合作为第一次上手的起点。</p>
       <div class="grid">
         ${starters.map((item) => renderStarterCard(item)).join('')}
       </div>
@@ -425,24 +601,31 @@ ${renderPortalHeadAssets()}
             <button class="toggle-button" type="button" data-filter-type="variant">只看变体</button>
           </div>
         </div>
-        <div class="copy">CLI 也支持只列推荐入口：<span class="cmd">node scripts/run_example_catalog_prepare.js --starter true</span></div>
-        <div class="copy">如果你已经知道任务意图，也可以直接运行：<span class="cmd">node scripts/run_example_catalog_prepare.js --intent ui</span></div>
-        <div class="copy">当前还支持：<span class="cmd">--intent academic</span> <span class="cmd">--intent packaging</span> <span class="cmd">--intent map</span> <span class="cmd">--intent typography</span> <span class="cmd">--intent ecommerce</span> <span class="cmd">--intent detail</span> <span class="cmd">--intent social</span> <span class="cmd">--intent abtest</span> <span class="cmd">--intent poster</span> <span class="cmd">--intent lookbook</span> <span class="cmd">--intent portrait</span> <span class="cmd">--intent studio</span> <span class="cmd">--intent cinematic</span> <span class="cmd">--intent oralboard</span> <span class="cmd">--intent financeboard</span> <span class="cmd">--intent hostboard</span> <span class="cmd">--intent productboard</span> <span class="cmd">--intent eduboard</span> <span class="cmd">--intent expertboard</span> <span class="cmd">--intent testimonialboard</span></div>
+        <div class="copy">CLI 也支持只列这 6 个推荐入口：<span class="cmd">node scripts/run_example_catalog_prepare.js --starter true</span></div>
+        <div class="copy">如果你已经知道任务意图，也建议第一次先从这 6 个里选：<span class="cmd">portrait</span> <span class="cmd">studio</span> <span class="cmd">ecommerce</span> <span class="cmd">packaging</span> <span class="cmd">cinematic</span> <span class="cmd">oralboard</span></div>
       </div>
     </section>
 
     <section class="section">
       <div class="group-stack">
         ${grouped.map((group) => `
-          <section class="section group-panel" data-category="${escapeHtml(group.category)}">
+          <section class="section group-panel" data-category="${escapeHtml(group.id)}">
             <div class="group-header">
               <div>
-                <h2 class="section-title">${escapeHtml(group.category)}</h2>
-                <p class="section-copy">这个分组下共 ${group.mainline.length + group.variants.length} 个入口，其中主链入口 ${group.mainline.length} 个，变体入口 ${group.variants.length} 个。</p>
+                <h2 class="section-title">${escapeHtml(group.title)}</h2>
+                <p class="section-copy">${escapeHtml(group.description)} 当前共 ${group.mainline.length + group.variants.length} 个入口，其中主链入口 ${group.mainline.length} 个，变体入口 ${group.variants.length} 个。</p>
               </div>
               <button class="group-toggle" type="button" aria-expanded="true">折叠分组</button>
             </div>
             <div class="group-body">
+            ${group.starterCards.length ? `
+              <div class="subsection-block" data-subsection="starter">
+              <h3 class="subsection-title">推荐意图入口</h3>
+              <div class="grid">
+                ${group.starterCards.map((item) => renderTaskStarter(item)).join('')}
+              </div>
+              </div>
+            ` : ''}
             ${group.mainline.length ? `
               <div class="subsection-block" data-subsection="mainline">
               <h3 class="subsection-title">主链入口</h3>

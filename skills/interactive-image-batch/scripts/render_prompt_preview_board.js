@@ -5,7 +5,7 @@ const { renderPortalHeadAssets } = require('./portal_ui_shared');
 const { topLabel, resolveProfile, buildDisplayDistributions, normalizeValue } = require('./template_display_profile');
 
 function escapeHtml(text) {
-  return String(text || '')
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -47,6 +47,18 @@ function renderMetaRow(label, value) {
   `;
 }
 
+function displayTitle(item, fallbackIndex) {
+  const shotLabel = String(item.shot_label || '').trim();
+  if (shotLabel) return shotLabel;
+  const scene = String(item.scene || '').trim();
+  if (scene) return scene;
+  return item.title || item.slug || `prompt-${fallbackIndex}`;
+}
+
+function findDistributionCounts(displayDistributions, key) {
+  return displayDistributions.find((item) => item.key === key)?.counts || [];
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args['prompts-file']) throw new Error('Missing required flag: --prompts-file');
@@ -69,13 +81,15 @@ function main() {
   const displayProfile = resolveProfile(prompts);
   const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
     .map((item) => ({ ...item, counts: item.counts.slice(0, 8) }));
-  const styleFamily = displayDistributions.find((item) => item.key === 'style_family')?.counts || [];
+  const styleFamily = findDistributionCounts(displayDistributions, 'style_family');
   const purityGrade = buildDisplayDistributions(prompts, {
     distributionFields: [{ key: 'purity_grade', label: '强度等级', shortLabel: '强度等级分布' }],
   })[0]?.counts || [];
   const slotRole = buildDisplayDistributions(prompts, {
     distributionFields: [{ key: 'slot_role', label: '槽位角色', shortLabel: '槽位角色分布' }],
   })[0]?.counts || [];
+  const showStyleFamily = styleFamily.length && topLabel(styleFamily) !== '未指定';
+  const showPurityGrade = purityGrade.length && topLabel(purityGrade) !== '未指定';
 
   const preflightBoardPath = path.join(outputDir, 'preflight_board.html');
 
@@ -257,8 +271,8 @@ ${renderPortalHeadAssets()}
           <div class="metric-value">${previewItems.length}</div>
         </div>
         <div class="metric-card metric-info">
-          <div class="metric-label">主风格族</div>
-          <div class="metric-value">${escapeHtml(topLabel(styleFamily))}</div>
+          <div class="metric-label">${escapeHtml(displayProfile.summaryFields[0]?.label || '主方向')}</div>
+          <div class="metric-value">${escapeHtml(topLabel(findDistributionCounts(displayDistributions, displayProfile.summaryFields[0]?.key) || []))}</div>
         </div>
       </div>
     </section>
@@ -270,9 +284,7 @@ ${renderPortalHeadAssets()}
         <article class="info-card">
           <h3>分布摘要</h3>
           <div class="meta-list">
-            ${renderMetaRow('主风格族', topLabel(styleFamily))}
-            ${renderMetaRow('主强度等级', topLabel(purityGrade))}
-            ${displayProfile.summaryFields.map((field, index) => renderMetaRow(field.label, topLabel(displayDistributions[index + 1]?.counts || []))).join('')}
+            ${displayProfile.summaryFields.map((field) => renderMetaRow(field.label, topLabel(findDistributionCounts(displayDistributions, field.key)))).join('')}
             ${storyboardMode ? renderMetaRow('主槽位角色', topLabel(slotRole)) : ''}
           </div>
         </article>
@@ -317,11 +329,11 @@ ${renderPortalHeadAssets()}
       <div class="prompt-grid">
         ${previewItems.map((item, index) => `
           <article class="prompt-card">
-            <h3 class="prompt-card-title">${escapeHtml(item.index || index + 1)}. ${escapeHtml(item.title || item.slug || `prompt-${index + 1}`)}</h3>
+            <h3 class="prompt-card-title">${escapeHtml(item.index || index + 1)}. ${escapeHtml(displayTitle(item, index + 1))}</h3>
             <div class="meta-list">
               ${displayProfile.sampleFields.map((field) => renderMetaRow(field.label, normalizeValue(item[field.key]) || '未设置')).join('')}
-              ${renderMetaRow('Slot', item.slot_id || item.shot_id || '未设置')}
-              ${renderMetaRow('Mode', item.reference_mode || 'prompt-only')}
+              ${renderMetaRow('槽位', item.slot_id || item.shot_id || '未设置')}
+              ${renderMetaRow('生成方式', item.reference_mode || 'prompt-only')}
             </div>
             <p class="prompt-card-copy">${escapeHtml(shorten(getPromptText(item)))}</p>
           </article>

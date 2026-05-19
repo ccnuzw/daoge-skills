@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "beauty-detail-studio",
+  "content_brief": "做一组更强调皮肤、妆发和近景细节控制的摄影棚人物大片，整体要有美妆广告式细腻度，但仍保持时尚编辑感，用于美容和高端人物棚拍任务。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "beauty detail studio editorial",
+    "soft premium close-up under controlled studio light",
+    "skin and hair detail with editorial polish"
+  ],
+  "variation_requirements": [
+    "皮肤和妆发细节必须可读，但不能假人感磨皮",
+    "近景棚拍要保证五官、发丝和高光层次成立",
+    "柔光必须细腻，不能把轮廓和材质打糊"
+  ],
+  "text_policy": "不生成可读标题，只保留适合美妆人物棚拍后期排版的近景安全区。",
+  "sample_variant_axes": {
+    "lighting": "soft beauty studio light with controlled highlight",
+    "camera_language": "close beauty crop with clean symmetry",
+    "material_emphasis": "skin finish and hair detail"
+  }
+}

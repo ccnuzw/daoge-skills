@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "sharp-tailoring-studio",
+  "content_brief": "做一组更强调肩线、剪裁和整体利落感的摄影棚人物大片，服装结构、轮廓边线和品牌式秩序感必须非常明确，用于时尚品牌和高端职业风棚拍。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "sharp tailoring studio editorial",
+    "clean silhouette with crisp shoulder line",
+    "structured fashion portrait under controlled light"
+  ],
+  "variation_requirements": [
+    "肩线和剪裁必须清楚，不能被柔光打平",
+    "姿态必须服务服装结构，不允许破坏轮廓秩序",
+    "背景和灯光都要克制，突出利落感"
+  ],
+  "text_policy": "不生成可读标题，只保留适合高端时尚人物棚拍的版面安全区。",
+  "sample_variant_axes": {
+    "lighting": "structured tailoring key light with crisp rim",
+    "camera_language": "clean half-body tailoring crop",
+    "material_emphasis": "shoulder line and fabric structure"
+  }
+}

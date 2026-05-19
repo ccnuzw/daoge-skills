@@ -23,6 +23,14 @@ function samplePrompts(prompts, count = 3) {
   return prompts.slice(0, count);
 }
 
+function displayTitle(item, fallbackIndex) {
+  const shotLabel = String(item.shot_label || '').trim();
+  if (shotLabel) return shotLabel;
+  const scene = String(item.scene || '').trim();
+  if (scene) return scene;
+  return item.title || item.slug || `prompt-${fallbackIndex}`;
+}
+
 function hasVariantAxes(prompts) {
   return prompts.some((item) => Array.isArray(item.variant_axes) && item.variant_axes.length);
 }
@@ -69,8 +77,9 @@ function formatPromptFieldSources(counts) {
     if (separator === -1) return `- ${name}: ${count}`;
     const field = name.slice(0, separator);
     const source = name.slice(separator + 2);
+    if (field === 'style_family' || field === 'purity_grade') return null;
     return `- ${labelField(field)} / ${labelSource(source)}: ${count}`;
-  });
+  }).filter(Boolean);
 }
 
 function formatSizeIssues(sizeIssues) {
@@ -210,6 +219,26 @@ function summarizeEditSignals(prompts) {
   };
 }
 
+function resolveUserFacingTemplateName(taskSpec, modeDetection, strategy) {
+  const outputMode = String(taskSpec.output_mode || '').trim();
+  if (outputMode) return outputMode;
+  const variantName = String(
+    strategy?.template_variant?.display_name ||
+    strategy?.template_variant?.name ||
+    ''
+  ).trim();
+  if (variantName) return variantName;
+  return String(modeDetection?.detected_template?.name || '').trim() || '未检测';
+}
+
+function formatModeLabel(mode) {
+  const text = String(mode || '').trim();
+  if (!text) return '未检测';
+  if (text === 'prepare-only') return '预检准备阶段';
+  if (text === 'storyboard-board') return '分镜整板预检阶段';
+  return text;
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const required = ['task-spec', 'strategy-file', 'prompts-file', 'validation-report', 'preview-file', 'plan-file', 'summary-file', 'mode-file'];
@@ -247,6 +276,7 @@ function main() {
   const readiness = buildReadiness(taskSpec, validation, gates);
   const editSignals = summarizeEditSignals(prompts);
   const displayProfile = resolveProfile(prompts);
+  const userFacingTemplateName = resolveUserFacingTemplateName(taskSpec, modeDetection, strategy);
   const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
     .map((item) => ({ ...item, counts: item.counts.slice(0, 6) }));
   const runtimeSourceFields = [
@@ -304,8 +334,8 @@ function main() {
     '',
     `- 内容主题: ${taskSpec.content_brief || '未提供'}`,
     `- 输出模式: ${taskSpec.output_mode || '未提供'}`,
-    `- DAOGE 模式: ${modeDetection.detected_mode || '未检测'}`,
-    `- DAOGE 模板: ${template.name || '未检测'}`,
+    `- DAOGE 模式: ${formatModeLabel(modeDetection.detected_mode)}`,
+    `- DAOGE 模板: ${userFacingTemplateName}`,
     `- 模板文档: ${templateDocument.exists ? templateDocument.path : (template.template_doc || '未设置')}`,
     `- 参考来源数量: ${(taskSpec.source_files || []).length}`,
     `- 参考图片数量: ${(taskSpec.source_images || []).length}`,
@@ -469,13 +499,13 @@ function main() {
 
     samplePrompts(prompts, 3).forEach((item, index) => {
       lines.push(`### 样例 ${index + 1}`);
-      lines.push(`- 标题: ${item.title || item.slug || `prompt-${index + 1}`}`);
+      lines.push(`- 标题: ${displayTitle(item, index + 1)}`);
       lines.push(`- 槽位 ID: ${item.slot_id || '未设置'}`);
       displayProfile.sampleFields.forEach((field) => {
         lines.push(`- ${field.label}: ${normalizeValue(item[field.key]) || '未设置'}`);
       });
       lines.push(`- 参考模式: ${item.reference_mode || '未设置'}`);
-      lines.push(`- 编辑底图来源: ${item.edit_source || '未设置'}`);
+      if (item.edit_source && item.edit_source !== '(missing)') lines.push(`- 编辑底图来源: ${item.edit_source}`);
       lines.push(`- 遮罩图: ${item.mask_image ? '已提供' : '未提供'}`);
       const draftItem = draftByIndex.get(String(item.index)) || {};
     const variantSignature = item.variant_signature || draftItem.variant_signature;
