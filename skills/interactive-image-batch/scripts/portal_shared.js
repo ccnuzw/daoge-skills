@@ -23,8 +23,10 @@ function makeLink(label, href) {
 function renderPortalTopLinks(outputDir, options = {}) {
   const currentPage = String(options.currentPage || '').trim();
   const extraLinks = Array.isArray(options.extraLinks) ? options.extraLinks : [];
+  const examplesCatalogPath = path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
   const defaultEntries = [
     { file: 'daoge_portal.html', label: '返回 DAOGE 门户' },
+    { file: 'result_hub.html', label: '结果总入口' },
     { file: 'prompt_preview.html', label: 'Prompt 预览' },
     { file: 'preflight_board.html', label: '预检总览' },
     { file: 'assets_board.html', label: '资产看板' },
@@ -41,6 +43,10 @@ function renderPortalTopLinks(outputDir, options = {}) {
     const absolutePath = path.join(outputDir, entry.file);
     if (!fileExists(absolutePath)) continue;
     links.push(makeLink(entry.label, relativeFile(outputDir, absolutePath)));
+  }
+
+  if (currentPage !== 'examples-catalog' && fileExists(examplesCatalogPath)) {
+    links.push(makeLink('示例目录', relativeFile(outputDir, examplesCatalogPath)));
   }
 
   for (const entry of extraLinks) {

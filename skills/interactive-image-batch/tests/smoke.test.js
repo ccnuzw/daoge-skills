@@ -1278,6 +1278,9 @@ test('render_result_hub_board writes html portal-style result navigation', () =>
   assert.match(html, /完成报告/);
   assert.match(html, /失败补跑/);
   assert.match(html, /结果总入口 Markdown/);
+  assert.match(html, /当前结果状态/);
+  assert.match(html, /页面生成状态/);
+  assert.match(html, /推荐下一步/);
 });
 
 test('render_portal_home writes unified html portal shell', () => {
@@ -1296,6 +1299,8 @@ test('render_portal_home writes unified html portal shell', () => {
   const assetsBoardFile = path.join(outputDir, 'assets_board.html');
   const selectionBoardFile = path.join(outputDir, 'selection_board.md');
   const rerunBoardFile = path.join(outputDir, 'rerun_board.html');
+  const examplesCatalogFile = path.join(path.dirname(outputDir), 'references', 'examples', 'examples_catalog.html');
+  fs.mkdirSync(path.dirname(examplesCatalogFile), { recursive: true });
 
   fs.writeFileSync(manifestFile, JSON.stringify({
     outputDir,
@@ -1313,6 +1318,7 @@ test('render_portal_home writes unified html portal shell', () => {
   fs.writeFileSync(assetsBoardFile, '<html>assets</html>');
   fs.writeFileSync(rerunBoardFile, '<html>rerun</html>');
   fs.writeFileSync(selectionBoardFile, '# selection');
+  fs.writeFileSync(examplesCatalogFile, '<html>examples</html>');
 
   runNode('render_portal_home.js', [
     '--manifest-file', manifestFile,
@@ -1334,6 +1340,36 @@ test('render_portal_home writes unified html portal shell', () => {
   assert.match(html, /失败补跑入口/);
   assert.match(html, /准备阶段先看 Prompt 预览和预检总览/);
   assert.match(html, /如果你现在只想完成一件事/);
+  assert.match(html, /当前任务状态/);
+  assert.match(html, /页面生成状态/);
+  assert.match(html, /推荐下一步/);
+  assert.match(html, /示例目录/);
+  assert.match(html, /如果你是第一次使用 DAOGE/);
+});
+
+test('render_example_catalog_board links back into portal navigation', () => {
+  const tempDir = makeTempDir('interactive-image-batch-example-catalog-links-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const catalogFile = path.join(skillRoot, 'references', 'examples', 'examples.catalog.json');
+  const outputFile = path.join(outputDir, 'examples_catalog.html');
+  const portalFile = path.join(outputDir, 'daoge_portal.html');
+  const resultHubFile = path.join(outputDir, 'result_hub.html');
+  const promptPreviewFile = path.join(outputDir, 'prompt_preview.html');
+  fs.writeFileSync(portalFile, '<html>portal</html>');
+  fs.writeFileSync(resultHubFile, '<html>hub</html>');
+  fs.writeFileSync(promptPreviewFile, '<html>prompt preview</html>');
+
+  runNode('render_example_catalog_board.js', [
+    '--catalog-file', catalogFile,
+    '--output-file', outputFile,
+  ]);
+
+  const html = fs.readFileSync(outputFile, 'utf8');
+  assert.match(html, /返回 DAOGE 门户/);
+  assert.match(html, /返回结果总入口/);
+  assert.match(html, /返回 Prompt 预览/);
 });
 
 test('render_completion_board writes html completion summary', () => {
@@ -1851,4 +1887,46 @@ test('run_real_provider_smoke creates safe preflight report without live executi
   const report = fs.readFileSync(reportFile, 'utf8');
   assert.match(report, /Live run confirmed: no/);
   assert.match(report, /No live provider calls were executed/);
+});
+
+test('run_example_catalog_prepare can run third-wave lookbook variants from widened catalog', () => {
+  const tempDir = makeTempDir('interactive-image-batch-example-catalog-lookbook-wave3-');
+  const cases = [
+    { exampleId: 'lookbook-editorial-pairing-lookbook', variant: 'editorial-pairing-lookbook' },
+    { exampleId: 'lookbook-detail-mix', variant: 'lookbook-detail-mix' },
+  ];
+
+  cases.forEach((item) => {
+    const outputDir = path.join(tempDir, item.exampleId);
+    const runStdout = runNode('run_example_catalog_prepare.js', [
+      '--example-id', item.exampleId,
+      '--output-dir', outputDir,
+    ]);
+    const summary = JSON.parse(runStdout);
+    assert.equal(summary.selectedExample.id, item.exampleId);
+    assert.equal(summary.selectedExample.template_variant, item.variant);
+    assert.equal(fs.existsSync(summary.preflightBoard), true);
+    assert.equal(fs.existsSync(summary.promptPreviewBoard), true);
+  });
+});
+
+test('run_example_catalog_prepare can resolve second-wave oral storyboard starter intents', () => {
+  const tempDir = makeTempDir('interactive-image-batch-oral-storyboard-wave2-intents-');
+  const cases = [
+    { intent: 'expertboard', exampleId: 'oral-storyboard-board-expert-led', variant: 'expert-led' },
+    { intent: 'testimonialboard', exampleId: 'oral-storyboard-board-testimonial-led', variant: 'testimonial-led' },
+  ];
+
+  cases.forEach((item) => {
+    const outputDir = path.join(tempDir, item.intent);
+    const runStdout = runNode('run_example_catalog_prepare.js', [
+      '--intent', item.intent,
+      '--output-dir', outputDir,
+    ]);
+    const summary = JSON.parse(runStdout);
+    assert.equal(summary.selectedExample.id, item.exampleId);
+    assert.equal(summary.selectedExample.template_variant, item.variant);
+    assert.equal(fs.existsSync(summary.preflightBoard), true);
+    assert.equal(fs.existsSync(summary.promptPreviewBoard), true);
+  });
 });

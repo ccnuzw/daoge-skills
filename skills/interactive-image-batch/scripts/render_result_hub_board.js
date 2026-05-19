@@ -45,6 +45,10 @@ function renderQuickTarget(title, copy, links = []) {
   `;
 }
 
+function availabilityLabel(exists) {
+  return exists ? '已生成' : '未生成';
+}
+
 function portableRunnerPreambleLines() {
   return [
     'DAOGE_RUNNER="${DAOGE_RUNNER_PATH:-./.codex/skills/interactive-image-batch/scripts/run_batch.js}"',
@@ -96,6 +100,27 @@ function main() {
   const assetsBoardPath = path.join(outputDir, 'assets_board.html');
   const runIndexPath = path.join(path.dirname(outputDir), 'daoge_run_index.md');
   const resultHubMarkdownPath = path.join(outputDir, 'daoge_result_hub.md');
+  const examplesCatalogPath = path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
+  const hasCompletionBoard = fileExists(completionBoardPath);
+  const hasReviewBoard = fileExists(reviewBoardPath);
+  const hasStoryboardBoard = fileExists(storyboardBoardPath);
+  const hasRunOverview = fileExists(runOverviewPath);
+  const hasRerunBoard = fileExists(rerunBoardPath);
+  const hasPromptPreview = fileExists(promptPreviewPath);
+  const hasPreflightBoard = fileExists(preflightBoardPath);
+  const hasAssetsBoard = fileExists(assetsBoardPath);
+  const hasHubMarkdown = fileExists(resultHubMarkdownPath);
+  const generatedPageCount = [
+    hasCompletionBoard,
+    hasReviewBoard,
+    hasStoryboardBoard,
+    hasRunOverview,
+    hasRerunBoard,
+    hasPromptPreview,
+    hasPreflightBoard,
+    hasAssetsBoard,
+    hasHubMarkdown,
+  ].filter(Boolean).length;
 
   const batchManifests = Array.isArray(manifest.batches) ? manifest.batches : [];
   const allResults = batchManifests.flatMap((batch) => batch.results || []);
@@ -107,6 +132,10 @@ function main() {
   const attemptedLocalEditSlotIds = uniqueSlotIds(attemptedLocalEdits);
   const successfulLocalEditSlotIds = uniqueSlotIds(successfulLocalEdits);
   const hasFailures = Number(manifest.failed || 0) > 0;
+  const currentResultStage = hasFailures ? '结果待补跑确认' : '结果稳定可继续筛图';
+  const recommendedNextStep = hasFailures
+    ? '先去审阅板和完成报告缩小问题范围，再进入失败补跑看板'
+    : (hasReviewBoard ? '先打开审阅看板继续筛图' : '先打开完成报告确认本轮摘要');
 
   const rerunCommand = [
     ...portableRunnerPreambleLines(),
@@ -372,6 +401,16 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
+      <h2>当前结果状态</h2>
+      <p class="section-copy">这一块先回答“这轮结果现在处于什么状态、下一步最该去哪”。它不是再重复入口列表，而是先帮你做一次结果阶段的动作判断。</p>
+      <div class="card-grid">
+        ${renderPortalCard('当前阶段', `当前结果阶段：${currentResultStage}。${hasFailures ? '这轮还有失败项，先不要直接回执行层。' : '这轮没有失败项，可以先在结果层完成筛图和整板确认。'}`, null, 'report')}
+        ${renderPortalCard('推荐下一步', `当前最建议的动作是：${recommendedNextStep}。默认顺序仍然是先审阅、再整板、再报告、最后补跑。`, hasReviewBoard ? relativeFile(outputDir, reviewBoardPath) : (hasCompletionBoard ? relativeFile(outputDir, completionBoardPath) : null), 'review')}
+        ${renderPortalCard('页面生成状态', `当前已生成 ${generatedPageCount} 个结果/准备相关页面。先确认你需要的页面是否已经在本轮 run 中生成，再决定是否回到上游阶段。`, hasRunOverview ? relativeFile(outputDir, runOverviewPath) : (hasCompletionBoard ? relativeFile(outputDir, completionBoardPath) : null), 'storyboard')}
+      </div>
+    </section>
+
+    <section class="section">
       <h2>推荐浏览顺序</h2>
       <p class="section-copy">结果层主链路已经打通。你可以先筛图，再跳整板，再回报告看执行背景。</p>
       <div class="card-grid">
@@ -390,6 +429,7 @@ ${renderPortalHeadAssets()}
         ${renderPortalCard('整板入口', '确认单张图在整板里的位置和上下文。', fileExists(storyboardBoardPath) ? relativeFile(outputDir, storyboardBoardPath) : null, 'storyboard')}
         ${renderPortalCard('报告入口', '查看执行路径、批次信息和完成摘要。', fileExists(completionBoardPath) ? relativeFile(outputDir, completionBoardPath) : null, 'report')}
         ${renderPortalCard('图片目录', '直接回到输出目录看最终图片和元数据。', '.', 'info')}
+        ${renderPortalCard('示例目录', '如果你想把当前结果和标准 starter 对照，或者要带新用户回到示例路径，这里就是入口。', fileExists(examplesCatalogPath) ? relativeFile(outputDir, examplesCatalogPath) : null, 'storyboard')}
       </div>
     </section>
 
@@ -414,6 +454,16 @@ ${renderPortalHeadAssets()}
             <li>成功局部编辑槽位: ${successfulLocalEditSlotIds.length ? escapeHtml(successfulLocalEditSlotIds.join(', ')) : '无'}</li>
           </ul>
         </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>页面生成状态</h2>
+      <p class="section-copy">这块专门告诉你当前 run 的页面产物齐不齐。对第一次进结果层的人，这比单纯知道入口名字更重要。</p>
+      <div class="card-grid">
+        ${renderPortalCard('核心结果页', `审阅看板 ${availabilityLabel(hasReviewBoard)} / Storyboard ${availabilityLabel(hasStoryboardBoard)} / 完成报告 ${availabilityLabel(hasCompletionBoard)}`, hasReviewBoard ? relativeFile(outputDir, reviewBoardPath) : (hasStoryboardBoard ? relativeFile(outputDir, storyboardBoardPath) : (hasCompletionBoard ? relativeFile(outputDir, completionBoardPath) : null)), 'review')}
+        ${renderPortalCard('运行与补跑页', `运行概览 ${availabilityLabel(hasRunOverview)} / 失败补跑 ${availabilityLabel(hasRerunBoard)} / 结果总入口 Markdown ${availabilityLabel(hasHubMarkdown)}`, hasRunOverview ? relativeFile(outputDir, runOverviewPath) : (hasRerunBoard ? relativeFile(outputDir, rerunBoardPath) : (hasHubMarkdown ? relativeFile(outputDir, resultHubMarkdownPath) : null)), 'rerun')}
+        ${renderPortalCard('准备与资产页', `Prompt 预览 ${availabilityLabel(hasPromptPreview)} / 预检总览 ${availabilityLabel(hasPreflightBoard)} / 资产看板 ${availabilityLabel(hasAssetsBoard)}`, hasPromptPreview ? relativeFile(outputDir, promptPreviewPath) : (hasPreflightBoard ? relativeFile(outputDir, preflightBoardPath) : (hasAssetsBoard ? relativeFile(outputDir, assetsBoardPath) : null)), 'storyboard')}
       </div>
     </section>
 

@@ -39,6 +39,10 @@ function renderGuideCard(title, copy, links = []) {
   `;
 }
 
+function availabilityLabel(exists) {
+  return exists ? '已生成' : '未生成';
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args['manifest-file']) throw new Error('Missing required flag: --manifest-file');
@@ -59,11 +63,38 @@ function main() {
   const resultHubMarkdownPath = path.join(outputDir, 'daoge_result_hub.md');
   const selectionBoardPath = path.join(outputDir, 'selection_board.md');
   const rerunBoardPath = path.join(outputDir, 'rerun_board.html');
+  const examplesCatalogPath = path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
+  const hasPromptPreview = fileExists(promptPreviewBoardPath);
+  const hasPreflightBoard = fileExists(preflightBoardPath);
+  const hasAssetsBoard = fileExists(assetsBoardPath);
+  const hasRunOverview = fileExists(runOverviewPath);
+  const hasReviewBoard = fileExists(reviewBoardPath);
+  const hasStoryboardBoard = fileExists(storyboardBoardPath);
+  const hasCompletionBoard = fileExists(completionBoardPath);
+  const hasRerunBoard = fileExists(rerunBoardPath);
+  const hasResultHub = fileExists(resultHubPath) || fileExists(resultHubMarkdownPath);
 
   const success = Number(manifest.success || 0);
   const failed = Number(manifest.failed || 0);
   const selectedCount = Number(manifest.selectedCount || success + failed || 0);
   const batchCount = Number(manifest.batchCount || 0);
+  const currentStage = hasPromptPreview || hasPreflightBoard || hasAssetsBoard
+    ? (hasReviewBoard || hasCompletionBoard || hasResultHub ? '准备与结果并存' : '准备阶段')
+    : (hasReviewBoard || hasCompletionBoard || hasResultHub ? '结果阶段' : '待生成');
+  const recommendedNextStep = hasPromptPreview || hasPreflightBoard
+    ? '先确认准备阶段，再进入结果层'
+    : (hasReviewBoard ? '先打开审阅看板' : (hasCompletionBoard ? '先打开完成报告' : '先生成门户产物'));
+  const generatedPageCount = [
+    hasPromptPreview,
+    hasPreflightBoard,
+    hasAssetsBoard,
+    hasRunOverview,
+    hasReviewBoard,
+    hasStoryboardBoard,
+    hasCompletionBoard,
+    hasRerunBoard,
+    hasResultHub,
+  ].filter(Boolean).length;
 
   const html = `<!doctype html>
 <html lang="zh-CN">
@@ -308,6 +339,16 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
+      <h2>当前任务状态</h2>
+      <p class="section-copy">这块先回答“这一轮现在进行到哪里、下一步最该点哪个入口”。不用先浏览所有页面，再自己判断任务处在哪个阶段。</p>
+      <div class="card-grid">
+        ${renderLinkCard('当前阶段', `当前 run 处于 ${currentStage}。如果准备页和结果页同时存在，优先先确认准备阶段是否仍然有效，再进入筛图和整板判断。`, null, 'report')}
+        ${renderLinkCard('推荐下一步', `当前最建议的动作是：${recommendedNextStep}。先沿主路径走，不要一开始就回到失败补跑入口。`, hasReviewBoard ? relativeFile(outputDir, reviewBoardPath) : (hasPromptPreview ? relativeFile(outputDir, promptPreviewBoardPath) : (hasCompletionBoard ? relativeFile(outputDir, completionBoardPath) : null)), 'review')}
+        ${renderLinkCard('页面生成状态', `当前已生成 ${generatedPageCount} 个核心 HTML 页面。页面越齐，门户就越接近完整工作台体验。`, hasResultHub ? (fileExists(resultHubPath) ? relativeFile(outputDir, resultHubPath) : relativeFile(outputDir, resultHubMarkdownPath)) : null, 'storyboard')}
+      </div>
+    </section>
+
+    <section class="section">
       <h2>推荐浏览顺序</h2>
       <p class="section-copy">准备阶段先确认 Prompt 和预检，再进入结果层做筛图、看整板和确认完成报告。</p>
       <div class="path-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
@@ -338,15 +379,26 @@ ${renderPortalHeadAssets()}
       <h2>四个最常用入口</h2>
       <p class="section-copy">准备阶段、资产阶段和结果阶段最常用的入口都放在这里，避免你在目录里自己找文件。</p>
       <div class="card-grid">
-        ${renderLinkCard('Prompt 预览', '准备阶段先看这一页，确认风格、场景、构图和批次分布，再决定要不要进入预检。', fileExists(promptPreviewBoardPath) ? relativeFile(outputDir, promptPreviewBoardPath) : null, 'review')}
-        ${renderLinkCard('预检总览', '这里集中展示准备阶段的信号灯、阻塞项、执行参数和质量门禁，适合在正式开跑前最后确认。', fileExists(preflightBoardPath) ? relativeFile(outputDir, preflightBoardPath) : null, 'report')}
-        ${renderLinkCard('资产看板', '这里集中展示参考图、遮罩图、绑定关系和分析结果，适合在正式执行前确认素材是否被正确理解和绑定。', fileExists(assetsBoardPath) ? relativeFile(outputDir, assetsBoardPath) : null, 'storyboard')}
-        ${renderLinkCard('运行概览', '这里集中展示执行阶段的成功失败、暂停状态、批次与模式分布，适合先判断运行本身是否稳定。', fileExists(runOverviewPath) ? relativeFile(outputDir, runOverviewPath) : null, 'report')}
-        ${renderLinkCard('HTML 审阅看板', '适合先筛图、切换审阅/画廊模式、定位到最值得优先看的结果。', fileExists(reviewBoardPath) ? relativeFile(outputDir, reviewBoardPath) : null, 'review')}
-        ${renderLinkCard('Storyboard 装板', '适合把单张结果放回整板上下文，查看槽位位置、当前焦点和整板节奏。', fileExists(storyboardBoardPath) ? relativeFile(outputDir, storyboardBoardPath) : null, 'storyboard')}
-        ${renderLinkCard('完成报告', '适合查看本轮执行摘要、成功失败样例、批次信息和下一步建议。', fileExists(completionBoardPath) ? relativeFile(outputDir, completionBoardPath) : null, 'report')}
-        ${renderLinkCard('失败补跑看板', '这里集中展示失败项、待复核项和 failed-only 补跑建议，适合先判断是否需要补跑。', fileExists(path.join(outputDir, 'rerun_board.html')) ? relativeFile(outputDir, path.join(outputDir, 'rerun_board.html')) : null, 'rerun')}
+        ${renderLinkCard(`Prompt 预览 · ${availabilityLabel(hasPromptPreview)}`, '准备阶段先看这一页，确认风格、场景、构图和批次分布，再决定要不要进入预检。', hasPromptPreview ? relativeFile(outputDir, promptPreviewBoardPath) : null, 'review')}
+        ${renderLinkCard(`预检总览 · ${availabilityLabel(hasPreflightBoard)}`, '这里集中展示准备阶段的信号灯、阻塞项、执行参数和质量门禁，适合在正式开跑前最后确认。', hasPreflightBoard ? relativeFile(outputDir, preflightBoardPath) : null, 'report')}
+        ${renderLinkCard(`资产看板 · ${availabilityLabel(hasAssetsBoard)}`, '这里集中展示参考图、遮罩图、绑定关系和分析结果，适合在正式执行前确认素材是否被正确理解和绑定。', hasAssetsBoard ? relativeFile(outputDir, assetsBoardPath) : null, 'storyboard')}
+        ${renderLinkCard(`运行概览 · ${availabilityLabel(hasRunOverview)}`, '这里集中展示执行阶段的成功失败、暂停状态、批次与模式分布，适合先判断运行本身是否稳定。', hasRunOverview ? relativeFile(outputDir, runOverviewPath) : null, 'report')}
+        ${renderLinkCard(`HTML 审阅看板 · ${availabilityLabel(hasReviewBoard)}`, '适合先筛图、切换审阅/画廊模式、定位到最值得优先看的结果。', hasReviewBoard ? relativeFile(outputDir, reviewBoardPath) : null, 'review')}
+        ${renderLinkCard(`Storyboard 装板 · ${availabilityLabel(hasStoryboardBoard)}`, '适合把单张结果放回整板上下文，查看槽位位置、当前焦点和整板节奏。', hasStoryboardBoard ? relativeFile(outputDir, storyboardBoardPath) : null, 'storyboard')}
+        ${renderLinkCard(`完成报告 · ${availabilityLabel(hasCompletionBoard)}`, '适合查看本轮执行摘要、成功失败样例、批次信息和下一步建议。', hasCompletionBoard ? relativeFile(outputDir, completionBoardPath) : null, 'report')}
+        ${renderLinkCard(`失败补跑看板 · ${availabilityLabel(hasRerunBoard)}`, '这里集中展示失败项、待复核项和 failed-only 补跑建议，适合先判断是否需要补跑。', hasRerunBoard ? relativeFile(outputDir, rerunBoardPath) : null, 'rerun')}
         ${renderLinkCard('失败补跑入口', '适合在本轮存在失败项时，找到失败续跑入口和下一步操作提示。', fileExists(selectionBoardPath) ? relativeFile(outputDir, selectionBoardPath) : null, 'rerun')}
+        ${renderLinkCard('示例目录', '第一次使用 DAOGE 时，先从 Example Catalog 选一个起步入口，再决定走 prepare 还是直接看结果层。', fileExists(examplesCatalogPath) ? relativeFile(outputDir, examplesCatalogPath) : null, 'storyboard')}
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>页面生成状态</h2>
+      <p class="section-copy">这块专门回答“当前这轮到底已经产出了哪些页面”。对于第一次使用的人，比入口列表更重要的是知道哪些页面已经可用、哪些还没生成。</p>
+      <div class="card-grid">
+        ${renderLinkCard('准备阶段页面', `Prompt 预览 ${availabilityLabel(hasPromptPreview)} / 预检总览 ${availabilityLabel(hasPreflightBoard)} / 资产看板 ${availabilityLabel(hasAssetsBoard)}`, hasPromptPreview ? relativeFile(outputDir, promptPreviewBoardPath) : (hasPreflightBoard ? relativeFile(outputDir, preflightBoardPath) : (hasAssetsBoard ? relativeFile(outputDir, assetsBoardPath) : null)), 'report')}
+        ${renderLinkCard('结果阶段页面', `运行概览 ${availabilityLabel(hasRunOverview)} / 审阅看板 ${availabilityLabel(hasReviewBoard)} / Storyboard ${availabilityLabel(hasStoryboardBoard)}`, hasReviewBoard ? relativeFile(outputDir, reviewBoardPath) : (hasRunOverview ? relativeFile(outputDir, runOverviewPath) : (hasStoryboardBoard ? relativeFile(outputDir, storyboardBoardPath) : null)), 'review')}
+        ${renderLinkCard('收尾与补跑页面', `完成报告 ${availabilityLabel(hasCompletionBoard)} / 结果总入口 ${availabilityLabel(hasResultHub)} / 失败补跑 ${availabilityLabel(hasRerunBoard)}`, hasCompletionBoard ? relativeFile(outputDir, completionBoardPath) : (hasResultHub ? (fileExists(resultHubPath) ? relativeFile(outputDir, resultHubPath) : relativeFile(outputDir, resultHubMarkdownPath)) : (hasRerunBoard ? relativeFile(outputDir, rerunBoardPath) : null)), 'rerun')}
       </div>
     </section>
 
@@ -358,6 +410,25 @@ ${renderPortalHeadAssets()}
         <li>storyboard 页会显示当前焦点，并高亮跳转到的槽位。</li>
         <li>结果总入口页会明确告诉你先看什么、再看什么。</li>
       </ul>
+    </section>
+
+    <section class="section">
+      <h2>如果你是第一次使用 DAOGE</h2>
+      <p class="section-copy">新用户不要一上来就理解全部模板和参数。最稳的路径是先看 Example Catalog，选一个代表任务家族的入口，再进入 Prompt 预览和预检总览。</p>
+      <div class="guide-grid">
+        ${renderGuideCard('我还不知道从哪个任务开始', '先去 Example Catalog 按任务意图挑一个 starter。这样比直接面对全部模板、全部参数更容易建立心智模型。', [
+          { label: 'Example Catalog', href: fileExists(examplesCatalogPath) ? relativeFile(outputDir, examplesCatalogPath) : null },
+          { label: 'Prompt 预览', href: hasPromptPreview ? relativeFile(outputDir, promptPreviewBoardPath) : null },
+        ])}
+        ${renderGuideCard('我想先看一个完整示例怎么走', '先看 examples，再回到当前门户。这样能把“示例路径”和“当前任务路径”对齐起来。', [
+          { label: 'Example Catalog', href: fileExists(examplesCatalogPath) ? relativeFile(outputDir, examplesCatalogPath) : null },
+          { label: '当前门户', href: 'daoge_portal.html' },
+        ])}
+        ${renderGuideCard('我已经知道方向，只想快速开工', '如果你已经知道当前任务属于哪一类，就从 Example Catalog 找最近的 starter，然后回到 prepare 主线。', [
+          { label: 'Example Catalog', href: fileExists(examplesCatalogPath) ? relativeFile(outputDir, examplesCatalogPath) : null },
+          { label: '预检总览', href: hasPreflightBoard ? relativeFile(outputDir, preflightBoardPath) : null },
+        ])}
+      </div>
     </section>
 
     <section class="section">

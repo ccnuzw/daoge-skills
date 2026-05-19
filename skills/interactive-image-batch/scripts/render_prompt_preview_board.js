@@ -2,6 +2,7 @@ const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
 const { renderPortalTopLinks } = require('./portal_shared');
 const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { topLabel, resolveProfile, buildDisplayDistributions, normalizeValue } = require('./template_display_profile');
 
 function escapeHtml(text) {
   return String(text || '')
@@ -15,23 +16,6 @@ function escapeHtml(text) {
 function relativeFile(outputDir, targetPath) {
   if (!targetPath) return null;
   return path.relative(outputDir, targetPath);
-}
-
-function countBy(items, key) {
-  const counts = {};
-  for (const item of items) {
-    const value = item[key];
-    const label = value === undefined || value === null || value === '' ? '未设置' : String(value).trim();
-    counts[label] = (counts[label] || 0) + 1;
-  }
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([name, count]) => ({ name, count }));
-}
-
-function topLabel(entries, fallback = '未指定') {
-  return entries[0]?.name || fallback;
 }
 
 function getPromptText(item) {
@@ -82,12 +66,16 @@ function main() {
   const previewItems = prompts.slice(0, previewCount);
   const storyboardMode = prompts.some((item) => item.slot_id || item.shot_id || item.layout_region_id);
 
-  const styleFamily = countBy(prompts, 'style_family');
-  const purityGrade = countBy(prompts, 'purity_grade');
-  const scene = countBy(prompts, 'scene');
-  const wardrobe = countBy(prompts, 'wardrobe');
-  const composition = countBy(prompts, 'composition');
-  const slotRole = countBy(prompts, 'slot_role');
+  const displayProfile = resolveProfile(prompts);
+  const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
+    .map((item) => ({ ...item, counts: item.counts.slice(0, 8) }));
+  const styleFamily = displayDistributions.find((item) => item.key === 'style_family')?.counts || [];
+  const purityGrade = buildDisplayDistributions(prompts, {
+    distributionFields: [{ key: 'purity_grade', label: '强度等级', shortLabel: '强度等级分布' }],
+  })[0]?.counts || [];
+  const slotRole = buildDisplayDistributions(prompts, {
+    distributionFields: [{ key: 'slot_role', label: '槽位角色', shortLabel: '槽位角色分布' }],
+  })[0]?.counts || [];
 
   const preflightBoardPath = path.join(outputDir, 'preflight_board.html');
 
@@ -254,7 +242,7 @@ ${renderPortalHeadAssets()}
       </div>
       <div class="eyebrow">DAOGE Prompt Preview</div>
       <h1>DAOGE Prompt 预览</h1>
-      <p class="hero-copy">这是 prepare 阶段的 Prompt HTML 预览页。它负责把这一轮的分布摘要、批次计划和代表性 Prompt 样例收在一页里，让你先确认风格、场景和构图分布，再决定是否继续进入预检或重新改 Prompt。</p>
+      <p class="hero-copy">这是 prepare 阶段的 Prompt HTML 预览页。它负责把这一轮的分布摘要、批次计划和代表性 Prompt 样例收在一页里，${escapeHtml(displayProfile.heroSummary)}</p>
       <div class="hero-grid">
         <div class="metric-card metric-info">
           <div class="metric-label">提示词总数</div>
@@ -277,25 +265,21 @@ ${renderPortalHeadAssets()}
 
     <section class="section">
       <h2>先看什么</h2>
-      <p class="section-copy">先看这轮 Prompt 的主风格、主场景和构图分布，再看批次计划，最后抽查样例 Prompt。如果这里就发现方向不对，不要直接进入执行阶段。</p>
+      <p class="section-copy">${escapeHtml(displayProfile.firstLookCopy)}</p>
       <div class="section-grid">
         <article class="info-card">
           <h3>分布摘要</h3>
           <div class="meta-list">
             ${renderMetaRow('主风格族', topLabel(styleFamily))}
             ${renderMetaRow('主强度等级', topLabel(purityGrade))}
-            ${renderMetaRow('主场景', topLabel(scene))}
-            ${renderMetaRow('主服装', topLabel(wardrobe))}
-            ${renderMetaRow('主构图', topLabel(composition))}
+            ${displayProfile.summaryFields.map((field, index) => renderMetaRow(field.label, topLabel(displayDistributions[index + 1]?.counts || []))).join('')}
             ${storyboardMode ? renderMetaRow('主槽位角色', topLabel(slotRole)) : ''}
           </div>
         </article>
         <article class="info-card">
           <h3>当前建议</h3>
           <ul class="info-list">
-            <li>先确认风格分布和场景分布是否符合任务预期。</li>
-            <li>再看批次计划，判断这轮是小样本还是大规模正式执行。</li>
-            <li>最后抽查样例 Prompt，确认没有明显重复或跑偏。</li>
+            ${displayProfile.currentAdvice.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
           </ul>
         </article>
       </div>
@@ -303,26 +287,14 @@ ${renderPortalHeadAssets()}
 
     <section class="section">
       <h2>分布概览</h2>
-      <p class="section-copy">这一页只放最值得先看的几个维度，帮助你快速判断这轮 Prompt 有没有风格过于单一、场景过于集中或者构图重复的问题。</p>
+      <p class="section-copy">${escapeHtml(displayProfile.distributionOverviewCopy)}</p>
       <div class="section-grid">
-        <article class="info-card">
-          <h3>风格族</h3>
-          ${renderList(styleFamily)}
-        </article>
-        <article class="info-card">
-          <h3>场景</h3>
-          ${renderList(scene)}
-        </article>
-      </div>
-      <div class="section-grid" style="margin-top:16px;">
-        <article class="info-card">
-          <h3>服装</h3>
-          ${renderList(wardrobe)}
-        </article>
-        <article class="info-card">
-          <h3>构图</h3>
-          ${renderList(composition)}
-        </article>
+        ${displayDistributions.map((item, index) => `
+          <article class="info-card"${index >= 2 ? ' style="margin-top:16px;"' : ''}>
+            <h3>${escapeHtml(item.label)}</h3>
+            ${renderList(item.counts)}
+          </article>
+        `).join('')}
       </div>
     </section>
 
@@ -347,10 +319,7 @@ ${renderPortalHeadAssets()}
           <article class="prompt-card">
             <h3 class="prompt-card-title">${escapeHtml(item.index || index + 1)}. ${escapeHtml(item.title || item.slug || `prompt-${index + 1}`)}</h3>
             <div class="meta-list">
-              ${renderMetaRow('Style', item.style_family || '未设置')}
-              ${renderMetaRow('Scene', item.scene || '未设置')}
-              ${renderMetaRow('Wardrobe', item.wardrobe || '未设置')}
-              ${renderMetaRow('Composition', item.composition || '未设置')}
+              ${displayProfile.sampleFields.map((field) => renderMetaRow(field.label, normalizeValue(item[field.key]) || '未设置')).join('')}
               ${renderMetaRow('Slot', item.slot_id || item.shot_id || '未设置')}
               ${renderMetaRow('Mode', item.reference_mode || 'prompt-only')}
             </div>

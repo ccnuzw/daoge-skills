@@ -3,6 +3,7 @@ const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
 const { renderPortalTopLinks } = require('./portal_shared');
 const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { resolveProfile, buildDisplayDistributions } = require('./template_display_profile');
 
 function escapeHtml(text) {
   return String(text || '')
@@ -138,6 +139,9 @@ function main() {
   const storyboard = args['storyboard-file'] && fileExists(path.resolve(args['storyboard-file'])) ? readJson(args['storyboard-file']) : null;
   const template = modeDetection.detected_template || {};
   const readiness = buildReadiness(taskSpec, validation, gates);
+  const displayProfile = resolveProfile(prompts);
+  const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
+    .map((item) => ({ ...item, counts: item.counts.slice(0, 8) }));
 
   const readinessClass = `status-${readiness.status}`;
   const statusPillClass = `pill-${readiness.status}`;
@@ -465,23 +469,21 @@ ${renderPortalHeadAssets()}
           <h3>分布概览</h3>
           <div class="kv-list">
             ${renderKeyValueRows([
-              { label: 'Style 分布', value: (validation.distributions?.style_family || []).slice(0, 4).map((item) => `${item.name} ${item.count}`).join(' / ') || '未提供' },
-              { label: 'Scene 分布', value: (validation.distributions?.scene || []).slice(0, 4).map((item) => `${item.name} ${item.count}`).join(' / ') || '未提供' },
-              { label: 'Wardrobe 分布', value: (validation.distributions?.wardrobe || []).slice(0, 4).map((item) => `${item.name} ${item.count}`).join(' / ') || '未提供' },
-              { label: 'Composition 分布', value: (validation.distributions?.composition || []).slice(0, 4).map((item) => `${item.name} ${item.count}`).join(' / ') || '未提供' },
+              ...displayDistributions.map((item) => ({
+                label: item.shortLabel || `${item.label}分布`,
+                value: item.counts.slice(0, 4).map((entry) => `${entry.name} ${entry.count}`).join(' / ') || '未提供',
+              })),
             ])}
           </div>
         </article>
       </div>
       <div class="section-grid" style="margin-top:16px;">
-        <article class="info-card">
-          <h3>风格族 Top</h3>
-          ${renderDistribution(validation.distributions?.style_family)}
-        </article>
-        <article class="info-card">
-          <h3>场景 Top</h3>
-          ${renderDistribution(validation.distributions?.scene)}
-        </article>
+        ${displayDistributions.slice(0, 2).map((item) => `
+          <article class="info-card">
+            <h3>${escapeHtml(item.label)} Top</h3>
+            ${renderDistribution(item.counts)}
+          </article>
+        `).join('')}
       </div>
     </section>
 
