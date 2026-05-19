@@ -1,0 +1,21 @@
+{
+  "template_id": "brand-packaging-board",
+  "template_variant": "beverage-label-design",
+  "content_brief": "做一张饮品标签设计板，展示瓶身、标签正面、细节贴近视角和货架并排状态。",
+  "output_mode": "饮品标签设计板",
+  "style_requirements": [
+    "beverage label design",
+    "bottle packaging",
+    "shelf-safe highlights"
+  ],
+  "variation_requirements": [
+    "标签识别清晰",
+    "瓶身材质可读",
+    "货架并排有统一性"
+  ],
+  "text_policy": "标签和标志留位，完整文案后期替换。",
+  "sample_variant_axes": {
+    "packaging_format": "label-first",
+    "shelf_presence": "colorful retail"
+  }
+}

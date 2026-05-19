@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "soft-beauty-studio",
+  "content_brief": "做一组柔光美感摄影棚人像，强调皮肤、发丝和柔和面料细节，用于美妆和人物情绪大片。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "soft beauty studio portrait",
+    "diffused studio glow",
+    "delicate skin and fabric finish"
+  ],
+  "variation_requirements": [
+    "柔光必须保留脸部结构",
+    "材质细节和皮肤质感都要细腻",
+    "背景和姿态不能变得过软无支撑"
+  ],
+  "text_policy": "不生成可读标题，只保留适合后期排版的柔光安全区。",
+  "sample_variant_axes": {
+    "lighting": "soft diffused studio glow",
+    "camera_language": "half-body clean crop",
+    "material_emphasis": "skin finish"
+  }
+}

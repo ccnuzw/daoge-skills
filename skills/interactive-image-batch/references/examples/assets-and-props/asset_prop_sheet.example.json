@@ -1,0 +1,21 @@
+{
+  "template_id": "asset-prop-sheet",
+  "template_variant": "retro-skeuomorphic-icons",
+  "content_brief": "做一组复古拟物化图标和小型道具资产板，展示按钮、徽章、工具和收藏物。",
+  "output_mode": "资产道具板",
+  "style_requirements": [
+    "retro skeuomorphic icons",
+    "sheet-style layout",
+    "collectible polish"
+  ],
+  "variation_requirements": [
+    "单体轮廓清晰",
+    "系列一致",
+    "小尺寸可读"
+  ],
+  "text_policy": "不生成正文，只保留必要标签留位。",
+  "sample_variant_axes": {
+    "asset_role": "icon sheet",
+    "surface_style": "retro skeuomorphic"
+  }
+}

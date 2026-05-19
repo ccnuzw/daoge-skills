@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "brand-portrait-kv",
+  "content_brief": "做一张人物近景品牌主视觉，重点展示眼神、脸部层次和标题留白，用于高端品牌人物海报。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "face-led key visual",
+    "controlled headroom portrait crop",
+    "premium calm portrait mood"
+  ],
+  "variation_requirements": [
+    "眼神方向明确",
+    "脸部光线层次清晰",
+    "标题留白稳定"
+  ],
+  "text_policy": "标题和品牌标识后期替换，当前只保留清晰肖像留白和头部构图安全区。",
+  "sample_variant_axes": {
+    "eye_language": "direct confidence",
+    "crop_scale": "head-and-shoulders",
+    "lighting": "face-led directional key light",
+    "mood": "premium calm"
+  }
+}

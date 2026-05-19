@@ -1,0 +1,21 @@
+{
+  "template_id": "visual-doc-slide",
+  "template_variant": "visual-report-page",
+  "content_brief": "做一张视觉报告页，包含标题区、关键结论块、右侧图像区和底部注释区，用于季度业务汇报。",
+  "output_mode": "汇报页",
+  "style_requirements": [
+    "title-led report layout",
+    "presentation-safe margins",
+    "polished briefing tone"
+  ],
+  "variation_requirements": [
+    "版区分工清晰",
+    "正文区和图像区不打架",
+    "阅读顺序稳定"
+  ],
+  "text_policy": "标题和关键标签可占位，详细正文和数据说明后期替换。",
+  "sample_variant_axes": {
+    "page_role": "report body page",
+    "layout_zones": "left-text-right-visual"
+  }
+}

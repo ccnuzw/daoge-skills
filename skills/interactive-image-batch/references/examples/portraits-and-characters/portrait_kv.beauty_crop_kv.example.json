@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "beauty-crop-kv",
+  "content_brief": "做一张更偏美容裁切的人物主视觉，强调脸部细节、发丝边缘和干净留白，用于美妆人物海报和近景品牌 KV。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "beauty crop portrait key visual",
+    "clean premium close crop",
+    "delicate skin and hair detail"
+  ],
+  "variation_requirements": [
+    "五官、皮肤和发丝边缘必须细腻可读",
+    "裁切要更精确，不能出现额头或下巴危险裁切",
+    "背景和留白必须服务近景人物，不要抢脸"
+  ],
+  "text_policy": "不生成可读标题，只保留适合美妆排版的脸部近景安全区和干净留白。",
+  "sample_variant_axes": {
+    "eye_language": "soft direct focus",
+    "crop_scale": "head-and-shoulders beauty crop",
+    "lighting": "soft face-wrap light",
+    "mood": "refined beauty calm"
+  }
+}

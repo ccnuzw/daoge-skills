@@ -39,6 +39,8 @@
 - `benefit-breakdown`: 每张图讲一个卖点。
 - `fit-and-material`: 版型和材质展示。
 - `lifestyle-proof`: 使用场景证明图。
+- `comparison-proof-detail`: 对比证明型详情页。
+- `feature-stack-page`: 连续堆叠卖点模块的详情页。
 
 ## 推荐 variant_axes
 

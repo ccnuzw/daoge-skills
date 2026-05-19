@@ -1,0 +1,21 @@
+{
+  "template_id": "brand-packaging-board",
+  "template_variant": "cosmetic-packaging",
+  "content_brief": "做一张美妆包装系统板，展示瓶身、外盒、套组和零售陈列视角。",
+  "output_mode": "美妆包装板",
+  "style_requirements": [
+    "cosmetic packaging",
+    "premium packaging polish",
+    "material clarity"
+  ],
+  "variation_requirements": [
+    "材质可读",
+    "品牌系统一致",
+    "零售呈现精致"
+  ],
+  "text_policy": "标志和包装文案留位，完整文字后期替换。",
+  "sample_variant_axes": {
+    "packaging_format": "box packaging",
+    "material_signal": "premium carton"
+  }
+}

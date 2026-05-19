@@ -1,0 +1,22 @@
+{
+  "template_id": "map-route-board",
+  "template_variant": "itinerary-day-trip-map",
+  "content_brief": "做一张一日行程地图，展示早晨出发点、上午景点、中午餐食停靠、下午路线延伸和傍晚收尾站点的完整时间顺序。",
+  "output_mode": "一日行程地图",
+  "style_requirements": [
+    "itinerary day trip map",
+    "route-first layout",
+    "guide-board polish"
+  ],
+  "variation_requirements": [
+    "时间顺序明确",
+    "停靠点和路线层级清晰",
+    "图例和编号系统统一"
+  ],
+  "text_policy": "标题、编号和局部标签留位，长说明后期替换。",
+  "sample_variant_axes": {
+    "map_type": "itinerary board",
+    "route_logic": "linear path",
+    "navigation_style": "infographic-map hybrid"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "template_id": "avatar-profile-pack",
+  "template_variant": "themed-3d-icon",
+  "content_brief": "做一组主题化 3D 头像 icon，面向知识创作者频道，要求小尺寸下仍然可读，并保留统一的角色识别。",
+  "output_mode": "主题 3D 头像图",
+  "style_requirements": [
+    "themed 3d avatar icon set",
+    "small-size readable profile asset",
+    "clean collectible creator identity"
+  ],
+  "variation_requirements": [
+    "小尺寸可读性优先",
+    "角色 identity 稳定",
+    "主题配色和表情变化在统一资产语言内"
+  ],
+  "text_policy": "不生成文字，只保留头像安全区、轮廓和主题符号。",
+  "sample_variant_axes": {
+    "asset_usage": "themed icon",
+    "crop_scale": "circular-safe headshot",
+    "expression_set": "confident",
+    "background_depth": "minimal textured backdrop"
+  }
+}

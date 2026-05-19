@@ -1,0 +1,24 @@
+{
+  "layout_id": "expert_led_left_info_3grid_bottom_kv",
+  "board_role": "storyboard-board",
+  "canvas": {
+    "width": 2560,
+    "height": 1440,
+    "aspect_ratio": "16:9",
+    "background": "#10161d"
+  },
+  "regions": [
+    { "id": "brand_panel", "role": "brand_panel", "x": 64, "y": 64, "width": 600, "height": 860, "notes": "左侧信息区" },
+    { "id": "shot_1", "role": "shot", "sequence": 1, "x": 720, "y": 64, "width": 560, "height": 280, "aspect_ratio": "16:9" },
+    { "id": "shot_2", "role": "shot", "sequence": 2, "x": 1304, "y": 64, "width": 560, "height": 280, "aspect_ratio": "16:9" },
+    { "id": "shot_3", "role": "shot", "sequence": 3, "x": 1888, "y": 64, "width": 560, "height": 280, "aspect_ratio": "16:9" },
+    { "id": "shot_4", "role": "kv", "sequence": 4, "x": 64, "y": 964, "width": 2384, "height": 320, "aspect_ratio": "16:9", "notes": "底部专家结论收尾 KV" }
+  ],
+  "bindings": {
+    "brand_panel": "brand_panel",
+    "shot_1": "shot_1",
+    "shot_2": "shot_2",
+    "shot_3": "shot_3",
+    "shot_4": "shot_4"
+  }
+}

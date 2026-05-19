@@ -123,9 +123,36 @@ Markdown 产物现在更适合作为：
 
 当前已经内置并适合长期复用的方向包括：
 
-- `campaign-poster`
-- `cinematic-storyboard`
-- `oral-storyboard-board`
+- `core-commercial`
+  - `campaign-poster`
+  - `studio-editorial`
+  - `portrait-kv`
+- `ecommerce-clean`
+- `ecommerce-clean-soft-scene-commerce`
+- `ecommerce-clean-material-focus-commerce`
+- `ecommerce-clean-flatlay-commerce`
+- `ecommerce-clean-platform-safe-packshot`
+- `detail-page-set`
+  - `social-grid`
+  - `ab-ad-test`
+  - `lookbook`
+  - `brand-packaging-board`
+  - `type-layout-poster`
+- `narrative-and-board`
+  - `cinematic-storyboard`
+  - `oral-storyboard-board`
+  - `illustrated-scene-set`
+- `interface-and-information`
+  - `ui-mockup-board`
+  - `infographic-board`
+  - `technical-diagram`
+  - `visual-doc-slide`
+  - `academic-figure-board`
+  - `map-route-board`
+- `identity-and-assets`
+  - `avatar-profile-pack`
+  - `image-edit`
+  - `asset-prop-sheet`
 
 其中 `oral-storyboard-board` 适合：
 
@@ -137,6 +164,353 @@ Markdown 产物现在更适合作为：
 对应示例包见：
 
 - `references/examples/finance-storyboard/`
+- `references/examples/ui-mockups/ui_mockup_board.example.json`
+- `references/examples/infographics/infographic_board.example.json`
+- `references/examples/technical-diagrams/technical_diagram.example.json`
+- `references/examples/avatars-and-profile/avatar_profile_pack.example.json`
+- `references/examples/slides-and-visual-docs/visual_doc_slide.example.json`
+- `references/examples/academic-figures/academic_figure_board.example.json`
+- `references/examples/branding-and-packaging/brand_packaging_board.example.json`
+- `references/examples/scenes-and-illustrations/illustrated_scene_set.example.json`
+- `references/examples/maps/map_route_board.example.json`
+- `references/examples/typography-and-text-layout/type_layout_poster.example.json`
+- `references/examples/assets-and-props/asset_prop_sheet.example.json`
+- `references/examples/README.md`
+
+如果你想把 example 直接变成最小可执行输入，可以运行：
+
+```bash
+node scripts/build_example_quickstart.js \
+  --example-file references/examples/ui-mockups/ui_mockup_board.example.json \
+  --output-dir /tmp/daoge-example-quickstart
+```
+
+如果你想直接从 example 跑到预检面板，可以运行：
+
+```bash
+node scripts/run_example_quickstart_prepare.js \
+  --example-file references/examples/ui-mockups/ui_mockup_board.example.json \
+  --output-dir /tmp/daoge-example-prepare
+```
+
+如果你想先看可运行 example 列表，再一键进预检，可以运行：
+
+```bash
+node scripts/run_example_catalog_prepare.js --list true
+node scripts/run_example_catalog_prepare.js --starter true
+node scripts/run_example_catalog_prepare.js --intent ui
+node scripts/run_example_catalog_prepare.js \
+  --example-id ui-mockup-board \
+  --output-dir /tmp/daoge-example-catalog-demo
+```
+
+如果你想直接体验 UI mockup 的高频子类，也可以运行：
+
+```bash
+node scripts/run_example_catalog_prepare.js \
+  --example-id ui-mockup-board-chat-interface-scene \
+  --output-dir /tmp/daoge-ui-chat-scene-demo
+```
+
+你也可以直接体验剩余两个 UI 高频尾项：
+
+```bash
+node scripts/run_example_catalog_prepare.js \
+  --example-id ui-mockup-board-short-video-cover-ui \
+  --output-dir /tmp/daoge-ui-short-video-demo
+```
+
+如果你想先看一个可点击的 catalog 首页，可以运行：
+
+```bash
+node scripts/render_example_catalog_board.js
+```
+
+当前 example catalog 已覆盖：
+
+- `ui-mockup-board`
+- `ui-mockup-board-social-interface-mockup`
+- `ui-mockup-board-live-commerce-ui`
+- `ui-mockup-board-chat-interface-scene`
+- `ui-mockup-board-product-card-overlay`
+- `ui-mockup-board-short-video-cover-ui`
+- `infographic-board`
+- `technical-diagram`
+- `academic-figure-board`
+- `brand-packaging-board`
+- `illustrated-scene-set`
+- `map-route-board`
+- `type-layout-poster`
+- `asset-prop-sheet`
+- `avatar-profile-pack`
+- `visual-doc-slide`
+- `visual-doc-slide-data-summary-slide`
+- `visual-doc-slide-before-after-explainer-slide`
+- `ecommerce-clean`
+- `detail-page-set`
+- `social-grid`
+- `ab-ad-test`
+- `image-edit`
+- `image-edit-localized-fix`
+- `image-edit-style-alignment-edit`
+- `image-edit-material-replacement-edit`
+- `image-edit-lighting-consistency-fix`
+- `campaign-poster`
+- `lookbook`
+- `portrait-kv`
+- `studio-editorial`
+- `cinematic-storyboard`
+- `oral-storyboard-board`
+- `finance-oral-storyboard-board`
+- `oral-storyboard-board-host-led`
+- `oral-storyboard-board-product-led`
+- `oral-storyboard-board-educational-explainer`
+
+第一批变体级 example 入口已补入 catalog：
+
+- `academic-figure-board-mechanism-diagram`
+- `brand-packaging-board-cosmetic-packaging`
+- `illustrated-scene-set-picture-book-scene`
+- `map-route-board-store-distribution-map`
+- `type-layout-poster-title-safe-poster`
+- `type-layout-poster-editorial-phrase-block`
+- `type-layout-poster-image-type-balance-poster`
+- `asset-prop-sheet-game-screenshot-mockup`
+- `asset-prop-sheet-prop-lineup-board`
+- `asset-prop-sheet-collectible-item-sheet`
+
+第二批变体级 example 入口新增：
+
+- `academic-figure-board-multi-condition-comparison`
+- `brand-packaging-board-beverage-label-design`
+- `map-route-board-illustrated-city-map`
+- `illustrated-scene-set-concept-scene`
+- `illustrated-scene-set-minimalist-mood-scene`
+- `cinematic-storyboard-micro-film`
+- `cinematic-storyboard-vertical-short`
+- `cinematic-storyboard-mood-sequence`
+- `cinematic-storyboard-demo-explainer-sequence`
+- `cinematic-storyboard-product-reveal-sequence`
+- `infographic-board-step-by-step-infographic`
+- `technical-diagram-sequence-diagram`
+- `brand-packaging-board-mascot-brand-kit`
+- `avatar-profile-pack-style-transfer-selfie`
+
+第三批静态视觉子类入口新增：
+
+- `infographic-board-legend-heavy-infographic`
+- `technical-diagram-network-topology`
+- `brand-packaging-board-character-merch-board`
+- `avatar-profile-pack-themed-3d-icon`
+
+第二十五批 Brand Packaging 第二波入口新增：
+
+- `brand-packaging-board-gift-box-campaign-packaging`
+- `brand-packaging-board-seasonal-limited-packaging`
+
+第四批说明型 / 电商型 / 投放型入口新增：
+
+- `visual-doc-slide-policy-style-slide`
+- `detail-page-set-fit-and-material`
+- `social-grid-brand-feed-system`
+- `ab-ad-test-benefit-stack`
+
+第五批说明页 / 详情页 / 社媒 / 海报入口新增：
+
+- `visual-doc-slide-educational-diagram-slide`
+- `detail-page-set-lifestyle-proof`
+- `social-grid-ugc-polished`
+- `campaign-poster-product-hero`
+
+第六批高密度解释 / 主图细节 / 上新九宫格 / 人物海报入口新增：
+
+- `visual-doc-slide-dense-explainer-slides`
+- `detail-page-set-hero-plus-details`
+- `social-grid-nine-grid-launch`
+- `campaign-poster-people-hero`
+
+第二十四批 Visual Doc Slide 第二波入口新增：
+
+- `visual-doc-slide-data-summary-slide`
+- `visual-doc-slide-before-after-explainer-slide`
+
+第二十一批 Detail Page 第二波入口新增：
+
+- `detail-page-set-comparison-proof-detail`
+- `detail-page-set-feature-stack-page`
+
+第二十二批 Social Grid 第二波入口新增：
+
+- `social-grid-countdown-campaign-grid`
+- `social-grid-benefit-carousel-grid`
+
+第七批技术图 / 信息图说明型入口新增：
+
+- `technical-diagram-flowchart-decision`
+- `technical-diagram-state-machine`
+- `infographic-board-comparison-infographic`
+- `infographic-board-bento-grid-infographic`
+
+第八批技术图 / 信息图尾项入口新增：
+
+- `technical-diagram-er-diagram`
+- `technical-diagram-mind-map-tech`
+- `infographic-board-hand-drawn-infographic`
+
+第九批 UI mockup 高频变体入口新增：
+
+- `ui-mockup-board-social-interface-mockup`
+- `ui-mockup-board-live-commerce-ui`
+- `ui-mockup-board-chat-interface-scene`
+
+第十批 UI mockup 尾项入口新增：
+
+- `ui-mockup-board-product-card-overlay`
+- `ui-mockup-board-short-video-cover-ui`
+
+第十一批投放测试 / Campaign 延展入口新增：
+
+- `ab-ad-test-audience-angle`
+- `ab-ad-test-layout-test`
+- `campaign-poster-campaign-extension`
+
+第二十三批 A/B Ad Test 第二波入口新增：
+
+- `ab-ad-test-hook-contrast-test`
+- `ab-ad-test-cta-emphasis-test`
+
+第二十批 Campaign Poster 第二波入口新增：
+
+- `campaign-poster-headline-safe-kv`
+- `campaign-poster-people-product-dual-hero`
+
+第十二批头像资产补齐入口新增：
+
+- `avatar-profile-pack-character-grid-portrait`
+- `avatar-profile-pack-cultural-portrait-series`
+
+第十三批学术图补齐入口新增：
+
+- `academic-figure-board-method-pipeline-overview`
+- `academic-figure-board-research-overview-poster`
+
+第十四批地图路线补齐入口新增：
+
+- `map-route-board-itinerary-day-trip-map`
+- `map-route-board-food-map`
+
+第十五批叙事与插画尾项补齐入口新增：
+
+- `cinematic-storyboard-mood-sequence`
+- `illustrated-scene-set-minimalist-mood-scene`
+
+同时修正：
+
+- `oral-storyboard-board` 基准入口的 `template_variant` 已统一为 `horizontal-board`
+
+第十六批肖像与棚拍家族化入口新增：
+
+- `portrait-kv-editorial-closeup`
+- `portrait-kv-soft-character-focus`
+- `studio-editorial-high-contrast-studio`
+- `studio-editorial-soft-beauty-studio`
+
+第十八批肖像与棚拍第二波入口新增：
+
+- `portrait-kv-dramatic-gaze-kv`
+- `portrait-kv-beauty-crop-kv`
+- `studio-editorial-mono-backdrop-editorial`
+- `studio-editorial-motion-pose-studio`
+
+第二十一批肖像与棚拍第三波入口新增：
+
+- `portrait-kv-emotion-contrast-kv`
+- `portrait-kv-product-linked-portrait-kv`
+- `studio-editorial-couture-minimal-studio`
+- `studio-editorial-gesture-sequence-studio`
+
+第十七批 Lookbook 家族化入口新增：
+
+- `lookbook-chapter-lookbook`
+- `lookbook-cover-and-range`
+
+第十九批 Lookbook 第二波入口新增：
+
+- `lookbook-chapter-scene-progressive`
+- `lookbook-multi-outfit-commercial`
+
+如果你是第一次上手，不建议直接从全部 20+ 入口里盲选。当前推荐起步入口是：
+
+- `ui-mockup-board`
+- `academic-figure-board`
+- `brand-packaging-board`
+- `brand-packaging-board-gift-box-campaign-packaging`
+- `brand-packaging-board-seasonal-limited-packaging`
+- `map-route-board`
+- `type-layout-poster`
+- `ecommerce-clean`
+- `detail-page-set`
+- `social-grid`
+- `ab-ad-test`
+- `ab-ad-test-hook-contrast-test`
+- `ab-ad-test-cta-emphasis-test`
+- `campaign-poster`
+- `campaign-poster-headline-safe-kv`
+- `lookbook`
+- `lookbook-chapter-lookbook`
+- `lookbook-cover-and-range`
+- `lookbook-chapter-scene-progressive`
+- `lookbook-multi-outfit-commercial`
+- `lookbook-editorial-pairing-lookbook`
+- `lookbook-detail-mix`
+- `detail-page-set-comparison-proof-detail`
+- `detail-page-set-feature-stack-page`
+- `social-grid-countdown-campaign-grid`
+- `social-grid-benefit-carousel-grid`
+- `portrait-kv`
+- `studio-editorial`
+- `portrait-kv-editorial-closeup`
+- `portrait-kv-soft-character-focus`
+- `portrait-kv-dramatic-gaze-kv`
+- `portrait-kv-beauty-crop-kv`
+- `portrait-kv-emotion-contrast-kv`
+- `portrait-kv-product-linked-portrait-kv`
+- `studio-editorial-high-contrast-studio`
+- `studio-editorial-soft-beauty-studio`
+- `studio-editorial-mono-backdrop-editorial`
+- `studio-editorial-motion-pose-studio`
+- `studio-editorial-couture-minimal-studio`
+- `studio-editorial-gesture-sequence-studio`
+- `cinematic-storyboard`
+- `oral-storyboard-board`
+- `finance-oral-storyboard-board`
+- `oral-storyboard-board-host-led`
+- `oral-storyboard-board-product-led`
+- `oral-storyboard-board-educational-explainer`
+
+如果你更习惯按任务意图找入口，可以直接使用：
+
+- `--intent ui`
+- `--intent academic`
+- `--intent packaging`
+- `--intent map`
+- `--intent typography`
+- `--intent ecommerce`
+- `--intent detail`
+- `--intent social`
+- `--intent abtest`
+- `--intent poster`
+- `--intent lookbook`
+- `--intent portrait`
+- `--intent studio`
+- `--intent cinematic`
+- `--intent oralboard`
+- `--intent financeboard`
+- `--intent hostboard`
+- `--intent productboard`
+- `--intent eduboard`
+- `--intent expertboard`
+- `--intent testimonialboard`
 
 ---
 
@@ -161,6 +535,44 @@ Markdown 产物现在更适合作为：
 - `layout_manifest.json`
 - `reference_bindings.json`
 - `render_config.json`
+
+---
+
+## 运行模式
+
+这个 skill 现在建议先判断运行模式，再决定走完整 runner 还是轻量路径。
+
+推荐探测命令：
+
+```bash
+cd skills/interactive-image-batch
+node scripts/detect_runtime_mode.js
+```
+
+当前建议模式：
+
+- `local-batch-runner`
+  - 有本地 `.env` 和有效凭证
+  - 走完整 `prepare -> execute -> review -> rerun` 主线
+- `host-native-image-tool`
+  - 宿主自带图像工具
+  - 保留 DAOGE 的 intake / template / prompt 规划
+  - 不强制进入本地 execute
+  - 推荐额外交付 `host_native_prompt_pack.json` 和可读摘要
+- `prompt-advisor`
+  - 只有 prompt 规划，不执行出图
+- `local-runner-missing-credentials`
+  - 本地 runner 存在，但缺少必要凭证
+  - 此时应补凭证，或者降级到 host-native / advisor
+
+### 为什么要加这一层
+
+因为当前 skill 的强项是完整运行时，但并不是所有环境都适合走完整 runner。
+
+第二阶段的目标不是削弱 DAOGE，而是让它在两类场景里都更合理：
+
+- 有本地执行能力时：走强工作流
+- 宿主已经能出图时：走轻量 host-native 路径
 
 ---
 
@@ -622,6 +1034,7 @@ node scripts/run_real_provider_smoke.js \
 - `scripts/materialize_prompt_drafts.js`
 - `scripts/render_prompt_preview.js`
 - `scripts/render_preflight_dashboard.js`
+- `scripts/build_host_native_prompt_pack.js`
 
 ### 执行与汇总
 
@@ -647,6 +1060,75 @@ node scripts/run_real_provider_smoke.js \
 - `rerun_candidates.json`
 - `daoge_result_hub.md`
 - `operations_report.md`
+
+如果走的是 `host-native-image-tool` 轻量路径，推荐至少保留：
+
+- `prompts.generated.json`
+- `host_native_prompt_pack.json`
+- `host_native_summary.md`
+- `host_native_summary.html`
+
+这组产物的目标不是伪装本地 execute 已发生，而是给宿主原生图像工具留下一份可交接、可审阅、可复用的最小 prompt 包。
+
+推荐命令：
+
+```bash
+node scripts/build_host_native_prompt_pack.js \
+  --prompts-file /abs/path/prompts.generated.json \
+  --task-spec /abs/path/task_spec.normalized.json \
+  --strategy-file /abs/path/prompt_strategy.normalized.json \
+  --runtime-mode-file /abs/path/runtime_mode.json \
+  --output-dir /abs/path/output_dir
+```
+
+如果宿主原生图像工具已经完成出图，还可以把结果回填进 DAOGE 的审阅和归档链：
+
+```bash
+node scripts/ingest_host_native_results.js \
+  --prompt-pack-file /abs/path/host_native_prompt_pack.json \
+  --results-file /abs/path/host_native_results.json \
+  --output-dir /abs/path/output_dir
+```
+
+`host_native_results.json` 不要求模拟完整 runner 结果，但建议至少包含：
+
+- `index`
+- `title`
+- `output`
+- `slotId`
+- `requestMode`
+- `status`
+- `error`
+
+现在这份结果文件已经有正式契约与示例：
+
+- schema: `references/host_native_results.schema.json`
+- example: `references/examples/host-native/host_native_results.example.json`
+- adapter playbook: `references/host_native_adapter_playbook_zh.md`
+- adapter quickstart: `references/examples/host-native/adapter_quickstart.example.md`
+
+推荐先独立校验：
+
+```bash
+node scripts/validate_host_native_results.js \
+  --results-file /abs/path/host_native_results.json
+```
+
+如果你是在接一个新的宿主环境，不要只看这里，优先继续读：
+
+- `references/host_native_adapter_playbook_zh.md`
+- `references/examples/host-native/adapter_quickstart.example.md`
+
+导入后会补出一条轻量结果链，包括：
+
+- `manifest.json`
+- `success.json`
+- `failed.json`
+- `needs_review.json`
+- `daoge_result_hub.md`
+- `result_hub.html`
+- `review_board.html`
+- `completion_board.html`
 
 如果开启联系图，还会有：
 
@@ -830,7 +1312,10 @@ skills/interactive-image-batch/scripts/run_smoke_tests.sh
 它会顺序执行：
 
 - `scripts/*.js` 全量 `node --check`
+- `scripts/detect_runtime_mode.js`
 - `scripts/validate_template_registry.js`
+- `scripts/build_host_native_prompt_pack.js` 的最小 fixture 产物检查
+- `scripts/ingest_host_native_results.js` 的最小 fixture 结果回填检查
 - `skills/interactive-image-batch/tests/smoke.test.js`
 
 当前 smoke 覆盖：
@@ -848,6 +1333,18 @@ skills/interactive-image-batch/scripts/run_smoke_tests.sh
 - 改 `run_batch*`、`render_*`、`validate_*`、`daoge_prepare_run.js` 时不要跳过回归
 - 新增执行分支时，优先补 fixture 和 smoke tests，再继续扩功能
 - 如果只改模板文档，也不要只靠肉眼检查，至少跑到 `validate_template_registry.js` 为绿
+
+如果你是在接新的 `host-native` 宿主，不要直接从脚本开始翻，推荐按这个顺序读：
+
+1. `references/host_native_integration_sop_zh.md`
+2. `references/host_native_adapter_playbook_zh.md`
+3. `references/examples/host-native/adapter_quickstart.example.md`
+4. `references/host_native_results.schema.json`
+5. `references/examples/host-native/host_native_results.example.json`
+
+如果这次已经完成了一个新宿主接入，建议顺手补一份归档：
+
+- `docs/host_native_adapter_archive_template_zh.md`
 
 ## 模板维护 SOP
 

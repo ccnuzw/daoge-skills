@@ -1,0 +1,22 @@
+{
+  "template_id": "asset-prop-sheet",
+  "template_variant": "prop-lineup-board",
+  "content_brief": "做一张 prop lineup board，展示一套风格统一的工具、徽章、票券和小型装备道具，强调单体轮廓清晰和系列排布秩序。",
+  "output_mode": "资产道具板",
+  "style_requirements": [
+    "prop lineup",
+    "sheet-style layout",
+    "utility clarity"
+  ],
+  "variation_requirements": [
+    "单体轮廓清晰",
+    "成套排布统一",
+    "标签只留必要留位"
+  ],
+  "text_policy": "不生成正文，只保留必要标签留位。",
+  "sample_variant_axes": {
+    "asset_role": "prop lineup",
+    "surface_style": "soft 3d prop",
+    "presentation_mode": "staged lineup"
+  }
+}

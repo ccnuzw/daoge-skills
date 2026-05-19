@@ -1,0 +1,21 @@
+{
+  "template_id": "ab-ad-test",
+  "template_variant": "single-variable",
+  "content_brief": "做一组广告投放 A/B 测试图，对比“直接产品展示”与“氛围感使用场景”两种表达，验证点击率差异。",
+  "output_mode": "广告测试图",
+  "style_requirements": [
+    "paid-social ad creative",
+    "conversion-oriented hero visual",
+    "headline-safe CTA layout"
+  ],
+  "variation_requirements": [
+    "测试假设明确",
+    "控制变量稳定",
+    "CTA 安全区清晰"
+  ],
+  "text_policy": "标题和 CTA 文案后期替换，当前只保留清晰转化结构和留白区。",
+  "sample_variant_axes": {
+    "ad_test_hypothesis": "test direct product clarity versus mood-led framing",
+    "value_proposition": "comfort-first message"
+  }
+}

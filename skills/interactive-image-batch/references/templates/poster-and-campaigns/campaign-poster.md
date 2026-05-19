@@ -40,6 +40,8 @@
 - `product-hero`: 产品主视觉，强调商品可读性、材质、卖点、商业转化。
 - `people-hero`: 人物主视觉，强调眼神、姿态、品牌气质和主体压迫感。
 - `campaign-extension`: Campaign 延展图，强调同一视觉系统下的多场景扩展。
+- `headline-safe-kv`: 强标题区主视觉，强调大面积安全留白和广告文案挂载空间。
+- `people-product-dual-hero`: 人物与产品双主角同屏，强调双重层级和平衡主视觉。
 
 ## 推荐 variant_axes
 

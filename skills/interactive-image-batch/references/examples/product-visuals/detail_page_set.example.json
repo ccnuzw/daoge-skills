@@ -1,0 +1,21 @@
+{
+  "template_id": "detail-page-set",
+  "template_variant": "benefit-breakdown",
+  "content_brief": "做一组电商详情页组图，分别展示卫衣主图、面料细节、版型上身效果和场景化卖点证明。",
+  "output_mode": "详情页组图",
+  "style_requirements": [
+    "product-first ecommerce composition",
+    "benefit breakdown layout",
+    "clean commercial softbox light"
+  ],
+  "variation_requirements": [
+    "每张图卖点角色明确",
+    "版型和材质可读",
+    "标签安全区稳定"
+  ],
+  "text_policy": "标签区和卖点说明位后期替换，当前只保留清晰安全区，不生成完整可读文案。",
+  "sample_variant_axes": {
+    "detail_page_role": "hero product image",
+    "benefit_angle": "premium fabric"
+  }
+}

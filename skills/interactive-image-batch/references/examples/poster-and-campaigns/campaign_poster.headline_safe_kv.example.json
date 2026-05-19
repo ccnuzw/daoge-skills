@@ -1,0 +1,23 @@
+{
+  "template_id": "campaign-poster",
+  "template_variant": "headline-safe-kv",
+  "content_brief": "做一张强标题区主视觉海报，主体层级明确，但必须保留大面积可挂文案的安全留白，适合品牌主KV、广告封面和线下灯箱海报。",
+  "output_mode": "品牌海报",
+  "style_requirements": [
+    "headline-safe campaign key visual",
+    "full-body hero with controlled copy-safe space",
+    "premium ad poster hierarchy"
+  ],
+  "variation_requirements": [
+    "主体必须足够强，但不能侵占标题区",
+    "留白要真实可用，不是空洞大白块",
+    "画面必须明确是广告海报，不是普通写真"
+  ],
+  "text_policy": "标题、logo、slogan 后期替换，当前只保留明确的大标题挂载区和稳定安全留白。",
+  "sample_variant_axes": {
+    "camera_language": "full-body vertical hero framing",
+    "commercial_role": "master KV",
+    "lighting": "soft premium studio light",
+    "mood": "editorial confidence"
+  }
+}

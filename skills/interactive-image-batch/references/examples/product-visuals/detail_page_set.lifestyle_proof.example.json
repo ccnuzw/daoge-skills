@@ -1,0 +1,23 @@
+{
+  "template_id": "detail-page-set",
+  "template_variant": "lifestyle-proof",
+  "content_brief": "做一组使用场景证明型详情页组图，展示产品在真实通勤、办公和休闲场景里的穿着或使用效果，强调生活化信服力。",
+  "output_mode": "场景证明详情页组图",
+  "style_requirements": [
+    "lifestyle-proof ecommerce detail set",
+    "product-visible scenario storytelling",
+    "commerce-safe real-life proof layout"
+  ],
+  "variation_requirements": [
+    "每张图都要兼顾场景感和产品可见性",
+    "生活方式证明角色明确",
+    "卖点说明位和主体关系稳定"
+  ],
+  "text_policy": "场景卖点标题和说明位后期替换，当前只保留清晰标签安全区。",
+  "sample_variant_axes": {
+    "detail_page_role": "lifestyle use case",
+    "benefit_angle": "comfort",
+    "shot_scale": "three-quarter",
+    "layout_zone": "top-copy-safe"
+  }
+}

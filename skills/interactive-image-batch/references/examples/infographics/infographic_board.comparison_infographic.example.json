@@ -1,0 +1,23 @@
+{
+  "template_id": "infographic-board",
+  "template_variant": "comparison-infographic",
+  "content_brief": "做一张左右对比信息图，比较手动流程和自动化流程在时间、成本、稳定性和复用性上的差异，要求结论区明确。",
+  "output_mode": "对比信息图",
+  "style_requirements": [
+    "comparison infographic board",
+    "clear dual-column explainer layout",
+    "difference-first structured information design"
+  ],
+  "variation_requirements": [
+    "左右对照关系清晰",
+    "差异项层级稳定",
+    "结论区和对比区边界明确"
+  ],
+  "text_policy": "允许标题、对比标签和结论标题占位，长段说明后期替换。",
+  "sample_variant_axes": {
+    "information_hierarchy": "comparison-first",
+    "reading_path": "left-right",
+    "icon_language": "flat icons",
+    "data_emphasis": "summary-led"
+  }
+}

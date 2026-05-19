@@ -1,0 +1,23 @@
+{
+  "template_id": "ui-mockup-board",
+  "template_variant": "product-card-overlay",
+  "content_brief": "做一张商品卖点叠层卡片图，展示产品主体、信息面板、卖点标签和局部价格区，适合商品卡片页、卖点摘要卡和广告落地页局部模块。",
+  "output_mode": "商品卖点叠层卡片",
+  "style_requirements": [
+    "product-card overlay UI",
+    "product-first information panel layout",
+    "clean commerce card composition"
+  ],
+  "variation_requirements": [
+    "商品主体和信息卡片共存且主次清晰",
+    "卖点标签、价格区和摘要模块节奏稳定",
+    "不能退化成普通商品海报或纯电商白底图"
+  ],
+  "text_policy": "商品名、价格、标签和摘要标题保留占位与安全区，细节文案后期替换。",
+  "sample_variant_axes": {
+    "ui_surface": "device-framed screen",
+    "module_focus": "product card",
+    "overlay_density": "balanced",
+    "device_context": "screen only"
+  }
+}

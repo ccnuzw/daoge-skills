@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "mono-backdrop-editorial",
+  "content_brief": "做一组单色背景控制很强的棚拍时尚大片，强调人物轮廓、服装材质和背景纯净秩序，用于品牌棚拍和服装形象图。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "mono backdrop studio editorial",
+    "controlled seamless color field",
+    "clean fashion silhouette emphasis"
+  ],
+  "variation_requirements": [
+    "背景必须统一而干净，不能出现廉价棚布感",
+    "人物轮廓和服装边缘要从单色背景里清晰分离",
+    "姿态变化可以有，但不能破坏棚拍秩序"
+  ],
+  "text_policy": "不生成可读标题，只保留适合品牌棚拍后期排版的干净背景留白。",
+  "sample_variant_axes": {
+    "lighting": "controlled key with clean backdrop falloff",
+    "camera_language": "centered studio portrait crop",
+    "material_emphasis": "silhouette line"
+  }
+}

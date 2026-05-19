@@ -1,0 +1,22 @@
+{
+  "template_id": "ecommerce-clean",
+  "template_variant": "flatlay-commerce",
+  "content_brief": "做一组电商平铺主图，展示基础款衬衫的正面平铺轮廓、面料纹理和折叠结构，适合类目页和平铺主图点击图。",
+  "output_mode": "电商主图",
+  "style_requirements": [
+    "flatlay ecommerce image",
+    "clean commercial top-down layout",
+    "product-first readability"
+  ],
+  "variation_requirements": [
+    "平铺结构稳定",
+    "面料和轮廓清晰",
+    "背景保持纯净并预留平台安全区"
+  ],
+  "text_policy": "标题和卖点标签后期替换，当前只保留平铺主图安全区，不生成可读文案。",
+  "sample_variant_axes": {
+    "shot_scale": "full product hero",
+    "benefit_angle": "structure clarity",
+    "background_cleanliness": "pure white"
+  }
+}

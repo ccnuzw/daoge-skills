@@ -1,0 +1,21 @@
+{
+  "template_id": "type-layout-poster",
+  "template_variant": "bilingual-layout-visual",
+  "content_brief": "做一张双语排版海报，展示主标题、副标题、角标区和大面积文字安全区。",
+  "output_mode": "排版海报",
+  "style_requirements": [
+    "bilingual layout visual",
+    "headline-first layout",
+    "editorial restraint"
+  ],
+  "variation_requirements": [
+    "标题层级清晰",
+    "字块节奏稳定",
+    "图像与文字主次明确"
+  ],
+  "text_policy": "标题和短语留位，正文后期替换。",
+  "sample_variant_axes": {
+    "language_mode": "bilingual balanced",
+    "type_dominance": "type-led"
+  }
+}

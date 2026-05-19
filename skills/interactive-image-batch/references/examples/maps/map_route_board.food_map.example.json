@@ -1,0 +1,22 @@
+{
+  "template_id": "map-route-board",
+  "template_variant": "food-map",
+  "content_brief": "做一张美食地图，展示城市内不同区域的餐饮热点、招牌菜符号和推荐路线，适合探店清单和专题导览图。",
+  "output_mode": "美食地图",
+  "style_requirements": [
+    "themed food map",
+    "illustrated guide-board layout",
+    "spatial storytelling"
+  ],
+  "variation_requirements": [
+    "餐饮热点分组清楚",
+    "路线、区域和图例风格统一",
+    "美食主题符号明确但不压倒导航结构"
+  ],
+  "text_policy": "标题、店名标签和局部图例留位，长说明后期替换。",
+  "sample_variant_axes": {
+    "map_type": "themed food map",
+    "route_logic": "clustered hotspots",
+    "navigation_style": "illustrated map"
+  }
+}

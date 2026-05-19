@@ -1,0 +1,88 @@
+{
+  "board_id": "oral-storyboard-product-led-board-01",
+  "board_title": "产品解说口播分镜整板",
+  "board_theme": "同一主理人、产品卖点拆解、信息区+分镜区+底部产品KV",
+  "brand_panel": {
+    "title_lines": [
+      "产品解说",
+      "口播分镜板",
+      "主题：把产品卖点拆成一张整板提案"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "左侧信息区只做排版"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "产品钩子开场",
+      "timecode": "0-4s",
+      "scene": "主理人在演播空间正面开场，背后叠加主产品和一句强卖点钩子信息",
+      "prompt_hints": [
+        "人物正面可信",
+        "产品钩子必须清楚"
+      ],
+      "continuity_notes": [
+        "主理人、服装、产品视觉和全板统一"
+      ],
+      "camera_move": "medium presenter shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "卖点拆解",
+      "timecode": "4-8s",
+      "scene": "主理人中近景讲解核心卖点，右侧叠加产品结构信息和对比框",
+      "prompt_hints": [
+        "产品信息要比海报感更重要",
+        "讲解逻辑必须成立"
+      ],
+      "continuity_notes": [
+        "主理人和产品品牌系统保持统一"
+      ],
+      "camera_move": "close explanation shot"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "使用场景补强",
+      "timecode": "8-12s",
+      "scene": "主理人继续解释产品使用场景，信息层辅助展示关键卖点落地方式",
+      "prompt_hints": [
+        "人物和产品都不能丢",
+        "场景是产品解释的服务层"
+      ],
+      "continuity_notes": [
+        "视觉系统和人物身份保持统一"
+      ],
+      "camera_move": "information-led composite shot"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "产品收尾KV",
+      "timecode": "12-16s",
+      "scene": "主理人、产品主体、关键信息和品牌收尾同屏，形成整板底部产品收束",
+      "prompt_hints": [
+        "人物与产品并重",
+        "必须有整板提案感收尾"
+      ],
+      "continuity_notes": [
+        "仍然是同一人物和同一产品视觉系统"
+      ],
+      "camera_move": "full-body wrap-up shot"
+    }
+  ]
+}

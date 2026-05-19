@@ -1,0 +1,23 @@
+{
+  "template_id": "social-grid",
+  "template_variant": "benefit-carousel-grid",
+  "content_brief": "做一组卖点轮播型社媒宫格，分别承担封面、核心卖点卡、细节卖点卡和生活方式补充卡，用于连续发布或横向轮播式浏览。",
+  "output_mode": "卖点轮播社媒宫格",
+  "style_requirements": [
+    "benefit-carousel social grid",
+    "modular product storytelling feed",
+    "square-safe editorial commerce layout"
+  ],
+  "variation_requirements": [
+    "每张图都要承担明确卖点模块角色",
+    "封面、卖点、细节和氛围之间层级清楚",
+    "整体裁切安全区和系列识别统一"
+  ],
+  "text_policy": "卖点标题、标签和说明文案后期替换，当前只保留模块化信息区和社媒安全区。",
+  "sample_variant_axes": {
+    "grid_role": "product benefit tile",
+    "crop_safety": "square-safe",
+    "palette_role": "muted neutral",
+    "content_density": "medium detail"
+  }
+}

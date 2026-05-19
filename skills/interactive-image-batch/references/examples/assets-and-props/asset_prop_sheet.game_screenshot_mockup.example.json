@@ -1,0 +1,21 @@
+{
+  "template_id": "asset-prop-sheet",
+  "template_variant": "game-screenshot-mockup",
+  "content_brief": "做一张游戏截图 mockup，展示道具栏、收藏物卡片和稀有度标签的嵌入式界面资产。",
+  "output_mode": "游戏截图 Mockup",
+  "style_requirements": [
+    "game screenshot mockup",
+    "glossy game ui",
+    "asset-readable highlights"
+  ],
+  "variation_requirements": [
+    "嵌入界面仍然清晰",
+    "资产轮廓稳定",
+    "系列感统一"
+  ],
+  "text_policy": "只保留必要标签留位，正文后期替换。",
+  "sample_variant_axes": {
+    "asset_role": "screenshot mockup",
+    "presentation_mode": "ui-embedded mockup"
+  }
+}

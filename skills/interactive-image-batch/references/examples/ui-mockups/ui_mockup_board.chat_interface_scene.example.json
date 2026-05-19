@@ -1,0 +1,23 @@
+{
+  "template_id": "ui-mockup-board",
+  "template_variant": "chat-interface-scene",
+  "content_brief": "做一张聊天界面包装图，展示连续对话气泡、头像区、输入区和辅助卡片模块，适合客服对话、AI 助手会话页和品牌聊天场景包装。",
+  "output_mode": "聊天界面场景图",
+  "style_requirements": [
+    "chat-interface scene",
+    "conversation-thread hierarchy",
+    "assistant-message UI composition"
+  ],
+  "variation_requirements": [
+    "对话气泡结构清晰",
+    "头像、消息层和输入区节奏稳定",
+    "聊天场景必须看起来像真实界面而不是科技海报"
+  ],
+  "text_policy": "消息内容、按钮文案和输入框占位保留安全区，具体内容后期替换。",
+  "sample_variant_axes": {
+    "ui_surface": "mobile app screen",
+    "module_focus": "chat thread",
+    "overlay_density": "balanced",
+    "device_context": "screen only"
+  }
+}

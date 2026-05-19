@@ -1,0 +1,23 @@
+{
+  "template_id": "detail-page-set",
+  "template_variant": "feature-stack-page",
+  "content_brief": "做一组电商详情页功能堆叠图，围绕同一商品连续拆出多个卖点模块，包含主卖点图、结构说明图和局部功能展示图，适合详情页中后段。",
+  "output_mode": "功能堆叠详情页组图",
+  "style_requirements": [
+    "feature-stack ecommerce detail set",
+    "module-based product storytelling layout",
+    "clean commercial lighting with readable material and structure"
+  ],
+  "variation_requirements": [
+    "每张图都要服务不同卖点模块",
+    "主商品、功能结构和说明位层级清楚",
+    "整组视觉节奏统一"
+  ],
+  "text_policy": "功能标题、模块标签和说明文案后期替换，当前只保留稳定模块区和留白安全区。",
+  "sample_variant_axes": {
+    "detail_page_role": "feature stack page",
+    "benefit_angle": "invisible fit",
+    "shot_scale": "three-quarter",
+    "layout_zone": "top-copy-safe"
+  }
+}

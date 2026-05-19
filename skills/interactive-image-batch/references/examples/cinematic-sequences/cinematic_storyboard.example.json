@@ -1,0 +1,32 @@
+{
+  "template_id": "cinematic-storyboard",
+  "template_variant": "four-beat-ad",
+  "content_brief": "做一组四拍连续广告分镜，展示同一位主角从开场钩子、产品揭示、情绪推进到收尾英雄镜头的连续叙事。",
+  "output_mode": "电影分镜组图",
+  "style_requirements": [
+    "cinematic four-beat continuity",
+    "premium narrative commercial rhythm",
+    "same-character same-wardrobe sequence logic"
+  ],
+  "variation_requirements": [
+    "每张承担明确叙事位置",
+    "主角、服装和色彩保持连续",
+    "镜头景别和动作推进清晰"
+  ],
+  "text_policy": "不生成可读字幕，只保留标题安全区和分镜板式说明空间。",
+  "sample_variant_axes": {
+    "story_beat": "opening hook",
+    "camera_language": "wide establishing shot",
+    "continuity_anchor": "same wardrobe same palette",
+    "motion_state": "stillness to turning"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "prompt-only",
+    "layout_manifest": "./cinematic_storyboard.layout_manifest.json",
+    "content_manifest": "./cinematic_storyboard.content_manifest.json",
+    "render_config": "./cinematic_storyboard.render_config.json"
+  }
+}

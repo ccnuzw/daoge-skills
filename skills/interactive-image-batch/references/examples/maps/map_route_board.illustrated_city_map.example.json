@@ -1,0 +1,21 @@
+{
+  "template_id": "map-route-board",
+  "template_variant": "illustrated-city-map",
+  "content_brief": "做一张插画城市地图，展示核心地标、河道、公园和代表性街区的导览结构。",
+  "output_mode": "插画城市地图",
+  "style_requirements": [
+    "illustrated city map",
+    "spatial storytelling",
+    "guide-board polish"
+  ],
+  "variation_requirements": [
+    "地标识别稳定",
+    "城市区域层级清楚",
+    "图例风格统一"
+  ],
+  "text_policy": "标题和局部标签留位，长说明后期替换。",
+  "sample_variant_axes": {
+    "map_type": "city guide",
+    "navigation_style": "illustrated map"
+  }
+}

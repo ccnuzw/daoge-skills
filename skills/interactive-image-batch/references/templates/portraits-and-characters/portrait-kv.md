@@ -36,6 +36,10 @@
 - `editorial-closeup`: 近景编辑感主视觉。
 - `brand-portrait-kv`: 品牌海报式肖像主视觉。
 - `soft-character-focus`: 柔和人物气质导向，弱化背景存在感。
+- `dramatic-gaze-kv`: 以眼神压迫感、脸部层次和主视觉张力为中心。
+- `beauty-crop-kv`: 以更精确的美容裁切和面部细节可读性为中心。
+- `emotion-contrast-kv`: 以克制但明确的情绪对照和人物表达张力为中心。
+- `product-linked-portrait-kv`: 人物仍是主视觉中心，但产品作为品牌锚点被清楚读到。
 
 ## 推荐 variant_axes
 

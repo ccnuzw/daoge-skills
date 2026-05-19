@@ -39,6 +39,8 @@
 - `cover-detail-mood`: 封面、细节、氛围三段式。
 - `ugc-polished`: 高级 UGC 风格，但保留商业可控性。
 - `brand-feed-system`: 品牌 Feed 统一视觉系统。
+- `countdown-campaign-grid`: 发售倒计时或大促预热宫格。
+- `benefit-carousel-grid`: 连续拆卖点模块的轮播型宫格。
 
 ## 推荐 variant_axes
 

@@ -1,0 +1,23 @@
+{
+  "template_id": "technical-diagram",
+  "template_variant": "network-topology",
+  "content_brief": "做一张企业网络拓扑图，展示总部、边缘节点、云服务区和安全域之间的连接关系，要求区域划分清晰。",
+  "output_mode": "网络拓扑图",
+  "style_requirements": [
+    "network topology board",
+    "zoned technical infrastructure map",
+    "clean node-link engineering clarity"
+  ],
+  "variation_requirements": [
+    "节点分区清晰",
+    "链路方向和聚合关系明确",
+    "安全域和核心域边界稳定"
+  ],
+  "text_policy": "保留节点标签、区域标签和链路说明位置，详细协议名后期替换。",
+  "sample_variant_axes": {
+    "diagram_type": "topology",
+    "node_hierarchy": "service-cluster",
+    "edge_semantics": "grouped containers",
+    "presentation_mode": "engineering blueprint"
+  }
+}

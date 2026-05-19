@@ -1,0 +1,22 @@
+{
+  "template_id": "academic-figure-board",
+  "template_variant": "research-overview-poster",
+  "content_brief": "做一张研究海报式概览图，整合研究问题、方法路径、核心实验结果和结论摘要，适合会议海报和项目汇报页。",
+  "output_mode": "研究概览海报图",
+  "style_requirements": [
+    "research overview poster",
+    "conference-style figure board",
+    "academic-safe contrast"
+  ],
+  "variation_requirements": [
+    "研究问题、方法和结果三层结构明确",
+    "海报式阅读顺序清晰",
+    "摘要区和图示区比例稳定"
+  ],
+  "text_policy": "标题、分区标签和摘要标题留位，长段学术说明后期替换。",
+  "sample_variant_axes": {
+    "figure_type": "research poster",
+    "annotation_density": "balanced",
+    "publication_context": "conference poster"
+  }
+}

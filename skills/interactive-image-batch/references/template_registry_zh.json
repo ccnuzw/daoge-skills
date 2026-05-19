@@ -98,6 +98,16 @@
           "id": "campaign-extension",
           "name": "Campaign 延展",
           "description": "同一视觉系统下多场景扩展"
+        },
+        {
+          "id": "headline-safe-kv",
+          "name": "强标题区主视觉",
+          "description": "强调大面积安全留白和广告标题挂载空间"
+        },
+        {
+          "id": "people-product-dual-hero",
+          "name": "人物产品双主角",
+          "description": "强调人物与产品同屏且双重层级都清晰成立"
         }
       ],
       "default_variant_axes": [
@@ -146,7 +156,9 @@
             "source": "template-autofill"
           }
         ]
-      }
+      },
+      "tier": "core-commercial",
+      "family": "brand-visual"
     },
     {
       "id": "studio-editorial",
@@ -210,7 +222,46 @@
         "背景杂乱影响主体",
         "姿态和构图在大批量里重复"
       ],
-      "template_doc": "references/templates/portraits-and-characters/studio-editorial.md"
+      "template_doc": "references/templates/portraits-and-characters/studio-editorial.md",
+      "variants": [
+        {
+          "id": "clean-fashion-editorial",
+          "name": "干净时尚编辑感",
+          "description": "背景纯净、材质清晰、服装与姿态变化可读。"
+        },
+        {
+          "id": "high-contrast-studio",
+          "name": "高对比棚拍",
+          "description": "强调结构光、轮廓边缘和更强的明暗对比。"
+        },
+        {
+          "id": "soft-beauty-studio",
+          "name": "柔光美感棚拍",
+          "description": "强调皮肤、面料和柔和灯光的细腻过渡。"
+        },
+        {
+          "id": "mono-backdrop-editorial",
+          "name": "单色背景棚拍",
+          "description": "强调单色无缝背景控制、主体分离和棚拍秩序。"
+        },
+        {
+          "id": "motion-pose-studio",
+          "name": "动态姿态棚拍",
+          "description": "强调动作延展感，同时维持灯光、服装和棚拍控制。"
+        },
+        {
+          "id": "couture-minimal-studio",
+          "name": "极简高定棚拍",
+          "description": "强调高定式克制背景、面料精度和轮廓秩序。"
+        },
+        {
+          "id": "gesture-sequence-studio",
+          "name": "手势序列棚拍",
+          "description": "强调动作连续性、手势表达和受控棚拍节奏。"
+        }
+      ],
+      "tier": "core-commercial",
+      "family": "portrait-fashion"
     },
     {
       "id": "ecommerce-clean",
@@ -273,7 +324,36 @@
         "背景元素比商品更醒目",
         "色彩过饱和影响真实质感"
       ],
-      "template_doc": "references/templates/product-visuals/ecommerce-clean.md"
+      "template_doc": "references/templates/product-visuals/ecommerce-clean.md",
+      "variants": [
+        {
+          "id": "white-clean-hero",
+          "name": "白底主图",
+          "description": "白底或浅底主图，最稳的商品展示路径。"
+        },
+        {
+          "id": "soft-scene-commerce",
+          "name": "轻场景电商图",
+          "description": "加入少量环境线索，但仍保持商品主导和转化导向。"
+        },
+        {
+          "id": "material-focus-commerce",
+          "name": "材质细节主导",
+          "description": "强调材质、做工和局部结构的可读性。"
+        },
+        {
+          "id": "flatlay-commerce",
+          "name": "平铺电商图",
+          "description": "强调平铺视角下的结构可读性、轮廓秩序和商品完整展示。"
+        },
+        {
+          "id": "platform-safe-packshot",
+          "name": "平台安全区 Packshot",
+          "description": "强调平台留白安全区、点击感和稳定商品主图构图。"
+        }
+      ],
+      "tier": "core-commercial",
+      "family": "product-commerce"
     },
     {
       "id": "lookbook",
@@ -336,7 +416,46 @@
         "同批画面风格完全漂移",
         "服装细节被姿态遮住"
       ],
-      "template_doc": "references/templates/grids-and-collages/lookbook.md"
+      "template_doc": "references/templates/grids-and-collages/lookbook.md",
+      "variants": [
+        {
+          "id": "series-unified",
+          "name": "统一系列",
+          "description": "同一系列统一风格，重点是连续性和款式节奏。"
+        },
+        {
+          "id": "chapter-lookbook",
+          "name": "章节式 Lookbook",
+          "description": "分章节切换场景，但保持系列和模特逻辑稳定。"
+        },
+        {
+          "id": "cover-and-range",
+          "name": "封面加稳定展示",
+          "description": "少量封面图搭配大量稳定展示图，兼顾节奏和可读性。"
+        },
+        {
+          "id": "chapter-scene-progressive",
+          "name": "章节场景递进",
+          "description": "按章节递进切换场景，同时保持系列和模特连续性。"
+        },
+              {
+                "id": "multi-outfit-commercial",
+                "name": "多款式商业展示",
+                "description": "强调多款式轮换、换装清晰和稳定商业展示语言。"
+              },
+              {
+                "id": "editorial-pairing-lookbook",
+                "name": "Editorial 配对组图",
+                "description": "强调成对组图关系、节奏互文和 editorial pairing。"
+              },
+              {
+                "id": "lookbook-detail-mix",
+                "name": "整身细节混排",
+                "description": "整身展示和局部细节混排，强化搭配与材质可读性。"
+              }
+            ],
+      "tier": "core-commercial",
+      "family": "brand-visual"
     },
     {
       "id": "portrait-kv",
@@ -402,7 +521,46 @@
         "背景戏太多削弱肖像",
         "多个 prompt 眼神完全相同"
       ],
-      "template_doc": "references/templates/portraits-and-characters/portrait-kv.md"
+      "template_doc": "references/templates/portraits-and-characters/portrait-kv.md",
+      "variants": [
+        {
+          "id": "editorial-closeup",
+          "name": "近景编辑感主视觉",
+          "description": "强调近景裁切、眼神强度和编辑感排版留白。"
+        },
+        {
+          "id": "brand-portrait-kv",
+          "name": "品牌肖像主视觉",
+          "description": "强调品牌人物形象、标题安全区和主视觉集中度。"
+        },
+        {
+          "id": "soft-character-focus",
+          "name": "柔和人物气质导向",
+          "description": "强调柔和背景、人物气质和弱冲突叙事中心。"
+        },
+        {
+          "id": "dramatic-gaze-kv",
+          "name": "强眼神主视觉",
+          "description": "强调眼神压迫感、面部层次和近景主视觉张力。"
+        },
+        {
+          "id": "beauty-crop-kv",
+          "name": "美容裁切主视觉",
+          "description": "强调脸部细节、发丝边缘和更精确的近景裁切。"
+        },
+        {
+          "id": "emotion-contrast-kv",
+          "name": "情绪对照主视觉",
+          "description": "强调克制但明确的情绪对照、表情变化和人物表达张力。"
+        },
+        {
+          "id": "product-linked-portrait-kv",
+          "name": "人物产品联动主视觉",
+          "description": "人物仍为视觉中心，同时让产品作为品牌锚点清晰可读。"
+        }
+      ],
+      "tier": "core-commercial",
+      "family": "portrait-fashion"
     },
     {
       "id": "image-edit",
@@ -465,7 +623,36 @@
         "局部编辑边界模糊",
         "修改区域光线与原图不一致"
       ],
-      "template_doc": "references/templates/editing-workflows/image-edit.md"
+      "template_doc": "references/templates/editing-workflows/image-edit.md",
+      "variants": [
+        {
+          "id": "background-replacement",
+          "name": "背景替换",
+          "description": "保留主体结构，替换背景并保持光线透视连续。"
+        },
+        {
+          "id": "localized-fix",
+          "name": "局部修正",
+          "description": "只修正局部区域，强调边界安全和主体不漂移。"
+        },
+        {
+          "id": "style-alignment-edit",
+          "name": "风格统一编辑",
+          "description": "在保留原图主体基础上统一新风格和色调。"
+        },
+        {
+          "id": "material-replacement-edit",
+          "name": "材质替换编辑",
+          "description": "保留主体结构和比例，只替换表面材质、纹理和反射表现。"
+        },
+        {
+          "id": "lighting-consistency-fix",
+          "name": "光线统一修正",
+          "description": "保留主体与场景结构，只修正亮度、阴影和补光不一致问题。"
+        }
+      ],
+      "tier": "identity-and-assets",
+      "family": "editing-ops"
     },
     {
       "id": "oral-storyboard-board",
@@ -569,6 +756,26 @@
           "id": "industry-led",
           "name": "产业信息主导",
           "description": "产业链、算力、芯片信息权重更高"
+        },
+        {
+          "id": "product-led",
+          "name": "产品解说主导",
+          "description": "产品卖点、结构信息和主持人口播并重"
+        },
+        {
+          "id": "educational-explainer",
+          "name": "教育科普主导",
+          "description": "知识点拆解、教学图解和连续解释更强"
+        },
+        {
+          "id": "expert-led",
+          "name": "专家解说主导",
+          "description": "专家、顾问、分析师等可信讲述者主导，观点与证据拆解并重"
+        },
+        {
+          "id": "testimonial-led",
+          "name": "案例见证主导",
+          "description": "人物讲述、转变过程与结果证明并重的案例型口播整板"
         }
       ],
       "default_variant_axes": [
@@ -619,7 +826,9 @@
             "source": "template-autofill"
           }
         ]
-      }
+      },
+      "tier": "narrative-and-board",
+      "family": "storyboard-sequence"
     },
     {
       "id": "cinematic-storyboard",
@@ -713,6 +922,16 @@
           "id": "mood-sequence",
           "name": "情绪递进",
           "description": "情绪组图"
+        },
+        {
+          "id": "demo-explainer-sequence",
+          "name": "演示说明分镜",
+          "description": "解释型产品演示分镜"
+        },
+        {
+          "id": "product-reveal-sequence",
+          "name": "产品揭示分镜",
+          "description": "环境铺垫到正式揭示的商业分镜"
         }
       ],
       "default_variant_axes": [
@@ -762,7 +981,9 @@
             "source": "template-autofill"
           }
         ]
-      }
+      },
+      "tier": "narrative-and-board",
+      "family": "storyboard-sequence"
     },
     {
       "id": "social-grid",
@@ -856,6 +1077,16 @@
           "id": "brand-feed-system",
           "name": "品牌 Feed 系统",
           "description": "统一色彩和系列识别"
+        },
+        {
+          "id": "countdown-campaign-grid",
+          "name": "倒计时活动宫格",
+          "description": "强调发售节奏、数字节点和系列连续感"
+        },
+        {
+          "id": "benefit-carousel-grid",
+          "name": "卖点轮播宫格",
+          "description": "强调封面、卖点卡和细节卡的连续浏览节奏"
         }
       ],
       "default_variant_axes": [
@@ -902,7 +1133,9 @@
             "source": "template-autofill"
           }
         ]
-      }
+      },
+      "tier": "core-commercial",
+      "family": "social-performance"
     },
     {
       "id": "ab-ad-test",
@@ -996,6 +1229,16 @@
           "id": "layout-test",
           "name": "版式测试",
           "description": "比较 CTA 和标题安全区"
+        },
+        {
+          "id": "hook-contrast-test",
+          "name": "钩子测试",
+          "description": "比较首屏开场表达差异"
+        },
+        {
+          "id": "cta-emphasis-test",
+          "name": "CTA 强调测试",
+          "description": "比较 CTA 区域强调强弱和转化结构"
         }
       ],
       "default_variant_axes": [
@@ -1041,7 +1284,9 @@
             "source": "template-autofill"
           }
         ]
-      }
+      },
+      "tier": "core-commercial",
+      "family": "social-performance"
     },
     {
       "id": "detail-page-set",
@@ -1133,6 +1378,16 @@
           "id": "lifestyle-proof",
           "name": "场景证明",
           "description": "使用场景增强可信度"
+        },
+        {
+          "id": "comparison-proof-detail",
+          "name": "对比证明",
+          "description": "前后差异或并列对比证明卖点"
+        },
+        {
+          "id": "feature-stack-page",
+          "name": "功能堆叠",
+          "description": "连续拆分多个卖点模块的详情页"
         }
       ],
       "default_variant_axes": [
@@ -1180,7 +1435,1690 @@
             "source": "template-autofill"
           }
         ]
-      }
+      },
+      "tier": "core-commercial",
+      "family": "product-commerce"
+    },
+    {
+      "id": "ui-mockup-board",
+      "name": "界面视觉稿",
+      "category": "ui-mockups",
+      "description": "适合 App/Web 视觉稿、社媒界面包装、直播带货 UI 和设备屏幕展示",
+      "triggers": [
+        "ui",
+        "界面",
+        "mockup",
+        "app",
+        "web",
+        "landing page",
+        "dashboard",
+        "直播界面",
+        "界面稿",
+        "产品卡片"
+      ],
+      "required_focus": [
+        "界面层级",
+        "模块可读性",
+        "设备或屏幕构图",
+        "按钮卡片与内容区关系",
+        "转化或展示目标"
+      ],
+      "ask_fields": [
+        "这是 App、Web、直播叠层还是社媒 UI",
+        "核心页面目标是什么",
+        "是否需要设备外框、手持场景或界面叠层",
+        "需要保留哪些模块层级",
+        "文字策略是装饰占位、局部可读还是后期替换"
+      ],
+      "required_slot_fields": [
+        "scene",
+        "composition",
+        "text_policy",
+        "ui_surface",
+        "module_focus"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "ui_goal",
+        "screen_context",
+        "module_hierarchy",
+        "interaction_focus",
+        "lighting_palette",
+        "composition_layout",
+        "text_render_policy",
+        "presentation_finish"
+      ],
+      "composition_bias": [
+        "clear screen hierarchy with obvious primary and secondary modules",
+        "device frame or UI surface is readable without overwhelming the content",
+        "layout leaves safe space for later copy or badge overlays when needed"
+      ],
+      "quality_rules": [
+        "必须明确这是界面任务，不是普通科技海报",
+        "模块层级和主次信息区必须可读",
+        "文字策略只能控制留位和可读等级，不默认生成长段文案",
+        "设备或屏幕构图不能压垮 UI 本身"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "readable paragraph text",
+        "fake app store badge",
+        "messy floating windows",
+        "random futuristic HUD",
+        "cropped screen"
+      ],
+      "anti_patterns": [
+        "把界面稿写成科技感海报",
+        "只有发光玻璃效果，没有模块结构",
+        "设备外框抢走主体",
+        "卡片、按钮和内容区没有明显主次"
+      ],
+      "template_doc": "references/templates/ui-mockups/ui-mockup-board.md",
+      "variants": [
+        {
+          "id": "landing-page-case-study",
+          "name": "落地页视觉稿",
+          "description": "强调首屏、模块节奏和转化结构"
+        },
+        {
+          "id": "social-interface-mockup",
+          "name": "社媒界面包装",
+          "description": "强调 feed 结构、内容卡片和平台感"
+        },
+        {
+          "id": "live-commerce-ui",
+          "name": "直播带货 UI",
+          "description": "强调商品区、互动区和购买动作"
+        },
+        {
+          "id": "product-card-overlay",
+          "name": "商品卡片叠层",
+          "description": "强调产品主体与信息卡片共存"
+        },
+        {
+          "id": "short-video-cover-ui",
+          "name": "短视频封面 UI",
+          "description": "强调封面主图、标题安全区和平台组件感"
+        },
+        {
+          "id": "chat-interface-scene",
+          "name": "聊天界面场景",
+          "description": "强调气泡结构、头像和连续对话感"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "ui-surface",
+          "field": "ui_surface",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "mobile app screen",
+            "desktop dashboard",
+            "floating overlay",
+            "device-framed screen"
+          ]
+        },
+        {
+          "name": "module-focus",
+          "field": "module_focus",
+          "strategy": "cycle",
+          "options": [
+            "hero banner",
+            "product card",
+            "comment layer",
+            "conversion section",
+            "chat thread"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "crisp screen glow",
+              "soft ambient reflection",
+              "clean studio presentation light"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "polished product thinking",
+              "conversion clarity",
+              "high-trust modern interface"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "interface-and-information",
+      "family": "ui-interface"
+    },
+    {
+      "id": "infographic-board",
+      "name": "信息图板",
+      "category": "infographics",
+      "description": "适合对比图、步骤图、数据摘要板和模块化信息图",
+      "triggers": [
+        "infographic",
+        "信息图",
+        "对比图",
+        "步骤图",
+        "数据看板",
+        "kpi",
+        "bento",
+        "图例"
+      ],
+      "required_focus": [
+        "阅读顺序",
+        "模块分组",
+        "数据或结论优先级",
+        "标签与图例关系",
+        "标题与信息面板留位"
+      ],
+      "ask_fields": [
+        "主要是在讲对比、流程、指标还是概览",
+        "信息模块预计有几组",
+        "是否有固定阅读顺序",
+        "文字策略是大标题留位、局部标签可读还是后期替换",
+        "重点是数据可信感、教学感还是品牌包装感"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "information_hierarchy",
+        "reading_path",
+        "data_emphasis"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "information_goal",
+        "module_grouping",
+        "reading_path",
+        "icon_data_language",
+        "headline_label_policy",
+        "composition_layout",
+        "clarity_finish"
+      ],
+      "composition_bias": [
+        "clear modular grouping with obvious reading order",
+        "headline, labels, and data cards do not fight for the same visual priority",
+        "layout supports later replacement of copy-heavy text blocks"
+      ],
+      "quality_rules": [
+        "必须有阅读顺序或模块层级",
+        "信息结构优先于装饰感",
+        "文字策略要限制模型直接生成大量可读文本",
+        "图标、数字、标题和图例要有明确分工"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "wall of readable text",
+        "random poster collage",
+        "overcrowded labels",
+        "decorative nonsense charts",
+        "unclear legend"
+      ],
+      "anti_patterns": [
+        "把信息图写成海报拼贴",
+        "模块很多但没有阅读路径",
+        "图标数字标题互相抢层级",
+        "只写高级感，不写信息结构"
+      ],
+      "template_doc": "references/templates/infographics/infographic-board.md",
+      "variants": [
+        {
+          "id": "comparison-infographic",
+          "name": "对比信息图",
+          "description": "强调差异项、对照列和结论区"
+        },
+        {
+          "id": "step-by-step-infographic",
+          "name": "步骤信息图",
+          "description": "强调流程顺序和步骤编号区"
+        },
+        {
+          "id": "bento-grid-infographic",
+          "name": "Bento 信息板",
+          "description": "强调模块分块和信息密度平衡"
+        },
+        {
+          "id": "kpi-dashboard-infographic",
+          "name": "指标看板信息图",
+          "description": "强调关键数字、趋势和摘要块"
+        },
+        {
+          "id": "legend-heavy-infographic",
+          "name": "图例重信息图",
+          "description": "强调标签区、图例区和解释结构"
+        },
+        {
+          "id": "hand-drawn-infographic",
+          "name": "手绘信息图",
+          "description": "强调教学感和轻松说明风格"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "information-hierarchy",
+          "field": "information_hierarchy",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "hero-stat-first",
+            "balanced-grid",
+            "explanation-first",
+            "comparison-first"
+          ]
+        },
+        {
+          "name": "reading-path",
+          "field": "reading_path",
+          "strategy": "cycle",
+          "options": [
+            "top-down",
+            "left-right",
+            "zigzag modules",
+            "circular overview"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "flat print-style clarity",
+              "subtle panel separation",
+              "soft shadow grouping"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "clear explanation",
+              "structured confidence",
+              "editorial teaching tone"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "interface-and-information",
+      "family": "information-design"
+    },
+    {
+      "id": "technical-diagram",
+      "name": "技术图解",
+      "category": "technical-diagrams",
+      "description": "适合系统架构图、流程图、时序图、拓扑图和状态机类任务",
+      "triggers": [
+        "架构图",
+        "technical diagram",
+        "system architecture",
+        "flowchart",
+        "sequence diagram",
+        "拓扑图",
+        "er diagram",
+        "状态机",
+        "mind map"
+      ],
+      "required_focus": [
+        "图类型明确",
+        "节点层级",
+        "关系方向",
+        "容器与箭头语义",
+        "标签与图例区控制"
+      ],
+      "ask_fields": [
+        "这是架构、流程、时序、拓扑、ER、状态机还是脑图",
+        "主要节点有几层",
+        "是否存在明确方向关系",
+        "文字策略是标题级可读、关键标签可读还是结构占位",
+        "更强调工程准确感、教学拆解感还是汇报展示感"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "diagram_type",
+        "node_hierarchy",
+        "edge_semantics"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "diagram_goal",
+        "node_hierarchy",
+        "relationship_semantics",
+        "legend_label_policy",
+        "composition_layout",
+        "clarity_finish"
+      ],
+      "composition_bias": [
+        "node-link structure remains readable before decorative styling",
+        "containers, arrows, and labels have distinct hierarchy",
+        "layout supports later replacement of exact terminology when needed"
+      ],
+      "quality_rules": [
+        "必须先确定图类型",
+        "节点层级和关系方向必须可描述",
+        "文字策略要限制为标签、图例或标题级",
+        "结构清晰优先于赛博风装饰"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "wall of tiny text",
+        "glowing sci-fi poster",
+        "meaningless arrows",
+        "unclear node grouping",
+        "decorative circuitry noise"
+      ],
+      "anti_patterns": [
+        "只有发光线条，没有节点语义",
+        "把技术图解写成赛博海报",
+        "分支、时序和层级关系混成一团",
+        "节点、箭头和容器没有明显主次"
+      ],
+      "template_doc": "references/templates/technical-diagrams/technical-diagram.md",
+      "variants": [
+        {
+          "id": "system-architecture",
+          "name": "系统架构图",
+          "description": "强调层级、服务关系和上下游边界"
+        },
+        {
+          "id": "flowchart-decision",
+          "name": "流程决策图",
+          "description": "强调分支判断、流程方向和节点状态"
+        },
+        {
+          "id": "sequence-diagram",
+          "name": "时序图",
+          "description": "强调参与者、时间推进和事件顺序"
+        },
+        {
+          "id": "network-topology",
+          "name": "网络拓扑图",
+          "description": "强调节点连接、区域划分和链路清晰度"
+        },
+        {
+          "id": "er-diagram",
+          "name": "ER 图",
+          "description": "强调实体块、属性组和关系连线"
+        },
+        {
+          "id": "state-machine",
+          "name": "状态机图",
+          "description": "强调状态节点、迁移触发和起止态"
+        },
+        {
+          "id": "mind-map-tech",
+          "name": "技术脑图",
+          "description": "强调中心主题、分支扩散和层级折叠感"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "diagram-type",
+          "field": "diagram_type",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "architecture",
+            "flowchart",
+            "sequence",
+            "topology",
+            "er",
+            "state-machine",
+            "mind-map"
+          ]
+        },
+        {
+          "name": "presentation-mode",
+          "field": "presentation_mode",
+          "strategy": "cycle",
+          "options": [
+            "engineering blueprint",
+            "teaching board",
+            "executive summary"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "flat diagram clarity",
+              "subtle depth separation",
+              "presentation-safe contrast"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "engineering precision",
+              "analytical explanation",
+              "system-level clarity"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "interface-and-information",
+      "family": "technical-explainer"
+    },
+    {
+      "id": "avatar-profile-pack",
+      "name": "头像资产包",
+      "category": "avatars-and-profile",
+      "description": "适合头像、profile 资产、角色贴纸、自拍风格迁移和主题化头像图",
+      "triggers": [
+        "avatar",
+        "profile",
+        "头像",
+        "贴纸",
+        "sticker",
+        "selfie",
+        "角色头像",
+        "icon portrait"
+      ],
+      "required_focus": [
+        "身份一致性",
+        "头像裁切安全区",
+        "小尺寸可读性",
+        "系列化状态变化",
+        "背景克制"
+      ],
+      "ask_fields": [
+        "这是头像、贴纸包、系列角色图还是风格迁移自拍",
+        "头像最终用在社媒、IM、频道封面还是产品资产",
+        "需要几张或几种角色状态",
+        "是否必须保持同一人物或角色 identity",
+        "裁切重点是头肩、半身还是头像圆形安全区"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "identity_policy",
+        "crop_scale",
+        "asset_usage",
+        "background_depth"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "identity_anchor",
+        "asset_usage_goal",
+        "crop_and_safe_area",
+        "expression_pose",
+        "lighting_palette",
+        "background_control",
+        "readability_finish"
+      ],
+      "composition_bias": [
+        "avatar-safe framing keeps head and facial landmarks readable at small size",
+        "identity consistency matters more than dramatic scene variation",
+        "background should support the avatar instead of competing with it"
+      ],
+      "quality_rules": [
+        "必须明确这是头像资产，不是海报",
+        "identity 一致性要优先说明",
+        "裁切安全区和小尺寸可读性必须明确",
+        "贴纸和头像类任务背景不能过重"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "poster typography",
+        "busy background",
+        "cropped forehead",
+        "identity drift",
+        "tiny unreadable face"
+      ],
+      "anti_patterns": [
+        "把头像任务写成品牌海报",
+        "多张系列图人物 identity 漂移",
+        "头像裁切不安全",
+        "背景细节过多导致缩小时主体不清晰"
+      ],
+      "template_doc": "references/templates/avatars-and-profile/avatar-profile-pack.md",
+      "variants": [
+        {
+          "id": "character-grid-portrait",
+          "name": "角色头像栅格",
+          "description": "强调同一角色多状态和一致性"
+        },
+        {
+          "id": "cultural-portrait-series",
+          "name": "文化主题头像系列",
+          "description": "强调主题差异和身份统一"
+        },
+        {
+          "id": "sticker-set",
+          "name": "贴纸资产包",
+          "description": "强调轮廓清晰和小尺寸识别"
+        },
+        {
+          "id": "style-transfer-selfie",
+          "name": "自拍风格迁移",
+          "description": "强调保留身份锚点和风格转换"
+        },
+        {
+          "id": "themed-3d-icon",
+          "name": "主题 3D 头像图",
+          "description": "强调小尺寸可读性和资产感"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "asset-usage",
+          "field": "asset_usage",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "social profile",
+            "chat avatar",
+            "sticker pack",
+            "creator identity",
+            "themed icon"
+          ]
+        },
+        {
+          "name": "crop-scale",
+          "field": "crop_scale",
+          "strategy": "cycle",
+          "options": [
+            "circular-safe headshot",
+            "head-and-shoulders",
+            "half-body profile"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "face-friendly soft key light",
+              "clean edge separation",
+              "avatar-safe contrast"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "approachable identity",
+              "crisp character clarity",
+              "collectible asset polish"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "identity-and-assets",
+      "family": "identity-assets"
+    },
+    {
+      "id": "visual-doc-slide",
+      "name": "视觉文档页",
+      "category": "slides-and-visual-docs",
+      "description": "适合幻灯页、汇报页、解释型页面和视觉报告页",
+      "triggers": [
+        "slide",
+        "slides",
+        "幻灯页",
+        "汇报页",
+        "visual report",
+        "report page",
+        "policy slide",
+        "explainer slide"
+      ],
+      "required_focus": [
+        "页面版区分工",
+        "标题与正文层级",
+        "图像区和注释区关系",
+        "汇报页版心",
+        "阅读顺序"
+      ],
+      "ask_fields": [
+        "这是封面页、正文解释页、政策页还是视觉报告页",
+        "页面重点是标题、图解、数据摘要还是结论块",
+        "需要哪些固定版区",
+        "文字策略是标题可读、关键标签可读还是全部后期替换",
+        "风格更偏正式汇报、教育说明还是品牌化视觉文档"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "page_role",
+        "layout_zones",
+        "headline_weight"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "page_goal",
+        "layout_zone_structure",
+        "headline_body_hierarchy",
+        "supporting_visual_plan",
+        "annotation_policy",
+        "composition_layout",
+        "presentation_finish"
+      ],
+      "composition_bias": [
+        "page layout must read like a report or slide instead of a poster",
+        "headline, body, and support zones should have deliberate spacing",
+        "visual elements support the narrative rather than replacing the page structure"
+      ],
+      "quality_rules": [
+        "必须明确这是页面级文档任务",
+        "版区分工和页内阅读顺序必须可读",
+        "长文本不交给模型自由生成",
+        "标题区、正文区、图像区和侧注区要有相对关系"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "poster collage",
+        "wall of tiny text",
+        "messy annotations",
+        "unstable margins",
+        "random dashboard clutter"
+      ],
+      "anti_patterns": [
+        "把幻灯页写成海报",
+        "页面只有标题，没有版区结构",
+        "注释区、正文区和图像区挤在一起",
+        "过度追求装饰，丢掉汇报秩序"
+      ],
+      "template_doc": "references/templates/slides-and-visual-docs/visual-doc-slide.md",
+      "variants": [
+        {
+          "id": "dense-explainer-slides",
+          "name": "高密度解释页",
+          "description": "强调模块秩序和阅读压力控制"
+        },
+        {
+          "id": "educational-diagram-slide",
+          "name": "教学图解页",
+          "description": "强调标题、图示和注释共存"
+        },
+        {
+          "id": "policy-style-slide",
+          "name": "政策风格页",
+          "description": "强调正式版式、边距和规则感"
+        },
+        {
+          "id": "visual-report-page",
+          "name": "视觉报告页",
+          "description": "强调版心、图文平衡和汇报完成度"
+        },
+        {
+          "id": "data-summary-slide",
+          "name": "数据摘要页",
+          "description": "强调结论数字、摘要块和图表支撑关系"
+        },
+        {
+          "id": "before-after-explainer-slide",
+          "name": "前后对照解释页",
+          "description": "强调前后对比结构和改造逻辑说明"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "page-role",
+          "field": "page_role",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "title slide",
+            "explainer page",
+            "report body page",
+            "policy summary page"
+          ]
+        },
+        {
+          "name": "layout-zones",
+          "field": "layout_zones",
+          "strategy": "cycle",
+          "options": [
+            "headline-top",
+            "left-text-right-visual",
+            "split columns",
+            "stacked modules"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "flat presentation clarity",
+              "subtle paper depth",
+              "report-safe contrast"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "formal clarity",
+              "educational order",
+              "polished briefing tone"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "interface-and-information",
+      "family": "visual-docs"
+    },
+    {
+      "id": "academic-figure-board",
+      "name": "学术图板",
+      "category": "academic-figures",
+      "description": "适合论文图、研究图、机制图、实验对比图和研究概览海报",
+      "triggers": [
+        "学术图",
+        "论文图",
+        "graphical abstract",
+        "mechanism diagram",
+        "research poster",
+        "publication chart",
+        "research overview",
+        "scientific schematic"
+      ],
+      "required_focus": [
+        "阅读顺序",
+        "比较维度",
+        "学术图版心",
+        "注释密度",
+        "研究表达清晰度"
+      ],
+      "ask_fields": [
+        "这是机制图、方法流程、实验对比还是研究概览图",
+        "主要阅读顺序是什么",
+        "重点是图示说明、实验对比，还是结论概览",
+        "文字策略是标题级可读、局部标签可读还是后期替换",
+        "更偏论文图、教学图，还是学术海报"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "figure_type",
+        "comparison_mode",
+        "annotation_density"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "research_goal",
+        "figure_structure",
+        "comparison_logic",
+        "annotation_policy",
+        "composition_layout",
+        "publication_finish"
+      ],
+      "composition_bias": [
+        "figure panels must read like a publication board rather than a commercial poster",
+        "reading order and comparison groups should be explicit at first glance",
+        "diagram blocks, labels, and summary regions should have clean academic spacing"
+      ],
+      "quality_rules": [
+        "必须先确定图类型和阅读顺序",
+        "图中结构必须服务研究表达，而不是商业装饰",
+        "文本策略要限制长文本直接生成",
+        "对比类任务必须明确比较维度"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "ad poster vibe",
+        "marketing headline",
+        "random decorative arrows",
+        "dense unreadable wall of text",
+        "comic-style exaggeration"
+      ],
+      "anti_patterns": [
+        "把论文图写成普通信息图",
+        "只有科技感，没有实验结构",
+        "对比图没有比较维度",
+        "机制图没有方向关系"
+      ],
+      "template_doc": "references/templates/academic-figures/academic-figure-board.md",
+      "variants": [
+        {
+          "id": "graphical-abstract",
+          "name": "研究摘要图",
+          "description": "强调图文概览和研究主线压缩"
+        },
+        {
+          "id": "mechanism-diagram",
+          "name": "机制图",
+          "description": "强调作用路径、方向关系和过程解释"
+        },
+        {
+          "id": "method-pipeline-overview",
+          "name": "方法流程图",
+          "description": "强调步骤分段和方法概览"
+        },
+        {
+          "id": "multi-condition-comparison",
+          "name": "多条件对比图",
+          "description": "强调实验组别和对比维度"
+        },
+        {
+          "id": "research-overview-poster",
+          "name": "研究概览海报",
+          "description": "强调研究问题、方法、结果和结论的整板展示"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "figure-type",
+          "field": "figure_type",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "graphical abstract",
+            "mechanism diagram",
+            "method pipeline",
+            "comparison grid",
+            "research poster"
+          ]
+        },
+        {
+          "name": "annotation-density",
+          "field": "annotation_density",
+          "strategy": "cycle",
+          "options": [
+            "minimal",
+            "balanced",
+            "dense"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "flat publication clarity",
+              "subtle figure separation",
+              "academic-safe contrast"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "scientific clarity",
+              "evidence-led explanation",
+              "research presentation tone"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "interface-and-information",
+      "family": "academic-figures"
+    },
+    {
+      "id": "brand-packaging-board",
+      "name": "品牌包装板",
+      "category": "branding-and-packaging",
+      "description": "适合品牌识别板、包装设计板、饮料标签、美妆包装和角色周边系统",
+      "triggers": [
+        "包装",
+        "packaging",
+        "label design",
+        "brand board",
+        "brand identity",
+        "mascot brand kit",
+        "character merch",
+        "包装板"
+      ],
+      "required_focus": [
+        "品牌统一性",
+        "包装载体可读性",
+        "材质信号",
+        "多资产层级",
+        "品牌系统完整度"
+      ],
+      "ask_fields": [
+        "这是品牌系统板、包装板、标签设计还是 mascot 周边板",
+        "主要载体是什么：瓶身、盒装、标签、套组还是品牌板",
+        "更强调品牌语义、包装结构，还是周边资产统一性",
+        "文字策略是标志留位、包装标签留位还是后期替换",
+        "是否需要多视角、多包装状态或多资产并排"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "packaging_format",
+        "brand_asset_scope",
+        "material_signal"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "brand_goal",
+        "asset_scope",
+        "packaging_structure",
+        "material_surface",
+        "layout_hierarchy",
+        "brand_finish"
+      ],
+      "composition_bias": [
+        "board should read like a brand system or packaging spread, not a single ad poster",
+        "packaging carriers and asset lineup should have clear primary-secondary hierarchy",
+        "label-safe or logo-safe regions should remain visually controlled"
+      ],
+      "quality_rules": [
+        "必须明确载体和品牌板目标",
+        "包装结构和材质信号必须可读",
+        "文字策略只保留安全区，不交给模型自由生成完整包装文案",
+        "多资产并排时要说明主次和统一性"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "poster-only composition",
+        "fake readable paragraph text",
+        "muddy materials",
+        "unstyled blank carton",
+        "random retail clutter"
+      ],
+      "anti_patterns": [
+        "把包装板写成海报",
+        "只有品牌气质，没有包装载体",
+        "包装材质不可读",
+        "多资产板缺少统一系统感"
+      ],
+      "template_doc": "references/templates/branding-and-packaging/brand-packaging-board.md",
+      "variants": [
+        {
+          "id": "beverage-label-design",
+          "name": "饮料标签设计",
+          "description": "强调瓶身、标签和货架识别"
+        },
+        {
+          "id": "brand-identity-board",
+          "name": "品牌识别板",
+          "description": "强调品牌色、包装语义和系统统一"
+        },
+        {
+          "id": "cosmetic-packaging",
+          "name": "美妆包装板",
+          "description": "强调材质质感和高级零售感"
+        },
+        {
+          "id": "character-merch-board",
+          "name": "角色周边板",
+          "description": "强调角色周边资产和收藏属性"
+        },
+        {
+          "id": "mascot-brand-kit",
+          "name": "Mascot 品牌资产板",
+          "description": "强调 mascot 形象与品牌资产的统一"
+        },
+        {
+          "id": "gift-box-campaign-packaging",
+          "name": "礼盒活动包装板",
+          "description": "强调礼盒套组层级、开盒逻辑和活动礼赠感"
+        },
+        {
+          "id": "seasonal-limited-packaging",
+          "name": "季节限定包装板",
+          "description": "强调季节主题、限定语义和零售延展"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "packaging-format",
+          "field": "packaging_format",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "label-first",
+            "box packaging",
+            "bottle packaging",
+            "kit board",
+            "merch board"
+          ]
+        },
+        {
+          "name": "material-signal",
+          "field": "material_signal",
+          "strategy": "cycle",
+          "options": [
+            "matte paper",
+            "glossy label",
+            "translucent bottle",
+            "premium carton"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "packaging-readable soft light",
+              "shelf-safe highlights",
+              "material clarity"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "branded coherence",
+              "premium packaging polish",
+              "collectible system clarity"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "core-commercial",
+      "family": "brand-packaging"
+    },
+    {
+      "id": "illustrated-scene-set",
+      "name": "插画场景组",
+      "category": "scenes-and-illustrations",
+      "description": "适合概念场景、治愈场景、极简情绪场景和绘本场景",
+      "triggers": [
+        "插画场景",
+        "illustrated scene",
+        "concept scene",
+        "healing scene",
+        "picture-book scene",
+        "storybook",
+        "mood scene",
+        "绘本场景"
+      ],
+      "required_focus": [
+        "氛围一致性",
+        "叙事锚点",
+        "场景主次关系",
+        "系列 continuity",
+        "插画表面语言"
+      ],
+      "ask_fields": [
+        "这是概念场景、治愈场景、极简情绪图还是绘本场景",
+        "更重氛围、叙事片段，还是场景设定展示",
+        "主体是人物、环境、物件，还是混合",
+        "是否需要连续系列感",
+        "文字策略是不留字、标题留位，还是局部标签留位"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "scene_mood",
+        "narrative_anchor",
+        "illustration_surface"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "scene_anchor",
+        "narrative_fragment",
+        "atmosphere_surface",
+        "color_temperature",
+        "composition_layout",
+        "illustration_finish"
+      ],
+      "composition_bias": [
+        "scene should read as an illustration spread or vignette rather than an ad visual",
+        "environment, subject, and quiet narrative anchor should stay balanced",
+        "series tasks should preserve continuity while allowing small mood shifts"
+      ],
+      "quality_rules": [
+        "必须明确这是插画场景，不是商业海报",
+        "氛围和叙事锚点要比卖点结构更重要",
+        "系列任务要说明 continuity 目标",
+        "文本策略只保留必要留位"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "brand poster copy",
+        "realistic ad typography",
+        "over-rendered product shot",
+        "harsh commercial flash",
+        "chaotic busy background"
+      ],
+      "anti_patterns": [
+        "把插画场景写成品牌视觉",
+        "只有风格词，没有场景锚点",
+        "系列图之间毫无连续感",
+        "氛围词堆砌但没有构图目标"
+      ],
+      "template_doc": "references/templates/scenes-and-illustrations/illustrated-scene-set.md",
+      "variants": [
+        {
+          "id": "concept-scene",
+          "name": "概念设定场景",
+          "description": "强调设定展示和环境主导"
+        },
+        {
+          "id": "healing-scene",
+          "name": "治愈氛围场景",
+          "description": "强调平静、温柔和轻叙事"
+        },
+        {
+          "id": "minimalist-mood-scene",
+          "name": "极简情绪场景",
+          "description": "强调留白、色温和单一叙事中心"
+        },
+        {
+          "id": "picture-book-scene",
+          "name": "绘本场景",
+          "description": "强调故事书质感和可延续系列"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "scene-mood",
+          "field": "scene_mood",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "contemplative",
+            "healing",
+            "whimsical",
+            "quiet wonder"
+          ]
+        },
+        {
+          "name": "illustration-surface",
+          "field": "illustration_surface",
+          "strategy": "cycle",
+          "options": [
+            "painterly",
+            "flat graphic",
+            "textured storybook",
+            "soft digital wash"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "soft atmospheric light",
+              "storybook-friendly depth",
+              "mood-safe contrast"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "immersive atmosphere",
+              "gentle narrative calm",
+              "illustrative wonder"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "narrative-and-board",
+      "family": "illustrated-scenes"
+    },
+    {
+      "id": "map-route-board",
+      "name": "地图路线板",
+      "category": "maps",
+      "description": "适合城市地图、路线图、分布图、导览图和一日行程地图",
+      "triggers": [
+        "地图",
+        "route map",
+        "city map",
+        "travel route",
+        "导览图",
+        "distribution map",
+        "itinerary map",
+        "food map"
+      ],
+      "required_focus": [
+        "路线层级",
+        "空间关系",
+        "地标分布",
+        "图例一致性",
+        "导览板阅读顺序"
+      ],
+      "ask_fields": [
+        "这是城市导览图、路线图、分布图还是一日行程图",
+        "主要阅读目标是什么：找路、看分布还是理解行程顺序",
+        "更偏拟真地图、插画地图，还是图示化导览板",
+        "是否需要编号、图例、地标标签或路线箭头",
+        "文字策略是标题可读、局部标签可读还是后期替换"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "map_type",
+        "route_logic",
+        "label_density"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "map_goal",
+        "spatial_structure",
+        "route_landmark_logic",
+        "label_legend_policy",
+        "composition_layout",
+        "guide_finish"
+      ],
+      "composition_bias": [
+        "board should read like a navigational map instead of a generic infographic",
+        "routes, landmarks, and legend should remain visually separated but coordinated",
+        "spatial clusters or paths should be understandable at first glance"
+      ],
+      "quality_rules": [
+        "必须先确定地图类型和阅读目标",
+        "空间关系、路线层级或分布逻辑必须一眼可读",
+        "文本策略只允许标题或标签留位，不直接生成长段说明",
+        "地标、编号、图例和路线要有统一规则"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "plain infographic blocks",
+        "unlabeled random icons",
+        "messy route arrows",
+        "wall of text",
+        "unclear spatial grouping"
+      ],
+      "anti_patterns": [
+        "把地图板写成普通信息图",
+        "只有漂亮插画，没有路线或空间逻辑",
+        "图例、标签和路线风格不统一",
+        "地标密度失控导致阅读混乱"
+      ],
+      "template_doc": "references/templates/maps/map-route-board.md",
+      "variants": [
+        {
+          "id": "illustrated-city-map",
+          "name": "插画城市地图",
+          "description": "强调城市导览和插画地标"
+        },
+        {
+          "id": "travel-route-map",
+          "name": "旅行路线图",
+          "description": "强调路径和停靠点"
+        },
+        {
+          "id": "store-distribution-map",
+          "name": "门店分布图",
+          "description": "强调分布密度和区域关系"
+        },
+        {
+          "id": "itinerary-day-trip-map",
+          "name": "一日行程图",
+          "description": "强调时间顺序和路线节奏"
+        },
+        {
+          "id": "food-map",
+          "name": "美食地图",
+          "description": "强调主题地标和分类导览"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "map-type",
+          "field": "map_type",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "city guide",
+            "route map",
+            "distribution map",
+            "itinerary board",
+            "themed food map"
+          ]
+        },
+        {
+          "name": "navigation-style",
+          "field": "navigation_style",
+          "strategy": "cycle",
+          "options": [
+            "diagram-led",
+            "illustrated map",
+            "semi-real map",
+            "infographic-map hybrid"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "flat readability",
+              "map-safe contrast",
+              "legend-friendly separation"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "navigational clarity",
+              "spatial storytelling",
+              "guide-board polish"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "interface-and-information",
+      "family": "map-and-route"
+    },
+    {
+      "id": "type-layout-poster",
+      "name": "排版海报",
+      "category": "typography-and-text-layout",
+      "description": "适合双语排版视觉、标题主导型海报和文字布局主导型画面",
+      "triggers": [
+        "排版海报",
+        "typography poster",
+        "bilingual layout",
+        "title-safe poster",
+        "文字海报",
+        "type layout",
+        "双语排版",
+        "headline poster"
+      ],
+      "required_focus": [
+        "字块节奏",
+        "标题安全区",
+        "图文主次",
+        "双语层级",
+        "版面秩序"
+      ],
+      "ask_fields": [
+        "这是双语排版视觉、标题海报还是安全标题海报",
+        "主要视觉中心是大标题、字块节奏，还是图文对位",
+        "更偏品牌海报、文化排版，还是信息性文字视觉",
+        "是否必须预留标题区、副标题区、角标区或 logo 区",
+        "文字策略是标题可读、短语可读还是全部后期替换"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "headline_role",
+        "language_mode",
+        "type_dominance"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "layout_goal",
+        "headline_hierarchy",
+        "image_text_balance",
+        "safe_area_policy",
+        "composition_layout",
+        "typography_finish"
+      ],
+      "composition_bias": [
+        "poster should read as a typography-led layout rather than a general campaign photo",
+        "headline, subhead, and image blocks should have clear rhythm and spacing",
+        "text reserves must feel deliberate instead of empty placeholders"
+      ],
+      "quality_rules": [
+        "必须明确文字在画面中的主次角色",
+        "标题区、安全区和图像区要有明确关系",
+        "不让模型自由生成大段正文",
+        "双语任务要明确主语言和辅助语言关系"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "crowded tiny paragraphs",
+        "random logo clutter",
+        "poster with no safe area",
+        "unstyled blank headline box",
+        "image-only fashion ad"
+      ],
+      "anti_patterns": [
+        "把排版海报写成普通人物海报",
+        "只有高级排版感，没有版面节奏",
+        "文本和图像抢主次",
+        "双语任务里两种语言层级混乱"
+      ],
+      "template_doc": "references/templates/typography-and-text-layout/type-layout-poster.md",
+      "variants": [
+        {
+          "id": "bilingual-layout-visual",
+          "name": "双语排版视觉",
+          "description": "强调双语字块和视觉平衡"
+        },
+        {
+          "id": "title-safe-poster",
+          "name": "标题安全区海报",
+          "description": "强调大标题空间和版面秩序"
+        },
+        {
+          "id": "editorial-phrase-block",
+          "name": "短语块排版海报",
+          "description": "强调短语块、角标词和留白节奏，而不是单一巨型标题"
+        },
+        {
+          "id": "image-type-balance-poster",
+          "name": "图文均衡排版海报",
+          "description": "强调主视觉和标题区的均衡关系，兼顾图像冲击力与排版秩序"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "language-mode",
+          "field": "language_mode",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "chinese-only",
+            "bilingual balanced",
+            "bilingual dominant-secondary"
+          ]
+        },
+        {
+          "name": "type-dominance",
+          "field": "type_dominance",
+          "strategy": "cycle",
+          "options": [
+            "type-led",
+            "image-type balance",
+            "image-led with type reserve"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "poster-safe contrast",
+              "editorial surface clarity",
+              "type-friendly background control"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "editorial restraint",
+              "typography-led polish",
+              "layout confidence"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "core-commercial",
+      "family": "typography-layout"
+    },
+    {
+      "id": "asset-prop-sheet",
+      "name": "资产道具板",
+      "category": "assets-and-props",
+      "description": "适合图标资产、道具资产、游戏截图 mockup 和拟物化小型视觉资产板",
+      "triggers": [
+        "asset sheet",
+        "prop sheet",
+        "skeuomorphic icons",
+        "game screenshot mockup",
+        "icon set",
+        "道具板",
+        "资产板",
+        "拟物图标"
+      ],
+      "required_focus": [
+        "单体可读性",
+        "轮廓清晰度",
+        "系列统一性",
+        "小尺寸识别",
+        "资产用途"
+      ],
+      "ask_fields": [
+        "这是图标板、道具板、游戏截图 mockup 还是单体资产组",
+        "重点是单体可读性、系列统一性，还是界面中的嵌入展示",
+        "更偏拟物、轻 3D、扁平图形，还是游戏风格截图",
+        "是否需要多角度、多状态或成套展示",
+        "文字策略是不留字、标签留位还是局部说明留位"
+      ],
+      "required_slot_fields": [
+        "composition",
+        "text_policy",
+        "asset_role",
+        "surface_style",
+        "presentation_mode"
+      ],
+      "prompt_sections": [
+        "subject_baseline",
+        "asset_usage_goal",
+        "asset_family_logic",
+        "material_surface",
+        "state_variation",
+        "composition_layout",
+        "asset_finish"
+      ],
+      "composition_bias": [
+        "sheet should prioritize individual asset readability before atmosphere",
+        "multi-asset tasks should keep silhouette separation and consistent scale logic",
+        "mockup variants should still preserve asset-first clarity"
+      ],
+      "quality_rules": [
+        "必须明确资产类型和使用场景",
+        "单体轮廓、材质和小尺寸可读性必须优先",
+        "多资产任务要说明系列一致性",
+        "文本策略只保留必要标签或留位"
+      ],
+      "default_negative_terms": [
+        "watermark",
+        "poster collage",
+        "muddy silhouettes",
+        "tiny unreadable props",
+        "random environment clutter",
+        "inconsistent icon scale"
+      ],
+      "anti_patterns": [
+        "把道具板写成海报或场景图",
+        "资产之间尺寸逻辑混乱",
+        "只有风格词，没有使用场景",
+        "小尺寸下轮廓和材质不可读"
+      ],
+      "template_doc": "references/templates/assets-and-props/asset-prop-sheet.md",
+      "variants": [
+        {
+          "id": "retro-skeuomorphic-icons",
+          "name": "复古拟物图标板",
+          "description": "强调图标材质和轮廓识别"
+        },
+        {
+          "id": "game-screenshot-mockup",
+          "name": "游戏截图 Mockup",
+          "description": "强调资产嵌入游戏 UI 的展示"
+        },
+        {
+          "id": "prop-lineup-board",
+          "name": "道具成套板",
+          "description": "强调多道具的系列排布、轮廓分离和整体秩序"
+        },
+        {
+          "id": "collectible-item-sheet",
+          "name": "收藏物件板",
+          "description": "强调收藏物材质等级感、单体可读性和系列一致性"
+        }
+      ],
+      "default_variant_axes": [
+        {
+          "name": "asset-role",
+          "field": "asset_role",
+          "strategy": "cycle",
+          "batch_balance": "within-batch",
+          "options": [
+            "icon sheet",
+            "prop lineup",
+            "collectible item",
+            "screenshot mockup"
+          ]
+        },
+        {
+          "name": "surface-style",
+          "field": "surface_style",
+          "strategy": "cycle",
+          "options": [
+            "retro skeuomorphic",
+            "glossy game ui",
+            "matte collectible",
+            "soft 3d prop"
+          ]
+        }
+      ],
+      "autofill_policy": {
+        "enabled": true,
+        "mark_sources": true,
+        "rules": [
+          {
+            "field": "lighting",
+            "values": [
+              "asset-readable highlights",
+              "edge separation",
+              "small-scale clarity"
+            ],
+            "source": "template-autofill"
+          },
+          {
+            "field": "mood",
+            "values": [
+              "collectible polish",
+              "utility clarity",
+              "playful asset precision"
+            ],
+            "source": "template-autofill"
+          }
+        ]
+      },
+      "tier": "identity-and-assets",
+      "family": "prop-assets"
     }
   ]
 }

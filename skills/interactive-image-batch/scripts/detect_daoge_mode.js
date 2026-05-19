@@ -49,13 +49,54 @@ function scoreTemplate(template, corpus) {
 
 function candidateCategoriesForMode(mode, taskSpec, strategy) {
   const outputSignals = [
+    taskSpec.content_brief,
     taskSpec.output_mode,
     strategy.output_mode,
     ...(taskSpec.style_requirements || []),
+    ...(taskSpec.variation_requirements || []),
   ].filter(Boolean).join(' ').toLowerCase();
 
   if (mode === 'storyboard-board' || mode === 'storyboard-image-edit') return new Set(['cinematic-sequences']);
   if (mode === 'image-edit') return new Set(['editing-workflows']);
+  if (/(图像编辑|编辑任务|修图|改图|局部修正|局部编辑|background replacement|localized fix|style alignment edit|image edit|edit boundary|tone correction)/i.test(outputSignals)) {
+    return new Set(['editing-workflows']);
+  }
+  if (/(map|city map|route map|travel route|itinerary map|distribution map|food map|地图|路线图|导览图|分布图|行程图)/i.test(outputSignals)) {
+    return new Set(['maps']);
+  }
+  if (/(typography poster|type layout|bilingual layout|title-safe poster|headline poster|排版海报|双语排版|文字海报|标题海报)/i.test(outputSignals)) {
+    return new Set(['typography-and-text-layout']);
+  }
+  if (/(asset sheet|prop sheet|skeuomorphic icons|game screenshot mockup|icon set|资产道具板|道具板|拟物图标|图标板|资产板)/i.test(outputSignals)) {
+    return new Set(['assets-and-props']);
+  }
+  if (/(academic figure|academic|research poster|graphical abstract|mechanism diagram|publication chart|scientific schematic|学术图|论文图|机制图|研究海报)/i.test(outputSignals)) {
+    return new Set(['academic-figures']);
+  }
+  if (/(branding|brand board|brand identity|packaging|package design|label design|mascot|merch|包装|包装板|品牌板|品牌系统|标签设计|周边板)/i.test(outputSignals)) {
+    return new Set(['branding-and-packaging']);
+  }
+  if (/(illustrated scene|concept scene|healing scene|picture-book|storybook|mood scene|插画场景|绘本场景|治愈场景|情绪场景|概念场景)/i.test(outputSignals)) {
+    return new Set(['scenes-and-illustrations']);
+  }
+  if (/(avatar|profile|头像|贴纸|sticker|selfie|角色头像|icon portrait)/i.test(outputSignals)) {
+    return new Set(['avatars-and-profile']);
+  }
+  if (/(slide|slides|幻灯页|汇报页|visual report|report page|policy slide|explainer slide)/i.test(outputSignals)) {
+    return new Set(['slides-and-visual-docs']);
+  }
+  if (/(infographic|信息图|对比图|步骤图|数据看板|kpi|bento|图例)/i.test(outputSignals)) {
+    return new Set(['infographics']);
+  }
+  if (/(架构图|technical diagram|system architecture|flowchart|sequence diagram|拓扑图|er diagram|状态机|mind map)/i.test(outputSignals)) {
+    return new Set(['technical-diagrams']);
+  }
+  if (/(?:\bui\b|界面|mockup|(?:^|[^a-z])app(?:[^a-z]|$)|(?:^|[^a-z])web(?:[^a-z]|$)|landing page|dashboard|直播界面|界面稿|产品卡片|chat interface)/i.test(outputSignals)) {
+    return new Set(['ui-mockups']);
+  }
+  if (/(lookbook|造型册|系列 lookbook|collection look|系列服装|款式轮换|章节式 lookbook|封面加稳定展示)/i.test(outputSignals)) {
+    return new Set(['grids-and-collages']);
+  }
   if (/(详情页|卖点|产品组图|detail page|product)/i.test(outputSignals)) return new Set(['product-visuals']);
   if (/(肖像|半身|portrait|close-up|studio|editorial)/i.test(outputSignals)) return new Set(['portraits-and-characters']);
   if (/(九宫格|社媒|instagram|feed|social)/i.test(outputSignals)) return new Set(['social-campaigns', 'grids-and-collages']);

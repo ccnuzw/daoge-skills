@@ -1,0 +1,32 @@
+{
+  "template_id": "oral-storyboard-board",
+  "template_variant": "product-led",
+  "content_brief": "做一张产品解说口播分镜整板，要求同一位产品主理人连续出镜，左侧信息区、右侧多格产品讲解镜头和底部产品收尾KV同时成立。",
+  "output_mode": "产品解说口播分镜整板",
+  "style_requirements": [
+    "same presenter same product identity",
+    "left info panel right shot grid bottom product kv",
+    "product-led storyboard board with clear feature breakdown"
+  ],
+  "variation_requirements": [
+    "主持人身份和产品体系都要统一",
+    "产品卖点拆解必须清晰，不退化成电商主图",
+    "整板结构要像真实产品口播提案板"
+  ],
+  "text_policy": "中文字段以后期替换为主，只保留信息层级、产品卖点标题区和整板结构清晰度。",
+  "sample_variant_axes": {
+    "story_beat": "logic breakdown",
+    "camera_language": "close explanation shot",
+    "continuity_anchor": "same face same product palette",
+    "mood": "professional trust"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "metadata-only",
+    "layout_manifest": "./oral_storyboard_board.product_led.layout_manifest.json",
+    "content_manifest": "./oral_storyboard_board.product_led.content_manifest.json",
+    "render_config": "./oral_storyboard_board.product_led.render_config.json"
+  }
+}

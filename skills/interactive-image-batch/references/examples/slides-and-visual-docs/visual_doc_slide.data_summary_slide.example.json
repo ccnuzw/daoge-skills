@@ -1,0 +1,23 @@
+{
+  "template_id": "visual-doc-slide",
+  "template_variant": "data-summary-slide",
+  "content_brief": "做一张数据摘要型视觉文档页，包含顶部标题区、核心结论数字区、右侧支撑图表区和底部注释区，用于季度业务汇报或经营复盘。",
+  "output_mode": "数据摘要页",
+  "style_requirements": [
+    "data-summary slide layout",
+    "executive summary presentation page",
+    "headline-first report-safe structure"
+  ],
+  "variation_requirements": [
+    "核心数字和结论区优先级最高",
+    "图表区和注释区分工明确",
+    "阅读顺序适合汇报场景"
+  ],
+  "text_policy": "标题、核心数字标签和摘要标题可占位，详细数据说明后期替换。",
+  "sample_variant_axes": {
+    "page_role": "report body page",
+    "layout_zones": "left-text-right-visual",
+    "headline_weight": "hero-title",
+    "annotation_density": "balanced"
+  }
+}

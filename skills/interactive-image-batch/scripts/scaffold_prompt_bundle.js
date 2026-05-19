@@ -271,6 +271,7 @@ function buildStoryboardSlots({ storyboardData, strategy, templateFields }) {
       variant_signature: variantAxes.map((axis) => `${axis.axis}=${axis.option}`).join(' | ') || null,
       template_variant: strategy.template_variant || null,
       text_policy: firstNonEmptyString(item.text_policy, strategy.text_policy),
+      reference_mode: item.reference_mode || 'prompt-only',
       source_refs: flattenSourceRefs(sourceFiles, item.source_refs, item.reference_images),
       negative_prompt: strategy.negative_policy || null,
       field_sources: {
@@ -278,6 +279,7 @@ function buildStoryboardSlots({ storyboardData, strategy, templateFields }) {
         scene: 'storyboard',
         composition: 'storyboard',
         text_policy: item.text_policy ? 'storyboard' : 'strategy',
+        reference_mode: 'storyboard',
       },
       notes: [
         `Storyboard slot ${item.slot_id}`,

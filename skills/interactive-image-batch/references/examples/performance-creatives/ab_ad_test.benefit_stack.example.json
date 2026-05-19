@@ -1,0 +1,23 @@
+{
+  "template_id": "ab-ad-test",
+  "template_variant": "benefit-stack",
+  "content_brief": "做一组广告利益点测试图，比较“舒适感”“支撑性”“轻盈感”“透气性”四种卖点表达，验证哪种最适合转化投放。",
+  "output_mode": "利益点投放测试图",
+  "style_requirements": [
+    "benefit-stack paid social creative",
+    "conversion-safe headline layout",
+    "commercial clarity with controlled variation"
+  ],
+  "variation_requirements": [
+    "每张图只替换卖点表达",
+    "主体、质感和留白控制项稳定",
+    "投放结构和 CTA 安全区明确"
+  ],
+  "text_policy": "标题和 CTA 后期替换，当前只保留投放结构和清晰留白。",
+  "sample_variant_axes": {
+    "ad_test_hypothesis": "test which benefit message improves click intent",
+    "controlled_variables": "same model same product same scene baseline",
+    "value_proposition": "comfort-first message",
+    "cta_zone": "bottom-safe"
+  }
+}

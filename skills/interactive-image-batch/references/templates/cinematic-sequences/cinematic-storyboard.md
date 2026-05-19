@@ -39,6 +39,8 @@
 - `micro-film`: 连续微电影镜头。
 - `vertical-short`: 竖版短视频分镜封面。
 - `mood-sequence`: 情绪递进组图。
+- `demo-explainer-sequence`: 解释型产品演示分镜。
+- `product-reveal-sequence`: 环境铺垫到正式揭示的商业分镜。
 
 ## 推荐 variant_axes
 

@@ -1,0 +1,21 @@
+{
+  "template_id": "academic-figure-board",
+  "template_variant": "mechanism-diagram",
+  "content_brief": "做一张机制图，展示细胞信号激活、关键作用路径和结果输出关系。",
+  "output_mode": "机制图",
+  "style_requirements": [
+    "mechanism diagram",
+    "scientific schematic",
+    "academic-safe contrast"
+  ],
+  "variation_requirements": [
+    "方向关系清晰",
+    "结构层级明确",
+    "注释密度平衡"
+  ],
+  "text_policy": "标题和局部标签留位，长段说明后期替换。",
+  "sample_variant_axes": {
+    "figure_type": "mechanism diagram",
+    "comparison_mode": "single-path"
+  }
+}

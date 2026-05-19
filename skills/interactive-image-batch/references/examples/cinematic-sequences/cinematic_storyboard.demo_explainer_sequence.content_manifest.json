@@ -1,0 +1,88 @@
+{
+  "board_id": "cinematic-demo-explainer-board-01",
+  "board_title": "产品演示说明分镜",
+  "board_theme": "同一主角、同一产品、连续演示说明、商业短片解释节奏",
+  "brand_panel": {
+    "title_lines": [
+      "演示说明分镜",
+      "Demo Explainer Sequence",
+      "主题：问题开场 -> 操作演示 -> 反馈验证 -> 收尾总结"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "顶部信息区只做排版，不单独生图"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "问题开场",
+      "timecode": "0-3s",
+      "scene": "主角在简洁工作台前短暂停顿，看向待解决的使用问题，环境光和产品轮廓共同建立解释开场。",
+      "prompt_hints": [
+        "第一拍明确提出问题场景",
+        "镜头仍然要保留商业短片质感"
+      ],
+      "continuity_notes": [
+        "角色服装、桌面和产品外观延续后续三拍"
+      ],
+      "camera_move": "wide establishing shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "操作演示",
+      "timecode": "3-6s",
+      "scene": "主角上手演示产品关键操作，动作明确，镜头聚焦于手部和产品交互关系。",
+      "prompt_hints": [
+        "操作必须清楚可读",
+        "镜头语言偏说明而不是情绪摆拍"
+      ],
+      "continuity_notes": [
+        "同一产品、同一工作台、同一角色逻辑保持不变"
+      ],
+      "camera_move": "medium action frame"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "反馈验证",
+      "timecode": "6-9s",
+      "scene": "主角观察演示后的即时反馈，表情和产品状态共同说明功能已经生效。",
+      "prompt_hints": [
+        "反馈信号要清楚",
+        "镜头承担解释闭环的第三节点"
+      ],
+      "continuity_notes": [
+        "人物、产品和光线逻辑继续连续"
+      ],
+      "camera_move": "close emotional frame"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "收尾总结",
+      "timecode": "9-12s",
+      "scene": "主角与产品同框完成收尾英雄镜头，画面既能总结功能价值，也保留商业主视觉完成度。",
+      "prompt_hints": [
+        "收尾必须兼顾说明与商业完成度",
+        "保留标题安全区"
+      ],
+      "continuity_notes": [
+        "同一人物和产品闭环收束"
+      ],
+      "camera_move": "hero end frame"
+    }
+  ]
+}

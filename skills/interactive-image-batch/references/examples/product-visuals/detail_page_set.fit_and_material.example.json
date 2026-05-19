@@ -1,0 +1,23 @@
+{
+  "template_id": "detail-page-set",
+  "template_variant": "fit-and-material",
+  "content_brief": "做一组服饰详情页组图，重点展示版型上身效果、走线结构、面料质感和局部触感特写，用于电商详情页中段。",
+  "output_mode": "版型与材质详情页组图",
+  "style_requirements": [
+    "fit-and-material ecommerce detail set",
+    "material-readable commercial lighting",
+    "product-first annotated composition"
+  ],
+  "variation_requirements": [
+    "版型和材质各自承担明确角色",
+    "局部特写和上身效果分工清晰",
+    "说明位安全区稳定"
+  ],
+  "text_policy": "标签和材质说明位后期替换，当前只保留清晰标注区和卖点留白。",
+  "sample_variant_axes": {
+    "detail_page_role": "material close detail",
+    "benefit_angle": "premium fabric",
+    "shot_scale": "close detail",
+    "layout_zone": "side-label-safe"
+  }
+}

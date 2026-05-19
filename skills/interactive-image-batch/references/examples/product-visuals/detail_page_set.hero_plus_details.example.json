@@ -1,0 +1,23 @@
+{
+  "template_id": "detail-page-set",
+  "template_variant": "hero-plus-details",
+  "content_brief": "做一组主图加细节图的详情页组图，第一张做商品主图，后续补局部细节、材质近景和功能点特写。",
+  "output_mode": "主图加细节详情页组图",
+  "style_requirements": [
+    "hero-plus-details ecommerce set",
+    "product-first clean commerce composition",
+    "detail-readable commercial lighting"
+  ],
+  "variation_requirements": [
+    "第一张承担主图角色",
+    "后续细节图分工明确",
+    "主图和细节图视觉语言统一"
+  ],
+  "text_policy": "标题、标签和说明位后期替换，当前只保留清晰留白和标注安全区。",
+  "sample_variant_axes": {
+    "detail_page_role": "hero product image",
+    "benefit_angle": "support",
+    "shot_scale": "full-body",
+    "layout_zone": "top-copy-safe"
+  }
+}

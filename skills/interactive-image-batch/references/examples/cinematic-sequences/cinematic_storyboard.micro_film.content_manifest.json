@@ -1,0 +1,75 @@
+{
+  "board_id": "cinematic-micro-film-board-01",
+  "board_title": "雨夜短片微电影分镜",
+  "board_theme": "微电影、雨夜街区、同一角色情绪推进、电影短片感",
+  "slots": [
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "独自行走",
+      "timecode": "0-3s",
+      "scene": "雨夜街区里，角色撑伞沿着昏黄路灯下的人行道独自行走，远处霓虹被雨丝拉成虚化色带",
+      "prompt_hints": [
+        "开场更偏短片观察视角",
+        "雨夜环境要形成情绪基底"
+      ],
+      "continuity_notes": [
+        "角色服装、伞和街区逻辑延续后续三拍"
+      ],
+      "camera_move": "wide establishing shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "停顿凝视",
+      "timecode": "3-6s",
+      "scene": "角色停在玻璃橱窗前侧身凝视，雨滴和店内暖光反射在脸部轮廓上",
+      "prompt_hints": [
+        "中近景情绪开始收束",
+        "玻璃反射和暖光形成内外对照"
+      ],
+      "continuity_notes": [
+        "街区和服装仍然一致"
+      ],
+      "camera_move": "medium action frame"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "进入店内",
+      "timecode": "6-9s",
+      "scene": "角色推门进入昏暖小店，背后雨夜与店内光色交叠，情绪进一步推进",
+      "prompt_hints": [
+        "动作必须明确",
+        "内外空间切换要成立"
+      ],
+      "continuity_notes": [
+        "角色身份和前两拍保持完全一致"
+      ],
+      "camera_move": "close emotional frame"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "情绪收束",
+      "timecode": "9-12s",
+      "scene": "角色在店内窗边短暂停住，暖光与雨夜城市反射同框，形成短片结尾的情绪收束画面",
+      "prompt_hints": [
+        "收尾更偏电影短片而不是广告定格",
+        "留出片名安全区"
+      ],
+      "continuity_notes": [
+        "同一角色、同一雨夜叙事闭环"
+      ],
+      "camera_move": "hero end frame"
+    }
+  ]
+}

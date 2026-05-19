@@ -1,0 +1,22 @@
+{
+  "template_id": "type-layout-poster",
+  "template_variant": "editorial-phrase-block",
+  "content_brief": "做一张 editorial phrase block 排版海报，用短语块、角标词和留白节奏组织画面，强调字块节奏而不是单一巨型主标题。",
+  "output_mode": "排版海报",
+  "style_requirements": [
+    "editorial phrase block",
+    "typography-led polish",
+    "layout confidence"
+  ],
+  "variation_requirements": [
+    "短语块节奏清晰",
+    "图文主次明确",
+    "不生成正文段落"
+  ],
+  "text_policy": "短语和标题留位，正文后期替换，不生成长段可读文字。",
+  "sample_variant_axes": {
+    "headline_role": "editorial phrase block",
+    "language_mode": "chinese-only",
+    "type_dominance": "type-led"
+  }
+}

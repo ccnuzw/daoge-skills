@@ -1,0 +1,88 @@
+{
+  "board_id": "oral-storyboard-testimonial-led-board-01",
+  "board_title": "见证主导口播分镜整板",
+  "board_theme": "同一讲述者、前后变化、案例证明、结果收尾",
+  "brand_panel": {
+    "title_lines": [
+      "案例见证",
+      "口播分镜板",
+      "主题：把转变过程和结果证明拆成一张案例整板"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "左侧信息区只做排版"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "问题前状态",
+      "timecode": "0-4s",
+      "scene": "讲述者开场描述问题前状态，背景叠加案例标题和第一层关键信息",
+      "prompt_hints": [
+        "讲述者可信",
+        "前状态必须清楚成立"
+      ],
+      "continuity_notes": [
+        "讲述者、服装、环境色板和全板统一"
+      ],
+      "camera_move": "medium presenter shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "转变过程",
+      "timecode": "4-8s",
+      "scene": "讲述者解释关键转变过程，旁侧叠加前后对照或步骤说明层",
+      "prompt_hints": [
+        "过程变化必须清楚",
+        "不要做成普通宣传海报"
+      ],
+      "continuity_notes": [
+        "讲述者身份和案例视觉持续统一"
+      ],
+      "camera_move": "information-led composite shot"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "结果证明",
+      "timecode": "8-12s",
+      "scene": "讲述者继续说明结果变化，叠加数据、反馈或结果标签作为证明层",
+      "prompt_hints": [
+        "结果证明要自然",
+        "人物仍然是叙事主中心"
+      ],
+      "continuity_notes": [
+        "讲述者、案例色板和图层语义保持统一"
+      ],
+      "camera_move": "close explanation shot"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "案例收尾KV",
+      "timecode": "12-16s",
+      "scene": "讲述者、案例结论、结果关键词和最终收束同屏，形成底部结果收尾",
+      "prompt_hints": [
+        "结果结论必须清晰",
+        "收尾要有案例提案感"
+      ],
+      "continuity_notes": [
+        "完成同一讲述者和同一案例系统闭环"
+      ],
+      "camera_move": "full-body wrap-up shot"
+    }
+  ]
+}

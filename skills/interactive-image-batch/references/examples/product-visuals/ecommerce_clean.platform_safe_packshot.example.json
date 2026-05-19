@@ -1,0 +1,22 @@
+{
+  "template_id": "ecommerce-clean",
+  "template_variant": "platform-safe-packshot",
+  "content_brief": "做一组平台安全区 packshot 主图，展示护肤喷雾瓶身轮廓、标签区和盖体结构，强调主图点击感和平台留白安全区。",
+  "output_mode": "电商主图",
+  "style_requirements": [
+    "platform-safe ecommerce packshot",
+    "clean commercial packshot lighting",
+    "stable product-first composition"
+  ],
+  "variation_requirements": [
+    "商品结构和标签区清晰",
+    "背景不能抢主体",
+    "平台安全区和主图留白必须稳定"
+  ],
+  "text_policy": "不生成可读文案，只保留 packshot 主图的后期标题和角标安全区。",
+  "sample_variant_axes": {
+    "shot_scale": "three-quarter display",
+    "benefit_angle": "silhouette readability",
+    "background_cleanliness": "pure white"
+  }
+}

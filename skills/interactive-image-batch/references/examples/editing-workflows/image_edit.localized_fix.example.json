@@ -1,0 +1,21 @@
+{
+  "template_id": "image-edit",
+  "template_variant": "localized-fix",
+  "content_brief": "基于已有人物图做局部修正，保留人物身份和服装主体，只清理袖口褶皱和背景边缘穿帮区域。",
+  "output_mode": "图像编辑",
+  "style_requirements": [
+    "localized edit",
+    "preserve subject identity",
+    "seamless fix boundary"
+  ],
+  "variation_requirements": [
+    "只修改局部区域",
+    "主体身份和服装结构保持一致",
+    "编辑边界必须干净自然"
+  ],
+  "text_policy": "保留原构图中的留白区，不新增可读文字。",
+  "sample_variant_axes": {
+    "edit_scope": "local masked edit",
+    "change_target": "object cleanup"
+  }
+}

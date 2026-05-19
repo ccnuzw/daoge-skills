@@ -1,0 +1,22 @@
+{
+  "template_id": "infographic-board",
+  "template_variant": "step-by-step-infographic",
+  "content_brief": "做一张步骤拆解信息图，展示从注册、配置、发布到复盘的四步流程，每一步都要有清晰模块和阅读顺序。",
+  "output_mode": "步骤信息图",
+  "style_requirements": [
+    "step-by-step infographic board",
+    "clear guided reading path",
+    "modular explainer layout"
+  ],
+  "variation_requirements": [
+    "每一步边界清晰",
+    "阅读顺序明确",
+    "标题区和步骤说明层级稳定"
+  ],
+  "text_policy": "允许步骤标题和关键标签占位，详细说明和长文本后期替换。",
+  "sample_variant_axes": {
+    "information_hierarchy": "step-led",
+    "reading_path": "left-to-right",
+    "data_emphasis": "process-led"
+  }
+}

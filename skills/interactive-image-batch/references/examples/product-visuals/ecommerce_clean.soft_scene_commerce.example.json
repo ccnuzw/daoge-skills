@@ -1,0 +1,21 @@
+{
+  "template_id": "ecommerce-clean",
+  "template_variant": "soft-scene-commerce",
+  "content_brief": "做一组轻场景电商图，展示基础款针织衫在浅色桌面和柔和家居背景中的商品可读性，适合平台主图和活动页首屏。",
+  "output_mode": "电商主图",
+  "style_requirements": [
+    "soft scene ecommerce image",
+    "restrained lifestyle hint",
+    "product-first commercial readability"
+  ],
+  "variation_requirements": [
+    "环境只能辅助商品，不抢主体",
+    "商品轮廓和颜色必须稳定",
+    "轻场景里仍要保留平台安全区"
+  ],
+  "text_policy": "不生成可读文案，只保留主图和轻场景电商图的后期安全区。",
+  "sample_variant_axes": {
+    "benefit_angle": "structure clarity",
+    "background_cleanliness": "restrained lifestyle hint"
+  }
+}

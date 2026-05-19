@@ -1,0 +1,56 @@
+{
+  "$schema_version": "1.0.0",
+  "title": "DAOGE host_native_results",
+  "type": "array",
+  "description": "Minimal result contract for importing host-native image generation outputs back into DAOGE.",
+  "item_type": "object",
+  "required_fields": [
+    "index",
+    "title",
+    "requestMode",
+    "status"
+  ],
+  "recommended_fields": [
+    "output",
+    "slotId",
+    "scene",
+    "composition",
+    "textPolicy",
+    "error",
+    "styleFamily",
+    "slotRole"
+  ],
+  "status_enum": [
+    "success",
+    "needs_review",
+    "failed"
+  ],
+  "rules": [
+    {
+      "when": "status in [success, needs_review]",
+      "require": [
+        "output"
+      ]
+    },
+    {
+      "when": "status == failed",
+      "recommend": [
+        "error"
+      ]
+    }
+  ],
+  "field_notes": {
+    "index": "String or number. Prefer stable numbering like 001, 002.",
+    "title": "Human-readable result title.",
+    "requestMode": "prompt-only | reference-assisted | masked-edit or compatible host-native value.",
+    "status": "success | needs_review | failed.",
+    "output": "Absolute or repo-relative image path. Required for success and needs_review.",
+    "slotId": "Optional storyboard slot identifier.",
+    "scene": "Optional scene summary for review boards.",
+    "composition": "Optional composition summary for review boards.",
+    "textPolicy": "Optional typography-space or copy-safe policy note.",
+    "error": "Recommended for failed items.",
+    "styleFamily": "Optional style family summary.",
+    "slotRole": "Optional storyboard role summary."
+  }
+}

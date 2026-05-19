@@ -1,0 +1,32 @@
+{
+  "template_id": "cinematic-storyboard",
+  "template_variant": "product-reveal-sequence",
+  "content_brief": "做一组产品揭示式电影分镜，展示同一条叙事线从环境铺垫、细节暗示、产品正式揭示到英雄定格的连续商业镜头。",
+  "output_mode": "产品揭示分镜组图",
+  "style_requirements": [
+    "cinematic product reveal continuity",
+    "premium suspense-to-reveal commercial rhythm",
+    "same-scene same-product sequence logic"
+  ],
+  "variation_requirements": [
+    "前半段要建立悬念和环境",
+    "中后段必须完成清晰产品 reveal",
+    "同一空间、光线和产品逻辑保持连续"
+  ],
+  "text_policy": "不生成可读字幕，只保留标题安全区和商业主视觉留白。",
+  "sample_variant_axes": {
+    "story_beat": "product reveal",
+    "camera_language": "hero end frame",
+    "continuity_anchor": "same palette same product environment",
+    "motion_state": "concealment to reveal"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "prompt-only",
+    "layout_manifest": "./cinematic_storyboard.layout_manifest.json",
+    "content_manifest": "./cinematic_storyboard.product_reveal_sequence.content_manifest.json",
+    "render_config": "./cinematic_storyboard.product_reveal_sequence.render_config.json"
+  }
+}

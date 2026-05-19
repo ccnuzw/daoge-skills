@@ -1,0 +1,25 @@
+{
+  "template_id": "brand-packaging-board",
+  "template_variant": "mascot-brand-kit",
+  "content_brief": "做一张 mascot 品牌资产板，展示角色主形象、表情延展、包装应用和品牌辅助图形。",
+  "output_mode": "品牌角色资产板",
+  "style_requirements": [
+    "mascot brand board spread",
+    "character-led packaging system",
+    "brand asset consistency"
+  ],
+  "variation_requirements": [
+    "角色主形象稳定",
+    "品牌辅助图形和包装应用统一",
+    "多资产层级清晰"
+  ],
+  "text_policy": "标志、口号和包装文案后期替换，当前只保留品牌资产位置和说明层级。",
+  "sample_variant_axes": {
+    "packaging_format": "merch packaging",
+    "brand_asset_scope": "mascot system",
+    "material_signal": "premium carton",
+    "asset_role": "mascot lineup",
+    "surface_style": "collectible polish",
+    "presentation_mode": "brand board spread"
+  }
+}

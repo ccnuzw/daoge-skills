@@ -1,0 +1,23 @@
+{
+  "template_id": "campaign-poster",
+  "template_variant": "people-hero",
+  "content_brief": "做一张人物主视觉海报，强调人物眼神、姿态和品牌气质，适用于品牌主海报、Campaign 人物 KV 和广告封面。",
+  "output_mode": "人物主视觉海报",
+  "style_requirements": [
+    "people-hero campaign poster",
+    "editorial character-led hero framing",
+    "typography-safe portrait campaign visual"
+  ],
+  "variation_requirements": [
+    "人物主体必须压住画面主层级",
+    "眼神和姿态承担海报情绪核心",
+    "标题和 logo 安全区稳定"
+  ],
+  "text_policy": "标题、logo 和 slogan 后期替换，当前只保留人物主视觉留白和安全区。",
+  "sample_variant_axes": {
+    "camera_language": "low-angle long-body framing",
+    "commercial_role": "master KV",
+    "material_emphasis": "silhouette contour",
+    "lighting": "soft premium studio light"
+  }
+}

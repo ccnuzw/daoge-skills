@@ -1,0 +1,23 @@
+{
+  "template_id": "technical-diagram",
+  "template_variant": "mind-map-tech",
+  "content_brief": "做一张技术脑图，围绕“企业 AI 平台”展开数据层、模型层、应用层和治理层，要求中心主题与分支扩散清晰。",
+  "output_mode": "技术脑图",
+  "style_requirements": [
+    "technical mind map clarity",
+    "center-led branch expansion layout",
+    "clean layered concept map"
+  ],
+  "variation_requirements": [
+    "中心主题明确",
+    "分支层级和扩散方向清晰",
+    "模块聚类稳定"
+  ],
+  "text_policy": "保留中心主题、分支标题和层级标签位置，详细解释文案后期替换。",
+  "sample_variant_axes": {
+    "diagram_type": "mind-map",
+    "node_hierarchy": "central-hub",
+    "edge_semantics": "grouped containers",
+    "presentation_mode": "teaching board"
+  }
+}

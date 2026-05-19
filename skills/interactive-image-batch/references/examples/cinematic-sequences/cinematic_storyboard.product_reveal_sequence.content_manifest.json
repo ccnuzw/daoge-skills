@@ -1,0 +1,88 @@
+{
+  "board_id": "cinematic-product-reveal-board-01",
+  "board_title": "产品揭示电影分镜",
+  "board_theme": "环境铺垫、细节暗示、正式揭示、英雄定格",
+  "brand_panel": {
+    "title_lines": [
+      "产品揭示分镜",
+      "Product Reveal Sequence",
+      "主题：环境铺垫 -> 细节暗示 -> 正式揭示 -> 英雄定格"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "顶部信息区只做排版，不单独生图"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "环境铺垫",
+      "timecode": "0-3s",
+      "scene": "昏暗而精致的展示空间中，主产品尚未完全出现，只以轮廓和环境反光建立悬念开场。",
+      "prompt_hints": [
+        "第一拍偏氛围铺垫",
+        "产品不能完全亮相"
+      ],
+      "continuity_notes": [
+        "空间、色调和产品位置逻辑延续后续三拍"
+      ],
+      "camera_move": "wide establishing shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "细节暗示",
+      "timecode": "3-6s",
+      "scene": "镜头切向产品局部质感和关键结构，仍然保持半遮半露，让观众预感即将 reveal。",
+      "prompt_hints": [
+        "细节必须可感知但不完全揭开",
+        "悬念感继续推进"
+      ],
+      "continuity_notes": [
+        "产品和空间逻辑与前后镜头保持一致"
+      ],
+      "camera_move": "medium action frame"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "正式揭示",
+      "timecode": "6-9s",
+      "scene": "产品在重点光线下完成正式登场，镜头明确展示核心轮廓、材质和品牌完成度。",
+      "prompt_hints": [
+        "这一拍必须完成 reveal",
+        "产品主体必须清楚"
+      ],
+      "continuity_notes": [
+        "色调和空间继续承接前两拍"
+      ],
+      "camera_move": "close emotional frame"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "英雄定格",
+      "timecode": "9-12s",
+      "scene": "产品在稳定的英雄构图中完成最终定格，保留主视觉标题安全区并形成商业收束。",
+      "prompt_hints": [
+        "收尾是明确的商业英雄镜头",
+        "必须保留标题安全区"
+      ],
+      "continuity_notes": [
+        "和前三拍共同完成 reveal 闭环"
+      ],
+      "camera_move": "hero end frame"
+    }
+  ]
+}

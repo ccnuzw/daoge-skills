@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "high-contrast-studio",
+  "content_brief": "做一组高对比摄影棚人像，强调结构光、轮廓边缘和服装版型，用于时尚品牌高冲击人物大片。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "high-contrast studio portrait",
+    "rim-lit contour emphasis",
+    "editorial structure light"
+  ],
+  "variation_requirements": [
+    "明暗对比必须明确",
+    "人物轮廓和服装结构都要可读",
+    "背景保持纯净但不失层次"
+  ],
+  "text_policy": "不生成可读标题，只保留适合棚拍主视觉的结构留白。",
+  "sample_variant_axes": {
+    "lighting": "rim-lit contour",
+    "camera_language": "slight low-angle elongation",
+    "material_emphasis": "silhouette line"
+  }
+}

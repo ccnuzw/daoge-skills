@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "clean-fashion-editorial",
+  "content_brief": "做一组摄影棚时尚编辑感人像，展示简洁背景、服装材质和姿态变化，用于品牌大片和棚拍 look。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "controlled studio framing",
+    "soft premium studio light",
+    "polished editorial minimalism"
+  ],
+  "variation_requirements": [
+    "灯光结构明确",
+    "材质和轮廓可读",
+    "姿态变化服务服装展示"
+  ],
+  "text_policy": "不生成可读标题，只保留棚拍画面的后期排版留白。",
+  "sample_variant_axes": {
+    "lighting": "soft premium studio light",
+    "camera_language": "centered editorial",
+    "material_emphasis": "fabric texture"
+  }
+}

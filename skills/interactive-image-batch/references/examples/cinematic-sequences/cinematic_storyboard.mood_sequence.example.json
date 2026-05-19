@@ -1,0 +1,32 @@
+{
+  "template_id": "cinematic-storyboard",
+  "template_variant": "mood-sequence",
+  "content_brief": "做一组情绪递进分镜，展示同一位角色从压抑克制、短暂停顿、情绪释放到平静收束的连续镜头。",
+  "output_mode": "情绪递进分镜组图",
+  "style_requirements": [
+    "cinematic mood progression",
+    "same-character emotional continuity",
+    "light and color shift drives the sequence"
+  ],
+  "variation_requirements": [
+    "每张必须承担明确情绪阶段",
+    "同一人物、服装和空间逻辑保持连续",
+    "镜头推进依赖情绪和光色变化而不是产品海报感"
+  ],
+  "text_policy": "不生成可读字幕，只保留必要标题安全区和镜头节奏留白。",
+  "sample_variant_axes": {
+    "story_beat": "emotion progression",
+    "camera_language": "close emotional frame",
+    "continuity_anchor": "same wardrobe same room logic",
+    "motion_state": "restraint to release"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "prompt-only",
+    "layout_manifest": "./cinematic_storyboard.layout_manifest.json",
+    "content_manifest": "./cinematic_storyboard.mood_sequence.content_manifest.json",
+    "render_config": "./cinematic_storyboard.mood_sequence.render_config.json"
+  }
+}

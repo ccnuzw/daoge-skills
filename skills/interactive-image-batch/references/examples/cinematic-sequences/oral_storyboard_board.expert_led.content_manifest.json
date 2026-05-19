@@ -1,0 +1,88 @@
+{
+  "board_id": "oral-storyboard-expert-led-board-01",
+  "board_title": "专家主导口播分镜整板",
+  "board_theme": "同一专家、观点拆解、证据支撑、结论收尾",
+  "brand_panel": {
+    "title_lines": [
+      "专家解说",
+      "口播分镜板",
+      "主题：把核心判断和证据拆成一张可信整板"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "左侧信息区只做排版"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "核心判断开场",
+      "timecode": "0-4s",
+      "scene": "专家正面开场，提出一个关键判断，背后叠加核心标题和专业环境提示",
+      "prompt_hints": [
+        "专家可信",
+        "开场结论必须成立"
+      ],
+      "continuity_notes": [
+        "专家、服装、环境色板和全板统一"
+      ],
+      "camera_move": "medium presenter shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "证据拆解",
+      "timecode": "4-8s",
+      "scene": "专家中近景解释支撑判断的证据或数据，旁侧叠加图表或结构化说明层",
+      "prompt_hints": [
+        "证据层必须清楚",
+        "不要做成普通咨询 PPT"
+      ],
+      "continuity_notes": [
+        "专家身份和专业环境保持统一"
+      ],
+      "camera_move": "information-led composite shot"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "关键解释",
+      "timecode": "8-12s",
+      "scene": "专家继续把复杂问题拆成更容易理解的逻辑层，信息框作为辅助说明",
+      "prompt_hints": [
+        "逻辑拆解要自然",
+        "人物仍然是主叙事中心"
+      ],
+      "continuity_notes": [
+        "专家、图解风格和色板持续统一"
+      ],
+      "camera_move": "close explanation shot"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "结论收尾KV",
+      "timecode": "12-16s",
+      "scene": "专家、关键结论关键词和最终建议同屏，形成整板底部可信收束",
+      "prompt_hints": [
+        "结论必须清晰",
+        "收尾要有专家提案感"
+      ],
+      "continuity_notes": [
+        "完成同一专家和同一视觉系统闭环"
+      ],
+      "camera_move": "full-body wrap-up shot"
+    }
+  ]
+}

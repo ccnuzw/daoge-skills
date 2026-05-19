@@ -1,0 +1,21 @@
+{
+  "template_id": "map-route-board",
+  "template_variant": "store-distribution-map",
+  "content_brief": "做一张门店分布图，展示核心城市、区域集群和旗舰店层级。",
+  "output_mode": "门店分布图",
+  "style_requirements": [
+    "store distribution map",
+    "diagram-led",
+    "guide-board polish"
+  ],
+  "variation_requirements": [
+    "区域分布清晰",
+    "图例统一",
+    "城市层级明确"
+  ],
+  "text_policy": "标题和局部标签留位，长说明后期替换。",
+  "sample_variant_axes": {
+    "map_type": "distribution map",
+    "route_logic": "clustered hotspots"
+  }
+}

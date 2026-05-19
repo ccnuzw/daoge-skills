@@ -23,6 +23,17 @@ function summarizeByCategory(templates) {
     .map(([name, count]) => ({ name, count }));
 }
 
+function summarizeByField(templates, fieldName) {
+  const counts = {};
+  templates.forEach((item) => {
+    const key = String(item[fieldName] || 'unassigned').trim() || 'unassigned';
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  return Object.entries(counts)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([name, count]) => ({ name, count }));
+}
+
 function renderList(items, emptyText = '无') {
   if (!items || !items.length) return `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
   return `<ul class="info-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
@@ -45,6 +56,8 @@ function main() {
 
   const templates = Array.isArray(report.templates) ? report.templates : [];
   const categories = summarizeByCategory(templates);
+  const tiers = summarizeByField(templates, 'tier');
+  const families = summarizeByField(templates, 'family');
   const failing = templates.filter((item) => !item.ok);
   const warningOnly = templates.filter((item) => item.ok && item.warnings && item.warnings.length);
   const healthy = templates.filter((item) => item.ok && (!item.warnings || item.warnings.length === 0));
@@ -64,19 +77,29 @@ function main() {
     '',
     ...renderMarkdownList(categories.map((item) => `${item.name}: ${item.count}`)),
     '',
-    '## 3. 健康状态',
+    '## 3. 层级分布',
+    '',
+    ...renderMarkdownList(tiers.map((item) => `${item.name}: ${item.count}`)),
+    '',
+    '## 4. 家族分布',
+    '',
+    ...renderMarkdownList(families.map((item) => `${item.name}: ${item.count}`)),
+    '',
+    '## 5. 健康状态',
     '',
     `- 完全通过: ${healthy.length}`,
     `- 仅警告: ${warningOnly.length}`,
     `- 失败: ${failing.length}`,
     '',
-    '## 4. 模板明细',
+    '## 6. 模板明细',
     '',
   ];
 
   templates.forEach((item) => {
     markdown.push(`### ${item.id}`);
     markdown.push('');
+    markdown.push(`- 层级: ${item.tier || '未记录'}`);
+    markdown.push(`- 家族: ${item.family || '未记录'}`);
     markdown.push(`- 分类: ${item.category || '未记录'}`);
     markdown.push(`- 文档存在: ${item.docExists ? '是' : '否'}`);
     markdown.push(`- 文档路径: ${item.templateDoc || '未记录'}`);
@@ -298,11 +321,19 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>分类与健康状态</h2>
+      <h2>分类、层级与健康状态</h2>
       <div class="section-grid">
         <article class="info-card">
           <h3>分类分布</h3>
           ${renderList(categories.map((item) => `${item.name}: ${item.count}`))}
+        </article>
+        <article class="info-card">
+          <h3>层级分布</h3>
+          ${renderList(tiers.map((item) => `${item.name}: ${item.count}`))}
+        </article>
+        <article class="info-card">
+          <h3>家族分布</h3>
+          ${renderList(families.map((item) => `${item.name}: ${item.count}`))}
         </article>
         <article class="info-card">
           <h3>健康状态</h3>
@@ -327,6 +358,8 @@ ${renderPortalHeadAssets()}
               <div class="status-pill ${statusClass}">${escapeHtml(statusLabel)}</div>
               <h3>${escapeHtml(item.id)}</h3>
               <div class="meta-list">
+                <div class="meta-row"><div class="meta-label">层级</div><div class="meta-value">${escapeHtml(item.tier || '未记录')}</div></div>
+                <div class="meta-row"><div class="meta-label">家族</div><div class="meta-value">${escapeHtml(item.family || '未记录')}</div></div>
                 <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">${escapeHtml(item.category || '未记录')}</div></div>
                 <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">${escapeHtml(item.docExists ? '是' : '否')}</div></div>
                 <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">${escapeHtml(item.templateDoc || '未记录')}</div></div>

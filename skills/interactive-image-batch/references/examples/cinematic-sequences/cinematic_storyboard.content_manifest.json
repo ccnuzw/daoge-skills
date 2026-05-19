@@ -1,0 +1,88 @@
+{
+  "board_id": "cinematic-storyboard-board-01",
+  "board_title": "都市夜行四拍广告分镜",
+  "board_theme": "深蓝夜色、电影广告、同一主角连续行动、情绪递进",
+  "brand_panel": {
+    "title_lines": [
+      "四拍广告分镜",
+      "Four Beat Ad Sequence",
+      "主题：开场钩子 -> 产品揭示 -> 情绪推进 -> 收尾英雄镜头"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "顶部信息区只做排版，不单独生图"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "开场钩子",
+      "timecode": "0-2s",
+      "scene": "高楼天桥夜色中，主角停在城市风口回头，远处车流虚化成蓝白光带",
+      "prompt_hints": [
+        "建立城市空间和人物情绪",
+        "第一拍必须有明显钩子感"
+      ],
+      "continuity_notes": [
+        "角色造型、外套和色调延续后续三拍"
+      ],
+      "camera_move": "wide establishing shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "产品揭示",
+      "timecode": "2-4s",
+      "scene": "主角在街角光影中抬手揭示产品，镜面反射带出品牌核心物件",
+      "prompt_hints": [
+        "产品第一次清晰进入叙事",
+        "人与产品同框但不要硬摆拍"
+      ],
+      "continuity_notes": [
+        "承接第一拍夜色和同一服装逻辑"
+      ],
+      "camera_move": "medium action frame"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "情绪推进",
+      "timecode": "4-6s",
+      "scene": "主角近景停顿，城市反光落在侧脸，情绪从克制转向坚定",
+      "prompt_hints": [
+        "近景情绪必须成立",
+        "保留同一角色识别和色调"
+      ],
+      "continuity_notes": [
+        "与前两拍保持同一人物与夜景空间"
+      ],
+      "camera_move": "close emotional frame"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "收尾英雄镜头",
+      "timecode": "6-8s",
+      "scene": "主角在楼顶边缘定格，产品与城市天际线同框，形成收尾英雄主视觉",
+      "prompt_hints": [
+        "要有明显终局定格感",
+        "标题和品牌留白清晰"
+      ],
+      "continuity_notes": [
+        "整个序列色调和人物必须统一"
+      ],
+      "camera_move": "hero end frame"
+    }
+  ]
+}

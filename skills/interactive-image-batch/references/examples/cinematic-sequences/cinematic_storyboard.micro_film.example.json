@@ -1,0 +1,32 @@
+{
+  "template_id": "cinematic-storyboard",
+  "template_variant": "micro-film",
+  "content_brief": "做一组微电影式连续分镜，展示同一位角色在雨夜街区从独自行走、停顿凝视、进入店内到最终情绪收束的连续短片感。",
+  "output_mode": "微电影分镜组图",
+  "style_requirements": [
+    "micro-film continuity",
+    "rainy-night emotional progression",
+    "same-character same-location sequence logic"
+  ],
+  "variation_requirements": [
+    "连续镜头必须有动作和情绪递进",
+    "同一角色和场景逻辑保持稳定",
+    "镜头语言更像短片而不是广告海报"
+  ],
+  "text_policy": "不生成可读字幕，只保留必要的标题安全区和镜头节奏留白。",
+  "sample_variant_axes": {
+    "story_beat": "emotional turn",
+    "camera_language": "close emotional frame",
+    "continuity_anchor": "same wardrobe same location logic",
+    "motion_state": "walking to stillness"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "prompt-only",
+    "layout_manifest": "./cinematic_storyboard.layout_manifest.json",
+    "content_manifest": "./cinematic_storyboard.micro_film.content_manifest.json",
+    "render_config": "./cinematic_storyboard.micro_film.render_config.json"
+  }
+}

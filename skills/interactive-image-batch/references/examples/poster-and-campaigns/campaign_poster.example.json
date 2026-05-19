@@ -1,0 +1,24 @@
+{
+  "template_id": "campaign-poster",
+  "template_variant": "co-brand-kv",
+  "content_brief": "做一张联名品牌主视觉海报，展示人物与产品同屏，保留标题区、联名锁定区和品牌安全留白。",
+  "output_mode": "品牌海报",
+  "style_requirements": [
+    "full-body vertical hero framing",
+    "premium campaign key visual",
+    "typography-safe poster composition",
+    "full-body co-brand poster silhouette"
+  ],
+  "variation_requirements": [
+    "主体层级明确",
+    "品牌海报气质稳定",
+    "标题和 logo 安全区清晰"
+  ],
+  "text_policy": "标题、logo 和 slogan 后期替换，当前只保留清晰主视觉留白和安全区。",
+  "sample_variant_axes": {
+    "camera_language": "full-body vertical hero framing",
+    "commercial_role": "master KV",
+    "lighting": "soft premium studio light",
+    "mood": "calm luxury"
+  }
+}

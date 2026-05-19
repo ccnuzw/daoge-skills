@@ -21,6 +21,12 @@ All user-facing dialogue for this skill should be in Chinese unless the user exp
 
 Before you commit to a path, decide which runtime mode you are in.
 
+Preferred probe:
+
+```bash
+node scripts/detect_runtime_mode.js
+```
+
 ### Mode 1: Local batch runner
 
 Use this mode when the environment is meant to run the bundled scripts with local `.env` credentials.
@@ -37,7 +43,25 @@ Behavior:
 - generate operational artifacts
 - require execution confirmation unless the user explicitly says to start immediately
 
-### Mode 2: Prompt-and-plan advisor
+### Mode 2: Host-native image tool
+
+Use this mode when the host environment already has a native image tool and the user does not need the full local batch runner.
+
+Typical signals:
+
+- `detect_runtime_mode.js` returns `host-native-image-tool`
+- the host has built-in image generation capability
+- the user wants DAOGE to organize prompts and template structure, but not necessarily run the local executor
+
+Behavior:
+
+- keep DAOGE intake, template selection, and prompt structuring
+- prefer a light path over the full local `prepare -> execute` runner chain
+- do not pretend that local runner artifacts exist if execution was delegated to the host tool
+- keep at least a prompt artifact or structured prompt summary when useful
+- prefer `scripts/build_host_native_prompt_pack.js` when you need a stable handoff artifact for the host tool
+
+### Mode 3: Prompt-and-plan advisor
 
 Use this mode when the user wants the DAOGE planning layer, but actual execution is not appropriate yet.
 
@@ -52,7 +76,7 @@ Behavior:
 - complete intake, planning, template selection, prompt structuring, and preview-oriented artifacts
 - do not claim that images were executed
 
-### Mode 3: Local-edit / rerun operator
+### Mode 4: Local-edit / rerun operator
 
 Use this mode when the user wants to rerun failed items, edit selected storyboard slots, or reuse previous outputs as references.
 
@@ -107,6 +131,7 @@ Default rule:
 
 - `prepare` is the normal path once the required task contract is explicit
 - `execute` only starts after user confirmation, unless the user explicitly opts into immediate execution
+- when runtime mode is `host-native-image-tool`, a light path may stop at prompt planning or host-side execution preparation instead of entering the full local `execute` stage
 
 ## Required artifacts
 
@@ -132,6 +157,12 @@ Core preflight artifacts:
 - `daoge_preflight_dashboard.md`
 - `preflight_board.html`
 
+Core host-native handoff artifacts:
+
+- `host_native_prompt_pack.json`
+- `host_native_summary.md`
+- `host_native_summary.html`
+
 Core execution artifacts:
 
 - `manifest.json`
@@ -151,6 +182,17 @@ Core execution artifacts:
 - `operations_report.md`
 
 Not every turn needs every artifact, but the workflow should stay artifact-first.
+
+When runtime mode is `host-native-image-tool`, prefer leaving a minimal but reviewable handoff bundle instead of fabricating local execution records. The recommended artifact generator is:
+
+```bash
+node scripts/build_host_native_prompt_pack.js \
+  --prompts-file /abs/path/prompts.generated.json \
+  --task-spec /abs/path/task_spec.normalized.json \
+  --strategy-file /abs/path/prompt_strategy.normalized.json \
+  --runtime-mode-file /abs/path/runtime_mode.json \
+  --output-dir /abs/path/output_dir
+```
 
 For user-facing browsing, prefer the HTML portal surfaces first. Markdown outputs remain useful as archival or debugging companions, but they should not be treated as the primary user portal once the HTML boards are available.
 

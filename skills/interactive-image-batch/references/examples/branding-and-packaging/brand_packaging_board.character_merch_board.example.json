@@ -1,0 +1,24 @@
+{
+  "template_id": "brand-packaging-board",
+  "template_variant": "character-merch-board",
+  "content_brief": "做一张角色周边板，展示角色立牌、钥匙扣、徽章、包装盒和吊卡，要求收藏属性和系列统一感明确。",
+  "output_mode": "角色周边板",
+  "style_requirements": [
+    "character merch board spread",
+    "collectible packaging system",
+    "retail-ready mascot merchandise presentation"
+  ],
+  "variation_requirements": [
+    "角色周边类型分组清晰",
+    "包装和裸件资产层级明确",
+    "系列化展示和收藏感统一"
+  ],
+  "text_policy": "标志、系列名和包装文案允许留位，细节描述后期替换。",
+  "sample_variant_axes": {
+    "packaging_format": "merch board",
+    "brand_asset_scope": "merch lineup",
+    "material_signal": "premium carton",
+    "shelf_presence": "collectible merch",
+    "merch_role": "character collectible lineup"
+  }
+}

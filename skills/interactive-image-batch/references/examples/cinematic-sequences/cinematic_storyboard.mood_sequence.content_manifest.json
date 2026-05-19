@@ -1,0 +1,75 @@
+{
+  "board_id": "cinematic-mood-sequence-board-01",
+  "board_title": "情绪递进分镜组",
+  "board_theme": "同一角色、同一空间、光色和情绪分段推进",
+  "slots": [
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "压抑克制",
+      "timecode": "0-2s",
+      "scene": "角色独坐在昏暗室内的窗边，蓝灰光线压低整体情绪，空气里带有停滞感。",
+      "prompt_hints": [
+        "第一拍必须建立压抑基调",
+        "空间安静但不能空"
+      ],
+      "continuity_notes": [
+        "角色服装、房间和时间段延续后续三拍"
+      ],
+      "camera_move": "wide emotional establishing shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "停顿凝视",
+      "timecode": "2-4s",
+      "scene": "角色侧身望向窗外，面部被一束稍暖的反光切开，情绪开始从封闭转向波动。",
+      "prompt_hints": [
+        "光线变化要带出情绪松动",
+        "中近景更强调眼神和呼吸感"
+      ],
+      "continuity_notes": [
+        "房间结构和服装保持不变"
+      ],
+      "camera_move": "medium reflective frame"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "情绪释放",
+      "timecode": "4-6s",
+      "scene": "角色站起转身，暖色灯光和窗外夜色同时进入画面，形成情绪释放的核心镜头。",
+      "prompt_hints": [
+        "动作必须明确",
+        "情绪释放要依靠姿态和光色一起完成"
+      ],
+      "continuity_notes": [
+        "同一角色、同一房间、同一夜晚逻辑"
+      ],
+      "camera_move": "close emotional turn frame"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "平静收束",
+      "timecode": "6-8s",
+      "scene": "角色重新停在窗前，室内暖光和城市夜色达到平衡，形成情绪平静后的收束定格。",
+      "prompt_hints": [
+        "最后一拍要有收束后的安定感",
+        "保留标题安全区"
+      ],
+      "continuity_notes": [
+        "完成同一角色和空间的情绪闭环"
+      ],
+      "camera_move": "hero calm end frame"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "render_mode": "storyboard_board",
+  "generation_mode": "per-slot",
+  "assembly_mode": "external-compositor",
+  "reference_mode": "prompt-only",
+  "layout_manifest": "./cinematic_storyboard.layout_manifest.json",
+  "content_manifest": "./cinematic_storyboard.product_reveal_sequence.content_manifest.json",
+  "output_name": "cinematic-storyboard-product-reveal-sequence-demo",
+  "policies": {
+    "allow_variable_layout": true,
+    "preserve_reference_metadata": true,
+    "skip_non_image_slots": false
+  }
+}

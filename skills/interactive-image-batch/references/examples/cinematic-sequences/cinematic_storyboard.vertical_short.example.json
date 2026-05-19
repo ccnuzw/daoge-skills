@@ -1,0 +1,32 @@
+{
+  "template_id": "cinematic-storyboard",
+  "template_variant": "vertical-short",
+  "content_brief": "做一组竖版短片分镜，展示同一位角色从开场吸引、动作推进、情绪近景到收尾定格的短视频连续镜头。",
+  "output_mode": "竖版短片分镜组图",
+  "style_requirements": [
+    "vertical short-form continuity",
+    "mobile-first cinematic framing",
+    "same-character same-color-logic sequence"
+  ],
+  "variation_requirements": [
+    "每张都要适合竖版短视频节奏",
+    "镜头语言和人物动作必须连续",
+    "同一角色和空间逻辑保持稳定"
+  ],
+  "text_policy": "不生成可读字幕，只保留竖版标题安全区和信息留白。",
+  "sample_variant_axes": {
+    "story_beat": "opening hook",
+    "camera_language": "vertical medium action frame",
+    "continuity_anchor": "same wardrobe same palette",
+    "motion_state": "walking to pause"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "prompt-only",
+    "layout_manifest": "./cinematic_storyboard.vertical_short.layout_manifest.json",
+    "content_manifest": "./cinematic_storyboard.vertical_short.content_manifest.json",
+    "render_config": "./cinematic_storyboard.vertical_short.render_config.json"
+  }
+}

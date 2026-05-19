@@ -1930,3 +1930,26 @@ test('run_example_catalog_prepare can resolve second-wave oral storyboard starte
     assert.equal(fs.existsSync(summary.promptPreviewBoard), true);
   });
 });
+
+test('run_example_catalog_prepare can run third-wave portrait-fashion variants from widened catalog', () => {
+  const tempDir = makeTempDir('interactive-image-batch-portrait-fashion-wave3-');
+  const cases = [
+    { exampleId: 'portrait-kv-emotion-contrast-kv', variant: 'emotion-contrast-kv' },
+    { exampleId: 'portrait-kv-product-linked-portrait-kv', variant: 'product-linked-portrait-kv' },
+    { exampleId: 'studio-editorial-couture-minimal-studio', variant: 'couture-minimal-studio' },
+    { exampleId: 'studio-editorial-gesture-sequence-studio', variant: 'gesture-sequence-studio' },
+  ];
+
+  cases.forEach((item) => {
+    const outputDir = path.join(tempDir, item.exampleId);
+    const runStdout = runNode('run_example_catalog_prepare.js', [
+      '--example-id', item.exampleId,
+      '--output-dir', outputDir,
+    ]);
+    const summary = JSON.parse(runStdout);
+    assert.equal(summary.selectedExample.id, item.exampleId);
+    assert.equal(summary.selectedExample.template_variant, item.variant);
+    assert.equal(fs.existsSync(summary.preflightBoard), true);
+    assert.equal(fs.existsSync(summary.promptPreviewBoard), true);
+  });
+});

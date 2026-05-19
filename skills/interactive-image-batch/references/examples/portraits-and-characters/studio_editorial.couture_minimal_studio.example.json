@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "couture-minimal-studio",
+  "content_brief": "做一组极简高定感棚拍大片，背景和色板都要克制，重点在人物轮廓、面料质感和高定式秩序感，用于时尚高端品牌棚拍形象图。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "couture minimal studio editorial",
+    "restrained luxury backdrop and silhouette control",
+    "high-fashion material precision"
+  ],
+  "variation_requirements": [
+    "背景必须极简但不能显得空或廉价",
+    "面料、轮廓和姿态必须传达高定式秩序感",
+    "灯光必须干净，不能把高定服装打平"
+  ],
+  "text_policy": "不生成可读标题，只保留适合高端棚拍后期排版的极简留白。",
+  "sample_variant_axes": {
+    "lighting": "clean couture key light with soft contour",
+    "camera_language": "centered couture portrait crop",
+    "material_emphasis": "fabric precision and silhouette line"
+  }
+}

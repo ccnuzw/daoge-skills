@@ -1,0 +1,23 @@
+{
+  "template_id": "infographic-board",
+  "template_variant": "bento-grid-infographic",
+  "content_brief": "做一张 Bento 信息板，把产品能力、使用场景、关键数字和风险提醒拆成多模块卡片，要求信息密度高但分块平衡。",
+  "output_mode": "Bento 信息板",
+  "style_requirements": [
+    "bento-grid infographic board",
+    "modular card-based information layout",
+    "balanced high-density explainer design"
+  ],
+  "variation_requirements": [
+    "模块分块清晰",
+    "信息密度高但不拥挤",
+    "主卡片和辅助卡片层级明确"
+  ],
+  "text_policy": "允许模块标题、关键数字和标签占位，长段内容后期替换。",
+  "sample_variant_axes": {
+    "information_hierarchy": "balanced-grid",
+    "reading_path": "zigzag modules",
+    "icon_language": "soft 3d icons",
+    "data_emphasis": "metric-led"
+  }
+}

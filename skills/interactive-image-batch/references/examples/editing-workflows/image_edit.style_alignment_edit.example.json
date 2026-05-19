@@ -1,0 +1,21 @@
+{
+  "template_id": "image-edit",
+  "template_variant": "style-alignment-edit",
+  "content_brief": "基于已有人像统一新风格，保留人物五官、发型和姿态，把原本偏杂的色调统一成干净的高端杂志风格。",
+  "output_mode": "图像编辑",
+  "style_requirements": [
+    "style alignment edit",
+    "preserve subject identity",
+    "editorial tone correction"
+  ],
+  "variation_requirements": [
+    "保留人物身份和构图",
+    "统一整体色调和材质表达",
+    "不能把风格调整扩大成重绘换脸"
+  ],
+  "text_policy": "保留原构图中的留白区，不新增可读文字。",
+  "sample_variant_axes": {
+    "edit_scope": "global-safe edit",
+    "change_target": "tone correction"
+  }
+}

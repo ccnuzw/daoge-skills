@@ -1,0 +1,23 @@
+{
+  "template_id": "social-grid",
+  "template_variant": "nine-grid-launch",
+  "content_brief": "做一组九宫格上新发布图，覆盖封面、商品细节、模特展示、氛围图和卖点摘要，适用于新品首发周发布。",
+  "output_mode": "九宫格上新图",
+  "style_requirements": [
+    "nine-grid launch system",
+    "square-safe brand launch social grid",
+    "cohesive multi-tile product campaign feed"
+  ],
+  "variation_requirements": [
+    "九张图角色分工清晰",
+    "封面节奏和细节节奏并存",
+    "裁切安全区和色彩系统统一"
+  ],
+  "text_policy": "标题贴纸、发售说明和摘要标签后期替换，当前只保留社媒安全区。",
+  "sample_variant_axes": {
+    "grid_role": "cover tile",
+    "crop_safety": "square-safe",
+    "palette_role": "hero contrast",
+    "content_density": "clean cover"
+  }
+}

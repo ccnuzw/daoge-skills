@@ -1,0 +1,14 @@
+{
+  "render_mode": "storyboard_board",
+  "generation_mode": "per-slot",
+  "assembly_mode": "external-compositor",
+  "reference_mode": "metadata-only",
+  "layout_manifest": "./oral_storyboard_board.educational_explainer.layout_manifest.json",
+  "content_manifest": "./oral_storyboard_board.educational_explainer.content_manifest.json",
+  "output_name": "oral-storyboard-board-educational-explainer-demo",
+  "policies": {
+    "allow_variable_layout": true,
+    "preserve_reference_metadata": true,
+    "skip_non_image_slots": true
+  }
+}

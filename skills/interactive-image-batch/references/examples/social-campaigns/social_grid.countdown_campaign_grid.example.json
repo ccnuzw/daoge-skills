@@ -1,0 +1,23 @@
+{
+  "template_id": "social-grid",
+  "template_variant": "countdown-campaign-grid",
+  "content_brief": "做一组发售倒计时社媒宫格，围绕新品预热周依次展示封面主视觉、倒计时数字节点、商品细节和氛围图，用于连续三到九张的活动预热发布。",
+  "output_mode": "倒计时社媒宫格",
+  "style_requirements": [
+    "countdown campaign social grid",
+    "launch-preheat rhythm with strong cover and date-safe composition",
+    "square-safe brand campaign feed"
+  ],
+  "variation_requirements": [
+    "每张图都要承担倒计时阶段角色",
+    "封面、数字节点、细节和氛围节奏清晰",
+    "整体色彩系统和裁切安全区统一"
+  ],
+  "text_policy": "日期、倒计时数字和活动文案后期替换，当前只保留清晰标题区和贴纸安全区。",
+  "sample_variant_axes": {
+    "grid_role": "cover tile",
+    "crop_safety": "square-safe",
+    "palette_role": "hero contrast",
+    "content_density": "clean cover"
+  }
+}

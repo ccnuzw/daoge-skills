@@ -1,0 +1,21 @@
+{
+  "template_id": "image-edit",
+  "template_variant": "background-replacement",
+  "content_brief": "基于已有商品图做背景替换，保留主体轮廓和材质结构，把杂乱室内背景改成干净浅灰商业背景。",
+  "output_mode": "图像编辑",
+  "style_requirements": [
+    "background replacement",
+    "preserve product geometry",
+    "commercial gray studio backdrop"
+  ],
+  "variation_requirements": [
+    "编辑边界干净",
+    "保留主体结构",
+    "光线方向连续"
+  ],
+  "text_policy": "保留原构图中的留白区，不新增可读文字。",
+  "sample_variant_axes": {
+    "edit_scope": "background-only edit",
+    "change_target": "background"
+  }
+}

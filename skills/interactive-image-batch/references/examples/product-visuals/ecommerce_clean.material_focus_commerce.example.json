@@ -1,0 +1,21 @@
+{
+  "template_id": "ecommerce-clean",
+  "template_variant": "material-focus-commerce",
+  "content_brief": "做一组材质细节主导的电商图，展示羊毛大衣的面料纹理、缝线和领口结构，同时保持商品整体轮廓可读。",
+  "output_mode": "电商主图",
+  "style_requirements": [
+    "material-focus ecommerce image",
+    "clean commercial detail lighting",
+    "texture-first product presentation"
+  ],
+  "variation_requirements": [
+    "材质和做工必须清晰可读",
+    "局部细节不能牺牲整体商品识别",
+    "背景保持简洁，避免电影化过重"
+  ],
+  "text_policy": "不生成可读文案，只保留材质细节电商图的后期标注安全区。",
+  "sample_variant_axes": {
+    "benefit_angle": "fabric detail",
+    "background_cleanliness": "pure white"
+  }
+}

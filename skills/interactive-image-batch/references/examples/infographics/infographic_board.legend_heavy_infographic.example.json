@@ -1,0 +1,23 @@
+{
+  "template_id": "infographic-board",
+  "template_variant": "legend-heavy-infographic",
+  "content_brief": "做一张图例较重的信息图，展示 AI 工作流里的输入、处理、输出和风险标签，要求图例区和主图区分工清晰。",
+  "output_mode": "图例重信息图",
+  "style_requirements": [
+    "legend-heavy infographic board",
+    "annotation-first explanation layout",
+    "clear label hierarchy and modular grouping"
+  ],
+  "variation_requirements": [
+    "图例区和主图区边界清晰",
+    "标签解释层级稳定",
+    "颜色编码和图标语义对应明确"
+  ],
+  "text_policy": "允许图例标题、标签和分组标题占位，长段解释文字后期替换。",
+  "sample_variant_axes": {
+    "information_hierarchy": "explanation-first",
+    "reading_path": "top-down",
+    "icon_language": "schematic symbols",
+    "data_emphasis": "evidence-led"
+  }
+}

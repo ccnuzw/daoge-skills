@@ -1,0 +1,21 @@
+{
+  "template_id": "illustrated-scene-set",
+  "template_variant": "minimalist-mood-scene",
+  "content_brief": "做一组极简情绪场景，展示留白客厅、单灯走廊和清晨窗边桌面的安静叙事片段。",
+  "output_mode": "极简情绪场景",
+  "style_requirements": [
+    "minimalist mood scene",
+    "restrained palette",
+    "single narrative focus with negative space"
+  ],
+  "variation_requirements": [
+    "每张必须有明确的单一叙事中心",
+    "留白和色温变化比物件堆叠更重要",
+    "系列感统一，但不能变成同一张图重复"
+  ],
+  "text_policy": "不生成正文，只保留必要标题留位。",
+  "sample_variant_axes": {
+    "scene_mood": "minimal calm",
+    "illustration_surface": "soft matte illustration"
+  }
+}

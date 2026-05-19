@@ -1,0 +1,37 @@
+[
+  {
+    "index": "001",
+    "title": "Host Native Success",
+    "output": "/abs/path/host_result_001.png",
+    "slotId": "shot_1",
+    "requestMode": "prompt-only",
+    "status": "success",
+    "scene": "studio backdrop",
+    "composition": "full-body vertical poster",
+    "styleFamily": "hero-fashion",
+    "slotRole": "hero"
+  },
+  {
+    "index": "002",
+    "title": "Host Native Review",
+    "output": "/abs/path/host_result_002.png",
+    "slotId": "shot_2",
+    "requestMode": "masked-edit",
+    "status": "needs_review",
+    "scene": "window light interior",
+    "composition": "medium portrait crop",
+    "textPolicy": "leave top and bottom clean for later typography",
+    "styleFamily": "quiet-luxury",
+    "slotRole": "detail"
+  },
+  {
+    "index": "003",
+    "title": "Host Native Failed",
+    "slotId": "shot_3",
+    "requestMode": "reference-assisted",
+    "status": "failed",
+    "error": "provider timeout",
+    "styleFamily": "quiet-luxury",
+    "slotRole": "detail"
+  }
+]

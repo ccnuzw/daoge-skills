@@ -5,6 +5,8 @@ const { parseArgs, writeJson } = require('./script_utils');
 const REQUIRED_TEMPLATE_FIELDS = [
   'id',
   'name',
+  'tier',
+  'family',
   'category',
   'description',
   'triggers',
@@ -149,6 +151,8 @@ function main() {
 
     report.templates.push({
       id,
+      tier: String(template.tier || '').trim(),
+      family: String(template.family || '').trim(),
       category: String(template.category || '').trim(),
       templateDoc: String(template.template_doc || '').trim() || null,
       docPath: doc.path,

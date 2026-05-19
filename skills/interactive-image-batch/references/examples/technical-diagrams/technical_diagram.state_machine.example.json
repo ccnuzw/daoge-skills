@@ -1,0 +1,23 @@
+{
+  "template_id": "technical-diagram",
+  "template_variant": "state-machine",
+  "content_brief": "做一张状态机图，展示订单从待支付、已支付、已发货、已完成到取消的迁移关系，要求起止态和触发条件清晰。",
+  "output_mode": "状态机图",
+  "style_requirements": [
+    "state machine diagram clarity",
+    "transition-led technical board",
+    "clean state-node relationship layout"
+  ],
+  "variation_requirements": [
+    "状态节点主次明确",
+    "迁移触发关系清晰",
+    "起始态和终止态可直接识别"
+  ],
+  "text_policy": "保留状态名称和迁移标签位置，详细业务规则后期替换。",
+  "sample_variant_axes": {
+    "diagram_type": "state-machine",
+    "node_hierarchy": "central-hub",
+    "edge_semantics": "annotated transitions",
+    "presentation_mode": "engineering blueprint"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "template_id": "oral-storyboard-board",
+  "template_variant": "industry-led",
+  "content_brief": "做一张财经口播分镜整板，展示同一位财经主理人连续出镜，把行情钩子、逻辑拆解、产业扩展和长期主义收尾放在一张横版提案板里。",
+  "output_mode": "财经口播分镜整板",
+  "style_requirements": [
+    "same financial presenter same studio identity",
+    "left info panel right shot grid bottom closing kv",
+    "deep navy financial studio with market overlays"
+  ],
+  "variation_requirements": [
+    "主持人统一稳定",
+    "财经图层和口播逻辑同时成立",
+    "整板结构要像真实导演提案板"
+  ],
+  "text_policy": "中文字段以后期替换为主，只保留标题安全区、信息层级和重点关键词位置。",
+  "sample_variant_axes": {
+    "story_beat": "opening hook",
+    "camera_language": "medium presenter shot",
+    "continuity_anchor": "same face same studio palette",
+    "mood": "analytical confidence"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "hybrid",
+    "layout_manifest": "./layout_manifest.example.json",
+    "content_manifest": "./content_manifest.example.json",
+    "render_config": "./render_config.example.json",
+    "reference_bindings": "./reference_bindings.example.json"
+  }
+}

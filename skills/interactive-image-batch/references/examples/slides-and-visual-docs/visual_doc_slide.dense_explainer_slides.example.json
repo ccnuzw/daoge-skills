@@ -1,0 +1,23 @@
+{
+  "template_id": "visual-doc-slide",
+  "template_variant": "dense-explainer-slides",
+  "content_brief": "做一张高信息密度解释页，展示背景、关键概念、流程要点和底部结论区，要求信息多但阅读压力可控。",
+  "output_mode": "高密度解释页",
+  "style_requirements": [
+    "dense explainer slide",
+    "high-information but ordered page layout",
+    "presentation-safe multi-module explanation page"
+  ],
+  "variation_requirements": [
+    "信息量高但版区秩序稳定",
+    "模块密度和阅读路径平衡",
+    "标题区、正文区和结论区边界清晰"
+  ],
+  "text_policy": "标题、模块标签和结论标题可占位，长段解释文字后期替换。",
+  "sample_variant_axes": {
+    "page_role": "report body page",
+    "layout_zones": "split columns",
+    "headline_weight": "balanced-title",
+    "annotation_density": "dense"
+  }
+}

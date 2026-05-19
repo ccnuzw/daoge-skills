@@ -36,6 +36,8 @@
 - `white-clean-hero`: 白底或浅底主图，最稳的商品展示路径。
 - `soft-scene-commerce`: 轻场景电商图，增加少量环境但不抢主体。
 - `material-focus-commerce`: 材质和做工细节优先的商品图。
+- `flatlay-commerce`: 平铺电商图，强调顶视角结构和商品轮廓秩序。
+- `platform-safe-packshot`: 平台安全区主图，强调 click-safe 留白和稳定 packshot。
 
 ## 推荐 variant_axes
 

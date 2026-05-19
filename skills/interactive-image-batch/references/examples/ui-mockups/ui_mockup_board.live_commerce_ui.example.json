@@ -1,0 +1,23 @@
+{
+  "template_id": "ui-mockup-board",
+  "template_variant": "live-commerce-ui",
+  "content_brief": "做一张直播带货界面图，突出商品区、价格锚点、评论互动区和购买按钮，适合直播导购页或直播间视觉包装。",
+  "output_mode": "直播带货界面",
+  "style_requirements": [
+    "live-commerce UI overlay",
+    "purchase-first mobile commerce screen",
+    "comment-and-product stacked interface"
+  ],
+  "variation_requirements": [
+    "商品区、互动区和购买动作分层清晰",
+    "屏幕主视觉和购买路径同时可读",
+    "直播感和转化感稳定，不退化成普通海报"
+  ],
+  "text_policy": "价格标签、商品名、评论气泡和购买按钮文字只保留占位，详细文案后期替换。",
+  "sample_variant_axes": {
+    "ui_surface": "floating overlay",
+    "module_focus": "conversion section",
+    "overlay_density": "information-rich",
+    "device_context": "screen only"
+  }
+}

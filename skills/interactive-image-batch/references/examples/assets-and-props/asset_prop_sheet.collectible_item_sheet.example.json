@@ -1,0 +1,22 @@
+{
+  "template_id": "asset-prop-sheet",
+  "template_variant": "collectible-item-sheet",
+  "content_brief": "做一张 collectible item sheet，展示收藏物件、徽章、通行证、限量周边和成套配件，强调材质质感和收藏品等级感。",
+  "output_mode": "资产道具板",
+  "style_requirements": [
+    "collectible item",
+    "collectible polish",
+    "asset-readable highlights"
+  ],
+  "variation_requirements": [
+    "材质等级感明确",
+    "小尺寸依然可读",
+    "同系列收藏物统一"
+  ],
+  "text_policy": "只保留必要标签留位，正文后期替换。",
+  "sample_variant_axes": {
+    "asset_role": "collectible item",
+    "surface_style": "matte collectible",
+    "presentation_mode": "inventory sheet"
+  }
+}

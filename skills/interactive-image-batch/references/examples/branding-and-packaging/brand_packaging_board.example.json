@@ -1,0 +1,21 @@
+{
+  "template_id": "brand-packaging-board",
+  "template_variant": "brand-identity-board",
+  "content_brief": "做一张新消费饮品品牌包装系统板，展示瓶身、标签、包装盒和品牌色系统。",
+  "output_mode": "品牌包装板",
+  "style_requirements": [
+    "brand board spread",
+    "packaging lineup display",
+    "premium packaging polish"
+  ],
+  "variation_requirements": [
+    "品牌系统一致",
+    "包装材质可读",
+    "多资产层级清晰"
+  ],
+  "text_policy": "标志、标签和包装文案位置留位，完整包装文字后期替换。",
+  "sample_variant_axes": {
+    "packaging_format": "bottle packaging",
+    "brand_asset_scope": "identity board"
+  }
+}

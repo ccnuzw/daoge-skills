@@ -1,0 +1,21 @@
+{
+  "template_id": "image-edit",
+  "template_variant": "lighting-consistency-fix",
+  "content_brief": "基于已有场景图做光线统一修正，保留主体身份、位置和场景结构，只修正前后景光线不一致、阴影跳变和边缘补光不自然的问题。",
+  "output_mode": "图像编辑",
+  "style_requirements": [
+    "lighting consistency fix",
+    "preserve subject identity",
+    "seamless light correction"
+  ],
+  "variation_requirements": [
+    "只修正光线和阴影逻辑",
+    "主体身份和构图保持一致",
+    "前后景亮度、边缘补光和阴影过渡要自然"
+  ],
+  "text_policy": "保留原构图中的留白区，不新增可读文字。",
+  "sample_variant_axes": {
+    "edit_scope": "local masked edit",
+    "change_target": "lighting correction"
+  }
+}

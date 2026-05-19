@@ -1,0 +1,23 @@
+{
+  "template_id": "infographic-board",
+  "template_variant": "hand-drawn-infographic",
+  "content_brief": "做一张手绘信息图，讲解一个轻量工作流的步骤、注意事项和常见错误，要求更轻松亲和、但结构仍然清楚。",
+  "output_mode": "手绘信息图",
+  "style_requirements": [
+    "hand-drawn infographic board",
+    "friendly teaching explainer layout",
+    "sketched but readable information structure"
+  ],
+  "variation_requirements": [
+    "结构清楚但风格更轻松",
+    "步骤和提示分区明确",
+    "标签、图标和说明层级稳定"
+  ],
+  "text_policy": "允许标题、提示标签和步骤标题占位，长段说明文字后期替换。",
+  "sample_variant_axes": {
+    "information_hierarchy": "explanation-first",
+    "reading_path": "top-down",
+    "icon_language": "hand-drawn markers",
+    "data_emphasis": "process-led"
+  }
+}

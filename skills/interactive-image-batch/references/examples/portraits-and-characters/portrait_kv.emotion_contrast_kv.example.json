@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "emotion-contrast-kv",
+  "content_brief": "做一张强调人物情绪对照感的近景主视觉，要求同一人物在稳定品牌气质里呈现更明确的情绪张力，用于人物主题海报和情绪型品牌封面。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "emotion contrast portrait key visual",
+    "face-led premium crop with expressive tension",
+    "brand-safe emotional contrast"
+  ],
+  "variation_requirements": [
+    "情绪对照必须明确，但不能失控成戏剧写真",
+    "脸部光线层次必须保护五官结构和眼神细节",
+    "背景只能服务人物，不允许抢走情绪中心"
+  ],
+  "text_policy": "不生成可读标题，只保留适合人物封面和品牌排版的近景安全区。",
+  "sample_variant_axes": {
+    "eye_language": "restrained emotional contrast",
+    "crop_scale": "tight portrait crop",
+    "lighting": "sculpted emotional side light",
+    "mood": "controlled expressive tension"
+  }
+}

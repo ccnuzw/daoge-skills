@@ -1,0 +1,22 @@
+{
+  "template_id": "lookbook",
+  "template_variant": "multi-outfit-commercial",
+  "content_brief": "做一组多款式商业展示型 lookbook，要求同一模特轮换多套主打造型，画面干净、镜头稳定、款式差异非常清晰，适合系列发布与商业订货展示。",
+  "output_mode": "系列 Lookbook",
+  "style_requirements": [
+    "multi-outfit commercial lookbook",
+    "stable editorial framing for outfit comparison",
+    "clean commercial series continuity"
+  ],
+  "variation_requirements": [
+    "每套款式差异必须清楚可读",
+    "镜头语言要稳定，方便系列对比",
+    "商业展示感要强，但不能退化成电商平铺"
+  ],
+  "text_policy": "不生成可读标题，只保留多款式商业展示组图的后期版面安全区。",
+  "sample_variant_axes": {
+    "lookbook_role": "showcase",
+    "camera_language": "front editorial",
+    "scene_rhythm": "neutral interior"
+  }
+}

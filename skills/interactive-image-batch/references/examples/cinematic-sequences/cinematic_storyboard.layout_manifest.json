@@ -1,0 +1,24 @@
+{
+  "layout_id": "four_grid_storyboard_row",
+  "board_role": "storyboard-board",
+  "canvas": {
+    "width": 2560,
+    "height": 1440,
+    "aspect_ratio": "16:9",
+    "background": "#111111"
+  },
+  "regions": [
+    { "id": "brand_panel", "role": "brand_panel", "x": 64, "y": 64, "width": 2432, "height": 88, "notes": "顶部信息区" },
+    { "id": "shot_1", "role": "shot", "sequence": 1, "x": 64, "y": 200, "width": 584, "height": 328, "aspect_ratio": "16:9" },
+    { "id": "shot_2", "role": "shot", "sequence": 2, "x": 680, "y": 200, "width": 584, "height": 328, "aspect_ratio": "16:9" },
+    { "id": "shot_3", "role": "shot", "sequence": 3, "x": 1296, "y": 200, "width": 584, "height": 328, "aspect_ratio": "16:9" },
+    { "id": "shot_4", "role": "kv", "sequence": 4, "x": 1912, "y": 200, "width": 584, "height": 328, "aspect_ratio": "16:9" }
+  ],
+  "bindings": {
+    "brand_panel": "brand_panel",
+    "shot_1": "shot_1",
+    "shot_2": "shot_2",
+    "shot_3": "shot_3",
+    "shot_4": "shot_4"
+  }
+}

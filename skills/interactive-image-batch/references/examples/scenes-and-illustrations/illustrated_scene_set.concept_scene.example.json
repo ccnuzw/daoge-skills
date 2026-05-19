@@ -1,0 +1,21 @@
+{
+  "template_id": "illustrated-scene-set",
+  "template_variant": "concept-scene",
+  "content_brief": "做一组概念场景，展示未来图书馆、空中花园和雾中高架步道的设定氛围。",
+  "output_mode": "概念场景",
+  "style_requirements": [
+    "concept scene",
+    "painterly",
+    "immersive atmosphere"
+  ],
+  "variation_requirements": [
+    "设定感明确",
+    "环境主导清晰",
+    "系列世界观统一"
+  ],
+  "text_policy": "不生成正文，只保留必要标题留位。",
+  "sample_variant_axes": {
+    "scene_mood": "contemplative",
+    "narrative_anchor": "environment-led"
+  }
+}

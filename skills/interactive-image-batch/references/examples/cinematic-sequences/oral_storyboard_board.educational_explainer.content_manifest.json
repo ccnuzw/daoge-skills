@@ -1,0 +1,88 @@
+{
+  "board_id": "oral-storyboard-educational-board-01",
+  "board_title": "教育科普口播分镜整板",
+  "board_theme": "同一讲解人、知识点拆解、图解层+分镜区+底部总结KV",
+  "brand_panel": {
+    "title_lines": [
+      "教育科普",
+      "口播分镜板",
+      "主题：把知识点拆成一张可讲清的整板"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "左侧信息区只做排版"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "问题钩子",
+      "timecode": "0-4s",
+      "scene": "讲解人正面开场，背景叠加问题钩子和一级知识点标题",
+      "prompt_hints": [
+        "讲解人可信",
+        "问题钩子必须成立"
+      ],
+      "continuity_notes": [
+        "讲解人、服装、教学色板和全板统一"
+      ],
+      "camera_move": "medium presenter shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "图解拆解",
+      "timecode": "4-8s",
+      "scene": "讲解人中近景解释核心知识点，旁侧配图解层或板书式说明框",
+      "prompt_hints": [
+        "图解必须清楚",
+        "不要做成普通 PPT 截图"
+      ],
+      "continuity_notes": [
+        "讲解人和教学环境保持统一"
+      ],
+      "camera_move": "information-led composite shot"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "案例说明",
+      "timecode": "8-12s",
+      "scene": "讲解人继续解释案例或应用场景，图层为辅助说明，不抢主叙事",
+      "prompt_hints": [
+        "人物与知识图层都不能丢",
+        "案例说明要自然"
+      ],
+      "continuity_notes": [
+        "讲解人、图解风格和色板持续统一"
+      ],
+      "camera_move": "close explanation shot"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "总结收尾KV",
+      "timecode": "12-16s",
+      "scene": "讲解人、知识总结关键词和最终结论同屏，形成整板底部收束",
+      "prompt_hints": [
+        "总结必须清晰",
+        "整板要有教学提案感收尾"
+      ],
+      "continuity_notes": [
+        "完成同一讲解人和同一教学视觉系统闭环"
+      ],
+      "camera_move": "full-body wrap-up shot"
+    }
+  ]
+}

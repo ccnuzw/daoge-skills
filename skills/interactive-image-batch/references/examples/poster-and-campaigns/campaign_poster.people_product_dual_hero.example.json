@@ -1,0 +1,23 @@
+{
+  "template_id": "campaign-poster",
+  "template_variant": "people-product-dual-hero",
+  "content_brief": "做一张人物与产品双主角同屏的品牌海报，人物气质、姿态和产品轮廓都必须清晰成立，适合新品发布、联名推广和品牌广告主视觉。",
+  "output_mode": "品牌海报",
+  "style_requirements": [
+    "people and product dual-hero campaign poster",
+    "balanced co-dominant subject hierarchy",
+    "typography-safe premium brand key visual"
+  ],
+  "variation_requirements": [
+    "人物和产品都必须可读，不能只偏一边",
+    "双主角层级要稳定，不互相遮挡卖点",
+    "构图必须像品牌广告海报，而不是商品详情图"
+  ],
+  "text_policy": "标题、logo 和系列名后期替换，当前只保留双主角海报的安全留白和结构层级。",
+  "sample_variant_axes": {
+    "camera_language": "full-body walking turn-back poster motion",
+    "commercial_role": "master KV",
+    "material_emphasis": "contour line",
+    "lighting": "directional rim light"
+  }
+}

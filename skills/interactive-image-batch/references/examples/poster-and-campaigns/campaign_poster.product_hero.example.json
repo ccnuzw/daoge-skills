@@ -1,0 +1,23 @@
+{
+  "template_id": "campaign-poster",
+  "template_variant": "product-hero",
+  "content_brief": "做一张产品主视觉海报，突出商品轮廓、材质和核心卖点，适用于品牌海报、投放封面和新品上市主 KV。",
+  "output_mode": "产品主视觉海报",
+  "style_requirements": [
+    "product-hero campaign poster",
+    "premium commercial hero framing",
+    "typography-safe product-first key visual"
+  ],
+  "variation_requirements": [
+    "商品主体必须压住画面主层级",
+    "材质和轮廓清晰可读",
+    "标题和 logo 安全区稳定"
+  ],
+  "text_policy": "标题、logo 和 slogan 后期替换，当前只保留主视觉留白和清晰安全区。",
+  "sample_variant_axes": {
+    "camera_language": "front-facing product hero framing",
+    "commercial_role": "product hero",
+    "material_emphasis": "contour line",
+    "lighting": "directional rim light"
+  }
+}

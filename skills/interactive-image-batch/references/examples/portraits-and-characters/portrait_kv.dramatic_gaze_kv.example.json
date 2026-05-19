@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "dramatic-gaze-kv",
+  "content_brief": "做一张眼神张力很强的人物近景主视觉，强调面部层次、压迫感和高端品牌人物气场，用于人物主题海报和封面主图。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "dramatic gaze portrait key visual",
+    "tight face-led luxury crop",
+    "controlled emotional intensity"
+  ],
+  "variation_requirements": [
+    "眼神必须有明确压迫感或对视强度",
+    "面部光线层次不能把五官压扁",
+    "近景裁切要紧，但不能切坏头发和下颌线"
+  ],
+  "text_policy": "不生成可读标题，只保留适合封面和人物海报排版的近景安全区。",
+  "sample_variant_axes": {
+    "eye_language": "direct dramatic stare",
+    "crop_scale": "tight portrait crop",
+    "lighting": "sculpted face-led directional light",
+    "mood": "controlled intensity"
+  }
+}

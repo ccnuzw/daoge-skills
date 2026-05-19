@@ -1,0 +1,21 @@
+{
+  "template_id": "technical-diagram",
+  "template_variant": "system-architecture",
+  "content_brief": "做一张系统架构图，展示 API gateway、服务集群、消息队列、数据库和监控层的关系。",
+  "output_mode": "系统架构图",
+  "style_requirements": [
+    "layered technical board",
+    "clean node-link diagram",
+    "engineering precision"
+  ],
+  "variation_requirements": [
+    "节点层级稳定",
+    "箭头语义清晰",
+    "容器和服务分组可读"
+  ],
+  "text_policy": "标题和关键节点标签留位，精确术语和详细注释后期替换。",
+  "sample_variant_axes": {
+    "diagram_type": "architecture",
+    "presentation_mode": "engineering blueprint"
+  }
+}

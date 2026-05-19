@@ -1,0 +1,32 @@
+{
+  "template_id": "oral-storyboard-board",
+  "template_variant": "educational-explainer",
+  "content_brief": "做一张教育科普口播分镜整板，要求同一位讲解人连续出镜，把知识点钩子、图解拆解、案例说明和底部总结KV组织成一张整板。",
+  "output_mode": "教育科普口播分镜整板",
+  "style_requirements": [
+    "same explainer same classroom identity",
+    "left info panel right shot grid bottom closing kv",
+    "educational explainer storyboard board with diagram support"
+  ],
+  "variation_requirements": [
+    "讲解人身份必须统一稳定",
+    "知识点图解要清楚，但不能变成普通 PPT",
+    "整板结构要像真实教学解释提案板"
+  ],
+  "text_policy": "中文字段以后期替换为主，只保留知识层级、板书式标题区和整板结构清晰度。",
+  "sample_variant_axes": {
+    "story_beat": "key answer reveal",
+    "camera_language": "information-led composite shot",
+    "continuity_anchor": "same face same teaching palette",
+    "mood": "analytical confidence"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "metadata-only",
+    "layout_manifest": "./oral_storyboard_board.educational_explainer.layout_manifest.json",
+    "content_manifest": "./oral_storyboard_board.educational_explainer.content_manifest.json",
+    "render_config": "./oral_storyboard_board.educational_explainer.render_config.json"
+  }
+}

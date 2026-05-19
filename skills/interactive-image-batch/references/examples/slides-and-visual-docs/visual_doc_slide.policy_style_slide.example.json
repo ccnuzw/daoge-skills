@@ -1,0 +1,23 @@
+{
+  "template_id": "visual-doc-slide",
+  "template_variant": "policy-style-slide",
+  "content_brief": "做一张政策风格的视觉说明页，展示制度框架、执行步骤和底部摘要区，要求版式正式、边距稳定、说明秩序强。",
+  "output_mode": "政策风格页",
+  "style_requirements": [
+    "policy-style slide layout",
+    "formal briefing page structure",
+    "presentation-safe regulated margins"
+  ],
+  "variation_requirements": [
+    "标题区、正文区和摘要区边界清晰",
+    "规则感和正式感稳定",
+    "阅读顺序明确"
+  ],
+  "text_policy": "标题、模块标签和摘要标题可占位，长段正文后期替换。",
+  "sample_variant_axes": {
+    "page_role": "policy summary page",
+    "layout_zones": "stacked modules",
+    "headline_weight": "balanced-title",
+    "annotation_density": "balanced"
+  }
+}

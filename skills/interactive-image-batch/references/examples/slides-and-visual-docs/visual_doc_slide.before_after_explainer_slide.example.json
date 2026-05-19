@@ -1,0 +1,23 @@
+{
+  "template_id": "visual-doc-slide",
+  "template_variant": "before-after-explainer-slide",
+  "content_brief": "做一张前后对照解释页，展示升级前问题、升级后结果和中间关键改造点，适合产品改版说明、流程优化汇报和方案升级对照。",
+  "output_mode": "前后对照解释页",
+  "style_requirements": [
+    "before-after explainer slide",
+    "comparison-led presentation layout",
+    "clear transformation storytelling page"
+  ],
+  "variation_requirements": [
+    "前后对照区必须边界清晰",
+    "结论差异和改造逻辑一眼可读",
+    "标题区、对照区和注释区秩序稳定"
+  ],
+  "text_policy": "标题、对照标签和改造步骤标题可占位，详细解释文字后期替换。",
+  "sample_variant_axes": {
+    "page_role": "explainer page",
+    "layout_zones": "split columns",
+    "headline_weight": "balanced-title",
+    "annotation_density": "balanced"
+  }
+}

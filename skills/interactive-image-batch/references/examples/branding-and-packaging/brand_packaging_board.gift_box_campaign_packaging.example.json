@@ -1,0 +1,23 @@
+{
+  "template_id": "brand-packaging-board",
+  "template_variant": "gift-box-campaign-packaging",
+  "content_brief": "做一张礼盒 campaign 包装板，展示主礼盒、开盒层级、套组内容物和活动赠礼延展，用于节日活动或联名发售包装方案展示。",
+  "output_mode": "礼盒活动包装板",
+  "style_requirements": [
+    "gift-box campaign packaging board",
+    "premium box packaging spread",
+    "brand-led retail gift presentation"
+  ],
+  "variation_requirements": [
+    "礼盒主包装和内件层级清晰",
+    "礼赠感和品牌统一性同时成立",
+    "包装材质、开盒逻辑和陈列关系可读"
+  ],
+  "text_policy": "礼盒标志、活动名和包装文案后期替换，当前只保留标志区和说明位。",
+  "sample_variant_axes": {
+    "packaging_format": "box packaging",
+    "brand_asset_scope": "packaging only",
+    "material_signal": "premium carton",
+    "shelf_presence": "minimal premium"
+  }
+}

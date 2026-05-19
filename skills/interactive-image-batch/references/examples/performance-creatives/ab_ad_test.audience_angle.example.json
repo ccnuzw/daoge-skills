@@ -1,0 +1,23 @@
+{
+  "template_id": "ab-ad-test",
+  "template_variant": "audience-angle",
+  "content_brief": "做一组广告人群角度测试图，比较“通勤人群”“居家人群”“健身后恢复人群”“轻旅行人群”四种使用场景表达，验证哪种角度更容易触发点击和兴趣。",
+  "output_mode": "人群角度投放测试图",
+  "style_requirements": [
+    "audience-angle paid social creative",
+    "controlled lifestyle ad framing",
+    "conversion-safe headline layout"
+  ],
+  "variation_requirements": [
+    "每张图只变化人群和使用情境角度",
+    "主体质感、留白区和广告结构保持稳定",
+    "每条表达都必须看起来像可投放广告而不是生活方式大片"
+  ],
+  "text_policy": "标题、标签和 CTA 文案后期替换，当前只保留清晰投放结构和安全留白。",
+  "sample_variant_axes": {
+    "ad_test_hypothesis": "test which audience framing generates stronger click intent",
+    "controlled_variables": "same product same visual quality same composition baseline",
+    "value_proposition": "comfort-first message",
+    "cta_zone": "bottom-safe"
+  }
+}

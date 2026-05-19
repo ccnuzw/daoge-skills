@@ -1,0 +1,88 @@
+{
+  "board_id": "oral-storyboard-host-led-board-01",
+  "board_title": "主持人主导口播分镜整板",
+  "board_theme": "同一主理人、人物镜头更强、信息结构依旧完整",
+  "brand_panel": {
+    "title_lines": [
+      "主持人主导",
+      "口播分镜板",
+      "主题：信息解释围绕同一主理人展开"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "左侧信息区只做排版"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "开场人物钩子",
+      "timecode": "0-4s",
+      "scene": "主持人正面开场，演播厅背景和主题信息围绕人物组织",
+      "prompt_hints": [
+        "人物正面可信",
+        "开场必须有人物抓力"
+      ],
+      "continuity_notes": [
+        "主持人和服装全板统一"
+      ],
+      "camera_move": "medium presenter shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "近景讲解",
+      "timecode": "4-8s",
+      "scene": "主持人中近景讲解核心逻辑，信息层为辅助，不抢人物主导权",
+      "prompt_hints": [
+        "人物表情和手势更重要",
+        "信息层只做支撑"
+      ],
+      "continuity_notes": [
+        "继续保持同一人物和演播厅"
+      ],
+      "camera_move": "close explanation shot"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "半身强化说明",
+      "timecode": "8-12s",
+      "scene": "主持人半身主导画面，侧旁辅助图层强调要点，整体仍是人物表达驱动",
+      "prompt_hints": [
+        "人物依旧占主导",
+        "说明感和结构感并存"
+      ],
+      "continuity_notes": [
+        "表情、服装、光色统一"
+      ],
+      "camera_move": "medium presenter shot"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "人物收尾KV",
+      "timecode": "12-16s",
+      "scene": "主持人主形象与关键信息、品牌收尾视觉同屏，形成人物主导的整板收束",
+      "prompt_hints": [
+        "主持人比产品和信息层更重要",
+        "底部收尾必须完整"
+      ],
+      "continuity_notes": [
+        "完成同一人物同一演播厅闭环"
+      ],
+      "camera_move": "full-body wrap-up shot"
+    }
+  ]
+}

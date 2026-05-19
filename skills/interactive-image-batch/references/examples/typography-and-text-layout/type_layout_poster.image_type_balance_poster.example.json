@@ -1,0 +1,22 @@
+{
+  "template_id": "type-layout-poster",
+  "template_variant": "image-type-balance-poster",
+  "content_brief": "做一张 image-type balance 的排版海报，让人物或物体视觉与标题区保持均衡，既保留主视觉冲击力，也保留明确的标题安全区和副标题节奏。",
+  "output_mode": "排版海报",
+  "style_requirements": [
+    "image-type balance",
+    "headline-first layout",
+    "editorial surface clarity"
+  ],
+  "variation_requirements": [
+    "图像与标题均衡",
+    "副标题区清晰",
+    "安全区稳定"
+  ],
+  "text_policy": "标题、短语和 logo 区留位，正文后期替换。",
+  "sample_variant_axes": {
+    "headline_role": "stacked title",
+    "language_mode": "bilingual dominant-secondary",
+    "type_dominance": "image-type balance"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "soft-character-focus",
+  "content_brief": "做一张柔和人物气质导向的肖像主视觉，背景弱化、表情安静、光线柔和，用于品牌人物情绪海报。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "soft character focus portrait",
+    "minimal background depth",
+    "calm emotional fashion portrait"
+  ],
+  "variation_requirements": [
+    "人物气质必须比背景更重要",
+    "脸部和头发边缘不能被柔光吞掉",
+    "情绪要安静，但不能空泛"
+  ],
+  "text_policy": "不生成可读标题，只保留适合人物海报的柔和留白和安全区。",
+  "sample_variant_axes": {
+    "eye_language": "soft distance",
+    "crop_scale": "half-body",
+    "lighting": "soft fill portrait light",
+    "mood": "premium calm"
+  }
+}

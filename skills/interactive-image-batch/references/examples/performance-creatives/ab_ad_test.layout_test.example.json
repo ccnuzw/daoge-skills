@@ -1,0 +1,23 @@
+{
+  "template_id": "ab-ad-test",
+  "template_variant": "layout-test",
+  "content_brief": "做一组广告构图测试图，比较“左文右图”“上图下文”“中心主体+底部 CTA”“留白偏上标题区”四种版式，验证哪种构图更适合转化投放。",
+  "output_mode": "构图测试投放图",
+  "style_requirements": [
+    "layout-test paid social creative",
+    "cta-safe composition experiment",
+    "conversion-oriented layout comparison"
+  ],
+  "variation_requirements": [
+    "只测试构图和 CTA 留白位置，不同时大改主体和场景",
+    "每张图版式差异必须足够明显",
+    "转化导向结构要稳定"
+  ],
+  "text_policy": "标题、按钮和 CTA 文案后期替换，当前只保留不同版式的清晰安全区。",
+  "sample_variant_axes": {
+    "ad_test_hypothesis": "test which layout improves scan speed and click intent",
+    "controlled_variables": "same model same product same palette baseline",
+    "camera_language": "front-facing conversion framing",
+    "cta_zone": "split between top-safe and bottom-safe"
+  }
+}

@@ -36,6 +36,10 @@
 - `clean-fashion-editorial`: 干净时尚编辑感，强调背景纯净与服装质感。
 - `high-contrast-studio`: 高对比棚拍，强调轮廓线和结构光。
 - `soft-beauty-studio`: 柔光美感棚拍，强调皮肤和面料细腻度。
+- `mono-backdrop-editorial`: 单色背景控制更强，强调主体轮廓和棚拍秩序。
+- `motion-pose-studio`: 姿态与身体动态感更强，但仍维持棚拍控制和服装可读性。
+- `couture-minimal-studio`: 极简高定棚拍，更强调面料秩序、轮廓和高端克制感。
+- `gesture-sequence-studio`: 更强调手势和动作连续性的棚拍序列感。
 
 ## 推荐 variant_axes
 

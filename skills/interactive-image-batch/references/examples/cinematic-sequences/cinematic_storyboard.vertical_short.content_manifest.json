@@ -1,0 +1,75 @@
+{
+  "board_id": "cinematic-vertical-short-board-01",
+  "board_title": "竖版短片分镜",
+  "board_theme": "竖版短视频、同一角色连续镜头、移动端优先视觉节奏",
+  "slots": [
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "开场吸引",
+      "timecode": "0-2s",
+      "scene": "角色在城市夜路中突然停步回头，竖版视角突出人物和环境纵深",
+      "prompt_hints": [
+        "第一拍必须有短视频钩子感",
+        "构图适合手机竖屏"
+      ],
+      "continuity_notes": [
+        "角色造型和环境延续后续三拍"
+      ],
+      "camera_move": "vertical wide establishing shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "动作推进",
+      "timecode": "2-4s",
+      "scene": "角色沿着巷道向前穿行，前景和背景都为竖版节奏服务",
+      "prompt_hints": [
+        "动作必须明确",
+        "人物仍然是画面核心"
+      ],
+      "continuity_notes": [
+        "色调与服装保持一致"
+      ],
+      "camera_move": "vertical medium action frame"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "情绪近景",
+      "timecode": "4-6s",
+      "scene": "角色近景停顿，面部情绪和环境反光共同推进短片气氛",
+      "prompt_hints": [
+        "近景情绪要成立",
+        "构图依然是竖版优先"
+      ],
+      "continuity_notes": [
+        "角色身份不能漂移"
+      ],
+      "camera_move": "vertical close emotional frame"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "收尾定格",
+      "timecode": "6-8s",
+      "scene": "角色在高处回望城市夜景，形成竖版短片收尾定格主视觉",
+      "prompt_hints": [
+        "要有短视频结尾定格感",
+        "留出竖版标题安全区"
+      ],
+      "continuity_notes": [
+        "完成同一角色同一故事闭环"
+      ],
+      "camera_move": "vertical hero end frame"
+    }
+  ]
+}

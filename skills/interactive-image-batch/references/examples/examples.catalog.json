@@ -1,0 +1,1312 @@
+{
+  "examples": [
+    {
+      "id": "ui-mockup-board",
+      "name": "UI 界面视觉稿",
+      "category": "ui-mockups",
+      "template_id": "ui-mockup-board",
+      "template_variant": "landing-page-case-study",
+      "example_file": "references/examples/ui-mockups/ui_mockup_board.example.json",
+      "description": "适合 landing page、dashboard 和设备界面展示类任务。",
+      "recommended_start": true,
+      "difficulty": "easy",
+      "starter_reason": "页面型任务最直观，第一次使用时最容易看懂 preflight 和 preview。",
+      "starter_intent": "ui"
+    },
+    {
+      "id": "ui-mockup-board-social-interface-mockup",
+      "name": "UI 界面视觉稿 · 社媒界面 Mockup",
+      "category": "ui-mockups",
+      "template_id": "ui-mockup-board",
+      "template_variant": "social-interface-mockup",
+      "example_file": "references/examples/ui-mockups/ui_mockup_board.social_interface_mockup.example.json",
+      "description": "适合社媒账号页、动态流卡片和 feed 结构包装图。"
+    },
+    {
+      "id": "ui-mockup-board-live-commerce-ui",
+      "name": "UI 界面视觉稿 · 直播带货界面",
+      "category": "ui-mockups",
+      "template_id": "ui-mockup-board",
+      "template_variant": "live-commerce-ui",
+      "example_file": "references/examples/ui-mockups/ui_mockup_board.live_commerce_ui.example.json",
+      "description": "适合直播导购页、商品区+评论区+购买动作并存的转化型界面图。"
+    },
+    {
+      "id": "ui-mockup-board-chat-interface-scene",
+      "name": "UI 界面视觉稿 · 聊天界面场景图",
+      "category": "ui-mockups",
+      "template_id": "ui-mockup-board",
+      "template_variant": "chat-interface-scene",
+      "example_file": "references/examples/ui-mockups/ui_mockup_board.chat_interface_scene.example.json",
+      "description": "适合 AI 助手、客服对话页和消息线程型界面包装图。"
+    },
+    {
+      "id": "ui-mockup-board-product-card-overlay",
+      "name": "UI 界面视觉稿 · 商品卖点叠层卡片",
+      "category": "ui-mockups",
+      "template_id": "ui-mockup-board",
+      "template_variant": "product-card-overlay",
+      "example_file": "references/examples/ui-mockups/ui_mockup_board.product_card_overlay.example.json",
+      "description": "适合产品主体 + 信息卡片并存的卖点摘要卡、商品卡片页和局部转化模块。"
+    },
+    {
+      "id": "ui-mockup-board-short-video-cover-ui",
+      "name": "UI 界面视觉稿 · 短视频封面式界面图",
+      "category": "ui-mockups",
+      "template_id": "ui-mockup-board",
+      "template_variant": "short-video-cover-ui",
+      "example_file": "references/examples/ui-mockups/ui_mockup_board.short_video_cover_ui.example.json",
+      "description": "适合短视频封面包装、内容预告主图和平台组件感较强的竖版界面图。"
+    },
+    {
+      "id": "infographic-board",
+      "name": "信息图板",
+      "category": "infographics",
+      "template_id": "infographic-board",
+      "template_variant": "kpi-dashboard-infographic",
+      "example_file": "references/examples/infographics/infographic_board.example.json",
+      "description": "适合 KPI 摘要、对比图和模块化信息板。"
+    },
+    {
+      "id": "technical-diagram",
+      "name": "技术图解",
+      "category": "technical-diagrams",
+      "template_id": "technical-diagram",
+      "template_variant": "system-architecture",
+      "example_file": "references/examples/technical-diagrams/technical_diagram.example.json",
+      "description": "适合架构图、流程图和技术关系图。"
+    },
+    {
+      "id": "avatar-profile-pack",
+      "name": "头像资产包",
+      "category": "avatars-and-profile",
+      "template_id": "avatar-profile-pack",
+      "template_variant": "sticker-set",
+      "example_file": "references/examples/avatars-and-profile/avatar_profile_pack.example.json",
+      "description": "适合头像、贴纸包和系列角色 profile 资产。"
+    },
+    {
+      "id": "visual-doc-slide",
+      "name": "视觉文档页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "visual-report-page",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.example.json",
+      "description": "适合汇报页、解释页和视觉报告单页。"
+    },
+    {
+      "id": "visual-doc-slide-policy-style-slide",
+      "name": "视觉文档页 · 政策风格页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "policy-style-slide",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.policy_style_slide.example.json",
+      "description": "适合制度说明页、政策摘要页和正式秩序感较强的视觉文档页。"
+    },
+    {
+      "id": "visual-doc-slide-educational-diagram-slide",
+      "name": "视觉文档页 · 教学图解页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "educational-diagram-slide",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.educational_diagram_slide.example.json",
+      "description": "适合教学讲解、培训图示和标题+图示+注释共存的说明页。"
+    },
+    {
+      "id": "visual-doc-slide-dense-explainer-slides",
+      "name": "视觉文档页 · 高密度解释页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "dense-explainer-slides",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.dense_explainer_slides.example.json",
+      "description": "适合信息量大、模块多，但仍需保持秩序和阅读压力控制的解释页。"
+    },
+    {
+      "id": "brand-packaging-board",
+      "name": "品牌包装板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "brand-identity-board",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.example.json",
+      "description": "适合品牌系统板、包装概念板、标签设计和周边包装资产。"
+    },
+    {
+      "id": "brand-packaging-board-cosmetic-packaging",
+      "name": "品牌包装板 · 美妆包装板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "cosmetic-packaging",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.cosmetic_packaging.example.json",
+      "description": "适合瓶身、外盒、套组和陈列感并重的美妆包装视觉。"
+    },
+    {
+      "id": "brand-packaging-board-beverage-label-design",
+      "name": "品牌包装板 · 饮料标签设计",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "beverage-label-design",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.beverage_label_design.example.json",
+      "description": "适合饮料标签、瓶身正面和货架并排识别更重要的包装视觉。"
+    },
+    {
+      "id": "brand-packaging-board-mascot-brand-kit",
+      "name": "品牌包装板 · Mascot 品牌资产板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "mascot-brand-kit",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.mascot_brand_kit.example.json",
+      "description": "适合 mascot 主形象、包装应用和品牌资产统一展示。"
+    },
+    {
+      "id": "brand-packaging-board-character-merch-board",
+      "name": "品牌包装板 · 角色周边板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "character-merch-board",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.character_merch_board.example.json",
+      "description": "适合角色周边、收藏板、包装和裸件资产并列展示。"
+    },
+    {
+      "id": "brand-packaging-board-gift-box-campaign-packaging",
+      "name": "品牌包装板 · 礼盒活动包装板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "gift-box-campaign-packaging",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.gift_box_campaign_packaging.example.json",
+      "description": "适合节日礼盒、联名礼赠和 campaign 套组包装方案展示。"
+    },
+    {
+      "id": "brand-packaging-board-seasonal-limited-packaging",
+      "name": "品牌包装板 · 季节限定包装板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "seasonal-limited-packaging",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.seasonal_limited_packaging.example.json",
+      "description": "适合春夏秋冬主题、节庆限定和限定联名包装延展。"
+    },
+    {
+      "id": "academic-figure-board",
+      "name": "学术图板",
+      "category": "academic-figures",
+      "template_id": "academic-figure-board",
+      "template_variant": "graphical-abstract",
+      "example_file": "references/examples/academic-figures/academic_figure_board.example.json",
+      "description": "适合研究概览图、机制图、论文图和实验对比图。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合验证 DAOGE 在非人物、高信息密度任务里的结构化能力。",
+      "starter_intent": "academic"
+    },
+    {
+      "id": "brand-packaging-board",
+      "name": "品牌包装板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "brand-identity-board",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.example.json",
+      "description": "适合品牌识别板、包装系统板和角色周边视觉。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "商业视觉代表性强，适合快速理解模板和变体之间的关系。",
+      "starter_intent": "packaging"
+    },
+    {
+      "id": "illustrated-scene-set",
+      "name": "插画场景组",
+      "category": "scenes-and-illustrations",
+      "template_id": "illustrated-scene-set",
+      "template_variant": "healing-scene",
+      "example_file": "references/examples/scenes-and-illustrations/illustrated_scene_set.example.json",
+      "description": "适合概念场景、治愈场景和绘本式氛围插画。"
+    },
+    {
+      "id": "map-route-board",
+      "name": "地图路线板",
+      "category": "maps",
+      "template_id": "map-route-board",
+      "template_variant": "travel-route-map",
+      "example_file": "references/examples/maps/map_route_board.example.json",
+      "description": "适合城市导览图、路线图、分布图和行程地图。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "能快速体验非摄影类任务的模板约束和摘要贴脸化效果。",
+      "starter_intent": "map"
+    },
+    {
+      "id": "type-layout-poster",
+      "name": "排版海报",
+      "category": "typography-and-text-layout",
+      "template_id": "type-layout-poster",
+      "template_variant": "bilingual-layout-visual",
+      "example_file": "references/examples/typography-and-text-layout/type_layout_poster.example.json",
+      "description": "适合双语排版视觉、标题安全区海报和文字主导布局。",
+      "recommended_start": true,
+      "difficulty": "easy",
+      "starter_reason": "文字主导型任务边界清楚，适合第一次理解标题安全区与版式控制。",
+      "starter_intent": "typography"
+    },
+    {
+      "id": "asset-prop-sheet",
+      "name": "资产道具板",
+      "category": "assets-and-props",
+      "template_id": "asset-prop-sheet",
+      "template_variant": "retro-skeuomorphic-icons",
+      "example_file": "references/examples/assets-and-props/asset_prop_sheet.example.json",
+      "description": "适合拟物图标板、道具资产板和游戏截图 mockup。"
+    },
+    {
+      "id": "visual-doc-slide",
+      "name": "视觉文档页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "visual-report-page",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.example.json",
+      "description": "适合幻灯页、汇报页、解释型单页和视觉报告页。"
+    },
+    {
+      "id": "visual-doc-slide-policy-style-slide",
+      "name": "视觉文档页 · 政策风格页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "policy-style-slide",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.policy_style_slide.example.json",
+      "description": "适合正式汇报、制度说明和规则感强的政策风格页面。"
+    },
+    {
+      "id": "visual-doc-slide-educational-diagram-slide",
+      "name": "视觉文档页 · 教学图解页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "educational-diagram-slide",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.educational_diagram_slide.example.json",
+      "description": "适合课堂说明、培训讲解和图示注释并重的教学型页面。"
+    },
+    {
+      "id": "visual-doc-slide-dense-explainer-slides",
+      "name": "视觉文档页 · 高密度解释页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "dense-explainer-slides",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.dense_explainer_slides.example.json",
+      "description": "适合多模块解释、结论区明显且阅读压力受控的高密度说明页。"
+    },
+    {
+      "id": "visual-doc-slide-data-summary-slide",
+      "name": "视觉文档页 · 数据摘要页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "data-summary-slide",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.data_summary_slide.example.json",
+      "description": "适合季度汇报、经营复盘和先结论后支撑的摘要型视觉文档页。"
+    },
+    {
+      "id": "visual-doc-slide-before-after-explainer-slide",
+      "name": "视觉文档页 · 前后对照解释页",
+      "category": "slides-and-visual-docs",
+      "template_id": "visual-doc-slide",
+      "template_variant": "before-after-explainer-slide",
+      "example_file": "references/examples/slides-and-visual-docs/visual_doc_slide.before_after_explainer_slide.example.json",
+      "description": "适合改造前后、升级前后和流程优化前后的对照解释页。"
+    },
+    {
+      "id": "ecommerce-clean",
+      "name": "电商主图",
+      "category": "product-visuals",
+      "template_id": "ecommerce-clean",
+      "template_variant": "white-clean-hero",
+      "example_file": "references/examples/product-visuals/ecommerce_clean.example.json",
+      "description": "适合商品主图、纯净电商图和商品可读性优先的商业展示。",
+      "recommended_start": true,
+      "difficulty": "easy",
+      "starter_reason": "电商主图是高频刚需，最适合第一次体验商品可读性优先的商业任务。",
+      "starter_intent": "ecommerce"
+    },
+    {
+      "id": "ecommerce-clean-soft-scene-commerce",
+      "name": "电商主图 · 轻场景电商",
+      "category": "product-visuals",
+      "template_id": "ecommerce-clean",
+      "template_variant": "soft-scene-commerce",
+      "example_file": "references/examples/product-visuals/ecommerce_clean.soft_scene_commerce.example.json",
+      "description": "适合带少量环境提示、但仍保持商品主导和转化导向的轻场景电商图。"
+    },
+    {
+      "id": "ecommerce-clean-material-focus-commerce",
+      "name": "电商主图 · 材质细节主导",
+      "category": "product-visuals",
+      "template_id": "ecommerce-clean",
+      "template_variant": "material-focus-commerce",
+      "example_file": "references/examples/product-visuals/ecommerce_clean.material_focus_commerce.example.json",
+      "description": "适合强调面料、做工和结构细节的商品电商图。"
+    },
+    {
+      "id": "ecommerce-clean-flatlay-commerce",
+      "name": "电商主图 · 平铺电商图",
+      "category": "product-visuals",
+      "template_id": "ecommerce-clean",
+      "template_variant": "flatlay-commerce",
+      "example_file": "references/examples/product-visuals/ecommerce_clean.flatlay_commerce.example.json",
+      "description": "适合顶视角平铺、结构轮廓清晰和类目页常见的商品电商主图。"
+    },
+    {
+      "id": "ecommerce-clean-platform-safe-packshot",
+      "name": "电商主图 · 平台安全区 Packshot",
+      "category": "product-visuals",
+      "template_id": "ecommerce-clean",
+      "template_variant": "platform-safe-packshot",
+      "example_file": "references/examples/product-visuals/ecommerce_clean.platform_safe_packshot.example.json",
+      "description": "适合平台主图、留白安全区稳定和 click-safe 构图要求明确的商品主图。"
+    },
+    {
+      "id": "detail-page-set",
+      "name": "详情页组图",
+      "category": "product-visuals",
+      "template_id": "detail-page-set",
+      "template_variant": "benefit-breakdown",
+      "example_file": "references/examples/product-visuals/detail_page_set.example.json",
+      "description": "适合主图、细节图、材质图和卖点拆解组成的详情页任务。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合体验一组图各司其职的电商详情页结构，而不是单张主图。",
+      "starter_intent": "detail"
+    },
+    {
+      "id": "detail-page-set-fit-and-material",
+      "name": "详情页组图 · 版型与材质",
+      "category": "product-visuals",
+      "template_id": "detail-page-set",
+      "template_variant": "fit-and-material",
+      "example_file": "references/examples/product-visuals/detail_page_set.fit_and_material.example.json",
+      "description": "适合版型上身、走线结构和面料质感并重的详情页中段组图。"
+    },
+    {
+      "id": "detail-page-set-lifestyle-proof",
+      "name": "详情页组图 · 场景证明图",
+      "category": "product-visuals",
+      "template_id": "detail-page-set",
+      "template_variant": "lifestyle-proof",
+      "example_file": "references/examples/product-visuals/detail_page_set.lifestyle_proof.example.json",
+      "description": "适合真实使用场景、生活方式证明和产品可见性并存的详情页组图。"
+    },
+    {
+      "id": "detail-page-set-hero-plus-details",
+      "name": "详情页组图 · 主图加细节",
+      "category": "product-visuals",
+      "template_id": "detail-page-set",
+      "template_variant": "hero-plus-details",
+      "example_file": "references/examples/product-visuals/detail_page_set.hero_plus_details.example.json",
+      "description": "适合第一张做主图、后续分拆材质和功能细节的经典详情页组图。"
+    },
+    {
+      "id": "detail-page-set-comparison-proof-detail",
+      "name": "详情页组图 · 对比证明图",
+      "category": "product-visuals",
+      "template_id": "detail-page-set",
+      "template_variant": "comparison-proof-detail",
+      "example_file": "references/examples/product-visuals/detail_page_set.comparison_proof_detail.example.json",
+      "description": "适合前后差异、并列比较和优势证明模块明确的详情页组图。"
+    },
+    {
+      "id": "detail-page-set-feature-stack-page",
+      "name": "详情页组图 · 功能堆叠页",
+      "category": "product-visuals",
+      "template_id": "detail-page-set",
+      "template_variant": "feature-stack-page",
+      "example_file": "references/examples/product-visuals/detail_page_set.feature_stack_page.example.json",
+      "description": "适合一页连续拆多个卖点模块、结构说明和功能分层清晰的详情页组图。"
+    },
+    {
+      "id": "social-grid",
+      "name": "社媒九宫格",
+      "category": "social-campaigns",
+      "template_id": "social-grid",
+      "template_variant": "cover-detail-mood",
+      "example_file": "references/examples/social-campaigns/social_grid.example.json",
+      "description": "适合 feed 统一视觉、九宫格发布和封面/细节/氛围混排任务。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "能快速体现多张图统一系统和社媒裁切安全区的组织能力。",
+      "starter_intent": "social"
+    },
+    {
+      "id": "social-grid-brand-feed-system",
+      "name": "社媒九宫格 · 品牌 Feed 系统",
+      "category": "social-campaigns",
+      "template_id": "social-grid",
+      "template_variant": "brand-feed-system",
+      "example_file": "references/examples/social-campaigns/social_grid.brand_feed_system.example.json",
+      "description": "适合统一品牌色、封面节奏和模块角色清晰的主页 Feed 系统。"
+    },
+    {
+      "id": "social-grid-ugc-polished",
+      "name": "社媒九宫格 · 高级 UGC",
+      "category": "social-campaigns",
+      "template_id": "social-grid",
+      "template_variant": "ugc-polished",
+      "example_file": "references/examples/social-campaigns/social_grid.ugc_polished.example.json",
+      "description": "适合兼顾真实感和品牌统一的高级 UGC 风格社媒组图。"
+    },
+    {
+      "id": "social-grid-nine-grid-launch",
+      "name": "社媒九宫格 · 上新发布",
+      "category": "social-campaigns",
+      "template_id": "social-grid",
+      "template_variant": "nine-grid-launch",
+      "example_file": "references/examples/social-campaigns/social_grid.nine_grid_launch.example.json",
+      "description": "适合新品首发、封面节奏明确和九宫格角色分工清晰的上新组图。"
+    },
+    {
+      "id": "social-grid-countdown-campaign-grid",
+      "name": "社媒九宫格 · 倒计时活动宫格",
+      "category": "social-campaigns",
+      "template_id": "social-grid",
+      "template_variant": "countdown-campaign-grid",
+      "example_file": "references/examples/social-campaigns/social_grid.countdown_campaign_grid.example.json",
+      "description": "适合发售倒计时、大促预热和活动节点递进式发布的社媒宫格。"
+    },
+    {
+      "id": "social-grid-benefit-carousel-grid",
+      "name": "社媒九宫格 · 卖点轮播宫格",
+      "category": "social-campaigns",
+      "template_id": "social-grid",
+      "template_variant": "benefit-carousel-grid",
+      "example_file": "references/examples/social-campaigns/social_grid.benefit_carousel_grid.example.json",
+      "description": "适合封面、卖点卡、细节卡和情绪卡连续浏览的社媒轮播宫格。"
+    },
+    {
+      "id": "ab-ad-test",
+      "name": "广告 A/B 测试组",
+      "category": "performance-creatives",
+      "template_id": "ab-ad-test",
+      "template_variant": "single-variable",
+      "example_file": "references/examples/performance-creatives/ab_ad_test.example.json",
+      "description": "适合单变量广告测试、转化导向投放素材和受众表达对照任务。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "能直观看到 DAOGE 的结构化测试思维，不只是做一组好看的图。",
+      "starter_intent": "abtest"
+    },
+    {
+      "id": "ab-ad-test-benefit-stack",
+      "name": "广告 A/B 测试组 · 利益点测试",
+      "category": "performance-creatives",
+      "template_id": "ab-ad-test",
+      "template_variant": "benefit-stack",
+      "example_file": "references/examples/performance-creatives/ab_ad_test.benefit_stack.example.json",
+      "description": "适合多利益点表达的投放对照，验证哪种卖点更适合转化。"
+    },
+    {
+      "id": "ab-ad-test-audience-angle",
+      "name": "广告 A/B 测试组 · 人群角度测试",
+      "category": "performance-creatives",
+      "template_id": "ab-ad-test",
+      "template_variant": "audience-angle",
+      "example_file": "references/examples/performance-creatives/ab_ad_test.audience_angle.example.json",
+      "description": "适合比较不同使用人群和场景角度，验证哪类表达更容易触发点击与兴趣。"
+    },
+    {
+      "id": "ab-ad-test-layout-test",
+      "name": "广告 A/B 测试组 · 构图测试",
+      "category": "performance-creatives",
+      "template_id": "ab-ad-test",
+      "template_variant": "layout-test",
+      "example_file": "references/examples/performance-creatives/ab_ad_test.layout_test.example.json",
+      "description": "适合比较标题区、CTA 留白和主体摆位等版式差异，验证哪种构图更利于转化。"
+    },
+    {
+      "id": "ab-ad-test-hook-contrast-test",
+      "name": "广告 A/B 测试组 · 首屏钩子测试",
+      "category": "performance-creatives",
+      "template_id": "ab-ad-test",
+      "template_variant": "hook-contrast-test",
+      "example_file": "references/examples/performance-creatives/ab_ad_test.hook_contrast_test.example.json",
+      "description": "适合比较问题式、结果先行式和直接结论式首屏钩子，验证哪种更容易停留和点击。"
+    },
+    {
+      "id": "ab-ad-test-cta-emphasis-test",
+      "name": "广告 A/B 测试组 · CTA 强调测试",
+      "category": "performance-creatives",
+      "template_id": "ab-ad-test",
+      "template_variant": "cta-emphasis-test",
+      "example_file": "references/examples/performance-creatives/ab_ad_test.cta_emphasis_test.example.json",
+      "description": "适合比较 CTA 强弱、按钮存在感和主体让位结构，验证哪种更利于行动转化。"
+    },
+    {
+      "id": "image-edit",
+      "name": "图像编辑",
+      "category": "editing-workflows",
+      "template_id": "image-edit",
+      "template_variant": "background-replacement",
+      "example_file": "references/examples/editing-workflows/image_edit.example.json",
+      "description": "适合保留主体、替换背景、局部修正和已有图像继续加工的任务。"
+    },
+    {
+      "id": "image-edit-localized-fix",
+      "name": "图像编辑 · 局部修正",
+      "category": "editing-workflows",
+      "template_id": "image-edit",
+      "template_variant": "localized-fix",
+      "example_file": "references/examples/editing-workflows/image_edit.localized_fix.example.json",
+      "description": "适合只修局部细节、瑕疵、边缘或特定小范围元素，同时保持主体和整体画面一致。"
+    },
+    {
+      "id": "image-edit-style-alignment-edit",
+      "name": "图像编辑 · 风格对齐",
+      "category": "editing-workflows",
+      "template_id": "image-edit",
+      "template_variant": "style-alignment-edit",
+      "example_file": "references/examples/editing-workflows/image_edit.style_alignment_edit.example.json",
+      "description": "适合在保留主体基础上，把局部或整体画面统一到新的品牌、材质或视觉风格。"
+    },
+    {
+      "id": "image-edit-material-replacement-edit",
+      "name": "图像编辑 · 材质替换",
+      "category": "editing-workflows",
+      "template_id": "image-edit",
+      "template_variant": "material-replacement-edit",
+      "example_file": "references/examples/editing-workflows/image_edit.material_replacement_edit.example.json",
+      "description": "适合保留产品或主体结构，只替换表面材质、纹理和反射表现。"
+    },
+    {
+      "id": "image-edit-lighting-consistency-fix",
+      "name": "图像编辑 · 光线统一修正",
+      "category": "editing-workflows",
+      "template_id": "image-edit",
+      "template_variant": "lighting-consistency-fix",
+      "example_file": "references/examples/editing-workflows/image_edit.lighting_consistency_fix.example.json",
+      "description": "适合修正局部补光、阴影跳变和前后景亮度不一致的问题。"
+    },
+    {
+      "id": "campaign-poster",
+      "name": "品牌海报",
+      "category": "poster-and-campaigns",
+      "template_id": "campaign-poster",
+      "template_variant": "co-brand-kv",
+      "example_file": "references/examples/poster-and-campaigns/campaign_poster.example.json",
+      "description": "适合联名主视觉、品牌海报、主 KV 和人物产品同屏的广告任务。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "最适合补齐品牌主视觉这一类典型商业单张任务，能快速看出海报层级和留白控制。",
+      "starter_intent": "poster"
+    },
+    {
+      "id": "campaign-poster-product-hero",
+      "name": "品牌海报 · 产品主视觉",
+      "category": "poster-and-campaigns",
+      "template_id": "campaign-poster",
+      "template_variant": "product-hero",
+      "example_file": "references/examples/poster-and-campaigns/campaign_poster.product_hero.example.json",
+      "description": "适合突出商品轮廓、材质和卖点的单张产品主视觉海报。"
+    },
+    {
+      "id": "campaign-poster-people-hero",
+      "name": "品牌海报 · 人物主视觉",
+      "category": "poster-and-campaigns",
+      "template_id": "campaign-poster",
+      "template_variant": "people-hero",
+      "example_file": "references/examples/poster-and-campaigns/campaign_poster.people_hero.example.json",
+      "description": "适合人物主导、眼神和姿态承担品牌情绪核心的单张海报。"
+    },
+    {
+      "id": "campaign-poster-campaign-extension",
+      "name": "品牌海报 · Campaign 延展",
+      "category": "poster-and-campaigns",
+      "template_id": "campaign-poster",
+      "template_variant": "campaign-extension",
+      "example_file": "references/examples/poster-and-campaigns/campaign_poster.campaign_extension.example.json",
+      "description": "适合同一主视觉系统下的多场景扩展海报、社媒封面和系列推广图。"
+    },
+    {
+      "id": "campaign-poster-headline-safe-kv",
+      "name": "品牌海报 · 强标题区主视觉",
+      "category": "poster-and-campaigns",
+      "template_id": "campaign-poster",
+      "template_variant": "headline-safe-kv",
+      "example_file": "references/examples/poster-and-campaigns/campaign_poster.headline_safe_kv.example.json",
+      "description": "适合需要大标题挂载区、强广告留白和稳定主视觉层级的品牌海报。"
+    },
+    {
+      "id": "campaign-poster-people-product-dual-hero",
+      "name": "品牌海报 · 人物产品双主角",
+      "category": "poster-and-campaigns",
+      "template_id": "campaign-poster",
+      "template_variant": "people-product-dual-hero",
+      "example_file": "references/examples/poster-and-campaigns/campaign_poster.people_product_dual_hero.example.json",
+      "description": "适合人物与产品同屏且双主角层级都清晰成立的品牌广告主视觉。"
+    },
+    {
+      "id": "lookbook",
+      "name": "系列 Lookbook",
+      "category": "grids-and-collages",
+      "template_id": "lookbook",
+      "template_variant": "series-unified",
+      "example_file": "references/examples/grids-and-collages/lookbook.example.json",
+      "description": "适合系列服装、同一模特多张组图和统一视觉系统下的展示任务。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "能直观看到 DAOGE 对多张组图连续性、款式差异和系列节奏的控制能力。",
+      "starter_intent": "lookbook"
+    },
+    {
+      "id": "lookbook-chapter-lookbook",
+      "name": "系列 Lookbook · 章节式切换",
+      "category": "grids-and-collages",
+      "template_id": "lookbook",
+      "template_variant": "chapter-lookbook",
+      "example_file": "references/examples/grids-and-collages/lookbook.chapter_lookbook.example.json",
+      "description": "适合按场景章节切换、但仍保持系列连续性的分段式 lookbook。"
+    },
+    {
+      "id": "lookbook-cover-and-range",
+      "name": "系列 Lookbook · 封面加稳定展示",
+      "category": "grids-and-collages",
+      "template_id": "lookbook",
+      "template_variant": "cover-and-range",
+      "example_file": "references/examples/grids-and-collages/lookbook.cover_and_range.example.json",
+      "description": "适合首图承担封面角色、后续多张稳定展示系列款式的发布型 lookbook。"
+    },
+    {
+      "id": "lookbook-chapter-scene-progressive",
+      "name": "系列 Lookbook · 章节场景递进",
+      "category": "grids-and-collages",
+      "template_id": "lookbook",
+      "template_variant": "chapter-scene-progressive",
+      "example_file": "references/examples/grids-and-collages/lookbook.chapter_scene_progressive.example.json",
+      "description": "适合章节推进感更强、场景递进更明显，但仍保持系列和模特逻辑稳定的 lookbook。"
+    },
+    {
+      "id": "lookbook-multi-outfit-commercial",
+      "name": "系列 Lookbook · 多款式商业展示",
+      "category": "grids-and-collages",
+      "template_id": "lookbook",
+      "template_variant": "multi-outfit-commercial",
+      "example_file": "references/examples/grids-and-collages/lookbook.multi_outfit_commercial.example.json",
+      "description": "适合多款式轮换更清晰、商业展示语言更稳定的系列 lookbook。"
+    },
+    {
+      "id": "lookbook-editorial-pairing-lookbook",
+      "name": "系列 Lookbook · Editorial 配对组图",
+      "category": "grids-and-collages",
+      "template_id": "lookbook",
+      "template_variant": "editorial-pairing-lookbook",
+      "example_file": "references/examples/grids-and-collages/lookbook.editorial_pairing_lookbook.example.json",
+      "description": "适合同一系列中强调成对关系、节奏互文和 editorial 配对的组图任务。"
+    },
+    {
+      "id": "lookbook-detail-mix",
+      "name": "系列 Lookbook · 整身细节混排",
+      "category": "grids-and-collages",
+      "template_id": "lookbook",
+      "template_variant": "lookbook-detail-mix",
+      "example_file": "references/examples/grids-and-collages/lookbook.detail_mix.example.json",
+      "description": "适合整身图和局部细节图混排、同时强调搭配完成度和材质可读性的系列 lookbook。"
+    },
+    {
+      "id": "portrait-kv",
+      "name": "肖像主视觉",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "brand-portrait-kv",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.example.json",
+      "description": "适合近景品牌人像、头肩海报和眼神气质主导的商业人物视觉。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "能快速体现人物近景主视觉里眼神、构图和留白的控制能力。",
+      "starter_intent": "portrait"
+    },
+    {
+      "id": "portrait-kv-editorial-closeup",
+      "name": "肖像主视觉 · 近景编辑感",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "editorial-closeup",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.editorial_closeup.example.json",
+      "description": "适合杂志封面、近景脸部主视觉和头肩裁切更强的编辑感人物图。"
+    },
+    {
+      "id": "portrait-kv-soft-character-focus",
+      "name": "肖像主视觉 · 柔和人物气质",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "soft-character-focus",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.soft_character_focus.example.json",
+      "description": "适合背景弱化、情绪安静和人物气质主导的柔和品牌肖像主视觉。"
+    },
+    {
+      "id": "portrait-kv-dramatic-gaze-kv",
+      "name": "肖像主视觉 · 强眼神主视觉",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "dramatic-gaze-kv",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.dramatic_gaze_kv.example.json",
+      "description": "适合强调眼神压迫感、脸部层次和人物封面张力的近景主视觉。"
+    },
+    {
+      "id": "portrait-kv-beauty-crop-kv",
+      "name": "肖像主视觉 · 美容裁切主视觉",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "beauty-crop-kv",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.beauty_crop_kv.example.json",
+      "description": "适合强调脸部细节、发丝边缘和精确近景裁切的美妆人物主视觉。"
+    },
+    {
+      "id": "portrait-kv-emotion-contrast-kv",
+      "name": "肖像主视觉 · 情绪对照主视觉",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "emotion-contrast-kv",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.emotion_contrast_kv.example.json",
+      "description": "适合强调克制情绪张力、人物表达变化和近景封面感的人物主视觉。"
+    },
+    {
+      "id": "portrait-kv-product-linked-portrait-kv",
+      "name": "肖像主视觉 · 人物产品联动",
+      "category": "portraits-and-characters",
+      "template_id": "portrait-kv",
+      "template_variant": "product-linked-portrait-kv",
+      "example_file": "references/examples/portraits-and-characters/portrait_kv.product_linked_portrait_kv.example.json",
+      "description": "适合人物仍为主视觉中心，同时产品作为品牌锚点清晰可读的品牌人物海报。"
+    },
+    {
+      "id": "studio-editorial",
+      "name": "棚拍大片",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "clean-fashion-editorial",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.example.json",
+      "description": "适合摄影棚、无缝背景、材质清晰和灯光结构明确的编辑感人物任务。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合第一次体验棚拍编辑感任务，灯光、材质和姿态关系都比较直观。",
+      "starter_intent": "studio"
+    },
+    {
+      "id": "studio-editorial-high-contrast-studio",
+      "name": "棚拍大片 · 高对比棚拍",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "high-contrast-studio",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.high_contrast_studio.example.json",
+      "description": "适合强调结构光、轮廓线和更强明暗反差的高冲击棚拍人物图。"
+    },
+    {
+      "id": "studio-editorial-soft-beauty-studio",
+      "name": "棚拍大片 · 柔光美感棚拍",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "soft-beauty-studio",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.soft_beauty_studio.example.json",
+      "description": "适合柔光皮肤质感、发丝细节和美妆人物大片。"
+    },
+    {
+      "id": "studio-editorial-mono-backdrop-editorial",
+      "name": "棚拍大片 · 单色背景棚拍",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "mono-backdrop-editorial",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.mono_backdrop_editorial.example.json",
+      "description": "适合强调单色无缝背景、主体分离和棚拍秩序的时尚人物任务。"
+    },
+    {
+      "id": "studio-editorial-motion-pose-studio",
+      "name": "棚拍大片 · 动态姿态棚拍",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "motion-pose-studio",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.motion_pose_studio.example.json",
+      "description": "适合强调动作延展感、姿态动态和可控棚拍灯光的人物大片。"
+    },
+    {
+      "id": "studio-editorial-couture-minimal-studio",
+      "name": "棚拍大片 · 极简高定棚拍",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "couture-minimal-studio",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.couture_minimal_studio.example.json",
+      "description": "适合强调极简高定感、面料精度和轮廓秩序的高端棚拍人物大片。"
+    },
+    {
+      "id": "studio-editorial-gesture-sequence-studio",
+      "name": "棚拍大片 · 手势序列棚拍",
+      "category": "portraits-and-characters",
+      "template_id": "studio-editorial",
+      "template_variant": "gesture-sequence-studio",
+      "example_file": "references/examples/portraits-and-characters/studio_editorial.gesture_sequence_studio.example.json",
+      "description": "适合强调动作连续性、手势表达和受控棚拍节奏的人物大片。"
+    },
+    {
+      "id": "cinematic-storyboard",
+      "name": "电影分镜组",
+      "category": "cinematic-sequences",
+      "template_id": "cinematic-storyboard",
+      "template_variant": "four-beat-ad",
+      "example_file": "references/examples/cinematic-sequences/cinematic_storyboard.example.json",
+      "description": "适合连续镜头广告、短片分镜和剧情推进组图。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合作为连续叙事型 storyboard 的起步入口。",
+      "starter_intent": "cinematic"
+    },
+    {
+      "id": "oral-storyboard-board",
+      "name": "口播分镜整板",
+      "category": "cinematic-sequences",
+      "template_id": "oral-storyboard-board",
+      "template_variant": "horizontal-board",
+      "example_file": "references/examples/cinematic-sequences/oral_storyboard_board.example.json",
+      "description": "适合同一位主理人连续出镜、信息区+分镜区+收尾KV的整板提案。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合作为口播整板和导演式提案板的 onboarding 入口。",
+      "starter_intent": "oralboard"
+    },
+    {
+      "id": "finance-oral-storyboard-board",
+      "name": "财经口播分镜整板",
+      "category": "cinematic-sequences",
+      "template_id": "oral-storyboard-board",
+      "template_variant": "industry-led",
+      "example_file": "references/examples/finance-storyboard/finance_oral_storyboard_board.example.json",
+      "description": "适合财经、产业链、半导体、算力等解释型口播整板和导演式提案板。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合作为财经赛道口播分镜板的行业 starter，能直接体验信息图层和主持人连续性的结合。",
+      "starter_intent": "financeboard"
+    },
+    {
+      "id": "oral-storyboard-board-host-led",
+      "name": "口播分镜整板 · 主持人主导",
+      "category": "cinematic-sequences",
+      "template_id": "oral-storyboard-board",
+      "template_variant": "host-led",
+      "example_file": "references/examples/cinematic-sequences/oral_storyboard_board.host_led.example.json",
+      "description": "适合人物镜头占比更高、信息层作为辅助的主持人主导整板口播提案。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合作为人物主导型口播分镜板入口，能更直观看到主持人连续镜头的组织方式。",
+      "starter_intent": "hostboard"
+    },
+    {
+      "id": "oral-storyboard-board-product-led",
+      "name": "口播分镜整板 · 产品解说主导",
+      "category": "cinematic-sequences",
+      "template_id": "oral-storyboard-board",
+      "template_variant": "product-led",
+      "example_file": "references/examples/cinematic-sequences/oral_storyboard_board.product_led.example.json",
+      "description": "适合产品卖点拆解、产品层和主持人讲解并重的整板口播提案。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合作为产品解说型口播分镜板入口，能直接体验产品卖点和主持人口播的整板组织。",
+      "starter_intent": "productboard"
+    },
+    {
+      "id": "oral-storyboard-board-educational-explainer",
+      "name": "口播分镜整板 · 教育科普主导",
+      "category": "cinematic-sequences",
+      "template_id": "oral-storyboard-board",
+      "template_variant": "educational-explainer",
+      "example_file": "references/examples/cinematic-sequences/oral_storyboard_board.educational_explainer.example.json",
+      "description": "适合知识点拆解、教学图解层和连续解释更强的教育科普整板口播提案。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合作为教育科普型口播分镜板入口，能直接体验图解层和讲解人连续镜头的结合。",
+      "starter_intent": "eduboard"
+    },
+    {
+      "id": "oral-storyboard-board-expert-led",
+      "name": "口播分镜整板 · 专家解说主导",
+      "category": "cinematic-sequences",
+      "template_id": "oral-storyboard-board",
+      "template_variant": "expert-led",
+      "example_file": "references/examples/cinematic-sequences/oral_storyboard_board.expert_led.example.json",
+      "description": "适合专家、顾问、分析师等可信讲述者主导，观点拆解和证据支撑更强的整板口播提案。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合作为专家解说型口播分镜板入口，能直接体验观点拆解、证据层和专家镜头连续性的结合。",
+      "starter_intent": "expertboard"
+    },
+    {
+      "id": "oral-storyboard-board-testimonial-led",
+      "name": "口播分镜整板 · 案例见证主导",
+      "category": "cinematic-sequences",
+      "template_id": "oral-storyboard-board",
+      "template_variant": "testimonial-led",
+      "example_file": "references/examples/cinematic-sequences/oral_storyboard_board.testimonial_led.example.json",
+      "description": "适合用户见证、案例复盘、前后变化证明更强的案例型整板口播提案。",
+      "recommended_start": true,
+      "difficulty": "medium",
+      "starter_reason": "适合作为案例见证型口播分镜板入口，能直接体验转变过程、结果证明和讲述者连续镜头的结合。",
+      "starter_intent": "testimonialboard"
+    },
+    {
+      "id": "academic-figure-board-mechanism-diagram",
+      "name": "学术图板 · 机制图",
+      "category": "academic-figures",
+      "template_id": "academic-figure-board",
+      "template_variant": "mechanism-diagram",
+      "example_file": "references/examples/academic-figures/academic_figure_board.mechanism_diagram.example.json",
+      "description": "适合细胞路径、作用机制和科学示意图。"
+    },
+    {
+      "id": "academic-figure-board-method-pipeline-overview",
+      "name": "学术图板 · 方法流程总览图",
+      "category": "academic-figures",
+      "template_id": "academic-figure-board",
+      "template_variant": "method-pipeline-overview",
+      "example_file": "references/examples/academic-figures/academic_figure_board.method_pipeline_overview.example.json",
+      "description": "适合研究方法流程、输入输出链路和核心算法步骤总览图。"
+    },
+    {
+      "id": "brand-packaging-board-cosmetic-packaging",
+      "name": "品牌包装板 · 美妆包装",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "cosmetic-packaging",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.cosmetic_packaging.example.json",
+      "description": "适合美妆包装、零售盒装和精致材质展示。"
+    },
+    {
+      "id": "brand-packaging-board-mascot-brand-kit",
+      "name": "品牌包装板 · Mascot 资产板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "mascot-brand-kit",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.mascot_brand_kit.example.json",
+      "description": "适合角色主形象、周边应用和 mascot 品牌资产系统展示。"
+    },
+    {
+      "id": "illustrated-scene-set-picture-book-scene",
+      "name": "插画场景组 · 绘本场景",
+      "category": "scenes-and-illustrations",
+      "template_id": "illustrated-scene-set",
+      "template_variant": "picture-book-scene",
+      "example_file": "references/examples/scenes-and-illustrations/illustrated_scene_set.picture_book_scene.example.json",
+      "description": "适合连续绘本场景和故事书质感插画。"
+    },
+    {
+      "id": "map-route-board-store-distribution-map",
+      "name": "地图路线板 · 门店分布图",
+      "category": "maps",
+      "template_id": "map-route-board",
+      "template_variant": "store-distribution-map",
+      "example_file": "references/examples/maps/map_route_board.store_distribution_map.example.json",
+      "description": "适合区域分布图、城市覆盖图和门店层级展示。"
+    },
+    {
+      "id": "map-route-board-itinerary-day-trip-map",
+      "name": "地图路线板 · 一日行程地图",
+      "category": "maps",
+      "template_id": "map-route-board",
+      "template_variant": "itinerary-day-trip-map",
+      "example_file": "references/examples/maps/map_route_board.itinerary_day_trip_map.example.json",
+      "description": "适合按时间顺序组织站点、停靠和路线的城市一日游导览图。"
+    },
+    {
+      "id": "type-layout-poster-title-safe-poster",
+      "name": "排版海报 · 标题安全区",
+      "category": "typography-and-text-layout",
+      "template_id": "type-layout-poster",
+      "template_variant": "title-safe-poster",
+      "example_file": "references/examples/typography-and-text-layout/type_layout_poster.title_safe_poster.example.json",
+      "description": "适合大标题主导海报和强安全区排版任务。"
+    },
+    {
+      "id": "type-layout-poster-editorial-phrase-block",
+      "name": "排版海报 · 短语块排版",
+      "category": "typography-and-text-layout",
+      "template_id": "type-layout-poster",
+      "template_variant": "editorial-phrase-block",
+      "example_file": "references/examples/typography-and-text-layout/type_layout_poster.editorial_phrase_block.example.json",
+      "description": "适合以短语块、角标词和留白节奏组织主画面的排版海报。"
+    },
+    {
+      "id": "type-layout-poster-image-type-balance-poster",
+      "name": "排版海报 · 图文均衡",
+      "category": "typography-and-text-layout",
+      "template_id": "type-layout-poster",
+      "template_variant": "image-type-balance-poster",
+      "example_file": "references/examples/typography-and-text-layout/type_layout_poster.image_type_balance_poster.example.json",
+      "description": "适合图像主视觉和标题区需要同时成立的图文均衡排版海报。"
+    },
+    {
+      "id": "infographic-board-step-by-step-infographic",
+      "name": "信息图板 · 步骤拆解图",
+      "category": "infographics",
+      "template_id": "infographic-board",
+      "template_variant": "step-by-step-infographic",
+      "example_file": "references/examples/infographics/infographic_board.step_by_step_infographic.example.json",
+      "description": "适合流程拆解、教学步骤图和操作路径说明。"
+    },
+    {
+      "id": "infographic-board-comparison-infographic",
+      "name": "信息图板 · 对比信息图",
+      "category": "infographics",
+      "template_id": "infographic-board",
+      "template_variant": "comparison-infographic",
+      "example_file": "references/examples/infographics/infographic_board.comparison_infographic.example.json",
+      "description": "适合左右对照、多列比较和结论区明确的对比型说明图。"
+    },
+    {
+      "id": "infographic-board-bento-grid-infographic",
+      "name": "信息图板 · Bento 信息板",
+      "category": "infographics",
+      "template_id": "infographic-board",
+      "template_variant": "bento-grid-infographic",
+      "example_file": "references/examples/infographics/infographic_board.bento_grid_infographic.example.json",
+      "description": "适合多模块卡片、信息密度高且分块平衡的信息板。"
+    },
+    {
+      "id": "infographic-board-hand-drawn-infographic",
+      "name": "信息图板 · 手绘信息图",
+      "category": "infographics",
+      "template_id": "infographic-board",
+      "template_variant": "hand-drawn-infographic",
+      "example_file": "references/examples/infographics/infographic_board.hand_drawn_infographic.example.json",
+      "description": "适合教学感更强、结构清楚但风格轻松的手绘说明型信息图。"
+    },
+    {
+      "id": "infographic-board-legend-heavy-infographic",
+      "name": "信息图板 · 图例重信息图",
+      "category": "infographics",
+      "template_id": "infographic-board",
+      "template_variant": "legend-heavy-infographic",
+      "example_file": "references/examples/infographics/infographic_board.legend_heavy_infographic.example.json",
+      "description": "适合图例较多、解释层较重和标签语义需要明确拆开的信息图。"
+    },
+    {
+      "id": "asset-prop-sheet-game-screenshot-mockup",
+      "name": "资产道具板 · 游戏截图 Mockup",
+      "category": "assets-and-props",
+      "template_id": "asset-prop-sheet",
+      "template_variant": "game-screenshot-mockup",
+      "example_file": "references/examples/assets-and-props/asset_prop_sheet.game_screenshot_mockup.example.json",
+      "description": "适合游戏界面内嵌资产展示和稀有度 mockup。"
+    },
+    {
+      "id": "asset-prop-sheet-prop-lineup-board",
+      "name": "资产道具板 · 道具成套板",
+      "category": "assets-and-props",
+      "template_id": "asset-prop-sheet",
+      "template_variant": "prop-lineup-board",
+      "example_file": "references/examples/assets-and-props/asset_prop_sheet.prop_lineup_board.example.json",
+      "description": "适合一组工具、徽章、票券或装备道具的系列排布展示。"
+    },
+    {
+      "id": "asset-prop-sheet-collectible-item-sheet",
+      "name": "资产道具板 · 收藏物件板",
+      "category": "assets-and-props",
+      "template_id": "asset-prop-sheet",
+      "template_variant": "collectible-item-sheet",
+      "example_file": "references/examples/assets-and-props/asset_prop_sheet.collectible_item_sheet.example.json",
+      "description": "适合徽章、限量周边和收藏配件等强调材质等级感的资产板。"
+    },
+    {
+      "id": "academic-figure-board-multi-condition-comparison",
+      "name": "学术图板 · 多条件对比图",
+      "category": "academic-figures",
+      "template_id": "academic-figure-board",
+      "template_variant": "multi-condition-comparison",
+      "example_file": "references/examples/academic-figures/academic_figure_board.multi_condition_comparison.example.json",
+      "description": "适合多组实验对比、条件差异展示和论文对照图。"
+    },
+    {
+      "id": "academic-figure-board-research-overview-poster",
+      "name": "学术图板 · 研究概览海报图",
+      "category": "academic-figures",
+      "template_id": "academic-figure-board",
+      "template_variant": "research-overview-poster",
+      "example_file": "references/examples/academic-figures/academic_figure_board.research_overview_poster.example.json",
+      "description": "适合会议研究海报、研究问题-方法-结果一体化概览图。"
+    },
+    {
+      "id": "technical-diagram-sequence-diagram",
+      "name": "技术图解 · 时序图",
+      "category": "technical-diagrams",
+      "template_id": "technical-diagram",
+      "template_variant": "sequence-diagram",
+      "example_file": "references/examples/technical-diagrams/technical_diagram.sequence_diagram.example.json",
+      "description": "适合请求链路、服务调用顺序和系统交互时序展示。"
+    },
+    {
+      "id": "technical-diagram-flowchart-decision",
+      "name": "技术图解 · 流程决策图",
+      "category": "technical-diagrams",
+      "template_id": "technical-diagram",
+      "template_variant": "flowchart-decision",
+      "example_file": "references/examples/technical-diagrams/technical_diagram.flowchart_decision.example.json",
+      "description": "适合审核流、条件分支和判断节点明确的流程决策图。"
+    },
+    {
+      "id": "technical-diagram-network-topology",
+      "name": "技术图解 · 网络拓扑图",
+      "category": "technical-diagrams",
+      "template_id": "technical-diagram",
+      "template_variant": "network-topology",
+      "example_file": "references/examples/technical-diagrams/technical_diagram.network_topology.example.json",
+      "description": "适合网络区域、节点连接和安全域关系明确的技术拓扑展示。"
+    },
+    {
+      "id": "technical-diagram-state-machine",
+      "name": "技术图解 · 状态机图",
+      "category": "technical-diagrams",
+      "template_id": "technical-diagram",
+      "template_variant": "state-machine",
+      "example_file": "references/examples/technical-diagrams/technical_diagram.state_machine.example.json",
+      "description": "适合状态迁移、触发条件和起止态明确的状态机图。"
+    },
+    {
+      "id": "technical-diagram-er-diagram",
+      "name": "技术图解 · ER 图",
+      "category": "technical-diagrams",
+      "template_id": "technical-diagram",
+      "template_variant": "er-diagram",
+      "example_file": "references/examples/technical-diagrams/technical_diagram.er_diagram.example.json",
+      "description": "适合实体关系、属性组和关系连线清晰的数据库结构图。"
+    },
+    {
+      "id": "technical-diagram-mind-map-tech",
+      "name": "技术图解 · 技术脑图",
+      "category": "technical-diagrams",
+      "template_id": "technical-diagram",
+      "template_variant": "mind-map-tech",
+      "example_file": "references/examples/technical-diagrams/technical_diagram.mind_map_tech.example.json",
+      "description": "适合中心主题明确、分支扩散清楚的技术脑图与概念图。"
+    },
+    {
+      "id": "brand-packaging-board-beverage-label-design",
+      "name": "品牌包装板 · 饮品标签设计",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "beverage-label-design",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.beverage_label_design.example.json",
+      "description": "适合瓶身标签、饮品包装和零售标签识别任务。"
+    },
+    {
+      "id": "brand-packaging-board-character-merch-board",
+      "name": "品牌包装板 · 角色周边板",
+      "category": "branding-and-packaging",
+      "template_id": "brand-packaging-board",
+      "template_variant": "character-merch-board",
+      "example_file": "references/examples/branding-and-packaging/brand_packaging_board.character_merch_board.example.json",
+      "description": "适合角色周边、收藏向 merch 资产和周边包装组合展示。"
+    },
+    {
+      "id": "map-route-board-illustrated-city-map",
+      "name": "地图路线板 · 插画城市地图",
+      "category": "maps",
+      "template_id": "map-route-board",
+      "template_variant": "illustrated-city-map",
+      "example_file": "references/examples/maps/map_route_board.illustrated_city_map.example.json",
+      "description": "适合城市地标导览、旅游城市图和体验型城市地图。"
+    },
+    {
+      "id": "map-route-board-food-map",
+      "name": "地图路线板 · 美食地图",
+      "category": "maps",
+      "template_id": "map-route-board",
+      "template_variant": "food-map",
+      "example_file": "references/examples/maps/map_route_board.food_map.example.json",
+      "description": "适合城市美食热点、探店清单和主题化餐饮导览图。"
+    },
+    {
+      "id": "avatar-profile-pack-style-transfer-selfie",
+      "name": "头像资产包 · 自拍风格迁移",
+      "category": "avatars-and-profile",
+      "template_id": "avatar-profile-pack",
+      "template_variant": "style-transfer-selfie",
+      "example_file": "references/examples/avatars-and-profile/avatar_profile_pack.style_transfer_selfie.example.json",
+      "description": "适合同一人物自拍头像的统一风格迁移和创作者资料页头像。"
+    },
+    {
+      "id": "avatar-profile-pack-character-grid-portrait",
+      "name": "头像资产包 · 角色头像栅格图",
+      "category": "avatars-and-profile",
+      "template_id": "avatar-profile-pack",
+      "template_variant": "character-grid-portrait",
+      "example_file": "references/examples/avatars-and-profile/avatar_profile_pack.character_grid_portrait.example.json",
+      "description": "适合同一角色多状态头像栅格、创作者角色包和系列 profile 资产。"
+    },
+    {
+      "id": "avatar-profile-pack-cultural-portrait-series",
+      "name": "头像资产包 · 文化主题头像系列",
+      "category": "avatars-and-profile",
+      "template_id": "avatar-profile-pack",
+      "template_variant": "cultural-portrait-series",
+      "example_file": "references/examples/avatars-and-profile/avatar_profile_pack.cultural_portrait_series.example.json",
+      "description": "适合同一人物身份下的文化主题头像扩展、专题角色头像和展览导览人物资产。"
+    },
+    {
+      "id": "avatar-profile-pack-themed-3d-icon",
+      "name": "头像资产包 · 主题 3D 头像图",
+      "category": "avatars-and-profile",
+      "template_id": "avatar-profile-pack",
+      "template_variant": "themed-3d-icon",
+      "example_file": "references/examples/avatars-and-profile/avatar_profile_pack.themed_3d_icon.example.json",
+      "description": "适合主题化创作者头像、3D icon 头像包和小尺寸优先的头像资产。"
+    },
+    {
+      "id": "illustrated-scene-set-concept-scene",
+      "name": "插画场景组 · 概念场景",
+      "category": "scenes-and-illustrations",
+      "template_id": "illustrated-scene-set",
+      "template_variant": "concept-scene",
+      "example_file": "references/examples/scenes-and-illustrations/illustrated_scene_set.concept_scene.example.json",
+      "description": "适合概念设定图、环境主导插画和世界观场景展示。"
+    },
+    {
+      "id": "illustrated-scene-set-minimalist-mood-scene",
+      "name": "插画场景组 · 极简情绪场景",
+      "category": "scenes-and-illustrations",
+      "template_id": "illustrated-scene-set",
+      "template_variant": "minimalist-mood-scene",
+      "example_file": "references/examples/scenes-and-illustrations/illustrated_scene_set.minimalist_mood_scene.example.json",
+      "description": "适合极简留白、单一叙事中心和色温主导的情绪插画场景。"
+    },
+    {
+      "id": "cinematic-storyboard-micro-film",
+      "name": "电影分镜组 · 微电影",
+      "category": "cinematic-sequences",
+      "template_id": "cinematic-storyboard",
+      "template_variant": "micro-film",
+      "example_file": "references/examples/cinematic-sequences/cinematic_storyboard.micro_film.example.json",
+      "description": "适合连续微电影镜头、短片式情绪推进和更生活化的分镜组图。"
+    },
+    {
+      "id": "cinematic-storyboard-vertical-short",
+      "name": "电影分镜组 · 竖版短片",
+      "category": "cinematic-sequences",
+      "template_id": "cinematic-storyboard",
+      "template_variant": "vertical-short",
+      "example_file": "references/examples/cinematic-sequences/cinematic_storyboard.vertical_short.example.json",
+      "description": "适合竖版短视频、移动端优先的连续分镜和短片节奏镜头。"
+    },
+    {
+      "id": "cinematic-storyboard-mood-sequence",
+      "name": "电影分镜组 · 情绪递进",
+      "category": "cinematic-sequences",
+      "template_id": "cinematic-storyboard",
+      "template_variant": "mood-sequence",
+      "example_file": "references/examples/cinematic-sequences/cinematic_storyboard.mood_sequence.example.json",
+      "description": "适合同一角色在固定空间中通过光色和表演完成情绪递进的连续分镜。"
+    },
+    {
+      "id": "cinematic-storyboard-demo-explainer-sequence",
+      "name": "电影分镜组 · 演示说明分镜",
+      "category": "cinematic-sequences",
+      "template_id": "cinematic-storyboard",
+      "template_variant": "demo-explainer-sequence",
+      "example_file": "references/examples/cinematic-sequences/cinematic_storyboard.demo_explainer_sequence.example.json",
+      "description": "适合产品演示、功能说明和解释型商业短片的连续分镜。"
+    },
+    {
+      "id": "cinematic-storyboard-product-reveal-sequence",
+      "name": "电影分镜组 · 产品揭示分镜",
+      "category": "cinematic-sequences",
+      "template_id": "cinematic-storyboard",
+      "template_variant": "product-reveal-sequence",
+      "example_file": "references/examples/cinematic-sequences/cinematic_storyboard.product_reveal_sequence.example.json",
+      "description": "适合先铺垫环境再完成产品 reveal 的商业连续镜头。"
+    }
+  ]
+}

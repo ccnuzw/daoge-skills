@@ -1,0 +1,32 @@
+{
+  "template_id": "oral-storyboard-board",
+  "template_variant": "expert-led",
+  "content_brief": "做一张专家主导的口播分镜整板，要求同一位专家或顾问连续出镜，把核心判断、证据支撑、关键解释镜头和底部结论收尾组织成一张可信的整板提案。",
+  "output_mode": "专家主导口播分镜整板",
+  "style_requirements": [
+    "same expert same professional identity",
+    "expert-led storyboard board with evidence-based explanation",
+    "left info panel right shot grid bottom conclusion kv"
+  ],
+  "variation_requirements": [
+    "专家身份和讲述气质必须统一稳定",
+    "证据层和观点层都要成立，但不能变成普通 PPT",
+    "整板必须像真实专家解说提案板"
+  ],
+  "text_policy": "中文字段以后期替换为主，只保留结论层级、证据标题区和整板结构清晰度。",
+  "sample_variant_axes": {
+    "story_beat": "logic breakdown",
+    "camera_language": "information-led composite shot",
+    "continuity_anchor": "same face same expert palette",
+    "mood": "analytical confidence"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "metadata-only",
+    "layout_manifest": "./oral_storyboard_board.expert_led.layout_manifest.json",
+    "content_manifest": "./oral_storyboard_board.expert_led.content_manifest.json",
+    "render_config": "./oral_storyboard_board.expert_led.render_config.json"
+  }
+}

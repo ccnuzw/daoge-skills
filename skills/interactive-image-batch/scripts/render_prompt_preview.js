@@ -3,6 +3,7 @@ const path = require('path');
 const { parseArgs, chunkArray } = require('./script_utils');
 const { labelField } = require('./display_labels_zh');
 const { brandHeader, quickReplyBlock, userFocusBlock } = require('./daoge_brand_zh');
+const { topLabel, resolveProfile, buildDisplayDistributions, normalizeValue } = require('./template_display_profile');
 
 function parseNumber(value, fallback) {
   const next = Number(value);
@@ -37,10 +38,6 @@ function shorten(text, max = 240) {
 
 function bullet(label, value) {
   return value ? `- ${label}: ${value}` : null;
-}
-
-function topLabel(entries, fallback = '未指定') {
-  return entries[0]?.name || fallback;
 }
 
 function formatEditMode(item) {
@@ -83,6 +80,9 @@ function main() {
     composition: topCounts(countBy(prompts, 'composition')),
     slot_role: topCounts(countBy(prompts, 'slot_role')),
   };
+  const displayProfile = resolveProfile(prompts);
+  const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
+    .map((item) => ({ ...item, counts: item.counts.slice(0, 12) }));
   const storyboardMode = prompts.some((item) => item.slot_id || item.shot_id || item.layout_region_id);
   const boardIds = Array.from(new Set(prompts.map((item) => item.board_id).filter(Boolean)));
   const referenceModes = topCounts(countBy(prompts, 'reference_mode'));
@@ -96,7 +96,7 @@ function main() {
     ...userFocusBlock([
       `数量：共 ${prompts.length} 条提示词，预览 ${previewItems.length} 条`,
       `批次：按每批 ${batchSize} 条拆分，共 ${batches.length} 批`,
-      `方向：主风格族 ${topLabel(distributions.style_family)}，主场景 ${topLabel(distributions.scene)}`,
+      `方向：主风格族 ${topLabel(distributions.style_family)}，${displayProfile.summaryFields[0]?.label || '主方向'} ${topLabel(displayDistributions[1]?.counts || [])}`,
     ]),
     '',
     `- 提示词来源: ${promptsFile}`,
@@ -118,12 +118,10 @@ function main() {
     ...distributions.style_family.map((item) => `  - ${item.name}: ${item.count}`),
     '- 强度等级:',
     ...distributions.purity_grade.map((item) => `  - ${item.name}: ${item.count}`),
-    '- 场景:',
-    ...distributions.scene.map((item) => `  - ${item.name}: ${item.count}`),
-    '- 服装:',
-    ...distributions.wardrobe.map((item) => `  - ${item.name}: ${item.count}`),
-    '- 构图:',
-    ...distributions.composition.map((item) => `  - ${item.name}: ${item.count}`),
+    ...displayDistributions.flatMap((item) => [
+      `- ${item.label}:`,
+      ...item.counts.map((entry) => `  - ${entry.name}: ${entry.count}`),
+    ]),
     ...(storyboardMode ? ['- 槽位角色:', ...distributions.slot_role.map((item) => `  - ${item.name}: ${item.count}`)] : []),
     ...(storyboardMode ? ['- 参考模式:', ...referenceModes.map((item) => `  - ${item.name}: ${item.count}`)] : []),
     ...(storyboardMode ? ['- 编辑底图来源:', ...editSources.map((item) => `  - ${item.name}: ${item.count}`)] : []),
@@ -156,9 +154,8 @@ function main() {
       bullet(labelField('timecode'), item.timecode),
       bullet(labelField('style_variant'), item.style_variant),
       bullet(labelField('purity_grade'), item.purity_grade),
-      bullet(labelField('scene'), item.scene),
+      ...displayProfile.sampleFields.map((field) => bullet(field.label, normalizeValue(item[field.key]))),
       bullet(labelField('scene_anchor'), item.scene_anchor),
-      bullet(labelField('wardrobe'), item.wardrobe),
       bullet(labelField('exposure_signal'), item.exposure_signal),
       bullet(labelField('gesture'), item.gesture),
       bullet(labelField('camera'), item.camera),
@@ -235,9 +232,7 @@ function main() {
     '',
     `- 主风格族: ${topLabel(distributions.style_family)}`,
     `- 主强度等级: ${topLabel(distributions.purity_grade)}`,
-    `- 主场景: ${topLabel(distributions.scene)}`,
-    `- 主服装: ${topLabel(distributions.wardrobe)}`,
-    `- 主构图: ${topLabel(distributions.composition)}`,
+    ...displayProfile.summaryFields.map((field, index) => `- ${field.label}: ${topLabel(displayDistributions[index + 1]?.counts || [])}`),
     '',
     '## 关键文件',
     '',

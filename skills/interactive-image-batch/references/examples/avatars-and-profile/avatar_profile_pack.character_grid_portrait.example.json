@@ -1,0 +1,23 @@
+{
+  "template_id": "avatar-profile-pack",
+  "template_variant": "character-grid-portrait",
+  "content_brief": "做一组角色头像栅格图，展示同一角色的冷静、微笑、自信和惊讶四种状态，适用于创作者角色包、频道人物资产和系列 profile 图。",
+  "output_mode": "角色头像栅格图",
+  "style_requirements": [
+    "character-grid portrait system",
+    "identity-stable avatar sheet",
+    "grid-safe collectible profile assets"
+  ],
+  "variation_requirements": [
+    "同一角色 identity 必须稳定",
+    "每个头像状态要可区分但风格统一",
+    "头像裁切和栅格节奏清晰"
+  ],
+  "text_policy": "不生成文字，重点保留圆形头像安全区、角色轮廓和多状态可读性。",
+  "sample_variant_axes": {
+    "asset_usage": "creator identity",
+    "crop_scale": "circular-safe headshot",
+    "expression_set": "neutral",
+    "background_depth": "flat color"
+  }
+}

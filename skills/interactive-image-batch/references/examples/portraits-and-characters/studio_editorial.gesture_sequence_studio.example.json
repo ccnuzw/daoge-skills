@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "gesture-sequence-studio",
+  "content_brief": "做一组强调手势和身体动作连续性的摄影棚人物大片，动作之间要像一个受控的棚拍序列，适合时尚和表达型品牌人物任务。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "gesture sequence studio editorial",
+    "controlled gesture rhythm under studio light",
+    "expressive pose sequence with readable styling"
+  ],
+  "variation_requirements": [
+    "动作之间要有连续性，不能只是随机换姿势",
+    "手势和身体延展必须成立，但不能破坏服装和轮廓可读性",
+    "灯光必须帮助动作节奏成立，而不是让画面散掉"
+  ],
+  "text_policy": "不生成可读标题，只保留适合动作型棚拍主视觉排版的安全区。",
+  "sample_variant_axes": {
+    "lighting": "rhythmic directional studio light",
+    "camera_language": "slight low-angle gesture crop",
+    "material_emphasis": "gesture line and fabric control"
+  }
+}

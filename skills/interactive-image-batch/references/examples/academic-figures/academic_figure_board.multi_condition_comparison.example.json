@@ -1,0 +1,21 @@
+{
+  "template_id": "academic-figure-board",
+  "template_variant": "multi-condition-comparison",
+  "content_brief": "做一张多条件实验对比图，展示对照组、实验组和时间阶段差异。",
+  "output_mode": "实验对比图",
+  "style_requirements": [
+    "multi-condition comparison",
+    "publication chart",
+    "academic-safe contrast"
+  ],
+  "variation_requirements": [
+    "比较维度清晰",
+    "组别关系稳定",
+    "注释密度平衡"
+  ],
+  "text_policy": "标题和局部标签留位，长段说明后期替换。",
+  "sample_variant_axes": {
+    "figure_type": "comparison grid",
+    "comparison_mode": "multi-condition"
+  }
+}

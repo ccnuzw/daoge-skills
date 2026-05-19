@@ -1,0 +1,32 @@
+{
+  "template_id": "oral-storyboard-board",
+  "template_variant": "horizontal-board",
+  "content_brief": "做一张横版整板口播分镜，展示同一位主理人连续出镜，左侧信息区、右侧多格讲解镜头、底部收尾KV完整成立。",
+  "output_mode": "口播分镜整板",
+  "style_requirements": [
+    "same presenter same studio identity",
+    "left info panel right shot grid bottom closing kv",
+    "proposal-board clarity with presenter continuity"
+  ],
+  "variation_requirements": [
+    "主持人身份统一稳定",
+    "信息区、分镜区和收尾KV同时成立",
+    "镜头和信息逻辑有明确推进"
+  ],
+  "text_policy": "中文字段以后期替换为主，只保留信息层级、标题安全区和整板结构清晰度。",
+  "sample_variant_axes": {
+    "story_beat": "opening hook",
+    "camera_language": "medium presenter shot",
+    "continuity_anchor": "same face same outfit logic",
+    "mood": "professional trust"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "metadata-only",
+    "layout_manifest": "./oral_storyboard_board.layout_manifest.json",
+    "content_manifest": "./oral_storyboard_board.content_manifest.json",
+    "render_config": "./oral_storyboard_board.render_config.json"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "template_id": "campaign-poster",
+  "template_variant": "campaign-extension",
+  "content_brief": "做一组 Campaign 延展海报，延续同一品牌主视觉系统，但在场景、主体动作和卖点切入上做多场景扩展，要求保持全身人物或完整主体裁切规则稳定，适合社媒封面、站内延展和系列推广海报。",
+  "output_mode": "Campaign 延展海报",
+  "style_requirements": [
+    "campaign extension poster system",
+    "typography-safe extended key visual",
+    "multi-scene brand visual consistency",
+    "full-body campaign extension silhouette"
+  ],
+  "variation_requirements": [
+    "必须保留统一品牌系统感",
+    "每张图要有可辨识的场景或叙事扩展",
+    "标题和 logo 安全区规则稳定",
+    "全身人物或完整主体裁切信号必须明确"
+  ],
+  "text_policy": "标题、logo、系列名和 slogan 后期替换，当前只保留统一留白和延展主视觉结构。",
+  "sample_variant_axes": {
+    "camera_language": "full-body walking turn-back poster motion",
+    "commercial_role": "campaign extension visual",
+    "material_emphasis": "silhouette contour",
+    "lighting": "diffused window light",
+    "mood": "editorial confidence"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "template_id": "social-grid",
+  "template_variant": "cover-detail-mood",
+  "content_brief": "做一组品牌社媒九宫格视觉，包含封面图、细节图和氛围图，用于新品上新周的 feed 统一发布。",
+  "output_mode": "社媒九宫格",
+  "style_requirements": [
+    "square-crop-safe vertical composition",
+    "premium social editorial",
+    "brand-feed system"
+  ],
+  "variation_requirements": [
+    "宫格角色清晰",
+    "色彩系统统一",
+    "裁切安全区稳定"
+  ],
+  "text_policy": "标题贴纸和说明文字后期替换，当前只保留社媒覆盖层安全区。",
+  "sample_variant_axes": {
+    "grid_role": "cover tile",
+    "crop_safety": "square-safe",
+    "lighting": "soft editorial daylight"
+  }
+}

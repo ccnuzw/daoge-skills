@@ -1,0 +1,21 @@
+{
+  "template_id": "type-layout-poster",
+  "template_variant": "title-safe-poster",
+  "content_brief": "做一张标题安全区海报，强调大标题区域、副标题留位和图像压缩到边角的版心控制。",
+  "output_mode": "标题安全区海报",
+  "style_requirements": [
+    "title-safe poster",
+    "headline-first layout",
+    "layout confidence"
+  ],
+  "variation_requirements": [
+    "标题区充足",
+    "图文主次明确",
+    "安全区稳定"
+  ],
+  "text_policy": "标题和短语留位，正文后期替换。",
+  "sample_variant_axes": {
+    "headline_role": "giant title",
+    "type_dominance": "type-led"
+  }
+}

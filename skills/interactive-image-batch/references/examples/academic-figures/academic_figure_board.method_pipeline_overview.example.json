@@ -1,0 +1,22 @@
+{
+  "template_id": "academic-figure-board",
+  "template_variant": "method-pipeline-overview",
+  "content_brief": "做一张方法流程总览图，展示数据输入、预处理、核心算法步骤、输出评估和结果汇总的完整研究流程。",
+  "output_mode": "方法流程总览图",
+  "style_requirements": [
+    "method pipeline overview",
+    "publication-oriented board",
+    "academic-safe contrast"
+  ],
+  "variation_requirements": [
+    "流程阶段清晰",
+    "阅读顺序明确",
+    "模块关系和输入输出边界稳定"
+  ],
+  "text_policy": "标题、流程节点和局部标签留位，长段说明后期替换。",
+  "sample_variant_axes": {
+    "figure_type": "method pipeline",
+    "comparison_mode": "single-path",
+    "publication_context": "teaching slide"
+  }
+}

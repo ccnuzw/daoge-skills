@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "editorial-closeup",
+  "content_brief": "做一张近景编辑感肖像主视觉，强调面部留白、眼神张力和头肩裁切，用于时尚人物专题封面。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "editorial close-up portrait",
+    "tight head-and-shoulders crop",
+    "restrained premium magazine mood"
+  ],
+  "variation_requirements": [
+    "眼神必须集中且明确",
+    "近景裁切稳定，不压迫五官结构",
+    "保留适合标题和栏位的头部留白"
+  ],
+  "text_policy": "不生成可读标题，只保留近景肖像排版安全区和头部留白。",
+  "sample_variant_axes": {
+    "eye_language": "restrained introspection",
+    "crop_scale": "tight portrait crop",
+    "lighting": "face-led directional key light",
+    "mood": "editorial tension"
+  }
+}

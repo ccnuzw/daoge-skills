@@ -1,0 +1,21 @@
+{
+  "template_id": "technical-diagram",
+  "template_variant": "sequence-diagram",
+  "content_brief": "做一张用户请求到服务响应的时序图，展示 client、gateway、service、worker 和 database 的调用顺序。",
+  "output_mode": "时序图",
+  "style_requirements": [
+    "sequence diagram clarity",
+    "node-column timing structure",
+    "technical annotation precision"
+  ],
+  "variation_requirements": [
+    "调用方向明确",
+    "纵向时序层级稳定",
+    "参与者列宽和箭头关系清晰"
+  ],
+  "text_policy": "保留参与者名称和箭头标签位置，详细术语后期替换。",
+  "sample_variant_axes": {
+    "diagram_type": "sequence",
+    "presentation_mode": "engineering walkthrough"
+  }
+}

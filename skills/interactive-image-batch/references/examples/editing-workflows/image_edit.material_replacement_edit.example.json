@@ -1,0 +1,21 @@
+{
+  "template_id": "image-edit",
+  "template_variant": "material-replacement-edit",
+  "content_brief": "基于已有产品图做材质替换编辑，保留产品轮廓、比例和构图，把原本普通塑料外壳统一改成高级磨砂金属材质。",
+  "output_mode": "图像编辑",
+  "style_requirements": [
+    "material replacement edit",
+    "preserve product geometry",
+    "texture continuity"
+  ],
+  "variation_requirements": [
+    "只替换指定材质",
+    "轮廓和比例保持一致",
+    "高光、反射和表面纹理必须自然"
+  ],
+  "text_policy": "保留原构图中的留白区，不新增可读文字。",
+  "sample_variant_axes": {
+    "edit_scope": "global-safe edit",
+    "change_target": "material replacement"
+  }
+}

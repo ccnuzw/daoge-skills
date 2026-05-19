@@ -65,6 +65,12 @@ function sectionLabel(section) {
     ad_test_hypothesis: 'Ad test hypothesis',
     controlled_variables: 'Controlled variables',
     detail_page_role: 'Detail page role',
+    identity_anchor: 'Identity anchor',
+    asset_usage_goal: 'Asset usage goal',
+    crop_and_safe_area: 'Crop and safe area',
+    expression_pose: 'Expression and pose',
+    background_control: 'Background control',
+    readability_finish: 'Readability finish',
   };
   return labels[section] || String(section || '').replace(/_/g, ' ');
 }
@@ -228,10 +234,10 @@ function baseSubject(item, mode, traits) {
     return `Adult East Asian female fashion model, photoreal premium commercial poster, ${traits.descriptor}`;
   }
   if (mode === 'product') {
-    return `Premium commercial product visual, ${traits.descriptor}`;
+    return `Premium commercial product visual, ${item.style_family || 'product-family'}, ${traits.descriptor}`;
   }
   if (mode === 'graphic') {
-    return `Premium branded graphic system poster, ${traits.descriptor}`;
+    return `Premium branded graphic system poster, ${item.style_family || 'graphic-family'}, ${traits.descriptor}`;
   }
   const familyKey = String(item.style_family || '').trim().toLowerCase();
   return `Premium visual asset, ${familyKey || 'branded visual direction'}`;
@@ -291,6 +297,11 @@ function buildDraftPrompt(item) {
   const adHypothesis = firstNonEmpty(item.ad_test_hypothesis, item.test_variable, item.value_proposition, pick(['test premium restraint versus stronger product clarity', 'test scene-led desire versus product-led readability', 'test direct gaze versus candid movement'], seed, 12));
   const controlledVariables = firstNonEmpty(item.controlled_variables, variantSummary.length ? variantSummary.join('; ') : null);
   const detailPageRole = firstNonEmpty(item.detail_page_role, item.product_role, pick(['hero product image', 'material close detail', 'fit demonstration', 'lifestyle use case', 'benefit breakdown image'], seed, 13));
+  const identityPolicy = firstNonEmpty(item.identity_policy, 'same person or same character identity stays stable across the whole set');
+  const assetUsage = firstNonEmpty(item.asset_usage, pick(['social profile', 'creator identity', 'sticker pack', 'themed icon'], seed, 16));
+  const cropScale = firstNonEmpty(item.crop_scale, pick(['circular-safe headshot', 'head-and-shoulders', 'half-body profile'], seed, 17));
+  const expressionSet = firstNonEmpty(item.expression_set, pick(['neutral', 'confident', 'playful', 'smile'], seed, 18));
+  const backgroundDepth = firstNonEmpty(item.background_depth, pick(['flat color', 'soft blur', 'minimal textured backdrop'], seed, 19));
   const nonHumanFocus = firstNonEmpty(item.signal_emphasis, exposureSignal, pick(traits.signalEmphasis || [], seed, 14));
   const nonHumanLayout = firstNonEmpty(item.layout_emphasis, editorialNuance, pick(traits.layoutEmphasis || [], seed, 15));
   const referenceNotes = storyboardSummary('Reference intent', item.reference_notes);
@@ -302,7 +313,50 @@ function buildDraftPrompt(item) {
 
   const sectionValues = {
     subject_baseline: baseSubject(item, mode, traits),
+    ui_goal: [
+      item.ui_surface ? `UI surface: ${item.ui_surface}` : '',
+      item.module_focus ? `Module focus: ${item.module_focus}` : '',
+      item.scene ? `UI task goal: ${item.scene}` : '',
+    ].filter(Boolean).join('. '),
+    screen_context: [
+      item.ui_surface ? `Screen context: ${item.ui_surface}` : '',
+      sceneAnchor ? `Surface anchor: ${ensureList(sceneAnchor).join(', ')}` : '',
+      nonHumanLayout ? `Layout rhythm: ${nonHumanLayout}` : '',
+    ].filter(Boolean).join('. '),
+    module_hierarchy: [
+      item.module_focus ? `Primary module hierarchy: ${item.module_focus}` : '',
+      variantSummary.length ? `Variant matrix: ${variantSummary.join('; ')}` : '',
+      compositionBias || '',
+    ].filter(Boolean).join('. '),
+    interaction_focus: [
+      nonHumanFocus ? `Interaction emphasis: ${nonHumanFocus}` : '',
+      qualityRule ? `UI constraint: ${qualityRule}` : '',
+    ].filter(Boolean).join('. '),
     campaign_intent: templateName ? `${templateName} direction, brand key visual for a premium campaign, no rendered text or real logo` : 'premium campaign key visual, no rendered text or real logo',
+    brand_goal: [
+      templateName ? `${templateName} direction for a premium packaging system board` : 'premium packaging system board direction',
+      item.scene ? `Brand goal: ${item.scene}` : '',
+    ].filter(Boolean).join('. '),
+    asset_scope: [
+      item.brand_asset_scope ? `Brand asset scope: ${item.brand_asset_scope}` : '',
+      item.packaging_format ? `Packaging format: ${item.packaging_format}` : '',
+    ].filter(Boolean).join('. '),
+    packaging_structure: [
+      item.packaging_format ? `Packaging structure: ${item.packaging_format}` : '',
+      composition ? `Board framing: ${composition}` : '',
+      nonHumanLayout ? `Spread rhythm: ${nonHumanLayout}` : '',
+    ].filter(Boolean).join('. '),
+    material_surface: [
+      item.material_signal ? `Material signal: ${item.material_signal}` : '',
+      nonHumanFocus ? `Readability focus: ${nonHumanFocus}` : '',
+      lighting ? `Lighting: ${lighting}` : '',
+    ].filter(Boolean).join('. '),
+    layout_hierarchy: [
+      nonHumanLayout ? `Layout hierarchy: ${nonHumanLayout}` : '',
+      compositionBias || '',
+      variantSummary.length ? `Variant matrix: ${variantSummary.join('; ')}` : '',
+    ].filter(Boolean).join('. '),
+    brand_finish: [posterCue, qualityRule, mood].filter(Boolean).join('. '),
     scene_hierarchy: [
       item.scene ? `Scene: ${item.scene}` : '',
       sceneAnchor ? `Scene anchor: ${ensureList(sceneAnchor).join(', ')}` : '',
@@ -331,6 +385,81 @@ function buildDraftPrompt(item) {
     ].filter(Boolean).join('. '),
     typography_safe_area: item.text_policy ? `Text policy: ${item.text_policy}; leave clean layout-safe negative space, do not generate readable typography` : 'leave clean layout-safe negative space, do not generate readable typography',
     commercial_finish: [posterCue, qualityRule, editorialNuance, voiceoverNote, mode !== 'human' ? nonHumanLayout : null].filter(Boolean).join('. '),
+    figure_structure: [
+      item.figure_type ? `Figure type: ${item.figure_type}` : '',
+      nonHumanLayout ? `Figure structure: ${nonHumanLayout}` : '',
+    ].filter(Boolean).join('. '),
+    diagram_goal: [
+      item.diagram_goal ? `Diagram goal: ${item.diagram_goal}` : '',
+      item.scene ? `Diagram task: ${item.scene}` : '',
+      item.diagram_type ? `Diagram type: ${item.diagram_type}` : '',
+    ].filter(Boolean).join('. '),
+    node_hierarchy: [
+      item.node_hierarchy ? `Node hierarchy: ${item.node_hierarchy}` : '',
+      nonHumanLayout ? `Layout rhythm: ${nonHumanLayout}` : '',
+      variantSummary.length ? `Variant matrix: ${variantSummary.join('; ')}` : '',
+    ].filter(Boolean).join('. '),
+    relationship_semantics: [
+      item.relationship_semantics ? `Relationship semantics: ${item.relationship_semantics}` : '',
+      item.edge_semantics ? `Edge semantics: ${item.edge_semantics}` : '',
+      nonHumanFocus ? `Diagram emphasis: ${nonHumanFocus}` : '',
+    ].filter(Boolean).join('. '),
+    legend_label_policy: [
+      item.legend_label_policy ? `Legend and label policy: ${item.legend_label_policy}` : '',
+      item.text_policy ? `Text policy: ${item.text_policy}` : '',
+    ].filter(Boolean).join('. '),
+    information_goal: [
+      item.information_goal ? `Information goal: ${item.information_goal}` : '',
+      item.scene ? `Information task: ${item.scene}` : '',
+      item.data_emphasis ? `Data emphasis: ${item.data_emphasis}` : '',
+    ].filter(Boolean).join('. '),
+    module_grouping: [
+      item.module_grouping ? `Module grouping: ${item.module_grouping}` : '',
+      nonHumanLayout ? `Layout rhythm: ${nonHumanLayout}` : '',
+      variantSummary.length ? `Variant matrix: ${variantSummary.join('; ')}` : '',
+    ].filter(Boolean).join('. '),
+    reading_path: [
+      item.reading_path ? `Reading path: ${item.reading_path}` : '',
+      item.information_hierarchy ? `Information hierarchy: ${item.information_hierarchy}` : '',
+    ].filter(Boolean).join('. '),
+    icon_data_language: [
+      item.icon_data_language ? `Icon and data language: ${item.icon_data_language}` : '',
+      item.icon_language ? `Icon language: ${item.icon_language}` : '',
+      item.data_emphasis ? `Data emphasis: ${item.data_emphasis}` : '',
+    ].filter(Boolean).join('. '),
+    headline_label_policy: [
+      item.headline_label_policy ? `Headline and label policy: ${item.headline_label_policy}` : '',
+      item.text_policy ? `Text policy: ${item.text_policy}` : '',
+    ].filter(Boolean).join('. '),
+    clarity_finish: [qualityRule, compositionBias, mood].filter(Boolean).join('. '),
+    comparison_logic: [
+      item.comparison_mode ? `Comparison logic: ${item.comparison_mode}` : '',
+      variantSummary.length ? `Variant matrix: ${variantSummary.join('; ')}` : '',
+    ].filter(Boolean).join('. '),
+    annotation_policy: [
+      item.annotation_density ? `Annotation density: ${item.annotation_density}` : '',
+      item.text_policy ? `Text policy: ${item.text_policy}` : '',
+    ].filter(Boolean).join('. '),
+    publication_finish: [posterCue, qualityRule, mood].filter(Boolean).join('. '),
+    map_goal: [
+      item.map_type ? `Map type: ${item.map_type}` : '',
+      item.scene ? `Map goal: ${item.scene}` : '',
+    ].filter(Boolean).join('. '),
+    spatial_structure: [
+      item.navigation_style ? `Navigation style: ${item.navigation_style}` : '',
+      composition ? `Spatial framing: ${composition}` : '',
+      nonHumanLayout ? `Guide layout: ${nonHumanLayout}` : '',
+    ].filter(Boolean).join('. '),
+    route_landmark_logic: [
+      item.route_logic ? `Route logic: ${item.route_logic}` : '',
+      nonHumanFocus ? `Landmark emphasis: ${nonHumanFocus}` : '',
+      variantSummary.length ? `Variant matrix: ${variantSummary.join('; ')}` : '',
+    ].filter(Boolean).join('. '),
+    label_legend_policy: [
+      item.label_density ? `Label density: ${item.label_density}` : '',
+      item.text_policy ? `Label policy: ${item.text_policy}` : '',
+    ].filter(Boolean).join('. '),
+    guide_finish: [posterCue, qualityRule, mood].filter(Boolean).join('. '),
     story_beat: [storyBeat, promptHints, visualElements, 'visible narrative progression, one clear moment in the sequence'].filter(Boolean).join('. '),
     camera_language: cameraLanguage ? `Camera language: ${cameraLanguage}; ${motionNote || 'precise shot scale, angle, and visual rhythm'}` : '',
     continuity_rules: [controlledVariables, continuityNotes, referenceNotes, 'keep character, palette, scene logic, and wardrobe continuity across the sequence'].filter(Boolean).join('. '),
@@ -339,6 +468,36 @@ function buildDraftPrompt(item) {
     ad_test_hypothesis: `${adHypothesis}; isolate one creative variable and keep the baseline stable`,
     controlled_variables: controlledVariables || 'keep subject, product, visual quality, and layout baseline stable',
     detail_page_role: `${detailPageRole}; clear ecommerce information hierarchy for later layout`,
+    identity_anchor: [
+      `Identity anchor: ${identityPolicy}`,
+      item.scene ? `Avatar series goal: ${item.scene}` : '',
+    ].filter(Boolean).join('. '),
+    asset_usage_goal: [
+      `Asset usage: ${assetUsage}`,
+      variantSummary.length ? `Variant matrix: ${variantSummary.join('; ')}` : '',
+    ].filter(Boolean).join('. '),
+    crop_and_safe_area: [
+      `Crop and safe area: ${cropScale}`,
+      composition ? `Framing: ${composition}` : '',
+      'keep forehead, chin, and facial landmarks readable in a circular-safe crop',
+    ].filter(Boolean).join('. '),
+    expression_pose: [
+      `Expression set: ${expressionSet}`,
+      mode === 'human' && gesture ? `Pose and body line: ${gesture}` : '',
+      mode === 'human' && eyeLanguage ? `Eye language: ${eyeLanguage}` : '',
+      mode === 'human' && candidness ? `Moment quality: ${candidness}` : '',
+    ].filter(Boolean).join('. '),
+    background_control: [
+      `Background depth: ${backgroundDepth}`,
+      sceneAnchor ? `Background anchor: ${ensureList(sceneAnchor).join(', ')}` : '',
+      'background stays restrained and never competes with the avatar face',
+    ].filter(Boolean).join('. '),
+    readability_finish: [
+      'small-size readability remains the top priority',
+      qualityRule,
+      compositionBias,
+      mood ? `Mood: ${ensureList(mood).join(', ')}` : '',
+    ].filter(Boolean).join('. '),
     studio_setup: item.scene ? `Controlled studio setup: ${item.scene}; ${sceneAnchor || 'clean premium backdrop'}` : sceneAnchor,
     wardrobe_material: item.wardrobe ? `Wardrobe material: ${item.wardrobe}; ${textureCue}` : textureCue,
     lighting_control: lighting ? `Lighting control: ${lighting}; refined skin texture and controlled contour` : '',
@@ -348,12 +507,17 @@ function buildDraftPrompt(item) {
     series_context: `Series image ${item.index || ''}, ${item.style_family || 'coherent style family'}, preserve consistent camera language with controlled variation`,
     lookbook_consistency: [compositionBias, 'wardrobe remains readable and consistent with the series system'].filter(Boolean).join('. '),
     portrait_intent: `Face-led premium key visual, ${eyeLanguage || 'composed direct gaze'}, ${mood || 'controlled luxury mood'}`,
-    edit_goal: 'Image edit target: apply the requested change while keeping the original subject structure coherent',
+    edit_goal: [
+      'Image edit target: apply the requested change while keeping the original subject structure coherent',
+      item.style_family ? `Series role: ${item.style_family}` : '',
+    ].filter(Boolean).join('. '),
     preserve_rules: 'Preserve rules: keep unchanged areas stable, avoid identity drift unless explicitly requested',
     change_boundary: item.scene || item.wardrobe ? `Change boundary: apply only the requested scene or wardrobe changes: ${[item.scene, item.wardrobe].filter(Boolean).join(', ')}` : '',
     target_scene_style: [sceneAnchor, lighting, palette].filter(Boolean).join('. '),
     consistency_rules: 'Consistency rules: edited light, perspective, fabric texture, and anatomy must blend naturally',
     quality_constraints: [qualityRule, 'clean edit boundary, no visible artifacts'].filter(Boolean).join('. '),
+    text_render_policy: item.text_policy ? `Text render policy: ${item.text_policy}` : '',
+    presentation_finish: [posterCue, qualityRule, mood].filter(Boolean).join('. '),
   };
 
   if (templateSections.length) {

@@ -1,0 +1,23 @@
+{
+  "template_id": "technical-diagram",
+  "template_variant": "er-diagram",
+  "content_brief": "做一张 ER 图，展示用户、订单、商品、支付记录之间的实体关系，要求实体块、属性组和关系连线清晰。",
+  "output_mode": "ER 图",
+  "style_requirements": [
+    "er diagram clarity",
+    "entity-relationship technical board",
+    "schema-like readable node-link layout"
+  ],
+  "variation_requirements": [
+    "实体块边界清晰",
+    "关系线和属性组主次明确",
+    "阅读顺序稳定"
+  ],
+  "text_policy": "保留实体名、属性组和关系标签位置，详细字段说明后期替换。",
+  "sample_variant_axes": {
+    "diagram_type": "er",
+    "node_hierarchy": "service-cluster",
+    "edge_semantics": "dependency lines",
+    "presentation_mode": "engineering blueprint"
+  }
+}

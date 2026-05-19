@@ -1,0 +1,21 @@
+{
+  "template_id": "illustrated-scene-set",
+  "template_variant": "picture-book-scene",
+  "content_brief": "做一组绘本场景，展示森林小屋、夜灯窗边和雨后小路的连续故事片段。",
+  "output_mode": "绘本场景",
+  "style_requirements": [
+    "picture-book scene",
+    "textured storybook",
+    "illustrative wonder"
+  ],
+  "variation_requirements": [
+    "系列感统一",
+    "叙事片段连续",
+    "色温轻微变化"
+  ],
+  "text_policy": "不生成正文，只保留必要标题留位。",
+  "sample_variant_axes": {
+    "scene_mood": "whimsical",
+    "illustration_surface": "textured storybook"
+  }
+}

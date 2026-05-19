@@ -1,0 +1,23 @@
+{
+  "template_id": "social-grid",
+  "template_variant": "brand-feed-system",
+  "content_brief": "做一组品牌 feed 系统图，包含封面、产品细节、氛围情绪和卖点摘要模块，用于品牌社媒主页连续发布。",
+  "output_mode": "品牌 Feed 系统图",
+  "style_requirements": [
+    "brand-feed system",
+    "square-safe editorial social grid",
+    "palette-consistent campaign feed"
+  ],
+  "variation_requirements": [
+    "每张图社媒角色明确",
+    "统一品牌色和裁切规则",
+    "封面、细节和摘要模块节奏清晰"
+  ],
+  "text_policy": "标题贴纸、摘要标签和封面文案后期替换，当前只保留安全区。",
+  "sample_variant_axes": {
+    "grid_role": "product benefit tile",
+    "crop_safety": "square-safe",
+    "palette_role": "muted neutral",
+    "content_density": "rich context"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "template_id": "visual-doc-slide",
+  "template_variant": "educational-diagram-slide",
+  "content_brief": "做一张教学型图解页，展示核心概念示意图、步骤注释和右下角总结区，要求标题、图示和注释能共存。",
+  "output_mode": "教学图解页",
+  "style_requirements": [
+    "educational diagram slide",
+    "teaching-first annotated page layout",
+    "diagram-and-note balanced presentation"
+  ],
+  "variation_requirements": [
+    "标题区、图示区和注释区边界清晰",
+    "图示讲解顺序明确",
+    "版面秩序适合课堂或培训说明"
+  ],
+  "text_policy": "标题、图例标签和注释标题可占位，详细讲解文字后期替换。",
+  "sample_variant_axes": {
+    "page_role": "explainer page",
+    "layout_zones": "left-text-right-visual",
+    "headline_weight": "hero-title",
+    "annotation_density": "dense"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "template_id": "technical-diagram",
+  "template_variant": "flowchart-decision",
+  "content_brief": "做一张流程决策图，展示用户提交申请后的审核、补充资料、通过和拒绝分支，要求分支判断和路径方向明确。",
+  "output_mode": "流程决策图",
+  "style_requirements": [
+    "flowchart decision clarity",
+    "branch-first technical explainer layout",
+    "clean directional node-link diagram"
+  ],
+  "variation_requirements": [
+    "判断分支清晰",
+    "流程方向明确",
+    "节点状态和结果区分稳定"
+  ],
+  "text_policy": "保留节点标签和箭头说明位置，详细规则文案后期替换。",
+  "sample_variant_axes": {
+    "diagram_type": "flowchart",
+    "node_hierarchy": "two-layer",
+    "edge_semantics": "directional arrows",
+    "presentation_mode": "teaching board"
+  }
+}

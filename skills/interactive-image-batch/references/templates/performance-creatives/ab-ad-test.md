@@ -39,6 +39,8 @@
 - `benefit-stack`: 卖点栈测试，比较不同产品利益表达。
 - `audience-angle`: 人群角度测试，比较不同使用场景和情绪。
 - `layout-test`: 构图和 CTA 留白测试。
+- `hook-contrast-test`: 首屏钩子差异测试。
+- `cta-emphasis-test`: CTA 强调强弱测试。
 
 ## 推荐 variant_axes
 

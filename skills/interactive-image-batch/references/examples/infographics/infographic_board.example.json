@@ -1,0 +1,21 @@
+{
+  "template_id": "infographic-board",
+  "template_variant": "kpi-dashboard-infographic",
+  "content_brief": "做一张季度增长 KPI 信息图，展示用户增长、转化率变化和渠道对比结论。",
+  "output_mode": "信息图",
+  "style_requirements": [
+    "modular infographic board",
+    "balanced data-card grid",
+    "editorial teaching tone"
+  ],
+  "variation_requirements": [
+    "阅读顺序明确",
+    "指标卡与结论区层级分明",
+    "图例和标签区不过载"
+  ],
+  "text_policy": "允许标题和关键标签占位，长文本、详细数字说明后期替换。",
+  "sample_variant_axes": {
+    "information_hierarchy": "hero-stat-first",
+    "reading_path": "top-down"
+  }
+}

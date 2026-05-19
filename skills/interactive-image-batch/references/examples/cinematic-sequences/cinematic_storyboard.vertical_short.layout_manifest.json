@@ -1,0 +1,22 @@
+{
+  "layout_id": "vertical_four_panel_board",
+  "board_role": "storyboard-board",
+  "canvas": {
+    "width": 1440,
+    "height": 2560,
+    "aspect_ratio": "9:16",
+    "background": "#0f1218"
+  },
+  "regions": [
+    { "id": "shot_1", "role": "shot", "sequence": 1, "x": 96, "y": 80, "width": 288, "height": 512, "aspect_ratio": "9:16" },
+    { "id": "shot_2", "role": "shot", "sequence": 2, "x": 416, "y": 80, "width": 288, "height": 512, "aspect_ratio": "9:16" },
+    { "id": "shot_3", "role": "shot", "sequence": 3, "x": 736, "y": 80, "width": 288, "height": 512, "aspect_ratio": "9:16" },
+    { "id": "shot_4", "role": "kv", "sequence": 4, "x": 1056, "y": 80, "width": 288, "height": 512, "aspect_ratio": "9:16" }
+  ],
+  "bindings": {
+    "shot_1": "shot_1",
+    "shot_2": "shot_2",
+    "shot_3": "shot_3",
+    "shot_4": "shot_4"
+  }
+}

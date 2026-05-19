@@ -1,0 +1,32 @@
+{
+  "template_id": "cinematic-storyboard",
+  "template_variant": "demo-explainer-sequence",
+  "content_brief": "做一组产品演示式电影分镜，展示同一位主角从问题开场、操作演示、反馈验证到收尾总结的连续说明型镜头。",
+  "output_mode": "演示说明分镜组图",
+  "style_requirements": [
+    "cinematic explainer continuity",
+    "same-character same-product sequence logic",
+    "clear demonstration rhythm with premium commercial polish"
+  ],
+  "variation_requirements": [
+    "每张必须承担明确解释节点",
+    "人物、产品和空间逻辑保持连续",
+    "镜头推进要服务说明而不是纯氛围"
+  ],
+  "text_policy": "不生成可读字幕，只保留标题安全区和说明型版式留白。",
+  "sample_variant_axes": {
+    "story_beat": "guided explanation",
+    "camera_language": "medium action frame",
+    "continuity_anchor": "same wardrobe same demo environment",
+    "motion_state": "showing to confirming"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "prompt-only",
+    "layout_manifest": "./cinematic_storyboard.layout_manifest.json",
+    "content_manifest": "./cinematic_storyboard.demo_explainer_sequence.content_manifest.json",
+    "render_config": "./cinematic_storyboard.demo_explainer_sequence.render_config.json"
+  }
+}

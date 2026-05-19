@@ -1,0 +1,21 @@
+{
+  "template_id": "ecommerce-clean",
+  "template_variant": "white-clean-hero",
+  "content_brief": "做一组电商主图，展示基础款卫衣的正面轮廓、面料质感和上身可读性，背景保持纯净可用于平台主图。",
+  "output_mode": "电商主图",
+  "style_requirements": [
+    "clean ecommerce hero",
+    "soft gray seamless background",
+    "material-readable product lighting"
+  ],
+  "variation_requirements": [
+    "商品轮廓稳定",
+    "背景干净不抢主角",
+    "主图安全区明确"
+  ],
+  "text_policy": "标题和卖点标签后期替换，当前只保留主图安全区，不生成可读文案。",
+  "sample_variant_axes": {
+    "benefit_angle": "silhouette readability",
+    "background_cleanliness": "soft gray"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "template_id": "academic-figure-board",
+  "template_variant": "graphical-abstract",
+  "content_brief": "做一张研究概览图，展示方法流程、关键机制和实验结论摘要。",
+  "output_mode": "学术图",
+  "style_requirements": [
+    "graphical abstract",
+    "publication-oriented board",
+    "academic-safe contrast"
+  ],
+  "variation_requirements": [
+    "阅读顺序清晰",
+    "比较维度明确",
+    "注释密度可控"
+  ],
+  "text_policy": "标题和关键标签留位，长段研究说明后期替换。",
+  "sample_variant_axes": {
+    "figure_type": "graphical abstract",
+    "publication_context": "journal figure"
+  }
+}

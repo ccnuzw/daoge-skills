@@ -1,0 +1,21 @@
+{
+  "template_id": "ui-mockup-board",
+  "template_variant": "landing-page-case-study",
+  "content_brief": "为支付产品做一组 landing page mockup，强调首屏转化区、产品卖点卡片和设备展示场景。",
+  "output_mode": "UI 界面视觉稿",
+  "style_requirements": [
+    "clean SaaS landing page",
+    "device-framed screen",
+    "modern dashboard cards"
+  ],
+  "variation_requirements": [
+    "模块层级清晰",
+    "屏幕构图有变化",
+    "标题区与 CTA 区留位稳定"
+  ],
+  "text_policy": "标题和关键按钮位置留位，长文案后期替换，不要求生成完整可读段落。",
+  "sample_variant_axes": {
+    "ui_surface": "device-framed screen",
+    "module_focus": "conversion section"
+  }
+}

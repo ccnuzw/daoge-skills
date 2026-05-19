@@ -1,0 +1,23 @@
+{
+  "template_id": "ab-ad-test",
+  "template_variant": "cta-emphasis-test",
+  "content_brief": "做一组广告 CTA 强调测试图，比较“轻 CTA”“中等 CTA”“强按钮感 CTA”和“主体让位式 CTA”四种转化结构，验证哪种更利于点击和行动。",
+  "output_mode": "CTA 强调测试投放图",
+  "style_requirements": [
+    "cta-emphasis paid social creative",
+    "conversion-safe layout experiment",
+    "clear action-zone hierarchy"
+  ],
+  "variation_requirements": [
+    "只测试 CTA 区域存在感和让位关系",
+    "主体、卖点和色彩控制项保持稳定",
+    "不同 CTA 强弱要足够明显"
+  ],
+  "text_policy": "按钮、行动文案和标题后期替换，当前只保留不同 CTA 强调强度的清晰安全区。",
+  "sample_variant_axes": {
+    "ad_test_hypothesis": "test which CTA emphasis level improves action intent",
+    "controlled_variables": "same product same model same hook baseline",
+    "camera_language": "front-facing conversion framing",
+    "cta_zone": "split between light bottom-safe and strong bottom-safe"
+  }
+}

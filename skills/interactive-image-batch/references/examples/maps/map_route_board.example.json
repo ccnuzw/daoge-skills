@@ -1,0 +1,21 @@
+{
+  "template_id": "map-route-board",
+  "template_variant": "travel-route-map",
+  "content_brief": "做一张城市一日游路线地图，展示地标、步行路径、餐饮停靠点和黄昏终点场景。",
+  "output_mode": "地图路线板",
+  "style_requirements": [
+    "illustrated city map",
+    "route-first layout",
+    "guide-board polish"
+  ],
+  "variation_requirements": [
+    "路线层级清晰",
+    "地标分组稳定",
+    "图例和标签风格统一"
+  ],
+  "text_policy": "标题和局部标签留位，长说明后期替换。",
+  "sample_variant_axes": {
+    "map_type": "route map",
+    "navigation_style": "illustrated map"
+  }
+}

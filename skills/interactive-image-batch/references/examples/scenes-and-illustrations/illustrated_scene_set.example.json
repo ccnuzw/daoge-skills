@@ -1,0 +1,21 @@
+{
+  "template_id": "illustrated-scene-set",
+  "template_variant": "healing-scene",
+  "content_brief": "做一组治愈系插画场景，展示黄昏房间、窗边植物和安静阅读片段。",
+  "output_mode": "插画场景",
+  "style_requirements": [
+    "healing scene",
+    "storybook-friendly depth",
+    "gentle narrative calm"
+  ],
+  "variation_requirements": [
+    "氛围连续",
+    "主次构图稳定",
+    "颜色温度有轻微变化"
+  ],
+  "text_policy": "不生成正文，只保留必要标题留位。",
+  "sample_variant_axes": {
+    "scene_mood": "healing",
+    "illustration_surface": "textured storybook"
+  }
+}

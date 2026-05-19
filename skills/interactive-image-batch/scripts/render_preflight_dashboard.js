@@ -3,6 +3,7 @@ const path = require('path');
 const { parseArgs, readJson } = require('./script_utils');
 const { labelField, labelSource, formatFieldSource, translateValidationMessage } = require('./display_labels_zh');
 const { brandHeader, quickReplyBlock, userFocusBlock } = require('./daoge_brand_zh');
+const { resolveProfile, buildDisplayDistributions, normalizeValue } = require('./template_display_profile');
 
 function formatList(items, fallback = '未提供') {
   const list = Array.isArray(items) ? items.filter(Boolean) : [];
@@ -245,6 +246,9 @@ function main() {
   const taskFieldSources = taskSpec.field_sources || {};
   const readiness = buildReadiness(taskSpec, validation, gates);
   const editSignals = summarizeEditSignals(prompts);
+  const displayProfile = resolveProfile(prompts);
+  const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
+    .map((item) => ({ ...item, counts: item.counts.slice(0, 6) }));
   const runtimeSourceFields = [
     'provider',
     'batch_size',
@@ -400,21 +404,12 @@ function main() {
     '',
     '## 3. 风格与素材分布',
     '',
-    '### 风格族分布',
-    '',
-    ...top(validation.distributions, 'style_family').map((item) => `- ${item.name}: ${item.count}`),
-    '',
-    '### 场景分布',
-    '',
-    ...top(validation.distributions, 'scene').map((item) => `- ${item.name}: ${item.count}`),
-    '',
-    '### 服装分布',
-    '',
-    ...top(validation.distributions, 'wardrobe').map((item) => `- ${item.name}: ${item.count}`),
-    '',
-    '### 构图分布',
-    '',
-    ...top(validation.distributions, 'composition').map((item) => `- ${item.name}: ${item.count}`),
+    ...displayDistributions.flatMap((item) => [
+      `### ${item.label}分布`,
+      '',
+      ...(item.counts.length ? item.counts.map((entry) => `- ${entry.name}: ${entry.count}`) : ['- 未提供']),
+      '',
+    ]),
     '',
     '### 变体矩阵',
     '',
@@ -476,10 +471,9 @@ function main() {
       lines.push(`### 样例 ${index + 1}`);
       lines.push(`- 标题: ${item.title || item.slug || `prompt-${index + 1}`}`);
       lines.push(`- 槽位 ID: ${item.slot_id || '未设置'}`);
-      lines.push(`- 风格族: ${item.style_family || '未设置'}`);
-      lines.push(`- 场景: ${item.scene || '未设置'}`);
-      lines.push(`- 服装: ${item.wardrobe || '未设置'}`);
-      lines.push(`- 构图: ${item.composition || '未设置'}`);
+      displayProfile.sampleFields.forEach((field) => {
+        lines.push(`- ${field.label}: ${normalizeValue(item[field.key]) || '未设置'}`);
+      });
       lines.push(`- 参考模式: ${item.reference_mode || '未设置'}`);
       lines.push(`- 编辑底图来源: ${item.edit_source || '未设置'}`);
       lines.push(`- 遮罩图: ${item.mask_image ? '已提供' : '未提供'}`);

@@ -1,0 +1,21 @@
+{
+  "template_id": "avatar-profile-pack",
+  "template_variant": "style-transfer-selfie",
+  "content_brief": "做一组风格迁移头像资产，把同一位自拍角色转成更统一的创作者头像风格，适用于社媒头像和作者资料页。",
+  "output_mode": "风格迁移头像资产",
+  "style_requirements": [
+    "creator-profile avatar polish",
+    "clean background restraint",
+    "identity-safe style transfer"
+  ],
+  "variation_requirements": [
+    "人物身份稳定",
+    "裁切安全区稳定",
+    "不同风格方向下仍要保持头像可识别"
+  ],
+  "text_policy": "不生成文字，保留头像裁切安全区和轮廓清晰度。",
+  "sample_variant_axes": {
+    "asset_usage": "social profile",
+    "crop_scale": "close headshot"
+  }
+}

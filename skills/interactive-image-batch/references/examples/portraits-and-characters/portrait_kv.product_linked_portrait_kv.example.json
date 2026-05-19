@@ -1,0 +1,23 @@
+{
+  "template_id": "portrait-kv",
+  "template_variant": "product-linked-portrait-kv",
+  "content_brief": "做一张人物与产品存在明确联动关系的近景主视觉，人物仍是视觉中心，但产品必须作为气质和用途锚点被清楚读到，用于人物主导的品牌产品海报。",
+  "output_mode": "肖像主视觉",
+  "style_requirements": [
+    "product linked portrait key visual",
+    "face-led hero crop with readable product anchor",
+    "luxury portrait with brand object linkage"
+  ],
+  "variation_requirements": [
+    "人物必须保持主视觉中心，不能退化成产品海报",
+    "产品存在感要清晰，但不遮挡五官和表情阅读",
+    "近景裁切必须同时照顾人脸与产品锚点关系"
+  ],
+  "text_policy": "不生成可读标题，只保留适合人物主导品牌产品海报的近景留白和安全区。",
+  "sample_variant_axes": {
+    "eye_language": "direct product-aware focus",
+    "crop_scale": "head-and-shoulders linked crop",
+    "lighting": "face-led key light with product accent",
+    "mood": "premium brand confidence"
+  }
+}

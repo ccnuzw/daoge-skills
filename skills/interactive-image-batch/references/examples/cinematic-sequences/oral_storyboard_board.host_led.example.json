@@ -1,0 +1,32 @@
+{
+  "template_id": "oral-storyboard-board",
+  "template_variant": "host-led",
+  "content_brief": "做一张主持人主导的口播分镜整板，要求同一位主理人镜头占比更高，信息区、讲解区和底部收尾KV围绕人物表达展开。",
+  "output_mode": "主持人主导口播分镜整板",
+  "style_requirements": [
+    "same presenter same studio identity",
+    "host-led storyboard board with strong presenter presence",
+    "left info panel right shots bottom closing kv"
+  ],
+  "variation_requirements": [
+    "主持人连续镜头权重更高",
+    "整板仍要保留信息结构和收尾KV",
+    "人物表情、手势和讲解节奏必须明确"
+  ],
+  "text_policy": "中文字段以后期替换为主，只保留信息层级、人物讲解区和标题安全区。",
+  "sample_variant_axes": {
+    "story_beat": "logic breakdown",
+    "camera_language": "close explanation shot",
+    "continuity_anchor": "same face same outfit logic",
+    "mood": "professional trust"
+  },
+  "storyboard_plan": {
+    "enabled": true,
+    "generation_mode": "per-slot",
+    "assembly_mode": "external-compositor",
+    "reference_mode": "metadata-only",
+    "layout_manifest": "./oral_storyboard_board.host_led.layout_manifest.json",
+    "content_manifest": "./oral_storyboard_board.host_led.content_manifest.json",
+    "render_config": "./oral_storyboard_board.host_led.render_config.json"
+  }
+}

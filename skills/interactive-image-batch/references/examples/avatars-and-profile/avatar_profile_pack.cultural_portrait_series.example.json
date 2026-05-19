@@ -1,0 +1,23 @@
+{
+  "template_id": "avatar-profile-pack",
+  "template_variant": "cultural-portrait-series",
+  "content_brief": "做一组文化主题头像系列，以同一人物身份为核心，延展出不同文化符号、配色和服饰细节，适用于专题人物头像、展览导览角色和文化频道封面。",
+  "output_mode": "文化主题头像系列",
+  "style_requirements": [
+    "cultural portrait avatar series",
+    "identity-safe themed profile set",
+    "heritage-inspired collectible portrait assets"
+  ],
+  "variation_requirements": [
+    "人物身份锚点稳定",
+    "不同文化主题之间要有明显差异但不能换人",
+    "头像裁切安全区和面部可识别性优先"
+  ],
+  "text_policy": "不生成文字，重点保留头像安全区、文化主题符号和人物识别度。",
+  "sample_variant_axes": {
+    "asset_usage": "social profile",
+    "crop_scale": "head-and-shoulders",
+    "expression_set": "confident",
+    "background_depth": "minimal textured backdrop"
+  }
+}

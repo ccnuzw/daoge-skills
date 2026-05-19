@@ -1,0 +1,23 @@
+{
+  "template_id": "ui-mockup-board",
+  "template_variant": "short-video-cover-ui",
+  "content_brief": "做一张短视频封面式界面图，突出封面主图、标题安全区、账号标签和平台组件感，适合短视频封面包装、内容预告页和平台分发主图。",
+  "output_mode": "短视频封面式界面图",
+  "style_requirements": [
+    "short-video cover UI",
+    "vertical platform cover framing",
+    "title-safe creator thumbnail layout"
+  ],
+  "variation_requirements": [
+    "封面主图、标题区和平台组件层级清晰",
+    "竖版短视频平台感稳定",
+    "必须保留标题安全区，不依赖模型生成可读长标题"
+  ],
+  "text_policy": "标题、账号标签、互动数字和按钮文案只保留占位，正式文案后期替换。",
+  "sample_variant_axes": {
+    "ui_surface": "mobile app screen",
+    "module_focus": "hero banner",
+    "overlay_density": "minimal",
+    "device_context": "hand-held phone"
+  }
+}

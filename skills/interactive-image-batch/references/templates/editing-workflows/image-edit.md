@@ -37,6 +37,8 @@
 - `background-replacement`: 保主体、换背景。
 - `localized-fix`: 局部修正，强调边界安全。
 - `style-alignment-edit`: 在原图基础上统一新风格。
+- `material-replacement-edit`: 保留结构，只替换材质和表面质感。
+- `lighting-consistency-fix`: 只修正光线、阴影和补光逻辑。
 
 ## 推荐 variant_axes
 

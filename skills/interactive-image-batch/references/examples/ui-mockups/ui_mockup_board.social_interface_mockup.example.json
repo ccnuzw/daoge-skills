@@ -1,0 +1,23 @@
+{
+  "template_id": "ui-mockup-board",
+  "template_variant": "social-interface-mockup",
+  "content_brief": "做一张社媒界面 mockup，展示品牌账号首页、帖子封面卡片、互动区和摘要信息层，适合社媒 feed 包装和账号视觉统一页。",
+  "output_mode": "社媒界面 Mockup",
+  "style_requirements": [
+    "social-interface mockup",
+    "feed-first card hierarchy",
+    "mobile-social editorial framing"
+  ],
+  "variation_requirements": [
+    "帖子卡片、互动区和账号信息层级清晰",
+    "社媒 feed 结构真实但不过度依赖可读长文案",
+    "封面图、摘要卡片和互动组件节奏稳定"
+  ],
+  "text_policy": "账号名、帖子标题、标签和互动数字只保留占位与安全区，长文案后期替换。",
+  "sample_variant_axes": {
+    "ui_surface": "mobile app screen",
+    "module_focus": "content card",
+    "overlay_density": "balanced",
+    "device_context": "hand-held phone"
+  }
+}

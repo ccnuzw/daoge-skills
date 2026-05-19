@@ -1,0 +1,88 @@
+{
+  "board_id": "oral-storyboard-board-01",
+  "board_title": "产品主理人口播分镜整板",
+  "board_theme": "深蓝演播厅、统一主理人、信息区+分镜区+底部收尾KV",
+  "brand_panel": {
+    "title_lines": [
+      "产品主理人",
+      "口播分镜板",
+      "主题：一个产品卖点如何拆解成一张整板"
+    ]
+  },
+  "slots": [
+    {
+      "slot_id": "brand_panel",
+      "role": "brand_panel",
+      "generate_image": false,
+      "notes": "左侧信息区只做排版，不单独生图"
+    },
+    {
+      "slot_id": "shot_1",
+      "role": "shot",
+      "sequence": 1,
+      "reference_mode": "prompt-only",
+      "shot_label": "开场钩子",
+      "timecode": "0-4s",
+      "scene": "主理人在演播厅正面开场，背后叠加核心产品图层和一句强钩子信息",
+      "prompt_hints": [
+        "人物正面可信",
+        "信息层级必须强"
+      ],
+      "continuity_notes": [
+        "主理人、服装、光色与全板统一"
+      ],
+      "camera_move": "medium presenter shot"
+    },
+    {
+      "slot_id": "shot_2",
+      "role": "shot",
+      "sequence": 2,
+      "reference_mode": "prompt-only",
+      "shot_label": "卖点拆解",
+      "timecode": "4-8s",
+      "scene": "主理人中近景讲解卖点，右侧叠加对比信息框和产品细节节点",
+      "prompt_hints": [
+        "讲解逻辑清晰",
+        "不要变成普通海报"
+      ],
+      "continuity_notes": [
+        "继续保持同一主理人和演播厅"
+      ],
+      "camera_move": "close explanation shot"
+    },
+    {
+      "slot_id": "shot_3",
+      "role": "shot",
+      "sequence": 3,
+      "reference_mode": "prompt-only",
+      "shot_label": "场景扩展",
+      "timecode": "8-12s",
+      "scene": "信息图层扩展到真实使用场景，主理人作为前景锚点继续解释",
+      "prompt_hints": [
+        "信息和场景要同时成立",
+        "人物不能丢失"
+      ],
+      "continuity_notes": [
+        "视觉风格和主持人身份保持统一"
+      ],
+      "camera_move": "information-led composite shot"
+    },
+    {
+      "slot_id": "shot_4",
+      "role": "kv",
+      "sequence": 4,
+      "reference_mode": "prompt-only",
+      "shot_label": "底部收尾KV",
+      "timecode": "12-16s",
+      "scene": "主理人、产品、卖点关键词和品牌收尾信息同屏，形成整板底部收束",
+      "prompt_hints": [
+        "人物与产品并重",
+        "要有提案板结束感"
+      ],
+      "continuity_notes": [
+        "收尾仍然是同一人物和同一视觉系统"
+      ],
+      "camera_move": "full-body wrap-up shot"
+    }
+  ]
+}

@@ -86,9 +86,13 @@
 
 ## 模板变体
 
-- `finance-explainer-board`: 财经、产业链、半导体、算力等解释型口播分镜板。
-- `product-host-board`: 产品讲解、卖点拆解、主理人介绍型整板。
-- `virtual-presenter-board`: CG、二次元、虚拟主理人连续出镜的提案板。
+- `horizontal-board`: 基准横版整板，左信息区 + 右侧分镜 + 底部收尾 KV。
+- `host-led`: 人物镜头占比更高的主持人主导整板。
+- `industry-led`: 财经、产业链、半导体、算力等解释型口播分镜板。
+- `product-led`: 产品卖点、产品层与主持人讲解并重的口播整板。
+- `educational-explainer`: 知识点拆解、图解层和教学解释更强的口播整板。
+- `expert-led`: 专家、顾问、分析师等可信讲述者主导的证据式口播整板。
+- `testimonial-led`: 用户见证、案例复盘、前后变化证明更强的口播整板。
 
 ## 推荐 variant_axes
 

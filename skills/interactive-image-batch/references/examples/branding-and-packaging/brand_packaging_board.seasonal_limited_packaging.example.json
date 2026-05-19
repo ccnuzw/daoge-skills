@@ -1,0 +1,23 @@
+{
+  "template_id": "brand-packaging-board",
+  "template_variant": "seasonal-limited-packaging",
+  "content_brief": "做一张季节限定包装板，展示限定版主包装、主题配色、辅助图形和零售陈列效果，用于节庆季、春夏秋冬主题或限定联名包装延展。",
+  "output_mode": "季节限定包装板",
+  "style_requirements": [
+    "seasonal limited packaging board",
+    "theme-driven packaging system",
+    "retail-ready branded seasonal presentation"
+  ],
+  "variation_requirements": [
+    "季节或限定主题必须明确",
+    "包装系统与主题图形统一",
+    "限定感、零售感和品牌识别同时成立"
+  ],
+  "text_policy": "限定名、系列名和包装文案后期替换，当前只保留品牌区和主题标签安全区。",
+  "sample_variant_axes": {
+    "packaging_format": "box packaging",
+    "brand_asset_scope": "identity board",
+    "material_signal": "glossy label",
+    "shelf_presence": "colorful retail"
+  }
+}

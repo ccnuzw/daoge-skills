@@ -1,0 +1,21 @@
+{
+  "template_id": "avatar-profile-pack",
+  "template_variant": "sticker-set",
+  "content_brief": "做一组创作者头像资产包，包含同一角色的微笑、惊讶、冷静三个状态，适用于社媒头像和聊天贴纸。",
+  "output_mode": "头像资产",
+  "style_requirements": [
+    "centered avatar crop",
+    "sticker-pack silhouette clarity",
+    "collectible asset polish"
+  ],
+  "variation_requirements": [
+    "identity 一致",
+    "小尺寸清晰",
+    "背景保持克制"
+  ],
+  "text_policy": "不需要生成文字，重点保留头像裁切安全区和角色轮廓。",
+  "sample_variant_axes": {
+    "asset_usage": "sticker pack",
+    "crop_scale": "circular-safe headshot"
+  }
+}

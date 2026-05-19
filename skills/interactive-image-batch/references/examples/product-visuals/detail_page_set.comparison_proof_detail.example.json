@@ -1,0 +1,23 @@
+{
+  "template_id": "detail-page-set",
+  "template_variant": "comparison-proof-detail",
+  "content_brief": "做一组电商详情页对比证明图，分别展示产品核心功能前后差异、局部对比细节和关键卖点证明，适合详情页中的对比模块。",
+  "output_mode": "对比证明详情页组图",
+  "style_requirements": [
+    "comparison-proof ecommerce detail set",
+    "clear before-after or side-by-side product comparison layout",
+    "clean commercial lighting with annotation-safe spacing"
+  ],
+  "variation_requirements": [
+    "每张图都要承担对比证明角色",
+    "对比关系和产品优势必须一眼可读",
+    "说明位与主体关系稳定"
+  ],
+  "text_policy": "对比标题、箭头和说明文案后期替换，当前只保留清晰标注区和对比留白，不生成完整可读文字。",
+  "sample_variant_axes": {
+    "detail_page_role": "comparison proof detail",
+    "benefit_angle": "support",
+    "shot_scale": "close detail",
+    "layout_zone": "side-label-safe"
+  }
+}

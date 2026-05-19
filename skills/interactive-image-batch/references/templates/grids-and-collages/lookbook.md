@@ -37,6 +37,10 @@
 - `series-unified`: 同一系列统一风格，重点是连续性。
 - `chapter-lookbook`: 分章节场景切换，但保持系列逻辑。
 - `cover-and-range`: 少量封面图加大量稳定展示图。
+- `chapter-scene-progressive`: 章节推进更强，场景和系列节奏成段递进。
+- `multi-outfit-commercial`: 多款式商业展示更强，重点在换装可读性和商业一致性。
+- `editorial-pairing-lookbook`: 成对 editorial 组图更强，强调双图关系和节奏互文。
+- `lookbook-detail-mix`: 整身和细节混排，强调搭配完整性和材质结构可读性。
 
 ## 推荐 variant_axes
 

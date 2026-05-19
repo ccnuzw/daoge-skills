@@ -1,0 +1,23 @@
+{
+  "template_id": "social-grid",
+  "template_variant": "ugc-polished",
+  "content_brief": "做一组高级 UGC 风格社媒图，保留真实感和生活感，但整体仍然维持品牌统一和商业可控性。",
+  "output_mode": "高级 UGC 社媒组图",
+  "style_requirements": [
+    "ugc-polished social grid",
+    "approachable but branded lifestyle feed",
+    "square-safe creator-style composition"
+  ],
+  "variation_requirements": [
+    "真实感和品牌统一同时成立",
+    "每张图社媒角色明确",
+    "裁切安全区稳定"
+  ],
+  "text_policy": "标题贴纸和信息标签后期替换，当前只保留社媒覆盖层安全区。",
+  "sample_variant_axes": {
+    "grid_role": "lifestyle mood tile",
+    "crop_safety": "square-safe",
+    "palette_role": "warm lifestyle",
+    "content_density": "medium detail"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "template_id": "studio-editorial",
+  "template_variant": "motion-pose-studio",
+  "content_brief": "做一组更强调姿态动势的摄影棚人物大片，人物动作要有延展感，但灯光、服装和轮廓仍然清晰可控，用于时尚和运动感品牌棚拍。",
+  "output_mode": "棚拍大片",
+  "style_requirements": [
+    "motion pose studio editorial",
+    "dynamic silhouette under controlled light",
+    "fashion movement with readable styling"
+  ],
+  "variation_requirements": [
+    "动作要有张力，但不能失去服装结构可读性",
+    "动态姿态下仍要保证手脚和边缘裁切稳定",
+    "灯光必须帮助动作轮廓成立，而不是打平"
+  ],
+  "text_policy": "不生成可读标题，只保留适合动态棚拍主视觉的排版安全区。",
+  "sample_variant_axes": {
+    "lighting": "directional rim-assisted studio light",
+    "camera_language": "slight low-angle dynamic crop",
+    "material_emphasis": "fabric motion line"
+  }
+}

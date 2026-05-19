@@ -1,0 +1,23 @@
+{
+  "template_id": "ab-ad-test",
+  "template_variant": "hook-contrast-test",
+  "content_brief": "做一组广告首屏钩子测试图，比较“直接产品结论”“问题式冲突感”“结果先行展示”和“氛围式吸引”四种开场表达，验证哪种第一眼更容易停留和点击。",
+  "output_mode": "首屏钩子测试投放图",
+  "style_requirements": [
+    "hook-contrast paid social creative",
+    "first-glance conversion framing",
+    "headline-safe ad structure"
+  ],
+  "variation_requirements": [
+    "只测试首屏钩子表达差异",
+    "主体、质感和 CTA 结构保持稳定",
+    "每张图都要看起来像真实可投放素材"
+  ],
+  "text_policy": "标题、问题句和 CTA 文案后期替换，当前只保留清晰首屏留白和转化结构。",
+  "sample_variant_axes": {
+    "ad_test_hypothesis": "test which opening hook improves thumb-stop and click intent",
+    "controlled_variables": "same product same model same palette baseline",
+    "value_proposition": "premium fabric message",
+    "cta_zone": "bottom-safe"
+  }
+}
