@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { parseArgs } = require('./run_batch_cli');
 const { chunkArray, resolvePromptFileForRerun } = require('./script_utils');
 const {
@@ -19,15 +20,20 @@ const {
 } = require('./run_batch_selection');
 const {
   renderCompletionReport,
-  renderCompletionBoard,
-  renderRunOverview,
-  renderPortalHome,
-  renderResultHub,
-  renderReviewBoard,
-  renderRerunBoard,
+  renderRunRecord,
+  renderWorkspaceHome,
+  renderResultWorkspace,
+  renderExceptionWorkspace,
+  renderStoryboardBoard,
+  renderWorkspaceState,
   renderVisualReviewAnalysis,
   createOperationalArtifacts,
+  removeFileIfExists,
 } = require('./run_batch_artifacts');
+const {
+  resolveOptionalPageEmission,
+  buildOptionalPageDecision,
+} = require('./default_generation_contract');
 const {
   writeJson,
   createJobState,
@@ -40,10 +46,15 @@ const {
   updateStateAfterBatch,
   evaluatePausePolicy,
 } = require('./run_batch_runtime');
+const { refreshTaskCenterRuntimeState } = require('./task_center_state_runtime');
+const { refreshRuntimeWorkbench } = require('./workbench_state_runtime');
 const {
   buildContactSheet,
   runBatch,
 } = require('./run_batch_executor');
+const { readJsonIfExists } = require('./script_utils');
+const { loadWorkbenchState } = require('./workbench_state_shared');
+const { summarizeUserWorkbenchProtocol } = require('./workspace_page_shared');
 
 function stamp() {
   const d = new Date();
@@ -77,6 +88,83 @@ function summarizeBatchItems(items, batchNumber, offsetBase) {
     lastIndex: items[items.length - 1]?.index ?? offsetBase + items.length,
     offsetBase,
   };
+}
+
+function buildReadmeFromWorkspaceState(outputDir, fallback = {}) {
+  const workspaceState = loadWorkbenchState(outputDir).workspaceState || {};
+  const artifactGovernance = workspaceState?.artifactGovernance || {};
+  const summary = artifactGovernance.summary || {};
+  const directoryProtocol = workspaceState?.assetLayers?.directoryProtocol || {};
+  const directorySurfaces = directoryProtocol?.surfaces || {};
+  const workbenchProtocol = {
+    ...summarizeUserWorkbenchProtocol(workspaceState?.assetLayers?.userWorkbenchProtocol, { outputDir }),
+    summary: String(workspaceState?.assetLayers?.userWorkbenchProtocol?.summary || '').trim()
+      || String(directoryProtocol.summary || '').trim()
+      || summarizeUserWorkbenchProtocol(workspaceState?.assetLayers?.userWorkbenchProtocol, { outputDir }).summary,
+  };
+  const workspaceSupport = Array.isArray(artifactGovernance.workspaceSupport) ? artifactGovernance.workspaceSupport : [];
+  const supportEntries = workspaceSupport.filter((item) => item.exists);
+  const defaultEntryPath = summary.defaultEntryPath || fallback.workspaceHomePath || null;
+  const defaultEntryLabel = workbenchProtocol.defaultEntryLabel || summary.defaultEntryLabel || '工作台首页';
+  const resultWorkspacePath = fallback.resultWorkspacePath || path.join(outputDir, 'result_workspace.html');
+  const exceptionWorkspacePath = fallback.exceptionWorkspacePath || path.join(outputDir, 'exception_workspace.html');
+  const runRecordPath = fallback.runRecordHtmlPath || path.join(outputDir, 'run_record.html');
+  const completionReportPath = fallback.completionReportPath || null;
+  const storyboardBoardPath = fallback.storyboardBoardPath || null;
+  const statusLines = Array.isArray(fallback.statusLines) ? fallback.statusLines : [];
+  const principle = String(summary.principle || '').trim() || workbenchProtocol.userRule;
+  const directorySummary = workbenchProtocol.summary;
+  const filesystemCount = Number(directorySurfaces?.filesystem?.count || 0);
+  const archiveCount = Number(directorySurfaces?.archive?.count || 0);
+  const internalCount = Number(directorySurfaces?.internal?.count || 0);
+
+  return [
+    '# DAOGE 当前任务入口',
+    '',
+    `请先打开${defaultEntryLabel}。这份 README 只负责告诉你从哪里进入、进去后先看什么、下一步怎么和 DAOGE 继续。`,
+    '',
+    `- 先看这里: ${defaultEntryPath}`,
+    `- 打开后先看: 当前阶段、推荐下一步、回到对话框怎么说`,
+    `- 不用先看: JSON / Markdown 内部记录、旧说明页、深看页`,
+    '',
+    '## 当前状态',
+    '',
+    ...statusLines,
+    '',
+    '## 这轮怎么进入',
+    '',
+    `- 主链: 任务总控 -> ${workbenchProtocol.defaultVisibleLabels.join(' -> ')}`,
+    `- 当前主入口: ${defaultEntryLabel}`,
+    `- 进入后: 先看页面顶部主动作，再按推荐按钮继续`,
+    `- 补充入口: ${supportEntries.length ? supportEntries.map((item) => item.label).join('、') : workbenchProtocol.supportEntryLabel}`,
+    `- 已后退: 深看页、旧说明页、JSON / Markdown 内部记录`,
+    `- 使用原则: ${principle}`,
+    `- 目录规则: ${directorySummary}`,
+    '',
+    '## 按需直达',
+    '',
+    `- 结果工作台: ${resultWorkspacePath}`,
+    `- 异常工作台: ${exceptionWorkspacePath}`,
+    `- 任务档案: ${runRecordPath}`,
+    ...(completionReportPath ? [`- 完成报告: ${completionReportPath}`] : []),
+    ...(storyboardBoardPath ? [`- 分镜整板页: ${storyboardBoardPath}`] : []),
+    ...supportEntries
+      .filter((item) => item.path && ![runRecordPath, completionReportPath, storyboardBoardPath].filter(Boolean).includes(item.path))
+      .map((item) => `- ${item.label}: ${item.path}`),
+    '',
+    '## 这三份说明各看什么',
+    '',
+    `- README: 只看入口、主链和目录分层，不展开过程细节`,
+    `- 任务档案: 只看这轮发生了什么、当前到了哪一步、下一步回哪里`,
+    `- 完成报告: 只看这轮是否已经可以收口，以及最后该怎么处理`,
+    '',
+    '## 目录分层',
+    '',
+    `- 用户直看层: 主链工作台 + 任务档案这类少量补充入口`,
+    `- 文件落盘层: ${filesystemCount > 0 ? `${filesystemCount} 个文件，仅用于目录落盘说明` : '当前没有额外文件落盘入口'}`,
+    `- 归档层: ${archiveCount > 0 ? `${archiveCount} 个文件，仅在归档回看时使用` : '当前没有归档文件'}`,
+    `- 内部状态层: ${internalCount > 0 ? `${internalCount} 个文件，服务状态底盘、续跑和诊断` : '当前没有内部状态文件'}`,
+  ].join('\n');
 }
 
 function buildExecutionPlan(selectedPrompts, batchSize, stageSize, sampleSize) {
@@ -193,6 +281,12 @@ async function main() {
   const contactSheet = parseBoolean(args['contact-sheet'], true);
   const dryRun = parseBoolean(args['dry-run'], false);
   const skipExisting = parseBoolean(args['skip-existing'], false);
+  const emitDiagnosticMarkdown = parseBoolean(args['emit-diagnostic-markdown'], false);
+  const emitArchiveMarkdown = parseBoolean(args['emit-archive-markdown'], false);
+  const optionalPageDecision = buildOptionalPageDecision({
+    optionalPageMode: args['emit-optional-pages'],
+  });
+  const optionalPageEmission = optionalPageDecision;
   const runLabel = args['run-label'] ? slugify(args['run-label']) : `run_${stamp()}`;
   const outputDir = path.resolve(args['output-dir'] || path.join(cwd, 'generated_images', runLabel));
   fs.mkdirSync(outputDir, { recursive: true });
@@ -206,6 +300,46 @@ async function main() {
   const batchPlan = batches.map(({ items, ...batch }) => batch);
   fs.writeFileSync(path.join(outputDir, 'batch_plan.json'), JSON.stringify(batchPlan, null, 2));
   fs.writeFileSync(path.join(outputDir, 'stage_plan.json'), JSON.stringify(publicExecutionPlan(executionPlan), null, 2));
+  const initialManifest = {
+    outputDir,
+    promptSource: promptsCopyPath,
+    promptSourceOriginal: promptsFile,
+    promptSnapshot: promptsCopyPath,
+    optionalPageMode: optionalPageEmission.mode,
+    resumeManifest,
+    failedOnly,
+    rerunPlan: rerunPlanPath,
+    selectedCount: selectedPrompts.length,
+    offset,
+    limit,
+    batchSize,
+    stageSize: stageSize || null,
+    sampleSize: executionPlan.sampleSize,
+    stageCount: executionPlan.stageCount,
+    batchCount: batches.length,
+    model: env.OPENAI_MODEL || 'gpt-image-2',
+    defaultSize: `${width}x${height}`,
+    generatedAt: new Date().toISOString(),
+    dryRun,
+    skipExisting,
+    paused: false,
+    pauseReason: null,
+    jobState: path.join(outputDir, 'job_state.json'),
+    checkpoint: path.join(outputDir, 'checkpoint.json'),
+    stagePlan: path.join(outputDir, 'stage_plan.json'),
+    success: 0,
+    failed: 0,
+    skipped: 0,
+    batches: batchPlan.map((batch) => ({
+      ...batch,
+      outputDir: null,
+      success: 0,
+      failed: 0,
+      skipped: 0,
+      results: [],
+    })),
+  };
+  fs.writeFileSync(path.join(outputDir, 'manifest.json'), JSON.stringify(initialManifest, null, 2));
 
   const jobState = createJobState(outputDir, {
     promptsFile,
@@ -220,6 +354,11 @@ async function main() {
   }, executionPlan);
   writeJobState(outputDir, jobState);
   writeCheckpoint(outputDir, jobState);
+  refreshTaskCenterRuntimeState(outputDir, {
+    jobState,
+    renderOutputs: true,
+  });
+  refreshRuntimeWorkbench(outputDir);
 
   console.log(`[info] output dir: ${outputDir}`);
   console.log(`[info] prompts: ${selectedPrompts.length}, stages: ${executionPlan.stageCount}, batches: ${batches.length}, batch size: ${batchSize}, concurrency: ${concurrency}, default size: ${width}x${height}, timeout per image: ${timeoutSeconds}s, retry: ${retryCount}`);
@@ -231,71 +370,85 @@ async function main() {
   if (reuseOutputAsReference) console.log('[info] previous successful outputs will be reused as edit references for selected prompts');
   if (dryRun) {
     const manifest = {
-      outputDir,
-      promptSource: promptsCopyPath,
-      promptSourceOriginal: promptsFile,
-      promptSnapshot: promptsCopyPath,
-      resumeManifest,
-      failedOnly,
-      rerunPlan: rerunPlanPath,
-      selectedCount: selectedPrompts.length,
-      offset,
-      limit,
-      batchSize,
-      stageSize: stageSize || null,
-      sampleSize: executionPlan.sampleSize,
-      stageCount: executionPlan.stageCount,
-      batchCount: batches.length,
-      model: env.OPENAI_MODEL || 'gpt-image-2',
-      defaultSize: `${width}x${height}`,
-      generatedAt: new Date().toISOString(),
+      ...initialManifest,
       dryRun: true,
-      skipExisting,
-      jobState: path.join(outputDir, 'job_state.json'),
-      checkpoint: path.join(outputDir, 'checkpoint.json'),
-      stagePlan: path.join(outputDir, 'stage_plan.json'),
-      success: 0,
-      failed: 0,
-      skipped: 0,
-      batches: batchPlan.map((batch) => ({
-        ...batch,
-        outputDir: null,
-        success: 0,
-        failed: 0,
-        skipped: 0,
-        results: [],
-      })),
     };
     fs.writeFileSync(path.join(outputDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-    const artifacts = createOperationalArtifacts(outputDir, manifest, [], { readJson, writeJson });
-    const reviewBoardPath = renderReviewBoard(outputDir);
-    const rerunBoardPath = renderRerunBoard(outputDir);
-    const portalHomePath = renderPortalHome(outputDir);
-    const completionBoardPath = renderCompletionBoard(outputDir);
-    const runOverviewPath = renderRunOverview(outputDir);
-    fs.writeFileSync(path.join(outputDir, 'README.md'), [
-      '# Interactive image batch dry run',
-      '',
-      `- Portal home: ${portalHomePath}`,
-      `- Completion board: ${completionBoardPath}`,
-      `- Run overview: ${runOverviewPath}`,
-      `- Rerun board: ${rerunBoardPath}`,
-      `- Output dir: ${outputDir}`,
-      `- Prompt source: ${promptsFile}`,
-      `- Prompt snapshot: ${promptsCopyPath}`,
-      `- Prompt count: ${selectedPrompts.length}`,
-      `- Batch size: ${batchSize}`,
-      `- Batch count: ${batches.length}`,
-      `- Stage count: ${executionPlan.stageCount}`,
-      `- Sample size: ${executionPlan.sampleSize}`,
-      `- Resume manifest: ${resumeManifest || 'none'}`,
-      `- Failed only: ${failedOnly}`,
-      `- Rerun plan: ${rerunPlanPath || 'none'}`,
-      `- Selection board: ${artifacts.selection.selectionBoard}`,
-      `- Review board: ${reviewBoardPath}`,
-      `- Operations report: ${artifacts.operations.reportMd}`,
-      `- Run index: ${artifacts.runIndex.indexMd}`,
-    ].join('\n'));
+    refreshRuntimeWorkbench(outputDir);
+    const artifacts = createOperationalArtifacts(outputDir, manifest, [], { readJson, writeJson }, {
+      generateDiagnosticMarkdown: emitDiagnosticMarkdown,
+      generateArchiveMarkdown: emitArchiveMarkdown,
+    });
+    const runRecord = renderRunRecord(outputDir, {
+      generateArchiveMarkdown: emitArchiveMarkdown,
+    });
+    const workspaceStateArtifacts = renderWorkspaceState(outputDir);
+    const workspaceHomePath = renderWorkspaceHome(outputDir);
+    const resultWorkspacePath = renderResultWorkspace(outputDir);
+    const exceptionWorkspacePath = renderExceptionWorkspace(outputDir);
+    const storyboardBoardPath = optionalPageDecision.shouldGenerateStoryboardDetails
+      ? renderStoryboardBoard(outputDir)
+      : null;
+    if (!optionalPageDecision.shouldGenerateStoryboardDetails || !storyboardBoardPath) {
+      removeFileIfExists(path.join(outputDir, 'storyboard_board.html'));
+    }
+    if (optionalPageDecision.shouldGenerateResultDetails) {
+      execFileSync(process.execPath, [
+        path.join(__dirname, 'render_review_board.js'),
+        '--manifest-file', path.join(outputDir, 'manifest.json'),
+        '--success-file', path.join(outputDir, 'success.json'),
+        '--failed-file', path.join(outputDir, 'failed.json'),
+        '--needs-review-file', path.join(outputDir, 'needs_review.json'),
+        '--rerun-candidates-file', path.join(outputDir, 'rerun_candidates.json'),
+        '--operations-report-file', path.join(outputDir, 'operations_report.json'),
+        '--output-file', path.join(outputDir, 'review_board.html'),
+      ], { stdio: 'ignore' });
+      execFileSync(process.execPath, [
+        path.join(__dirname, 'render_run_overview.js'),
+        '--manifest-file', path.join(outputDir, 'manifest.json'),
+        '--output-file', path.join(outputDir, 'run_overview.html'),
+      ], { stdio: 'ignore' });
+      execFileSync(process.execPath, [
+        path.join(__dirname, 'render_rerun_board.js'),
+        '--manifest-file', path.join(outputDir, 'manifest.json'),
+        '--output-file', path.join(outputDir, 'rerun_board.html'),
+      ], { stdio: 'ignore' });
+      execFileSync(process.execPath, [
+        path.join(__dirname, 'render_completion_board.js'),
+        '--manifest-file', path.join(outputDir, 'manifest.json'),
+        '--output-file', path.join(outputDir, 'completion_board.html'),
+      ], { stdio: 'ignore' });
+    }
+    if (optionalPageDecision.shouldGenerateLegacyPages) {
+      execFileSync(process.execPath, [
+        path.join(__dirname, 'render_result_hub_board.js'),
+        '--manifest-file', path.join(outputDir, 'manifest.json'),
+        '--output-file', path.join(outputDir, 'result_hub.html'),
+      ], { stdio: 'ignore' });
+      execFileSync(process.execPath, [
+        path.join(__dirname, 'render_portal_home.js'),
+        '--manifest-file', path.join(outputDir, 'manifest.json'),
+        '--output-file', path.join(outputDir, 'daoge_portal.html'),
+      ], { stdio: 'ignore' });
+    }
+    if (optionalPageDecision.shouldRefreshExpandedWorkspace) {
+      renderWorkspaceState(outputDir);
+      renderWorkspaceHome(outputDir);
+      renderResultWorkspace(outputDir);
+      renderExceptionWorkspace(outputDir);
+    }
+    fs.writeFileSync(path.join(outputDir, 'README.md'), buildReadmeFromWorkspaceState(outputDir, {
+      workspaceHomePath,
+      resultWorkspacePath,
+      exceptionWorkspacePath,
+      runRecordHtmlPath: runRecord.htmlPath,
+      completionReportPath: null,
+      storyboardBoardPath,
+      statusLines: [
+        '- 当前状态: 模拟运行，页面和档案已经生成',
+        `- 输出目录: ${outputDir}`,
+      ],
+    }));
     console.log('[dry-run]');
     console.log(JSON.stringify({ outputDir, selectedCount: selectedPrompts.length, batchCount: batches.length, rerunPlan: rerunPlanPath }, null, 2));
     return;
@@ -307,6 +460,11 @@ async function main() {
   let pauseReason = null;
   jobState.status = 'running';
   writeJobState(outputDir, jobState);
+  refreshTaskCenterRuntimeState(outputDir, {
+    jobState,
+    renderOutputs: true,
+  });
+  refreshRuntimeWorkbench(outputDir);
   printExecutionStart({
     selectedCount: selectedPrompts.length,
     stageCount: executionPlan.stageCount,
@@ -324,6 +482,11 @@ async function main() {
     jobState.progress.currentStage = plannedBatch.stageNumber;
     jobState.progress.currentBatch = plannedBatch.batchNumber;
     writeJobState(outputDir, jobState);
+    refreshTaskCenterRuntimeState(outputDir, {
+      jobState,
+      renderOutputs: true,
+    });
+    refreshRuntimeWorkbench(outputDir);
     printBatchStart(plannedBatch, batches.length);
 
     const batchResult = await runBatch(plannedBatch.items, {
@@ -351,6 +514,17 @@ async function main() {
     updateStateAfterBatch(jobState, batchResult.manifest);
     writeJobState(outputDir, jobState);
     writeCheckpoint(outputDir, jobState, batchResult.manifest);
+    refreshTaskCenterRuntimeState(outputDir, {
+      jobState,
+      checkpoint: {
+        writtenAt: new Date().toISOString(),
+        latestBatch: {
+          batchNumber: batchResult.manifest.batchNumber,
+        },
+      },
+      renderOutputs: true,
+    });
+    refreshRuntimeWorkbench(outputDir);
     printBatchSummary(plannedBatch, batchResult.manifest, jobState);
 
     pauseReason = evaluatePausePolicy(batchResult.manifest, allResults, pausePolicy);
@@ -364,6 +538,17 @@ async function main() {
       jobState.pauseReason = pauseReason;
       writeJobState(outputDir, jobState);
       writeCheckpoint(outputDir, jobState, batchResult.manifest);
+      refreshTaskCenterRuntimeState(outputDir, {
+        jobState,
+        checkpoint: {
+          writtenAt: new Date().toISOString(),
+          latestBatch: {
+            batchNumber: batchResult.manifest.batchNumber,
+          },
+        },
+        renderOutputs: true,
+      });
+      refreshRuntimeWorkbench(outputDir);
       console.log('DAOGE 状态：已暂停，等待处理');
       console.log(`[DAOGE][自动暂停] ${translatePauseReason(pauseReason)}`);
       console.log(`[pause] ${pauseReason}`);
@@ -379,6 +564,7 @@ async function main() {
     promptSource: promptsCopyPath,
     promptSourceOriginal: promptsFile,
     promptSnapshot: promptsCopyPath,
+    optionalPageMode: optionalPageEmission.mode,
     resumeManifest,
     failedOnly,
     rerunPlan: rerunPlanPath,
@@ -409,9 +595,17 @@ async function main() {
     jobState.pauseReason = null;
     writeJobState(outputDir, jobState);
     writeCheckpoint(outputDir, jobState);
+    refreshTaskCenterRuntimeState(outputDir, {
+      jobState,
+      renderOutputs: true,
+    });
+    refreshRuntimeWorkbench(outputDir);
   }
   fs.writeFileSync(path.join(outputDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-  const artifacts = createOperationalArtifacts(outputDir, manifest, allResults, { readJson, writeJson });
+  const artifacts = createOperationalArtifacts(outputDir, manifest, allResults, { readJson, writeJson }, {
+    generateDiagnosticMarkdown: emitDiagnosticMarkdown,
+    generateArchiveMarkdown: emitArchiveMarkdown,
+  });
   const visualReviewAnalysisPath = renderVisualReviewAnalysis(outputDir, manifest, {
     enable: parseBoolean(args['enable-visual-review'], false),
     envFile,
@@ -419,43 +613,89 @@ async function main() {
     visionTimeoutMs: Number(args['vision-timeout-ms'] || 90000),
     maxItems: Number(args['review-max-items'] || 8),
   });
-  const reviewBoardPath = renderReviewBoard(outputDir);
-  const rerunBoardPath = renderRerunBoard(outputDir);
-  const portalHomePath = renderPortalHome(outputDir);
-  const completionBoardPath = renderCompletionBoard(outputDir);
-  const runOverviewPath = renderRunOverview(outputDir);
-  let completionReportPath = renderCompletionReport(outputDir);
-  const resultHubPath = renderResultHub(outputDir);
+  const runRecord = renderRunRecord(outputDir, {
+    generateArchiveMarkdown: emitArchiveMarkdown,
+  });
+  const workspaceStateArtifacts = renderWorkspaceState(outputDir);
+  const workspaceHomePath = renderWorkspaceHome(outputDir);
+  const resultWorkspacePath = renderResultWorkspace(outputDir);
+  const exceptionWorkspacePath = renderExceptionWorkspace(outputDir);
+  const storyboardBoardPath = optionalPageDecision.shouldGenerateStoryboardDetails
+    ? renderStoryboardBoard(outputDir)
+    : null;
+  if (!optionalPageDecision.shouldGenerateStoryboardDetails || !storyboardBoardPath) {
+    removeFileIfExists(path.join(outputDir, 'storyboard_board.html'));
+  }
+  if (optionalPageDecision.shouldGenerateResultDetails) {
+    execFileSync(process.execPath, [
+      path.join(__dirname, 'render_review_board.js'),
+      '--manifest-file', path.join(outputDir, 'manifest.json'),
+      '--success-file', path.join(outputDir, 'success.json'),
+      '--failed-file', path.join(outputDir, 'failed.json'),
+      '--needs-review-file', path.join(outputDir, 'needs_review.json'),
+      '--rerun-candidates-file', path.join(outputDir, 'rerun_candidates.json'),
+      '--operations-report-file', path.join(outputDir, 'operations_report.json'),
+      '--output-file', path.join(outputDir, 'review_board.html'),
+    ], { stdio: 'ignore' });
+    execFileSync(process.execPath, [
+      path.join(__dirname, 'render_run_overview.js'),
+      '--manifest-file', path.join(outputDir, 'manifest.json'),
+      '--output-file', path.join(outputDir, 'run_overview.html'),
+    ], { stdio: 'ignore' });
+    execFileSync(process.execPath, [
+      path.join(__dirname, 'render_rerun_board.js'),
+      '--manifest-file', path.join(outputDir, 'manifest.json'),
+      '--output-file', path.join(outputDir, 'rerun_board.html'),
+    ], { stdio: 'ignore' });
+    execFileSync(process.execPath, [
+      path.join(__dirname, 'render_completion_board.js'),
+      '--manifest-file', path.join(outputDir, 'manifest.json'),
+      '--output-file', path.join(outputDir, 'completion_board.html'),
+    ], { stdio: 'ignore' });
+  }
+  if (optionalPageDecision.shouldGenerateLegacyPages) {
+    execFileSync(process.execPath, [
+      path.join(__dirname, 'render_result_hub_board.js'),
+      '--manifest-file', path.join(outputDir, 'manifest.json'),
+      '--output-file', path.join(outputDir, 'result_hub.html'),
+    ], { stdio: 'ignore' });
+    execFileSync(process.execPath, [
+      path.join(__dirname, 'render_portal_home.js'),
+      '--manifest-file', path.join(outputDir, 'manifest.json'),
+      '--output-file', path.join(outputDir, 'daoge_portal.html'),
+    ], { stdio: 'ignore' });
+  }
+  if (optionalPageDecision.shouldRefreshExpandedWorkspace) {
+    renderWorkspaceState(outputDir);
+    renderWorkspaceHome(outputDir);
+    renderResultWorkspace(outputDir);
+    renderExceptionWorkspace(outputDir);
+  }
+  let completionReportPath = renderCompletionReport(outputDir, {
+    generateArchiveMarkdown: emitArchiveMarkdown,
+  });
 
-  const readme = [
-    '# DAOGE Run Output',
-    '',
-    `- DAOGE portal home: ${portalHomePath}`,
-    `- DAOGE completion board: ${completionBoardPath}`,
-    `- DAOGE run overview: ${runOverviewPath}`,
-    `- DAOGE rerun board: ${rerunBoardPath}`,
-    `- DAOGE 结果总入口: ${resultHubPath}`,
-    `- DAOGE completion report: ${completionReportPath}`,
-    `- DAOGE review board: ${reviewBoardPath}`,
-    `- Visual review analysis: ${visualReviewAnalysisPath || 'disabled'}`,
-    `- Output dir: ${outputDir}`,
-    `- Prompt source: ${promptsFile}`,
-    `- Success: ${manifest.success}`,
-    `- Failed: ${manifest.failed}`,
-    `- Skipped existing: ${allResults.filter((item) => item.skipped).length}`,
-    `- Selection board: ${artifacts.selection.selectionBoard}`,
-    `- Operations report: ${artifacts.operations.reportMd}`,
-    `- Run index: ${artifacts.runIndex.indexMd}`,
-    `- Job state: ${path.join(outputDir, 'job_state.json')}`,
-    `- Checkpoint: ${path.join(outputDir, 'checkpoint.json')}`,
-    `- Stage plan: ${path.join(outputDir, 'stage_plan.json')}`,
-  ].join('\n');
-  fs.writeFileSync(path.join(outputDir, 'README.md'), readme);
+  fs.writeFileSync(path.join(outputDir, 'README.md'), buildReadmeFromWorkspaceState(outputDir, {
+    workspaceHomePath,
+    resultWorkspacePath,
+    exceptionWorkspacePath,
+    runRecordHtmlPath: runRecord.htmlPath,
+    completionReportPath,
+    storyboardBoardPath,
+    statusLines: [
+      `- 成功结果: ${manifest.success}`,
+      `- 失败结果: ${manifest.failed}`,
+      `- 跳过已有结果: ${allResults.filter((item) => item.skipped).length}`,
+      `- 当前状态: ${manifest.paused ? '已暂停，建议先处理风险' : (manifest.failed > 0 ? '存在异常，建议先处理失败项' : '整体稳定，可以继续筛图或进入下一轮')}`,
+      `- 运行总索引: ${artifacts.runIndex.indexMd}`,
+    ],
+  }));
 
   console.log(paused ? 'DAOGE 状态：已暂停，等待处理' : 'DAOGE 状态：任务完成');
   console.log(`[DAOGE][执行结果] 成功 ${manifest.success}，失败 ${manifest.failed}，跳过 ${allResults.filter((item) => item.skipped).length}，共 ${selectedPrompts.length} 张`);
-  console.log(`[DAOGE][结果入口] 先看这里：${resultHubPath}`);
-  console.log(`[DAOGE][审阅看板] HTML 看板：${reviewBoardPath}`);
+  console.log(`[DAOGE][工作台首页] 先看这里：${workspaceHomePath}`);
+  console.log(`[DAOGE][结果工作台] 结果主链入口：${resultWorkspacePath}`);
+  if (storyboardBoardPath) console.log(`[DAOGE][整板页] 按需页面：${storyboardBoardPath}`);
   if (paused) {
     console.log(`[DAOGE][下一步建议] ${translatePauseReason(pauseReason)}。建议先处理风险，再决定是否继续续跑。`);
   } else if (manifest.failed > 0) {
@@ -464,7 +704,7 @@ async function main() {
     console.log('[DAOGE][下一步建议] 本轮已稳定完成，可以进入选图、复盘或下一轮扩图。');
   }
   console.log('[done]');
-  console.log(JSON.stringify({ outputDir, resultHubPath, success: manifest.success, failed: manifest.failed, batchCount: batches.length }, null, 2));
+  console.log(JSON.stringify({ outputDir, workspaceHomePath, resultWorkspacePath, success: manifest.success, failed: manifest.failed, batchCount: batches.length }, null, 2));
 }
 
 main().catch((error) => {

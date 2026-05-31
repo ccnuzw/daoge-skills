@@ -18,6 +18,12 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
 }
 
+function readJsonIfExists(filePath) {
+  const absolutePath = path.resolve(filePath);
+  if (!fs.existsSync(absolutePath)) return null;
+  return JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+}
+
 function parseEnvFile(filePath) {
   const out = {};
   const raw = fs.readFileSync(path.resolve(filePath), 'utf8');
@@ -80,6 +86,7 @@ function copyFileIntoDir(sourcePath, targetDir, targetName) {
 module.exports = {
   parseArgs,
   readJson,
+  readJsonIfExists,
   parseEnvFile,
   writeJson,
   fileExists,

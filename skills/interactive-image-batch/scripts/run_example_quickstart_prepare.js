@@ -86,6 +86,7 @@ function main() {
     '--output-dir', prepareOutputDir,
     '--batch-size', '2',
     '--preview-count', '4',
+    ...(args['emit-optional-pages'] ? ['--emit-optional-pages', args['emit-optional-pages']] : []),
   ]);
 
   console.log(JSON.stringify({
@@ -102,8 +103,8 @@ function main() {
     promptDraftBundle,
     promptsQuickstart,
     prepareOutputDir,
-    preflightBoard: path.join(prepareOutputDir, 'preflight_board.html'),
-    promptPreviewBoard: path.join(prepareOutputDir, 'prompt_preview.html'),
+    workspaceHome: path.join(prepareOutputDir, 'workspace_home.html'),
+    prepareWorkspace: path.join(prepareOutputDir, 'prepare_workspace.html'),
   }, null, 2));
 }
 

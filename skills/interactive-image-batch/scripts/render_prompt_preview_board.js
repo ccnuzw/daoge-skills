@@ -1,8 +1,11 @@
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks } = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail, renderPortalRouteCompass, renderPortalWorkbench } = require('./portal_shared');
+const { ensurePortalUiAssets, renderPortalHeadAssets } = require('./portal_ui_shared');
 const { topLabel, resolveProfile, buildDisplayDistributions, normalizeValue } = require('./template_display_profile');
+const { deriveTaskLabel } = require('./task_label_utils');
+const { loadWorkbenchState } = require('./workbench_state_shared');
+const { resolveWorkspaceRouteFile } = require('./workspace_storyboard_shared');
 
 function escapeHtml(text) {
   return String(text ?? '')
@@ -77,6 +80,28 @@ function main() {
   const previewCount = Math.min(Number(args['preview-count'] || 8), prompts.length);
   const previewItems = prompts.slice(0, previewCount);
   const storyboardMode = prompts.some((item) => item.slot_id || item.shot_id || item.layout_region_id);
+  const workbenchState = loadWorkbenchState(outputDir);
+  const pageState = workbenchState.pageState || workbenchState.workspaceState || {};
+  const taskLabel = deriveTaskLabel({
+    taskLabel: String(pageState?.taskLabel || '').trim(),
+    selectedCount: Number(pageState?.counts?.selected || prompts.length || 0),
+    sampleSize: 0,
+    pauseReason: '',
+    resumeManifest: null,
+  }, outputDir);
+  const phaseLabel = String(pageState?.status?.phase || '').trim() || '准备阶段';
+  const statusHeadline = String(pageState?.status?.headline || '').trim() || `当前处于${phaseLabel}的方向确认阶段`;
+  const statusSummary = String(pageState?.status?.summary || '').trim()
+    || '这一页先帮你确认方向、分布和样本质量，再决定是继续预检、回准备主链还是去素材页。';
+  const nextActionTarget = pageState?.nextAction?.target
+    ? path.join(outputDir, pageState.nextAction.target)
+    : path.join(outputDir, 'prepare_workspace.html');
+  const nextActionLabel = String(pageState?.nextAction?.label || '').trim()
+    || (fileExists(path.join(outputDir, 'prepare_workspace.html')) ? '回准备工作台' : '去预检总览');
+  const nextActionReason = String(pageState?.nextAction?.reason || '').trim() || statusSummary;
+  const workspaceHomePath = resolveWorkspaceRouteFile(outputDir, pageState, 'home', path.join(outputDir, 'workspace_home.html'));
+  const prepareWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'prepare', path.join(outputDir, 'prepare_workspace.html'));
+  const resultWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
 
   const displayProfile = resolveProfile(prompts);
   const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
@@ -92,13 +117,28 @@ function main() {
   const showPurityGrade = purityGrade.length && topLabel(purityGrade) !== '未指定';
 
   const preflightBoardPath = path.join(outputDir, 'preflight_board.html');
+  const assetsBoardPath = path.join(outputDir, 'assets_board.html');
+  const promptContextBar = renderPortalContextBar({
+    runLabel: taskLabel,
+    phaseLabel,
+    flowLabel: '工作台首页 -> 准备工作台 -> 提示词预览 -> 预检 -> 素材绑定 -> 执行',
+    counts: [
+      { label: '提示词', value: prompts.length },
+      { label: '批次', value: batches.length },
+      { label: '当前样本', value: previewItems.length },
+    ],
+    hints: [
+      statusHeadline,
+      nextActionReason,
+    ],
+  });
 
   const html = `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DAOGE Prompt Preview</title>
+  <title>DAOGE 提示词预览</title>
 ${renderPortalHeadAssets()}
   <style>
     :root {
@@ -123,7 +163,7 @@ ${renderPortalHeadAssets()}
     .shell {
       max-width: 1480px;
       margin: 0 auto;
-      padding: 28px 24px 56px;
+      padding: 24px 22px 48px;
     }
     .hero, .section, .prompt-card {
       border: 1px solid var(--panel-border);
@@ -133,7 +173,7 @@ ${renderPortalHeadAssets()}
       box-shadow: 0 18px 48px rgba(0,0,0,0.24);
     }
     .hero {
-      padding: 28px 28px 24px;
+      padding: 24px 24px 20px;
       background:
         linear-gradient(160deg, rgba(136,185,255,0.15), transparent 38%),
         rgba(255,255,255,0.04);
@@ -174,12 +214,12 @@ ${renderPortalHeadAssets()}
     .hero-copy {
       margin: 0;
       color: var(--text-sub);
-      line-height: 1.7;
-      max-width: 76ch;
+      line-height: 1.65;
+      max-width: 68ch;
     }
     .hero-grid, .section-grid, .prompt-grid {
       display: grid;
-      gap: 16px;
+      gap: 14px;
     }
     .hero-grid {
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -196,28 +236,28 @@ ${renderPortalHeadAssets()}
     .metric-info .metric-value { color: var(--info); }
     .metric-success .metric-value { color: var(--success); }
     .prompt-card {
-      padding: 20px;
+      padding: 18px;
     }
     .prompt-card-title {
-      font-size: 18px;
+      font-size: 17px;
       margin: 0 0 10px;
     }
     .prompt-card-copy {
       color: var(--text-sub);
-      line-height: 1.7;
-      margin: 14px 0 0;
-      font-size: 14px;
+      line-height: 1.6;
+      margin: 12px 0 0;
+      font-size: 13px;
     }
     .meta-list {
       display: grid;
-      gap: 10px;
-      margin-top: 12px;
+      gap: 8px;
+      margin-top: 10px;
     }
     .meta-row {
       display: grid;
       grid-template-columns: 110px 1fr;
       gap: 10px;
-      padding-bottom: 10px;
+      padding-bottom: 8px;
       border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .meta-row:last-child { border-bottom: none; padding-bottom: 0; }
@@ -249,15 +289,26 @@ ${renderPortalHeadAssets()}
         ${renderPortalTopLinks(outputDir, {
           currentPage: 'prompt_preview.html',
           extraLinks: [
-            { label: 'Markdown Prompt 预览', href: relativeFile(outputDir, markdownPath) },
-            { label: '运行摘要 Markdown', href: relativeFile(outputDir, summaryPath) },
+            { label: '回工作台首页', file: workspaceHomePath },
+            { label: '回准备工作台', file: prepareWorkspacePath },
+            { label: '提示词预览文字版', href: relativeFile(outputDir, markdownPath) },
+            { label: '运行摘要文字版', href: relativeFile(outputDir, summaryPath) },
           ],
         })}
       </div>
-      <div class="eyebrow">DAOGE Prompt Preview</div>
-      <h1>DAOGE Prompt 预览</h1>
-      <p class="hero-copy">这是 prepare 阶段的 Prompt HTML 预览页。它负责把这一轮的分布摘要、批次计划和代表性 Prompt 样例收在一页里，${escapeHtml(displayProfile.heroSummary)}</p>
+      <div class="eyebrow">提示词方向确认</div>
+      <h1>${escapeHtml(taskLabel)} · DAOGE 提示词预览</h1>
+      <p class="hero-copy">${escapeHtml(statusSummary)}</p>
+      ${promptContextBar}
+      ${renderPortalModeSwitch({
+        title: '准备页浏览模式',
+        copy: '新手先看方向和建议，熟练用户可以更快切到批次、分布和下一站。',
+      })}
       <div class="hero-grid">
+        <div class="metric-card metric-info">
+          <div class="metric-label">当前任务</div>
+          <div class="metric-value">${escapeHtml(taskLabel)}</div>
+        </div>
         <div class="metric-card metric-info">
           <div class="metric-label">提示词总数</div>
           <div class="metric-value">${prompts.length}</div>
@@ -271,34 +322,88 @@ ${renderPortalHeadAssets()}
           <div class="metric-value">${previewItems.length}</div>
         </div>
         <div class="metric-card metric-info">
-          <div class="metric-label">${escapeHtml(displayProfile.summaryFields[0]?.label || '主方向')}</div>
-          <div class="metric-value">${escapeHtml(topLabel(findDistributionCounts(displayDistributions, displayProfile.summaryFields[0]?.key) || []))}</div>
+          <div class="metric-label">推荐下一步</div>
+          <div class="metric-value">${escapeHtml(nextActionLabel)}</div>
         </div>
       </div>
+      ${renderPortalProgressRail(outputDir, {
+        currentPage: 'prompt_preview.html',
+        title: '准备主链进度',
+        copy: '这一步先看方向，再去预检确认能不能开跑，最后才进入执行层。',
+      })}
+      ${renderPortalRouteCompass(outputDir, {
+        title: '看完提示词预览后，通常这样走',
+        copy: '如果方向不对，就回展示板重选；如果方向对，就继续向前做放行确认。',
+        previous: {
+          label: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回中文模板展示板',
+          summary: fileExists(prepareWorkspacePath) ? '回准备主链重新看当前阶段、路线和工作台建议。' : '当你发现任务类型、风格方向或任务意图一开始就选偏了，回这里重选更省时间。',
+          file: fileExists(prepareWorkspacePath) ? prepareWorkspacePath : path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html'),
+          cta: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回展示板重选',
+        },
+        nextSteps: [
+          {
+            kicker: '新手下一站',
+            label: nextActionLabel,
+            summary: nextActionReason,
+            file: nextActionTarget,
+            cta: nextActionLabel,
+            audience: 'newcomer',
+          },
+          {
+            kicker: '专业下一站',
+            label: storyboardMode ? '去资产看板' : (fileExists(resultWorkspacePath) ? '去结果工作台' : '去预检总览'),
+            summary: storyboardMode ? '如果你主要关心素材和槽位绑定，直接去资产看板会更快。' : (fileExists(resultWorkspacePath) ? '如果这轮已经有结果层入口，可以直接回主链继续。' : '如果方向已经明确，就继续去预检总览做放行判断。'),
+            file: storyboardMode ? assetsBoardPath : (fileExists(resultWorkspacePath) ? resultWorkspacePath : preflightBoardPath),
+            cta: storyboardMode ? '去资产看板' : (fileExists(resultWorkspacePath) ? '去结果工作台' : '去预检总览'),
+            audience: 'pro',
+          },
+        ],
+      })}
     </section>
 
     <section class="section">
-      <h2>先看什么</h2>
+      <h2>准备主控</h2>
       <p class="section-copy">${escapeHtml(displayProfile.firstLookCopy)}</p>
-      <div class="section-grid">
-        <article class="info-card">
-          <h3>分布摘要</h3>
-          <div class="meta-list">
-            ${displayProfile.summaryFields.map((field) => renderMetaRow(field.label, topLabel(findDistributionCounts(displayDistributions, field.key)))).join('')}
-            ${storyboardMode ? renderMetaRow('主槽位角色', topLabel(slotRole)) : ''}
-          </div>
-        </article>
-        <article class="info-card">
-          <h3>当前建议</h3>
-          <ul class="info-list">
-            ${displayProfile.currentAdvice.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
-          </ul>
-        </article>
-      </div>
+      ${renderPortalWorkbench(outputDir, {
+        title: '准备阶段，先看这里',
+        copy: '先判断方向是否正确，再决定去预检还是看素材。',
+        cards: [
+          {
+            label: '主方向',
+            value: topLabel(findDistributionCounts(displayDistributions, displayProfile.summaryFields[0]?.key) || []),
+            summary: '这格只回答这轮提示词当前最主要的方向。',
+            tone: 'prepare',
+          },
+          {
+            label: '当前建议',
+            value: nextActionLabel,
+            summary: nextActionReason,
+            tone: 'report',
+            file: nextActionTarget,
+            cta: nextActionLabel,
+          },
+          {
+            label: '素材判断',
+            value: storyboardMode ? '建议看素材页' : '可直接预检',
+            summary: storyboardMode ? '这轮是 storyboard 类任务，最好再看一次槽位和素材绑定。' : '当前更适合直接进入预检放行。',
+            tone: 'prepare',
+            file: storyboardMode ? assetsBoardPath : preflightBoardPath,
+            cta: storyboardMode ? '去资产看板' : '继续预检',
+          },
+          {
+            label: '样本状态',
+            value: `${previewItems.length} / ${prompts.length}`,
+            summary: '先看样本是否已经覆盖主方向，再决定要不要继续逐条核对。',
+            tone: 'status',
+            file: markdownPath,
+            cta: '打开文字版',
+          },
+        ],
+      })}
     </section>
 
     <section class="section">
-      <h2>分布概览</h2>
+      <h2>准备概览</h2>
       <p class="section-copy">${escapeHtml(displayProfile.distributionOverviewCopy)}</p>
       <div class="section-grid">
         ${displayDistributions.map((item, index) => `
@@ -311,8 +416,8 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>批次计划</h2>
-      <p class="section-copy">这里反映 prepare 阶段如何切批。先确认每批大小和总批次数，避免到了执行阶段才发现节奏过重或过碎。</p>
+      <h2>批次概览</h2>
+      <p class="section-copy">这里反映准备阶段如何切批。先确认每批大小和总批次数，避免到了执行阶段才发现节奏过重或过碎。</p>
       <article class="info-card">
         <h3>批次概览</h3>
         ${batches.length ? `
@@ -324,8 +429,8 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>Prompt 样例</h2>
-      <p class="section-copy">这里展示的是首批高代表性的 Prompt 样例，用于人工确认方向。首屏只保留高信号字段，长 Prompt 做收束，避免一开始就被大量文本淹没。</p>
+      <h2>提示词样例</h2>
+      <p class="section-copy">这里展示的是首批高代表性的提示词样例，用于人工确认方向。首屏只保留高信号字段，长提示词做收束，避免一开始就被大量文本淹没。</p>
       <div class="prompt-grid">
         ${previewItems.map((item, index) => `
           <article class="prompt-card">
@@ -342,14 +447,14 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>关键入口</h2>
-      <p class="section-copy">Prompt 预览页不是最终执行页，它负责把你带回 prepare 主线。你可以从这里回到预检总览，也可以继续看 Markdown 原文和运行摘要。</p>
+      <h2>继续下一步</h2>
+      <p class="section-copy">提示词预览页不是最终执行页。看完这里以后，通常就回预检总览，或者继续检查素材和原文。</p>
       <article class="info-card">
-        <h3>文件入口</h3>
+        <h3>常用入口</h3>
         <div class="link-row">
           ${fileExists(preflightBoardPath) ? renderLink('返回预检总览', relativeFile(outputDir, preflightBoardPath)) : ''}
-          ${renderLink('Markdown Prompt 预览', relativeFile(outputDir, markdownPath))}
-          ${renderLink('运行摘要', relativeFile(outputDir, summaryPath))}
+          ${renderLink('提示词预览文字版', relativeFile(outputDir, markdownPath))}
+          ${renderLink('运行摘要文字版', relativeFile(outputDir, summaryPath))}
           ${renderLink('批次计划 JSON', relativeFile(outputDir, planPath))}
         </div>
       </article>
@@ -358,6 +463,7 @@ ${renderPortalHeadAssets()}
 </body>
 </html>`;
 
+  ensurePortalUiAssets(outputDir);
   require('fs').writeFileSync(outputPath, html);
   console.log(JSON.stringify({
     outputPath,

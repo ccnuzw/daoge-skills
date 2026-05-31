@@ -137,7 +137,7 @@ node scripts/run_example_catalog_prepare.js --intent expertboard
 node scripts/run_example_catalog_prepare.js --intent testimonialboard
 ```
 
-如果你想先打开一个可点击的 catalog 首页，可以运行：
+如果你想先打开一个可点击的中文模板展示板，可以运行：
 
 ```bash
 node scripts/render_example_catalog_board.js
@@ -146,6 +146,8 @@ node scripts/render_example_catalog_board.js
 默认会生成：
 
 - `references/examples/examples_catalog.html`
+
+这份 `examples_catalog.html` 就是当前 skill 的中文模板展示板，适合普通用户先浏览任务类型和入口，再决定是否继续看命令或内部字段。
 
 当前 catalog 已包含：
 

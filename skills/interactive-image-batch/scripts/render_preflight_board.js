@@ -1,9 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks } = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail, renderPortalRouteCompass, renderPortalWorkbench } = require('./portal_shared');
+const { ensurePortalUiAssets, renderPortalHeadAssets } = require('./portal_ui_shared');
 const { resolveProfile, buildDisplayDistributions } = require('./template_display_profile');
+const { deriveTaskLabel } = require('./task_label_utils');
+const { loadWorkbenchState } = require('./workbench_state_shared');
+const { resolveWorkspaceRouteFile } = require('./workspace_storyboard_shared');
 
 function escapeHtml(text) {
   return String(text ?? '')
@@ -159,14 +162,58 @@ function main() {
   const storyboard = args['storyboard-file'] && fileExists(path.resolve(args['storyboard-file'])) ? readJson(args['storyboard-file']) : null;
   const template = modeDetection.detected_template || {};
   const readiness = buildReadiness(taskSpec, validation, gates);
+  const workbenchState = loadWorkbenchState(outputDir);
+  const pageState = workbenchState.pageState || workbenchState.workspaceState || {};
   const displayProfile = resolveProfile(prompts);
   const userFacingTemplateName = resolveUserFacingTemplateName(taskSpec, modeDetection, strategy);
   const displayDistributions = buildDisplayDistributions(prompts, displayProfile)
     .map((item) => ({ ...item, counts: item.counts.slice(0, 8) }));
+  const taskLabel = deriveTaskLabel({
+    taskLabel: String(pageState?.taskLabel || '').trim(),
+    selectedCount: Number(pageState?.counts?.selected || validation.promptCount || prompts.length || 0),
+    sampleSize: Number(taskSpec.sample_size || 0),
+    pauseReason: '',
+    resumeManifest: null,
+  }, outputDir);
+  const phaseLabel = String(pageState?.status?.phase || '').trim() || '准备阶段';
+  const statusHeadline = String(pageState?.status?.headline || '').trim() || `当前处于${phaseLabel}的放行判断`;
+  const statusSummary = String(pageState?.status?.summary || '').trim()
+    || '这一页负责把预检结论、风险和放行建议收在一起，确认无误后再进入运行层。';
+  const nextActionTarget = pageState?.nextAction?.target
+    ? path.join(outputDir, pageState.nextAction.target)
+    : (fileExists(path.join(outputDir, 'prepare_workspace.html'))
+      ? path.join(outputDir, 'prepare_workspace.html')
+      : (fileExists(path.join(outputDir, 'result_workspace.html'))
+        ? path.join(outputDir, 'result_workspace.html')
+        : null));
+  const nextActionLabel = String(pageState?.nextAction?.label || '').trim()
+    || (fileExists(path.join(outputDir, 'prepare_workspace.html')) ? '回准备工作台' : '继续下一步');
+  const nextActionReason = String(pageState?.nextAction?.reason || '').trim()
+    || statusSummary;
+  const workspaceHomePath = resolveWorkspaceRouteFile(outputDir, pageState, 'home', path.join(outputDir, 'workspace_home.html'));
+  const prepareWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'prepare', path.join(outputDir, 'prepare_workspace.html'));
+  const resultWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
 
   const readinessClass = `status-${readiness.status}`;
   const statusPillClass = `pill-${readiness.status}`;
   const promptPreviewHtml = path.join(outputDir, 'prompt_preview.html');
+  const assetsBoardPath = path.join(outputDir, 'assets_board.html');
+  const runOverviewPath = path.join(outputDir, 'run_overview.html');
+  const preflightContextBar = renderPortalContextBar({
+    runLabel: taskLabel,
+    phaseLabel,
+    flowLabel: '工作台首页 -> 准备工作台 -> Prompt 预览 -> 预检总览 -> 运行层',
+    counts: [
+      { label: '提示词', value: validation.promptCount },
+      { label: '批次', value: batchPlan.length },
+      { label: '阻塞', value: readiness.blocking.length },
+      { label: '提醒', value: readiness.cautions.length },
+    ],
+    hints: [
+      statusHeadline,
+      nextActionReason,
+    ],
+  });
 
   const html = `<!doctype html>
 <html lang="zh-CN">
@@ -200,7 +247,7 @@ ${renderPortalHeadAssets()}
     .shell {
       max-width: 1480px;
       margin: 0 auto;
-      padding: 28px 24px 56px;
+      padding: 24px 22px 48px;
     }
     .hero, .section {
       border: 1px solid var(--panel-border);
@@ -210,7 +257,7 @@ ${renderPortalHeadAssets()}
       box-shadow: 0 18px 48px rgba(0,0,0,0.24);
     }
     .hero {
-      padding: 28px 28px 24px;
+      padding: 24px 24px 20px;
       margin-bottom: 20px;
     }
     .status-green {
@@ -263,12 +310,12 @@ ${renderPortalHeadAssets()}
     .hero-copy {
       margin: 0;
       color: var(--text-sub);
-      line-height: 1.7;
-      max-width: 76ch;
+      line-height: 1.65;
+      max-width: 68ch;
     }
     .hero-grid, .section-grid, .metric-grid {
       display: grid;
-      gap: 16px;
+      gap: 14px;
     }
     .hero-grid {
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -279,7 +326,7 @@ ${renderPortalHeadAssets()}
     }
     .metric-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      margin-top: 18px;
+      margin-top: 16px;
     }
     .metric-value {
     }
@@ -304,7 +351,7 @@ ${renderPortalHeadAssets()}
       display: grid;
       grid-template-columns: 140px 1fr;
       gap: 12px;
-      padding: 10px 0;
+      padding: 8px 0;
       border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .kv-row:last-child { border-bottom: none; }
@@ -314,8 +361,8 @@ ${renderPortalHeadAssets()}
     }
     .kv-value {
       color: var(--text-main);
-      font-size: 14px;
-      line-height: 1.6;
+      font-size: 13px;
+      line-height: 1.55;
     }
     @media (max-width: 1080px) {
       .hero-grid, .section-grid, .metric-grid {
@@ -344,6 +391,8 @@ ${renderPortalHeadAssets()}
         ${renderPortalTopLinks(outputDir, {
           currentPage: 'preflight_board.html',
           extraLinks: [
+            { label: '回工作台首页', file: workspaceHomePath },
+            { label: '回准备工作台', file: prepareWorkspacePath },
             { label: 'Markdown 预检页', href: relativeFile(outputDir, outputDir ? path.join(outputDir, 'daoge_preflight_dashboard.md') : null) },
             { label: 'Prompt 预览 Markdown', href: relativeFile(outputDir, previewPath) },
             { label: '运行摘要 Markdown', href: relativeFile(outputDir, summaryPath) },
@@ -352,24 +401,29 @@ ${renderPortalHeadAssets()}
       </div>
       <div class="eyebrow">DAOGE Preflight Board</div>
       <div class="pill ${escapeHtml(statusPillClass)}">当前信号灯：${escapeHtml(readiness.label)}</div>
-      <h1>DAOGE 预检总览</h1>
-      <p class="hero-copy">这是 prepare 阶段的 HTML 总览页。它负责把这轮任务的预检结论、任务定义、执行参数、质量门禁和关键入口收在一页里，让你在正式开跑前先确认方向、规模和风险。</p>
+      <h1>${escapeHtml(taskLabel)} · DAOGE 预检总览</h1>
+      <p class="hero-copy">${escapeHtml(statusSummary)}</p>
+      ${preflightContextBar}
+      ${renderPortalModeSwitch({
+        title: '预检浏览模式',
+        copy: '新手先看信号灯和风险，专业用户可以直接判断放行与回退路径。',
+      })}
       <div class="hero-grid">
+        <div class="metric-card metric-info">
+          <div class="metric-label">当前任务</div>
+          <div class="metric-value">${escapeHtml(taskLabel)}</div>
+        </div>
         <div class="metric-card metric-${escapeHtml(readiness.status)}">
           <div class="metric-label">DAOGE 结论</div>
           <div class="metric-value">${escapeHtml(readiness.label)}</div>
-        </div>
-        <div class="metric-card metric-info">
-          <div class="metric-label">提示词总数</div>
-          <div class="metric-value">${escapeHtml(validation.promptCount)}</div>
         </div>
         <div class="metric-card metric-info">
           <div class="metric-label">批次数量</div>
           <div class="metric-value">${escapeHtml(batchPlan.length)}</div>
         </div>
         <div class="metric-card metric-info">
-          <div class="metric-label">DAOGE 模板</div>
-          <div class="metric-value">${escapeHtml(userFacingTemplateName)}</div>
+          <div class="metric-label">推荐下一步</div>
+          <div class="metric-value">${escapeHtml(nextActionLabel)}</div>
         </div>
       </div>
       <div class="metric-grid">
@@ -386,25 +440,84 @@ ${renderPortalHeadAssets()}
           <div class="metric-value">${escapeHtml(readiness.verdict)}</div>
         </div>
       </div>
+      ${renderPortalProgressRail(outputDir, {
+        currentPage: 'preflight_board.html',
+        title: '准备主链进度',
+        copy: 'Prompt 方向确认之后，这一站负责做最后放行；放行后才进入运行层。',
+      })}
+      ${renderPortalRouteCompass(outputDir, {
+        title: '看完预检总览后，建议这样继续',
+        copy: '预检页最重要的价值就是决定“放行还是回退”，不要停在中间态。',
+        previous: {
+          label: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回 Prompt 预览',
+          summary: fileExists(prepareWorkspacePath) ? '回准备主链重新看当前局面、放行判断和页间交接。' : '如果你觉得方向不对、批次过重或者风格分布不理想，先回 Prompt 预览继续调整。',
+          file: fileExists(prepareWorkspacePath) ? prepareWorkspacePath : promptPreviewHtml,
+          cta: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回 Prompt 预览',
+        },
+        nextSteps: [
+          {
+            kicker: '新手下一站',
+            label: nextActionLabel,
+            summary: nextActionReason,
+            file: nextActionTarget || assetsBoardPath,
+            cta: nextActionLabel,
+            audience: 'newcomer',
+          },
+          {
+            kicker: '专业下一站',
+            label: fileExists(runOverviewPath) ? '进入运行概览' : (fileExists(resultWorkspacePath) ? '进入结果工作台' : '去资产看板'),
+            summary: fileExists(runOverviewPath) ? '如果预检已放行且运行层产物存在，可以直接去运行概览判断执行是否稳定。' : (fileExists(resultWorkspacePath) ? '如果这一轮已经进入结果层，可以直接回结果工作台继续。' : '如果你更关心素材绑定，可以继续去资产看板。'),
+            file: fileExists(runOverviewPath) ? runOverviewPath : (fileExists(resultWorkspacePath) ? resultWorkspacePath : assetsBoardPath),
+            cta: fileExists(runOverviewPath) ? '去运行概览' : (fileExists(resultWorkspacePath) ? '去结果工作台' : '去资产看板'),
+            audience: 'pro',
+          },
+        ],
+      })}
     </section>
 
     <section class="section">
-      <h2>先看什么</h2>
-      <p class="section-copy">先看结论和风险，再看任务定义与执行参数，最后决定是直接开跑、先改 prompt，还是回到 prepare 阶段调整规模和稳定性参数。</p>
-      <div class="section-grid">
-        <article class="info-card">
-          <h3>阻塞项</h3>
-          ${renderList(readiness.blocking, '无')}
-        </article>
-        <article class="info-card">
-          <h3>风险提示</h3>
-          ${renderList(readiness.cautions, '无')}
-        </article>
-      </div>
+      <h2>预检主控</h2>
+      <p class="section-copy">先看结论和风险，再看任务定义与执行参数，最后决定是直接开跑、先改 prompt，还是回到准备阶段调整规模和稳定性参数。</p>
+      ${renderPortalWorkbench(outputDir, {
+        title: '预检阶段，先看这里',
+        copy: '先判断能不能放行，再决定回退还是继续。',
+        cards: [
+          {
+            label: '放行结论',
+            value: readiness.verdict,
+            summary: '这一格只回答“现在能不能开跑”。',
+            tone: readiness.status === 'red' ? 'rerun' : (readiness.status === 'yellow' ? 'report' : 'prepare'),
+          },
+          {
+            label: '阻塞项',
+            value: String(readiness.blocking.length),
+            summary: readiness.blocking.length ? readiness.blocking.slice(0, 2).join('；') : '当前没有阻塞项。',
+            tone: readiness.blocking.length ? 'rerun' : 'prepare',
+            file: promptPreviewHtml,
+            cta: '回 Prompt 预览',
+          },
+          {
+            label: '风险提示',
+            value: String(readiness.cautions.length),
+            summary: readiness.cautions.length ? readiness.cautions.slice(0, 2).join('；') : '当前没有明显风险。',
+            tone: readiness.cautions.length ? 'report' : 'prepare',
+            file: assetsBoardPath,
+            cta: '看素材页',
+          },
+          {
+            label: '下一站',
+            value: nextActionLabel,
+            summary: nextActionReason,
+            tone: 'review',
+            file: nextActionTarget || (fileExists(runOverviewPath) ? runOverviewPath : (fileExists(assetsBoardPath) ? assetsBoardPath : promptPreviewHtml)),
+            cta: '打开下一站',
+          },
+        ],
+      })}
     </section>
 
     <section class="section">
-      <h2>任务定义</h2>
+      <h2>任务概览</h2>
       <p class="section-copy">先确认这轮到底在做什么、用什么模板、输出多少张、是不是 storyboard，以及 Prompt 和模式判断是否符合你的预期。</p>
       <div class="section-grid">
         <article class="info-card">
@@ -509,10 +622,10 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>关键入口</h2>
-      <p class="section-copy">这一页不取代原始 Markdown 和 JSON，而是把最常看的入口放在一起。你可以从这里继续打开 Prompt 预览、运行摘要、原始 Markdown 预检页和批次计划。</p>
+      <h2>继续下一步</h2>
+      <p class="section-copy">这一页不取代原始 Markdown 和 JSON，但会把最常看的入口收在一起，方便你继续回准备主线或进入运行层。</p>
       <article class="info-card">
-        <h3>文件入口</h3>
+        <h3>常用入口</h3>
         <div class="link-row">
           ${renderLink('Markdown 预检页', relativeFile(outputDir, path.join(outputDir, 'daoge_preflight_dashboard.md')))}
           ${renderLink('Prompt 预览', fileExists(promptPreviewHtml) ? relativeFile(outputDir, promptPreviewHtml) : relativeFile(outputDir, previewPath))}
@@ -526,6 +639,7 @@ ${renderPortalHeadAssets()}
 </body>
 </html>`;
 
+  ensurePortalUiAssets(outputDir);
   fs.writeFileSync(outputPath, html);
   console.log(JSON.stringify({
     outputPath,

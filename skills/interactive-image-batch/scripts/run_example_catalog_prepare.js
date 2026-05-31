@@ -46,7 +46,7 @@ function listStarterExamples(examples) {
   console.log(lines.join('\n'));
 }
 
-function runPrepare(exampleId, outputDir) {
+function runPrepare(exampleId, outputDir, entryMode = 'example') {
   const examples = loadCatalog();
   const match = examples.find((item) => item.id === exampleId);
   if (!match) {
@@ -63,12 +63,27 @@ function runPrepare(exampleId, outputDir) {
     path.join(__dirname, 'run_example_quickstart_prepare.js'),
     '--example-file', exampleFile,
     '--output-dir', finalOutputDir,
+    '--emit-optional-pages', 'mainline-only',
   ], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
   const summary = JSON.parse(stdout);
+  const catalogFile = catalogPath();
+  const entryStateFile = path.join(finalOutputDir, 'entry_state.json');
+  execFileSync(process.execPath, [
+    path.join(__dirname, 'build_entry_state.js'),
+    '--catalog-file', catalogFile,
+    '--selected-id', match.id,
+    '--entry-mode', entryMode,
+    '--runtime-mode', 'local-batch-runner',
+    '--optional-page-mode', 'mainline-only',
+    '--output-dir', finalOutputDir,
+    '--output-file', entryStateFile,
+  ], {
+    stdio: 'ignore',
+  });
   console.log(JSON.stringify({
     selectedExample: {
       id: match.id,
@@ -77,6 +92,7 @@ function runPrepare(exampleId, outputDir) {
       template_id: match.template_id,
       template_variant: match.template_variant,
     },
+    entryState: entryStateFile,
     ...summary,
   }, null, 2));
 }
@@ -101,7 +117,7 @@ function main() {
       const known = starterExamples(examples).map((item) => item.starter_intent).filter(Boolean).join(', ');
       throw new Error(`Unknown starter intent: ${args.intent}. Available: ${known}`);
     }
-    runPrepare(match.id, args['output-dir']);
+    runPrepare(match.id, args['output-dir'], 'intent');
     return;
   }
 
@@ -109,7 +125,7 @@ function main() {
     throw new Error('Missing required flag: --example-id (or use --list true / --starter true / --intent <name>)');
   }
 
-  runPrepare(String(args['example-id']).trim(), args['output-dir']);
+  runPrepare(String(args['example-id']).trim(), args['output-dir'], 'example');
 }
 
 try {

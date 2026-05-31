@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks, renderPortalContextBar } = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail } = require('./portal_shared');
+const { ensurePortalUiAssets, renderPortalHeadAssets } = require('./portal_ui_shared');
 
 function ensureArray(value) {
   if (Array.isArray(value)) return value;
@@ -11,7 +11,7 @@ function ensureArray(value) {
 }
 
 function escapeHtml(text) {
-  return String(text || '')
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -22,6 +22,16 @@ function escapeHtml(text) {
 function relativeFile(outputDir, targetPath) {
   if (!targetPath) return null;
   return path.relative(outputDir, targetPath);
+}
+
+function makeInlineLink(label, href) {
+  if (!href) return '';
+  return `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+}
+
+function makeToolbarLink(label, href) {
+  if (!href) return '';
+  return `<a href="${escapeHtml(href)}" class="hero-action-link hero-action-primary">${escapeHtml(label)}</a>`;
 }
 
 function isNeedsReview(item) {
@@ -123,7 +133,7 @@ function renderRecommendations(keepCandidates, rerunCandidates, needsReview) {
   if (keepCandidates.length) {
     lines.push('<section class="recommendation-block">');
     lines.push('<h2>建议保留</h2>');
-    lines.push('<ul>');
+    lines.push('<ul class="recommendation-list">');
     keepCandidates.forEach((item) => {
       lines.push(`<li>#${escapeHtml(item.rank)} ${escapeHtml(item.title)}${item.slotId ? ` · ${escapeHtml(item.slotId)}` : ''} · 审阅分 ${escapeHtml(item.reviewScore)} · ${escapeHtml(item.reason)}</li>`);
     });
@@ -134,7 +144,7 @@ function renderRecommendations(keepCandidates, rerunCandidates, needsReview) {
   if (rerunCandidates.length) {
     lines.push('<section class="recommendation-block">');
     lines.push('<h2>建议重跑</h2>');
-    lines.push('<ul>');
+    lines.push('<ul class="recommendation-list">');
     rerunCandidates.forEach((item) => {
       lines.push(`<li>${escapeHtml(item.title || item.slug || item.index || '未命名结果')}${item.slotId ? ` · ${escapeHtml(item.slotId)}` : ''} · ${escapeHtml(item.error || '执行失败，建议失败续跑')}</li>`);
     });
@@ -145,7 +155,7 @@ function renderRecommendations(keepCandidates, rerunCandidates, needsReview) {
   if (needsReview.length) {
     lines.push('<section class="recommendation-block">');
     lines.push('<h2>建议复核</h2>');
-    lines.push('<ul>');
+    lines.push('<ul class="recommendation-list">');
     needsReview.slice(0, 8).forEach((item) => {
       lines.push(`<li>${escapeHtml(item.title || item.slug || item.index || '未命名结果')}${item.slotId ? ` · ${escapeHtml(item.slotId)}` : ''} · 局部编辑结果，重点看遮罩边界、融合感与主体一致性。</li>`);
     });
@@ -243,7 +253,12 @@ function renderCard(item, outputDir, storyboardBoardRelative, assetsBoardRelativ
       data-search="${escapeHtml(cardSearchText(enriched))}"
     >
       <div class="card-media ${relativeImage ? 'has-image' : 'missing-image'}">
-        ${relativeImage ? `<img src="${escapeHtml(relativeImage)}" alt="${escapeHtml(title)}" />` : '<div class="card-placeholder">No image</div>'}
+        ${relativeImage ? `
+          <button type="button" class="card-media-button" data-preview-trigger aria-label="预览 ${escapeHtml(title)}">
+            <img src="${escapeHtml(relativeImage)}" alt="${escapeHtml(title)}" />
+            <span class="card-preview-hint">点击预览</span>
+          </button>
+        ` : '<div class="card-placeholder">No image</div>'}
         <div class="card-status">${escapeHtml(statusText)}</div>
         <div class="card-score">审阅分 ${escapeHtml(enriched.reviewScore)}</div>
       </div>
@@ -268,7 +283,7 @@ function renderCard(item, outputDir, storyboardBoardRelative, assetsBoardRelativ
   `;
 }
 
-function renderSection(title, subtitle, items, outputDir, storyboardBoardRelative, assetsBoardRelative) {
+function renderSection(title, subtitle, items, outputDir, storyboardBoardRelative, assetsBoardRelative, tone) {
   const averageScore = items.length
     ? Math.round(items.reduce((sum, item) => sum + Number(item.reviewScore || 0), 0) / items.length)
     : 0;
@@ -278,7 +293,7 @@ function renderSection(title, subtitle, items, outputDir, storyboardBoardRelativ
     rerun: items.filter((item) => (item.visualVerdict || (item.ok ? (isNeedsReview(item) ? 'review' : 'keep') : 'rerun')) === 'rerun').length,
   };
   return `
-    <section class="board-section">
+    <section class="board-section board-section-${escapeHtml(tone || 'neutral')}">
       <div class="section-header">
         <div>
           <h2>${escapeHtml(title)}</h2>
@@ -318,9 +333,21 @@ function main() {
   const resultHubFile = path.join(outputDir, 'result_hub.html');
   const resultHubMarkdownFile = path.join(outputDir, 'daoge_result_hub.md');
   const completionReportFile = path.join(outputDir, 'daoge_completion_report.md');
+  const completionBoardFile = path.join(outputDir, 'completion_board.html');
+  const rerunBoardFile = path.join(outputDir, 'rerun_board.html');
   const portalHomeFile = path.join(outputDir, 'daoge_portal.html');
   const storyboardBoardRelative = fileExists(storyboardBoardFile) ? relativeFile(outputDir, storyboardBoardFile) : null;
   const assetsBoardRelative = fileExists(assetsBoardFile) ? relativeFile(outputDir, assetsBoardFile) : null;
+  const portalHomeRelative = fileExists(portalHomeFile) ? relativeFile(outputDir, portalHomeFile) : null;
+  const resultHubRelative = fileExists(resultHubFile) ? relativeFile(outputDir, resultHubFile) : null;
+  const promptPreviewRelative = fileExists(path.join(outputDir, 'prompt_preview.html')) ? relativeFile(outputDir, path.join(outputDir, 'prompt_preview.html')) : null;
+  const runOverviewRelative = fileExists(path.join(outputDir, 'run_overview.html')) ? relativeFile(outputDir, path.join(outputDir, 'run_overview.html')) : null;
+  const completionBoardRelative = fileExists(completionBoardFile) ? relativeFile(outputDir, completionBoardFile) : null;
+  const rerunBoardRelative = fileExists(rerunBoardFile) ? relativeFile(outputDir, rerunBoardFile) : null;
+  const resultHubMarkdownRelative = fileExists(resultHubMarkdownFile) ? relativeFile(outputDir, resultHubMarkdownFile) : null;
+  const completionReportRelative = fileExists(completionReportFile) ? relativeFile(outputDir, completionReportFile) : null;
+  const examplesCatalogPath = path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
+  const examplesCatalogRelative = fileExists(examplesCatalogPath) ? relativeFile(outputDir, examplesCatalogPath) : null;
 
   const success = fileExists(successFile) ? readJson(successFile) : [];
   const failed = fileExists(failedFile) ? readJson(failedFile) : [];
@@ -401,94 +428,134 @@ ${renderPortalHeadAssets()}
       font-family: "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
     }
     .shell {
-      max-width: 1520px;
+      max-width: 1480px;
       margin: 0 auto;
-      padding: 28px 24px 56px;
+      padding: 24px 22px 48px;
     }
     .hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
-      gap: 20px;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
     .hero-panel,
-    .side-panel,
+    .overview-panel,
     .board-section {
       border: 1px solid var(--panel-border);
       background: var(--panel);
       backdrop-filter: blur(12px);
       border-radius: 24px;
-      box-shadow: 0 18px 48px rgba(0,0,0,0.24);
+      box-shadow: 0 18px 44px rgba(0,0,0,0.22);
     }
     .hero-panel {
-      padding: 28px 28px 24px;
+      padding: 24px 24px 20px;
       background:
-        linear-gradient(160deg, rgba(217,179,109,0.15), transparent 38%),
+        linear-gradient(160deg, rgba(217,179,109,0.13), transparent 34%),
         rgba(255,255,255,0.04);
     }
     .hero-topline {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr);
-      gap: 18px;
+      grid-template-columns: minmax(0, 1fr) minmax(250px, 0.74fr);
+      gap: 16px;
       align-items: start;
+      margin-bottom: 18px;
     }
     .eyebrow {
       display: inline-flex;
-      padding: 6px 10px;
+      padding: 5px 10px;
       border-radius: 999px;
       background: rgba(255,255,255,0.08);
       color: var(--accent);
-      font-size: 12px;
+      font-size: 11px;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
     h1 {
       margin: 0;
-      font-size: 34px;
+      font-size: 32px;
       line-height: 1.1;
       letter-spacing: 0.02em;
     }
     .hero-copy {
-      margin: 14px 0 18px;
+      margin: 12px 0 16px;
       color: var(--text-sub);
-      line-height: 1.7;
-      max-width: 72ch;
+      line-height: 1.65;
+      max-width: 66ch;
     }
     .hero-callout {
-      border-radius: 18px;
+      border-radius: 20px;
       border: 1px solid rgba(255,255,255,0.08);
       background:
         linear-gradient(180deg, rgba(136,185,255,0.1), rgba(255,255,255,0.02)),
         rgba(255,255,255,0.03);
-      padding: 16px 16px 14px;
+      padding: 15px 15px 14px;
+      box-shadow: inset 0 0 0 1px rgba(136,185,255,0.06);
     }
     .hero-callout h2 {
       margin: 0 0 8px;
-      font-size: 16px;
+      font-size: 15px;
     }
     .hero-callout p {
       margin: 0;
       color: var(--text-sub);
-      font-size: 13px;
+      font-size: 12px;
       line-height: 1.6;
     }
-    .hero-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
+    .hero-context {
+      margin-top: 2px;
     }
-    .hero-links a {
+    .hero-actions {
+      margin-top: 18px;
+    }
+    .hero-actions-label {
+      color: var(--text-sub);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .hero-action-strip {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      padding: 4px 2px 2px;
+    }
+    .hero-action-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       color: var(--text-main);
       text-decoration: none;
-      padding: 10px 14px;
-      border-radius: 14px;
+      min-height: 38px;
+      padding: 0 14px;
+      border-radius: 999px;
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.08);
-      font-size: 13px;
+      font-size: 12px;
+      line-height: 1;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    .hero-action-primary {
+      background:
+        linear-gradient(180deg, rgba(217,179,109,0.08), rgba(255,255,255,0.02)),
+        rgba(255,255,255,0.05);
+      border-color: rgba(217,179,109,0.18);
+      box-shadow: inset 0 0 0 1px rgba(217,179,109,0.06);
+      color: var(--text-main);
+    }
+    .toolbar-shell {
+      margin-top: 18px;
+      padding: 14px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)),
+        rgba(255,255,255,0.03);
+      display: grid;
+      gap: 12px;
     }
     .control-panel {
-      margin-top: 18px;
       display: grid;
       grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(140px, 0.65fr));
       gap: 12px;
@@ -516,25 +583,41 @@ ${renderPortalHeadAssets()}
     .control-item input::placeholder {
       color: rgba(243,239,230,0.4);
     }
-    .side-panel {
-      padding: 22px 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
+    .toolbar-notes {
+      display: grid;
+      gap: 8px;
     }
-    .side-title {
-      margin: 0 0 10px;
-      font-size: 18px;
+    .overview-stack {
+      display: grid;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .overview-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+      gap: 16px;
+    }
+    .overview-panel {
+      padding: 18px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)),
+        rgba(255,255,255,0.03);
+    }
+    .overview-title {
+      margin: 0 0 12px;
+      font-size: 16px;
       color: var(--accent);
     }
     .metric-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
+      gap: 10px;
     }
     .metric-card {
       border-radius: 18px;
-      padding: 16px 16px 18px;
+      padding: 14px 14px 16px;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.08);
     }
@@ -553,14 +636,13 @@ ${renderPortalHeadAssets()}
     .metric-score .metric-value { color: var(--score); }
     .status-legend {
       display: grid;
-      gap: 10px;
-      margin-top: 8px;
+      gap: 8px;
     }
     .legend-item {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 12px;
+      padding: 9px 11px;
       border-radius: 14px;
       border: 1px solid rgba(255,255,255,0.08);
       background: rgba(255,255,255,0.04);
@@ -582,79 +664,111 @@ ${renderPortalHeadAssets()}
       margin: 0 0 10px;
       font-size: 18px;
     }
-    .recommendation-block ul {
+    .recommendation-block {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+    }
+    .recommendation-block h2 {
       margin: 0;
-      padding-left: 18px;
+      font-size: 13px;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .recommendation-block + .recommendation-block {
+      margin-top: 14px;
+      padding-top: 12px;
+    }
+    .recommendation-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 8px;
+    }
+    .recommendation-list li {
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
       color: var(--text-sub);
-      line-height: 1.65;
+      font-size: 12px;
+      line-height: 1.6;
     }
     .section-stack {
       display: grid;
-      gap: 18px;
+      gap: 16px;
       margin-top: 18px;
     }
     .board-section {
-      padding: 22px;
-    }
-    .board-section:first-child {
-      border-color: rgba(124,197,163,0.18);
+      padding: 18px;
       background:
-        linear-gradient(180deg, rgba(124,197,163,0.08), rgba(255,255,255,0.02)),
-        rgba(255,255,255,0.04);
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)),
+        rgba(255,255,255,0.03);
+      position: relative;
+      overflow: hidden;
     }
-    .board-section:nth-child(2) {
-      border-color: rgba(226,192,112,0.18);
-      background:
-        linear-gradient(180deg, rgba(226,192,112,0.08), rgba(255,255,255,0.02)),
-        rgba(255,255,255,0.04);
+    .board-section::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 3px;
+      opacity: 0.9;
     }
-    .board-section:nth-child(3) {
-      border-color: rgba(255,140,122,0.18);
-      background:
-        linear-gradient(180deg, rgba(255,140,122,0.08), rgba(255,255,255,0.02)),
-        rgba(255,255,255,0.04);
+    .board-section-keep::before {
+      background: linear-gradient(90deg, rgba(124,197,163,0.95), rgba(124,197,163,0.18));
+    }
+    .board-section-review::before {
+      background: linear-gradient(90deg, rgba(226,192,112,0.95), rgba(226,192,112,0.18));
+    }
+    .board-section-rerun::before {
+      background: linear-gradient(90deg, rgba(255,140,122,0.95), rgba(255,140,122,0.18));
     }
     .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 16px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
     .section-header > div:first-child {
-      max-width: 68ch;
+      max-width: 62ch;
     }
     .section-header p {
       margin: 0;
       color: var(--text-sub);
-      font-size: 13px;
-      line-height: 1.5;
-      max-width: 72ch;
+      font-size: 12px;
+      line-height: 1.55;
+      max-width: 60ch;
     }
     .section-summary {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       justify-content: flex-end;
+      align-self: start;
     }
     .section-summary span {
       display: inline-flex;
       align-items: center;
-      padding: 7px 10px;
+      padding: 6px 10px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: 11px;
       color: var(--text-sub);
       border: 1px solid rgba(255,255,255,0.08);
       background: rgba(255,255,255,0.05);
     }
     .card-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
     }
     body.gallery-density .card-grid {
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
     }
     .card-grid.filtered-empty::after {
       content: '当前筛选条件下没有结果。';
@@ -672,6 +786,7 @@ ${renderPortalHeadAssets()}
       overflow: hidden;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
     }
     .card-media {
       position: relative;
@@ -680,11 +795,41 @@ ${renderPortalHeadAssets()}
         linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)),
         repeating-linear-gradient(45deg, rgba(255,255,255,0.04) 0, rgba(255,255,255,0.04) 12px, transparent 12px, transparent 24px);
     }
+    .card-media-button {
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      border: none;
+      background: transparent;
+      display: block;
+      cursor: zoom-in;
+      position: relative;
+    }
     .card-media img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
+    }
+    .card-preview-hint {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      color: var(--text-main);
+      background: rgba(14,19,24,0.72);
+      border: 1px solid rgba(255,255,255,0.12);
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 120ms ease, transform 120ms ease;
+      pointer-events: none;
+    }
+    .card-media:hover .card-preview-hint,
+    .card-media-button:focus-visible .card-preview-hint {
+      opacity: 1;
+      transform: translateY(0);
     }
     .card-placeholder {
       width: 100%;
@@ -701,9 +846,9 @@ ${renderPortalHeadAssets()}
       position: absolute;
       left: 12px;
       top: 12px;
-      padding: 6px 10px;
+      padding: 5px 9px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       background: rgba(14,19,24,0.72);
       border: 1px solid rgba(255,255,255,0.12);
@@ -712,9 +857,9 @@ ${renderPortalHeadAssets()}
       position: absolute;
       right: 12px;
       top: 12px;
-      padding: 6px 10px;
+      padding: 5px 9px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       color: var(--score);
       background: rgba(14,19,24,0.72);
@@ -724,34 +869,37 @@ ${renderPortalHeadAssets()}
     .review-rerun .card-status { color: var(--rerun); }
     .review-review .card-status { color: var(--review); }
     .card-body {
-      padding: 14px 14px 16px;
+      padding: 13px 13px 15px;
+      display: grid;
+      gap: 10px;
     }
     body.gallery-density .card-body {
-      padding: 12px 12px 14px;
+      padding: 11px 11px 13px;
     }
     .card-body h3 {
-      margin: 0 0 8px;
+      margin: 0;
       font-size: 16px;
       line-height: 1.35;
     }
     body.gallery-density .card-body h3 {
       font-size: 15px;
-      margin-bottom: 6px;
     }
     .card-meta {
       color: var(--accent);
       font-size: 12px;
-      margin-bottom: 10px;
     }
     body.gallery-density .card-meta {
-      margin-bottom: 8px;
       font-size: 11px;
     }
     .card-priority {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      margin-bottom: 10px;
+      width: fit-content;
+      padding: 6px 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
       font-size: 12px;
       color: var(--text-sub);
     }
@@ -763,38 +911,41 @@ ${renderPortalHeadAssets()}
     }
     .card-priority strong {
       color: var(--text-main);
-      font-size: 14px;
-    }
-    .card-jump {
-      margin-bottom: 10px;
+      font-size: 13px;
     }
     .card-jump-group {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 8px;
     }
     .card-jump a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 32px;
+      padding: 0 12px;
+      border-radius: 999px;
       color: var(--accent);
       font-size: 12px;
       text-decoration: none;
-      border-bottom: 1px solid rgba(217,179,109,0.35);
-      padding-bottom: 1px;
+      border: 1px solid rgba(217,179,109,0.18);
+      background: rgba(217,179,109,0.08);
+      line-height: 1;
+      white-space: nowrap;
     }
     .card-jump a:hover {
       color: var(--text-main);
-      border-bottom-color: rgba(243,239,230,0.45);
+      border-color: rgba(243,239,230,0.26);
     }
     .risk-tags {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 10px;
+      gap: 6px;
     }
     .risk-tag {
       display: inline-flex;
       align-items: center;
-      padding: 5px 9px;
+      padding: 5px 8px;
       border-radius: 999px;
       background: rgba(255,255,255,0.08);
       border: 1px solid rgba(255,255,255,0.1);
@@ -806,16 +957,15 @@ ${renderPortalHeadAssets()}
       color: var(--keep);
     }
     .card-notes p {
-      margin: 0 0 6px;
+      margin: 0 0 4px;
       color: var(--text-sub);
       font-size: 12px;
       line-height: 1.55;
     }
     .card-notes-primary {
-      min-height: 42px;
+      min-height: 40px;
     }
     .card-details {
-      margin-top: 10px;
       border-top: 1px solid rgba(255,255,255,0.08);
       padding-top: 10px;
     }
@@ -839,7 +989,7 @@ ${renderPortalHeadAssets()}
       margin-top: 10px;
     }
     .empty-state {
-      padding: 28px;
+      padding: 24px;
       border-radius: 18px;
       background: rgba(255,255,255,0.04);
       color: var(--text-sub);
@@ -847,21 +997,212 @@ ${renderPortalHeadAssets()}
       border: 1px dashed rgba(255,255,255,0.14);
     }
     .ops-summary {
+      color: var(--text-sub);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .filter-summary {
+      color: var(--accent);
+      font-size: 12px;
+    }
+    body.preview-open {
+      overflow: hidden;
+    }
+    .preview-modal[hidden] {
+      display: none;
+    }
+    .preview-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      padding: 22px;
+      background: rgba(7,10,14,0.82);
+      backdrop-filter: blur(12px);
+      display: grid;
+      place-items: center;
+    }
+    .preview-dialog {
+      width: min(1680px, calc(100vw - 44px));
+      height: min(920px, calc(100vh - 44px));
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(360px, 430px);
+      gap: 0;
+      border-radius: 28px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03)),
+        rgba(14,19,24,0.94);
+      box-shadow: 0 28px 80px rgba(0,0,0,0.42);
+      overflow: hidden;
+    }
+    .preview-stage {
+      position: relative;
+      background:
+        radial-gradient(circle at center, rgba(36,52,78,0.42), transparent 54%),
+        linear-gradient(135deg, rgba(10,14,18,0.96), rgba(16,22,30,0.98));
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      min-width: 0;
+    }
+    .preview-stage-inner {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 42px 72px 28px;
+    }
+    .preview-stage-inner img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 22px;
+      box-shadow: 0 18px 48px rgba(0,0,0,0.36);
+      background: rgba(255,255,255,0.02);
+    }
+    .preview-stage-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 22px 20px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      color: var(--text-sub);
+      font-size: 12px;
+    }
+    .preview-toolbar-left {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .preview-index {
+      color: var(--text-main);
+      font-weight: 600;
+    }
+    .preview-nav {
+      min-width: 104px;
+      height: 42px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(14,19,24,0.72);
+      color: var(--text-main);
+      font-size: 13px;
+      line-height: 1;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .preview-nav[disabled] {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .preview-side {
+      display: grid;
+      grid-template-rows: auto auto auto auto 1fr;
+      gap: 14px;
+      padding: 22px 22px 24px;
+      border-left: 1px solid rgba(255,255,255,0.08);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)),
+        rgba(16,22,30,0.98);
+      overflow: auto;
+    }
+    .preview-side-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .preview-kicker {
+      color: var(--accent);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .preview-side h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+    .preview-meta {
       margin-top: 10px;
+      color: var(--text-sub);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .preview-close {
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04);
+      color: var(--text-main);
+      border-radius: 14px;
+      padding: 10px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .preview-pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .preview-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04);
+      color: var(--text-main);
+      font-size: 12px;
+    }
+    .preview-block {
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+    }
+    .preview-block-title {
+      color: var(--accent);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .preview-priority {
+      color: var(--text-main);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .preview-risk-list,
+    .preview-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .preview-risk-list .risk-tag {
+      margin: 0;
+    }
+    .preview-notes {
+      display: grid;
+      gap: 8px;
+    }
+    .preview-note {
       color: var(--text-sub);
       font-size: 13px;
       line-height: 1.6;
     }
-    .filter-summary {
-      margin-top: 14px;
+    .preview-links a {
       color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(217,179,109,0.35);
+      padding-bottom: 1px;
       font-size: 13px;
     }
     @media (max-width: 1080px) {
-      .hero {
+      .hero-topline {
         grid-template-columns: 1fr;
       }
-      .hero-topline {
+      .overview-grid {
         grid-template-columns: 1fr;
       }
       .control-panel {
@@ -869,6 +1210,22 @@ ${renderPortalHeadAssets()}
       }
       .metric-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .card-grid,
+      body.gallery-density .card-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .preview-dialog {
+        grid-template-columns: 1fr;
+        height: min(940px, calc(100vh - 28px));
+      }
+      .preview-side {
+        grid-template-rows: auto auto auto auto auto;
+        border-left: none;
+        border-top: 1px solid rgba(255,255,255,0.08);
+      }
+      .preview-stage-inner {
+        padding: 34px 52px 24px;
       }
     }
     @media (max-width: 720px) {
@@ -876,18 +1233,54 @@ ${renderPortalHeadAssets()}
         padding: 18px 14px 44px;
       }
       h1 { font-size: 28px; }
+      .toolbar-shell {
+        padding: 12px;
+      }
       .control-panel {
         grid-template-columns: 1fr;
+      }
+      .hero-action-strip {
+        gap: 8px;
       }
       .metric-grid {
         grid-template-columns: 1fr;
       }
+      .card-grid,
+      body.gallery-density .card-grid {
+        grid-template-columns: 1fr;
+      }
       .section-header {
-        flex-direction: column;
-        align-items: flex-start;
+        grid-template-columns: 1fr;
       }
       .section-summary {
         justify-content: flex-start;
+      }
+      .preview-modal {
+        padding: 10px;
+      }
+      .preview-dialog {
+        width: calc(100vw - 20px);
+        height: calc(100vh - 20px);
+      }
+      .preview-stage-inner {
+        padding: 18px 14px 16px;
+      }
+      .preview-stage-toolbar {
+        align-items: flex-start;
+      }
+      .preview-toolbar-left {
+        width: 100%;
+      }
+      .preview-nav {
+        min-width: 92px;
+        height: 40px;
+        padding: 0 14px;
+      }
+      .preview-side {
+        padding: 16px 14px 18px;
+      }
+      .preview-side-top {
+        flex-direction: column;
       }
     }
   </style>
@@ -898,98 +1291,160 @@ ${renderPortalHeadAssets()}
       <section class="hero-panel">
         <div class="hero-topline">
           <div>
-            <div class="eyebrow">DAOGE Review Layer</div>
+            <div class="eyebrow">结果审阅工作台</div>
             <h1>DAOGE 结果审阅看板</h1>
             <p class="hero-copy">
-              这一页不是执行报告，而是本轮结果的决策面板。先在这里决定哪些图保留、哪些图复核、哪些图值得重跑，再回到结果目录或 storyboard 装板继续推进。
+              这一页只做结果判断。先决定哪些图保留、哪些图复核、哪些图值得重跑，再继续去整板或完成报告确认结论。
             </p>
-            ${reviewContextBar}
-          </div>
-          <div class="hero-callout">
-            <h2>先看哪里</h2>
-            <p>先扫顶部动作概览和状态图例，再看三大结果分区。默认优先看“建议保留”，其次是“待复核”，最后处理失败或重跑项。</p>
           </div>
         </div>
-        <div class="hero-links">
-          ${renderPortalTopLinks(outputDir, {
-            currentPage: 'review_board.html',
-            extraLinks: [
-              { label: '结果总入口', file: resultHubFile },
-              { label: '结果总入口 Markdown', file: resultHubMarkdownFile },
-              { label: '完成报告 Markdown', file: completionReportFile },
-            ],
-          })}
+        <div class="hero-context">
+          ${reviewContextBar}
         </div>
-        <div class="control-panel">
-          <div class="control-item">
-            <label for="review-search">搜索标题 / 槽位 / 风险标签</label>
-            <input id="review-search" type="search" placeholder="例如 shot_2 / 遮罩 / hero reveal" />
-          </div>
-          <div class="control-item">
-            <label for="review-status">按结论筛选</label>
-            <select id="review-status">
-              <option value="all">全部</option>
-              <option value="keep">建议保留</option>
-              <option value="review">建议复核</option>
-              <option value="rerun">建议重跑</option>
-            </select>
-          </div>
-          <div class="control-item">
-            <label for="review-mode">按模式筛选</label>
-            <select id="review-mode">
-              <option value="all">全部模式</option>
-              <option value="prompt-only">prompt-only</option>
-              <option value="reference-assisted">reference-assisted</option>
-              <option value="masked-edit">masked-edit</option>
-            </select>
-          </div>
-          <div class="control-item">
-            <label for="review-sort">排序</label>
-            <select id="review-sort">
-              <option value="score-desc">审阅分：高到低</option>
-              <option value="score-asc">审阅分：低到高</option>
-              <option value="title-asc">标题：A-Z</option>
-              <option value="slot-asc">槽位：A-Z</option>
-            </select>
-          </div>
-          <div class="control-item">
-            <label for="review-density">浏览模式</label>
-            <select id="review-density">
-              <option value="review">审阅模式</option>
-              <option value="gallery">画廊模式</option>
-            </select>
+        <div class="hero-actions">
+          <div class="hero-actions-label">快捷入口</div>
+          <div class="hero-action-strip">
+            ${[
+              makeToolbarLink('旧结果说明页', resultHubRelative),
+              makeToolbarLink('去分镜整板页', storyboardBoardRelative),
+              makeToolbarLink('进入完成摘要页', completionBoardRelative),
+              makeToolbarLink('进入失败补跑页', rerunBoardRelative),
+            ].filter(Boolean).join('\n            ')}
           </div>
         </div>
-        <div class="ops-summary">
-          成功 ${escapeHtml(success.length)} 张，失败 ${escapeHtml(failed.length)} 张，建议复核 ${escapeHtml(needsReview.length)} 张。
-          当前平均审阅分 ${escapeHtml(averageScore)}。
-          ${operations ? `当前主 request mode：${escapeHtml((operations.distributions?.requestMode || []).slice(0, 3).map((item) => `${item.name}(${item.count})`).join('，') || '未记录')}` : ''}
-          ${reviewAnalysis?.enabled ? `视觉审阅：已启用，分析 ${escapeHtml(reviewAnalysis.itemCount || 0)} 张。` : ''}
+        ${renderPortalModeSwitch({
+          title: '审阅浏览模式',
+          copy: '简洁查看更适合按建议顺序看，进阶查看更适合直接跳整板、报告和素材来源。',
+        })}
+        ${renderPortalProgressRail(outputDir, {
+          currentPage: 'review_board.html',
+          title: '结果主链进度',
+          copy: '结果层通常先从审阅页做决策，再进入整板和完成报告，最后才考虑补跑。',
+        })}
+        <div class="toolbar-shell">
+          <div class="control-panel">
+            <div class="control-item">
+              <label for="review-search">搜索标题 / 槽位 / 风险标签</label>
+              <input id="review-search" type="search" placeholder="例如 shot_2 / 遮罩 / hero reveal" />
+            </div>
+            <div class="control-item">
+              <label for="review-status">按结论筛选</label>
+              <select id="review-status">
+                <option value="all">全部</option>
+                <option value="keep">建议保留</option>
+                <option value="review">建议复核</option>
+                <option value="rerun">建议重跑</option>
+              </select>
+            </div>
+            <div class="control-item">
+              <label for="review-mode">按模式筛选</label>
+              <select id="review-mode">
+                <option value="all">全部模式</option>
+                <option value="prompt-only">prompt-only</option>
+                <option value="reference-assisted">reference-assisted</option>
+                <option value="masked-edit">masked-edit</option>
+              </select>
+            </div>
+            <div class="control-item">
+              <label for="review-sort">排序</label>
+              <select id="review-sort">
+                <option value="score-desc">审阅分：高到低</option>
+                <option value="score-asc">审阅分：低到高</option>
+                <option value="title-asc">标题：A-Z</option>
+                <option value="slot-asc">槽位：A-Z</option>
+              </select>
+            </div>
+            <div class="control-item">
+              <label for="review-density">浏览模式</label>
+              <select id="review-density">
+                <option value="review">审阅模式</option>
+                <option value="gallery">画廊模式</option>
+              </select>
+            </div>
+          </div>
+          <div class="toolbar-notes">
+            <div class="ops-summary">
+              成功 ${escapeHtml(success.length)} 张，失败 ${escapeHtml(failed.length)} 张，建议复核 ${escapeHtml(needsReview.length)} 张。
+              当前平均审阅分 ${escapeHtml(averageScore)}。
+              ${operations ? `当前主 request mode：${escapeHtml((operations.distributions?.requestMode || []).slice(0, 3).map((item) => `${item.name}(${item.count})`).join('，') || '未记录')}` : ''}
+              ${reviewAnalysis?.enabled ? `视觉审阅：已启用，分析 ${escapeHtml(reviewAnalysis.itemCount || 0)} 张。` : ''}
+            </div>
+            <div class="filter-summary" id="filter-summary">当前展示全部结果。</div>
+          </div>
         </div>
-        <div class="filter-summary" id="filter-summary">当前展示全部结果。</div>
       </section>
-      <aside class="side-panel">
-        <div>
-          <h2 class="side-title">结果摘要</h2>
-          <div class="metric-grid">
-            ${renderMetricCards(metrics)}
-          </div>
+    </div>
+
+    <div class="overview-stack">
+      <section class="overview-panel">
+        <h2 class="overview-title">结果摘要</h2>
+        <div class="metric-grid">
+          ${renderMetricCards(metrics)}
         </div>
-        <div>
-          <h2 class="side-title">状态图例</h2>
+      </section>
+      <div class="overview-grid">
+        <section class="overview-panel">
+          <h2 class="overview-title">状态图例</h2>
           ${renderLegend()}
-        </div>
-        <div>
-          <h2 class="side-title">分组导航</h2>
+        </section>
+        <section class="overview-panel">
+          <h2 class="overview-title">分组导航</h2>
           ${renderRecommendations(keepCandidates, rerunCandidates, needsReview)}
-        </div>
-      </aside>
+        </section>
+      </div>
     </div>
 
     <div class="section-stack">
-      ${renderSection('建议保留 / 继续扩图候选', '优先看这些成功且相对稳定的结果，适合作为保留候选或下一轮参考底图。审阅分越高，越适合先看。', enrichedSuccess.sort((a, b) => b.reviewScore - a.reviewScore).slice(0, 12), outputDir, storyboardBoardRelative, assetsBoardRelative)}
-      ${renderSection('局部编辑 / 待复核结果', '这一组优先检查遮罩边界、融合感、主体一致性与局部改动是否越界。风险标签会标出局部编辑和留白敏感项。', enrichedNeedsReview, outputDir, storyboardBoardRelative, assetsBoardRelative)}
-      ${renderSection('失败或建议重跑项', '先看失败原因，再决定是失败续跑、回到 prompt 调整，还是改素材绑定后再跑。', enrichedFailed.length ? enrichedFailed : rerunCandidates.map(enrichItem), outputDir, storyboardBoardRelative, assetsBoardRelative)}
+      ${renderSection('建议保留 / 继续扩图候选', '优先看这些成功且相对稳定的结果，适合作为保留候选或下一轮参考底图。审阅分越高，越适合先看。', enrichedSuccess.sort((a, b) => b.reviewScore - a.reviewScore).slice(0, 12), outputDir, storyboardBoardRelative, assetsBoardRelative, 'keep')}
+      ${renderSection('局部编辑 / 待复核结果', '这一组优先检查遮罩边界、融合感、主体一致性与局部改动是否越界。风险标签会标出局部编辑和留白敏感项。', enrichedNeedsReview, outputDir, storyboardBoardRelative, assetsBoardRelative, 'review')}
+      ${renderSection('失败或建议重跑项', '先看失败原因，再决定是失败续跑、回到 prompt 调整，还是改素材绑定后再跑。', enrichedFailed.length ? enrichedFailed : rerunCandidates.map(enrichItem), outputDir, storyboardBoardRelative, assetsBoardRelative, 'rerun')}
+    </div>
+  </div>
+  <div class="preview-modal" id="review-preview" hidden>
+    <div class="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+      <div class="preview-stage">
+        <div class="preview-stage-inner">
+          <img id="preview-image" alt="" />
+        </div>
+        <div class="preview-stage-toolbar">
+          <div class="preview-toolbar-left">
+            <button type="button" class="preview-nav preview-prev" id="preview-prev" aria-label="上一张">上一张</button>
+            <button type="button" class="preview-nav preview-next" id="preview-next" aria-label="下一张">下一张</button>
+            <div class="preview-index" id="preview-index">1 / 1</div>
+          </div>
+          <div class="preview-stage-hint">Esc 关闭，方向键切换上一张和下一张</div>
+        </div>
+      </div>
+      <aside class="preview-side">
+        <div class="preview-side-top">
+          <div>
+            <div class="preview-kicker">大图预览</div>
+            <h2 id="preview-title">当前结果</h2>
+            <div class="preview-meta" id="preview-meta"></div>
+          </div>
+          <button type="button" class="preview-close" id="preview-close">关闭预览</button>
+        </div>
+        <div class="preview-pill-row">
+          <span class="preview-pill" id="preview-status"></span>
+          <span class="preview-pill" id="preview-score"></span>
+        </div>
+        <section class="preview-block">
+          <div class="preview-block-title">处理判断</div>
+          <div class="preview-priority" id="preview-priority"></div>
+        </section>
+        <section class="preview-block">
+          <div class="preview-block-title">风险标签</div>
+          <div class="preview-risk-list" id="preview-risks"></div>
+        </section>
+        <section class="preview-block">
+          <div class="preview-block-title">关键信息</div>
+          <div class="preview-notes" id="preview-notes"></div>
+        </section>
+        <section class="preview-block">
+          <div class="preview-block-title">相关入口</div>
+          <div class="preview-links" id="preview-links"></div>
+        </section>
+      </aside>
     </div>
   </div>
   <script>
@@ -1002,6 +1457,112 @@ ${renderPortalHeadAssets()}
       const summary = document.getElementById('filter-summary');
       const grids = Array.from(document.querySelectorAll('.card-grid'));
       const cards = Array.from(document.querySelectorAll('.review-card'));
+      const previewRoot = document.getElementById('review-preview');
+      const previewImage = document.getElementById('preview-image');
+      const previewTitle = document.getElementById('preview-title');
+      const previewMeta = document.getElementById('preview-meta');
+      const previewStatus = document.getElementById('preview-status');
+      const previewScore = document.getElementById('preview-score');
+      const previewPriority = document.getElementById('preview-priority');
+      const previewRisks = document.getElementById('preview-risks');
+      const previewNotes = document.getElementById('preview-notes');
+      const previewLinks = document.getElementById('preview-links');
+      const previewIndexLabel = document.getElementById('preview-index');
+      const previewPrev = document.getElementById('preview-prev');
+      const previewNext = document.getElementById('preview-next');
+      const previewClose = document.getElementById('preview-close');
+      let previewCard = null;
+
+      function visiblePreviewCards() {
+        return cards.filter((card) => card.style.display !== 'none' && card.querySelector('[data-preview-trigger]'));
+      }
+
+      function cardTextLines(card, selector) {
+        return Array.from(card.querySelectorAll(selector))
+          .map((node) => String(node.textContent || '').trim())
+          .filter(Boolean);
+      }
+
+      function buildRiskMarkup(tags) {
+        if (!tags.length) {
+          return '<span class="risk-tag risk-tag-clean">风险较低</span>';
+        }
+        return tags.map((tag) => '<span class="risk-tag">' + tag + '</span>').join('');
+      }
+
+      function buildLinkMarkup(links) {
+        if (!links.length) return '<div class="preview-note">当前没有可跳转的相关入口。</div>';
+        return links.map((item) => '<a href="' + item.href + '">' + item.label + '</a>').join('');
+      }
+
+      function buildNoteMarkup(lines) {
+        if (!lines.length) return '<div class="preview-note">当前没有更多备注。</div>';
+        return lines.map((line) => '<div class="preview-note">' + line + '</div>').join('');
+      }
+
+      function fillPreview(card) {
+        const image = card.querySelector('.card-media img');
+        const title = String(card.querySelector('h3')?.textContent || '').trim();
+        const meta = String(card.querySelector('.card-meta')?.textContent || '').trim();
+        const status = String(card.querySelector('.card-status')?.textContent || '').trim();
+        const score = String(card.querySelector('.card-score')?.textContent || '').trim();
+        const priority = String(card.querySelector('.card-priority')?.textContent || '').trim();
+        const risks = cardTextLines(card, '.risk-tag');
+        const notes = [
+          ...cardTextLines(card, '.card-notes-primary p'),
+          ...cardTextLines(card, '.card-notes-extra p'),
+        ];
+        const links = Array.from(card.querySelectorAll('.card-jump a')).map((node) => ({
+          label: String(node.textContent || '').trim(),
+          href: node.getAttribute('href') || '#',
+        }));
+
+        previewImage.src = image?.getAttribute('src') || '';
+        previewImage.alt = image?.getAttribute('alt') || title;
+        previewTitle.textContent = title || '当前结果';
+        previewMeta.textContent = meta || '未记录元数据';
+        previewStatus.textContent = status || '未标记';
+        previewScore.textContent = score || '审阅分未记录';
+        previewPriority.textContent = priority || '当前没有处理判断。';
+        previewRisks.innerHTML = buildRiskMarkup(risks);
+        previewNotes.innerHTML = buildNoteMarkup(notes);
+        previewLinks.innerHTML = buildLinkMarkup(links);
+      }
+
+      function syncPreviewButtons() {
+        const currentCards = visiblePreviewCards();
+        const currentIndex = currentCards.indexOf(previewCard);
+        previewIndexLabel.textContent = currentCards.length ? (currentIndex + 1) + ' / ' + currentCards.length : '0 / 0';
+        previewPrev.disabled = currentCards.length <= 1;
+        previewNext.disabled = currentCards.length <= 1;
+      }
+
+      function openPreview(card) {
+        if (!card) return;
+        previewCard = card;
+        fillPreview(card);
+        syncPreviewButtons();
+        previewRoot.hidden = false;
+        document.body.classList.add('preview-open');
+      }
+
+      function closePreview() {
+        previewRoot.hidden = true;
+        document.body.classList.remove('preview-open');
+        previewCard = null;
+      }
+
+      function stepPreview(direction) {
+        const currentCards = visiblePreviewCards();
+        if (!currentCards.length || !previewCard) return;
+        const currentIndex = currentCards.indexOf(previewCard);
+        if (currentIndex === -1) {
+          openPreview(currentCards[0]);
+          return;
+        }
+        const nextIndex = (currentIndex + direction + currentCards.length) % currentCards.length;
+        openPreview(currentCards[nextIndex]);
+      }
 
       function sortCards(grid) {
         const currentCards = Array.from(grid.querySelectorAll('.review-card')).filter((card) => card.style.display !== 'none');
@@ -1045,13 +1606,50 @@ ${renderPortalHeadAssets()}
 
         const total = cards.length;
         summary.textContent = visible === total
-          ? \`当前展示全部结果，共 \${total} 张。\`
-          : \`当前筛选后展示 \${visible} / \${total} 张结果。\`;
+          ? '当前展示全部结果，共 ' + total + ' 张。'
+          : '当前筛选后展示 ' + visible + ' / ' + total + ' 张结果。';
+
+        if (!previewRoot.hidden) {
+          const currentCards = visiblePreviewCards();
+          if (!currentCards.length) {
+            closePreview();
+          } else if (!currentCards.includes(previewCard)) {
+            openPreview(currentCards[0]);
+          } else {
+            syncPreviewButtons();
+          }
+        }
       }
 
       [searchInput, statusSelect, modeSelect, sortSelect, densitySelect].forEach((node) => {
         node.addEventListener('input', applyFilters);
         node.addEventListener('change', applyFilters);
+      });
+
+      cards.forEach((card) => {
+        const trigger = card.querySelector('[data-preview-trigger]');
+        if (!trigger) return;
+        trigger.addEventListener('click', () => openPreview(card));
+      });
+
+      previewPrev.addEventListener('click', () => stepPreview(-1));
+      previewNext.addEventListener('click', () => stepPreview(1));
+      previewClose.addEventListener('click', closePreview);
+      previewRoot.addEventListener('click', (event) => {
+        if (event.target === previewRoot) closePreview();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (previewRoot.hidden) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closePreview();
+        } else if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          stepPreview(-1);
+        } else if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          stepPreview(1);
+        }
       });
 
       applyFilters();
@@ -1060,6 +1658,7 @@ ${renderPortalHeadAssets()}
 </body>
 </html>`;
 
+  ensurePortalUiAssets(outputDir);
   fs.writeFileSync(outputPath, html);
   console.log(JSON.stringify({
     outputPath,

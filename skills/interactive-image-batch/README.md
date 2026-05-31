@@ -740,6 +740,12 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/interacti
 
 安装完成后建议重启 Codex。
 
+说明：
+
+- `references/examples/examples_catalog.html` 属于这个 skill 包内文件
+- 使用 `npx skills` 安装 `interactive-image-batch` 时，它会随 skill 一起安装
+- 手动复制 `skills/interactive-image-batch/` 时，只要整目录复制完整，这份中文模板展示板也会一起带过去
+
 ### 手动安装
 
 把 `skills/interactive-image-batch` 复制到以下任一目录：
@@ -748,6 +754,11 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/interacti
 - 全局：`~/.codex/skills/interactive-image-batch/`
 
 如果你是手动覆盖更新，也建议重启 Codex，让新版本 skill 被重新加载。
+
+说明：
+
+- 手动安装时，不要只复制 `SKILL.md`
+- 应把整个 `interactive-image-batch` 目录完整复制过去，这样 `references/examples/examples_catalog.html`、任务地图、脚本和示例资源都会一起生效
 
 ---
 

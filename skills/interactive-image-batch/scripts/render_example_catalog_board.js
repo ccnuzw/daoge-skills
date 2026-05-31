@@ -1,7 +1,22 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson } = require('./script_utils');
-const { renderPortalTopLinks } = require('./portal_shared');
+const {
+  entryModeLabel,
+  loadEntryState,
+  resolveEntryContext,
+  resolveEntryMainlineProtocol,
+  resolveEntryNextStep,
+  resolveEntryPreview,
+  resolveEntryRoute,
+  resolveEntryWorkbench,
+} = require('./entry_state_shared');
+const {
+  renderPortalTopLinks,
+  renderPortalContextBar,
+  renderPortalRouteCompass,
+  renderPortalWorkbench,
+} = require('./portal_shared');
 const { renderPortalHeadAssets } = require('./portal_ui_shared');
 
 function escapeHtml(text) {
@@ -148,12 +163,18 @@ function renderCard(item, entryType) {
       <div class="copy">${escapeHtml(item.description || '')}</div>
       <div class="quick-tips">
         <span class="quick-tag">${entryType === 'mainline' ? '适合第一次用这类任务的人' : '适合任务已经明确、需要更细风格控制的人'}</span>
+        <span class="quick-tag">${entryType === 'mainline' ? '先看它，再决定要不要继续细分' : '已经知道方向时再选它'}</span>
       </div>
-      <div class="cmd">node scripts/run_example_catalog_prepare.js \\
-  --example-id ${escapeHtml(item.id)} \\
-  --output-dir /tmp/daoge-${escapeHtml(item.id)}-demo</div>
+      <div class="meta meta-user">
+        <div class="meta-row"><div class="meta-label">适合什么</div><div class="meta-value">${escapeHtml(item.description || '适合当前这一类任务。')}</div></div>
+        <div class="meta-row"><div class="meta-label">怎么选</div><div class="meta-value">${entryType === 'mainline' ? '如果你还在判断这类任务该怎么起步，先从这里开始。' : '如果你已经确认主任务方向，但想进一步控制表现风格，再选这个细分入口。'}</div></div>
+      </div>
       <details class="card-details">
         <summary>${detailSummary}</summary>
+        <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
+        <div class="cmd">node scripts/run_example_catalog_prepare.js \\
+  --example-id ${escapeHtml(item.id)} \\
+  --output-dir /tmp/daoge-${escapeHtml(item.id)}-demo</div>
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">内部 ID</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
           <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
@@ -178,11 +199,16 @@ function renderStarterCard(item) {
         <span class="quick-tag">推荐难度：${escapeHtml(item.difficulty || '未标注')}</span>
         <span class="quick-tag">第一次使用优先选它</span>
       </div>
-      <div class="cmd">node scripts/run_example_catalog_prepare.js \\
-  --example-id ${escapeHtml(item.id)} \\
-  --output-dir /tmp/daoge-${escapeHtml(item.id)}-demo</div>
+      <div class="meta meta-user">
+        <div class="meta-row"><div class="meta-label">为什么推荐</div><div class="meta-value">${escapeHtml(item.starter_reason || item.description || '适合作为第一次使用时的起步入口。')}</div></div>
+        <div class="meta-row"><div class="meta-label">建议用法</div><div class="meta-value">如果你还不确定这类任务该从哪里开始，先用这个入口跑预检，再决定要不要继续细分。</div></div>
+      </div>
       <details class="card-details">
         <summary>查看模板细节（维护者）</summary>
+        <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
+        <div class="cmd">node scripts/run_example_catalog_prepare.js \\
+  --example-id ${escapeHtml(item.id)} \\
+  --output-dir /tmp/daoge-${escapeHtml(item.id)}-demo</div>
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
           <div class="meta-row"><div class="meta-label">模板 ID</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
@@ -205,11 +231,16 @@ function renderIntentCard(item) {
         <span class="quick-tag">直接按任务意图起步</span>
         <span class="quick-tag">适合不想先理解模板名的人</span>
       </div>
-      <div class="cmd">node scripts/run_example_catalog_prepare.js \\
+      <div class="meta meta-user">
+        <div class="meta-row"><div class="meta-label">适合谁</div><div class="meta-value">适合已经知道自己要做哪一类任务，但不想先理解模板内部名字的人。</div></div>
+        <div class="meta-row"><div class="meta-label">建议动作</div><div class="meta-value">先按这个任务意图起步，再看预检结果是否接近你的目标。</div></div>
+      </div>
+      <details class="card-details">
+        <summary>查看模板细节（维护者）</summary>
+        <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
+        <div class="cmd">node scripts/run_example_catalog_prepare.js \\
   --intent ${escapeHtml(item.intent)} \\
   --output-dir /tmp/daoge-${escapeHtml(item.intent)}-starter</div>
-      <details class="card-details">
-        <summary>查看内部映射（维护者）</summary>
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">推荐入口</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
           <div class="meta-row"><div class="meta-label">入口名称</div><div class="meta-value">${escapeHtml(item.name)}</div></div>
@@ -230,11 +261,16 @@ function renderTaskStarter(item) {
       <div class="quick-tips">
         <span class="quick-tag">这类任务建议先走意图入口</span>
       </div>
-      <div class="cmd">node scripts/run_example_catalog_prepare.js \\
+      <div class="meta meta-user">
+        <div class="meta-row"><div class="meta-label">为什么先走这里</div><div class="meta-value">这个入口能先帮你建立这类任务的基本路径，不用一上来就面对太多细分变体。</div></div>
+        <div class="meta-row"><div class="meta-label">建议动作</div><div class="meta-value">先按任务意图起步，等预检方向对了，再决定要不要切到更具体的变体。</div></div>
+      </div>
+      <details class="card-details">
+        <summary>查看模板细节（维护者）</summary>
+        <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
+        <div class="cmd">node scripts/run_example_catalog_prepare.js \\
   --intent ${escapeHtml(item.intent)} \\
   --output-dir /tmp/daoge-${escapeHtml(item.intent)}-starter</div>
-      <details class="card-details">
-        <summary>查看内部映射（维护者）</summary>
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">任务意图</div><div class="meta-value">${escapeHtml(item.intent)}</div></div>
           <div class="meta-row"><div class="meta-label">对应入口</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
@@ -249,21 +285,44 @@ function main() {
   const catalogFile = path.resolve(args['catalog-file'] || path.join(__dirname, '..', 'references', 'examples', 'examples.catalog.json'));
   const outputFile = path.resolve(args['output-file'] || path.join(path.dirname(catalogFile), 'examples_catalog.html'));
   const portalDir = path.dirname(outputFile);
-  const portalFile = path.join(portalDir, 'daoge_portal.html');
-  const resultHubFile = path.join(portalDir, 'result_hub.html');
-  const promptPreviewFile = path.join(portalDir, 'prompt_preview.html');
+  const workspaceHomeFile = path.join(portalDir, 'workspace_home.html');
+  const prepareWorkspaceFile = path.join(portalDir, 'prepare_workspace.html');
+  const resultWorkspaceFile = path.join(portalDir, 'result_workspace.html');
+  const entryStateFile = path.resolve(args['entry-state-file'] || path.join(portalDir, 'entry_state.json'));
   const catalog = readJson(catalogFile);
   const examples = Array.isArray(catalog.examples) ? catalog.examples : [];
   const grouped = groupExamplesByTask(examples);
   const starters = shortlistStarterExamples(examples);
   const intentCards = starterIntentCards(examples);
+  const entryState = loadEntryState(entryStateFile);
+  const currentTaskCategory = String(entryState?.taskCategory || '').trim() || '尚未选择';
+  const currentStarterIntent = String(entryState?.starterIntent || '').trim() || '尚未选择';
+  const entryMainlineProtocol = resolveEntryMainlineProtocol(entryState, { currentLayer: '模板展示层' });
+  const entryPreview = resolveEntryPreview(entryState);
+  const nextStep = resolveEntryNextStep(portalDir, entryState, {
+    prepareFile: prepareWorkspaceFile,
+    homeFile: workspaceHomeFile,
+  });
+  const entryContext = resolveEntryContext(entryState, {
+    currentTaskCategory,
+    currentStarterIntent,
+    entryPreview,
+    nextStep,
+    mainlineProtocol: entryMainlineProtocol,
+  });
+  const entryRoute = resolveEntryRoute(portalDir, entryState, { nextStep });
+  const entryWorkbench = resolveEntryWorkbench(portalDir, entryState, {
+    nextStep,
+    entryPreview,
+    currentTaskCategory,
+  });
 
   const html = `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DAOGE Example Catalog</title>
+  <title>DAOGE 中文模板展示板</title>
 ${renderPortalHeadAssets()}
   <style>
     :root {
@@ -558,24 +617,91 @@ ${renderPortalHeadAssets()}
         ${renderPortalTopLinks(portalDir, {
           currentPage: 'examples-catalog',
           extraLinks: [
-            { label: '返回 DAOGE 门户', file: portalFile },
-            { label: '返回结果总入口', file: resultHubFile },
-            { label: '返回 Prompt 预览', file: promptPreviewFile },
+            { label: '返回工作台首页', file: workspaceHomeFile },
+            { label: '返回准备工作台', file: prepareWorkspaceFile },
+            { label: '返回结果工作台', file: resultWorkspaceFile },
           ],
         })}
       </div>
-      <div class="eyebrow">DAOGE Examples</div>
-      <h1>中文任务入口总览</h1>
-      <p class="hero-copy">这个页面现在优先按中文任务组织，而不是先按内部分类组织。你可以先判断自己属于哪类任务，再看推荐意图入口、主链入口和细分变体入口。对第一次使用者来说，先选中文任务，再决定是否继续往下选 variant，会比直接在全部 example 里盲选稳定得多。</p>
+      <div class="eyebrow">DAOGE Template Board</div>
+      <h1>中文模板展示板</h1>
+      <p class="hero-copy">这就是中文任务入口总览，也是新版示例目录。这个页面优先按中文任务组织，而不是先按内部分类组织。你不需要先理解模板名，只要先判断自己属于哪类任务，再看推荐意图入口、主链入口和细分入口。对第一次使用的人来说，先选中文任务，再决定要不要继续细分，会比直接在全部 example 里盲选稳定得多。</p>
+      ${renderPortalContextBar(entryContext)}
+    </section>
+
+    ${renderPortalWorkbench(portalDir, {
+      title: '入口主链协议',
+      copy: entryMainlineProtocol.summary,
+      maxCards: 3,
+      cards: [
+        { label: '模板展示板', value: '选任务', summary: entryMainlineProtocol.entryRole, tone: 'good', hideLinkIfMissing: true },
+        {
+          label: '任务总控',
+          value: '跨任务入口',
+          summary: entryMainlineProtocol.taskCenterEntryProtocol?.summary || entryMainlineProtocol.taskCenterRole,
+          tone: 'info',
+          hideLinkIfMissing: true,
+        },
+        { label: '工作台首页', value: '接住单轮任务', summary: entryMainlineProtocol.workspaceRole, file: workspaceHomeFile, cta: '回工作台首页', pendingLabel: '选定任务后生成', tone: 'neutral' },
+      ],
+    })}
+
+    ${renderPortalRouteCompass(portalDir, {
+      title: entryRoute.title,
+      copy: entryRoute.copy,
+      current: entryRoute.current,
+      previous: {
+        label: '工作台首页',
+        summary: '回到统一主控页，重新看当前主链位置和已生成页面。',
+        file: workspaceHomeFile,
+        cta: '回工作台首页',
+      },
+      nextSteps: [
+        entryRoute.next,
+      ],
+    })}
+
+    ${renderPortalWorkbench(portalDir, {
+      title: entryWorkbench.title,
+      copy: entryWorkbench.copy,
+      cards: entryWorkbench.cards,
+    })}
+
+    <section class="section">
+      <div class="copy">当前页面优先展示 6 组中文任务：人物与时尚视觉、电商与商业视觉、信息与说明型视觉、资产与编辑、分镜与叙事、界面与产品样机。内部分类和命令行信息仍然保留，但默认收进进阶信息里，不再占据第一视角。</div>
     </section>
 
     <section class="section">
-      <div class="copy">当前页面优先展示 6 组中文任务：人物与时尚视觉、电商与商业视觉、信息与说明型视觉、资产与编辑、分镜与叙事、界面与产品样机。内部分类仍然保留在卡片详情里，但不再作为普通用户的第一视角。</div>
+      <h2 class="section-title">第一次使用，先这样选</h2>
+      <p class="section-copy">第一次使用先不要看全部卡片，先按任务意图起步，再看推荐入口，最后才看细分变体。</p>
+      <div class="grid">
+        <article class="card starter-card">
+          <div class="card-top">
+            <h3>第 1 步</h3>
+            <span class="entry-tag entry-tag-main">先判断任务</span>
+          </div>
+          <div class="copy">先看“按任务意图开始”，找到最像你目标的那一类，不用先背模板名字。</div>
+        </article>
+        <article class="card starter-card">
+          <div class="card-top">
+            <h3>第 2 步</h3>
+            <span class="entry-tag entry-tag-main">先走推荐起步</span>
+          </div>
+          <div class="copy">如果你还不确定细分风格，先选“推荐起步”里的入口，通常更稳。</div>
+        </article>
+        <article class="card starter-card">
+          <div class="card-top">
+            <h3>第 3 步</h3>
+            <span class="entry-tag entry-tag-variant">再看细分入口</span>
+          </div>
+          <div class="copy">只有当你已经知道自己要更具体的表现方式时，再去选择细分入口。</div>
+        </article>
+      </div>
     </section>
 
     <section class="section">
       <h2 class="section-title">按任务意图开始</h2>
-      <p class="section-copy">如果你还不想先理解模板名，可以先从这 6 个最高频任务意图开始。第一次使用先不要展开全部入口，先选最像你任务的一类再进预检。</p>
+      <p class="section-copy">如果你还不想先理解模板名，可以先从这些高频任务意图开始。第一次使用先不要展开全部入口，先选最像你任务的一类再进预检。</p>
       <div class="grid">
         ${intentCards.map((item) => renderIntentCard(item)).join('')}
       </div>
@@ -601,8 +727,8 @@ ${renderPortalHeadAssets()}
             <button class="toggle-button" type="button" data-filter-type="variant">只看变体</button>
           </div>
         </div>
-        <div class="copy">CLI 也支持只列这 6 个推荐入口：<span class="cmd">node scripts/run_example_catalog_prepare.js --starter true</span></div>
-        <div class="copy">如果你已经知道任务意图，也建议第一次先从这 6 个里选：<span class="cmd">portrait</span> <span class="cmd">studio</span> <span class="cmd">ecommerce</span> <span class="cmd">packaging</span> <span class="cmd">cinematic</span> <span class="cmd">oralboard</span></div>
+        <div class="copy">如果你更习惯看命令，可以用这条方式只列推荐起步入口：<span class="cmd">node scripts/run_example_catalog_prepare.js --starter true</span></div>
+        <div class="copy">如果你已经知道任务意图，也可以直接从这些高频任务开始：<span class="cmd">portrait</span> <span class="cmd">studio</span> <span class="cmd">ecommerce</span> <span class="cmd">packaging</span> <span class="cmd">cinematic</span> <span class="cmd">oralboard</span></div>
       </div>
     </section>
 
