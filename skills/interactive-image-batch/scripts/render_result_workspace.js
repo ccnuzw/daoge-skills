@@ -17,12 +17,17 @@ const {
   getWorkspaceStageChrome,
   getWorkspaceStagePhrases,
   getWorkspaceIdentityCopy,
-  getWorkspacePageShellConfig,
-  getWorkspaceLayoutConfig,
-  getWorkspaceModeSwitchConfig,
+  resolveWorkspaceShellRuntime,
   getWorkspaceActionCopy,
   buildWorkspaceContextFallback,
-  resolveWorkspaceContextBarData,
+  resolveWorkspaceStageContextBarData,
+  resolveWorkspaceStageViewValue,
+  resolveWorkspaceStageSection,
+  resolveWorkspaceStageStateValue,
+  resolveWorkspaceStageSessionConsole,
+  resolveWorkspaceStageActionStatus,
+  resolveWorkspaceStageDialogueStatus,
+  resolveWorkspaceStageConfirmationState,
   buildWorkspaceHeroCardsData,
   buildWorkspaceStageGuideFallback,
   buildWorkspaceStageWorkbenchCards,
@@ -77,6 +82,7 @@ const {
   renderWorkspaceAdvancedSection,
   buildCommonDeclaredSectionRenderers,
   buildWorkspaceContentSectionPlan,
+  resolveWorkspaceStageContentSectionPlan,
   renderWorkspaceDeclaredSections,
   renderWorkspaceSectionLayout,
   renderWorkspacePageShell,
@@ -87,9 +93,9 @@ const {
   resolveWorkspaceGuideSectionData,
   resolveWorkspaceIssuesSectionData,
   resolveWorkspaceDecisionSectionData,
-  resolveWorkspaceSummarySectionData,
-  resolveWorkspaceRouteSectionByStage,
-  resolveWorkspaceWorkbenchSectionData,
+  resolveWorkspaceStageSummarySection,
+  resolveWorkspaceStageRouteSection,
+  resolveWorkspaceStageWorkbenchSection,
   buildRenderableWorkbench,
   summarizeArtifactLayer,
   buildWorkspaceFallbackGuide,
@@ -185,13 +191,15 @@ function renderResultWorkspaceContentArea(options = {}) {
   const previewCardsHtml = Array.isArray(options.previewCardsHtml) ? options.previewCardsHtml.filter(Boolean).join('') : '';
   const issueCardsHtml = Array.isArray(options.issueCardsHtml) ? options.issueCardsHtml.filter(Boolean).join('') : '';
   return renderWorkspaceDeclaredSections(
-    buildWorkspaceContentSectionPlan(
-      options.contentSections,
-      (options.denseCopy?.contentSectionOrder || ['preview', 'issues', 'guide', 'visibility']).map((key) => ({
-        key,
-        kind: key === 'preview' ? 'previewGrid' : (key === 'issues' ? 'issuesGrid' : 'keyValue'),
-      }))
-    ),
+    Array.isArray(options.contentSections) && options.contentSections.length
+      ? options.contentSections
+      : buildWorkspaceContentSectionPlan(
+        options.contentSections,
+        (options.denseCopy?.contentSectionOrder || ['preview', 'issues', 'guide', 'visibility']).map((key) => ({
+          key,
+          kind: key === 'preview' ? 'previewGrid' : (key === 'issues' ? 'issuesGrid' : 'keyValue'),
+        }))
+      ),
     {
       ...buildCommonDeclaredSectionRenderers({
         guide: options.guideSection || {},
@@ -296,13 +304,13 @@ function main() {
     resumeManifest: manifest?.resumeManifest || null,
   }, outputDir);
   const resultSummary = pageState?.result || {};
-  const resultHero = resultView?.hero || {};
+  const resultHero = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'hero', {});
   const resultContext = resultView?.context || {};
-  const resultFlow = resultView?.flow || {};
-  const resultAssetStatus = resultView?.assetStatus || {};
-  const resultActionStatus = resultView?.actionStatus || {};
-  const resultDialogueStatus = resultView?.dialogueStatus || {};
-  const resultCopilot = resultView?.copilot || {};
+  const resultFlow = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'flow', {});
+  const resultAssetStatus = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'assetStatus', {});
+  const resultActionStatus = resolveWorkspaceStageActionStatus(pageState, 'result', resultView);
+  const resultDialogueStatus = resolveWorkspaceStageDialogueStatus(pageState, 'result', resultView);
+  const resultCopilot = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'copilot', {});
   const unifiedResultStatus = resultSummary?.unifiedStatus && typeof resultSummary.unifiedStatus === 'object'
     ? resultSummary.unifiedStatus
     : {};
@@ -312,24 +320,24 @@ function main() {
   const runtimeCopilotSummary = runtimeSummary.copilotSummary && typeof runtimeSummary.copilotSummary === 'object'
     ? runtimeSummary.copilotSummary
     : {};
-  const resultWorkflowCopilot = pageState?.workflowSessions?.result || resultView?.workflowCopilot || {};
-  const resultWorkflowContract = resultView?.workflowContract || pageState?.workflowContracts?.result || {};
-  const resultControlRail = resultView?.controlRail || {};
-  const resultSessionConsole = pageState?.taskSessionSnapshots?.result || resultView?.sessionConsole || {};
-  const resultConfirmationState = resultView?.confirmation
-    || resultSummary.confirmation
-    || resultPageData.confirmation
-    || resultSummary.confirmationState
-    || pageState?.result?.confirmationState
-    || {};
-  const stateResultCockpitSummary = resultPageData.cockpitSummary || resultSummary.cockpitSummary || null;
-  const stateResultJudgment = resultPageData.judgment || resultSummary.judgment || null;
+  const resultWorkflowCopilot = pageState?.workflowSessions?.result || resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'workflowCopilot', {});
+  const resultWorkflowContract = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'workflowContract', pageState?.workflowContracts?.result || {});
+  const resultControlRail = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'controlRail', {});
+  const resultSessionConsole = resolveWorkspaceStageSessionConsole(pageState, 'result', resultView);
+  const resultConfirmationState = resolveWorkspaceStageConfirmationState(
+    pageState,
+    'result',
+    resultView,
+    resultSummary.confirmation || resultPageData.confirmation || resultSummary.confirmationState || pageState?.result?.confirmationState || {}
+  );
+  const stateResultCockpitSummary = resolveWorkspaceStageStateValue(pageState, 'result', resultPageData, resultSummary, 'cockpitSummary', null);
+  const stateResultJudgment = resolveWorkspaceStageStateValue(pageState, 'result', resultPageData, resultSummary, 'judgment', null);
   const stateResultStatusStack = toArray(resultPageData.statusStack).length
     ? resultPageData.statusStack
     : (toArray(resultSummary.statusStack).length ? resultSummary.statusStack : []);
-  const stateResultDecision = resultPageData.decision || resultSummary.decision || null;
-  const stateResultSummarySection = resultPageData.summary || resultSummary.summary || null;
-  const stateResultCollaboration = resultPageData.collaboration || resultSummary.collaboration || null;
+  const stateResultDecision = resolveWorkspaceStageStateValue(pageState, 'result', resultPageData, resultSummary, 'decision', null);
+  const stateResultSummarySection = resolveWorkspaceStageStateValue(pageState, 'result', resultPageData, resultSummary, 'summary', null);
+  const stateResultCollaboration = resolveWorkspaceStageStateValue(pageState, 'result', resultPageData, resultSummary, 'collaboration', null);
   const resultFallbackState = buildStageWorkspaceFallbackState('result', {
     failedCount,
     reviewCount,
@@ -362,7 +370,11 @@ function main() {
     ? resultSummary.primaryAction
     : null;
   const resultSecondaryHints = toArray(resultSummary.secondaryActionHints);
-  const resolvedResultTimeline = resultView?.timeline
+  const resultTaskControlBar = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'taskControlBar', null);
+  const resultSignalBar = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'signalBar', null);
+  const resultTimeline = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'timeline', null);
+  const resultStageRelay = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'stageRelay', null);
+  const resolvedResultTimeline = resultTimeline
     || resultPageData?.sections?.timeline
     || buildWorkspaceFallbackTimeline('result', {
       events: Array.isArray(resultPageData?.timelineEvents) && resultPageData.timelineEvents.length
@@ -370,7 +382,7 @@ function main() {
         : null,
       workspaceTimelineEvents: workspaceTimeline?.events,
     });
-  const resolvedResultProgress = resultView?.progress || null;
+  const resolvedResultProgress = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'progress', null);
   const resolvedResultActionStatus = {
     ...buildActionStatusFromUnifiedStatus(unifiedResultStatus, {
       base: resultActionStatus,
@@ -404,16 +416,16 @@ function main() {
   const resolvedResultWorkflow = adaptWorkflowCopilot(resultWorkflowCopilot, {
     stageKey: 'result',
     stageLabel: currentPhaseLabel,
-    taskControlBar: resultView?.taskControlBar || null,
+    taskControlBar: resultTaskControlBar,
     sessionConsole: resultSessionConsole,
-    signalBar: resultView?.signalBar || null,
+    signalBar: resultSignalBar,
     statusStack: stateResultStatusStack,
     cockpitSummary: stateResultCockpitSummary,
     dialogueStatus: resolvedResultDialogueStatus,
     confirmation: resultConfirmationState,
-    timeline: resultView?.timeline || null,
+    timeline: resultTimeline,
     judgment: stateResultJudgment,
-    stageRelay: resultView?.stageRelay || null,
+    stageRelay: resultStageRelay,
   });
   const resultContractState = buildWorkflowContractPageState(resultWorkflowContract, {
     taskControlBar: resolvedResultWorkflow.taskControlBar,
@@ -429,29 +441,29 @@ function main() {
     confirmationSummary: resultConfirmationState.summary,
     defaultActionReason: resolvedResultWorkflow.language.dialogueActionReason,
   });
-  const resultTransitionStatus = resultView?.transitionStatus || {};
-  const resultHandoffFromPrevious = resultView?.handoffFromPrevious || resultTransitionStatus || {};
-  const resultHandoffToNext = resultView?.handoffToNext || {};
-  const resultSections = resultView?.sections || {};
-  const resultPageSections = resultPageData?.sections || {};
-  const resultGuideSection = resultSections?.guide || {};
-  const resultVisibilitySection = resultSections?.visibility || {};
-  const resultPreviewSection = resultSections?.preview || {};
-  const resultIssuesSection = resultSections?.issues || {};
-  const resultAdvancedSection = resultSections?.advanced || {};
+  const resultTransitionStatus = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'transitionStatus', {});
+  const resultHandoffFromPrevious = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'handoffFromPrevious', resultTransitionStatus || {});
+  const resultHandoffToNext = resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'handoffToNext', {});
+  const resultGuideSection = resolveWorkspaceStageSection(pageState, 'result', resultView, resultPageData, 'guide');
+  const resultVisibilitySection = resolveWorkspaceStageSection(pageState, 'result', resultView, resultPageData, 'visibility');
+  const resultPreviewSection = resolveWorkspaceStageSection(pageState, 'result', resultView, resultPageData, 'preview');
+  const resultIssuesSection = resolveWorkspaceStageSection(pageState, 'result', resultView, resultPageData, 'issues');
+  const resultAdvancedSection = resolveWorkspaceStageSection(pageState, 'result', resultView, resultPageData, 'advanced');
   const statusLabel = resultNarrative.statusLabel;
   const statusTone = String(resultSummary.statusTone || pageState?.status?.tone || '').trim()
     || (failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'));
   const statusSummary = resultNarrative.statusSummary || resultStageSummary;
   const chrome = getWorkspaceStageChrome('result');
   const denseCopy = getWorkspaceDenseCopy('result');
-  const shell = getWorkspacePageShellConfig('result');
-  const governance = pageState?.governanceByPage?.[shell.currentPage] || pageState?.governance || null;
-  const layout = resultView?.display || governance?.display || getWorkspaceLayoutConfig('result', { currentPage: shell.currentPage });
-  const surfaceRules = layout?.surfaceRules || {};
-  const governedWorkbenchIds = Array.isArray(governance?.workbenchEntryIds) ? new Set(governance.workbenchEntryIds) : null;
-  const optionalSurface = governance?.optionalSurface || {};
-  const modeSwitch = getWorkspaceModeSwitchConfig('result', { currentPage: shell.currentPage });
+  const {
+    shell,
+    governance,
+    layout,
+    surfaceRules,
+    governedWorkbenchIds,
+    optionalSurface,
+    modeSwitch,
+  } = resolveWorkspaceShellRuntime(pageState, 'result', resultView);
   const actionCopy = getWorkspaceActionCopy();
   const identity = getWorkspaceIdentityCopy();
   const successItems = Array.isArray(resultPageData?.resultItems) && resultPageData.resultItems.length
@@ -503,7 +515,7 @@ function main() {
     ? path.join(outputDir, resolvedNextAction.target)
     : null;
   const normalizedResultGuideSection = resolveWorkspaceGuideSectionData(
-    resultPageSections?.guide || resultGuideSection,
+    resultGuideSection,
     buildWorkspaceStageGuideFallback('result', {
       entryGuideTitle: resultGuideSection?.title,
       entryGuideItems: resultGuideSection?.items,
@@ -511,7 +523,7 @@ function main() {
     })
   );
   const normalizedResultVisibilitySection = resolveWorkspaceGuideSectionData(
-    resultPageSections?.visibility || resultVisibilitySection,
+    resultVisibilitySection,
     buildWorkspaceStageVisibilityFallback('result', {
       visibilityTitle: resultVisibilitySection?.title,
       visibilityCopy: resultVisibilitySection?.copy,
@@ -519,14 +531,14 @@ function main() {
     })
   );
   const normalizedResultPreviewSection = buildWorkspacePreviewSectionData(
-    resultPageSections?.preview || resultPreviewSection
+    resultPreviewSection
   );
   const normalizedResultIssuesSection = resolveWorkspaceIssuesSectionData(
-    resultPageSections?.issues || resultIssuesSection,
-    resultPageSections?.issues || {}
+    resultIssuesSection,
+    resultIssuesSection
   );
   const normalizedResultAdvancedSection = buildWorkspaceAdvancedSectionData(
-    resultPageSections?.advanced || resultAdvancedSection
+    resultAdvancedSection
   );
   const previewItems = Array.isArray(normalizedResultPreviewSection.items) && normalizedResultPreviewSection.items.length
     ? normalizedResultPreviewSection.items.slice(0, 12)
@@ -550,7 +562,7 @@ function main() {
     {
       workflow: resolvedResultWorkflow.stageRelay,
       copilot: resultCopilot?.mainline?.stageRelay,
-      view: resultView?.stageRelay,
+      view: resultStageRelay,
       fallbackCurrentSummary: firstNonEmpty(
         resultFallbackState.stageRelay.fallbackCurrentSummary,
         resultTransitionSummary,
@@ -567,7 +579,7 @@ function main() {
     base: stateResultCockpitSummary,
     workflow: resolvedResultWorkflow.cockpitSummary,
     copilot: resultCopilot?.hero?.cockpitSummary,
-    view: resultView?.cockpitSummary,
+    view: resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'cockpitSummary', null),
     items: resultFallbackState.cockpitItems,
   });
   const resolvedResultJudgment = buildUnifiedWorkflowJudgment({
@@ -579,7 +591,7 @@ function main() {
     baseState: stateResultJudgment,
     copilot: resultCopilot?.mainline?.judgment,
     workflow: resolvedResultWorkflow.judgment,
-    view: resultView?.judgment,
+    view: resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'judgment', null),
   });
   const resolvedResultDecision = buildUnifiedWorkflowDecision({
     stageConfig: {
@@ -594,10 +606,15 @@ function main() {
       }),
     }),
     state: stateResultDecision,
-    view: resultView?.decision,
+    view: resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'decision', null),
   });
-  const resolvedResultSummary = resolveWorkspaceSummarySectionData(
-    stateResultSummarySection || resultView?.summary || {},
+  const resolvedResultSummary = resolveWorkspaceStageSummarySection(
+    pageState,
+    'result',
+    {
+      ...resultView,
+      summary: resultView?.summary || stateResultSummarySection || {},
+    },
     buildWorkspaceSummarySectionData({
       enabled: layout.showSummaryByDefault,
       title: chrome.summaryTitle,
@@ -620,7 +637,7 @@ function main() {
     || resolvedResultWorkflow.taskControlBar
     || resultCopilot?.hero?.taskControlBar
     || resultControlRail.taskControlBar
-    || resultView?.taskControlBar
+    || resultTaskControlBar
     || buildTaskControlBarFromUnifiedStatus(unifiedResultStatus, {
       copilotSummary: runtimeCopilotSummary,
       taskLabel,
@@ -654,7 +671,7 @@ function main() {
   const resolvedResultSignalBar = resolvedResultWorkflow.signalBar
     || resultCopilot?.hero?.signalBar
     || resultControlRail.signalBar
-    || (Array.isArray(resultView?.signalBar) ? { items: resultView.signalBar } : resultView?.signalBar)
+    || (Array.isArray(resultSignalBar) ? { items: resultSignalBar } : resultSignalBar)
     || {
       items: buildResultSignalBar({
         stageLabel: currentPhaseLabel,
@@ -685,7 +702,7 @@ function main() {
   const resolvedResultCollaboration = buildUnifiedWorkflowCollaboration(unifiedResultStatus, {
     base: resultContractState.collaboration || stateResultCollaboration,
     workflow: resolvedResultWorkflow.collaboration,
-    view: resultView?.collaboration,
+    view: resolveWorkspaceStageViewValue(pageState, 'result', resultView, 'collaboration', null),
     confirmation: resolvedResultConfirmationState,
     timeline: resolvedResultTimeline,
     dialogue: finalizedResultDialogueStatus,
@@ -699,7 +716,10 @@ function main() {
   const normalizedResultSummary = buildWorkspaceSummarySectionData(resolvedResultSummary || {});
   const resultContentSections = renderResultWorkspaceContentArea({
     denseCopy,
-    contentSections: resultView?.contentSections,
+    contentSections: resolveWorkspaceStageContentSectionPlan(pageState, 'result', resultView, (denseCopy.contentSectionOrder || ['preview', 'issues', 'guide', 'visibility']).map((key) => ({
+      key,
+      kind: key === 'preview' ? 'previewGrid' : (key === 'issues' ? 'issuesGrid' : 'keyValue'),
+    }))),
     guideSection: normalizedResultGuideSection,
     visibilitySection: normalizedResultVisibilitySection,
     previewSection: normalizedResultPreviewSection,
@@ -721,16 +741,20 @@ function main() {
     }),
     ...guideCards,
   ].filter(Boolean).filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
-  const resolvedResultWorkbench = resolveWorkspaceWorkbenchSectionData(
-    resultView?.workbench || {},
+  const resolvedResultWorkbench = resolveWorkspaceStageWorkbenchSection(
+    pageState,
+    'result',
+    resultView,
     buildWorkspaceWorkbenchSectionData({
       title: chrome.workbenchTitle,
       copy: chrome.workbenchCopy,
       cards: fallbackWorkbenchCards,
     })
   );
-  const resolvedResultRoute = resolveWorkspaceRouteSectionByStage(
-    resultView?.route || {},
+  const resolvedResultRoute = resolveWorkspaceStageRouteSection(
+    pageState,
+    'result',
+    resultView,
     buildWorkspaceStageRouteFallback('result', {
       title: chrome.routeTitle,
       copy: chrome.routeCopy,
@@ -749,7 +773,7 @@ function main() {
     })
   );
   const resultHeroCards = Array.isArray(resultView?.heroCards) ? resultView.heroCards : [];
-  const contextBarData = resolveWorkspaceContextBarData('result', resultContext, buildWorkspaceContextFallback('result', {
+  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'result', resultView, buildWorkspaceContextFallback('result', {
     runLabel: taskLabel,
     phaseLabel: currentPhaseLabel,
     flowLabel: identity.flows.result,

@@ -57,17 +57,17 @@ function main() {
   const successfulLocalEditSlotIds = uniqueSlotIds(successfulLocalEdits);
   const hasFailures = Number(manifest.failed || 0) > 0;
   const lines = [
-    '# DAOGE 结果说明',
+    '# DAOGE 结果补充说明',
     '',
     '我是 DAOGE。',
-    '这份说明只负责告诉你：结果现在稳不稳、最推荐回哪个工作台、以及还需要哪些补充动作。',
+    '这份 Markdown 已经退到结果补充说明层，只负责告诉你结果现在稳不稳、该回哪个主链工作台、以及还需要哪些按需补充动作。',
     '',
-    '## 1. 最推荐入口',
+    '## 1. 回主链入口',
     '',
-    `- 工作台首页: ${fileExists(workspaceHomePath) ? workspaceHomePath : '尚未生成'}`,
-    `- 结果工作台: ${fileExists(resultWorkspacePath) ? resultWorkspacePath : '尚未生成'}`,
-    `- 异常工作台: ${fileExists(exceptionWorkspacePath) ? exceptionWorkspacePath : '尚未生成'}`,
-    `- 整板页: ${fileExists(storyboardBoardPath) ? storyboardBoardPath : '本轮未生成'}`,
+    `- 回结果工作台: ${fileExists(resultWorkspacePath) ? resultWorkspacePath : '尚未生成'}`,
+    `- 回异常工作台: ${fileExists(exceptionWorkspacePath) ? exceptionWorkspacePath : '尚未生成'}`,
+    `- 回工作台首页: ${fileExists(workspaceHomePath) ? workspaceHomePath : '尚未生成'}`,
+    `- 分镜整板补充页: ${fileExists(storyboardBoardPath) ? storyboardBoardPath : '本轮未生成'}`,
     '',
     '## 2. 当前结果判断',
     '',
@@ -91,15 +91,15 @@ function main() {
     '',
     '## 4. 这些入口分别什么时候用',
     '',
-    '- 工作台首页: 用来重新判断整条任务现在走到哪一步。',
+    '- 工作台首页: 只在需要重新总览整条任务阶段时回去，不作为结果层默认下一步。',
     '- 结果工作台: 正常情况下默认先回这里做筛图和收口判断。',
     '- 异常工作台: 只有出现失败项或待复核压力时才优先进入。',
-    '- 分镜整板页: 只有分镜任务才需要回这里看上下文和镜头关系。',
-    '- 完成报告: 更适合查看目录、批次、覆盖范围和最终归档说明。',
+    '- 分镜整板补充页: 只有分镜任务且需要复看上下文和镜头关系时才按需打开。',
+    '- 完成归档报告: 更适合查看目录、批次、覆盖范围和最终归档说明。',
     '',
     '## 5. 快速查看文件',
     '',
-    `- 完成报告: ${fileExists(completionReportPath) ? completionReportPath : '未生成'}`,
+    `- 完成归档报告: ${fileExists(completionReportPath) ? completionReportPath : '未生成'}`,
     `- 结果挑选与补救说明: ${fileExists(selectionBoardPath) ? selectionBoardPath : '未生成'}`,
     `- 运行复盘: ${fileExists(operationsReportPath) ? operationsReportPath : '未生成'}`,
     `- 运行总索引: ${fileExists(runIndexPath) ? runIndexPath : '未生成'}`,
@@ -114,7 +114,7 @@ function main() {
       ? ['- 当前有失败项，先回异常工作台，不要直接继续下一轮。']
       : ['- 当前没有失败项，建议先回结果工作台继续筛图和最终取舍。']),
     ...(fileExists(storyboardBoardPath)
-      ? ['- 这轮是分镜任务时，别只看单张，记得回整板页检查上下文。']
+      ? ['- 这轮是分镜任务时，别只看单张；如需复看上下文，再按需打开分镜整板补充页。']
       : ['- 当前不是整板优先任务，可以把注意力集中在结果工作台。']),
     '- 如果你只想找最终图片，不需要先读所有说明，直接打开图片目录即可。',
   ];

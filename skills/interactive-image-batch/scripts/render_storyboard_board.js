@@ -189,8 +189,8 @@ function main() {
   const boardContextBar = renderPortalContextBar({
     runLabel: path.basename(outputDir),
     boardLabel: content.board_id || content.board_title || '',
-    phaseLabel: '整板审阅',
-    flowLabel: '结果工作台 -> 整板页 -> 异常 / 回首页',
+    phaseLabel: '分镜整板补充页',
+    flowLabel: '结果工作台 -> 分镜整板补充页 -> 回结果主链',
     counts: [
       { label: '已出图', value: boardSummary.readyCount },
       { label: '待复核', value: boardSummary.needsReviewCount },
@@ -218,7 +218,7 @@ function main() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(content.board_title || content.board_id || 'Storyboard Board')}</title>
+  <title>${escapeHtml(content.board_title || content.board_id || '未命名分镜')} · DAOGE 分镜整板补充页</title>
 ${renderPortalHeadAssets()}
   <style>
     :root {
@@ -677,30 +677,30 @@ ${renderPortalHeadAssets()}
       })}
     </div>
     ${renderPortalModeSwitch({
-      title: '整板页浏览模式',
-      copy: '这里专门用来回看整板节奏与镜头关系，看完后回结果层或异常层继续主链判断。',
+      title: '分镜整板补充页浏览模式',
+      copy: '这里专门按需回看整板节奏与镜头关系。普通流程看完就回结果工作台，只有发现缺图或异常时才去异常工作台。',
     })}
     ${renderPortalProgressRail(outputDir, {
       currentPage: 'storyboard_board.html',
-      title: '新的主链',
-      copy: '整板页已经降成按需页面，只有分镜任务才需要进入这里回看上下文。',
+      title: '结果主链进度',
+      copy: '分镜整板补充页已经降成结果补充页，只有分镜任务且需要上下文复看时才进入，不再抢结果主链入口。',
     })}
     ${renderPortalRouteCompass(outputDir, {
-      title: '看完整板后，通常这样走',
-      copy: '当你已经确认镜头衔接和品牌区关系，就回结果层继续收口；如果已经看到缺图或异常，再进异常层。',
+      title: '分镜整板补充页看完后，回结果主链',
+      copy: '这里负责深看镜头衔接、品牌区和整板观感，不再承担结果总控。把结论送回结果工作台，异常再交给异常工作台。',
       previous: {
         label: '回结果工作台',
         summary: '如果你已经看完整板，回统一结果页继续判断是否收口。',
         file: resultWorkspacePath,
-        cta: '回结果层',
+        cta: '回结果工作台',
       },
       nextSteps: [
         {
           kicker: '推荐下一步',
-          label: '回工作台首页',
-          summary: '如果这一轮已经判断清楚，可以回首页继续下一轮任务或重新开题。',
-          file: workspaceHomePath,
-          cta: '回首页',
+          label: '回结果工作台',
+          summary: '整板节奏判断完后，先回结果主链继续筛图、收口或确认下一步。',
+          file: resultWorkspacePath,
+          cta: '回结果工作台',
           audience: 'newcomer',
         },
         {
@@ -714,8 +714,9 @@ ${renderPortalHeadAssets()}
         ],
       })}
     <section class="board-hero">
-      <div class="board-kicker">Storyboard Workbench</div>
-      <h1 class="board-title">${escapeHtml(content.board_title || content.board_id || 'Storyboard Board')}</h1>
+      <div class="board-kicker">分镜整板补充页</div>
+      <h1 class="board-title">${escapeHtml(content.board_title || content.board_id || '未命名分镜')} · DAOGE 分镜整板补充页</h1>
+      <p class="board-subtitle">分镜整板补充页已经退到结果补充页层。普通结果判断先回结果工作台；只有需要看镜头衔接、版面关系或分镜上下文时，才停留在这里。</p>
       <p class="board-subtitle">${escapeHtml(boardHero.summary)}</p>
       ${boardHero.tags.length ? `
         <div class="board-hero-tags">

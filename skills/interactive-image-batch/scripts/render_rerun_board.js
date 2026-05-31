@@ -45,10 +45,6 @@ function main() {
 
   const resultWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
   const exceptionWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'exception', path.join(outputDir, 'exception_workspace.html'));
-  const runOverviewPath = path.join(outputDir, 'run_overview.html');
-  const reviewBoardPath = path.join(outputDir, 'review_board.html');
-  const completionBoardPath = path.join(outputDir, 'completion_board.html');
-  const selectionBoardPath = path.join(outputDir, 'selection_board.md');
   const runnerCommand = `node "$DAOGE_RUNNER" --prompts-file '${resolvePromptFileForRerun(manifest, outputDir)}' --resume-manifest '${manifestPath}' --failed-only true`;
   const failedCount = Number(pageState?.counts?.failed || ensureArray(failed).length || manifest.failed || 0);
   const reviewCount = Number(pageState?.counts?.needsReview || ensureArray(needsReview).length || 0);
@@ -152,24 +148,15 @@ ${renderWorkspaceStyles()}
           file: resultWorkspacePath,
           cta: '回结果工作台',
         },
-        {
-          kicker: '如果要查执行问题',
-          label: '运行概览补充页',
-          summary: '怀疑失败来自执行过程时再去看。',
-          file: runOverviewPath,
-          cta: '进入运行概览补充页',
-        },
       ],
     })}
 
     ${renderPortalWorkbench(outputDir, {
       title: '补跑补充页入口',
-      copy: '保留和补跑判断直接相关的少量入口。',
+      copy: '保留和补跑判断直接相关的主链入口；运行概览、审阅看板和完成摘要不再从这里继续分叉。',
       cards: [
         { label: '回异常工作台', value: fileExists(exceptionWorkspacePath) ? '推荐入口' : '待生成', summary: nextActionReason, file: exceptionWorkspacePath, cta: '回异常工作台', tone: 'good' },
         { label: '回结果工作台', value: fileExists(resultWorkspacePath) ? '可进入' : '待生成', summary: '回主链重新判断是否真的需要补跑。', file: resultWorkspacePath, cta: '回结果工作台', tone: 'info' },
-        { label: '审阅看板', value: fileExists(reviewBoardPath) ? '可进入' : '待生成', summary: '有些问题更适合人工判断，不一定要补跑。', file: reviewBoardPath, cta: '进入审阅看板', tone: 'neutral' },
-        { label: '完成摘要页', value: fileExists(completionBoardPath) ? '可进入' : '待生成', summary: '回看整体结果摘要时再进入。', file: completionBoardPath, cta: '进入完成摘要页', tone: 'neutral' },
       ],
     })}
 
@@ -196,8 +183,8 @@ ${renderWorkspaceStyles()}
           kicker: 'failed-only',
           title: '只补跑失败项',
           copy: runnerCommand,
-          href: fileExists(selectionBoardPath) ? relativeFile(outputDir, selectionBoardPath) : null,
-          cta: '查看选择板',
+          href: fileExists(exceptionWorkspacePath) ? relativeFile(outputDir, exceptionWorkspacePath) : null,
+          cta: '回异常工作台确认',
           tone: 'warn',
         })}
       </div>

@@ -75,7 +75,7 @@ function main() {
   const contextBar = renderPortalContextBar({
     runLabel: path.basename(outputDir),
     phaseLabel,
-    flowLabel: '旧结果说明页 -> 结果工作台 -> 审阅 / 整板 / 异常',
+    flowLabel: '旧结果维护说明页 -> 结果工作台 -> 审阅 / 分镜补充 / 异常',
     counts: [
       { label: '成功', value: success },
       { label: '失败', value: failed },
@@ -92,7 +92,7 @@ function main() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DAOGE 旧结果说明页</title>
+  <title>DAOGE 旧结果维护说明页</title>
 ${renderPortalHeadAssets()}
   <style>
     :root {
@@ -113,22 +113,22 @@ ${renderWorkspaceStyles()}
       <div class="top-links">
         ${renderPortalTopLinks(outputDir, {
           currentPage: 'result_hub.html',
-          extraLinks: [{ label: '结果说明文档', file: resultHubMarkdownPath }],
+          extraLinks: [{ label: '旧结果维护说明文档', file: resultHubMarkdownPath }],
         })}
       </div>
-      <div class="eyebrow">旧结果说明</div>
-      <h1>${taskLabel} · DAOGE 旧结果说明页</h1>
+      <div class="eyebrow">旧结果维护说明</div>
+      <h1>${taskLabel} · DAOGE 旧结果维护说明页</h1>
       <p class="hero-copy">${statusSummary}</p>
       ${renderPortalModeSwitch({
         title: '结果入口迁移说明',
-        copy: '旧结果说明页继续存在，但现在只作为说明入口；真正的结果主控已经迁移到统一结果工作台。',
+        copy: '旧结果维护说明页继续存在，但现在只作为维护说明入口；真正的结果主控已经迁移到统一结果工作台。',
         newcomerLabel: '回结果主链',
-        proLabel: '旧入口说明',
+        proLabel: '旧维护说明',
       })}
       ${contextBar}
       <div class="hero-grid">
         ${renderMetricCard('当前任务', taskLabel, 'info', phaseLabel)}
-        ${renderMetricCard('当前定位', '旧结果说明', 'warn', statusHeadline)}
+        ${renderMetricCard('当前定位', '旧结果维护说明', 'warn', statusHeadline)}
         ${renderMetricCard('推荐动作', nextActionLabel, 'good', nextActionReason)}
         ${renderMetricCard('结果状态', failed > 0 ? '先处理异常' : '可继续筛图', failed > 0 ? 'bad' : 'good', failed > 0 ? `当前失败 ${failed} 项` : `当前成功 ${success} 项`)}
       </div>
@@ -137,12 +137,12 @@ ${renderWorkspaceStyles()}
     ${renderPortalProgressRail(outputDir, {
       currentPage: 'result_hub.html',
       title: '结果主链',
-      copy: '旧结果说明页已经退到说明层，结果主链请回结果工作台，再按需进入异常工作台或结果补充页。',
+      copy: '旧结果维护说明页已经退到维护说明层，结果主链请回结果工作台，再按需进入异常工作台或结果补充页。',
     })}
 
     ${renderPortalRouteCompass(outputDir, {
       title: '现在建议这样走',
-      copy: '从旧结果说明页迁移到新的结果主链，不再把这个旧页当结果总控。',
+      copy: '从旧结果维护说明页迁移到新的结果主链，不再把这个旧页当结果总控。',
       previous: {
         label: '准备工作台',
         summary: '如果你怀疑方向或放行条件本身有问题，就先回准备层。',
@@ -181,7 +181,7 @@ ${renderWorkspaceStyles()}
     })}
 
     <section class="section">
-      <h2>旧结果说明页</h2>
+      <h2>旧结果维护说明页</h2>
       <p class="section-copy">这些页还保留，但已经退到细分操作层。现在建议先进入结果工作台，再按需要跳进去。</p>
       <div class="entry-grid">
         ${renderEntryCard({
@@ -193,11 +193,11 @@ ${renderWorkspaceStyles()}
           tone: 'good',
         })}
         ${renderEntryCard({
-          kicker: '整板入口',
-          title: '分镜整板页',
+          kicker: '按需补充页',
+          title: '分镜整板补充页',
           copy: '只有分镜任务才更依赖这个视角，普通结果任务不必先看。',
           href: hasStoryboard ? relativeFile(outputDir, storyboardBoardPath) : null,
-          cta: '打开分镜整板页',
+          cta: '打开分镜整板补充页',
           tone: 'neutral',
         })}
         ${renderEntryCard({

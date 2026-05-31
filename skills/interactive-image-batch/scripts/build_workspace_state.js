@@ -31,6 +31,7 @@ const {
   buildTaskCenterEntryProtocol,
   resolveEntryMainlineProtocol,
 } = require('./entry_state_shared');
+const { resolveRecommendedWorkspacePath } = require('./workspace_layout_migration');
 const {
   getWorkspacePageShellConfig,
   buildWorkspaceAdvancedSectionData,
@@ -48,6 +49,7 @@ const {
   buildWorkspaceWorkbenchSectionData,
   buildWorkspaceContentSectionPlan,
   buildWorkspaceStateTopology,
+  buildWorkspaceStateProtocol,
 } = require('./workspace_page_shared');
 const { summarizeOptionalPageEmission } = require('./default_generation_contract');
 const { resolveProfile, buildDisplayDistributions } = require('./template_display_profile');
@@ -544,7 +546,7 @@ function summarizeResultState(manifest, workspaceState, workspaceAssets, reviewI
   const secondaryActionHints = hasCompletedExecution
     ? [
       reviewCount > 0 ? `当前还有 ${reviewCount} 项待复核，适合边筛边确认。` : '',
-      hasStoryboard ? '如果需要确认镜头衔接，再按需进入分镜整板页。' : '',
+      hasStoryboard ? '如果需要确认镜头衔接，再按需进入分镜整板补充页。' : '',
       failedCount > 0 ? '失败项会继续打断主链，建议优先分流到异常层。' : '',
     ].filter(Boolean)
     : [
@@ -1318,8 +1320,19 @@ function buildActionLanguage(actionKey, options = {}) {
   return getActionLanguage(actionKey, options);
 }
 
+function normalizeWorkspaceActionTarget(target, outputDir = '') {
+  const raw = String(target || '').trim();
+  if (!raw) return '';
+  if (path.isAbsolute(raw)) {
+    const relative = path.relative(path.resolve(outputDir || ''), raw);
+    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) return relative;
+    return path.basename(raw);
+  }
+  return raw.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
 function resolvePrimaryActionLanguage(nextAction, options = {}) {
-  const target = String(nextAction?.target || '').trim();
+  const target = path.basename(normalizeWorkspaceActionTarget(nextAction?.target, options.outputDir));
   if (target === 'prepare_workspace.html') return buildActionLanguage('go_prepare', options);
   if (target === 'result_workspace.html') return buildActionLanguage('go_result', options);
   if (target === 'exception_workspace.html') return buildActionLanguage('go_exception', options);
@@ -2088,6 +2101,7 @@ function buildWorkflowStageContract(stageKey, session) {
     },
     nextAction: {
       label: String(unifiedAction.label || action.label || '').trim(),
+      target: String(unifiedAction.target || action.target || '').trim(),
       summary: String(unifiedAction.reason || action.summary || '').trim(),
       reason: String(action.actionReason || unifiedDialogue.actionReason || reply.replyReason || checkpoints.summary || '').trim(),
       recommendedReply: String(action.recommendedReply || unifiedDialogue.primarySay || reply.recommendedReply || '').trim(),
@@ -2145,6 +2159,37 @@ function buildWorkflowContractRegistry(workflowSessions = {}) {
     result: buildWorkflowStageContract('result', workflowSessions.result),
     exception: buildWorkflowStageContract('exception', workflowSessions.exception),
   };
+}
+
+function buildWorkflowTextProtocolRegistry(workflowContracts = {}) {
+  const stages = ['home', 'prepare', 'result', 'exception'];
+  return Object.fromEntries(stages.map((stageKey) => {
+    const contract = workflowContracts?.[stageKey] && typeof workflowContracts[stageKey] === 'object'
+      ? workflowContracts[stageKey]
+      : {};
+    const snapshot = contract.snapshot && typeof contract.snapshot === 'object' ? contract.snapshot : {};
+    const judgment = contract.currentJudgment && typeof contract.currentJudgment === 'object' ? contract.currentJudgment : {};
+    const nextAction = contract.nextAction && typeof contract.nextAction === 'object' ? contract.nextAction : {};
+    const dialogue = contract.dialogue && typeof contract.dialogue === 'object' ? contract.dialogue : {};
+    const bridge = contract.actionReplyBridge && typeof contract.actionReplyBridge === 'object' ? contract.actionReplyBridge : {};
+
+    return [stageKey, {
+      stageKey,
+      source: `workflowContracts.${stageKey}`,
+      currentFocus: String(judgment.actionSummary || nextAction.summary || snapshot.nextActionSummary || '').trim(),
+      statusSummary: String(judgment.statusSummary || snapshot.statusLabel || '').trim(),
+      pressureLabel: String(snapshot.pressureLabel || '').trim(),
+      nextActionSummary: String(nextAction.summary || nextAction.reason || snapshot.nextActionSummary || '').trim(),
+      recommendedReply: String(nextAction.recommendedReply || dialogue.recommendedReply || bridge.reply || dialogue.primarySay || '').trim(),
+      readPriority: [
+        `workflowContracts.${stageKey}.currentJudgment`,
+        `workflowContracts.${stageKey}.nextAction`,
+        `workflowContracts.${stageKey}.dialogue`,
+        `workflowSessions.${stageKey}`,
+        `views.${stageKey}`,
+      ],
+    }];
+  }));
 }
 
 function buildHomeView(options = {}) {
@@ -3245,6 +3290,9 @@ function buildRuntimePrepareOverrides(prepareSummary, runtimeSummary, options = 
     return null;
   }
 
+  const liveDirective = runtime?.liveCopilotDirective && typeof runtime.liveCopilotDirective === 'object'
+    ? runtime.liveCopilotDirective
+    : null;
   const readiness = prepareSummary?.readiness || {};
   const runtimeWorkflow = runtime?.runtimeWorkflow && typeof runtime.runtimeWorkflow === 'object'
     ? runtime.runtimeWorkflow
@@ -3262,10 +3310,10 @@ function buildRuntimePrepareOverrides(prepareSummary, runtimeSummary, options = 
   const completedBatchCount = Number(runtime?.completedBatchCount || 0);
   const totalBatchCount = Number(runtime?.totalBatchCount || prepareSummary?.batchCount || 0);
   const nextActionLabel = buildRuntimeNextActionLabel({
-    explicitLabel: String(runtime?.nextActionLabel || runtime?.nextSuggestedAction?.label || '').trim(),
+    explicitLabel: String(liveDirective?.nextActionLabel || liveDirective?.nextAction?.label || runtime?.nextActionLabel || runtime?.nextSuggestedAction?.label || '').trim(),
     runtimeStatus,
   });
-  const nextActionSummary = String(runtime?.nextActionReason || runtime?.nextSuggestedAction?.reason || runtimeSummaryText).trim() || runtimeSummaryText;
+  const nextActionSummary = String(liveDirective?.nextActionSummary || liveDirective?.nextAction?.reason || runtime?.nextActionReason || runtime?.nextSuggestedAction?.reason || runtimeSummaryText).trim() || runtimeSummaryText;
   const pressureCopy = buildRuntimePressureCopy({
     runtimeStatus,
     currentBatch,
@@ -3341,10 +3389,10 @@ function buildRuntimePrepareOverrides(prepareSummary, runtimeSummary, options = 
       {
         label: '对话信号',
         value: buildRuntimeDialogueValue({
-          primarySay: dialogueStatus?.primarySay,
+          primarySay: liveDirective?.recommendedReply || dialogueStatus?.primarySay,
           nextActionLabel,
         }),
-        summary: String(dialogueStatus?.actionReason || nextActionSummary || pressureSummary).trim() || pressureSummary,
+        summary: String(liveDirective?.actionReason || dialogueStatus?.actionReason || nextActionSummary || pressureSummary).trim() || pressureSummary,
         tone: runtimeStatus === 'paused' ? 'warn' : 'good',
       },
     ],
@@ -3368,10 +3416,13 @@ function buildRuntimePrepareOverrides(prepareSummary, runtimeSummary, options = 
       taskLabel: String(options.taskLabel || '').trim(),
       nextActionLabel,
       nextActionReason: nextActionSummary,
-      nextActionTarget: String(runtime?.nextSuggestedAction?.target || '').trim() || 'workspace_home.html',
-      recommendedReply: String(dialogueStatus?.primarySay || '').trim(),
-      actionReason: String(dialogueStatus?.actionReason || nextActionSummary).trim(),
-      dialogueSummary: String(dialogueStatus?.summary || progressSummary || runtimeSummaryText).trim(),
+      nextActionTarget: normalizeWorkspaceActionTarget(
+        liveDirective?.nextAction?.target || runtime?.nextSuggestedAction?.target,
+        runtime?.outputDir || options.outputDir
+      ) || 'workspace_home.html',
+      recommendedReply: String(liveDirective?.recommendedReply || dialogueStatus?.primarySay || '').trim(),
+      actionReason: String(liveDirective?.actionReason || dialogueStatus?.actionReason || nextActionSummary).trim(),
+      dialogueSummary: String(liveDirective?.dialogueSummary || dialogueStatus?.summary || progressSummary || runtimeSummaryText).trim(),
       alternativeSayItems: Array.isArray(dialogueStatus?.alternativeSayItems) ? dialogueStatus.alternativeSayItems : [],
       confirmItems: Array.isArray(dialogueStatus?.confirmItems) ? dialogueStatus.confirmItems : [],
       dialogueStatus,
@@ -3386,6 +3437,9 @@ function buildRuntimeStageOverrides(stageKey, stageState, runtimeSummary, option
     return null;
   }
 
+  const liveDirective = runtime?.liveCopilotDirective && typeof runtime.liveCopilotDirective === 'object'
+    ? runtime.liveCopilotDirective
+    : null;
   const runtimeWorkflow = runtime?.runtimeWorkflow && typeof runtime.runtimeWorkflow === 'object'
     ? runtime.runtimeWorkflow
     : null;
@@ -3401,16 +3455,18 @@ function buildRuntimeStageOverrides(stageKey, stageState, runtimeSummary, option
   const pendingBatchCount = Number(runtime?.pendingBatchCount || 0);
   const completedBatchCount = Number(runtime?.completedBatchCount || 0);
   const totalBatchCount = Number(runtime?.totalBatchCount || 0);
-  const nextActionTargetRaw = String(runtime?.nextSuggestedAction?.target || '').trim();
+  const nextActionTargetRaw = String(liveDirective?.nextAction?.target || runtime?.nextSuggestedAction?.target || '').trim();
   const nextActionTarget = nextActionTargetRaw
-    ? path.basename(nextActionTargetRaw)
+    ? normalizeWorkspaceActionTarget(nextActionTargetRaw, runtime?.outputDir || options.outputDir)
     : (String(options.defaultTarget || 'workspace_home.html').trim() || 'workspace_home.html');
   const nextActionLabel = buildRuntimeNextActionLabel({
-    explicitLabel: String(runtime?.nextActionLabel || runtime?.nextSuggestedAction?.label || '').trim(),
+    explicitLabel: String(liveDirective?.nextActionLabel || liveDirective?.nextAction?.label || runtime?.nextActionLabel || runtime?.nextSuggestedAction?.label || '').trim(),
     runtimeStatus,
   });
   const nextActionSummary = String(
-    runtime?.nextActionReason
+    liveDirective?.nextActionSummary
+    || liveDirective?.nextAction?.reason
+    || runtime?.nextActionReason
     || runtime?.nextSuggestedAction?.reason
     || runtimeSummaryText
     || progressSummary
@@ -3507,10 +3563,10 @@ function buildRuntimeStageOverrides(stageKey, stageState, runtimeSummary, option
       {
         label: '对话信号',
         value: buildRuntimeDialogueValue({
-          primarySay: dialogueStatus?.primarySay,
+          primarySay: liveDirective?.recommendedReply || dialogueStatus?.primarySay,
           nextActionLabel,
         }),
-        summary: String(dialogueStatus?.actionReason || nextActionSummary || pressureSummary).trim() || pressureSummary,
+        summary: String(liveDirective?.actionReason || dialogueStatus?.actionReason || nextActionSummary || pressureSummary).trim() || pressureSummary,
         tone: runtimeStatus === 'running' ? 'good' : 'warn',
       },
     ],
@@ -3535,9 +3591,9 @@ function buildRuntimeStageOverrides(stageKey, stageState, runtimeSummary, option
       nextActionLabel,
       nextActionReason: nextActionSummary,
       nextActionTarget,
-      recommendedReply: String(dialogueStatus?.primarySay || '').trim(),
-      actionReason: String(dialogueStatus?.actionReason || nextActionSummary).trim(),
-      dialogueSummary: String(dialogueStatus?.summary || progressSummary || runtimeSummaryText).trim(),
+      recommendedReply: String(liveDirective?.recommendedReply || dialogueStatus?.primarySay || '').trim(),
+      actionReason: String(liveDirective?.actionReason || dialogueStatus?.actionReason || nextActionSummary).trim(),
+      dialogueSummary: String(liveDirective?.dialogueSummary || dialogueStatus?.summary || progressSummary || runtimeSummaryText).trim(),
       alternativeSayItems: Array.isArray(dialogueStatus?.alternativeSayItems) ? dialogueStatus.alternativeSayItems : [],
       confirmItems: Array.isArray(dialogueStatus?.confirmItems) ? dialogueStatus.confirmItems : [],
       dialogueStatus,
@@ -4097,6 +4153,9 @@ function buildRuntimeAwareDialogueStatus(baseDialogueStatus, runtimeSummary) {
   const runtimeStatus = String(runtimeSummary?.currentStatus || '').trim();
   if (!runtimeDialogue || !runtimeStatus) return base;
 
+  const liveDirective = runtimeSummary?.liveCopilotDirective && typeof runtimeSummary.liveCopilotDirective === 'object'
+    ? runtimeSummary.liveCopilotDirective
+    : null;
   const currentBatch = Number(runtimeSummary?.currentBatch || 0);
   const progressSummary = String(runtimeSummary?.progressSummary || '').trim();
   const recentItems = buildRelayItems(
@@ -4110,13 +4169,13 @@ function buildRuntimeAwareDialogueStatus(baseDialogueStatus, runtimeSummary) {
     4,
   );
   const nextSayItems = buildRelayItems(
-    runtimeDialogue.nextSayItems || [],
+    liveDirective?.nextSayItems || runtimeDialogue.nextSayItems || [],
     base.nextSayItems || [],
     4,
   );
-  const primarySay = String(runtimeDialogue.primarySay || nextSayItems[0] || base.primarySay || '').trim();
+  const primarySay = String(liveDirective?.recommendedReply || liveDirective?.primarySay || runtimeDialogue.primarySay || nextSayItems[0] || base.primarySay || '').trim();
   const alternativeSayItems = buildRelayItems(
-    runtimeDialogue.alternativeSayItems || [],
+    liveDirective?.alternativeSayItems || runtimeDialogue.alternativeSayItems || [],
     nextSayItems.slice(primarySay ? 1 : 0),
     3,
   ).filter((item) => item !== primarySay);
@@ -4131,9 +4190,9 @@ function buildRuntimeAwareDialogueStatus(baseDialogueStatus, runtimeSummary) {
     nextSayItems,
     primarySay,
     alternativeSayItems,
-    actionReason: String(runtimeDialogue.actionReason || base.actionReason || '').trim()
+    actionReason: String(liveDirective?.actionReason || runtimeDialogue.actionReason || base.actionReason || '').trim()
       || (currentBatch > 0 ? `当前正在执行第 ${currentBatch} 批，先盯住进度最省心。` : ''),
-    summary: String(runtimeDialogue.summary || base.summary || progressSummary || '').trim(),
+    summary: String(liveDirective?.dialogueSummary || runtimeDialogue.summary || base.summary || progressSummary || '').trim(),
   });
 }
 
@@ -4484,6 +4543,120 @@ function inferWorkflowKind(manifest, taskSpec, modeDetection) {
   return 'standard';
 }
 
+function buildSpecialWorkflowProtocol(options = {}) {
+  const outputDir = path.resolve(options.outputDir || process.cwd());
+  const manifest = options.manifest && typeof options.manifest === 'object' ? options.manifest : {};
+  const taskSpec = options.taskSpec && typeof options.taskSpec === 'object' ? options.taskSpec : {};
+  const modeDetection = options.modeDetection && typeof options.modeDetection === 'object' ? options.modeDetection : {};
+  const routes = options.routes && typeof options.routes === 'object' ? options.routes : {};
+  const storyboardSpecialization = options.storyboardSpecialization && typeof options.storyboardSpecialization === 'object'
+    ? options.storyboardSpecialization
+    : {};
+  const referenceBindings = options.referenceBindings && typeof options.referenceBindings === 'object'
+    ? options.referenceBindings
+    : null;
+  const successItems = toArray(options.successItems);
+  const failedItems = toArray(options.failedItems);
+  const reviewItems = toArray(options.reviewItems);
+  const rerunCandidates = toArray(options.rerunCandidates);
+  const workflowKind = String(options.workflowKind || inferWorkflowKind(manifest, taskSpec, modeDetection)).trim() || 'standard';
+  const runtimeMode = String(options.runtimeMode || manifest.runtimeMode || (manifest.hostNative ? 'host-native-image-tool' : 'local-batch-runner')).trim() || 'local-batch-runner';
+  const hasStoryboard = Boolean(options.hasStoryboard);
+  const storyboardPlan = taskSpec.storyboard_plan && typeof taskSpec.storyboard_plan === 'object'
+    ? taskSpec.storyboard_plan
+    : {};
+  const storyboardSlots = toArray(storyboardPlan.content_slots || storyboardPlan.slots);
+  const combinedItems = successItems.concat(failedItems, reviewItems);
+  const hasMaskedEditSlots = combinedItems.some((item) => {
+    const requestMode = String(item?.requestMode || item?.request_mode || '').trim();
+    const editMode = String(item?.editMode || item?.edit_mode || '').trim();
+    return requestMode === 'masked-edit' || editMode === 'masked-edit' || Boolean(item?.mask || item?.maskPath || item?.mask_path);
+  });
+  const hostNativePackPath = path.join(outputDir, 'host_native_prompt_pack.json');
+  const hostNativeSummaryHtmlPath = path.join(outputDir, 'host_native_summary.html');
+  const hostNativeSummaryMdPath = path.join(outputDir, 'host_native_summary.md');
+  const rerunBoardPath = path.join(outputDir, 'rerun_board.html');
+  const rerunCandidatesPath = path.join(outputDir, 'rerun_candidates.json');
+
+  return {
+    version: 1,
+    language: 'special-workflow-protocol',
+    activeWorkflowKind: workflowKind,
+    runtimeMode,
+    positioning: '特殊工作流是 DAOGE 正式能力，但不会回到普通用户第一主链；统一状态负责承认职责、资产和回填方式。',
+    readPriority: [
+      'workspace_state.specialWorkflowProtocol',
+      'workspace_state.specialization',
+      'workspace_state.routes',
+      'workspace_state.artifactGovernance',
+      'runtime_state.json',
+    ],
+    hostNative: {
+      officialMainline: true,
+      active: workflowKind === 'host-native' || runtimeMode === 'host-native-image-tool' || Boolean(manifest.hostNative),
+      runtimeMode: 'host-native-image-tool',
+      responsibility: '宿主原生图像工具是正式运行模式之一，负责承接轻量提示词交接、宿主侧执行和结果回填。',
+      detectionContract: {
+        source: 'detect_runtime_mode.js / manifest.runtimeMode / manifest.hostNative',
+        detectedMode: String(modeDetection.detected_mode || runtimeMode || '').trim(),
+        recommendation: String(modeDetection.recommendation || manifest.recommendation || '').trim(),
+      },
+      handoffAssets: {
+        promptPack: fileExists(hostNativePackPath) ? hostNativePackPath : null,
+        summaryHtml: fileExists(hostNativeSummaryHtmlPath) ? hostNativeSummaryHtmlPath : null,
+        summaryMarkdown: fileExists(hostNativeSummaryMdPath) ? hostNativeSummaryMdPath : null,
+      },
+      resultBackfillContract: {
+        sourceScript: 'ingest_host_native_results.js',
+        expectedManifestFlag: 'hostNative=true',
+        workspaceReturn: '宿主结果回填后接回 workspace_state、result_workspace 和 exception_workspace。',
+      },
+      defaultMainlineBehavior: '不伪造本地 runner 执行记录；有宿主结果后再回填统一工作台。',
+    },
+    storyboard: {
+      officialSubsystem: true,
+      active: Boolean(storyboardSpecialization.enabled || hasStoryboard),
+      responsibility: 'storyboard 是专用结构化子系统，状态层必须保留 slot、layout、reference、mask、continuity、camera_move 等字段含义。',
+      structureContract: {
+        contentSlots: storyboardSlots.length || Number(storyboardSpecialization.slotCount || 0) || null,
+        contentSlotSource: storyboardSlots.length ? 'task_spec.storyboard_plan.content_slots' : 'manifest/results/storyboard_bundle',
+        layoutBindingSource: fileExists(path.join(outputDir, 'layout_manifest.storyboard.json')) ? path.join(outputDir, 'layout_manifest.storyboard.json') : null,
+        contentManifestSource: fileExists(path.join(outputDir, 'content_manifest.storyboard.json')) ? path.join(outputDir, 'content_manifest.storyboard.json') : null,
+        renderConfigSource: fileExists(path.join(outputDir, 'render_config.storyboard.json')) ? path.join(outputDir, 'render_config.storyboard.json') : null,
+        referenceBindingSource: referenceBindings ? path.join(outputDir, 'reference_bindings.imported.json') : null,
+        hasReferenceBindings: Boolean(referenceBindings || storyboardSpecialization.hasReferenceBindings),
+        hasMaskedEditSlots,
+        continuityFields: ['continuity', 'camera_move', 'timecode', 'shot_label'],
+      },
+      primarySurface: hasStoryboard && routes.storyboard ? routes.storyboard : null,
+      defaultMainlineBehavior: '只有分镜任务按需打开 storyboard_board.html；普通批量图不默认生成或展示分镜整板补充页。',
+    },
+    localEditRerun: {
+      officialProfessionalPath: true,
+      active: workflowKind === 'local-edit' || Boolean(manifest.resumeManifest) || rerunCandidates.length > 0,
+      responsibility: 'local-edit / rerun 是异常层和分镜局部修订的专业路径，不再作为普通用户第一主链。',
+      triggerContract: {
+        resumeManifest: manifest.resumeManifest || null,
+        rerunCandidateCount: rerunCandidates.length,
+        failedCount: Number(manifest.failed || failedItems.length || 0),
+        reviewCount: reviewItems.length,
+      },
+      routeContract: {
+        exceptionSurface: routes.exception || path.join(outputDir, 'exception_workspace.html'),
+        storyboardRepairSurface: hasStoryboard && routes.storyboard ? routes.storyboard : null,
+        rerunSurface: fileExists(rerunBoardPath) ? rerunBoardPath : null,
+        rerunCandidates: fileExists(rerunCandidatesPath) ? rerunCandidatesPath : null,
+      },
+      defaultMainlineBehavior: '异常页先判断是否需要补跑；只有确认进入专业处理时才打开 rerun_board 或局部分镜修订。',
+    },
+    defaultVisibility: {
+      mainlineOnly: true,
+      advancedPagesDefaultGenerated: false,
+      summary: 'host-native、storyboard 和 local-edit/rerun 都被统一状态正式记录，但高级页默认按需生成、按需打开。',
+    },
+  };
+}
+
 function inferStatus(manifest, outputDir, options = {}) {
   const failedCount = Number(manifest?.failed || 0);
   const reviewCount = Number(options.reviewCount || 0);
@@ -4635,7 +4808,7 @@ function inferNextAction(manifest, outputDir, options = {}) {
           ? `当前正在执行第 ${Number(runtimeSummary?.currentBatch ?? progress.currentBatch ?? 0)} 批，工作台会持续刷新。`
           : '当前任务正在执行中，工作台会持续刷新。')
       ).trim() || '当前任务正在执行中，工作台会持续刷新。',
-      target: runtimeTarget ? path.basename(runtimeTarget) : 'workspace_home.html',
+      target: runtimeTarget ? normalizeWorkspaceActionTarget(runtimeTarget, outputDir) : 'workspace_home.html',
     };
   }
   if (runtimeStatus === 'planned') {
@@ -4643,7 +4816,7 @@ function inferNextAction(manifest, outputDir, options = {}) {
     return {
       label: String(runtimeSummary?.nextSuggestedAction?.label || '进入工作台首页').trim() || '进入工作台首页',
       reason: String(runtimeSummary?.nextSuggestedAction?.reason || '当前任务已经排队，先回工作台首页确认执行节奏。').trim() || '当前任务已经排队，先回工作台首页确认执行节奏。',
-      target: runtimeTarget ? path.basename(runtimeTarget) : 'workspace_home.html',
+      target: runtimeTarget ? normalizeWorkspaceActionTarget(runtimeTarget, outputDir) : 'workspace_home.html',
     };
   }
   if (runtimeStatus === 'paused') {
@@ -4651,7 +4824,7 @@ function inferNextAction(manifest, outputDir, options = {}) {
     return {
       label: String(runtimeSummary?.nextSuggestedAction?.label || '先处理暂停原因').trim() || '先处理暂停原因',
       reason: String(runtimeSummary?.nextSuggestedAction?.reason || runtimeSummary?.phaseSummary || manifest.pauseReason || '当前任务已经暂停，先处理暂停原因最稳。').trim() || '当前任务已经暂停，先处理暂停原因最稳。',
-      target: runtimeTarget ? path.basename(runtimeTarget) : 'workspace_home.html',
+      target: runtimeTarget ? normalizeWorkspaceActionTarget(runtimeTarget, outputDir) : 'workspace_home.html',
     };
   }
   if (runtimeStatus === 'awaiting_confirmation' || runtimeStatus === 'waiting') {
@@ -4659,7 +4832,7 @@ function inferNextAction(manifest, outputDir, options = {}) {
     return {
       label: String(runtimeSummary?.nextSuggestedAction?.label || '先完成当前确认').trim() || '先完成当前确认',
       reason: String(runtimeSummary?.nextSuggestedAction?.reason || runtimeSummary?.phaseSummary || '当前任务正在等待确认，先把这一步处理掉最稳。').trim() || '当前任务正在等待确认，先把这一步处理掉最稳。',
-      target: runtimeTarget ? path.basename(runtimeTarget) : 'workspace_home.html',
+      target: runtimeTarget ? normalizeWorkspaceActionTarget(runtimeTarget, outputDir) : 'workspace_home.html',
     };
   }
   if (failedCount > 0) {
@@ -4805,12 +4978,13 @@ function buildUserWorkbenchProtocol(outputDir, options = {}) {
   const defaultVisibleFiles = defaultVisibleEntries.length
     ? defaultVisibleEntries.map((item) => item.path).filter(Boolean)
     : fallbackMainlineFiles;
-  const defaultVisibleLabels = defaultVisibleEntries.length
-    ? defaultVisibleEntries.map((item) => item.label).filter(Boolean)
-    : fallbackMainlineLabels;
+  const defaultVisibleLabels = fallbackMainlineLabels;
   const supportEntry = userFacingItems.find((item) => item && item.role === 'support') || null;
   const defaultEntry = userFacingItems.find((item) => item && item.role === 'default-entry') || null;
   const resolvedTopology = buildWorkspaceStateTopology(outputDir, stateTopology);
+  const stateProtocol = stateTopology.stateProtocol && typeof stateTopology.stateProtocol === 'object'
+    ? stateTopology.stateProtocol
+    : buildWorkspaceStateProtocol(outputDir, resolvedTopology);
   const taskCenterUnifiedState = resolvedTopology.taskCenterUnifiedState;
   const taskCenterEntryProtocol = resolvedTopology.taskCenterEntryProtocol;
 
@@ -4837,12 +5011,16 @@ function buildUserWorkbenchProtocol(outputDir, options = {}) {
     runtimeRule: resolvedTopology.runtimeRule,
     taskCenterCopy: '默认先从工作台首页进入，再顺着准备、结果、异常三站推进；任务档案只作为按需补充入口。',
     stateSourceSummary: resolvedTopology.stateSourceSummary,
+    stateProtocol,
     stateRoles: resolvedTopology.stateRoles,
     readPriority: resolvedTopology.readPriority,
     taskCenterReadPriority: resolvedTopology.taskCenterReadPriority,
+    duplicateFieldRule: resolvedTopology.duplicateFieldRule,
+    fieldBoundaries: resolvedTopology.fieldBoundaries,
+    consumerReadPlan: resolvedTopology.consumerReadPlan,
     consumerRule: resolvedTopology.consumerRule,
     taskCenterConsumerRule: resolvedTopology.taskCenterConsumerRule,
-    summary: `默认先看${defaultVisibleLabels.join('、') || '工作台主链页面'}；任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 只保留兼容快照角色，普通用户不用直接看这些文件名。`,
+    summary: `默认主链仍是${defaultVisibleLabels.join('、') || '工作台主链页面'}；当前已生成入口按文件存在情况展示，任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 只保留兼容快照角色，普通用户不用直接看这些文件名。`,
   };
 }
 
@@ -4960,7 +5138,7 @@ function buildUnifiedAssetLayers(outputDir, options = {}) {
         buildDirectoryAssetRecord('result-workspace-file', '结果工作台', path.join(outputDir, 'result_workspace.html'), { role: 'mainline', summary: '负责结果筛看、取舍和收口判断。', defaultVisible: true }),
         buildDirectoryAssetRecord('exception-workspace-file', '异常工作台', path.join(outputDir, 'exception_workspace.html'), { role: 'conditional-mainline', summary: '只在出现异常或待复核时进入。', defaultVisible: true }),
         buildDirectoryAssetRecord('run-record-html-file', '任务档案页', path.join(outputDir, 'run_record.html'), { role: 'support', summary: '保留为唯一工作台补充入口。', defaultVisible: false }),
-        buildDirectoryAssetRecord('storyboard-board-file', '分镜整板页', path.join(outputDir, 'storyboard_board.html'), { role: 'conditional', summary: '只有分镜任务才需要按需打开。', defaultVisible: false }),
+        buildDirectoryAssetRecord('storyboard-board-file', '分镜整板补充页', path.join(outputDir, 'storyboard_board.html'), { role: 'conditional', summary: '只有分镜任务才需要按需打开。', defaultVisible: false }),
         buildDirectoryAssetRecord('prompt-preview-html-file', '提示词预览页', path.join(outputDir, 'prompt_preview.html'), { role: 'advanced', summary: '属于准备层深看页。', defaultVisible: false }),
         buildDirectoryAssetRecord('preflight-board-file', '预检页', path.join(outputDir, 'preflight_board.html'), { role: 'advanced', summary: '属于准备层深看页。', defaultVisible: false }),
         buildDirectoryAssetRecord('assets-board-file', '素材页', path.join(outputDir, 'assets_board.html'), { role: 'advanced', summary: '属于准备层深看页。', defaultVisible: false }),
@@ -4968,8 +5146,8 @@ function buildUnifiedAssetLayers(outputDir, options = {}) {
         buildDirectoryAssetRecord('completion-board-file', '完成摘要页', path.join(outputDir, 'completion_board.html'), { role: 'advanced', summary: '属于结果层深看页。', defaultVisible: false }),
         buildDirectoryAssetRecord('run-overview-file', '运行概览页', path.join(outputDir, 'run_overview.html'), { role: 'advanced', summary: '属于结果层深看页。', defaultVisible: false }),
         buildDirectoryAssetRecord('rerun-board-file', '补跑页', path.join(outputDir, 'rerun_board.html'), { role: 'advanced', summary: '属于异常层深看页。', defaultVisible: false }),
-        buildDirectoryAssetRecord('result-hub-file', '旧结果说明页', path.join(outputDir, 'result_hub.html'), { role: 'maintenance', summary: '只保留维护观察意义。', defaultVisible: false }),
-        buildDirectoryAssetRecord('portal-home-file', '旧门户页', path.join(outputDir, 'daoge_portal.html'), { role: 'maintenance', summary: '只保留维护观察意义。', defaultVisible: false }),
+        buildDirectoryAssetRecord('result-hub-file', '旧结果维护说明页', path.join(outputDir, 'result_hub.html'), { role: 'maintenance', summary: '只保留维护观察意义。', defaultVisible: false }),
+        buildDirectoryAssetRecord('portal-home-file', '旧入口维护说明页', path.join(outputDir, 'daoge_portal.html'), { role: 'maintenance', summary: '只保留维护观察意义。', defaultVisible: false }),
       ],
     },
     filesystem: {
@@ -5048,15 +5226,20 @@ function buildUnifiedAssetLayers(outputDir, options = {}) {
   const stateTopology = buildWorkspaceStateTopology(outputDir, {
     diagnosticArchiveDefaultVisible: false,
   });
+  const stateProtocol = buildWorkspaceStateProtocol(outputDir, stateTopology);
   const userWorkbenchProtocol = buildUserWorkbenchProtocol(outputDir, {
     directoryProtocol: outputDirectoryProtocol,
-    stateTopology,
+    stateTopology: {
+      ...stateTopology,
+      stateProtocol,
+    },
   });
 
   return {
     defaultLayer: 'user-facing',
     principle: '普通用户默认只看可继续判断和处理的用户资产；工作台状态底盘和诊断归档统一后退，避免让人直接面对内部文件。',
     stateTopology,
+    stateProtocol,
     directoryProtocol: outputDirectoryProtocol,
     userWorkbenchProtocol,
     userFacing: {
@@ -5505,6 +5688,7 @@ function buildWorkspacePageData(options = {}) {
 
 function summarizeArtifactGovernance(outputDir, options = {}) {
   const hasStoryboard = Boolean(options.hasStoryboard);
+  const layoutEntry = resolveRecommendedWorkspacePath(outputDir, 'workspace_home.html', 'workspace');
   const taskCenterPath = path.join(path.dirname(outputDir), 'task_center.html');
   const workspaceHomePath = path.join(outputDir, 'workspace_home.html');
   const prepareWorkspacePath = path.join(outputDir, 'prepare_workspace.html');
@@ -5534,7 +5718,16 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
 
   const userEntry = [
     { id: 'task-center', label: '任务总控', path: taskCenterPath, audience: 'all', role: 'cross-run-entry', exists: fileExists(taskCenterPath) },
-    { id: 'workspace-home', label: '工作台首页', path: workspaceHomePath, audience: 'all', role: 'default-entry', exists: fileExists(workspaceHomePath) },
+    {
+      id: 'workspace-home',
+      label: '工作台首页',
+      path: layoutEntry.recommendedPath,
+      compatibilityPath: workspaceHomePath,
+      mirrorPath: layoutEntry.mirrorPath,
+      audience: 'all',
+      role: 'default-entry',
+      exists: fileExists(layoutEntry.recommendedPath),
+    },
     { id: 'prepare-workspace', label: '准备工作台', path: prepareWorkspacePath, audience: 'all', role: 'mainline', exists: fileExists(prepareWorkspacePath) },
     { id: 'result-workspace', label: '结果工作台', path: resultWorkspacePath, audience: 'all', role: 'mainline', exists: fileExists(resultWorkspacePath) },
     { id: 'exception-workspace', label: '异常工作台', path: exceptionWorkspacePath, audience: 'all', role: 'conditional-mainline', exists: fileExists(exceptionWorkspacePath) },
@@ -5553,7 +5746,7 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
   ];
 
   const conditionalPages = [
-    { id: 'storyboard-board', label: '分镜整板页', path: storyboardBoardPath, audience: 'advanced', role: 'conditional-support', exists: hasStoryboard && fileExists(storyboardBoardPath) },
+    { id: 'storyboard-board', label: '分镜整板补充页', path: storyboardBoardPath, audience: 'advanced', role: 'conditional-support', exists: hasStoryboard && fileExists(storyboardBoardPath) },
   ];
 
   const advancedPages = [
@@ -5567,8 +5760,8 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
   ];
 
   const legacyPages = [
-    { id: 'result-hub', label: '旧结果说明页', path: resultHubPath, audience: 'advanced', role: 'legacy-result-entry', exists: fileExists(resultHubPath) },
-    { id: 'portal-home', label: '旧门户页', path: portalHomePath, audience: 'advanced', role: 'legacy-home-entry', exists: fileExists(portalHomePath) },
+    { id: 'result-hub', label: '旧结果维护说明页', path: resultHubPath, audience: 'advanced', role: 'legacy-result-entry', exists: fileExists(resultHubPath) },
+    { id: 'portal-home', label: '旧入口维护说明页', path: portalHomePath, audience: 'advanced', role: 'legacy-home-entry', exists: fileExists(portalHomePath) },
   ];
 
   const internalAssets = [
@@ -5659,7 +5852,7 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
         label: '旧入口说明',
         generation: 'retire-first',
         audience: 'maintenance-only',
-        description: '旧门户和旧结果说明页只保留给维护观察，不再属于个人工作台正式链路。',
+        description: '旧入口维护说明页和旧结果维护说明页只保留给维护观察，不再属于个人工作台正式链路。',
       },
       diagnosticInternal: {
         label: '诊断归档',
@@ -5797,6 +5990,15 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
   const visibleAdvancedCount = advancedPages.filter((item) => item.exists).length;
   const visibleLegacyCount = legacyPages.filter((item) => item.exists).length;
   const totalOptionalCount = visibleConditionalCount + visibleAdvancedCount;
+  const defaultUserJourney = ['task-center', 'workspace-home', 'prepare-workspace', 'result-workspace', 'exception-workspace'];
+  const advancedPagePolicy = [
+    { file: 'prompt_preview.html', mode: 'prepare-details', label: '提示词预览页' },
+    { file: 'assets_board.html', mode: 'prepare-details', label: '素材页' },
+    { file: 'review_board.html', mode: 'result-details', label: '审阅看板' },
+    { file: 'completion_board.html', mode: 'result-details', label: '完成摘要页' },
+    { file: 'run_overview.html', mode: 'result-details', label: '运行概览页' },
+    { file: 'rerun_board.html', mode: 'result-details', label: '补跑页' },
+  ];
   const buildLayerSnapshot = (key, config = {}) => {
     const items = Array.isArray(config.items) ? config.items : [];
     const visibleItems = items.filter((item) => item.exists);
@@ -5815,7 +6017,7 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
   };
   const artifactLayerProtocol = {
     version: 1,
-    defaultUserJourney: ['task-center', 'workspace-home', 'prepare-workspace', 'result-workspace', 'exception-workspace'],
+    defaultUserJourney,
     defaultVisibleLayers: ['mainline', 'support'],
     onDemandLayers: ['conditional', 'advanced'],
     maintenanceLayers: ['legacy'],
@@ -5896,11 +6098,38 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
       deepDiveEntry: '优先通过补充层和进阶层按需进入，不再从首页堆叠所有入口。',
     },
   };
+  const userFacingSummary = {
+    version: 1,
+    defaultEntryLabel: '工作台首页',
+    defaultEntryPath: layoutEntry.recommendedPath,
+    defaultEntryCompatibilityPath: workspaceHomePath,
+    defaultUserJourney,
+    principle: '普通用户默认只走任务总控和四站工作台；任务档案是唯一常驻补充入口。',
+    defaultVisibleLayers: ['mainline', 'support'],
+    onDemandLayers: ['conditional', 'advanced'],
+    maintenanceLayers: ['legacy'],
+    internalLayers: ['internal'],
+    defaultVisibleRule: '默认只看主链工作台和任务档案页。',
+    onDemandRule: '高级页只在 prepare-details / result-details / all 模式生成。',
+    internalRule: 'JSON、Markdown、状态快照和诊断记录只给程序或维护者使用。',
+    userVisibleCounts: {
+      crossRun: visibleCrossRunCount,
+      mainline: visibleMainlineCount,
+      support: visibleSupportCount,
+      optional: totalOptionalCount,
+      legacy: visibleLegacyCount,
+      internal: internalOnly.length,
+    },
+    advancedPagePolicy,
+  };
 
   return {
     summary: {
       defaultEntryLabel: '工作台首页',
-      defaultEntryPath: workspaceHomePath,
+      defaultEntryPath: layoutEntry.recommendedPath,
+      defaultEntryCompatibilityPath: workspaceHomePath,
+      workspaceLayoutMode: layoutEntry.mode,
+      workspaceLayoutManifest: path.join(outputDir, 'workspace_layout_manifest.json'),
       userVisibleCount: visibleToUser.length,
       crossRunCount: visibleCrossRunCount,
       mainlineCount: visibleMainlineCount,
@@ -5916,6 +6145,7 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
       filesystemCount: visibleFilesystemCount,
       archiveCount: visibleArchiveCount,
     },
+    userFacingSummary,
     userEntry,
     workspaceSupport,
     filesystemSupport,
@@ -6063,14 +6293,14 @@ function buildAssetVisibilityGuide(stage, options = {}) {
       title: denseCopy.visibilitySectionTitle,
       copy: denseCopy.visibilitySectionCopy,
       now: '可直接使用结果、预览图、待复核与异常结果',
-      optional: hasStoryboard ? '任务档案、分镜整板页' : '任务档案、异常工作台',
+      optional: hasStoryboard ? '任务档案、分镜整板补充页' : '任务档案、异常工作台',
       hidden: 'operations_report、success.json、failed.json 等内部记录',
     },
     exception: {
       title: denseCopy.visibilitySectionTitle,
       copy: denseCopy.visibilitySectionCopy,
       now: '失败结果、待复核结果、补跑候选',
-      optional: hasStoryboard ? '结果工作台、分镜整板页' : '结果工作台、工作台首页',
+      optional: hasStoryboard ? '结果工作台、分镜整板补充页' : '结果工作台、工作台首页',
       hidden: '准备细分页、内部 JSON / Markdown 记录',
     },
   };
@@ -6436,6 +6666,27 @@ function main() {
       ? 'go_exception'
       : ((fileExists(routes.result) && hasCompletedExecution) ? 'go_result' : 'go_prepare'),
   });
+  const inferredWorkflowKind = inferWorkflowKind(manifest, taskSpec, modeDetection);
+  const workflowKind = inferredWorkflowKind === 'standard' && storyboardSpecialization.enabled
+    ? 'storyboard'
+    : inferredWorkflowKind;
+  const runtimeMode = manifest.runtimeMode || (manifest.hostNative ? 'host-native-image-tool' : 'local-batch-runner');
+  const specialWorkflowProtocol = buildSpecialWorkflowProtocol({
+    outputDir,
+    manifest,
+    taskSpec,
+    modeDetection,
+    routes,
+    storyboardSpecialization,
+    referenceBindings,
+    successItems,
+    failedItems,
+    reviewItems,
+    rerunCandidates,
+    workflowKind,
+    runtimeMode,
+    hasStoryboard,
+  });
 
   const workspaceState = {
     version: 1,
@@ -6454,12 +6705,17 @@ function main() {
         : (Number(manifest.success || successItems.length || 0) > 0 || Number(manifest.selectedCount || manifest.promptCount || 0) > 0 || reviewItems.length > 0
           ? 'result'
           : (fileExists(path.join(outputDir, 'prepare_workspace.html')) ? 'prepare' : 'entry'))),
-    runtimeMode: manifest.runtimeMode || (manifest.hostNative ? 'host-native-image-tool' : 'local-batch-runner'),
-    workflowKind: inferWorkflowKind(manifest, taskSpec, modeDetection),
+    runtimeMode,
+    workflowKind,
     runtimeSummary: runtimeSnapshot,
+    liveCopilotDirective: runtimeSnapshot?.liveCopilotDirective && typeof runtimeSnapshot.liveCopilotDirective === 'object'
+      ? runtimeSnapshot.liveCopilotDirective
+      : undefined,
     runtimeWorkflow: runtimeSnapshot?.runtimeWorkflow && typeof runtimeSnapshot.runtimeWorkflow === 'object'
       ? runtimeSnapshot.runtimeWorkflow
       : undefined,
+    stateProtocol: workspaceAssets.layers?.stateProtocol || buildWorkspaceStateProtocol(outputDir),
+    specialWorkflowProtocol,
     entryState,
     entryBridge,
     status,
@@ -6523,6 +6779,7 @@ function main() {
         slotCount: storyboardSpecialization.slotCount,
         hasReferenceBindings: Boolean(referenceBindings),
         hasMaskedEditSlots: successItems.concat(failedItems).some((item) => item.requestMode === 'masked-edit'),
+        protocol: specialWorkflowProtocol.storyboard,
       },
     },
     updatedAt: new Date().toISOString(),
@@ -6683,7 +6940,7 @@ function main() {
     }),
     nextActionLabel: nextAction.label,
     nextActionReason: nextAction.reason,
-    ctaLabel: resolvePrimaryActionLanguage(nextAction).ctaLabel,
+    ctaLabel: resolvePrimaryActionLanguage(nextAction, { outputDir }).ctaLabel,
     file: path.join(outputDir, nextAction.target),
   });
   const prepareRoutePlan = buildPrepareRoutePlan({
@@ -6711,7 +6968,7 @@ function main() {
     file: path.join(outputDir, nextAction.target),
     nextCta: (workspaceState.counts.failed > 0
       ? buildActionLanguage('go_exception')
-      : resolvePrimaryActionLanguage({ target: nextAction.target }, { hasStoryboard })).ctaLabel,
+      : resolvePrimaryActionLanguage({ target: nextAction.target }, { hasStoryboard, outputDir })).ctaLabel,
   });
   const exceptionRoutePlan = buildExceptionRoutePlan({
     hasStoryboard,
@@ -6973,13 +7230,13 @@ function main() {
   pageData.exception.summary = exceptionSummary.summary;
   pageData.exception.collaboration = exceptionSummary.collaboration;
   pageData.exception.confirmation = exceptionSummary.confirmationState;
-  const homePrimaryAction = resolvePrimaryActionLanguage(nextAction);
+  const homePrimaryAction = resolvePrimaryActionLanguage(nextAction, { outputDir });
   const preparePrimaryAction = prepareSummary.readiness?.tone === 'bad'
     ? buildActionLanguage('refine_prepare')
     : buildActionLanguage('go_result');
   const resultPrimaryAction = workspaceState.counts.failed > 0
     ? buildActionLanguage('go_exception')
-    : resolvePrimaryActionLanguage({ target: nextAction.target }, { hasStoryboard });
+    : resolvePrimaryActionLanguage({ target: nextAction.target }, { hasStoryboard, outputDir });
   const exceptionPrimaryAction = hasStoryboard ? buildActionLanguage('go_storyboard') : buildActionLanguage('go_home');
   const homeReturnAction = buildActionLanguage('go_home');
   const resultReturnAction = buildActionLanguage('go_home');
@@ -6989,7 +7246,7 @@ function main() {
   const resultToExceptionTransitionStatus = buildResultToExceptionTransitionStatus(resultSummary, exceptionSummary);
   const exceptionTransitionStatus = buildExceptionFromResultTransitionStatus(resultSummary, exceptionSummary);
   const exceptionBackToMainlineTransitionStatus = buildExceptionBackToMainlineTransitionStatus(exceptionSummary, resultSummary, {
-    returnLabel: hasStoryboard ? '回结果工作台或整板页' : '回结果工作台',
+    returnLabel: hasStoryboard ? '回结果工作台或分镜整板补充页' : '回结果工作台',
     hasStoryboard,
   });
   homeStageUi = buildHomeStageUiState(workspaceState.taskLabel, status.phase, workspaceState, {
@@ -7080,6 +7337,32 @@ function main() {
       taskLabel: workspaceState.taskLabel,
     },
   });
+  if (workspaceState.liveCopilotDirective) {
+    workspaceState.unifiedStatus = buildStageUnifiedStatus({
+      stage: workspaceState.liveCopilotDirective.stageLabel || workspaceState.unifiedStatus?.stage,
+      conclusion: workspaceState.liveCopilotDirective.statusSummary || workspaceState.unifiedStatus?.conclusion,
+      currentFocus: workspaceState.liveCopilotDirective.nextActionSummary || workspaceState.unifiedStatus?.currentFocus,
+      progress: workspaceState.liveCopilotDirective.progressSummary || workspaceState.unifiedStatus?.progress,
+      status: workspaceState.liveCopilotDirective.currentStatus || workspaceState.unifiedStatus?.status,
+      taskLabel: workspaceState.taskLabel,
+      nextAction: workspaceState.liveCopilotDirective.nextAction || workspaceState.unifiedStatus?.nextAction,
+      nextActionSummary: workspaceState.liveCopilotDirective.nextActionSummary,
+      recommendedReply: workspaceState.liveCopilotDirective.recommendedReply,
+      actionReason: workspaceState.liveCopilotDirective.actionReason,
+      dialogueSummary: workspaceState.liveCopilotDirective.dialogueSummary,
+      nextSayItems: workspaceState.liveCopilotDirective.nextSayItems,
+      alternativeSayItems: workspaceState.liveCopilotDirective.alternativeSayItems,
+      confirmItems: workspaceState.liveCopilotDirective.confirmItems,
+      dialogueStatus: {
+        primarySay: workspaceState.liveCopilotDirective.recommendedReply,
+        actionReason: workspaceState.liveCopilotDirective.actionReason,
+        summary: workspaceState.liveCopilotDirective.dialogueSummary,
+        nextSayItems: workspaceState.liveCopilotDirective.nextSayItems,
+        alternativeSayItems: workspaceState.liveCopilotDirective.alternativeSayItems,
+        confirmItems: workspaceState.liveCopilotDirective.confirmItems,
+      },
+    });
+  }
   workspaceState.pageData = pageData;
   workspaceState.stagePlan = buildGovernanceStagePlan();
   const homeWorkflowCopilotState = buildWorkflowCopilot({
@@ -7209,6 +7492,7 @@ function main() {
   workspaceState.workflowProtocolRegistry = buildWorkflowProtocolRegistry(workspaceState.workflowSessions);
   workspaceState.workflowCopilotRegistry = buildWorkflowCopilotRegistry(workspaceState.workflowSessions);
   workspaceState.workflowContracts = buildWorkflowContractRegistry(workspaceState.workflowSessions);
+  workspaceState.workflowTextProtocol = buildWorkflowTextProtocolRegistry(workspaceState.workflowContracts);
 
   const baseViews = {
     home: buildHomeView({

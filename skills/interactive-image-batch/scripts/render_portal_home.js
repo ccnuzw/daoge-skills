@@ -94,7 +94,7 @@ function main() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DAOGE 旧入口说明页</title>
+  <title>DAOGE 旧入口维护说明页</title>
 ${renderPortalHeadAssets()}
   <style>
     :root {
@@ -118,14 +118,14 @@ ${renderWorkspaceStyles()}
           extraLinks: [{ label: '中文模板展示板', file: examplesCatalogPath }],
         })}
       </div>
-      <div class="eyebrow">旧入口说明</div>
-      <h1>${taskLabel} · DAOGE 旧入口说明页</h1>
+      <div class="eyebrow">旧入口维护说明</div>
+      <h1>${taskLabel} · DAOGE 旧入口维护说明页</h1>
       <p class="hero-copy">${statusSummary}</p>
       ${renderPortalModeSwitch({
         title: '入口迁移说明',
-        copy: '旧门户继续存在，但现在只作为过渡说明；真正的主链入口已经收敛到新的工作台页面。',
+        copy: '旧入口维护说明页继续存在，但现在只作为过渡说明；真正的主链入口已经收敛到新的工作台页面。',
         newcomerLabel: '回工作台主链',
-        proLabel: '旧入口说明',
+        proLabel: '旧维护说明',
       })}
       ${contextBar}
       <div class="hero-grid">
@@ -212,10 +212,10 @@ ${renderWorkspaceStyles()}
         })}
         ${renderEntryCard({
           kicker: '按需补充页',
-          title: '分镜整板页',
-          copy: '只有分镜任务才需要这类整板视角，普通任务可跳过。',
+          title: '分镜整板补充页',
+          copy: '只有分镜任务才需要这类整板视角，普通任务可跳过，默认仍回结果主链判断。',
           href: fileExists(storyboardBoardPath) ? relativeFile(outputDir, storyboardBoardPath) : null,
-          cta: '打开分镜整板页',
+          cta: '打开分镜整板补充页',
           tone: 'neutral',
         })}
       </div>

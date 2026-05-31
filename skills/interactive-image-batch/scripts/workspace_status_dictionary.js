@@ -179,7 +179,7 @@ function buildResultStatusSummary(options = {}) {
 
 function buildResultNextStepReason(options = {}) {
   if (options.failedCount > 0) return '异常集中处理更省心。';
-  if (options.hasStoryboard) return '先在结果层完成取舍；只有需要核对镜头衔接时，再按需去整板页。';
+  if (options.hasStoryboard) return '先在结果层完成取舍；只有需要核对镜头衔接时，再按需去分镜整板补充页。';
   return '先在结果层完成取舍；只有想重新总览整轮主链时，再回首页。';
 }
 
@@ -606,9 +606,9 @@ function getWorkspaceInteractionTemplates(stage) {
     result: {
       action: {
         primaryFailed: '先处理失败项，再决定是否继续保留和补跑。',
-        primaryClear: '优先把可用结果筛清，再决定是否需要看整板或复核边界图。',
+        primaryClear: '优先把可用结果筛清，再决定是否需要打开分镜整板补充页或复核边界图。',
         secondaryReviewSummary: '边界图、融合图或局部编辑结果建议再人工确认一眼。',
-        secondaryStoryboardSummary: '只有当镜头节奏、上下文衔接重要时，再回整板页看整体关系。',
+        secondaryStoryboardSummary: '只有当镜头节奏、上下文衔接重要时，再回分镜整板补充页看整体关系。',
         noteFailed: '失败项没有收口前，不建议过早做最终取舍。',
         noteClear: '当前主要精力应放在结果判断，而不是重新找入口。',
         noteReview: '待复核项通常不需要大改，只需要你做最后的人眼判断。',
@@ -647,7 +647,7 @@ function getWorkspaceInteractionTemplates(stage) {
         primaryClear: '如果主要剩待复核项，回结果工作台结合图片判断会更顺。',
         secondaryReviewSummary: '把边界项和人工判断项在这一轮顺手收掉。',
         secondaryRerunSummary: '只有明确值得补跑时，再进入补跑动作，避免无意义反复生成。',
-        secondaryStoryboardSummary: '当问题和镜头顺序、整板节奏有关时，再回整板页看上下文。',
+        secondaryStoryboardSummary: '当问题和镜头顺序、整板节奏有关时，再回分镜整板补充页看上下文。',
         noteFailed: '失败项优先级高于待复核项。',
         noteReviewOnly: '如果只剩待复核项，异常层只是辅助判断区。',
         noteRerun: '补跑应该是有意识的动作，不应该成为默认下一步。',
@@ -663,7 +663,7 @@ function getWorkspaceInteractionTemplates(stage) {
         nextConfirm: '后，先确认这些问题是否还会影响最终取舍。',
         nextFailed: '如果还有硬失败残留，先不要急着收口，继续围绕可用结果做判断。',
         nextClear: '如果硬失败已经清空，就把重点放回保留取舍和最终收口。',
-        nextStoryboard: '当问题和镜头衔接、整板上下文有关时，再按需回整板页复看。',
+        nextStoryboard: '当问题和镜头衔接、整板上下文有关时，再按需回分镜整板补充页复看。',
         nextNoStoryboard: '如果当前判断已经稳定，就继续回工作台首页或结果工作台按推荐动作往下走。',
       },
       dialogue: {
@@ -743,18 +743,18 @@ function getActionLanguage(actionKey, options = {}) {
       summaryLabel: '回工作台首页重新看当前阶段',
     },
     go_storyboard: {
-      actionLabel: '进入分镜整板页',
-      questionLabel: '是否按需进入分镜整板页',
-      replyLabel: '继续，进入分镜整板页',
-      ctaLabel: '进入分镜整板页',
-      summaryLabel: '按需进入分镜整板页看上下文',
+      actionLabel: '进入分镜整板补充页',
+      questionLabel: '是否按需进入分镜整板补充页',
+      replyLabel: '继续，进入分镜整板补充页',
+      ctaLabel: '进入分镜整板补充页',
+      summaryLabel: '按需进入分镜整板补充页看上下文',
     },
     return_mainline: {
-      actionLabel: hasStoryboard ? '回结果工作台或进入分镜整板页' : '回结果工作台',
-      questionLabel: hasStoryboard ? '是否回结果工作台或进入分镜整板页继续判断' : '是否回结果工作台继续判断',
-      replyLabel: hasStoryboard ? '继续，回结果工作台或进入分镜整板页' : '继续，回结果工作台',
+      actionLabel: hasStoryboard ? '回结果工作台或进入分镜整板补充页' : '回结果工作台',
+      questionLabel: hasStoryboard ? '是否回结果工作台或进入分镜整板补充页继续判断' : '是否回结果工作台继续判断',
+      replyLabel: hasStoryboard ? '继续，回结果工作台或进入分镜整板补充页' : '继续，回结果工作台',
       ctaLabel: hasStoryboard ? '回结果工作台' : '回结果工作台',
-      summaryLabel: hasStoryboard ? '回结果工作台或进入分镜整板页继续判断' : '回结果工作台继续判断',
+      summaryLabel: hasStoryboard ? '回结果工作台或进入分镜整板补充页继续判断' : '回结果工作台继续判断',
     },
     revisit_prepare: {
       actionLabel: '回看准备工作台',
@@ -1356,8 +1356,8 @@ function buildExceptionRoutePlan(options = {}) {
     nextSteps: [
       {
         kicker: '推荐下一步',
-        label: hasStoryboard ? '分镜整板页' : '工作台首页',
-        summary: hasStoryboard ? '当问题和镜头衔接有关时，回整板页更容易看出上下文。' : '如果问题已经判断清楚，可以回首页重新进入主链。',
+        label: hasStoryboard ? '分镜整板补充页' : '工作台首页',
+        summary: hasStoryboard ? '当问题和镜头衔接有关时，回分镜整板补充页更容易看出上下文。' : '如果问题已经判断清楚，可以回首页重新进入主链。',
         file: String(options.file || '').trim() || (hasStoryboard ? 'storyboard_board.html' : 'workspace_home.html'),
         cta: String(options.nextCta || '现在继续').trim() || '现在继续',
       },
@@ -1376,7 +1376,7 @@ function buildHomeWorkbenchPlan(options = {}) {
 
 function buildPrepareWorkbenchPlan(options = {}) {
   const cards = [];
-  cards.push({ label: '工作台首页', value: '回主控', summary: '只有想重新看当前阶段和主链入口时，再回这里。', href: 'workspace_home.html', cta: getActionLanguage('go_home').ctaLabel, tone: 'info', audience: 'all' });
+  cards.push({ label: '工作台首页', value: '回主链', summary: '只有想重新看当前阶段和主链入口时，再回这里。', href: 'workspace_home.html', cta: getActionLanguage('go_home').ctaLabel, tone: 'info', audience: 'all' });
   return cards;
 }
 

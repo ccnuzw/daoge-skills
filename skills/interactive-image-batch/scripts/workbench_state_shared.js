@@ -37,8 +37,45 @@ function buildRuntimeWorkflowFallback(runtimeState = {}) {
   if (runtimeState.runtimeWorkflow && typeof runtimeState.runtimeWorkflow === 'object') {
     return runtimeState.runtimeWorkflow;
   }
+  if (!hasRuntimeProtocolEvidence(runtimeState)) return null;
   const normalizedRuntimeState = normalizeRuntimeProtocolState(runtimeState);
   return normalizedRuntimeState.runtimeWorkflow || null;
+}
+
+function hasRuntimeProtocolEvidence(source = {}) {
+  if (!source || typeof source !== 'object') return false;
+  const runtimeSummary = source.runtimeSummary && typeof source.runtimeSummary === 'object'
+    ? source.runtimeSummary
+    : {};
+  return Boolean(
+    source.currentStatus
+    || source.runtimeWorkflow
+    || source.workflowDialogue
+    || source.dialogueStatus
+    || source.copilotSummary
+    || runtimeSummary.copilotSummary
+    || runtimeSummary.dialogueStatus
+    || runtimeSummary.unifiedStatus
+    || runtimeSummary.runtimeWorkflow
+    || source.runtimeCopilotProtocol
+    || source.unifiedStatus
+    || source.nextSuggestedAction
+  );
+}
+
+function buildLiveCopilotDirectiveFallback(...sources) {
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+    if (source.liveCopilotDirective && typeof source.liveCopilotDirective === 'object') {
+      return source.liveCopilotDirective;
+    }
+    if (!hasRuntimeProtocolEvidence(source)) continue;
+    const normalized = normalizeRuntimeProtocolState(source);
+    if (normalized.liveCopilotDirective && typeof normalized.liveCopilotDirective === 'object') {
+      return normalized.liveCopilotDirective;
+    }
+  }
+  return null;
 }
 
 function buildWorkflowSessionFallbacks(snapshot = {}) {
@@ -252,6 +289,12 @@ function buildWorkbenchStateSnapshot(outputDir, options = {}) {
       ? resolveLegacyWorkbenchStatePath(outputDir)
       : resolveUnifiedWorkbenchStatePath(outputDir))
   ).trim();
+  const liveCopilotDirective = buildLiveCopilotDirectiveFallback(
+    workspaceState.liveCopilotDirective ? workspaceState : null,
+    workspaceState.runtimeSummary,
+    workspaceState,
+    runtimeState
+  );
 
   return {
     schemaVersion: 1,
@@ -271,9 +314,12 @@ function buildWorkbenchStateSnapshot(outputDir, options = {}) {
     mode: String(workspaceState.mode || '').trim() || 'workspace',
     runtimeMode: String(workspaceState.runtimeMode || '').trim() || 'unknown',
     entryBridge: shouldEmbedEntryBridge(snapshotRole) ? (workspaceState.entryBridge || null) : null,
+    stateProtocol: shouldEmbedDerivedSummaries(snapshotRole) ? (workspaceState.stateProtocol || {}) : {},
+    specialWorkflowProtocol: shouldEmbedDerivedSummaries(snapshotRole) ? (workspaceState.specialWorkflowProtocol || {}) : {},
     status: shouldEmbedCoreRuntimeState(snapshotRole) ? (workspaceState.status || {}) : {},
     counts: shouldEmbedCoreRuntimeState(snapshotRole) ? (workspaceState.counts || {}) : {},
     nextAction: shouldEmbedCoreRuntimeState(snapshotRole) ? (workspaceState.nextAction || {}) : {},
+    liveCopilotDirective,
     routes: shouldEmbedStaticConfig(snapshotRole) ? (workspaceState.routes || {}) : {},
     risk: shouldEmbedCoreDecisionState(snapshotRole) ? (workspaceState.risk || {}) : {},
     confirmationState: shouldEmbedCoreDecisionState(snapshotRole) ? (workspaceState.confirmationState || {}) : {},
@@ -295,6 +341,9 @@ function buildWorkbenchStateSnapshot(outputDir, options = {}) {
       : {},
     workflowCopilotRegistry: shouldEmbedWorkflowRegistries(snapshotRole)
       ? (workspaceState.workflowCopilotRegistry || {})
+      : {},
+    workflowTextProtocol: shouldEmbedWorkflowRegistries(snapshotRole)
+      ? (workspaceState.workflowTextProtocol || {})
       : {},
     pageGroups: shouldEmbedPageGovernance(snapshotRole) ? (workspaceState.pageGroups || {}) : {},
     pageData: shouldEmbedCompatibilitySections(snapshotRole) ? (workspaceState.pageData || {}) : {},
@@ -334,13 +383,6 @@ function hydrateWorkbenchSnapshot(outputDir, snapshot = {}, options = {}) {
   hydratedSnapshot.runtimeWorkflow = hydratedSnapshot.runtimeWorkflow
     || buildRuntimeWorkflowFallback(hydratedSnapshot.runtimeSummary)
     || null;
-  hydratedSnapshot.workflowSessions = (
-    hydratedSnapshot.workflowSessions
-    && typeof hydratedSnapshot.workflowSessions === 'object'
-    && Object.keys(hydratedSnapshot.workflowSessions).length
-  )
-    ? hydratedSnapshot.workflowSessions
-    : buildWorkflowSessionFallbacks(hydratedSnapshot);
   const providedWorkspaceState = options.workspaceState && typeof options.workspaceState === 'object'
     ? options.workspaceState
     : null;
@@ -350,9 +392,42 @@ function hydrateWorkbenchSnapshot(outputDir, snapshot = {}, options = {}) {
   )
     ? providedWorkspaceState
     : readCanonicalWorkspaceState(outputDir, hydratedSnapshot);
+  hydratedSnapshot.liveCopilotDirective = buildLiveCopilotDirectiveFallback(
+    hydratedSnapshot.runtimeSummary,
+    canonicalWorkspaceState.runtimeSummary,
+    hydratedSnapshot,
+    canonicalWorkspaceState,
+    options.runtimeState
+  );
+  if (
+    hydratedSnapshot.runtimeSummary
+    && typeof hydratedSnapshot.runtimeSummary === 'object'
+    && hydratedSnapshot.liveCopilotDirective
+    && !hydratedSnapshot.runtimeSummary.liveCopilotDirective
+  ) {
+    hydratedSnapshot.runtimeSummary = {
+      ...hydratedSnapshot.runtimeSummary,
+      liveCopilotDirective: hydratedSnapshot.liveCopilotDirective,
+    };
+  }
+  hydratedSnapshot.workflowSessions = (
+    hydratedSnapshot.workflowSessions
+    && typeof hydratedSnapshot.workflowSessions === 'object'
+    && Object.keys(hydratedSnapshot.workflowSessions).length
+  )
+    ? hydratedSnapshot.workflowSessions
+    : buildWorkflowSessionFallbacks(hydratedSnapshot);
   hydratedSnapshot.taskSessionSnapshots = pickStateSection(
     hydratedSnapshot.taskSessionSnapshots,
     canonicalWorkspaceState.taskSessionSnapshots
+  );
+  hydratedSnapshot.stateProtocol = pickStateSection(
+    hydratedSnapshot.stateProtocol,
+    canonicalWorkspaceState.stateProtocol
+  );
+  hydratedSnapshot.specialWorkflowProtocol = pickStateSection(
+    hydratedSnapshot.specialWorkflowProtocol,
+    canonicalWorkspaceState.specialWorkflowProtocol
   );
   hydratedSnapshot.workflowProtocolRegistry = pickStateSection(
     hydratedSnapshot.workflowProtocolRegistry,
@@ -366,6 +441,10 @@ function hydrateWorkbenchSnapshot(outputDir, snapshot = {}, options = {}) {
     hydratedSnapshot.workflowContracts,
     canonicalWorkspaceState.workflowContracts
   );
+  hydratedSnapshot.workflowTextProtocol = pickStateSection(
+    hydratedSnapshot.workflowTextProtocol,
+    canonicalWorkspaceState.workflowTextProtocol
+  );
   hydratedSnapshot.entryBridge = hydratedSnapshot.entryBridge
     || canonicalWorkspaceState.entryBridge
     || null;
@@ -373,6 +452,8 @@ function hydrateWorkbenchSnapshot(outputDir, snapshot = {}, options = {}) {
     'status',
     'counts',
     'nextAction',
+    'stateProtocol',
+    'specialWorkflowProtocol',
     'risk',
     'confirmationState',
     'sourceSummary',
@@ -392,6 +473,7 @@ function hydrateWorkbenchSnapshot(outputDir, snapshot = {}, options = {}) {
     'specialization',
     'panels',
     'taskSessionSnapshots',
+    'workflowTextProtocol',
   ];
 
   for (const sectionKey of hydratedStateSections) {

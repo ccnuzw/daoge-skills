@@ -5,6 +5,7 @@ const { parseArgs, readJson, readJsonIfExists, ensureDir, writeJson } = require(
 const { loadWorkbenchState } = require('./workbench_state_shared');
 const { summarizeUserWorkbenchProtocol } = require('./workspace_page_shared');
 const { resolveOptionalPageEmission, buildOptionalPageDecision, pruneHiddenHtmlFiles } = require('./default_generation_contract');
+const { syncWorkspaceLayout, resolveRecommendedWorkspacePath } = require('./workspace_layout_migration');
 
 function asArray(value) {
   if (Array.isArray(value)) return value;
@@ -61,12 +62,16 @@ function writeReadme(outputDir, summary) {
       || directorySummary
       || summarizeUserWorkbenchProtocol(workspaceState?.assetLayers?.userWorkbenchProtocol, { outputDir }).summary,
   };
+  const layoutEntry = resolveRecommendedWorkspacePath(outputDir, 'workspace_home.html', 'workspace');
   const lines = [
     '# DAOGE 当前任务入口',
     '',
-    `请先打开${workbenchProtocol.defaultEntryLabel || governanceSummary.defaultEntryLabel || '工作台首页'}。这份 README 只负责告诉你从哪里进入，不负责解释本轮过程细节或最终收口结论。`,
+    `请先打开${workbenchProtocol.defaultEntryLabel || governanceSummary.defaultEntryLabel || '工作台首页'}。这份 README 只负责告诉你从哪里进入，不负责解释本轮过程细节或最终收口结论。任务档案只作回看，内部记录仅维护者诊断使用。`,
     '',
-    `- 先看这里: ${governanceSummary.defaultEntryPath || summary.workspaceHome}`,
+    `- 先看这里: ${layoutEntry.recommendedPath || governanceSummary.defaultEntryPath || summary.workspaceHome}`,
+    layoutEntry.mode === 'workspace-mirror-first' ? `- 兼容旧入口: ${layoutEntry.compatibilityPath}` : '',
+    '- 不用先看: JSON / Markdown 内部记录、旧说明页、深看页',
+    '- 内部记录: 仅维护者诊断和续跑使用，不作为普通阅读入口',
     '',
     '## 当前状态',
     '',
@@ -82,17 +87,19 @@ function writeReadme(outputDir, summary) {
     '- 已后退: 深看页、旧说明页、JSON / Markdown 内部记录',
     `- 使用原则: ${governanceSummary.principle || workbenchProtocol.userRule}`,
     `- 目录规则: ${workbenchProtocol.summary}`,
+    layoutEntry.mode === 'workspace-mirror-first' ? '- 目录迁移: 推荐先看 workspace/ 分层入口，顶层文件继续保留给旧脚本兼容。' : '',
     '',
     '## 按需直达',
     '',
     `- 结果工作台: ${summary.resultWorkspace}`,
     `- 异常工作台: ${summary.exceptionWorkspace}`,
     `- 任务档案: ${summary.runRecordHtml}`,
-    ...(summary.completionReport ? [`- 完成报告: ${summary.completionReport}`] : []),
-    ...(summary.storyboardBoard ? [`- 分镜整板页: ${summary.storyboardBoard}`] : []),
-    ...workspaceSupport
-      .filter((item) => item.path && ![summary.runRecordHtml, summary.completionReport, summary.storyboardBoard].filter(Boolean).includes(item.path))
-      .map((item) => `- ${item.label}: ${item.path}`),
+    ...(summary.completionReport ? ['- 完成报告: 已归档为文字版，需要收口复盘时再看，不作为普通入口'] : []),
+    ...(workspaceSupport
+      .filter((item) => item.path && ![summary.runRecordHtml].includes(item.path))
+      .length || summary.storyboardBoard
+      ? ['- 其它补充页: 已生成但默认后退，需要深看时从对应工作台按需进入']
+      : ['- 其它补充页: 默认不生成；需要深看时从对应工作台按需进入']),
     '',
     '## 这三份说明各看什么',
     '',
@@ -105,8 +112,8 @@ function writeReadme(outputDir, summary) {
     '- 用户直看层: 主链工作台 + 任务档案这类少量补充入口',
     `- 文件落盘层: ${filesystemCount > 0 ? `${filesystemCount} 个文件，仅用于目录落盘说明` : '当前没有额外文件落盘入口'}`,
     `- 归档层: ${archiveCount > 0 ? `${archiveCount} 个文件，仅在归档回看时使用` : '当前没有归档文件'}`,
-    `- 内部状态层: ${internalCount > 0 ? `${internalCount} 个文件，服务状态底盘、续跑和诊断` : '当前没有内部状态文件'}`,
-  ];
+    `- 内部状态层: ${internalCount > 0 ? `${internalCount} 个文件，仅维护者诊断、续跑和兼容读取使用` : '当前没有内部状态文件'}`,
+  ].filter((line) => line !== '');
   writeMarkdown(path.join(outputDir, 'README.md'), lines);
 }
 
@@ -412,6 +419,27 @@ function main() {
     success: manifest.success,
     failed: manifest.failed,
   });
+  syncWorkspaceLayout(outputDir, { source: 'ingest_host_native_results' });
+  runNode('build_workspace_state.js', [
+    '--manifest-file', manifestPath,
+    '--output-dir', outputDir,
+    '--workspace-state-file', path.join(outputDir, 'workspace_state.json'),
+    '--workspace-assets-file', path.join(outputDir, 'workspace_assets.json'),
+    '--workspace-timeline-file', path.join(outputDir, 'workspace_timeline.json'),
+    '--workbench-state-file', path.join(outputDir, 'workbench_state.json'),
+  ]);
+  writeReadme(outputDir, {
+    workspaceHome: path.join(outputDir, 'workspace_home.html'),
+    resultWorkspace: path.join(outputDir, 'result_workspace.html'),
+    exceptionWorkspace: path.join(outputDir, 'exception_workspace.html'),
+    runRecordHtml: path.join(outputDir, 'run_record.html'),
+    runRecordMarkdown: path.join(outputDir, 'run_record.md'),
+    completionReport: emitArchiveMarkdown ? path.join(outputDir, 'daoge_completion_report.md') : null,
+    storyboardBoard: fs.existsSync(path.join(outputDir, 'storyboard_board.html')) ? path.join(outputDir, 'storyboard_board.html') : null,
+    success: manifest.success,
+    failed: manifest.failed,
+  });
+  syncWorkspaceLayout(outputDir, { source: 'ingest_host_native_results' });
 
   const summary = {
     ok: true,

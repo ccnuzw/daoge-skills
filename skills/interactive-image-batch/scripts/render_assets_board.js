@@ -150,7 +150,7 @@ function main() {
   const phaseLabel = String(pageState?.status?.phase || '').trim() || '准备阶段';
   const statusHeadline = String(pageState?.status?.headline || '').trim() || '当前处于素材与绑定确认阶段';
   const statusSummary = String(pageState?.status?.summary || '').trim()
-    || '这一页只负责确认素材、槽位和绑定关系有没有明显偏差，确认干净后就回主链继续推进。';
+    || '素材看板已经降为准备补充页，只负责确认素材、槽位和绑定关系有没有明显偏差；确认干净后就回准备工作台继续推进。';
   const nextActionTarget = pageState?.nextAction?.target
     ? path.join(outputDir, pageState.nextAction.target)
     : (fileExists(path.join(outputDir, 'prepare_workspace.html'))
@@ -166,7 +166,7 @@ function main() {
     runLabel: taskLabel,
     boardLabel: bindings.board_id || analysis.boardId || analysis.board_id || '',
     phaseLabel,
-    flowLabel: '工作台首页 -> 准备工作台 -> Prompt 预览 -> 资产看板 -> 运行层',
+    flowLabel: '工作台首页 -> 准备工作台 -> 素材补充页 -> 回准备主链',
     counts: [
       { label: '参考图', value: referenceCount },
       { label: '遮罩图', value: maskCount },
@@ -206,7 +206,7 @@ function main() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DAOGE Assets Board</title>
+  <title>DAOGE 素材补充页</title>
 ${renderPortalHeadAssets()}
   <style>
     :root {
@@ -411,18 +411,17 @@ ${renderPortalHeadAssets()}
           extraLinks: [
             { label: '回工作台首页', file: workspaceHomePath },
             { label: '回准备工作台', file: prepareWorkspacePath },
-            { label: '绑定确认摘要', href: relativeFile(outputDir, path.join(outputDir, 'binding_confirmation.md')) },
-            { label: '会话卡', href: relativeFile(outputDir, path.join(outputDir, 'binding_conversation_card.md')) },
           ],
         })}
       </div>
-      <div class="eyebrow">DAOGE Assets Board</div>
-      <h1>${escapeHtml(taskLabel)} · DAOGE 资产看板</h1>
+      <div class="eyebrow">素材绑定补充页</div>
+      <h1>${escapeHtml(taskLabel)} · DAOGE 素材补充页</h1>
+      <p class="hero-copy">素材看板已经退到准备补充页层。普通流程先回准备工作台；只有需要核对素材、槽位和绑定关系时，才停留在这里。</p>
       <p class="hero-copy">${escapeHtml(statusSummary)}</p>
       ${assetsContextBar}
       ${renderPortalModeSwitch({
-        title: '素材页浏览模式',
-        copy: '新手先确认素材是否放对位置，专业用户再看规则判断、视觉建议和更细的绑定细节。',
+        title: '素材补充页浏览模式',
+        copy: '新手确认素材放对位置后就回准备工作台；专业用户再看规则判断、视觉建议和绑定细节。',
       })}
       <div class="hero-grid">
         <div class="metric-card metric-info">
@@ -449,11 +448,11 @@ ${renderPortalHeadAssets()}
       ${renderPortalProgressRail(outputDir, {
         currentPage: 'assets_board.html',
         title: '准备主链进度',
-        copy: '素材页主要负责确认绑定是否干净。通常看完这里就回预检放行，或者进入运行层。',
+        copy: '素材页只做准备补充核对，不再承担准备主控。通常看完这里就回准备工作台收口。',
       })}
       ${renderPortalRouteCompass(outputDir, {
-        title: '看完素材页后，通常这样走',
-        copy: '素材确认完成后，下一步通常不是继续翻 JSON，而是回到放行判断，或者进入运行层。',
+        title: '素材补充页看完后，回准备主链',
+        copy: '这里负责深看素材绑定，不再承担准备总控。把绑定结论送回准备工作台，再决定预检或执行。',
         previous: {
           label: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回 Prompt 预览',
           summary: fileExists(prepareWorkspacePath) ? '回准备主链重新看路线、放行状态和页间交接。' : '如果你怀疑槽位角色或方向本身有偏差，回 Prompt 预览重新对照最省时间。',
@@ -472,7 +471,7 @@ ${renderPortalHeadAssets()}
           {
             kicker: '专业下一站',
             label: fileExists(runOverviewPath) ? '去运行概览' : (fileExists(resultWorkspacePath) ? '去结果工作台' : '回预检总览'),
-            summary: fileExists(runOverviewPath) ? '如果本轮已经开跑，可以直接去运行层确认执行是否稳定。' : (fileExists(resultWorkspacePath) ? '如果结果层入口已经生成，可以直接回结果工作台继续。' : '如果还没有运行层产物，先回预检总览做放行判断。'),
+            summary: fileExists(runOverviewPath) ? '如果本轮已经开跑，可以按需去运行概览确认执行是否稳定。' : (fileExists(resultWorkspacePath) ? '如果结果层入口已经生成，可以直接回结果工作台继续。' : '如果还没有运行层产物，先回准备工作台做放行判断。'),
             file: fileExists(runOverviewPath) ? runOverviewPath : (fileExists(resultWorkspacePath) ? resultWorkspacePath : preflightBoardPath),
             cta: fileExists(runOverviewPath) ? '去运行概览' : (fileExists(resultWorkspacePath) ? '去结果工作台' : '回预检总览'),
             audience: 'pro',
@@ -482,11 +481,11 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>素材主控</h2>
-      <p class="section-copy">先判断素材是不是放对了，再决定回预检、回 Prompt，还是继续进入运行层。</p>
+      <h2>素材补充判断</h2>
+      <p class="section-copy">这里只补充素材、槽位和绑定关系判断，不再承担准备主控。看完后回准备工作台决定预检、回 Prompt，还是继续进入运行层。</p>
       ${renderPortalWorkbench(outputDir, {
-        title: '素材阶段，先看这里',
-        copy: '只先回答素材有没有对上、有没有明显异常、下一步该去哪。',
+        title: '素材补充页，先看这里',
+        copy: '只先回答素材有没有对上、有没有明显异常，再把结论带回准备主链。',
         cards: [
           {
             label: '绑定状态',
@@ -565,15 +564,12 @@ ${renderPortalHeadAssets()}
 
     <section class="section">
       <h2>继续下一步</h2>
-      <p class="section-copy">素材页看完后，通常回准备主线继续放行，或者直接进入运行层，不需要继续翻内部文件。</p>
+      <p class="section-copy">素材页看完后，通常回准备主线继续放行；绑定 Markdown 和 JSON 只留在内部状态层，不再作为普通入口。</p>
       <article class="info-card">
         <h3>常用入口</h3>
         <div class="link-row">
-          ${renderLink('绑定确认摘要', relativeFile(outputDir, path.join(outputDir, 'binding_confirmation.md')))}
-          ${renderLink('会话卡', relativeFile(outputDir, path.join(outputDir, 'binding_conversation_card.md')))}
-          ${fileExists(preflightBoardPath) ? renderLink('返回预检总览', relativeFile(outputDir, preflightBoardPath)) : ''}
-          <span class="portal-audience-pro">${renderLink('绑定关系 JSON', relativeFile(outputDir, bindingsPath))}</span>
-          <span class="portal-audience-pro">${renderLink('资产分析 JSON', relativeFile(outputDir, analysisPath))}</span>
+          ${renderLink('回准备工作台', relativeFile(outputDir, prepareWorkspacePath))}
+          ${renderLink('回工作台首页', relativeFile(outputDir, workspaceHomePath))}
         </div>
       </article>
     </section>

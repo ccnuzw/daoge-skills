@@ -92,7 +92,7 @@ function main() {
   const phaseLabel = String(pageState?.status?.phase || '').trim() || '准备阶段';
   const statusHeadline = String(pageState?.status?.headline || '').trim() || `当前处于${phaseLabel}的方向确认阶段`;
   const statusSummary = String(pageState?.status?.summary || '').trim()
-    || '这一页先帮你确认方向、分布和样本质量，再决定是继续预检、回准备主链还是去素材页。';
+    || '提示词预览已经降为准备补充页，只负责深看方向、分布和样本质量；普通流程请回准备工作台继续。';
   const nextActionTarget = pageState?.nextAction?.target
     ? path.join(outputDir, pageState.nextAction.target)
     : path.join(outputDir, 'prepare_workspace.html');
@@ -121,7 +121,7 @@ function main() {
   const promptContextBar = renderPortalContextBar({
     runLabel: taskLabel,
     phaseLabel,
-    flowLabel: '工作台首页 -> 准备工作台 -> 提示词预览 -> 预检 -> 素材绑定 -> 执行',
+    flowLabel: '工作台首页 -> 准备工作台 -> 提示词补充页 -> 回准备主链',
     counts: [
       { label: '提示词', value: prompts.length },
       { label: '批次', value: batches.length },
@@ -291,18 +291,17 @@ ${renderPortalHeadAssets()}
           extraLinks: [
             { label: '回工作台首页', file: workspaceHomePath },
             { label: '回准备工作台', file: prepareWorkspacePath },
-            { label: '提示词预览文字版', href: relativeFile(outputDir, markdownPath) },
-            { label: '运行摘要文字版', href: relativeFile(outputDir, summaryPath) },
           ],
         })}
       </div>
-      <div class="eyebrow">提示词方向确认</div>
-      <h1>${escapeHtml(taskLabel)} · DAOGE 提示词预览</h1>
+      <div class="eyebrow">提示词预览补充页</div>
+      <h1>${escapeHtml(taskLabel)} · DAOGE 提示词预览补充页</h1>
+      <p class="hero-copy">提示词预览已经退到准备补充页层。普通流程先回准备工作台；只有需要逐条看 prompt、分布或样本覆盖时，才停留在这里。</p>
       <p class="hero-copy">${escapeHtml(statusSummary)}</p>
       ${promptContextBar}
       ${renderPortalModeSwitch({
-        title: '准备页浏览模式',
-        copy: '新手先看方向和建议，熟练用户可以更快切到批次、分布和下一站。',
+        title: '提示词补充页浏览模式',
+        copy: '新手看完方向摘要就回准备工作台；熟练用户才继续深看批次、分布和样本。',
       })}
       <div class="hero-grid">
         <div class="metric-card metric-info">
@@ -329,11 +328,11 @@ ${renderPortalHeadAssets()}
       ${renderPortalProgressRail(outputDir, {
         currentPage: 'prompt_preview.html',
         title: '准备主链进度',
-        copy: '这一步先看方向，再去预检确认能不能开跑，最后才进入执行层。',
+        copy: '提示词预览只做准备补充说明，不再承担准备主控。主判断回准备工作台完成。',
       })}
       ${renderPortalRouteCompass(outputDir, {
-        title: '看完提示词预览后，通常这样走',
-        copy: '如果方向不对，就回展示板重选；如果方向对，就继续向前做放行确认。',
+        title: '提示词补充页看完后，回准备主链',
+        copy: '这里负责逐条深看 prompt，不再承担准备总控。方向结论要送回准备工作台，再决定预检或回退。',
         previous: {
           label: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回中文模板展示板',
           summary: fileExists(prepareWorkspacePath) ? '回准备主链重新看当前阶段、路线和工作台建议。' : '当你发现任务类型、风格方向或任务意图一开始就选偏了，回这里重选更省时间。',
@@ -362,11 +361,11 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>准备主控</h2>
+      <h2>提示词补充判断</h2>
       <p class="section-copy">${escapeHtml(displayProfile.firstLookCopy)}</p>
       ${renderPortalWorkbench(outputDir, {
-        title: '准备阶段，先看这里',
-        copy: '先判断方向是否正确，再决定去预检还是看素材。',
+        title: '提示词补充页，先看这里',
+        copy: '先判断方向是否正确，再把结论带回准备主链。',
         cards: [
           {
             label: '主方向',
@@ -448,14 +447,12 @@ ${renderPortalHeadAssets()}
 
     <section class="section">
       <h2>继续下一步</h2>
-      <p class="section-copy">提示词预览页不是最终执行页。看完这里以后，通常就回预检总览，或者继续检查素材和原文。</p>
+      <p class="section-copy">提示词预览页不是最终执行页。看完这里以后，通常就回准备工作台；文字版和 JSON 只留给维护排查，不作为普通入口。</p>
       <article class="info-card">
         <h3>常用入口</h3>
         <div class="link-row">
-          ${fileExists(preflightBoardPath) ? renderLink('返回预检总览', relativeFile(outputDir, preflightBoardPath)) : ''}
-          ${renderLink('提示词预览文字版', relativeFile(outputDir, markdownPath))}
-          ${renderLink('运行摘要文字版', relativeFile(outputDir, summaryPath))}
-          ${renderLink('批次计划 JSON', relativeFile(outputDir, planPath))}
+          ${renderLink('回准备工作台', relativeFile(outputDir, prepareWorkspacePath))}
+          ${renderLink('回工作台首页', relativeFile(outputDir, workspaceHomePath))}
         </div>
       </article>
     </section>

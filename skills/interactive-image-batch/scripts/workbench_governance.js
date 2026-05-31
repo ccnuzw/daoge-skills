@@ -147,7 +147,7 @@ const DISPLAY_GOVERNANCE_BY_PAGE = {
       },
       support: {
         copy: '首页把流程状态和状态栈后退成补充层，只有需要时再展开看全局脉络。',
-        sectionKeys: ['flow', 'statusStack', 'assets'],
+        sectionKeys: ['flow', 'statusStack', 'assets', 'specialWorkflow'],
       },
     },
     modeSwitch: {

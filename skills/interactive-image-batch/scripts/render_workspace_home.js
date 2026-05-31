@@ -16,12 +16,17 @@ const {
   getWorkspaceStageChrome,
   getWorkspaceStagePhrases,
   getWorkspaceIdentityCopy,
-  getWorkspacePageShellConfig,
-  getWorkspaceLayoutConfig,
-  getWorkspaceModeSwitchConfig,
+  resolveWorkspaceShellRuntime,
   buildWorkspaceContextFallback,
   buildWorkspaceCockpitSummaryData,
-  resolveWorkspaceContextBarData,
+  resolveWorkspaceStageContextBarData,
+  resolveWorkspaceStageViewValue,
+  resolveWorkspaceStageSection,
+  resolveWorkspaceStageStateValue,
+  resolveWorkspaceStageSessionConsole,
+  resolveWorkspaceStageActionStatus,
+  resolveWorkspaceStageDialogueStatus,
+  resolveWorkspaceStageConfirmationState,
   buildWorkspaceDecisionSectionData,
   buildWorkspaceStageGuideFallback,
   buildWorkspaceStageVisibilityFallback,
@@ -69,6 +74,7 @@ const {
   renderResolvedWorkspaceSummarySection,
   renderWorkspaceGridSection,
   buildWorkspaceContentSectionPlan,
+  resolveWorkspaceStageContentSectionPlan,
   renderWorkspaceDeclaredSections,
   renderWorkspaceSectionLayout,
   renderWorkspacePageShell,
@@ -76,9 +82,9 @@ const {
   buildWorkspacePreviewSectionData,
   resolveWorkspaceGuideSectionData,
   resolveWorkspaceDecisionSectionData,
-  resolveWorkspaceSummarySectionData,
-  resolveWorkspaceRouteSectionByStage,
-  resolveWorkspaceWorkbenchSectionData,
+  resolveWorkspaceStageSummarySection,
+  resolveWorkspaceStageRouteSection,
+  resolveWorkspaceStageWorkbenchSection,
   buildRenderableWorkbench,
   summarizeArtifactLayer,
   buildWorkspaceFallbackGuide,
@@ -191,6 +197,9 @@ function main() {
   const taskCenterPath = path.join(path.dirname(outputDir), 'task_center.html');
   const examplesCatalogPath = path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
   const identity = getWorkspaceIdentityCopy();
+  const specialWorkflowProtocol = pageState?.specialWorkflowProtocol && typeof pageState.specialWorkflowProtocol === 'object'
+    ? pageState.specialWorkflowProtocol
+    : {};
 
   const hasPrepare = fileExists(preparePath);
   const hasResult = fileExists(resultPath);
@@ -210,6 +219,39 @@ function main() {
     reviewItems: canonicalReviewItems,
   });
   const hasTaskCenter = fileExists(taskCenterPath);
+  const specialWorkflowCards = [
+    specialWorkflowProtocol?.hostNative?.officialMainline ? {
+      label: 'host-native 正式模式',
+      value: specialWorkflowProtocol.hostNative.active ? '当前启用' : '本轮未启用',
+      summary: specialWorkflowProtocol.hostNative.active
+        ? (specialWorkflowProtocol.hostNative.defaultMainlineBehavior || specialWorkflowProtocol.hostNative.responsibility)
+        : '宿主原生图像工具保留为正式运行模式之一，但本轮仍按当前工作流推进。',
+      tone: specialWorkflowProtocol.hostNative.active ? 'good' : 'neutral',
+      hideLinkIfMissing: true,
+    } : null,
+    specialWorkflowProtocol?.storyboard?.officialSubsystem ? {
+      label: 'storyboard 专用子系统',
+      value: specialWorkflowProtocol.storyboard.active ? '当前启用' : '按需启用',
+      summary: specialWorkflowProtocol.storyboard.active
+        ? `保留 ${specialWorkflowProtocol.storyboard.structureContract?.contentSlots || '分镜'} 个 content slot / layout / reference / mask 语义，不压平成普通批量图。`
+        : specialWorkflowProtocol.storyboard.defaultMainlineBehavior,
+      tone: specialWorkflowProtocol.storyboard.active ? 'info' : 'neutral',
+      file: specialWorkflowProtocol.storyboard.active && specialWorkflowProtocol.storyboard.primarySurface ? specialWorkflowProtocol.storyboard.primarySurface : null,
+      cta: '进入分镜整板补充页',
+      hideLinkIfMissing: true,
+    } : null,
+    specialWorkflowProtocol?.localEditRerun?.officialProfessionalPath ? {
+      label: 'local-edit / rerun 专业路径',
+      value: specialWorkflowProtocol.localEditRerun.active ? '当前需要关注' : '异常时再启用',
+      summary: specialWorkflowProtocol.localEditRerun.active
+        ? (specialWorkflowProtocol.localEditRerun.defaultMainlineBehavior || specialWorkflowProtocol.localEditRerun.responsibility)
+        : '局部修订和补跑只在异常页或分镜局部修订里处理，不抬成普通用户第一主链。',
+      tone: specialWorkflowProtocol.localEditRerun.active ? 'warn' : 'neutral',
+      file: specialWorkflowProtocol.localEditRerun.active ? (specialWorkflowProtocol.localEditRerun.routeContract?.rerunSurface || specialWorkflowProtocol.localEditRerun.routeContract?.exceptionSurface) : null,
+      cta: '进入专业处理',
+      hideLinkIfMissing: true,
+    } : null,
+  ].filter(Boolean);
   const fallbackAssetGuide = {
     ...homeFallbackGuide.visibility,
     items: [
@@ -247,8 +289,20 @@ function main() {
   const runtimeSummary = pageState?.runtimeSummary && typeof pageState.runtimeSummary === 'object'
     ? pageState.runtimeSummary
     : {};
+  const liveCopilotDirective = runtimeSummary.liveCopilotDirective && typeof runtimeSummary.liveCopilotDirective === 'object'
+    ? runtimeSummary.liveCopilotDirective
+    : (pageState?.liveCopilotDirective && typeof pageState.liveCopilotDirective === 'object'
+      ? pageState.liveCopilotDirective
+      : {});
   const runtimeCopilotSummary = runtimeSummary.copilotSummary && typeof runtimeSummary.copilotSummary === 'object'
-    ? runtimeSummary.copilotSummary
+    ? {
+      ...runtimeSummary.copilotSummary,
+      nextActionLabel: liveCopilotDirective.nextActionLabel || liveCopilotDirective.nextAction?.label || runtimeSummary.copilotSummary.nextActionLabel,
+      nextActionSummary: liveCopilotDirective.nextActionSummary || liveCopilotDirective.nextAction?.reason || runtimeSummary.copilotSummary.nextActionSummary,
+      recommendedReply: liveCopilotDirective.recommendedReply || liveCopilotDirective.primarySay || runtimeSummary.copilotSummary.recommendedReply,
+      progressSummary: liveCopilotDirective.progressSummary || runtimeSummary.copilotSummary.progressSummary,
+      conclusion: liveCopilotDirective.statusSummary || runtimeSummary.copilotSummary.conclusion,
+    }
     : {};
   const taskConclusion = buildHomeTaskConclusion({
     hasFailure: issueCount > 0,
@@ -289,12 +343,14 @@ function main() {
     : (issueCount > 0 ? 'bad' : 'good');
   const chrome = getWorkspaceStageChrome('home');
   const denseCopy = getWorkspaceDenseCopy('home');
-  const shell = getWorkspacePageShellConfig('home');
-  const governance = pageState?.governanceByPage?.[shell.currentPage] || pageState?.governance || null;
-  const layout = homeView?.display || governance?.display || getWorkspaceLayoutConfig('home', { currentPage: shell.currentPage });
-  const surfaceRules = layout?.surfaceRules || {};
-  const governedWorkbenchIds = Array.isArray(governance?.workbenchEntryIds) ? new Set(governance.workbenchEntryIds) : null;
-  const modeSwitch = getWorkspaceModeSwitchConfig('home', { currentPage: shell.currentPage });
+  const {
+    shell,
+    governance,
+    layout,
+    surfaceRules,
+    governedWorkbenchIds,
+    modeSwitch,
+  } = resolveWorkspaceShellRuntime(pageState, 'home', homeView);
   const decisionSummary = buildHomeDecisionSummary({
     hasFailure: issueCount > 0,
     hasResult,
@@ -335,68 +391,79 @@ function main() {
     pressureLabel: userFacingAssetOverview.pressureLabel,
     pressureSummary: userFacingAssetOverview.summary || issueLabel,
     pressureTone: issueCount > 0 ? 'bad' : 'good',
-    confirmationState: homePageData?.confirmation || homeView?.confirmation || pageState?.confirmationState || {},
+    confirmationState: resolveWorkspaceStageConfirmationState(pageState, 'home', homeView, homePageData?.confirmation || pageState?.confirmationState || {}),
   });
   const homeNarrative = resolveUnifiedStageNarrative(unifiedStatus, {
     ...homeFallbackState.narrative,
   });
-  const homeHero = homeView?.hero || {};
+  const homeHero = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'hero', {});
   const stagePhrases = getWorkspaceStagePhrases('home');
   const homeContext = homeView?.context || {};
-  const homeFlow = homeView?.flow || {};
-  const homeAssetStatus = homeView?.assetStatus || {};
-  const homeActionStatus = homeView?.actionStatus || {};
-  const homeDialogueStatus = homeView?.dialogueStatus || {};
-  const homeControlRail = homeView?.controlRail || {};
-  const homeCopilot = homeView?.copilot || {};
-  const homeWorkflowCopilot = pageState?.workflowSessions?.home || homeView?.workflowCopilot || {};
-  const homeWorkflowContract = homeView?.workflowContract || pageState?.workflowContracts?.home || {};
-  const homeSessionConsole = pageState?.taskSessionSnapshots?.home || homeView?.sessionConsole || {};
-  const homeConfirmationState = homePageData?.confirmation || homeView?.confirmation || pageState?.confirmationState || {};
+  const homeFlow = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'flow', {});
+  const homeAssetStatus = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'assetStatus', {});
+  const homeActionStatus = resolveWorkspaceStageActionStatus(pageState, 'home', homeView);
+  const homeDialogueStatus = resolveWorkspaceStageDialogueStatus(pageState, 'home', homeView);
+  const homeControlRail = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'controlRail', {});
+  const homeCopilot = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'copilot', {});
+  const homeWorkflowCopilot = pageState?.workflowSessions?.home || resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'workflowCopilot', {});
+  const homeWorkflowContract = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'workflowContract', pageState?.workflowContracts?.home || {});
+  const homeSessionConsole = resolveWorkspaceStageSessionConsole(pageState, 'home', homeView);
+  const homeConfirmationState = resolveWorkspaceStageConfirmationState(pageState, 'home', homeView, homePageData?.confirmation || pageState?.confirmationState || {});
+  const homeTaskControlBar = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'taskControlBar', null);
+  const homeSignalBar = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'signalBar', null);
+  const homeStatusStack = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'statusStack', []);
+  const stateHomeCockpitSummary = resolveWorkspaceStageStateValue(pageState, 'home', homePageData, {}, 'cockpitSummary', null);
+  const stateHomeJudgment = resolveWorkspaceStageStateValue(pageState, 'home', homePageData, {}, 'judgment', null);
+  const stateHomeDecision = resolveWorkspaceStageStateValue(pageState, 'home', homePageData, {}, 'decision', null);
+  const stateHomeCollaboration = resolveWorkspaceStageStateValue(pageState, 'home', homePageData, {}, 'collaboration', null);
+  const homeCockpitSummary = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'cockpitSummary', null);
+  const homeTimeline = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'timeline', null);
+  const homeJudgment = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'judgment', null);
+  const homeStageRelay = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'stageRelay', null);
   const resolvedHomeCockpitSummary = buildUnifiedWorkflowCockpitSummary({
-    base: homePageData?.cockpitSummary || null,
+    base: stateHomeCockpitSummary,
     workflow: null,
     copilot: homeCopilot?.hero?.cockpitSummary,
-    view: homeView?.cockpitSummary,
+    view: homeCockpitSummary,
     items: homeFallbackState.cockpitItems,
   });
   const resolvedHomeConfirmationState = buildConfirmationStateFromUnifiedStatus(unifiedStatus, homeConfirmationState);
-  const resolvedHomeTimeline = homeView?.timeline
+  const resolvedHomeTimeline = homeTimeline
     || homePageData?.sections?.timeline
     || buildWorkspaceFallbackTimeline('home', {
       workspaceTimelineEvents: workspaceTimeline?.events,
     });
-  const resolvedHomeProgress = homeView?.progress || null;
+  const resolvedHomeProgress = resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'progress', null);
   const resolvedHomeActionStatus = buildActionStatusFromUnifiedStatus(unifiedStatus, {
     base: homeActionStatus,
     copilotSummary: runtimeCopilotSummary,
-    confirmationReply: homeConfirmationState.recommendedReply,
+    confirmationReply: liveCopilotDirective.recommendedReply || homeConfirmationState.recommendedReply,
     confirmationSummary: homeConfirmationState.summary,
     dialogueNextSayItems: homeDialogueStatus.nextSayItems,
-    nextActionSummary: nextCopy || String(homeConfirmationState.summary || '').trim(),
+    nextActionSummary: liveCopilotDirective.nextActionSummary || nextCopy || String(homeConfirmationState.summary || '').trim(),
     defaultActionReason: stagePhrases.actionReason,
   });
   const resolvedHomeDialogueStatus = buildDialogueStatusFromUnifiedStatus(unifiedStatus, {
     base: homeDialogueStatus,
     copilotSummary: runtimeCopilotSummary,
-    confirmationReply: homeConfirmationState.recommendedReply,
+    confirmationReply: liveCopilotDirective.recommendedReply || homeConfirmationState.recommendedReply,
     confirmationSummary: homeConfirmationState.summary,
-    nextActionSummary: nextCopy || String(homeConfirmationState.summary || '').trim(),
+    nextActionSummary: liveCopilotDirective.nextActionSummary || nextCopy || String(homeConfirmationState.summary || '').trim(),
     defaultActionReason: stagePhrases.dialogueActionReason,
   });
   const resolvedHomeWorkflow = adaptWorkflowCopilot(homeWorkflowCopilot, {
     stageKey: 'home',
     stageLabel: currentStage,
-    taskControlBar: homeView?.taskControlBar || null,
+    taskControlBar: homeTaskControlBar,
     sessionConsole: homeSessionConsole,
-    signalBar: homeView?.signalBar || null,
-    statusStack: homeView?.statusStack || [],
-    cockpitSummary: homePageData?.cockpitSummary || homeView?.cockpitSummary || null,
+    signalBar: homeSignalBar,
+    statusStack: homeStatusStack,
+    cockpitSummary: stateHomeCockpitSummary || homeCockpitSummary,
     dialogueStatus: resolvedHomeDialogueStatus,
     confirmation: resolvedHomeConfirmationState,
-    timeline: homeView?.timeline || null,
-    judgment: homePageData?.judgment || homeView?.judgment || null,
-    stageRelay: homeView?.stageRelay || null,
+    timeline: homeTimeline,
+    judgment: stateHomeJudgment || homeJudgment,
+    stageRelay: homeStageRelay,
   });
   const homeContractState = buildWorkflowContractPageState(homeWorkflowContract, {
     taskControlBar: resolvedHomeWorkflow.taskControlBar,
@@ -412,13 +479,22 @@ function main() {
     confirmationSummary: resolvedHomeConfirmationState.summary,
     defaultActionReason: resolvedHomeWorkflow.language.dialogueActionReason,
   });
+  const homeRecommendedReply = String(
+    liveCopilotDirective.recommendedReply
+    || liveCopilotDirective.primarySay
+    || runtimeCopilotSummary.recommendedReply
+    || resolvedHomeConfirmationState.recommendedReply
+    || (Array.isArray(homeDialogueStatus.nextSayItems) ? homeDialogueStatus.nextSayItems[0] : '')
+    || finalizedHomeDialogueStatus.primarySay
+    || ''
+  ).trim();
   const homeTextDefaults = buildWorkflowTextDefaults({
     copilotSummary: runtimeCopilotSummary,
-    nextActionSummary: runtimeCopilotSummary.nextActionSummary || nextCopy,
-    recommendedReply: runtimeCopilotSummary.recommendedReply || resolvedHomeConfirmationState.recommendedReply,
-    primarySay: runtimeCopilotSummary.recommendedReply || finalizedHomeDialogueStatus.primarySay,
+    nextActionSummary: liveCopilotDirective.nextActionSummary || runtimeCopilotSummary.nextActionSummary || nextCopy,
+    recommendedReply: homeRecommendedReply,
+    primarySay: homeRecommendedReply,
     progressSummary: runtimeCopilotSummary.progressSummary || unifiedStatus.progress || decisionSummary || nextCopy || '',
-    statusSummary: runtimeCopilotSummary.conclusion || homeNarrative.statusSummary || decisionSummary || nextCopy || '',
+    statusSummary: liveCopilotDirective.statusSummary || runtimeCopilotSummary.conclusion || homeNarrative.statusSummary || decisionSummary || nextCopy || '',
     confirmationSummary: resolvedHomeConfirmationState.summary,
     issueSummary: issueCount > 0 ? issueLabel : '',
     continuationLabel: getStageContinuationCopy('home'),
@@ -435,11 +511,16 @@ function main() {
         pageValue: resolvedHomeWorkflow.language.pagePurpose,
       }),
     }),
-    state: homePageData?.decision,
-    view: homeView?.decision,
+    state: stateHomeDecision,
+    view: resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'decision', null),
   });
-  const resolvedHomeSummary = resolveWorkspaceSummarySectionData(
-    homePageData?.summary || homeView?.summary || {},
+  const resolvedHomeSummary = resolveWorkspaceStageSummarySection(
+    pageState,
+    'home',
+    {
+      ...homeView,
+      summary: homeView?.summary || homePageData?.summary || {},
+    },
     buildWorkspaceSummarySectionData({
       enabled: layout.showSummaryByDefault,
       title: chrome.summaryTitle,
@@ -449,8 +530,8 @@ function main() {
         { label: '当前结论', value: homeNarrative.statusLabel || taskConclusion },
         { label: '结果概况', value: userFacingAssetOverview.summary },
         { label: '当前重点', value: homeNarrative.currentFocus || currentFocus },
-        { label: '下一步', value: unifiedStatus.nextAction?.label || nextTitle },
-        { label: '为什么先做这一步', value: unifiedStatus.nextAction?.reason || nextCopy },
+        { label: '下一步', value: liveCopilotDirective.nextActionLabel || liveCopilotDirective.nextAction?.label || unifiedStatus.nextAction?.label || nextTitle },
+        { label: '为什么先做这一步', value: liveCopilotDirective.nextActionSummary || liveCopilotDirective.nextAction?.reason || unifiedStatus.nextAction?.reason || nextCopy },
         { label: '默认入口', value: artifactLayer.defaultEntryLabel },
       ],
     })
@@ -460,7 +541,7 @@ function main() {
     || resolvedHomeWorkflow.taskControlBar
     || homeCopilot?.hero?.taskControlBar
     || homeControlRail.taskControlBar
-    || homeView?.taskControlBar
+    || homeTaskControlBar
     || buildTaskControlBarFromUnifiedStatus(unifiedStatus, {
       copilotSummary: runtimeCopilotSummary,
       taskLabel,
@@ -491,6 +572,7 @@ function main() {
     nextActionSummary: homeTextDefaults.nextActionSummary,
     nextActionTone: issueCount > 0 ? 'warn' : 'good',
     primarySay: homeTextDefaults.primarySay,
+    forcePrimarySay: homeTextDefaults.primarySay,
     progressLabel: stagePhrases.progressLabel,
     progressSummary: homeTextDefaults.progressSummary,
     progressTone: issueCount > 0 ? 'warn' : 'good',
@@ -498,7 +580,7 @@ function main() {
   const resolvedHomeSignalBar = resolvedHomeWorkflow.signalBar
     || homeCopilot?.hero?.signalBar
     || homeControlRail.signalBar
-    || (Array.isArray(homeView?.signalBar) ? { items: homeView.signalBar } : homeView?.signalBar)
+    || (Array.isArray(homeSignalBar) ? { items: homeSignalBar } : homeSignalBar)
     || {
       items: buildHomeSignalBar({
         stageLabel: currentStage,
@@ -514,7 +596,7 @@ function main() {
     workflow: resolvedHomeWorkflow.statusStack,
     copilot: homeCopilot?.mainline?.statusStack,
     controlRail: homeControlRail.statusStack,
-    stateItems: homePageData?.statusStack || homeView?.statusStack || [],
+    stateItems: homePageData?.statusStack || homeStatusStack,
     fallbackBuilder: () => buildHomeStatusStack({
       issueCount,
       hasResult,
@@ -526,19 +608,18 @@ function main() {
     }),
   });
   const resolvedHomeCollaboration = buildUnifiedWorkflowCollaboration(unifiedStatus, {
-    base: homeContractState.collaboration || homePageData?.collaboration,
+    base: homeContractState.collaboration || stateHomeCollaboration,
     workflow: resolvedHomeWorkflow.collaboration,
-    view: homeView?.collaboration,
+    view: resolveWorkspaceStageViewValue(pageState, 'home', homeView, 'collaboration', null),
     confirmation: homeContractState.confirmation || resolvedHomeConfirmationState,
     timeline: resolvedHomeTimeline,
     dialogue: finalizedHomeDialogueStatus,
   });
-  const homeSections = homeView?.sections || {};
   const entryGuide = stateGuides.entryStructure || workbenchGuide?.section || null;
   const visibilityGuide = stateGuides.assetVisibility || pageState?.assetVisibilityGuide?.home || null;
-  const homeGuideSection = homePageSections?.guide || homeSections?.guide || {};
-  const homeVisibilitySection = homePageSections?.visibility || homeSections?.visibility || {};
-  const homePreviewSection = homePageSections?.preview || homeSections?.preview || {};
+  const homeGuideSection = resolveWorkspaceStageSection(pageState, 'home', homeView, homePageData, 'guide');
+  const homeVisibilitySection = resolveWorkspaceStageSection(pageState, 'home', homeView, homePageData, 'visibility');
+  const homePreviewSection = resolveWorkspaceStageSection(pageState, 'home', homeView, homePageData, 'preview');
   const normalizedHomeGuideSection = resolveWorkspaceGuideSectionData(homeGuideSection, buildWorkspaceStageGuideFallback('home', {
     entryGuideTitle: entryGuide?.title,
     entryGuideItems: entryGuide?.items,
@@ -551,14 +632,16 @@ function main() {
     visibilityItems: Array.isArray(visibilityGuide?.items) && visibilityGuide.items.length ? visibilityGuide.items : fallbackAssetGuide.items,
   }));
   const normalizedHomePreviewSection = buildWorkspacePreviewSectionData(
-    homePageSections?.preview || homePreviewSection
+    homePreviewSection
   );
   const homeHeroCards = Array.isArray(homeView?.heroCards) ? homeView.heroCards : [];
   const normalizedHomeSummary = buildWorkspaceSummarySectionData(resolvedHomeSummary || {});
   const previewEnabled = normalizedHomePreviewSection.enabled !== false;
   const homeContentSections = renderWorkspaceDeclaredSections(
-    buildWorkspaceContentSectionPlan(
-      homeView?.contentSections,
+    resolveWorkspaceStageContentSectionPlan(
+      pageState,
+      'home',
+      homeView,
       denseCopy.contentSectionOrder.map((key) => ({
         key,
         kind: key === 'preview' ? 'previewGrid' : 'keyValue',
@@ -617,16 +700,20 @@ function main() {
       : null,
     ...guideCards,
   ].filter(Boolean).filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
-  const resolvedHomeWorkbench = resolveWorkspaceWorkbenchSectionData(
-    homeView?.workbench || {},
+  const resolvedHomeWorkbench = resolveWorkspaceStageWorkbenchSection(
+    pageState,
+    'home',
+    homeView,
     buildWorkspaceWorkbenchSectionData({
       title: chrome.workbenchTitle,
       copy: chrome.workbenchCopy,
       cards: fallbackWorkbenchCards,
     })
   );
-  const resolvedHomeRoute = resolveWorkspaceRouteSectionByStage(
-    homeView?.route || {},
+  const resolvedHomeRoute = resolveWorkspaceStageRouteSection(
+    pageState,
+    'home',
+    homeView,
     buildWorkspaceStageRouteFallback('home', {
       title: chrome.routeTitle,
       copy: chrome.routeCopy,
@@ -638,8 +725,14 @@ function main() {
       nextCta: '现在进入',
     })
   );
+  const specialWorkflowSection = specialWorkflowCards.length ? renderPortalWorkbench(outputDir, {
+    title: '特殊工作流定位',
+    copy: specialWorkflowProtocol.positioning || '这些能力是正式工作流，但默认不扩成新的普通用户主链。',
+    cards: specialWorkflowCards,
+    maxCards: 3,
+  }) : '';
 
-  const contextBarData = resolveWorkspaceContextBarData('home', homeContext, buildWorkspaceContextFallback('home', {
+  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'home', homeView, buildWorkspaceContextFallback('home', {
     items: Array.isArray(homeContext.items) ? homeContext.items : [],
     runLabel: taskLabel,
     phaseLabel: `${currentStage} · 当前任务`,
@@ -752,19 +845,23 @@ function main() {
         },
         workflow: resolvedHomeWorkflow.judgment,
         copilot: homeCopilot?.mainline?.judgment,
-        view: homeView?.judgment,
+        view: homeJudgment,
       })),
       stageRelay: renderWorkspaceStageRelaySection(buildUnifiedWorkflowStageRelay(unifiedStatus, {
         workflow: resolvedHomeWorkflow.stageRelay,
         copilot: homeCopilot?.mainline?.stageRelay,
-        view: homeView?.stageRelay,
+        view: homeStageRelay,
         fallbackCurrentSummary: homeFallbackState.stageRelay.fallbackCurrentSummary || homeNarrative.transitionSummary || nextCopy,
         fallbackNextSummary: homeFallbackState.stageRelay.fallbackNextSummary || homeNarrative.handoffSummary || nextCopy,
       })),
       statusStack: renderWorkspaceStatusStack(resolvedHomeStatusStack),
       timeline: renderWorkspaceTimelineSection(resolvedHomeTimeline),
-      assets: renderWorkspaceAssetStatusSection(homeAssetStatus),
+      assets: [
+        renderWorkspaceAssetStatusSection(homeAssetStatus),
+        specialWorkflowSection,
+      ],
       actions: renderWorkspaceActionStatusSection(finalizedHomeActionStatus),
+      specialWorkflow: specialWorkflowSection,
       decision: renderResolvedWorkspaceDecisionSection(resolvedHomeDecision, {
         title: chrome.decisionTitle,
         copy: chrome.decisionCopy,

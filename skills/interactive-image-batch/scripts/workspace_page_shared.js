@@ -264,7 +264,7 @@ function getWorkspaceActionCopy() {
     returnHome: `回${identity.pages.home}`,
     returnResult: `回${identity.pages.result}`,
     returnTaskCenter: '回任务总控',
-    openStoryboard: '进入分镜整板页',
+    openStoryboard: '进入分镜整板补充页',
     viewRunRecord: '查看任务档案',
     viewRecordShort: '查看任务档案',
     viewIssues: '查看问题',
@@ -275,6 +275,9 @@ function getWorkspaceActionCopy() {
 
 function summarizeArtifactLayer(artifactGovernance = {}) {
   const summary = artifactGovernance.summary || {};
+  const userFacingSummary = artifactGovernance.userFacingSummary && typeof artifactGovernance.userFacingSummary === 'object'
+    ? artifactGovernance.userFacingSummary
+    : {};
   const protocol = artifactGovernance.artifactLayerProtocol && typeof artifactGovernance.artifactLayerProtocol === 'object'
     ? artifactGovernance.artifactLayerProtocol
     : {};
@@ -288,16 +291,29 @@ function summarizeArtifactLayer(artifactGovernance = {}) {
     ? artifactGovernance.optionalPages.filter((item) => item.exists)
     : [];
   const layerOrder = ['mainline', 'support', 'conditional', 'advanced', 'legacy', 'internal'];
+  const defaultVisibleLayers = Array.isArray(userFacingSummary.defaultVisibleLayers) && userFacingSummary.defaultVisibleLayers.length
+    ? userFacingSummary.defaultVisibleLayers
+    : (Array.isArray(protocol.defaultVisibleLayers) ? protocol.defaultVisibleLayers : []);
+  const onDemandLayers = Array.isArray(userFacingSummary.onDemandLayers) && userFacingSummary.onDemandLayers.length
+    ? userFacingSummary.onDemandLayers
+    : (Array.isArray(protocol.onDemandLayers) ? protocol.onDemandLayers : []);
+  const maintenanceLayers = Array.isArray(userFacingSummary.maintenanceLayers) && userFacingSummary.maintenanceLayers.length
+    ? userFacingSummary.maintenanceLayers
+    : (Array.isArray(protocol.maintenanceLayers) ? protocol.maintenanceLayers : []);
+  const internalLayers = Array.isArray(userFacingSummary.internalLayers) && userFacingSummary.internalLayers.length
+    ? userFacingSummary.internalLayers
+    : (Array.isArray(protocol.internalLayers) ? protocol.internalLayers : []);
   return {
-    defaultEntryLabel: String(summary.defaultEntryLabel || '工作台首页').trim(),
+    defaultEntryLabel: String(userFacingSummary.defaultEntryLabel || summary.defaultEntryLabel || '工作台首页').trim(),
     userVisibleCount: Number(summary.userVisibleCount || 0),
-    internalCount: Number(summary.internalCount || 0),
-    principle: String(summary.principle || '').trim() || '普通用户默认只看工作台主链。任务档案保留为少量补充入口，Markdown 与 JSON 退回文件落盘或内部诊断层。',
+    internalCount: Number(userFacingSummary.userVisibleCounts?.internal ?? summary.internalCount ?? 0),
+    principle: String(userFacingSummary.principle || summary.principle || '').trim() || '普通用户默认只看工作台主链。任务档案保留为少量补充入口，Markdown 与 JSON 退回文件落盘或内部诊断层。',
     userFacingRule: String(protocol.userFacingRule || '').trim() || '',
-    defaultVisibleLayers: Array.isArray(protocol.defaultVisibleLayers) ? protocol.defaultVisibleLayers : [],
-    onDemandLayers: Array.isArray(protocol.onDemandLayers) ? protocol.onDemandLayers : [],
-    maintenanceLayers: Array.isArray(protocol.maintenanceLayers) ? protocol.maintenanceLayers : [],
-    internalLayers: Array.isArray(protocol.internalLayers) ? protocol.internalLayers : [],
+    defaultVisibleLayers,
+    onDemandLayers,
+    maintenanceLayers,
+    internalLayers,
+    userFacingSummary,
     layerProtocol: protocol,
     layers: Object.fromEntries(layerOrder.map((key) => {
       const layer = protocolLayers[key] && typeof protocolLayers[key] === 'object'
@@ -376,6 +392,89 @@ function buildWorkspaceStateTopology(outputDir = '', overrides = {}) {
   const runtimeRule = '工作台会优先使用 workspace_live_state.json 作为主实时状态源；workspace_state.json 负责统一状态模型；runtime_state.json 只负责运行期进度；workspace_assets.json 和 workspace_timeline.json 分别承接资产分层与阶段时间线；workbench_state.json 只保留兼容旧读取作用。';
   const stateSourceSummary = '任务内优先读取主实时状态源，再由统一状态模型、运行状态、资产状态和时间线状态补全；跨任务切换、入口主链提醒和运行态副驾驶交接再交给任务总控实时状态源处理。';
   const summary = 'workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，runtime_state.json / workspace_assets.json / workspace_timeline.json 分别承接运行、资产和时间线信息，workbench_state.json 退为兼容快照，task_center_live_state.json 负责跨任务总控实时状态、入口主链提醒和运行态副驾驶交接。';
+  const duplicateFieldRule = 'currentFocus、nextActionSummary、recommendedReply、pressureLabel、statusSummary 统一由 workspace_state.json 持有语义源；workspace_live_state.json 只做页面首屏镜像，runtime_state.json 只在运行中、暂停、等待确认、异常和完成收口时提供实时覆盖，task_center_live_state.json 只保留跨任务摘要与交接副本。';
+  const fieldBoundaries = {
+    currentFocus: {
+      canonicalOwner: 'workspace_state.json',
+      canonicalPaths: ['workflowContracts.*.currentJudgment.currentFocus', 'views.*.stageSummary.currentFocus', 'unifiedStatus.currentFocus'],
+      liveMirror: 'workspace_live_state.json 页面首屏轻量镜像，不新增语义判断。',
+      runtimeOverride: 'runtime_state.json 仅在运行态接管时用 runtimeWorkflow.currentFocus / runtimeCopilotProtocol.handoffState 覆盖显示。',
+      taskCenterMirror: 'task_center_live_state.json 只保留 liveRun.runtimeFocus / entryMainlineGuide.focus 级别的跨任务交接摘要。',
+      consumers: ['页面主链', '实时副驾驶', '任务总控摘要'],
+      reductionRule: '其它层不得重新定义“当前重点”，只能镜像 canonical 或按运行态临时覆盖。',
+    },
+    nextActionSummary: {
+      canonicalOwner: 'workspace_state.json',
+      canonicalPaths: ['workflowContracts.*.nextAction.reason', 'workflowTextProtocol.*.nextActionSummary', 'unifiedStatus.nextActionSummary'],
+      liveMirror: 'workspace_live_state.json 可缓存首屏下一步文案。',
+      runtimeOverride: 'runtime_state.json 运行中优先使用 runtimeWorkflow.nextAction.reason / runtimeCopilotProtocol.nextActionSummary。',
+      taskCenterMirror: 'task_center_live_state.json 只保留跨任务继续建议，不反写单轮 nextAction。',
+      consumers: ['页面行动条', '副驾驶建议', '任务总控继续入口'],
+      reductionRule: '页面与任务总控只消费下一步摘要，不自行拼接新的下一步判断。',
+    },
+    recommendedReply: {
+      canonicalOwner: 'workspace_state.json',
+      canonicalPaths: ['workflowContracts.*.dialogueStatus.primarySay', 'workflowTextProtocol.*.recommendedReply', 'unifiedStatus.recommendedReply'],
+      liveMirror: 'workspace_live_state.json 可镜像 copilotSummary.recommendedReply 供首屏直接展示。',
+      runtimeOverride: 'runtime_state.json 在等待确认、暂停、异常分流和完成收口时用 workflowDialogue.primarySay 接管。',
+      taskCenterMirror: 'task_center_live_state.json 只镜像 liveRun.copilotSummary.recommendedReply 作为跨任务入口提示。',
+      consumers: ['副驾驶', '确认条', '任务总控入口提示'],
+      reductionRule: '推荐回复归副驾驶语言协议持有，状态层只引用，不再各自生成不同口径。',
+    },
+    pressureLabel: {
+      canonicalOwner: 'workspace_state.json',
+      canonicalPaths: ['views.*.stageUi.pressureLabel', 'workflowContracts.*.currentJudgment.pressureLabel', 'stageUi.*.pressureLabel'],
+      liveMirror: 'workspace_live_state.json 可镜像当前页面压力标签。',
+      runtimeOverride: 'runtime_state.json 只在 running / paused / awaiting_confirmation / exception / completed 这些实时分支给临时压力标签。',
+      taskCenterMirror: 'task_center_live_state.json 不拥有单轮 pressureLabel，只可汇总为跨任务风险标签。',
+      consumers: ['页面状态条', '实时副驾驶'],
+      reductionRule: 'pressureLabel 是页面/阶段 UI 标签，不作为任务总控或运行底层事实字段重复维护。',
+    },
+    statusSummary: {
+      canonicalOwner: 'workspace_state.json',
+      canonicalPaths: ['workflowContracts.*.currentJudgment.statusSummary', 'statusStack.current.summary', 'unifiedStatus.statusSummary'],
+      liveMirror: 'workspace_live_state.json 可缓存首屏状态摘要。',
+      runtimeOverride: 'runtime_state.json 运行态用 currentStatus / runtimeCopilotProtocol.progressSummary 临时覆盖。',
+      taskCenterMirror: 'task_center_live_state.json 只保留跨任务 liveRun.statusSummary。',
+      consumers: ['页面状态摘要', '运行态副驾驶', '任务总控任务卡'],
+      reductionRule: '长期状态摘要由 workspace_state 统一，实时摘要只在 runtime_state 生命周期内覆盖。',
+    },
+  };
+  const consumerReadPlan = {
+    pages: {
+      owner: 'workspace renderers / loadWorkbenchState',
+      readPriority,
+      primaryLayer: 'workspace_live_state.json',
+      canonicalLayer: 'workspace_state.json',
+      runtimeOverlay: 'runtime_state.json 只覆盖运行中、暂停、等待确认、异常分流和完成收口的实时副驾驶字段。',
+      fallbackLayers: ['workspace_assets.json', 'workspace_timeline.json', 'workbench_state.json'],
+      fields: ['currentFocus', 'nextActionSummary', 'recommendedReply', 'pressureLabel', 'statusSummary'],
+    },
+    taskCenter: {
+      owner: 'task_center.html / task_center_state_shared.js',
+      readPriority: taskCenterReadPriority,
+      primaryLayer: 'task_center_live_state.json',
+      fallbackLayers: ['task_center_state.json', 'daoge_run_index.json'],
+      fields: ['entryMainlineGuide', 'liveRun', 'copilotSummary', 'nextTaskSuggestion'],
+      rule: '任务总控只读跨任务摘要与交接，不直接接管单轮 workspace_state 字段所有权。',
+    },
+    runtime: {
+      owner: 'runtime_state_snapshot.js / refreshRuntimeWorkbench',
+      readPriority: ['runtime_state.json', 'job_state.json', 'checkpoint.json', 'manifest.json'],
+      primaryLayer: 'runtime_state.json',
+      mirrorTargets: ['workspace_live_state.json', 'task_center_live_state.json'],
+      fields: ['currentStatus', 'runtimeWorkflow', 'runtimeCopilotProtocol', 'workflowDialogue'],
+      rule: '运行态负责实时覆盖与分流，不持有阶段长期语义。',
+    },
+    copilot: {
+      owner: 'workflowContracts / workflowTextProtocol / runtimeCopilotProtocol',
+      readPriority: ['workspace_state.json', 'workspace_live_state.json', 'runtime_state.json'],
+      canonicalLayer: 'workspace_state.json',
+      runtimeOverlay: 'runtime_state.json',
+      fields: ['recommendedReply', 'nextActionSummary', 'statusSummary', 'currentFocus'],
+      rule: '副驾驶先读统一语言协议；有运行态接管时再读 runtime_state 的临时覆盖。',
+    },
+  };
 
   return {
     preferredRuntimeSource,
@@ -391,11 +490,78 @@ function buildWorkspaceStateTopology(outputDir = '', overrides = {}) {
     stateRoles,
     readPriority,
     taskCenterReadPriority,
+    duplicateFieldRule,
+    fieldBoundaries,
+    consumerReadPlan,
     runtimeRule,
     stateSourceSummary,
     consumerRule: '任务内页面优先消费 workspace_live_state.json；缺失时回落到 workspace_state.json，再补 runtime_state.json、workspace_assets.json 和 workspace_timeline.json；旧页面只把 workbench_state.json 当兼容兜底。',
     taskCenterConsumerRule: '任务总控优先消费 task_center_live_state.json；缺失时回落到 task_center_state.json 和 daoge_run_index.json；单轮任务判断仍交给对应工作台首页。',
     summary,
+  };
+}
+
+function buildWorkspaceStateProtocol(outputDir = '', overrides = {}) {
+  const topology = buildWorkspaceStateTopology(outputDir, overrides);
+  const fileContracts = {
+    workspaceLiveState: {
+      file: 'workspace_live_state.json',
+      path: topology.primaryRuntimeSource,
+      responsibility: '任务内主实时状态源，只保留页面运行中最先需要读取的轻量快照。',
+      consumers: ['loadWorkbenchState', 'workspace_home.html', 'prepare_workspace.html', 'result_workspace.html', 'exception_workspace.html'],
+      readOrder: 1,
+      defaultVisible: false,
+      updateCadence: '工作台刷新或运行态变化时优先更新。',
+      owns: ['实时入口状态', '轻量页面快照', '当前状态源指针'],
+      doesNotOwn: ['currentFocus 等长期语义源', '完整用户资产分层', '完整页面治理配置', '历史兼容快照'],
+    },
+    workspaceState: {
+      file: 'workspace_state.json',
+      path: topology.canonicalState,
+      responsibility: '任务内统一状态模型，负责汇总阶段判断、页面治理、主链文案和副驾驶协议。',
+      consumers: ['build_workspace_state.js', 'loadWorkbenchState', 'workspace renderers', 'task_center_state_shared.js'],
+      readOrder: 2,
+      defaultVisible: false,
+      updateCadence: '准备、运行、结果、异常和收口节点变化时重建。',
+      owns: ['统一阶段语义', 'workflowContracts', 'workflowTextProtocol', 'stateProtocol', 'artifactGovernance', 'currentFocus/nextActionSummary/recommendedReply/pressureLabel/statusSummary 的语义源'],
+      doesNotOwn: ['逐批运行进度原始事实', '图片资产原始列表', '跨任务总控索引'],
+    },
+    runtimeState: {
+      file: 'runtime_state.json',
+      path: topology.runtimeState,
+      responsibility: '运行期状态源，只负责运行中、暂停、等待确认、完成和异常分流的实时副驾驶信息。',
+      consumers: ['build_workspace_state.js', 'refreshRuntimeWorkbench', 'loadWorkbenchState'],
+      readOrder: 3,
+      defaultVisible: false,
+      updateCadence: 'job_state.json 或 checkpoint.json 更新后同步。',
+      owns: ['currentStatus', 'runtimeWorkflow', 'runtimeCopilotProtocol', 'workflowDialogue'],
+      doesNotOwn: ['currentFocus 等长期阶段语义', '入口选择', '页面分层治理', '长期任务档案'],
+    },
+    taskCenterLiveState: {
+      file: 'task_center_live_state.json',
+      path: topology.taskCenterUnifiedState,
+      responsibility: '跨任务总控实时状态源，负责入口主链提醒、继续哪一轮任务和运行态副驾驶交接。',
+      consumers: ['loadTaskCenterState', 'task_center.html', 'render_run_index.js'],
+      readOrder: 1,
+      defaultVisible: false,
+      updateCadence: '任务总控刷新或单轮运行态变化时同步。',
+      owns: ['entryMainlineGuide', 'liveRun', 'taskCenterConsumerRule', '跨任务继续建议'],
+      doesNotOwn: ['单轮 currentFocus/pressureLabel 等内部判断', '单轮结果资产细节', '旧页面兼容快照'],
+    },
+  };
+
+  return {
+    version: 1,
+    summary: topology.summary,
+    consumerRule: topology.consumerRule,
+    taskCenterConsumerRule: topology.taskCenterConsumerRule,
+    readPriority: topology.readPriority,
+    taskCenterReadPriority: topology.taskCenterReadPriority,
+    stateRoles: topology.stateRoles,
+    duplicateFieldRule: topology.duplicateFieldRule,
+    fieldBoundaries: topology.fieldBoundaries,
+    consumerReadPlan: topology.consumerReadPlan,
+    files: fileContracts,
   };
 }
 
@@ -436,6 +602,12 @@ function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
   const stateSourceSummary = String(source.stateSourceSummary || '').trim()
     || stateTopology.stateSourceSummary;
   const stateRoles = stateTopology.stateRoles;
+  const stateProtocol = source.stateProtocol && typeof source.stateProtocol === 'object'
+    ? source.stateProtocol
+    : buildWorkspaceStateProtocol(outputDir, {
+      ...stateSources,
+      taskCenterEntryProtocol: source.taskCenterEntryProtocol,
+    });
 
   return {
     defaultEntryLabel,
@@ -454,9 +626,13 @@ function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
     taskCenterUnifiedState,
     stateSourceSummary,
     taskCenterEntryProtocol,
+    stateProtocol,
     stateRoles,
     readPriority: stateTopology.readPriority,
     taskCenterReadPriority: stateTopology.taskCenterReadPriority,
+    duplicateFieldRule: stateTopology.duplicateFieldRule,
+    fieldBoundaries: stateTopology.fieldBoundaries,
+    consumerReadPlan: stateTopology.consumerReadPlan,
     consumerRule: stateTopology.consumerRule,
     taskCenterConsumerRule: stateTopology.taskCenterConsumerRule,
     stateSources: {
@@ -1112,7 +1288,7 @@ function getWorkspaceIdentityCopy() {
       prepare: '准备工作台',
       result: '结果工作台',
       exception: '异常工作台',
-      storyboard: '整板页',
+      storyboard: '分镜整板补充页',
       record: '任务档案',
       taskCenter: '任务总控',
     },
@@ -1203,6 +1379,25 @@ function getWorkspaceLayoutConfig(stage, options = {}) {
 
 function getWorkspaceModeSwitchConfig(stage, options = {}) {
   return getWorkspaceLayoutConfig(stage, options).modeSwitch;
+}
+
+function resolveWorkspaceShellRuntime(pageState = {}, stage = 'home', viewState = {}) {
+  const shell = getWorkspacePageShellConfig(stage);
+  const state = pageState && typeof pageState === 'object' ? pageState : {};
+  const viewDisplay = resolveWorkspaceStageViewValue(state, stage, viewState, 'display', null);
+  const governance = state.governanceByPage?.[shell.currentPage] || state.governance || null;
+  const layout = viewDisplay || governance?.display || getWorkspaceLayoutConfig(stage, { currentPage: shell.currentPage });
+  const surfaceRules = layout?.surfaceRules || {};
+  const modeSwitch = layout?.modeSwitch || getWorkspaceModeSwitchConfig(stage, { currentPage: shell.currentPage });
+  return {
+    shell,
+    governance,
+    layout,
+    surfaceRules,
+    modeSwitch,
+    optionalSurface: governance?.optionalSurface || {},
+    governedWorkbenchIds: Array.isArray(governance?.workbenchEntryIds) ? new Set(governance.workbenchEntryIds) : null,
+  };
 }
 
 function renderWorkspaceDensityGroup(title, copy, items, options = {}) {
@@ -2405,9 +2600,21 @@ function resolveWorkspaceSummarySectionData(section = {}, fallback = {}) {
   });
 }
 
+function resolveWorkspaceViewSummarySection(viewState = {}, fallback = {}) {
+  const source = viewState && typeof viewState === 'object' ? viewState : {};
+  return resolveWorkspaceSummarySectionData(source.summary || {}, fallback);
+}
+
+function resolveWorkspaceStageSummarySection(pageState = {}, stage = 'home', viewState = {}, fallback = {}) {
+  return resolveWorkspaceViewSummarySection(
+    resolveWorkspaceStageView(pageState, stage, viewState),
+    fallback
+  );
+}
+
 function buildWorkspaceGuideSectionData(options = {}) {
   return {
-    title: String(options.title || '').trim() || '主链控制台',
+    title: String(options.title || '').trim() || '主链接力说明',
     copy: String(options.copy || '').trim() || '这里只保留当前任务真正需要的主链说明，不把内部结构直接摊给用户。',
     items: toArray(options.items).filter((item) => item && item.label),
   };
@@ -2438,6 +2645,134 @@ function resolveWorkspaceContextBarData(stage, section = {}, fallback = {}) {
     counts: Array.isArray(source.counts) && source.counts.length ? source.counts : fallbackCounts,
     hints: fallbackHints,
   });
+}
+
+function resolveWorkspaceViewContextBarData(stage, viewState = {}, fallback = {}) {
+  const source = viewState && typeof viewState === 'object' ? viewState : {};
+  return resolveWorkspaceContextBarData(stage, source.context || {}, fallback);
+}
+
+function resolveWorkspaceStageView(pageState = {}, stage = 'home', fallbackView = {}) {
+  const stageKey = String(stage || '').trim() || 'home';
+  const state = pageState && typeof pageState === 'object' ? pageState : {};
+  const stateView = state.views?.[stageKey] && typeof state.views[stageKey] === 'object'
+    ? state.views[stageKey]
+    : {};
+  const fallback = fallbackView && typeof fallbackView === 'object' ? fallbackView : {};
+  if (Object.keys(stateView).length) {
+    return {
+      ...fallback,
+      ...stateView,
+    };
+  }
+  return fallback;
+}
+
+function resolveWorkspaceStageContextBarData(pageState = {}, stage = 'home', viewState = {}, fallback = {}) {
+  return resolveWorkspaceViewContextBarData(
+    stage,
+    resolveWorkspaceStageView(pageState, stage, viewState),
+    fallback
+  );
+}
+
+function resolveWorkspaceStageSessionConsole(pageState = {}, stage = 'home', viewState = {}) {
+  const stageKey = String(stage || '').trim() || 'home';
+  const state = pageState && typeof pageState === 'object' ? pageState : {};
+  const view = resolveWorkspaceStageView(state, stageKey, viewState);
+  const workflowSession = state.workflowSessions?.[stageKey] && typeof state.workflowSessions[stageKey] === 'object'
+    ? state.workflowSessions[stageKey]
+    : {};
+  const workflowSessionConsole = workflowSession.console?.sessionConsole && typeof workflowSession.console.sessionConsole === 'object'
+    ? workflowSession.console.sessionConsole
+    : {};
+  const taskSessionSnapshot = state.taskSessionSnapshots?.[stageKey] && typeof state.taskSessionSnapshots[stageKey] === 'object'
+    ? state.taskSessionSnapshots[stageKey]
+    : {};
+  const viewSessionConsole = view.sessionConsole && typeof view.sessionConsole === 'object'
+    ? view.sessionConsole
+    : {};
+
+  if (Object.keys(workflowSessionConsole).length) return workflowSessionConsole;
+  if (Object.keys(taskSessionSnapshot).length) return taskSessionSnapshot;
+  return viewSessionConsole;
+}
+
+function hasWorkspaceStageViewValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return value !== undefined && value !== null && value !== '';
+}
+
+function resolveWorkspaceStageViewValue(pageState = {}, stage = 'home', viewState = {}, field = '', fallback = undefined) {
+  const fieldKey = String(field || '').trim();
+  if (!fieldKey) return fallback;
+  const stageKey = String(stage || '').trim() || 'home';
+  const state = pageState && typeof pageState === 'object' ? pageState : {};
+  const stateView = state.views?.[stageKey] && typeof state.views[stageKey] === 'object'
+    ? state.views[stageKey]
+    : {};
+  const passedView = viewState && typeof viewState === 'object' ? viewState : {};
+  if (hasWorkspaceStageViewValue(stateView[fieldKey])) return stateView[fieldKey];
+  if (hasWorkspaceStageViewValue(passedView[fieldKey])) return passedView[fieldKey];
+  return fallback;
+}
+
+function resolveWorkspaceStagePageData(pageState = {}, stage = 'home', pageData = {}) {
+  const stageKey = String(stage || '').trim() || 'home';
+  const state = pageState && typeof pageState === 'object' ? pageState : {};
+  const statePageData = state.pageData?.[stageKey] && typeof state.pageData[stageKey] === 'object'
+    ? state.pageData[stageKey]
+    : {};
+  const passedPageData = pageData && typeof pageData === 'object' ? pageData : {};
+  if (Object.keys(passedPageData).length) return passedPageData;
+  return statePageData;
+}
+
+function resolveWorkspaceStageSection(pageState = {}, stage = 'home', viewState = {}, pageData = {}, sectionKey = '', fallback = {}) {
+  const key = String(sectionKey || '').trim();
+  if (!key) return fallback && typeof fallback === 'object' && !Array.isArray(fallback) ? fallback : {};
+  const page = resolveWorkspaceStagePageData(pageState, stage, pageData);
+  const view = resolveWorkspaceStageView(pageState, stage, viewState);
+  const pageSections = page.sections && typeof page.sections === 'object' ? page.sections : {};
+  const viewSections = view.sections && typeof view.sections === 'object' ? view.sections : {};
+  const pageSection = pageSections[key] && typeof pageSections[key] === 'object' && !Array.isArray(pageSections[key])
+    ? pageSections[key]
+    : {};
+  const viewSection = viewSections[key] && typeof viewSections[key] === 'object' && !Array.isArray(viewSections[key])
+    ? viewSections[key]
+    : {};
+  if (Object.keys(pageSection).length) return pageSection;
+  if (Object.keys(viewSection).length) return viewSection;
+  return fallback && typeof fallback === 'object' && !Array.isArray(fallback) ? fallback : {};
+}
+
+function resolveWorkspaceStageStateValue(pageState = {}, stage = 'home', pageData = {}, stageState = {}, field = '', fallback = undefined) {
+  const fieldKey = String(field || '').trim();
+  if (!fieldKey) return fallback;
+  const page = resolveWorkspaceStagePageData(pageState, stage, pageData);
+  const stateSource = stageState && typeof stageState === 'object' ? stageState : {};
+  if (hasWorkspaceStageViewValue(page[fieldKey])) return page[fieldKey];
+  if (hasWorkspaceStageViewValue(stateSource[fieldKey])) return stateSource[fieldKey];
+  return fallback;
+}
+
+function resolveWorkspaceStageViewField(pageState = {}, stage = 'home', viewState = {}, field = '', fallback = {}) {
+  const value = resolveWorkspaceStageViewValue(pageState, stage, viewState, field, fallback);
+  if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length) return value;
+  return fallback && typeof fallback === 'object' && !Array.isArray(fallback) ? fallback : {};
+}
+
+function resolveWorkspaceStageActionStatus(pageState = {}, stage = 'home', viewState = {}, fallback = {}) {
+  return resolveWorkspaceStageViewField(pageState, stage, viewState, 'actionStatus', fallback);
+}
+
+function resolveWorkspaceStageDialogueStatus(pageState = {}, stage = 'home', viewState = {}, fallback = {}) {
+  return resolveWorkspaceStageViewField(pageState, stage, viewState, 'dialogueStatus', fallback);
+}
+
+function resolveWorkspaceStageConfirmationState(pageState = {}, stage = 'home', viewState = {}, fallback = {}) {
+  return resolveWorkspaceStageViewField(pageState, stage, viewState, 'confirmation', fallback);
 }
 
 function buildWorkspaceContextFallback(stage, options = {}) {
@@ -2585,7 +2920,7 @@ function buildWorkspaceStageWorkbenchCards(stage, options = {}) {
         source: {
           id: 'workspace-home',
           label: '工作台首页',
-          value: '回主控',
+          value: '回主链',
           summary: '如果你要重新看当前阶段和主链入口，再回这里。',
           file: values.homeFile,
           cta: values.homeCta || '回工作台首页',
@@ -2625,7 +2960,7 @@ function buildWorkspaceStageWorkbenchCards(stage, options = {}) {
           type: 'storyboard',
           source: {
             id: 'storyboard',
-            label: '分镜整板页',
+            label: '分镜整板补充页',
             file: values.storyboardFile,
             cta: values.storyboardCta,
             tone: values.storyboardTone || 'info',
@@ -2655,7 +2990,7 @@ function buildWorkspaceStageWorkbenchCards(stage, options = {}) {
           type: 'storyboard',
           source: {
             id: 'storyboard',
-            label: '分镜整板页',
+            label: '分镜整板补充页',
             file: values.storyboardFile,
             cta: values.storyboardCta,
             tone: values.storyboardTone || 'warn',
@@ -2772,6 +3107,19 @@ function resolveWorkspaceRouteSectionData(section = {}, fallback = {}) {
 
 function resolveWorkspaceRouteSectionByStage(section = {}, fallback = {}) {
   return resolveWorkspaceRouteSectionData(section, buildWorkspaceRouteSectionData(fallback));
+}
+
+function resolveWorkspaceViewRouteSection(stage, viewState = {}, fallback = {}) {
+  const source = viewState && typeof viewState === 'object' ? viewState : {};
+  return resolveWorkspaceRouteSectionByStage(source.route || {}, fallback);
+}
+
+function resolveWorkspaceStageRouteSection(pageState = {}, stage = 'home', viewState = {}, fallback = {}) {
+  return resolveWorkspaceViewRouteSection(
+    stage,
+    resolveWorkspaceStageView(pageState, stage, viewState),
+    fallback
+  );
 }
 
 function buildWorkspaceRouteFallback(stage, options = {}) {
@@ -2982,6 +3330,18 @@ function resolveWorkspaceWorkbenchSectionData(section = {}, fallback = {}) {
   });
 }
 
+function resolveWorkspaceViewWorkbenchSection(viewState = {}, fallback = {}) {
+  const source = viewState && typeof viewState === 'object' ? viewState : {};
+  return resolveWorkspaceWorkbenchSectionData(source.workbench || {}, fallback);
+}
+
+function resolveWorkspaceStageWorkbenchSection(pageState = {}, stage = 'home', viewState = {}, fallback = {}) {
+  return resolveWorkspaceViewWorkbenchSection(
+    resolveWorkspaceStageView(pageState, stage, viewState),
+    fallback
+  );
+}
+
 function finalizeWorkspaceActionStatus(actionStatus = {}, workflow = {}) {
   const resolved = actionStatus && typeof actionStatus === 'object' ? { ...actionStatus } : {};
   const workflowAction = workflow && typeof workflow === 'object' ? workflow.action || {} : {};
@@ -3016,6 +3376,18 @@ function buildWorkspaceContentSectionPlan(items = [], fallback = []) {
       enabled: item.enabled !== false,
     };
   }).filter(Boolean);
+}
+
+function resolveWorkspaceViewContentSectionPlan(viewState = {}, fallback = []) {
+  const source = viewState && typeof viewState === 'object' ? viewState : {};
+  return buildWorkspaceContentSectionPlan(source.contentSections, fallback);
+}
+
+function resolveWorkspaceStageContentSectionPlan(pageState = {}, stage = 'home', viewState = {}, fallback = []) {
+  return resolveWorkspaceViewContentSectionPlan(
+    resolveWorkspaceStageView(pageState, stage, viewState),
+    fallback
+  );
 }
 
 function renderWorkspaceDeclaredSections(plan = [], renderers = {}) {
@@ -5092,6 +5464,7 @@ module.exports = {
   getWorkspaceIdentityCopy,
   summarizeArtifactLayer,
   summarizeUserWorkbenchProtocol,
+  buildWorkspaceStateProtocol,
   buildSupportPageCopy,
   buildWorkspaceFallbackGuide,
   buildWorkspaceNewcomerSummaryItems,
@@ -5113,6 +5486,7 @@ module.exports = {
   getWorkspacePageShellConfig,
   getWorkspaceLayoutConfig,
   getWorkspaceModeSwitchConfig,
+  resolveWorkspaceShellRuntime,
   getWorkspaceActionCopy,
   renderWorkspaceSection,
   renderWorkspaceKeyValueSection,
@@ -5133,6 +5507,18 @@ module.exports = {
   buildWorkspaceContextBarData,
   buildWorkspaceContextFallback,
   resolveWorkspaceContextBarData,
+  resolveWorkspaceViewContextBarData,
+  resolveWorkspaceStageView,
+  resolveWorkspaceStageViewValue,
+  resolveWorkspaceStagePageData,
+  resolveWorkspaceStageSection,
+  resolveWorkspaceStageStateValue,
+  resolveWorkspaceStageViewField,
+  resolveWorkspaceStageContextBarData,
+  resolveWorkspaceStageSessionConsole,
+  resolveWorkspaceStageActionStatus,
+  resolveWorkspaceStageDialogueStatus,
+  resolveWorkspaceStageConfirmationState,
   buildWorkspaceDecisionSectionData,
   buildWorkspaceDecisionItems,
   buildWorkspaceDirectionSectionData,
@@ -5152,6 +5538,8 @@ module.exports = {
   resolveWorkspaceIssuesSectionData,
   resolveWorkspaceDecisionSectionData,
   resolveWorkspaceSummarySectionData,
+  resolveWorkspaceViewSummarySection,
+  resolveWorkspaceStageSummarySection,
   buildWorkspacePreviewSectionData,
   buildWorkspaceReadinessSectionData,
   buildWorkspaceRoutePointData,
@@ -5160,6 +5548,8 @@ module.exports = {
   buildWorkspaceRouteFallback,
   buildWorkspaceStageRouteFallback,
   resolveWorkspaceRouteSectionByStage,
+  resolveWorkspaceViewRouteSection,
+  resolveWorkspaceStageRouteSection,
   resolveWorkspaceRouteSectionData,
   buildWorkspaceAssetsSectionData,
   buildWorkspaceAdvancedSectionData,
@@ -5178,8 +5568,12 @@ module.exports = {
   buildWorkspaceWorkbenchData,
   buildWorkspaceWorkbenchSectionData,
   resolveWorkspaceWorkbenchSectionData,
+  resolveWorkspaceViewWorkbenchSection,
+  resolveWorkspaceStageWorkbenchSection,
   buildRenderableWorkbench,
   buildWorkspaceContentSectionPlan,
+  resolveWorkspaceViewContentSectionPlan,
+  resolveWorkspaceStageContentSectionPlan,
   renderWorkspaceCollaborationSection,
   renderWorkspaceStageRelaySection,
   renderWorkspaceTransitionStatusSection,

@@ -17,12 +17,17 @@ const {
   getWorkspaceStageChrome,
   getWorkspaceStagePhrases,
   getWorkspaceIdentityCopy,
-  getWorkspacePageShellConfig,
-  getWorkspaceLayoutConfig,
-  getWorkspaceModeSwitchConfig,
+  resolveWorkspaceShellRuntime,
   getWorkspaceActionCopy,
   buildWorkspaceContextFallback,
-  resolveWorkspaceContextBarData,
+  resolveWorkspaceStageContextBarData,
+  resolveWorkspaceStageViewValue,
+  resolveWorkspaceStageSection,
+  resolveWorkspaceStageStateValue,
+  resolveWorkspaceStageSessionConsole,
+  resolveWorkspaceStageActionStatus,
+  resolveWorkspaceStageDialogueStatus,
+  resolveWorkspaceStageConfirmationState,
   buildWorkspaceHeroCardsData,
   renderMetricCard,
   renderWorkspaceFlowSection,
@@ -71,6 +76,7 @@ const {
   renderResolvedWorkspaceSummarySection,
   renderWorkspaceGridSection,
   buildWorkspaceContentSectionPlan,
+  resolveWorkspaceStageContentSectionPlan,
   renderWorkspaceDeclaredSections,
   renderWorkspaceSectionLayout,
   renderWorkspacePageShell,
@@ -79,9 +85,9 @@ const {
   resolveWorkspaceGuideSectionData,
   resolveWorkspaceIssuesSectionData,
   resolveWorkspaceDecisionSectionData,
-  resolveWorkspaceSummarySectionData,
-  resolveWorkspaceRouteSectionByStage,
-  resolveWorkspaceWorkbenchSectionData,
+  resolveWorkspaceStageSummarySection,
+  resolveWorkspaceStageRouteSection,
+  resolveWorkspaceStageWorkbenchSection,
   buildRenderableWorkbench,
   summarizeArtifactLayer,
   buildWorkspaceFallbackGuide,
@@ -205,12 +211,19 @@ function main() {
     ? workbenchGuide.cards
     : [];
   const denseCopy = getWorkspaceDenseCopy('exception');
+  const {
+    shell,
+    governance: governanceForShell,
+    layout,
+    surfaceRules,
+    governedWorkbenchIds,
+    optionalSurface,
+    modeSwitch,
+  } = resolveWorkspaceShellRuntime(pageState, 'exception', exceptionView);
 
   const workspaceHomePath = resolveWorkspaceRouteFile(outputDir, pageState, 'home', path.join(outputDir, 'workspace_home.html'));
   const resultWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
   const storyboardPath = resolveWorkspaceRouteFile(outputDir, pageState, 'storyboard', path.join(outputDir, 'storyboard_board.html'));
-  const governance = pageState?.governanceByPage?.['exception_workspace.html'] || pageState?.governance || null;
-  const optionalSurface = governance?.optionalSurface || {};
 
   const exceptionItems = Array.isArray(exceptionPageData?.exceptionItems) && exceptionPageData.exceptionItems.length
     ? exceptionPageData.exceptionItems
@@ -237,13 +250,13 @@ function main() {
   const rerunCount = Number(pageMetrics.rerunCount || exceptionSummary?.rerunCount || 0);
   const totalIssueCount = failedCount + reviewCount;
   const selectedCount = Number(sourceCounts.selected || pageState?.counts?.selected || manifest.selectedCount || failedCount + reviewCount || 0);
-  const exceptionHero = exceptionView?.hero || {};
+  const exceptionHero = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'hero', {});
   const exceptionContext = exceptionView?.context || {};
-  const exceptionFlow = exceptionView?.flow || {};
-  const exceptionAssetStatus = exceptionView?.assetStatus || {};
-  const exceptionActionStatus = exceptionView?.actionStatus || {};
-  const exceptionDialogueStatus = exceptionView?.dialogueStatus || {};
-  const exceptionCopilot = exceptionView?.copilot || {};
+  const exceptionFlow = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'flow', {});
+  const exceptionAssetStatus = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'assetStatus', {});
+  const exceptionActionStatus = resolveWorkspaceStageActionStatus(pageState, 'exception', exceptionView);
+  const exceptionDialogueStatus = resolveWorkspaceStageDialogueStatus(pageState, 'exception', exceptionView);
+  const exceptionCopilot = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'copilot', {});
   const unifiedExceptionStatus = exceptionSummary?.unifiedStatus && typeof exceptionSummary.unifiedStatus === 'object'
     ? exceptionSummary.unifiedStatus
     : {};
@@ -253,24 +266,24 @@ function main() {
   const runtimeCopilotSummary = runtimeSummary.copilotSummary && typeof runtimeSummary.copilotSummary === 'object'
     ? runtimeSummary.copilotSummary
     : {};
-  const exceptionWorkflowCopilot = pageState?.workflowSessions?.exception || exceptionView?.workflowCopilot || {};
-  const exceptionWorkflowContract = exceptionView?.workflowContract || pageState?.workflowContracts?.exception || {};
-  const exceptionControlRail = exceptionView?.controlRail || {};
-  const exceptionSessionConsole = pageState?.taskSessionSnapshots?.exception || exceptionView?.sessionConsole || {};
-  const exceptionConfirmationState = exceptionView?.confirmation
-    || exceptionSummary.confirmation
-    || exceptionPageData.confirmation
-    || exceptionSummary.confirmationState
-    || pageState?.exception?.confirmationState
-    || {};
-  const stateExceptionCockpitSummary = exceptionPageData.cockpitSummary || exceptionSummary.cockpitSummary || null;
-  const stateExceptionJudgment = exceptionPageData.judgment || exceptionSummary.judgment || null;
+  const exceptionWorkflowCopilot = pageState?.workflowSessions?.exception || resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'workflowCopilot', {});
+  const exceptionWorkflowContract = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'workflowContract', pageState?.workflowContracts?.exception || {});
+  const exceptionControlRail = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'controlRail', {});
+  const exceptionSessionConsole = resolveWorkspaceStageSessionConsole(pageState, 'exception', exceptionView);
+  const exceptionConfirmationState = resolveWorkspaceStageConfirmationState(
+    pageState,
+    'exception',
+    exceptionView,
+    exceptionSummary.confirmation || exceptionPageData.confirmation || exceptionSummary.confirmationState || pageState?.exception?.confirmationState || {}
+  );
+  const stateExceptionCockpitSummary = resolveWorkspaceStageStateValue(pageState, 'exception', exceptionPageData, exceptionSummary, 'cockpitSummary', null);
+  const stateExceptionJudgment = resolveWorkspaceStageStateValue(pageState, 'exception', exceptionPageData, exceptionSummary, 'judgment', null);
   const stateExceptionStatusStack = toArray(exceptionPageData.statusStack).length
     ? exceptionPageData.statusStack
     : (toArray(exceptionSummary.statusStack).length ? exceptionSummary.statusStack : []);
-  const stateExceptionDecision = exceptionPageData.decision || exceptionSummary.decision || null;
-  const stateExceptionSummarySection = exceptionPageData.summary || exceptionSummary.summary || null;
-  const stateExceptionCollaboration = exceptionPageData.collaboration || exceptionSummary.collaboration || null;
+  const stateExceptionDecision = resolveWorkspaceStageStateValue(pageState, 'exception', exceptionPageData, exceptionSummary, 'decision', null);
+  const stateExceptionSummarySection = resolveWorkspaceStageStateValue(pageState, 'exception', exceptionPageData, exceptionSummary, 'summary', null);
+  const stateExceptionCollaboration = resolveWorkspaceStageStateValue(pageState, 'exception', exceptionPageData, exceptionSummary, 'collaboration', null);
   const exceptionFallbackState = buildStageWorkspaceFallbackState('exception', {
     failedCount,
     reviewCount,
@@ -322,7 +335,11 @@ function main() {
   const nextActionPath = resolvedNextAction.target
     ? path.join(outputDir, resolvedNextAction.target)
     : workspaceHomePath;
-  const resolvedExceptionTimeline = exceptionView?.timeline
+  const exceptionTaskControlBar = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'taskControlBar', null);
+  const exceptionSignalBar = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'signalBar', null);
+  const exceptionTimeline = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'timeline', null);
+  const exceptionStageRelay = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'stageRelay', null);
+  const resolvedExceptionTimeline = exceptionTimeline
     || exceptionPageData?.sections?.timeline
     || buildWorkspaceFallbackTimeline('exception', {
       events: Array.isArray(exceptionPageData?.timelineEvents) && exceptionPageData.timelineEvents.length
@@ -330,7 +347,7 @@ function main() {
         : null,
       workspaceTimelineEvents: workspaceTimeline?.events,
     });
-  const resolvedExceptionProgress = exceptionView?.progress || null;
+  const resolvedExceptionProgress = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'progress', null);
   const resolvedExceptionActionStatus = {
     ...buildActionStatusFromUnifiedStatus(unifiedExceptionStatus, {
       base: exceptionActionStatus,
@@ -364,16 +381,16 @@ function main() {
   const resolvedExceptionWorkflow = adaptWorkflowCopilot(exceptionWorkflowCopilot, {
     stageKey: 'exception',
     stageLabel: currentPhaseLabel,
-    taskControlBar: exceptionView?.taskControlBar || null,
+    taskControlBar: exceptionTaskControlBar,
     sessionConsole: exceptionSessionConsole,
-    signalBar: exceptionView?.signalBar || null,
+    signalBar: exceptionSignalBar,
     statusStack: stateExceptionStatusStack,
     cockpitSummary: stateExceptionCockpitSummary,
     dialogueStatus: resolvedExceptionDialogueStatus,
     confirmation: exceptionConfirmationState,
-    timeline: exceptionView?.timeline || null,
+    timeline: exceptionTimeline,
     judgment: stateExceptionJudgment,
-    stageRelay: exceptionView?.stageRelay || null,
+    stageRelay: exceptionStageRelay,
   });
   const exceptionContractState = buildWorkflowContractPageState(exceptionWorkflowContract, {
     taskControlBar: resolvedExceptionWorkflow.taskControlBar,
@@ -389,15 +406,15 @@ function main() {
     confirmationSummary: exceptionConfirmationState.summary,
     defaultActionReason: resolvedExceptionWorkflow.language.dialogueActionReason,
   });
-  const exceptionTransitionStatus = exceptionView?.transitionStatus || {};
-  const exceptionHandoffFromPrevious = exceptionView?.handoffFromPrevious || exceptionTransitionStatus || {};
-  const exceptionHandoffToNext = exceptionView?.handoffToNext || {};
+  const exceptionTransitionStatus = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'transitionStatus', {});
+  const exceptionHandoffFromPrevious = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'handoffFromPrevious', exceptionTransitionStatus || {});
+  const exceptionHandoffToNext = resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'handoffToNext', {});
   const resolvedExceptionStageRelay = buildUnifiedWorkflowStageRelay(
     unifiedExceptionStatus,
     {
       workflow: resolvedExceptionWorkflow.stageRelay,
       copilot: exceptionCopilot?.mainline?.stageRelay,
-      view: exceptionView?.stageRelay,
+      view: exceptionStageRelay,
       fallbackCurrentSummary: firstNonEmpty(
         exceptionFallbackState.stageRelay.fallbackCurrentSummary,
         exceptionTransitionSummary,
@@ -410,14 +427,12 @@ function main() {
       ),
     }
   );
-  const exceptionSections = exceptionView?.sections || {};
-  const exceptionPageSections = exceptionPageData?.sections || {};
-  const exceptionGuideSection = exceptionSections?.guide || {};
-  const exceptionVisibilitySection = exceptionSections?.visibility || {};
-  const exceptionIssuesSection = exceptionSections?.issues || {};
-  const exceptionRerunSection = exceptionPageSections?.rerun || {};
+  const exceptionGuideSection = resolveWorkspaceStageSection(pageState, 'exception', exceptionView, exceptionPageData, 'guide');
+  const exceptionVisibilitySection = resolveWorkspaceStageSection(pageState, 'exception', exceptionView, exceptionPageData, 'visibility');
+  const exceptionIssuesSection = resolveWorkspaceStageSection(pageState, 'exception', exceptionView, exceptionPageData, 'issues');
+  const exceptionRerunSection = resolveWorkspaceStageSection(pageState, 'exception', exceptionView, exceptionPageData, 'rerun');
   const normalizedExceptionGuideSection = resolveWorkspaceGuideSectionData(
-    exceptionPageSections?.guide || exceptionGuideSection,
+    exceptionGuideSection,
     buildWorkspaceStageGuideFallback('exception', {
       entryGuideTitle: entryGuide?.title || fallbackEntryGuide?.title,
       entryGuideItems: entryGuide?.items || fallbackEntryGuide?.items,
@@ -425,7 +440,7 @@ function main() {
     })
   );
   const normalizedExceptionVisibilitySection = resolveWorkspaceGuideSectionData(
-    exceptionPageSections?.visibility || exceptionVisibilitySection,
+    exceptionVisibilitySection,
     buildWorkspaceStageVisibilityFallback('exception', {
       visibilityTitle: visibilityGuide?.title || fallbackAssetGuide?.title,
       visibilityCopy: visibilityGuide?.copy || fallbackAssetGuide?.copy,
@@ -433,8 +448,8 @@ function main() {
     })
   );
   const normalizedExceptionIssuesSection = resolveWorkspaceIssuesSectionData(
-    exceptionPageSections?.issues || exceptionIssuesSection,
-    exceptionPageSections?.issues || {}
+    exceptionIssuesSection,
+    exceptionIssuesSection
   );
   const displayIssueItems = Array.isArray(normalizedExceptionIssuesSection.items) && normalizedExceptionIssuesSection.items.length
     ? normalizedExceptionIssuesSection.items.slice(0, 16)
@@ -465,12 +480,6 @@ function main() {
     overviewBuilder: buildUserFacingAssetOverview,
   }).overview;
   const chrome = getWorkspaceStageChrome('exception');
-  const shell = getWorkspacePageShellConfig('exception');
-  const governanceForShell = pageState?.governanceByPage?.[shell.currentPage] || pageState?.governance || null;
-  const layout = exceptionView?.display || governanceForShell?.display || getWorkspaceLayoutConfig('exception', { currentPage: shell.currentPage });
-  const surfaceRules = layout?.surfaceRules || {};
-  const governedWorkbenchIds = Array.isArray(governanceForShell?.workbenchEntryIds) ? new Set(governanceForShell.workbenchEntryIds) : null;
-  const modeSwitch = getWorkspaceModeSwitchConfig('exception', { currentPage: shell.currentPage });
   const actionCopy = getWorkspaceActionCopy();
   const identity = getWorkspaceIdentityCopy();
   const taskLabel = deriveTaskLabel({
@@ -484,7 +493,7 @@ function main() {
     base: stateExceptionCockpitSummary,
     workflow: resolvedExceptionWorkflow.cockpitSummary,
     copilot: exceptionCopilot?.hero?.cockpitSummary,
-    view: exceptionView?.cockpitSummary,
+    view: resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'cockpitSummary', null),
     items: exceptionFallbackState.cockpitItems,
   });
   const resolvedExceptionJudgment = buildUnifiedWorkflowJudgment({
@@ -496,7 +505,7 @@ function main() {
     baseState: stateExceptionJudgment,
     copilot: exceptionCopilot?.mainline?.judgment,
     workflow: resolvedExceptionWorkflow.judgment,
-    view: exceptionView?.judgment,
+    view: resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'judgment', null),
   });
   const resolvedExceptionDecision = buildUnifiedWorkflowDecision({
     stageConfig: {
@@ -511,10 +520,15 @@ function main() {
       }),
     }),
     state: stateExceptionDecision,
-    view: exceptionView?.decision,
+    view: resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'decision', null),
   });
-  const resolvedExceptionSummary = resolveWorkspaceSummarySectionData(
-    stateExceptionSummarySection || exceptionView?.summary || {},
+  const resolvedExceptionSummary = resolveWorkspaceStageSummarySection(
+    pageState,
+    'exception',
+    {
+      ...exceptionView,
+      summary: exceptionView?.summary || stateExceptionSummarySection || {},
+    },
     buildWorkspaceSummarySectionData({
       enabled: layout.showSummaryByDefault,
       title: chrome.summaryTitle,
@@ -537,7 +551,7 @@ function main() {
     || resolvedExceptionWorkflow.taskControlBar
     || exceptionCopilot?.hero?.taskControlBar
     || exceptionControlRail.taskControlBar
-    || exceptionView?.taskControlBar
+    || exceptionTaskControlBar
     || buildTaskControlBarFromUnifiedStatus(unifiedExceptionStatus, {
       copilotSummary: runtimeCopilotSummary,
       taskLabel,
@@ -571,7 +585,7 @@ function main() {
   const resolvedExceptionSignalBar = resolvedExceptionWorkflow.signalBar
     || exceptionCopilot?.hero?.signalBar
     || exceptionControlRail.signalBar
-    || (Array.isArray(exceptionView?.signalBar) ? { items: exceptionView.signalBar } : exceptionView?.signalBar)
+    || (Array.isArray(exceptionSignalBar) ? { items: exceptionSignalBar } : exceptionSignalBar)
     || {
       items: buildExceptionSignalBar({
         stageLabel: currentPhaseLabel,
@@ -603,15 +617,17 @@ function main() {
   const resolvedExceptionCollaboration = buildUnifiedWorkflowCollaboration(unifiedExceptionStatus, {
     base: exceptionContractState.collaboration || stateExceptionCollaboration,
     workflow: resolvedExceptionWorkflow.collaboration,
-    view: exceptionView?.collaboration,
+    view: resolveWorkspaceStageViewValue(pageState, 'exception', exceptionView, 'collaboration', null),
     confirmation: resolvedExceptionConfirmationState,
     timeline: resolvedExceptionTimeline,
     dialogue: finalizedExceptionDialogueStatus,
   });
   const normalizedExceptionSummary = buildWorkspaceSummarySectionData(resolvedExceptionSummary || {});
   const exceptionContentSections = renderWorkspaceDeclaredSections(
-    buildWorkspaceContentSectionPlan(
-      exceptionView?.contentSections,
+    resolveWorkspaceStageContentSectionPlan(
+      pageState,
+      'exception',
+      exceptionView,
       denseCopy.contentSectionOrder.map((key) => ({
         key,
         kind: key === 'issues' ? 'issuesGrid' : 'keyValue',
@@ -657,16 +673,20 @@ function main() {
     }),
     ...guideCards,
   ].filter(Boolean).filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
-  const resolvedExceptionWorkbench = resolveWorkspaceWorkbenchSectionData(
-    exceptionView?.workbench || {},
+  const resolvedExceptionWorkbench = resolveWorkspaceStageWorkbenchSection(
+    pageState,
+    'exception',
+    exceptionView,
     buildWorkspaceWorkbenchSectionData({
       title: chrome.workbenchTitle,
       copy: chrome.workbenchCopy,
       cards: fallbackWorkbenchCards,
     })
   );
-  const resolvedExceptionRoute = resolveWorkspaceRouteSectionByStage(
-    exceptionView?.route || {},
+  const resolvedExceptionRoute = resolveWorkspaceStageRouteSection(
+    pageState,
+    'exception',
+    exceptionView,
     buildWorkspaceStageRouteFallback('exception', {
       title: chrome.routeTitle,
       copy: chrome.routeCopy,
@@ -685,7 +705,7 @@ function main() {
   );
 
   const exceptionHeroCards = Array.isArray(exceptionView?.heroCards) ? exceptionView.heroCards : [];
-  const contextBarData = resolveWorkspaceContextBarData('exception', exceptionContext, buildWorkspaceContextFallback('exception', {
+  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'exception', exceptionView, buildWorkspaceContextFallback('exception', {
     runLabel: taskLabel,
     phaseLabel: currentPhaseLabel,
     flowLabel: identity.flows.exception,

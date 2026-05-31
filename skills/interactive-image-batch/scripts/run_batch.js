@@ -49,6 +49,7 @@ const {
 } = require('./run_batch_runtime');
 const { refreshTaskCenterRuntimeState } = require('./task_center_state_runtime');
 const { refreshRuntimeWorkbench } = require('./workbench_state_runtime');
+const { syncWorkspaceLayout, resolveRecommendedWorkspacePath } = require('./workspace_layout_migration');
 const {
   buildContactSheet,
   runBatch,
@@ -105,13 +106,13 @@ function buildReadmeFromWorkspaceState(outputDir, fallback = {}) {
   };
   const workspaceSupport = Array.isArray(artifactGovernance.workspaceSupport) ? artifactGovernance.workspaceSupport : [];
   const supportEntries = workspaceSupport.filter((item) => item.exists);
-  const defaultEntryPath = summary.defaultEntryPath || fallback.workspaceHomePath || null;
+  const layoutEntry = resolveRecommendedWorkspacePath(outputDir, 'workspace_home.html', 'workspace');
+  const defaultEntryPath = layoutEntry.recommendedPath || summary.defaultEntryPath || fallback.workspaceHomePath || null;
   const defaultEntryLabel = workbenchProtocol.defaultEntryLabel || summary.defaultEntryLabel || '工作台首页';
   const resultWorkspacePath = fallback.resultWorkspacePath || path.join(outputDir, 'result_workspace.html');
   const exceptionWorkspacePath = fallback.exceptionWorkspacePath || path.join(outputDir, 'exception_workspace.html');
   const runRecordPath = fallback.runRecordHtmlPath || path.join(outputDir, 'run_record.html');
   const completionReportPath = fallback.completionReportPath || null;
-  const storyboardBoardPath = fallback.storyboardBoardPath || null;
   const statusLines = Array.isArray(fallback.statusLines) ? fallback.statusLines : [];
   const principle = String(summary.principle || '').trim() || workbenchProtocol.userRule;
   const directorySummary = workbenchProtocol.summary;
@@ -122,11 +123,13 @@ function buildReadmeFromWorkspaceState(outputDir, fallback = {}) {
   return [
     '# DAOGE 当前任务入口',
     '',
-    `请先打开${defaultEntryLabel}。这份 README 只负责告诉你从哪里进入、进去后先看什么、下一步怎么和 DAOGE 继续。`,
+    `请先打开${defaultEntryLabel}。这份 README 只负责告诉你从哪里进入、进去后先看什么、下一步怎么和 DAOGE 继续。任务档案只作回看，内部记录仅维护者诊断使用。`,
     '',
     `- 先看这里: ${defaultEntryPath}`,
+    layoutEntry.mode === 'workspace-mirror-first' ? `- 兼容旧入口: ${layoutEntry.compatibilityPath}` : '',
     `- 打开后先看: 当前阶段、推荐下一步、回到对话框怎么说`,
     `- 不用先看: JSON / Markdown 内部记录、旧说明页、深看页`,
+    `- 内部记录: 仅维护者诊断和续跑使用，不作为普通阅读入口`,
     '',
     '## 当前状态',
     '',
@@ -141,17 +144,19 @@ function buildReadmeFromWorkspaceState(outputDir, fallback = {}) {
     `- 已后退: 深看页、旧说明页、JSON / Markdown 内部记录`,
     `- 使用原则: ${principle}`,
     `- 目录规则: ${directorySummary}`,
+    layoutEntry.mode === 'workspace-mirror-first' ? `- 目录迁移: 推荐先看 workspace/ 分层入口，顶层文件继续保留给旧脚本兼容。` : '',
     '',
     '## 按需直达',
     '',
     `- 结果工作台: ${resultWorkspacePath}`,
     `- 异常工作台: ${exceptionWorkspacePath}`,
     `- 任务档案: ${runRecordPath}`,
-    ...(completionReportPath ? [`- 完成报告: ${completionReportPath}`] : []),
-    ...(storyboardBoardPath ? [`- 分镜整板页: ${storyboardBoardPath}`] : []),
-    ...supportEntries
-      .filter((item) => item.path && ![runRecordPath, completionReportPath, storyboardBoardPath].filter(Boolean).includes(item.path))
-      .map((item) => `- ${item.label}: ${item.path}`),
+    ...(completionReportPath ? ['- 完成报告: 已归档为文字版，需要收口复盘时再看，不作为普通入口'] : []),
+    ...(supportEntries
+      .filter((item) => item.path && ![runRecordPath].includes(item.path))
+      .length
+      ? ['- 其它补充页: 已生成但默认后退，需要深看时从对应工作台按需进入']
+      : ['- 其它补充页: 默认不生成；需要深看时从对应工作台按需进入']),
     '',
     '## 这三份说明各看什么',
     '',
@@ -164,8 +169,8 @@ function buildReadmeFromWorkspaceState(outputDir, fallback = {}) {
     `- 用户直看层: 主链工作台 + 任务档案这类少量补充入口`,
     `- 文件落盘层: ${filesystemCount > 0 ? `${filesystemCount} 个文件，仅用于目录落盘说明` : '当前没有额外文件落盘入口'}`,
     `- 归档层: ${archiveCount > 0 ? `${archiveCount} 个文件，仅在归档回看时使用` : '当前没有归档文件'}`,
-    `- 内部状态层: ${internalCount > 0 ? `${internalCount} 个文件，服务状态底盘、续跑和诊断` : '当前没有内部状态文件'}`,
-  ].join('\n');
+    `- 内部状态层: ${internalCount > 0 ? `${internalCount} 个文件，仅维护者诊断、续跑和兼容读取使用` : '当前没有内部状态文件'}`,
+  ].filter((line) => line !== '').join('\n');
 }
 
 function buildExecutionPlan(selectedPrompts, batchSize, stageSize, sampleSize) {
@@ -451,6 +456,22 @@ async function main() {
         `- 输出目录: ${outputDir}`,
       ],
     }));
+    syncWorkspaceLayout(outputDir, { source: 'run_batch' });
+    renderWorkspaceState(outputDir);
+    syncWorkspaceLayout(outputDir, { source: 'run_batch' });
+    fs.writeFileSync(path.join(outputDir, 'README.md'), buildReadmeFromWorkspaceState(outputDir, {
+      workspaceHomePath,
+      resultWorkspacePath,
+      exceptionWorkspacePath,
+      runRecordHtmlPath: runRecord.htmlPath,
+      completionReportPath: null,
+      storyboardBoardPath,
+      statusLines: [
+        '- 当前状态: 模拟运行，页面和档案已经生成',
+        `- 输出目录: ${outputDir}`,
+      ],
+    }));
+    syncWorkspaceLayout(outputDir, { source: 'run_batch' });
     console.log('[dry-run]');
     console.log(JSON.stringify({ outputDir, selectedCount: selectedPrompts.length, batchCount: batches.length, rerunPlan: rerunPlanPath }, null, 2));
     return;
@@ -690,15 +711,34 @@ async function main() {
       `- 失败结果: ${manifest.failed}`,
       `- 跳过已有结果: ${allResults.filter((item) => item.skipped).length}`,
       `- 当前状态: ${manifest.paused ? '已暂停，建议先处理风险' : (manifest.failed > 0 ? '存在异常，建议先处理失败项' : '整体稳定，可以继续筛图或进入下一轮')}`,
-      `- 运行总索引: ${artifacts.runIndex.indexMd}`,
+      '- 运行总索引: 已后退到归档层，普通流程不用从 README 打开',
     ],
   }));
+  syncWorkspaceLayout(outputDir, { source: 'run_batch' });
+  renderWorkspaceState(outputDir);
+  syncWorkspaceLayout(outputDir, { source: 'run_batch' });
+  fs.writeFileSync(path.join(outputDir, 'README.md'), buildReadmeFromWorkspaceState(outputDir, {
+    workspaceHomePath,
+    resultWorkspacePath,
+    exceptionWorkspacePath,
+    runRecordHtmlPath: runRecord.htmlPath,
+    completionReportPath,
+    storyboardBoardPath,
+    statusLines: [
+      `- 成功结果: ${manifest.success}`,
+      `- 失败结果: ${manifest.failed}`,
+      `- 跳过已有结果: ${allResults.filter((item) => item.skipped).length}`,
+      `- 当前状态: ${manifest.paused ? '已暂停，建议先处理风险' : (manifest.failed > 0 ? '存在异常，建议先处理失败项' : '整体稳定，可以继续筛图或进入下一轮')}`,
+      '- 运行总索引: 已后退到归档层，普通流程不用从 README 打开',
+    ],
+  }));
+  syncWorkspaceLayout(outputDir, { source: 'run_batch' });
 
   console.log(paused ? 'DAOGE 状态：已暂停，等待处理' : 'DAOGE 状态：任务完成');
   console.log(`[DAOGE][执行结果] 成功 ${manifest.success}，失败 ${manifest.failed}，跳过 ${allResults.filter((item) => item.skipped).length}，共 ${selectedPrompts.length} 张`);
   console.log(`[DAOGE][工作台首页] 先看这里：${workspaceHomePath}`);
   console.log(`[DAOGE][结果工作台] 结果主链入口：${resultWorkspacePath}`);
-  if (storyboardBoardPath) console.log(`[DAOGE][整板页] 按需页面：${storyboardBoardPath}`);
+  if (storyboardBoardPath) console.log(`[DAOGE][分镜整板补充页] 按需页面：${storyboardBoardPath}`);
   if (paused) {
     console.log(`[DAOGE][下一步建议] ${translatePauseReason(pauseReason)}。建议先处理风险，再决定是否继续续跑。`);
   } else if (manifest.failed > 0) {

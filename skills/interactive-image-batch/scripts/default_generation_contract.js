@@ -18,15 +18,15 @@ const DEFAULT_GENERATION_CONTRACT = {
     { id: 'preflight-board', file: 'preflight_board.html', label: '预检页', layer: 'advanced', mode: 'prepare-details', purpose: '只在需要细看准备检查时生成。' },
     { id: 'prompt-preview', file: 'prompt_preview.html', label: '提示词预览页', layer: 'advanced', mode: 'prepare-details', purpose: '只在需要逐条检查提示词时生成。' },
     { id: 'assets-board', file: 'assets_board.html', label: '素材页', layer: 'advanced', mode: 'prepare-details', purpose: '只在需要细看素材绑定时生成。' },
-    { id: 'storyboard-board', file: 'storyboard_board.html', label: '分镜整板页', layer: 'conditional', mode: 'result-details', purpose: '只在分镜任务且需要整板复看时生成。' },
+    { id: 'storyboard-board', file: 'storyboard_board.html', label: '分镜整板补充页', layer: 'conditional', mode: 'result-details', purpose: '只在分镜任务且需要整板复看时生成。' },
     { id: 'review-board', file: 'review_board.html', label: '审阅看板', layer: 'advanced', mode: 'result-details', purpose: '只在需要深度筛图和人工复核时生成。' },
     { id: 'completion-board', file: 'completion_board.html', label: '完成摘要页', layer: 'advanced', mode: 'result-details', purpose: '只在需要独立完成摘要时生成。' },
     { id: 'run-overview', file: 'run_overview.html', label: '运行概览页', layer: 'advanced', mode: 'result-details', purpose: '只在需要技术性回看运行结构时生成。' },
     { id: 'rerun-board', file: 'rerun_board.html', label: '补跑页', layer: 'advanced', mode: 'result-details', purpose: '只在需要补跑失败项或局部修复时生成。' },
   ],
   maintenanceHtml: [
-    { id: 'result-hub', file: 'result_hub.html', label: '旧结果说明页', layer: 'legacy', mode: 'legacy', purpose: '仅维护观察使用，不进入个人工作台正式链路。' },
-    { id: 'portal-home', file: 'daoge_portal.html', label: '旧门户页', layer: 'legacy', mode: 'legacy', purpose: '仅迁移观察使用，不再作为默认入口。' },
+    { id: 'result-hub', file: 'result_hub.html', label: '旧结果维护说明页', layer: 'legacy', mode: 'legacy', purpose: '仅维护观察使用，不进入个人工作台正式链路。' },
+    { id: 'portal-home', file: 'daoge_portal.html', label: '旧入口维护说明页', layer: 'legacy', mode: 'legacy', purpose: '仅迁移观察使用，不再作为默认入口。' },
   ],
   internalArtifacts: [
     { id: 'manifest', file: 'manifest.json', layer: 'internal', purpose: '运行记录，给程序和诊断使用。' },
@@ -44,6 +44,17 @@ const DEFAULT_GENERATION_CONTRACT = {
 
 function cloneGenerationItems(items = []) {
   return items.map((item) => ({ ...item }));
+}
+
+function splitOnDemandHtmlByMode(onDemandHtml = []) {
+  const prepareDetailIds = new Set(['preflight-board', 'prompt-preview', 'assets-board']);
+  const resultDetailIds = new Set(['review-board', 'completion-board', 'run-overview', 'rerun-board']);
+  const storyboardDetailIds = new Set(['storyboard-board']);
+  return {
+    prepareDetailHtml: onDemandHtml.filter((item) => prepareDetailIds.has(item.id)),
+    resultDetailHtml: onDemandHtml.filter((item) => resultDetailIds.has(item.id)),
+    storyboardDetailHtml: onDemandHtml.filter((item) => storyboardDetailIds.has(item.id)),
+  };
 }
 
 function resolveOptionalPageEmission(options = {}) {
@@ -101,19 +112,27 @@ function buildDefaultGenerationContract(resolved = {}) {
   const onDemandHtml = cloneGenerationItems(DEFAULT_GENERATION_CONTRACT.onDemandHtml);
   const maintenanceHtml = cloneGenerationItems(DEFAULT_GENERATION_CONTRACT.maintenanceHtml);
   const internalArtifacts = cloneGenerationItems(DEFAULT_GENERATION_CONTRACT.internalArtifacts);
-  const prepareDetails = onDemandHtml.filter((item) => item.mode === 'prepare-details');
-  const resultDetails = onDemandHtml.filter((item) => item.mode === 'result-details');
+  const {
+    prepareDetailHtml,
+    resultDetailHtml,
+    storyboardDetailHtml,
+  } = splitOnDemandHtmlByMode(onDemandHtml);
+  const detailModeMatrix = [
+    ...prepareDetailHtml.map((item) => ({ id: item.id, file: item.file, mode: 'prepare-details', alsoGeneratedIn: ['all'] })),
+    ...resultDetailHtml.map((item) => ({ id: item.id, file: item.file, mode: 'result-details', alsoGeneratedIn: ['all'] })),
+    ...storyboardDetailHtml.map((item) => ({ id: item.id, file: item.file, mode: 'result-details', alsoGeneratedIn: ['all'], conditional: 'storyboard' })),
+  ];
   const generatedByMode = {
     'mainline-only': defaultHtml,
-    'prepare-details': defaultHtml.concat(prepareDetails),
-    'result-details': defaultHtml.concat(resultDetails),
+    'prepare-details': defaultHtml.concat(prepareDetailHtml),
+    'result-details': defaultHtml.concat(resultDetailHtml, storyboardDetailHtml),
     legacy: defaultHtml.concat(maintenanceHtml),
     all: defaultHtml.concat(onDemandHtml, maintenanceHtml),
   };
   const hiddenByMode = {
     'mainline-only': onDemandHtml.concat(maintenanceHtml),
-    'prepare-details': resultDetails.concat(maintenanceHtml),
-    'result-details': prepareDetails.concat(maintenanceHtml),
+    'prepare-details': resultDetailHtml.concat(storyboardDetailHtml, maintenanceHtml),
+    'result-details': prepareDetailHtml.concat(maintenanceHtml),
     legacy: onDemandHtml,
     all: [],
   };
@@ -123,7 +142,7 @@ function buildDefaultGenerationContract(resolved = {}) {
     userEntry: '任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
     defaultVisibleRule: '普通用户默认只看主链工作台和任务档案页。',
     onDemandRule: '提示词预览、素材页、审阅看板、运行概览和补跑页必须按需开启，不作为默认入口。',
-    legacyRule: '旧门户页和旧结果说明页只用于维护观察，不进入个人工作台正式链路。',
+    legacyRule: '旧入口维护说明页和旧结果维护说明页只用于维护观察，不进入个人工作台正式链路。',
     internalRule: 'JSON、Markdown 归档和诊断文件只给程序或维护者使用，默认不展示给普通用户。',
   };
   return {
@@ -132,6 +151,10 @@ function buildDefaultGenerationContract(resolved = {}) {
     defaultHtml,
     defaultFiles,
     onDemandHtml,
+    prepareDetailHtml,
+    resultDetailHtml,
+    storyboardDetailHtml,
+    detailModeMatrix,
     maintenanceHtml,
     internalArtifacts,
     currentMode: {
@@ -181,17 +204,17 @@ function summarizeOptionalPageEmission(options = {}) {
     },
   };
   const copyMap = {
-    'mainline-only': '当前只生成主链工作台，进阶页面和旧入口说明页默认不生成。',
+    'mainline-only': '当前只生成主链工作台，进阶页面和旧维护说明页默认不生成。',
     'prepare-details': '当前额外生成准备补充页，方便继续深看预检、预览与准备判断。',
     'result-details': '当前额外生成结果补充页，方便继续深看审阅、补跑与结果摘要。',
-    legacy: '当前额外生成旧入口说明页，主要用于迁移观察或维护回看。',
-    all: '当前同时生成准备补充页、结果补充页和旧入口说明页，属于完整展开模式。',
+    legacy: '当前额外生成旧维护说明页，主要用于迁移观察或维护回看。',
+    all: '当前同时生成准备补充页、结果补充页和旧维护说明页，属于完整展开模式。',
   };
   const recommendedActionMap = {
     'mainline-only': '需要深看时，再开启对应补充页。',
     'prepare-details': '可直接复核准备补充页，确认后回主链继续。',
     'result-details': '可直接复核结果补充页，确认后回主链继续。',
-    legacy: '旧入口说明页只在维护或迁移观察时打开。',
+    legacy: '旧维护说明页只在维护或迁移观察时打开。',
     all: '页面较多，仍以主链工作台为主。',
   };
   const currentFocusMap = {
@@ -219,7 +242,7 @@ function summarizeOptionalPageEmission(options = {}) {
   const resolvedLabel =
     resolved.mode === 'prepare-details' ? '准备补充页已展开'
       : resolved.mode === 'result-details' ? '结果补充页已展开'
-        : resolved.mode === 'legacy' ? '旧入口说明页已展开'
+        : resolved.mode === 'legacy' ? '旧维护说明页已展开'
           : resolved.mode === 'all' ? '完整展开模式'
             : '主链极简模式';
   return {
@@ -258,7 +281,7 @@ function summarizeOptionalPageEmission(options = {}) {
       { mode: 'mainline-only', label: '只保留主链', summary: copyMap['mainline-only'], generatedLayers: layerSetMap['mainline-only'].generatedLayers.slice() },
       { mode: 'prepare-details', label: '展开准备补充页', summary: copyMap['prepare-details'], generatedLayers: layerSetMap['prepare-details'].generatedLayers.slice() },
       { mode: 'result-details', label: '展开结果补充页', summary: copyMap['result-details'], generatedLayers: layerSetMap['result-details'].generatedLayers.slice() },
-      { mode: 'legacy', label: '展开旧入口说明页', summary: copyMap.legacy, generatedLayers: layerSetMap.legacy.generatedLayers.slice() },
+      { mode: 'legacy', label: '展开旧维护说明页', summary: copyMap.legacy, generatedLayers: layerSetMap.legacy.generatedLayers.slice() },
       { mode: 'all', label: '全部展开', summary: copyMap.all, generatedLayers: layerSetMap.all.generatedLayers.slice() },
     ],
   };
@@ -266,15 +289,12 @@ function summarizeOptionalPageEmission(options = {}) {
 
 function buildOptionalPageDecision(options = {}) {
   const summary = summarizeOptionalPageEmission(options);
-  const generatedLayers = new Set(
-    Array.isArray(summary.layerPolicy?.generatedLayers)
-      ? summary.layerPolicy.generatedLayers
-      : []
-  );
-  const shouldGeneratePrepareDetails = summary.prepareDetails && generatedLayers.has('advanced');
-  const shouldGenerateResultDetails = summary.resultDetails && generatedLayers.has('conditional');
-  const shouldGenerateStoryboardDetails = summary.storyboardDetails && generatedLayers.has('conditional');
-  const shouldGenerateLegacyPages = summary.legacyPages && generatedLayers.has('legacy');
+  const generatedHtmlFiles = new Set(summary.generationContract?.currentMode?.generatedHtmlFiles || []);
+  const hasGeneratedFile = (items) => (Array.isArray(items) ? items : []).some((item) => generatedHtmlFiles.has(item.file));
+  const shouldGeneratePrepareDetails = summary.prepareDetails && hasGeneratedFile(summary.generationContract?.prepareDetailHtml);
+  const shouldGenerateResultDetails = summary.resultDetails && hasGeneratedFile(summary.generationContract?.resultDetailHtml);
+  const shouldGenerateStoryboardDetails = summary.storyboardDetails && hasGeneratedFile(summary.generationContract?.storyboardDetailHtml);
+  const shouldGenerateLegacyPages = summary.legacyPages && hasGeneratedFile(summary.generationContract?.maintenanceHtml);
   return {
     ...summary,
     shouldGeneratePrepareDetails,
@@ -299,10 +319,15 @@ function pruneHiddenHtmlFiles(outputDir, optionalPageDecision, options = {}) {
   for (const file of hiddenFiles) {
     const fileName = String(file || '').trim();
     if (!fileName || path.basename(fileName) !== fileName || !fileName.endsWith('.html')) continue;
-    const target = path.join(outputDir, fileName);
-    if (!fs.existsSync(target)) continue;
-    fs.unlinkSync(target);
-    pruned.push(target);
+    const targets = [
+      path.join(outputDir, fileName),
+      path.join(outputDir, 'workspace', fileName),
+    ];
+    for (const target of targets) {
+      if (!fs.existsSync(target)) continue;
+      fs.unlinkSync(target);
+      pruned.push(target);
+    }
   }
   return pruned;
 }
