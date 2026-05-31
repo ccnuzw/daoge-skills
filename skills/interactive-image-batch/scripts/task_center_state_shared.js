@@ -4,11 +4,13 @@ const { loadWorkbenchState } = require('./workbench_state_shared');
 const { buildLiveRunStateBundle, normalizeRuntimeProtocolState } = require('./unified_status_summary');
 const { summarizeUserWorkbenchProtocol } = require('./workspace_page_shared');
 const { summarizeOptionalPageEmission } = require('./default_generation_contract');
+const { resolveEntryMainlineActions } = require('./entry_state_shared');
 const {
   cleanLabel,
   pickPromptItems,
   deriveTaskLabel,
 } = require('./task_label_utils');
+const { buildRuntimeCopilotRelayCopy } = require('./workspace_status_dictionary');
 
 function resolveTaskCenterStatePath(indexFile, options = {}) {
   if (options.stateFile) return path.resolve(options.stateFile);
@@ -167,6 +169,9 @@ function normalizeRuntimeSummary(runtimeSummary, fallback = {}) {
     completedBatchCount: Number(normalized.completedBatchCount ?? 0),
     pendingBatchCount: Number(normalized.pendingBatchCount ?? 0),
     totalBatchCount: Number(normalized.totalBatchCount ?? 0),
+    failedCount: Number(normalized.failedCount ?? secondary.failedCount ?? secondary.failed ?? 0),
+    successCount: Number(normalized.successCount ?? secondary.successCount ?? secondary.success ?? 0),
+    skippedCount: Number(normalized.skippedCount ?? secondary.skippedCount ?? secondary.skipped ?? 0),
     progressSummary: cleanLabel(normalized.progressSummary) || '',
     updatedAt: normalized.updatedAt || null,
     runningTask: cleanLabel(normalized.runningTask) || cleanLabel(normalized.taskLabel) || '未命名任务',
@@ -211,6 +216,9 @@ function normalizeLiveRunSnapshot(rawLiveRun, fallback = {}) {
     completedBatchCount: Number(runtimeSummary.completedBatchCount || 0),
     pendingBatchCount: Number(runtimeSummary.pendingBatchCount || 0),
     totalBatchCount: Number(runtimeSummary.totalBatchCount || 0),
+    failedCount: Number(runtimeSummary.failedCount || fallback.failedCount || fallback.failed || 0),
+    successCount: Number(runtimeSummary.successCount || fallback.successCount || fallback.success || 0),
+    skippedCount: Number(runtimeSummary.skippedCount || fallback.skippedCount || fallback.skipped || 0),
     progressSummary: liveRunBundle.progressSummary,
     updatedAt: runtimeSummary.updatedAt || fallback.latestEventTime || fallback.generatedAt || new Date().toISOString(),
     runningTask: liveRunBundle.runningTask,
@@ -287,6 +295,7 @@ function isSameRun(left, right) {
 
 function buildTaskCenterWorkbench(latest, latestWorkspace, examplesCatalogPath) {
   if (!latest) return null;
+  const entryActions = resolveEntryMainlineActions({ hasWorkspace: Boolean(latestWorkspace), latestWorkspace });
   const assetLayerSummary = latest.assetLayerSummary || summarizeUserAssetLayer();
   const workbenchProtocol = latest.workbenchProtocol || summarizeUserWorkbenchProtocol();
   const hasWorkbenchProtocol = workbenchProtocol.defaultVisibleLabels.length > 0
@@ -304,21 +313,21 @@ function buildTaskCenterWorkbench(latest, latestWorkspace, examplesCatalogPath) 
         : '这里只负责选任务。总控页只保留两个动作：开始新任务，或者继续某一轮已有任务。'),
     cards: [
       {
-        label: '继续当前任务',
+        label: entryActions.continueTask.label,
         value: latest.taskLabel,
-        summary: `${latest.phaseLabel || '当前阶段待判断'} · ${assetLayerSummary.headline} · ${latest.nextActionReason || '这一轮已经是当前最值得继续的任务。'}`,
+        summary: `${latest.phaseLabel || '当前阶段待判断'} · ${assetLayerSummary.headline} · ${latest.nextActionReason || entryActions.continueTask.summary}`,
         file: latestWorkspace,
-        cta: '进入这轮任务',
-        pendingLabel: '当前任务主入口尚未生成',
+        cta: entryActions.continueTask.cta,
+        pendingLabel: entryActions.continueTask.pendingLabel,
         tone: 'good',
       },
       {
-        label: '开始新任务',
-        value: '中文模板展示板',
-        summary: '如果你要新开一轮任务，先从这里选任务类型和起步入口。',
+        label: entryActions.startNewTask.label,
+        value: entryActions.startNewTask.value,
+        summary: entryActions.startNewTask.summary,
         file: examplesCatalogPath,
-        cta: '开始新任务',
-        pendingLabel: '中文模板展示板尚未生成',
+        cta: entryActions.startNewTask.cta,
+        pendingLabel: entryActions.startNewTask.pendingLabel,
         tone: 'info',
       },
     ],
@@ -342,21 +351,15 @@ function buildTaskCenterCopilotRelay(options = {}) {
     || '默认只沿主链工作台继续，细页按需打开。';
   const deepDiveRule = cleanLabel(optionalPageMode.deepDiveSuggestion)
     || '如果需要深看，再展开对应补充页。';
-
-  const watch = runtimeStatus === 'running'
-    ? '先看实时进度，不切到其它任务内判断。'
-    : (runtimeStatus === 'paused'
-      ? '先看暂停原因，把需要人工确认的风险收掉。'
-      : (runtimeStatus === 'completed'
-        ? `先${nextActionLabel}，把结果筛图和收口接住。`
-        : (runtimeFocus || progressSummary || '先选定任务，再进入工作台首页。')));
-  const handoff = runtimeStatus === 'running'
-    ? '等任务完成或暂停后，再交回工作台首页、结果工作台或异常工作台。'
-    : (runtimeStatus === 'paused'
-      ? '处理完暂停原因后，再回工作台首页继续主链。'
-      : (runtimeStatus === 'completed'
-        ? '完成态由结果工作台接住，不再停留在总控层做单轮判断。'
-        : (handoffRule || '进入单轮任务后，由工作台首页接住下一步。')));
+  const relayCopy = buildRuntimeCopilotRelayCopy({
+    runtimeStatus,
+    runtimeFocus,
+    progressSummary,
+    nextActionLabel,
+    failedCount: options.failedCount,
+  });
+  const watch = relayCopy.watch;
+  const handoff = runtimeStatus ? relayCopy.handoff : (handoffRule || relayCopy.handoff);
 
   return {
     title: '实时副驾驶接力',
@@ -368,11 +371,15 @@ function buildTaskCenterCopilotRelay(options = {}) {
     generationLabel: generationMode,
     generationRule,
     deepDiveRule,
+    flowMode: relayCopy.mode,
+    currentLookValue: relayCopy.currentLookValue,
+    currentLookSummary: relayCopy.currentLookSummary,
     summary: `实时副驾驶：${watch} 对话框可以说「${primarySay}」。${handoff} 当前是${generationMode}：${generationRule} ${deepDiveRule}`,
   };
 }
 
 function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPath, liveRun = null) {
+  const entryActions = resolveEntryMainlineActions({ hasWorkspace: Boolean(latestWorkspace), latestWorkspace });
   const workbenchProtocol = latest?.workbenchProtocol || summarizeUserWorkbenchProtocol({}, {
     outputDir: latest?.outputDir || '',
   });
@@ -381,6 +388,7 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
     ? liveRun.runtimeCopilotProtocol
     : {};
   const runtimeStatus = cleanLabel(liveRun?.currentStatus || runtimeProtocol.status || '');
+  const failedCount = Number(liveRun?.failedCount ?? liveRun?.runtimeSummary?.failedCount ?? latest?.failedCount ?? latest?.failed ?? 0);
   const progressSummary = cleanLabel(liveRun?.progressSummary)
     || cleanLabel(runtimeProtocol.progressSummary)
     || cleanLabel(latest?.phaseSummary)
@@ -404,14 +412,6 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
         : (runtimeStatus === 'completed' ? '先进入结果工作台筛图和收口。' : progressSummary)));
   const handoffRule = cleanLabel(runtimeProtocol.handoffRule)
     || '任务总控负责入口选择；进入单轮任务后，由工作台首页和实时副驾驶接住下一步。';
-  const currentLookValue = runtimeStatus === 'running'
-    ? '先看实时进度'
-    : (runtimeStatus === 'paused'
-      ? '先看暂停原因'
-      : (runtimeStatus === 'completed' ? nextActionLabel : nextActionLabel));
-  const currentLookSummary = runtimeStatus
-    ? `${runtimeFocus} ${progressSummary}`.trim()
-    : progressSummary;
   const optionalPageMode = latest?.pageState?.optionalPageMode && typeof latest.pageState.optionalPageMode === 'object'
     ? latest.pageState.optionalPageMode
     : summarizeOptionalPageEmission({
@@ -425,7 +425,12 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
     nextActionLabel,
     handoffRule,
     optionalPageMode,
+    failedCount,
   });
+  const currentLookValue = copilotRelay.currentLookValue || nextActionLabel;
+  const currentLookSummary = copilotRelay.currentLookSummary || (runtimeStatus
+    ? `${runtimeFocus} ${progressSummary}`.trim()
+    : progressSummary);
 
   return {
     title: '入口主链提醒',
@@ -444,7 +449,7 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
           ? `${latest.taskLabel || '当前任务'} 已经有主入口，先点进这轮工作台。`
           : '当前还没有历史任务，先从模板展示板选择任务类型。',
         file: hasLatestWorkspace ? latestWorkspace : examplesCatalogPath,
-        cta: hasLatestWorkspace ? '进入工作台首页' : '开始新任务',
+        cta: hasLatestWorkspace ? entryActions.openWorkspaceHome.cta : entryActions.startNewTask.cta,
         tone: hasLatestWorkspace ? 'good' : 'info',
       },
       {
@@ -452,7 +457,7 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
         value: currentLookValue,
         summary: currentLookSummary,
         file: hasLatestWorkspace ? latestWorkspace : examplesCatalogPath,
-        cta: hasLatestWorkspace ? '继续当前任务' : '选择任务模板',
+        cta: hasLatestWorkspace ? entryActions.continueTask.cta : entryActions.startNewTask.cta,
         tone: runtimeStatus === 'paused' ? 'warn' : (runtimeStatus === 'completed' ? 'good' : 'info'),
       },
       {

@@ -19,6 +19,7 @@ const {
 const {
   loadEntryState,
   resolveEntryContext,
+  resolveEntryMainlineActions,
   resolveEntryMainlineProtocol,
   resolveEntryNextStep,
   resolveEntryPreview,
@@ -175,6 +176,7 @@ function main() {
   const entryState = buildEntryStatePaths(rootDir, latest)
     .map((filePath) => loadEntryState(filePath))
     .find(Boolean) || null;
+  const entryActions = resolveEntryMainlineActions({ hasWorkspace: Boolean(latestWorkspace), latestWorkspace });
   const entryMainlineProtocol = resolveEntryMainlineProtocol(entryState, { currentLayer: '总控层' });
   const entryPreview = resolveEntryPreview(entryState);
   const entryNextStep = resolveEntryNextStep(rootDir, entryState, {
@@ -215,7 +217,7 @@ function main() {
     copy: `${entryMainlineProtocol.summary} ${entryMainlineProtocol.taskCenterEntryProtocol?.userRule || ''}`.trim(),
     maxCards: 3,
     cards: [
-      { label: '模板展示板', value: '选任务', summary: entryMainlineProtocol.entryRole, file: examplesCatalogPath, cta: '开始新任务', tone: 'good' },
+      { label: '模板展示板', value: entryActions.chooseTemplate.value, summary: entryMainlineProtocol.entryRole, file: examplesCatalogPath, cta: entryActions.startNewTask.cta, tone: 'good' },
       {
         label: '任务总控',
         value: '跨任务入口',
@@ -224,8 +226,8 @@ function main() {
         tone: 'info',
       },
       latestWorkspace
-        ? { label: '工作台首页', value: '接住单轮任务', summary: entryMainlineProtocol.workspaceRole, file: latestWorkspace, cta: '继续当前任务', tone: 'neutral' }
-        : { label: '工作台首页', value: '接住单轮任务', summary: entryMainlineProtocol.workspaceRole, pendingLabel: '选定任务后生成', tone: 'neutral' },
+        ? { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.workspaceRole, file: latestWorkspace, cta: entryActions.continueTask.cta, tone: 'neutral' }
+        : { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.workspaceRole, pendingLabel: entryActions.openWorkspaceHome.pendingLabel, tone: 'neutral' },
     ],
   };
   const supportCopy = buildSupportPageCopy('task-center', {
@@ -371,7 +373,7 @@ ${renderWorkspaceStyles()}
           preferExtraLinks: true,
           extraLinks: [
             { label: '中文模板展示板', file: examplesCatalogPath },
-            latestWorkspace ? { label: '继续当前任务', file: latestWorkspace } : null,
+            latestWorkspace ? { label: entryActions.continueTask.label, file: latestWorkspace } : null,
           ],
         })}
       </div>
@@ -427,15 +429,15 @@ ${renderWorkspaceStyles()}
         label: latest.taskLabel,
         summary: latest.nextActionReason || latest.phaseSummary || '这一轮当前最值得继续。',
         file: latestWorkspace,
-        cta: '进入这轮任务',
-        pendingLabel: '当前任务入口尚未生成',
+        cta: entryActions.continueTask.cta,
+        pendingLabel: entryActions.continueTask.pendingLabel,
       } : {
         kicker: '当前推荐',
         label: '先开始一轮新任务',
-        summary: '当前还没有历史任务，先从中文模板展示板开始。',
+        summary: entryActions.startNewTask.summary,
         file: examplesCatalogPath,
-        cta: '开始新任务',
-        pendingLabel: '中文模板展示板尚未生成',
+        cta: entryActions.startNewTask.cta,
+        pendingLabel: entryActions.startNewTask.pendingLabel,
       }),
       nextSteps: [
         entryState ? entryRoute.next : null,
@@ -444,15 +446,15 @@ ${renderWorkspaceStyles()}
           label: latest.nextActionLabel || '进入工作台首页',
           summary: latest.nextActionReason || '先进入这一轮任务的工作台首页，再顺着主链继续。',
           file: latestWorkspace,
-          cta: '选定这轮任务',
-          pendingLabel: '当前任务主入口尚未生成',
+          cta: entryActions.continueTask.routeCta,
+          pendingLabel: entryActions.continueTask.pendingLabel,
         } : {
           kicker: '下一步',
-          label: '中文模板展示板',
-          summary: '先选任务类型和入口，再进入准备工作台。',
+          label: entryActions.startNewTask.value,
+          summary: entryActions.startNewTask.summary,
           file: examplesCatalogPath,
-          cta: '开始新任务',
-          pendingLabel: '中文模板展示板尚未生成',
+          cta: entryActions.startNewTask.cta,
+          pendingLabel: entryActions.startNewTask.pendingLabel,
         },
       ].filter(Boolean),
     })}

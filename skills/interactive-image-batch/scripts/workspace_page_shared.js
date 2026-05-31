@@ -321,47 +321,36 @@ function summarizeArtifactLayer(artifactGovernance = {}) {
   };
 }
 
-function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
-  const source = protocol && typeof protocol === 'object' ? protocol : {};
-  const outputDir = String(options.outputDir || '').trim();
-  const fallbackDefaultVisibleLabels = Array.isArray(options.fallbackDefaultVisibleLabels) && options.fallbackDefaultVisibleLabels.length
-    ? options.fallbackDefaultVisibleLabels
-    : ['工作台首页', '准备工作台', '结果工作台', '异常工作台'];
-  const stateSources = source.stateSources && typeof source.stateSources === 'object'
+function buildWorkspaceStateTopology(outputDir = '', overrides = {}) {
+  const baseDir = String(outputDir || '').trim();
+  const source = overrides && typeof overrides === 'object' ? overrides : {};
+  const nestedSources = source.stateSources && typeof source.stateSources === 'object'
     ? source.stateSources
     : {};
-  const defaultEntryLabel = String(source.defaultEntryLabel || '工作台首页').trim() || '工作台首页';
-  const supportEntryLabel = String(source.supportEntryLabel || '任务档案页').trim() || '任务档案页';
-  const defaultVisibleLabels = Array.isArray(source.defaultVisibleLabels) && source.defaultVisibleLabels.length
-    ? source.defaultVisibleLabels.filter(Boolean)
-    : fallbackDefaultVisibleLabels;
-  const primaryRuntimeSource = String(stateSources.primaryRuntimeSource || '').trim()
-    || (outputDir ? path.join(outputDir, 'workspace_live_state.json') : 'workspace_live_state.json');
-  const compatibilitySnapshot = String(stateSources.compatibilitySnapshot || '').trim()
-    || (outputDir ? path.join(outputDir, 'workbench_state.json') : 'workbench_state.json');
-  const canonicalState = String(stateSources.canonicalState || '').trim()
-    || (outputDir ? path.join(outputDir, 'workspace_state.json') : 'workspace_state.json');
-  const runtimeState = String(stateSources.runtimeState || '').trim()
-    || (outputDir ? path.join(outputDir, 'runtime_state.json') : 'runtime_state.json');
-  const assetsState = String(stateSources.assetsState || '').trim()
-    || (outputDir ? path.join(outputDir, 'workspace_assets.json') : 'workspace_assets.json');
-  const timelineState = String(stateSources.timelineState || '').trim()
-    || (outputDir ? path.join(outputDir, 'workspace_timeline.json') : 'workspace_timeline.json');
-  const taskCenterUnifiedState = String(stateSources.taskCenterUnifiedState || '').trim()
-    || (outputDir ? path.join(path.dirname(outputDir), 'task_center_live_state.json') : 'task_center_live_state.json');
+  const resolveInOutput = (name) => (baseDir ? path.join(baseDir, name) : name);
+  const resolveInTaskRoot = (name) => (baseDir ? path.join(path.dirname(baseDir), name) : name);
+  const preferredRuntimeSource = String(
+    source.preferredRuntimeSource
+    || source.primaryRuntimeSource
+    || nestedSources.primaryRuntimeSource
+    || nestedSources.preferredRuntimeSource
+    || ''
+  ).trim() || resolveInOutput('workspace_live_state.json');
+  const canonicalState = String(source.canonicalState || nestedSources.canonicalState || '').trim()
+    || resolveInOutput('workspace_state.json');
+  const runtimeState = String(source.runtimeState || nestedSources.runtimeState || '').trim()
+    || resolveInOutput('runtime_state.json');
+  const assetsState = String(source.assetsState || nestedSources.assetsState || '').trim()
+    || resolveInOutput('workspace_assets.json');
+  const timelineState = String(source.timelineState || nestedSources.timelineState || '').trim()
+    || resolveInOutput('workspace_timeline.json');
+  const compatibilitySnapshot = String(source.compatibilitySnapshot || nestedSources.compatibilitySnapshot || '').trim()
+    || resolveInOutput('workbench_state.json');
+  const taskCenterUnifiedState = String(source.taskCenterUnifiedState || nestedSources.taskCenterUnifiedState || '').trim()
+    || resolveInTaskRoot('task_center_live_state.json');
   const taskCenterEntryProtocol = source.taskCenterEntryProtocol && typeof source.taskCenterEntryProtocol === 'object'
     ? buildTaskCenterEntryProtocol({ ...source.taskCenterEntryProtocol, source: source.taskCenterEntryProtocol.source || taskCenterUnifiedState })
     : buildTaskCenterEntryProtocol({ source: taskCenterUnifiedState });
-  const userRule = String(source.userRule || '').trim()
-    || '普通用户默认先看工作台首页，再按准备、结果、异常顺着主链继续；任务档案只在按需回看时打开；底层记录文件默认不用直接看。';
-  const runtimeRule = String(source.runtimeRule || '').trim()
-    || '工作台会优先使用 workspace_live_state.json 作为主实时状态源；workspace_state.json 负责统一状态模型；runtime_state.json 只负责运行期进度；workspace_assets.json 和 workspace_timeline.json 分别承接资产分层与阶段时间线；workbench_state.json 只保留兼容旧读取作用。';
-  const taskCenterCopy = String(source.taskCenterCopy || '').trim()
-    || '默认先从工作台首页进入，再顺着准备、结果、异常三站推进；任务档案只作为按需补充入口。';
-  const summary = String(source.summary || '').trim()
-    || `默认先看${defaultVisibleLabels.join('、')}；任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 只保留兼容快照角色，普通用户不用直接看这些文件名。`;
-  const stateSourceSummary = String(source.stateSourceSummary || '').trim()
-    || '任务内优先读取主实时状态源，再由统一状态模型、运行状态、资产状态和时间线状态补全；跨任务切换、入口主链提醒和运行态副驾驶交接再交给任务总控实时状态源处理。';
   const stateRoles = {
     primaryRuntimeSource: '任务内主实时状态源',
     canonicalState: '任务内统一状态模型',
@@ -371,6 +360,82 @@ function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
     compatibilitySnapshot: '兼容旧读取方式的页面快照',
     taskCenterUnifiedState: '跨任务总控实时状态源',
   };
+  const readPriority = [
+    'workspace_live_state.json',
+    'workspace_state.json',
+    'runtime_state.json',
+    'workspace_assets.json',
+    'workspace_timeline.json',
+    'workbench_state.json',
+  ];
+  const taskCenterReadPriority = [
+    'task_center_live_state.json',
+    'task_center_state.json',
+    'daoge_run_index.json',
+  ];
+  const runtimeRule = '工作台会优先使用 workspace_live_state.json 作为主实时状态源；workspace_state.json 负责统一状态模型；runtime_state.json 只负责运行期进度；workspace_assets.json 和 workspace_timeline.json 分别承接资产分层与阶段时间线；workbench_state.json 只保留兼容旧读取作用。';
+  const stateSourceSummary = '任务内优先读取主实时状态源，再由统一状态模型、运行状态、资产状态和时间线状态补全；跨任务切换、入口主链提醒和运行态副驾驶交接再交给任务总控实时状态源处理。';
+  const summary = 'workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，runtime_state.json / workspace_assets.json / workspace_timeline.json 分别承接运行、资产和时间线信息，workbench_state.json 退为兼容快照，task_center_live_state.json 负责跨任务总控实时状态、入口主链提醒和运行态副驾驶交接。';
+
+  return {
+    preferredRuntimeSource,
+    primaryRuntimeSource: preferredRuntimeSource,
+    canonicalState,
+    runtimeState,
+    assetsState,
+    timelineState,
+    compatibilitySnapshot,
+    taskCenterUnifiedState,
+    diagnosticArchiveDefaultVisible: Boolean(source.diagnosticArchiveDefaultVisible),
+    taskCenterEntryProtocol,
+    stateRoles,
+    readPriority,
+    taskCenterReadPriority,
+    runtimeRule,
+    stateSourceSummary,
+    consumerRule: '任务内页面优先消费 workspace_live_state.json；缺失时回落到 workspace_state.json，再补 runtime_state.json、workspace_assets.json 和 workspace_timeline.json；旧页面只把 workbench_state.json 当兼容兜底。',
+    taskCenterConsumerRule: '任务总控优先消费 task_center_live_state.json；缺失时回落到 task_center_state.json 和 daoge_run_index.json；单轮任务判断仍交给对应工作台首页。',
+    summary,
+  };
+}
+
+function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
+  const source = protocol && typeof protocol === 'object' ? protocol : {};
+  const outputDir = String(options.outputDir || '').trim();
+  const fallbackDefaultVisibleLabels = Array.isArray(options.fallbackDefaultVisibleLabels) && options.fallbackDefaultVisibleLabels.length
+    ? options.fallbackDefaultVisibleLabels
+    : ['工作台首页', '准备工作台', '结果工作台', '异常工作台'];
+  const stateSources = source.stateSources && typeof source.stateSources === 'object'
+    ? source.stateSources
+    : {};
+  const stateTopology = buildWorkspaceStateTopology(outputDir, {
+    ...stateSources,
+    taskCenterEntryProtocol: source.taskCenterEntryProtocol,
+  });
+  const defaultEntryLabel = String(source.defaultEntryLabel || '工作台首页').trim() || '工作台首页';
+  const supportEntryLabel = String(source.supportEntryLabel || '任务档案页').trim() || '任务档案页';
+  const defaultVisibleLabels = Array.isArray(source.defaultVisibleLabels) && source.defaultVisibleLabels.length
+    ? source.defaultVisibleLabels.filter(Boolean)
+    : fallbackDefaultVisibleLabels;
+  const primaryRuntimeSource = stateTopology.primaryRuntimeSource;
+  const compatibilitySnapshot = stateTopology.compatibilitySnapshot;
+  const canonicalState = stateTopology.canonicalState;
+  const runtimeState = stateTopology.runtimeState;
+  const assetsState = stateTopology.assetsState;
+  const timelineState = stateTopology.timelineState;
+  const taskCenterUnifiedState = stateTopology.taskCenterUnifiedState;
+  const taskCenterEntryProtocol = stateTopology.taskCenterEntryProtocol;
+  const userRule = String(source.userRule || '').trim()
+    || '普通用户默认先看工作台首页，再按准备、结果、异常顺着主链继续；任务档案只在按需回看时打开；底层记录文件默认不用直接看。';
+  const runtimeRule = String(source.runtimeRule || '').trim()
+    || stateTopology.runtimeRule;
+  const taskCenterCopy = String(source.taskCenterCopy || '').trim()
+    || '默认先从工作台首页进入，再顺着准备、结果、异常三站推进；任务档案只作为按需补充入口。';
+  const summary = String(source.summary || '').trim()
+    || `默认先看${defaultVisibleLabels.join('、')}；任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 只保留兼容快照角色，普通用户不用直接看这些文件名。`;
+  const stateSourceSummary = String(source.stateSourceSummary || '').trim()
+    || stateTopology.stateSourceSummary;
+  const stateRoles = stateTopology.stateRoles;
 
   return {
     defaultEntryLabel,
@@ -390,6 +455,10 @@ function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
     stateSourceSummary,
     taskCenterEntryProtocol,
     stateRoles,
+    readPriority: stateTopology.readPriority,
+    taskCenterReadPriority: stateTopology.taskCenterReadPriority,
+    consumerRule: stateTopology.consumerRule,
+    taskCenterConsumerRule: stateTopology.taskCenterConsumerRule,
     stateSources: {
       primaryRuntimeSource,
       canonicalState,
@@ -5135,4 +5204,5 @@ module.exports = {
   renderWorkspacePageShell,
   renderWorkspaceDeclaredSections,
   renderWorkspaceStyles,
+  buildWorkspaceStateTopology,
 };

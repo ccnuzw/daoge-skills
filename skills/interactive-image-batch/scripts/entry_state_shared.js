@@ -14,6 +14,50 @@ function normalizeList(value, fallback = []) {
   return normalized.length ? normalized : fallback;
 }
 
+function resolveEntryMainlineActions(options = {}) {
+  const hasWorkspace = Boolean(options.hasWorkspace || options.latestWorkspace);
+  return {
+    startNewTask: {
+      label: '开始新任务',
+      value: '中文模板展示板',
+      cta: '开始新任务',
+      summary: '先从中文模板展示板选择任务类型和起步入口。',
+      pendingLabel: '中文模板展示板尚未生成',
+    },
+    continueTask: {
+      label: '继续当前任务',
+      value: hasWorkspace ? '工作台首页' : '等待任务主入口',
+      cta: hasWorkspace ? '继续当前任务' : '选定任务后继续',
+      routeCta: '选定这轮任务',
+      summary: hasWorkspace
+        ? '继续当前任务时，先进入这一轮工作台首页，再顺着准备、结果、异常推进。'
+        : '选定任务后，工作台首页会接住单轮任务判断。',
+      pendingLabel: '当前任务主入口尚未生成',
+    },
+    openTaskCenter: {
+      label: '打开任务总控',
+      value: '任务总控',
+      cta: '打开任务总控',
+      summary: '任务总控只负责开新任务、继续某一轮任务和切换任务。',
+      pendingLabel: '任务总控尚未生成',
+    },
+    openWorkspaceHome: {
+      label: '工作台首页',
+      value: '接住单轮任务',
+      cta: hasWorkspace ? '回工作台首页' : '选定任务后生成',
+      summary: '工作台首页接住单轮任务判断，再顺着准备、结果、异常继续。',
+      pendingLabel: '选定任务后生成',
+    },
+    chooseTemplate: {
+      label: '中文模板展示板',
+      value: '选任务',
+      cta: '开始新任务',
+      summary: '模板展示板只负责选择任务类型和起步入口。',
+      pendingLabel: '中文模板展示板尚未生成',
+    },
+  };
+}
+
 function buildTaskCenterEntryProtocol(options = {}) {
   return {
     version: Number(options.version || 1),
@@ -297,6 +341,7 @@ module.exports = {
   buildTaskCenterEntryProtocol,
   entryModeLabel,
   loadEntryState,
+  resolveEntryMainlineActions,
   resolveEntryDefaultGenerationProtocol,
   resolveEntryContext,
   resolveEntryMainlineProtocol,

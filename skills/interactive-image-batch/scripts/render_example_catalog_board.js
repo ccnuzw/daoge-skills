@@ -5,6 +5,7 @@ const {
   entryModeLabel,
   loadEntryState,
   resolveEntryContext,
+  resolveEntryMainlineActions,
   resolveEntryMainlineProtocol,
   resolveEntryNextStep,
   resolveEntryPreview,
@@ -297,6 +298,7 @@ function main() {
   const entryState = loadEntryState(entryStateFile);
   const currentTaskCategory = String(entryState?.taskCategory || '').trim() || '尚未选择';
   const currentStarterIntent = String(entryState?.starterIntent || '').trim() || '尚未选择';
+  const entryActions = resolveEntryMainlineActions({ hasWorkspace: fs.existsSync(workspaceHomeFile) });
   const entryMainlineProtocol = resolveEntryMainlineProtocol(entryState, { currentLayer: '模板展示层' });
   const entryPreview = resolveEntryPreview(entryState);
   const nextStep = resolveEntryNextStep(portalDir, entryState, {
@@ -634,7 +636,7 @@ ${renderPortalHeadAssets()}
       copy: entryMainlineProtocol.summary,
       maxCards: 3,
       cards: [
-        { label: '模板展示板', value: '选任务', summary: entryMainlineProtocol.entryRole, tone: 'good', hideLinkIfMissing: true },
+        { label: '模板展示板', value: entryActions.chooseTemplate.value, summary: entryMainlineProtocol.entryRole, tone: 'good', hideLinkIfMissing: true },
         {
           label: '任务总控',
           value: '跨任务入口',
@@ -642,7 +644,7 @@ ${renderPortalHeadAssets()}
           tone: 'info',
           hideLinkIfMissing: true,
         },
-        { label: '工作台首页', value: '接住单轮任务', summary: entryMainlineProtocol.workspaceRole, file: workspaceHomeFile, cta: '回工作台首页', pendingLabel: '选定任务后生成', tone: 'neutral' },
+        { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.workspaceRole, file: workspaceHomeFile, cta: entryActions.openWorkspaceHome.cta, pendingLabel: entryActions.openWorkspaceHome.pendingLabel, tone: 'neutral' },
       ],
     })}
 
@@ -654,7 +656,7 @@ ${renderPortalHeadAssets()}
         label: '工作台首页',
         summary: '回到统一主控页，重新看当前主链位置和已生成页面。',
         file: workspaceHomeFile,
-        cta: '回工作台首页',
+        cta: entryActions.openWorkspaceHome.cta,
       },
       nextSteps: [
         entryRoute.next,

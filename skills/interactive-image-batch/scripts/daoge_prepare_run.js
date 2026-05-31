@@ -4,7 +4,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { parseArgs, readJson, writeJson } = require('./script_utils');
 const { ensurePortalUiAssets } = require('./portal_ui_shared');
-const { resolveOptionalPageEmission } = require('./default_generation_contract');
+const { buildOptionalPageDecision, pruneHiddenHtmlFiles, resolveOptionalPageEmission } = require('./default_generation_contract');
 
 function required(args, key) {
   if (!args[key]) throw new Error(`Missing required flag: --${key}`);
@@ -116,6 +116,9 @@ function main() {
   const bindingConversationCard = path.join(outputDir, 'binding_conversation_card.md');
   const keepPrepareMarkdown = flagEnabled(args['emit-prepare-markdown']);
   const optionalPageEmission = resolveOptionalPageEmission({
+    optionalPageMode: args['emit-optional-pages'],
+  });
+  const optionalPageDecision = buildOptionalPageDecision({
     optionalPageMode: args['emit-optional-pages'],
   });
   const prepareMarkdownArtifacts = createEphemeralPrepareMarkdownPaths(outputDir, keepPrepareMarkdown);
@@ -382,6 +385,7 @@ function main() {
       removeFileIfExists(path.join(outputDir, 'daoge_run_summary.md'));
       removeFileIfExists(path.join(outputDir, 'daoge_preflight_dashboard.md'));
     }
+    pruneHiddenHtmlFiles(outputDir, optionalPageDecision);
   }
 }
 

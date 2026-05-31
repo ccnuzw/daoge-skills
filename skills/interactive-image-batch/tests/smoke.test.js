@@ -1620,6 +1620,57 @@ test('run_batch removes leftover storyboard board in mainline-only mode', () => 
   assert.equal(fs.existsSync(path.join(outputDir, 'storyboard_board.html')), false);
 });
 
+test('run_batch prunes leftover advanced and legacy html in mainline-only mode', () => {
+  const tempDir = makeTempDir('interactive-image-batch-mainline-advanced-prune-');
+  const outputDir = path.join(tempDir, 'out');
+  const envFile = path.join(tempDir, '.env');
+  const promptsFile = path.join(tempDir, 'prompts.generated.json');
+
+  fs.mkdirSync(outputDir, { recursive: true });
+  [
+    'review_board.html',
+    'completion_board.html',
+    'run_overview.html',
+    'rerun_board.html',
+    'result_hub.html',
+    'daoge_portal.html',
+    'preflight_board.html',
+    'prompt_preview.html',
+    'assets_board.html',
+  ].forEach((name) => {
+    fs.writeFileSync(path.join(outputDir, name), `<html>${name}</html>`);
+  });
+  fs.writeFileSync(envFile, [
+    'OPENAI_BASE_URL=https://example.com/v1',
+    'OPENAI_API_KEY=test-key',
+    'OPENAI_MODEL=gpt-image-2',
+  ].join('\n'));
+  fs.writeFileSync(promptsFile, readFixture('prompts.minimal.json'));
+
+  runNode('run_batch.js', [
+    '--prompts-file', promptsFile,
+    '--env-file', envFile,
+    '--dry-run', 'true',
+    '--output-dir', outputDir,
+    '--batch-size', '1',
+    '--concurrency', '1',
+  ]);
+
+  [
+    'review_board.html',
+    'completion_board.html',
+    'run_overview.html',
+    'rerun_board.html',
+    'result_hub.html',
+    'daoge_portal.html',
+    'preflight_board.html',
+    'prompt_preview.html',
+    'assets_board.html',
+  ].forEach((name) => {
+    assert.equal(fs.existsSync(path.join(outputDir, name)), false, `unexpected leftover ${name}`);
+  });
+});
+
 test('import_reference_assets organizes files and generates storyboard bindings', () => {
   const tempDir = makeTempDir('interactive-image-batch-import-assets-');
   const outputDir = path.join(tempDir, 'out');
@@ -3895,7 +3946,7 @@ test('refreshTaskCenterRuntimeState writes running paused and completed live sta
   assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.summary || ''), /实时副驾驶/);
   assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.watch || ''), /先看实时进度/);
   assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.reply || ''), /继续，先盯住当前进度/);
-  assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.handoff || ''), /任务完成或暂停后/);
+  assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.handoff || ''), /完成、暂停或等待确认后/);
   assert.equal(snapshot.entryMainlineGuide?.copilotRelay?.generationMode, 'mainline-only');
   assert.equal(snapshot.entryMainlineGuide?.copilotRelay?.generationLabel, '主链极简模式');
   assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.generationRule || ''), /顺着主链继续/);
@@ -3973,6 +4024,41 @@ test('refreshTaskCenterRuntimeState writes running paused and completed live sta
   assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.handoff || ''), /结果工作台接住/);
   assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.summary || ''), /当前是主链极简模式/);
   assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.generationRule || ''), /顺着主链继续/);
+
+  const waitingState = {
+    ...runningState,
+    status: 'awaiting_confirmation',
+    updatedAt: '2026-05-26T08:04:00.000Z',
+    pauseReason: 'sample_stage_completed_review_required',
+  };
+  fs.writeFileSync(path.join(outputDir, 'job_state.json'), JSON.stringify(waitingState, null, 2));
+  result = refreshTaskCenterRuntimeState(outputDir, {
+    renderOutputs: false,
+  });
+  snapshot = JSON.parse(fs.readFileSync(result.statePath, 'utf8'));
+  assert.equal(snapshot.currentStatus, 'awaiting_confirmation');
+  assert.equal(snapshot.runtimeCopilotProtocol?.cadenceLabel, '等待确认');
+  assert.equal(snapshot.entryMainlineGuide?.runtimeMode, 'awaiting_confirmation');
+  assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.watch || ''), /确认点/);
+  assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.handoff || ''), /确认完成后/);
+
+  const completedFailedState = {
+    ...completedState,
+    progress: {
+      ...completedState.progress,
+      failed: 1,
+      success: 1,
+    },
+  };
+  fs.writeFileSync(path.join(outputDir, 'job_state.json'), JSON.stringify(completedFailedState, null, 2));
+  result = refreshTaskCenterRuntimeState(outputDir, {
+    renderOutputs: false,
+  });
+  snapshot = JSON.parse(fs.readFileSync(result.statePath, 'utf8'));
+  assert.equal(snapshot.currentStatus, 'completed');
+  assert.match(snapshot.nextSuggestedAction.label, /异常工作台/);
+  assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.watch || ''), /异常工作台/);
+  assert.match(String(snapshot.entryMainlineGuide?.copilotRelay?.handoff || ''), /异常工作台先接住失败项/);
 });
 
 test('refreshRuntimeWorkbench updates workspace pages for running and paused states', () => {

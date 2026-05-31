@@ -4,7 +4,7 @@ const { execFileSync } = require('child_process');
 const { parseArgs, readJson, readJsonIfExists, ensureDir, writeJson } = require('./script_utils');
 const { loadWorkbenchState } = require('./workbench_state_shared');
 const { summarizeUserWorkbenchProtocol } = require('./workspace_page_shared');
-const { resolveOptionalPageEmission, buildOptionalPageDecision } = require('./default_generation_contract');
+const { resolveOptionalPageEmission, buildOptionalPageDecision, pruneHiddenHtmlFiles } = require('./default_generation_contract');
 
 function asArray(value) {
   if (Array.isArray(value)) return value;
@@ -399,6 +399,7 @@ function main() {
   } else {
     removeFileIfExists(path.join(outputDir, 'storyboard_board.html'));
   }
+  pruneHiddenHtmlFiles(outputDir, optionalPageDecision);
 
   writeReadme(outputDir, {
     workspaceHome: path.join(outputDir, 'workspace_home.html'),

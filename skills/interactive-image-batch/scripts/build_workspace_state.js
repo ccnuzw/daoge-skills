@@ -47,6 +47,7 @@ const {
   buildWorkspaceSummarySectionData,
   buildWorkspaceWorkbenchSectionData,
   buildWorkspaceContentSectionPlan,
+  buildWorkspaceStateTopology,
 } = require('./workspace_page_shared');
 const { summarizeOptionalPageEmission } = require('./default_generation_contract');
 const { resolveProfile, buildDisplayDistributions } = require('./template_display_profile');
@@ -4809,8 +4810,9 @@ function buildUserWorkbenchProtocol(outputDir, options = {}) {
     : fallbackMainlineLabels;
   const supportEntry = userFacingItems.find((item) => item && item.role === 'support') || null;
   const defaultEntry = userFacingItems.find((item) => item && item.role === 'default-entry') || null;
-  const taskCenterUnifiedState = stateTopology.taskCenterUnifiedState || path.join(path.dirname(outputDir), 'task_center_live_state.json');
-  const taskCenterEntryProtocol = buildTaskCenterEntryProtocol({ source: taskCenterUnifiedState });
+  const resolvedTopology = buildWorkspaceStateTopology(outputDir, stateTopology);
+  const taskCenterUnifiedState = resolvedTopology.taskCenterUnifiedState;
+  const taskCenterEntryProtocol = resolvedTopology.taskCenterEntryProtocol;
 
   return {
     version: 1,
@@ -4822,19 +4824,24 @@ function buildUserWorkbenchProtocol(outputDir, options = {}) {
     defaultVisibleFiles,
     defaultVisibleLabels,
     stateSources: {
-      primaryRuntimeSource: stateTopology.preferredRuntimeSource || path.join(outputDir, 'workspace_live_state.json'),
-      canonicalState: stateTopology.canonicalState || path.join(outputDir, 'workspace_state.json'),
-      runtimeState: stateTopology.runtimeState || path.join(outputDir, 'runtime_state.json'),
-      assetsState: stateTopology.assetsState || path.join(outputDir, 'workspace_assets.json'),
-      timelineState: stateTopology.timelineState || path.join(outputDir, 'workspace_timeline.json'),
-      compatibilitySnapshot: stateTopology.compatibilitySnapshot || path.join(outputDir, 'workbench_state.json'),
+      primaryRuntimeSource: resolvedTopology.primaryRuntimeSource,
+      canonicalState: resolvedTopology.canonicalState,
+      runtimeState: resolvedTopology.runtimeState,
+      assetsState: resolvedTopology.assetsState,
+      timelineState: resolvedTopology.timelineState,
+      compatibilitySnapshot: resolvedTopology.compatibilitySnapshot,
       taskCenterUnifiedState,
     },
     taskCenterEntryProtocol,
     userRule: '普通用户默认先看工作台首页，再按准备、结果、异常顺着主链继续；任务档案只在按需回看时打开；底层记录文件默认不用直接看。',
-    runtimeRule: '工作台会优先使用 workspace_live_state.json 作为主实时状态源；workspace_state.json 负责统一状态模型；runtime_state.json 只负责运行期进度；workspace_assets.json 和 workspace_timeline.json 分别承接资产分层与阶段时间线；workbench_state.json 只保留兼容旧读取作用。',
+    runtimeRule: resolvedTopology.runtimeRule,
     taskCenterCopy: '默认先从工作台首页进入，再顺着准备、结果、异常三站推进；任务档案只作为按需补充入口。',
-    stateSourceSummary: '任务内优先读取主实时状态源，再由统一状态模型、运行状态、资产状态和时间线状态补全；跨任务切换、入口主链提醒和运行态副驾驶交接再交给任务总控实时状态源处理。',
+    stateSourceSummary: resolvedTopology.stateSourceSummary,
+    stateRoles: resolvedTopology.stateRoles,
+    readPriority: resolvedTopology.readPriority,
+    taskCenterReadPriority: resolvedTopology.taskCenterReadPriority,
+    consumerRule: resolvedTopology.consumerRule,
+    taskCenterConsumerRule: resolvedTopology.taskCenterConsumerRule,
     summary: `默认先看${defaultVisibleLabels.join('、') || '工作台主链页面'}；任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 只保留兼容快照角色，普通用户不用直接看这些文件名。`,
   };
 }
@@ -5038,20 +5045,9 @@ function buildUnifiedAssetLayers(outputDir, options = {}) {
     surfaces: directorySurfaces,
     summary: `当前输出目录默认只让用户先看 ${defaultVisibleFiles.length} 个主链文件，其它文件按文件落盘、归档或内部状态层后退。`,
   };
-  const stateTopology = {
-    preferredRuntimeSource: path.join(outputDir, 'workspace_live_state.json'),
-    canonicalState: path.join(outputDir, 'workspace_state.json'),
-    runtimeState: path.join(outputDir, 'runtime_state.json'),
-    assetsState: path.join(outputDir, 'workspace_assets.json'),
-    timelineState: path.join(outputDir, 'workspace_timeline.json'),
-    compatibilitySnapshot: path.join(outputDir, 'workbench_state.json'),
-    taskCenterUnifiedState: path.join(path.dirname(outputDir), 'task_center_live_state.json'),
+  const stateTopology = buildWorkspaceStateTopology(outputDir, {
     diagnosticArchiveDefaultVisible: false,
-    taskCenterEntryProtocol: buildTaskCenterEntryProtocol({
-      source: path.join(path.dirname(outputDir), 'task_center_live_state.json'),
-    }),
-    summary: 'workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，runtime_state.json / workspace_assets.json / workspace_timeline.json 分别承接运行、资产和时间线信息，workbench_state.json 退为兼容快照，task_center_live_state.json 负责跨任务总控实时状态、入口主链提醒和运行态副驾驶交接。',
-  };
+  });
   const userWorkbenchProtocol = buildUserWorkbenchProtocol(outputDir, {
     directoryProtocol: outputDirectoryProtocol,
     stateTopology,

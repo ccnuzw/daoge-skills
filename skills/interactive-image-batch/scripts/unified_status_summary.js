@@ -712,6 +712,9 @@ function normalizeRuntimeProtocolState(runtimeState = {}, fallback = {}) {
     '未命名任务'
   );
   const runningTask = cleanText(primary.runningTask || secondary.runningTask || taskLabel, '未命名任务');
+  const failedCount = Number(primary.failedCount ?? secondary.failedCount ?? secondary.failed ?? 0);
+  const successCount = Number(primary.successCount ?? secondary.successCount ?? secondary.success ?? 0);
+  const skippedCount = Number(primary.skippedCount ?? secondary.skippedCount ?? secondary.skipped ?? 0);
   const resolvedUnifiedStatus = unifiedStatusSource || buildStageUnifiedStatus({
     stage: phaseLabel || currentStage,
     conclusion: phaseHeadline || phaseSummary,
@@ -788,7 +791,7 @@ function normalizeRuntimeProtocolState(runtimeState = {}, fallback = {}) {
       nextAction: nextSuggestedAction,
       dialogueStatus,
       copilotSummary,
-      failedCount: Number(primary.failedCount ?? secondary.failedCount ?? secondary.failed ?? 0),
+      failedCount,
     });
 
   return {
@@ -800,6 +803,9 @@ function normalizeRuntimeProtocolState(runtimeState = {}, fallback = {}) {
     completedBatchCount: Number(primary.completedBatchCount ?? secondary.completedBatchCount ?? 0),
     pendingBatchCount: Number(primary.pendingBatchCount ?? secondary.pendingBatchCount ?? 0),
     totalBatchCount: Number(primary.totalBatchCount ?? secondary.totalBatchCount ?? 0),
+    failedCount,
+    successCount,
+    skippedCount,
     progressSummary,
     updatedAt: primary.updatedAt || secondary.updatedAt || primary.generatedAt || secondary.generatedAt || null,
     runningTask,

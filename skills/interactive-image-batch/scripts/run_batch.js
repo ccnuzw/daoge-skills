@@ -33,6 +33,7 @@ const {
 const {
   resolveOptionalPageEmission,
   buildOptionalPageDecision,
+  pruneHiddenHtmlFiles,
 } = require('./default_generation_contract');
 const {
   writeJson,
@@ -437,6 +438,7 @@ async function main() {
       renderResultWorkspace(outputDir);
       renderExceptionWorkspace(outputDir);
     }
+    pruneHiddenHtmlFiles(outputDir, optionalPageDecision);
     fs.writeFileSync(path.join(outputDir, 'README.md'), buildReadmeFromWorkspaceState(outputDir, {
       workspaceHomePath,
       resultWorkspacePath,
@@ -671,6 +673,7 @@ async function main() {
     renderResultWorkspace(outputDir);
     renderExceptionWorkspace(outputDir);
   }
+  pruneHiddenHtmlFiles(outputDir, optionalPageDecision);
   let completionReportPath = renderCompletionReport(outputDir, {
     generateArchiveMarkdown: emitArchiveMarkdown,
   });

@@ -286,11 +286,33 @@ function buildOptionalPageDecision(options = {}) {
   };
 }
 
+function pruneHiddenHtmlFiles(outputDir, optionalPageDecision, options = {}) {
+  const fs = options.fs || require('fs');
+  const path = options.path || require('path');
+  const decision = optionalPageDecision && typeof optionalPageDecision === 'object'
+    ? optionalPageDecision
+    : buildOptionalPageDecision(optionalPageDecision || {});
+  const hiddenFiles = decision.generationContract?.currentMode?.hiddenHtmlFiles
+    || decision.generationPolicy?.hiddenHtmlFiles
+    || [];
+  const pruned = [];
+  for (const file of hiddenFiles) {
+    const fileName = String(file || '').trim();
+    if (!fileName || path.basename(fileName) !== fileName || !fileName.endsWith('.html')) continue;
+    const target = path.join(outputDir, fileName);
+    if (!fs.existsSync(target)) continue;
+    fs.unlinkSync(target);
+    pruned.push(target);
+  }
+  return pruned;
+}
+
 module.exports = {
   DEFAULT_GENERATION_CONTRACT,
   buildOptionalPageDecision,
   buildDefaultGenerationContract,
   cloneGenerationItems,
+  pruneHiddenHtmlFiles,
   resolveOptionalPageEmission,
   summarizeOptionalPageEmission,
 };

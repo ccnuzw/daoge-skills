@@ -334,6 +334,72 @@ function buildRuntimeConversationCopy(options = {}) {
   };
 }
 
+function buildRuntimeCopilotRelayCopy(options = {}) {
+  const mode = normalizeRuntimeConversationMode(options);
+  const nextActionLabel = String(options.nextActionLabel || '').trim();
+  const runtimeFocus = String(options.runtimeFocus || '').trim();
+  const progressSummary = String(options.progressSummary || '').trim();
+  const failedCount = Number(options.failedCount || 0);
+
+  if (mode === 'running') {
+    return {
+      mode,
+      watch: '先看实时进度，不切到其它任务内判断。',
+      handoff: '等任务完成、暂停或等待确认后，再交回工作台首页、结果工作台或异常工作台。',
+      currentLookValue: '先看实时进度',
+      currentLookSummary: runtimeFocus || progressSummary || '任务正在推进，先让实时副驾驶继续接住进度。',
+    };
+  }
+
+  if (mode === 'paused') {
+    return {
+      mode,
+      watch: '先看暂停原因，把需要人工确认的风险收掉。',
+      handoff: '处理完暂停原因后，再回工作台首页继续主链。',
+      currentLookValue: '先看暂停原因',
+      currentLookSummary: runtimeFocus || progressSummary || '当前暂停原因会影响主链继续，先收掉这一层。',
+    };
+  }
+
+  if (mode === 'waiting') {
+    return {
+      mode,
+      watch: '先看确认点，明确答复后再继续执行。',
+      handoff: '确认完成后，任务会回到运行态或交回对应工作台继续主链。',
+      currentLookValue: '先看确认点',
+      currentLookSummary: runtimeFocus || progressSummary || '当前停在确认点，不需要在总控层做单轮判断。',
+    };
+  }
+
+  if (mode === 'completed-failed') {
+    return {
+      mode,
+      watch: `先进入异常工作台，把 ${failedCount || '残留'} 个异常压力收口。`,
+      handoff: '异常工作台先接住失败项和补跑判断，处理后再回结果工作台收口。',
+      currentLookValue: nextActionLabel || '进入异常工作台',
+      currentLookSummary: runtimeFocus || progressSummary || '完成态仍有异常，先收异常比直接筛图更稳。',
+    };
+  }
+
+  if (mode === 'completed-clean') {
+    return {
+      mode,
+      watch: `先${nextActionLabel || '进入结果工作台'}，把结果筛图和收口接住。`,
+      handoff: '完成态由结果工作台接住，不再停留在总控层做单轮判断。',
+      currentLookValue: nextActionLabel || '进入结果工作台',
+      currentLookSummary: runtimeFocus || progressSummary || '结果已经生成，可以进入结果工作台继续筛图。',
+    };
+  }
+
+  return {
+    mode,
+    watch: runtimeFocus || progressSummary || '先选定任务，再进入工作台首页。',
+    handoff: '进入单轮任务后，由工作台首页接住下一步。',
+    currentLookValue: nextActionLabel || '进入工作台首页',
+    currentLookSummary: runtimeFocus || progressSummary || '先回工作台首页确认当前主链位置。',
+  };
+}
+
 function buildRuntimePressureCopy(options = {}) {
   const runtimeStatus = String(options.runtimeStatus || '').trim();
   const currentBatch = Number(options.currentBatch || 0);
@@ -1552,6 +1618,7 @@ module.exports = {
   buildRuntimeDialogueValue,
   buildRuntimeNextActionLabel,
   buildRuntimeConversationCopy,
+  buildRuntimeCopilotRelayCopy,
   getDefaultActionStatusCopy,
   getDefaultTransitionStatusCopy,
   getDefaultDialogueStatusCopy,
