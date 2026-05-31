@@ -13,6 +13,12 @@
 
 - [references/template_map_zh.md](./references/template_map_zh.md)
 
+如果你更习惯先看可视化模板板，再做选择，也可以直接打开：
+
+- `references/examples/examples_catalog.html`
+
+这份中文模板展示板随 `interactive-image-batch` 一起安装，不是额外下载物。
+
 ---
 
 ## 一、先记住一句话
@@ -60,6 +66,12 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 - [references/template_map_zh.md](./references/template_map_zh.md)
 - `references/examples/examples_catalog.html`
+
+如果你不想先记命令，最适合先看的是：
+
+- `references/examples/examples_catalog.html`
+
+它更像一块中文模板选择展示板，适合先浏览，再决定用哪个 `intent` 或 `example-id`。
 
 ---
 
@@ -114,6 +126,22 @@ node scripts/run_example_catalog_prepare.js \
 
 - 你已经熟悉这套系统
 - 你已经知道具体 example id
+
+---
+
+### 入口 4：先看中文模板展示板再决定
+
+如果你现在最卡的是“我不知道该选哪个模板”，优先直接打开：
+
+```text
+references/examples/examples_catalog.html
+```
+
+适合：
+
+- 你更习惯先按视觉浏览模板
+- 你不想先记 `intent`
+- 你想先从中文版模板板里挑一个，再回头运行命令
 
 ---
 

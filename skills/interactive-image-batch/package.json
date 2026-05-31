@@ -1,0 +1,19 @@
+{
+  "name": "interactive-image-batch",
+  "version": "1.0.0",
+  "description": "如果你是第一次使用这套 skill，先不要直接读完整 README。",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.60.0"
+  }
+}

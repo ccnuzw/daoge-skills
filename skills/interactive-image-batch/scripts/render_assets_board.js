@@ -1,8 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks, renderPortalContextBar } = require('./portal_shared');
+const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail, renderPortalRouteCompass, renderPortalWorkbench } = require('./portal_shared');
 const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { deriveTaskLabel } = require('./task_label_utils');
+const { loadWorkbenchState } = require('./workbench_state_shared');
+const { resolveWorkspaceRouteFile } = require('./workspace_storyboard_shared');
 
 function escapeHtml(text) {
   return String(text || '')
@@ -63,6 +66,9 @@ function renderAssetTile(asset, analysisMap, slotAssignmentsByAsset, outputDir) 
   const analysis = analysisMap.get(absolutePath) || null;
   const slotAssignments = slotAssignmentsByAsset.get(asset.asset_id) || [];
   const vision = analysis?.vision_recommendation || null;
+  const slotSummary = slotAssignments.length
+    ? slotAssignments.map((item) => item.slot_id).join(', ')
+    : '未绑定';
 
   return `
     <article id="asset-${escapeHtml(asset.asset_id || 'unknown')}" class="asset-tile asset-${escapeHtml(asset.asset_type || 'reference')}">
@@ -75,13 +81,17 @@ function renderAssetTile(asset, analysisMap, slotAssignmentsByAsset, outputDir) 
         ${slotAssignments.length ? `<span class="pill pill-slot">${escapeHtml(slotAssignments.map((item) => item.slot_id).join(', '))}</span>` : '<span class="pill pill-missing">未绑定</span>'}
       </div>
       <div class="meta-list">
-        ${renderMetaRow('Asset ID', asset.asset_id || '未设置')}
         ${renderMetaRow('文件名', basenameSafe(asset.path))}
-        ${renderMetaRow('规则推断', analysis?.inference?.reason || '未记录')}
-        ${renderMetaRow('规则槽位', analysis?.inferred_slot_id || '未记录')}
-        ${renderMetaRow('规则类型', analysis?.inferred_type || '未记录')}
-        ${renderMetaRow('视觉推荐', vision ? `${vision.slot_id || '未推荐'} / ${vision.type || '未设置'} / ${Number(vision.confidence || 0).toFixed(2)}` : '未启用')}
+        ${renderMetaRow('当前绑定', slotSummary)}
+        ${renderMetaRow('规则判断', analysis?.inference?.reason || '未记录')}
+        ${renderMetaRow('建议槽位', analysis?.inferred_slot_id || '未记录')}
+        ${renderMetaRow('视觉建议', vision ? `${vision.slot_id || '未推荐'} / ${vision.type || '未设置'}` : '未启用')}
         ${renderMetaRow('备注', asset.notes || '未提供')}
+      </div>
+      <div class="meta-list portal-audience-pro" style="margin-top:12px;">
+        ${renderMetaRow('Asset ID', asset.asset_id || '未设置')}
+        ${renderMetaRow('规则类型', analysis?.inferred_type || '未记录')}
+        ${renderMetaRow('视觉置信度', vision ? Number(vision.confidence || 0).toFixed(2) : '未启用')}
       </div>
     </article>
   `;
@@ -98,8 +108,12 @@ function main() {
   const analysis = readJson(analysisPath);
   const outputDir = path.dirname(bindingsPath);
   const outputPath = path.resolve(args['output-file'] || path.join(outputDir, 'assets_board.html'));
+  const workbenchState = loadWorkbenchState(outputDir);
+  const pageState = workbenchState.pageState || workbenchState.workspaceState || {};
 
   const preflightBoardPath = path.join(outputDir, 'preflight_board.html');
+  const promptPreviewBoardPath = path.join(outputDir, 'prompt_preview.html');
+  const runOverviewPath = path.join(outputDir, 'run_overview.html');
 
   const referenceAssets = ensureArray(bindings.reference_assets);
   const slotAssignments = ensureArray(bindings.slot_assignments);
@@ -126,11 +140,33 @@ function main() {
   const promptOnlySlots = slotAssignments.filter((slot) => String(slot.reference_mode || '').trim() === 'prompt-only');
   const slotModeCounts = countBy(slotAssignments, (slot) => slot.reference_mode || 'prompt-only');
   const unresolvedNaturalLanguage = ensureArray(naturalLanguageBindings?.unassignedIndexes).length;
+  const taskLabel = deriveTaskLabel({
+    taskLabel: String(pageState?.taskLabel || '').trim(),
+    selectedCount: Number(pageState?.counts?.selected || slotAssignments.length || 0),
+    sampleSize: 0,
+    pauseReason: '',
+    resumeManifest: null,
+  }, outputDir);
+  const phaseLabel = String(pageState?.status?.phase || '').trim() || '准备阶段';
+  const statusHeadline = String(pageState?.status?.headline || '').trim() || '当前处于素材与绑定确认阶段';
+  const statusSummary = String(pageState?.status?.summary || '').trim()
+    || '这一页只负责确认素材、槽位和绑定关系有没有明显偏差，确认干净后就回主链继续推进。';
+  const nextActionTarget = pageState?.nextAction?.target
+    ? path.join(outputDir, pageState.nextAction.target)
+    : (fileExists(path.join(outputDir, 'prepare_workspace.html'))
+      ? path.join(outputDir, 'prepare_workspace.html')
+      : preflightBoardPath);
+  const nextActionLabel = String(pageState?.nextAction?.label || '').trim()
+    || (fileExists(path.join(outputDir, 'prepare_workspace.html')) ? '回准备工作台' : '回预检总览');
+  const nextActionReason = String(pageState?.nextAction?.reason || '').trim() || statusSummary;
+  const workspaceHomePath = resolveWorkspaceRouteFile(outputDir, pageState, 'home', path.join(outputDir, 'workspace_home.html'));
+  const prepareWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'prepare', path.join(outputDir, 'prepare_workspace.html'));
+  const resultWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
   const assetsContextBar = renderPortalContextBar({
-    runLabel: path.basename(outputDir),
+    runLabel: taskLabel,
     boardLabel: bindings.board_id || analysis.boardId || analysis.board_id || '',
-    phaseLabel: '素材阶段',
-    flowLabel: 'Prompt -> 预检 -> 资产 -> 运行 -> 审阅',
+    phaseLabel,
+    flowLabel: '工作台首页 -> 准备工作台 -> Prompt 预览 -> 资产看板 -> 运行层',
     counts: [
       { label: '参考图', value: referenceCount },
       { label: '遮罩图', value: maskCount },
@@ -138,8 +174,8 @@ function main() {
       { label: '未绑定', value: unassignedAssets.length },
     ],
     hints: [
-      promptOnlySlots.length ? `${promptOnlySlots.length} 个槽位仍为 prompt-only` : '当前槽位均已拿到素材或已明确模式',
-      unresolvedNaturalLanguage ? `中文绑定还有 ${unresolvedNaturalLanguage} 个待消化索引` : '中文绑定解析已收敛',
+      statusHeadline,
+      nextActionReason,
     ],
   });
   const slotBindingRows = slotAssignments.map((item) => {
@@ -373,16 +409,26 @@ ${renderPortalHeadAssets()}
         ${renderPortalTopLinks(outputDir, {
           currentPage: 'assets_board.html',
           extraLinks: [
+            { label: '回工作台首页', file: workspaceHomePath },
+            { label: '回准备工作台', file: prepareWorkspacePath },
             { label: '绑定确认摘要', href: relativeFile(outputDir, path.join(outputDir, 'binding_confirmation.md')) },
             { label: '会话卡', href: relativeFile(outputDir, path.join(outputDir, 'binding_conversation_card.md')) },
           ],
         })}
       </div>
       <div class="eyebrow">DAOGE Assets Board</div>
-      <h1>DAOGE 资产看板</h1>
-      <p class="hero-copy">这一页负责把参考图、遮罩图、绑定关系和分析结果统一展示出来。你可以先看素材是否导入正确，再看它们被分配到了哪些 slot，最后确认自然语言、规则推断和视觉推荐有没有明显冲突。</p>
+      <h1>${escapeHtml(taskLabel)} · DAOGE 资产看板</h1>
+      <p class="hero-copy">${escapeHtml(statusSummary)}</p>
       ${assetsContextBar}
+      ${renderPortalModeSwitch({
+        title: '素材页浏览模式',
+        copy: '新手先确认素材是否放对位置，专业用户再看规则判断、视觉建议和更细的绑定细节。',
+      })}
       <div class="hero-grid">
+        <div class="metric-card metric-info">
+          <div class="metric-label">当前任务</div>
+          <div class="metric-value">${escapeHtml(taskLabel)}</div>
+        </div>
         <div class="metric-card metric-ref">
           <div class="metric-label">参考图数量</div>
           <div class="metric-value">${referenceCount}</div>
@@ -396,15 +442,87 @@ ${renderPortalHeadAssets()}
           <div class="metric-value">${slotAssignments.length}</div>
         </div>
         <div class="metric-card metric-warn">
-          <div class="metric-label">未绑定资产</div>
-          <div class="metric-value">${unassignedAssets.length}</div>
+          <div class="metric-label">推荐下一步</div>
+          <div class="metric-value">${escapeHtml(nextActionLabel)}</div>
         </div>
       </div>
+      ${renderPortalProgressRail(outputDir, {
+        currentPage: 'assets_board.html',
+        title: '准备主链进度',
+        copy: '素材页主要负责确认绑定是否干净。通常看完这里就回预检放行，或者进入运行层。',
+      })}
+      ${renderPortalRouteCompass(outputDir, {
+        title: '看完素材页后，通常这样走',
+        copy: '素材确认完成后，下一步通常不是继续翻 JSON，而是回到放行判断，或者进入运行层。',
+        previous: {
+          label: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回 Prompt 预览',
+          summary: fileExists(prepareWorkspacePath) ? '回准备主链重新看路线、放行状态和页间交接。' : '如果你怀疑槽位角色或方向本身有偏差，回 Prompt 预览重新对照最省时间。',
+          file: fileExists(prepareWorkspacePath) ? prepareWorkspacePath : promptPreviewBoardPath,
+          cta: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回 Prompt 预览',
+        },
+        nextSteps: [
+          {
+            kicker: '新手下一站',
+            label: nextActionLabel,
+            summary: nextActionReason,
+            file: nextActionTarget,
+            cta: nextActionLabel,
+            audience: 'newcomer',
+          },
+          {
+            kicker: '专业下一站',
+            label: fileExists(runOverviewPath) ? '去运行概览' : (fileExists(resultWorkspacePath) ? '去结果工作台' : '回预检总览'),
+            summary: fileExists(runOverviewPath) ? '如果本轮已经开跑，可以直接去运行层确认执行是否稳定。' : (fileExists(resultWorkspacePath) ? '如果结果层入口已经生成，可以直接回结果工作台继续。' : '如果还没有运行层产物，先回预检总览做放行判断。'),
+            file: fileExists(runOverviewPath) ? runOverviewPath : (fileExists(resultWorkspacePath) ? resultWorkspacePath : preflightBoardPath),
+            cta: fileExists(runOverviewPath) ? '去运行概览' : (fileExists(resultWorkspacePath) ? '去结果工作台' : '回预检总览'),
+            audience: 'pro',
+          },
+        ],
+      })}
     </section>
 
     <section class="section">
-      <h2>先看什么</h2>
-      <p class="section-copy">先看资产有没有落盘和分类正确，再看每个素材当前绑定到哪个 slot，然后再看自然语言解析、规则推断和视觉推荐是不是一致。如果这里已经发现绑定不对，不要直接进入执行阶段。</p>
+      <h2>素材主控</h2>
+      <p class="section-copy">先判断素材是不是放对了，再决定回预检、回 Prompt，还是继续进入运行层。</p>
+      ${renderPortalWorkbench(outputDir, {
+        title: '素材阶段，先看这里',
+        copy: '只先回答素材有没有对上、有没有明显异常、下一步该去哪。',
+        cards: [
+          {
+            label: '绑定状态',
+            value: unassignedAssets.length ? '还有未绑定素材' : '素材已基本对齐',
+            summary: unassignedAssets.length ? `当前还有 ${unassignedAssets.length} 个未绑定素材。` : '当前没有明显未绑定素材。',
+            tone: unassignedAssets.length ? 'rerun' : 'prepare',
+          },
+          {
+            label: '槽位状态',
+            value: promptOnlySlots.length ? `仍有 ${promptOnlySlots.length} 个 prompt-only` : '槽位已完成素材分配',
+            summary: promptOnlySlots.length ? '如果这些槽位本来就需要参考图或遮罩图，先不要直接开跑。' : '当前槽位分配比较完整。',
+            tone: promptOnlySlots.length ? 'report' : 'prepare',
+          },
+          {
+            label: '中文理解',
+            value: unresolvedNaturalLanguage ? '还有未消化指令' : '当前理解正常',
+            summary: unresolvedNaturalLanguage ? `中文绑定里还有 ${unresolvedNaturalLanguage} 个未消化索引。` : '当前自然语言绑定没有明显冲突。',
+            tone: unresolvedNaturalLanguage ? 'rerun' : 'prepare',
+            file: promptPreviewBoardPath,
+            cta: '回 Prompt 预览',
+          },
+          {
+            label: '推荐下一步',
+            value: nextActionLabel,
+            summary: nextActionReason,
+            tone: 'review',
+            file: nextActionTarget || (fileExists(preflightBoardPath) ? preflightBoardPath : runOverviewPath),
+            cta: '打开下一站',
+          },
+        ],
+      })}
+    </section>
+
+    <section class="section">
+      <h2>素材概览</h2>
+      <p class="section-copy">先把这轮素材层的总状态看清楚，再决定是否继续逐张核对。</p>
       <div class="section-grid">
         <article class="info-card">
           <h3>绑定总览</h3>
@@ -424,7 +542,7 @@ ${renderPortalHeadAssets()}
 
     <section class="section">
       <h2>绑定关系</h2>
-      <p class="section-copy">这一块帮助你快速看清每个 slot 现在拿到了什么素材，是纯参考图、遮罩编辑，还是仍然 prompt-only。</p>
+      <p class="section-copy">这里帮助你快速看清每个 slot 现在拿到了什么素材，是纯参考图、遮罩编辑，还是仍然 prompt-only。</p>
       <div class="section-grid">
         <article class="info-card">
           <h3>Slot -> Asset</h3>
@@ -446,16 +564,16 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>关键入口</h2>
-      <p class="section-copy">资产看板不替代 JSON 和 Markdown，它负责把素材层的关键入口收进一个 HTML 页里，方便你继续回到确认摘要、Prompt 预览和预检总览。</p>
+      <h2>继续下一步</h2>
+      <p class="section-copy">素材页看完后，通常回准备主线继续放行，或者直接进入运行层，不需要继续翻内部文件。</p>
       <article class="info-card">
-        <h3>文件入口</h3>
+        <h3>常用入口</h3>
         <div class="link-row">
           ${renderLink('绑定确认摘要', relativeFile(outputDir, path.join(outputDir, 'binding_confirmation.md')))}
           ${renderLink('会话卡', relativeFile(outputDir, path.join(outputDir, 'binding_conversation_card.md')))}
-          ${renderLink('绑定关系 JSON', relativeFile(outputDir, bindingsPath))}
-          ${renderLink('资产分析 JSON', relativeFile(outputDir, analysisPath))}
           ${fileExists(preflightBoardPath) ? renderLink('返回预检总览', relativeFile(outputDir, preflightBoardPath)) : ''}
+          <span class="portal-audience-pro">${renderLink('绑定关系 JSON', relativeFile(outputDir, bindingsPath))}</span>
+          <span class="portal-audience-pro">${renderLink('资产分析 JSON', relativeFile(outputDir, analysisPath))}</span>
         </div>
       </article>
     </section>

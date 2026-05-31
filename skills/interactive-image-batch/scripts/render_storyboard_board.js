@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks, renderPortalContextBar } = require('./portal_shared');
+const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail, renderPortalRouteCompass } = require('./portal_shared');
 const { renderPortalHeadAssets } = require('./portal_ui_shared');
 
 function ensureArray(value) {
@@ -11,12 +11,30 @@ function ensureArray(value) {
 }
 
 function escapeHtml(text) {
-  return String(text || '')
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function formatPercent(value, total) {
+  const numericValue = Number(value || 0);
+  const numericTotal = Number(total || 0);
+  if (!numericTotal) return '0%';
+  return `${((numericValue / numericTotal) * 100).toFixed(4)}%`;
+}
+
+function regionStyle(region, canvas) {
+  const canvasWidth = Number(canvas?.width || 0);
+  const canvasHeight = Number(canvas?.height || 0);
+  return [
+    `left:${formatPercent(region.x, canvasWidth)}`,
+    `top:${formatPercent(region.y, canvasHeight)}`,
+    `width:${formatPercent(region.width, canvasWidth)}`,
+    `height:${formatPercent(region.height, canvasHeight)}`,
+  ].join(';');
 }
 
 function findSlotImage(slotId, results) {
@@ -42,10 +60,10 @@ function getReviewLabel(reviewState) {
   return '缺图';
 }
 
-function renderBrandPanel(region, content) {
+function renderBrandPanel(region, content, canvas) {
   const titleLines = ensureArray(content?.brand_panel?.title_lines);
   return `
-    <div class="panel panel-brand" style="left:${region.x}px;top:${region.y}px;width:${region.width}px;height:${region.height}px;">
+    <div class="panel panel-brand" style="${regionStyle(region, canvas)}">
       <div class="panel-brand-inner">
         ${titleLines.length ? titleLines.map((item) => `<div class="brand-line">${escapeHtml(item)}</div>`).join('') : '<div class="brand-line muted">Brand panel</div>'}
         <div class="brand-meta">${escapeHtml(content?.board_theme || '')}</div>
@@ -54,14 +72,14 @@ function renderBrandPanel(region, content) {
   `;
 }
 
-function renderImageRegion(region, slot, result, outputDir) {
+function renderImageRegion(region, slot, result, outputDir, canvas) {
   const outputPath = result?.output || null;
   const relativeImage = outputPath ? path.relative(outputDir, outputPath) : null;
   const reviewState = getReviewState(result, relativeImage);
   const reviewLabel = getReviewLabel(reviewState);
   const anchorId = `slot-${String(slot?.slot_id || region.id || '').trim()}`;
   return `
-    <div id="${escapeHtml(anchorId)}" class="panel panel-shot state-${escapeHtml(reviewState)}" style="left:${region.x}px;top:${region.y}px;width:${region.width}px;height:${region.height}px;">
+    <div id="${escapeHtml(anchorId)}" class="panel panel-shot state-${escapeHtml(reviewState)}" style="${regionStyle(region, canvas)}">
       <div class="panel-frame ${relativeImage ? 'has-image' : 'missing-image'}">
         ${relativeImage ? `<img src="${escapeHtml(relativeImage)}" alt="${escapeHtml(slot?.shot_label || slot?.slot_id || region.id)}" />` : '<div class="placeholder">No image</div>'}
         <div class="panel-state">${escapeHtml(reviewLabel)}</div>
@@ -123,6 +141,29 @@ function buildBoardSummary(regions, bindingMap, slotMap, content, results, outpu
   };
 }
 
+function splitThemeParts(themeText) {
+  return String(themeText || '')
+    .split(/[，,、]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildBoardHero(content, boardSummary) {
+  const themeParts = splitThemeParts(content?.board_theme || '');
+  const heroTags = themeParts.slice(0, 6);
+  const boardType = themeParts[0] || '整板分镜';
+  const duration = themeParts.find((item) => /秒/.test(item)) || '';
+  const narrative = themeParts.find((item) => /为什么|核心|主题|问题|转折/.test(item)) || '';
+  const shotCount = boardSummary.totalSlots ? `${boardSummary.totalSlots} 格镜头` : '';
+  const summaryBits = [boardType, duration, shotCount, narrative].filter(Boolean);
+  return {
+    summary: summaryBits.length
+      ? `${summaryBits.join('，')}，适合先看整板节奏，再回到审阅和完成页做收口。`
+      : '这一页更适合先看整板节奏、主画面关系和镜头回到上下文后的观感。',
+    tags: heroTags,
+  };
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args['storyboard-file']) throw new Error('Missing required flag: --storyboard-file');
@@ -134,7 +175,9 @@ function main() {
   const results = readJson(resultsFile);
   const outputDir = path.resolve(args['output-dir'] || path.dirname(resultsFile));
   const outputPath = path.resolve(args['output-file'] || path.join(outputDir, 'storyboard_board.html'));
-  const assetsBoardPath = path.join(outputDir, 'assets_board.html');
+  const workspaceHomePath = path.join(outputDir, 'workspace_home.html');
+  const resultWorkspacePath = path.join(outputDir, 'result_workspace.html');
+  const exceptionWorkspacePath = path.join(outputDir, 'exception_workspace.html');
   const layout = storyboard.layout || {};
   const content = storyboard.content || {};
   const canvas = layout.canvas || {};
@@ -142,11 +185,12 @@ function main() {
   const bindingMap = buildBindingMap(layout);
   const slotMap = buildSlotMap(storyboard);
   const boardSummary = buildBoardSummary(regions, bindingMap, slotMap, content, results, outputDir);
+  const boardHero = buildBoardHero(content, boardSummary);
   const boardContextBar = renderPortalContextBar({
     runLabel: path.basename(outputDir),
     boardLabel: content.board_id || content.board_title || '',
     phaseLabel: '整板审阅',
-    flowLabel: '审阅 -> 整板 -> 完成报告',
+    flowLabel: '结果工作台 -> 整板页 -> 异常 / 回首页',
     counts: [
       { label: '已出图', value: boardSummary.readyCount },
       { label: '待复核', value: boardSummary.needsReviewCount },
@@ -163,10 +207,10 @@ function main() {
     const slotId = bindingMap.get(region.id) || region.id;
     const slot = slotMap.get(slotId) || content.slots?.find((item) => item.slot_id === slotId) || null;
     if (String(region.role || slot?.role || '').trim() === 'brand_panel') {
-      return renderBrandPanel(region, content);
+      return renderBrandPanel(region, content, canvas);
     }
     const result = findSlotResult(slotId, results);
-    return renderImageRegion(region, slot, result, outputDir);
+    return renderImageRegion(region, slot, result, outputDir, canvas);
   }).join('\n');
 
   const html = `<!doctype html>
@@ -203,6 +247,40 @@ ${renderPortalHeadAssets()}
       max-width: min(100vw - 48px, ${canvas.width || 1920}px);
       margin: 0 auto;
     }
+    .board-hero {
+      margin: 20px 0 24px;
+      display: grid;
+      gap: 14px;
+    }
+    .board-kicker {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(215,181,109,0.22);
+      background: rgba(255,255,255,0.04);
+      color: var(--accent);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .board-hero-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .board-hero-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04);
+      color: var(--text-sub);
+      font-size: 12px;
+      line-height: 1;
+    }
     .top-links {
       display: flex;
       flex-wrap: wrap;
@@ -220,11 +298,13 @@ ${renderPortalHeadAssets()}
     }
     .board-overview {
       display: grid;
-      grid-template-columns: minmax(280px, 1.2fr) minmax(320px, 1fr);
-      gap: 18px;
-      margin-bottom: 22px;
+      grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);
+      gap: 24px;
+      margin: 30px 0 24px;
+      align-items: start;
     }
     .overview-card {
+      min-width: 0;
       border: 1px solid rgba(255,255,255,0.08);
       border-radius: 24px;
       background:
@@ -358,14 +438,69 @@ ${renderPortalHeadAssets()}
       font-size: 12px;
     }
     .board-title {
-      margin: 0 0 16px;
-      font-size: 28px;
-      letter-spacing: 0.04em;
+      margin: 0;
+      max-width: 100%;
+      font-size: clamp(24px, 2.15vw, 40px);
+      line-height: 1.16;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
     }
     .board-subtitle {
-      margin: 0 0 24px;
+      margin: 0;
       color: var(--text-sub);
-      font-size: 14px;
+      max-width: 980px;
+      font-size: 15px;
+      line-height: 1.75;
+    }
+    body[data-portal-page="storyboard_board.html"] .portal-actions {
+      margin: 22px 0 30px;
+      padding: 18px;
+    }
+    body[data-portal-page="storyboard_board.html"] .portal-actions-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      align-items: stretch;
+    }
+    body[data-portal-page="storyboard_board.html"] .portal-action-card {
+      min-width: 0;
+      min-height: 176px;
+      padding: 18px 20px 16px;
+      gap: 10px;
+      align-content: start;
+    }
+    body[data-portal-page="storyboard_board.html"] .portal-action-label {
+      font-size: 15px;
+      line-height: 1.35;
+    }
+    body[data-portal-page="storyboard_board.html"] .portal-action-summary {
+      min-height: 0;
+      max-width: 28ch;
+      font-size: 13px;
+      line-height: 1.68;
+    }
+    body[data-portal-page="storyboard_board.html"] .portal-action-link {
+      margin-top: auto;
+      padding-top: 10px;
+    }
+    body[data-portal-page="storyboard_board.html"] .portal-action-link a,
+    body[data-portal-page="storyboard_board.html"] .portal-action-link span {
+      font-size: 13px;
+    }
+    @media (max-width: 1180px) {
+      .board-title {
+        font-size: clamp(24px, 4.8vw, 36px);
+        white-space: normal;
+        text-wrap: balance;
+      }
+      .board-overview {
+        grid-template-columns: 1fr;
+      }
+      body[data-portal-page="storyboard_board.html"] .portal-actions-grid {
+        grid-template-columns: 1fr;
+      }
+      body[data-portal-page="storyboard_board.html"] .portal-action-card {
+        min-height: 0;
+      }
     }
     .focus-banner {
       display: none;
@@ -414,9 +549,14 @@ ${renderPortalHeadAssets()}
       border-radius: 20px;
       overflow: hidden;
     }
+    .panel-shot {
+      display: flex;
+      flex-direction: column;
+    }
     .panel-frame {
       width: 100%;
-      height: calc(100% - 74px);
+      flex: 1 1 auto;
+      min-height: 0;
       background: rgba(255,255,255,0.04);
       display: flex;
       align-items: center;
@@ -474,6 +614,7 @@ ${renderPortalHeadAssets()}
       border-color: rgba(215,181,109,0.48);
     }
     .panel-caption {
+      flex: 0 0 auto;
       padding: 14px 14px 16px;
     }
     .panel-title {
@@ -491,6 +632,10 @@ ${renderPortalHeadAssets()}
       color: var(--text-sub);
       font-size: 12px;
       line-height: 1.55;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      overflow: hidden;
     }
     .panel-brand {
       display: flex;
@@ -531,8 +676,53 @@ ${renderPortalHeadAssets()}
         currentPage: 'storyboard_board.html',
       })}
     </div>
-    <h1 class="board-title">${escapeHtml(content.board_title || content.board_id || 'Storyboard Board')}</h1>
-    <p class="board-subtitle">${escapeHtml(content.board_theme || '')}</p>
+    ${renderPortalModeSwitch({
+      title: '整板页浏览模式',
+      copy: '这里专门用来回看整板节奏与镜头关系，看完后回结果层或异常层继续主链判断。',
+    })}
+    ${renderPortalProgressRail(outputDir, {
+      currentPage: 'storyboard_board.html',
+      title: '新的主链',
+      copy: '整板页已经降成按需页面，只有分镜任务才需要进入这里回看上下文。',
+    })}
+    ${renderPortalRouteCompass(outputDir, {
+      title: '看完整板后，通常这样走',
+      copy: '当你已经确认镜头衔接和品牌区关系，就回结果层继续收口；如果已经看到缺图或异常，再进异常层。',
+      previous: {
+        label: '回结果工作台',
+        summary: '如果你已经看完整板，回统一结果页继续判断是否收口。',
+        file: resultWorkspacePath,
+        cta: '回结果层',
+      },
+      nextSteps: [
+        {
+          kicker: '推荐下一步',
+          label: '回工作台首页',
+          summary: '如果这一轮已经判断清楚，可以回首页继续下一轮任务或重新开题。',
+          file: workspaceHomePath,
+          cta: '回首页',
+          audience: 'newcomer',
+        },
+        {
+          kicker: '专业下一站',
+          label: '去异常工作台',
+          summary: '如果整板里已经明确看到缺图或异常，直接去异常层最小范围处理。',
+          file: exceptionWorkspacePath,
+          cta: '去异常层',
+          audience: 'pro',
+        },
+        ],
+      })}
+    <section class="board-hero">
+      <div class="board-kicker">Storyboard Workbench</div>
+      <h1 class="board-title">${escapeHtml(content.board_title || content.board_id || 'Storyboard Board')}</h1>
+      <p class="board-subtitle">${escapeHtml(boardHero.summary)}</p>
+      ${boardHero.tags.length ? `
+        <div class="board-hero-tags">
+          ${boardHero.tags.map((item) => `<span class="board-hero-tag">${escapeHtml(item)}</span>`).join('')}
+        </div>
+      ` : ''}
+    </section>
     ${boardContextBar}
     <div class="focus-banner" id="focus-banner">
       <div class="focus-banner-label">当前焦点</div>
@@ -564,7 +754,7 @@ ${renderPortalHeadAssets()}
           </div>
         </div>
         <div class="board-meta-list" style="margin-top:14px;">
-          <div class="board-meta-item"><strong>Board ID</strong><span>${escapeHtml(content.board_id || '未设置')}</span></div>
+          <div class="board-meta-item portal-audience-pro"><strong>Board ID</strong><span>${escapeHtml(content.board_id || '未设置')}</span></div>
           <div class="board-meta-item"><strong>主题</strong><span>${escapeHtml(content.board_theme || '未设置')}</span></div>
           <div class="board-meta-item"><strong>先看哪里</strong><span>先看“失败 / 缺图”，再看“待复核”，最后回到整板检查镜头节奏、品牌区与主画面关系。</span></div>
         </div>
@@ -578,9 +768,6 @@ ${renderPortalHeadAssets()}
               <div class="slot-nav-main">
                 <div class="slot-nav-title">${escapeHtml(item.shotLabel)}</div>
                 <div class="slot-nav-sub">${escapeHtml(item.slotId)}${item.scene ? ` · ${escapeHtml(item.scene)}` : ''}</div>
-                <div class="slot-nav-links">
-                  ${fileExists(assetsBoardPath) ? `<a href="${escapeHtml(path.relative(outputDir, assetsBoardPath))}#slot-${escapeHtml(item.slotId)}">查看素材来源</a>` : ''}
-                </div>
               </div>
               <div class="slot-nav-side">
                 <div>${escapeHtml(item.timecode || '未标时间码')}</div>

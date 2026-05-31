@@ -121,9 +121,12 @@ JSON
     --results-file "$tmp_dir/host_native_results.json" \
     --output-dir "$tmp_dir/out" > /dev/null
   test -f "$tmp_dir/out/manifest.json"
-  test -f "$tmp_dir/out/review_board.html"
-  test -f "$tmp_dir/out/result_hub.html"
-  test -f "$tmp_dir/out/completion_board.html"
+  test -f "$tmp_dir/out/workspace_home.html"
+  test -f "$tmp_dir/out/result_workspace.html"
+  test -f "$tmp_dir/out/exception_workspace.html"
+  test ! -f "$tmp_dir/out/review_board.html"
+  test ! -f "$tmp_dir/out/result_hub.html"
+  test ! -f "$tmp_dir/out/completion_board.html"
 )
 
 echo "[smoke] host-native results schema fixture"

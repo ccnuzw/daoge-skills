@@ -1,8 +1,16 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execFileSync } = require('child_process');
 const { shellQuote, portableRunnerPreambleLines } = require('./run_batch_cli');
 const { ensurePortalUiAssets } = require('./portal_ui_shared');
+const { buildTaskCenterState } = require('./task_center_state_shared');
+const {
+  buildOptionalPageDecision,
+  buildDefaultGenerationContract,
+  resolveOptionalPageEmission,
+  summarizeOptionalPageEmission,
+} = require('./default_generation_contract');
 
 function countBy(items, key) {
   const counts = {};
@@ -16,7 +24,7 @@ function countBy(items, key) {
     .sort((a, b) => b.count - a.count);
 }
 
-function createSelectionArtifacts(outputDir, manifest, allResults) {
+function createSelectionArtifacts(outputDir, manifest, allResults, options = {}) {
   const successful = allResults.filter((item) => item.ok && !item.skipped);
   const failed = allResults.filter((item) => !item.ok);
   const needsReview = successful.filter((item) => item.requestMode === 'masked-edit' || item.editSource === 'previous-output');
@@ -45,18 +53,63 @@ function createSelectionArtifacts(outputDir, manifest, allResults) {
   fs.writeFileSync(files.needsReviewFile, JSON.stringify(needsReview, null, 2));
   fs.writeFileSync(files.rerunCandidatesFile, JSON.stringify(rerunCandidates, null, 2));
 
+  const resultWorkspacePath = path.join(outputDir, 'result_workspace.html');
+  const exceptionWorkspacePath = path.join(outputDir, 'exception_workspace.html');
+  const storyboardBoardPath = path.join(outputDir, 'storyboard_board.html');
   const lines = [
-    '# Selection Board',
+    '# DAOGE 结果挑选与补救说明',
     '',
-    `- Success: ${successful.length}`,
-    `- Failed: ${failed.length}`,
-    `- Needs review: ${needsReview.length}`,
+    '这份说明只回答三件事：本轮结果稳不稳、要不要补救、下一步该回哪个工作台。',
     '',
-    '## Failed rerun',
+    '## 1. 当前状态',
+    '',
+    `- 成功结果: ${successful.length}`,
+    `- 失败结果: ${failed.length}`,
+    `- 待人工再看: ${needsReview.length}`,
+    `- 当前最推荐入口: ${failed.length || needsReview.length ? exceptionWorkspacePath : resultWorkspacePath}`,
+    '',
+    '## 2. 下一步建议',
     '',
   ];
 
+  if (failed.length || needsReview.length) {
+    lines.push(`- 先回异常工作台统一处理: ${exceptionWorkspacePath}`);
+    if (failed.length) {
+      lines.push('- 当前存在硬失败，建议先缩小范围，再决定是否补跑。');
+    }
+    if (needsReview.length) {
+      lines.push('- 当前有待复核项，通常来自局部编辑或边界敏感结果。');
+    }
+  } else {
+    lines.push(`- 当前没有明显补救压力，建议直接回结果工作台继续筛图: ${resultWorkspacePath}`);
+    if (fs.existsSync(storyboardBoardPath)) {
+      lines.push(`- 如果你想结合整板上下文复看镜头关系，再打开整板页: ${storyboardBoardPath}`);
+    }
+  }
+
+  lines.push('');
+  lines.push('## 3. 需要处理的结果');
+  lines.push('');
   if (failed.length) {
+    failed.slice(0, 8).forEach((item) => {
+      lines.push(`- 失败: ${item.index} / ${item.title || item.slug || '未命名结果'}${item.error ? ` - ${item.error}` : ''}`);
+    });
+  }
+  if (needsReview.length) {
+    needsReview.slice(0, 8).forEach((item) => {
+      lines.push(`- 待复核: ${item.index} / ${item.title || item.slug || '未命名结果'}`);
+    });
+  }
+  if (!failed.length && !needsReview.length) {
+    lines.push('- 当前没有失败项，也没有明显待复核项。');
+  }
+
+  if (failed.length) {
+    lines.push('');
+    lines.push('## 4. 维护者补跑命令');
+    lines.push('');
+    lines.push('如果你确实要只补跑失败项，可以使用下面这条命令：');
+    lines.push('');
     lines.push('```bash');
     lines.push(...portableRunnerPreambleLines());
     lines.push('node "$DAOGE_RUNNER" \\');
@@ -64,11 +117,11 @@ function createSelectionArtifacts(outputDir, manifest, allResults) {
     lines.push(`  --resume-manifest ${shellQuote(path.join(outputDir, 'manifest.json'))} \\`);
     lines.push('  --failed-only true');
     lines.push('```');
-  } else {
-    lines.push('- No failed items.');
   }
 
-  fs.writeFileSync(files.selectionBoard, `${lines.join('\n')}\n`);
+  if (options.generateDiagnosticMarkdown !== false) {
+    fs.writeFileSync(files.selectionBoard, `${lines.join('\n')}\n`);
+  }
   return {
     ...files,
     successful,
@@ -78,9 +131,28 @@ function createSelectionArtifacts(outputDir, manifest, allResults) {
   };
 }
 
-function createOperationsReport(outputDir, manifest, allResults) {
+function removeFileIfExists(filePath) {
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+}
+
+function createEphemeralArchiveMarkdownPath(outputDir, enabled, fileName) {
+  if (enabled) {
+    return {
+      tempDir: null,
+      filePath: path.join(outputDir, fileName),
+    };
+  }
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-archive-markdown-'));
+  return {
+    tempDir,
+    filePath: path.join(tempDir, fileName),
+  };
+}
+
+function createOperationsReport(outputDir, manifest, allResults, options = {}) {
   const successful = allResults.filter((item) => item.ok && !item.skipped);
   const failed = allResults.filter((item) => !item.ok);
+  const skipped = allResults.filter((item) => item.skipped).length;
   const report = {
     generatedAt: new Date().toISOString(),
     outputDir,
@@ -88,7 +160,7 @@ function createOperationsReport(outputDir, manifest, allResults) {
     counts: {
       success: successful.length,
       failed: failed.length,
-      skipped: allResults.filter((item) => item.skipped).length,
+      skipped,
     },
     distributions: {
       requestMode: countBy(successful, 'requestMode').slice(0, 12),
@@ -101,31 +173,62 @@ function createOperationsReport(outputDir, manifest, allResults) {
   const reportMd = path.join(outputDir, 'operations_report.md');
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
 
+  const successRate = successful.length + failed.length
+    ? `${Math.round((successful.length / (successful.length + failed.length)) * 100)}%`
+    : '0%';
   const lines = [
-    '# Operations Report',
+    '# DAOGE 运行复盘',
     '',
-    `- Success: ${report.counts.success}`,
-    `- Failed: ${report.counts.failed}`,
-    `- Skipped: ${report.counts.skipped}`,
+    '这份复盘用于帮助你快速判断：这一轮整体稳不稳、主要集中在哪类结果、下一步该怎么继续。',
     '',
-    '## Request modes',
+    '## 1. 总体情况',
     '',
-    ...(report.distributions.requestMode.length ? report.distributions.requestMode.map((item) => `- ${item.name}: ${item.count}`) : ['- None']),
+    `- 成功结果: ${report.counts.success}`,
+    `- 失败结果: ${report.counts.failed}`,
+    `- 跳过已有结果: ${report.counts.skipped}`,
+    `- 本轮成功率: ${successRate}`,
+    `- 当前是否暂停: ${manifest.paused ? '是' : '否'}`,
+    `- 暂停原因: ${manifest.pauseReason || '无'}`,
     '',
-    '## Style families',
+    '## 2. 批次摘要',
     '',
-    ...(report.distributions.styleFamily.length ? report.distributions.styleFamily.map((item) => `- ${item.name}: ${item.count}`) : ['- None']),
+    ...((manifest.batches || []).length
+      ? (manifest.batches || []).map((batch) => `- 第 ${batch.batchNumber} 批: 成功 ${batch.success || 0}，失败 ${batch.failed || 0}`)
+      : ['- 当前没有批次数据']),
     '',
-    '## Slot roles',
+    '## 3. 结果结构',
     '',
-    ...(report.distributions.slotRole.length ? report.distributions.slotRole.map((item) => `- ${item.name}: ${item.count}`) : ['- None']),
+    '### 请求方式',
+    '',
+    ...(report.distributions.requestMode.length ? report.distributions.requestMode.map((item) => `- ${item.name}: ${item.count}`) : ['- 当前没有可展示的数据']),
+    '',
+    '### 风格分布',
+    '',
+    ...(report.distributions.styleFamily.length ? report.distributions.styleFamily.map((item) => `- ${item.name}: ${item.count}`) : ['- 当前没有可展示的数据']),
+    '',
+    '### 槽位角色',
+    '',
+    ...(report.distributions.slotRole.length ? report.distributions.slotRole.map((item) => `- ${item.name}: ${item.count}`) : ['- 当前没有可展示的数据']),
+    '',
+    '## 4. 下一步建议',
+    '',
+    ...(failed.length
+      ? ['- 当前仍有失败项，建议先回异常工作台收口，再考虑继续扩图。']
+      : ['- 当前没有失败项，可以回结果工作台继续筛图或进入整板页看上下文。']),
+    ...(skipped ? ['- 本轮存在跳过结果，继续下一轮前建议确认这些已有结果是否仍然适用。'] : ['- 当前没有跳过项，结果覆盖比较完整。']),
   ];
 
-  fs.writeFileSync(reportMd, `${lines.join('\n')}\n`);
+  if (options.generateDiagnosticMarkdown !== false) {
+    fs.writeFileSync(reportMd, `${lines.join('\n')}\n`);
+  }
   return { reportPath, reportMd, report };
 }
 
-function createContactSheetIndex(outputDir, manifest) {
+function createContactSheetIndex(outputDir, manifest, options = {}) {
+  if (options.generateArchiveMarkdown !== true) {
+    removeFileIfExists(path.join(outputDir, 'contact_sheet_index.md'));
+    return null;
+  }
   const lines = [
     '# Contact Sheet Index',
     '',
@@ -139,6 +242,14 @@ function createContactSheetIndex(outputDir, manifest) {
 }
 
 function renderCompletionReport(outputDir) {
+  return renderCompletionReportWithOptions(outputDir, {});
+}
+
+function renderCompletionReportWithOptions(outputDir, options = {}) {
+  if (options.generateArchiveMarkdown !== true) {
+    removeFileIfExists(path.join(outputDir, 'daoge_completion_report.md'));
+    return null;
+  }
   const scriptPath = path.join(__dirname, 'render_completion_report.js');
   const manifestPath = path.join(outputDir, 'manifest.json');
   const reportPath = path.join(outputDir, 'daoge_completion_report.md');
@@ -148,74 +259,127 @@ function renderCompletionReport(outputDir) {
   return reportPath;
 }
 
-function renderCompletionBoard(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_completion_board.js');
+function renderRunRecord(outputDir, options = {}) {
+  const scriptPath = path.join(__dirname, 'render_run_record.js');
   const manifestPath = path.join(outputDir, 'manifest.json');
-  const boardPath = path.join(outputDir, 'completion_board.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', boardPath], {
+  const archiveMarkdown = createEphemeralArchiveMarkdownPath(outputDir, options.generateArchiveMarkdown === true, 'run_record.md');
+  const markdownPath = archiveMarkdown.filePath;
+  const htmlPath = path.join(outputDir, 'run_record.html');
+  execFileSync(process.execPath, [
+    scriptPath,
+    '--manifest-file', manifestPath,
+    '--markdown-file', markdownPath,
+    '--html-file', htmlPath,
+  ], {
+    stdio: 'ignore',
+  });
+  if (options.generateArchiveMarkdown !== true) {
+    removeFileIfExists(path.join(outputDir, 'run_record.md'));
+  }
+  if (archiveMarkdown.tempDir) {
+    fs.rmSync(archiveMarkdown.tempDir, { recursive: true, force: true });
+  }
+  return { markdownPath: options.generateArchiveMarkdown === true ? markdownPath : null, htmlPath };
+}
+
+function renderTaskCenter(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_task_center.js');
+  const rootDir = path.dirname(outputDir);
+  const indexPath = path.join(rootDir, 'daoge_run_index.json');
+  const htmlPath = path.join(rootDir, 'task_center.html');
+  if (!fs.existsSync(indexPath)) return null;
+  execFileSync(process.execPath, [
+    scriptPath,
+    '--index-file', indexPath,
+    '--output-file', htmlPath,
+  ], {
+    stdio: 'ignore',
+  });
+  return htmlPath;
+}
+
+function renderWorkspaceHome(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_workspace_home.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const workspacePath = path.join(outputDir, 'workspace_home.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', workspacePath], {
+    stdio: 'ignore',
+  });
+  return workspacePath;
+}
+
+function renderPrepareWorkspace(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_prepare_workspace.js');
+  const workspacePath = path.join(outputDir, 'prepare_workspace.html');
+  execFileSync(process.execPath, [scriptPath, '--output-dir', outputDir, '--output-file', workspacePath], {
+    stdio: 'ignore',
+  });
+  return workspacePath;
+}
+
+function renderResultWorkspace(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_result_workspace.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const workspacePath = path.join(outputDir, 'result_workspace.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', workspacePath], {
+    stdio: 'ignore',
+  });
+  return workspacePath;
+}
+
+function renderExceptionWorkspace(outputDir) {
+  const scriptPath = path.join(__dirname, 'render_exception_workspace.js');
+  const manifestPath = path.join(outputDir, 'manifest.json');
+  const workspacePath = path.join(outputDir, 'exception_workspace.html');
+  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', workspacePath], {
+    stdio: 'ignore',
+  });
+  return workspacePath;
+}
+
+function renderStoryboardBoard(outputDir) {
+  const storyboardFile = path.join(outputDir, 'storyboard_bundle.validation.json');
+  const resultsFile = path.join(outputDir, 'success.json');
+  if (!fs.existsSync(storyboardFile) || !fs.existsSync(resultsFile)) return null;
+
+  const scriptPath = path.join(__dirname, 'render_storyboard_board.js');
+  const boardPath = path.join(outputDir, 'storyboard_board.html');
+  execFileSync(process.execPath, [
+    scriptPath,
+    '--storyboard-file', storyboardFile,
+    '--results-file', resultsFile,
+    '--output-dir', outputDir,
+    '--output-file', boardPath,
+  ], {
     stdio: 'ignore',
   });
   return boardPath;
 }
 
-function renderRunOverview(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_run_overview.js');
+function renderWorkspaceState(outputDir) {
+  const scriptPath = path.join(__dirname, 'build_workspace_state.js');
   const manifestPath = path.join(outputDir, 'manifest.json');
-  const overviewPath = path.join(outputDir, 'run_overview.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', overviewPath], {
+  const workspaceStatePath = path.join(outputDir, 'workspace_state.json');
+  const workspaceAssetsPath = path.join(outputDir, 'workspace_assets.json');
+  const workspaceTimelinePath = path.join(outputDir, 'workspace_timeline.json');
+  const workbenchStatePath = path.join(outputDir, 'workbench_state.json');
+  execFileSync(process.execPath, [
+    scriptPath,
+    '--manifest-file', manifestPath,
+    '--output-dir', outputDir,
+    '--workspace-state-file', workspaceStatePath,
+    '--workspace-assets-file', workspaceAssetsPath,
+    '--workspace-timeline-file', workspaceTimelinePath,
+    '--workbench-state-file', workbenchStatePath,
+  ], {
     stdio: 'ignore',
   });
-  return overviewPath;
-}
-
-function renderResultHub(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_result_hub.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const hubPath = path.join(outputDir, 'daoge_result_hub.md');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', hubPath], {
-    stdio: 'ignore',
-  });
-  return hubPath;
-}
-
-function renderResultHubBoard(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_result_hub_board.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const hubBoardPath = path.join(outputDir, 'result_hub.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', hubBoardPath], {
-    stdio: 'ignore',
-  });
-  return hubBoardPath;
-}
-
-function renderPortalHome(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_portal_home.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const portalPath = path.join(outputDir, 'daoge_portal.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', portalPath], {
-    stdio: 'ignore',
-  });
-  return portalPath;
-}
-
-function renderReviewBoard(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_review_board.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const reviewBoardPath = path.join(outputDir, 'review_board.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', reviewBoardPath], {
-    stdio: 'ignore',
-  });
-  return reviewBoardPath;
-}
-
-function renderRerunBoard(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_rerun_board.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const rerunBoardPath = path.join(outputDir, 'rerun_board.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', rerunBoardPath], {
-    stdio: 'ignore',
-  });
-  return rerunBoardPath;
+  return {
+    workspaceStatePath,
+    workspaceAssetsPath,
+    workspaceTimelinePath,
+    workbenchStatePath,
+  };
 }
 
 function renderVisualReviewAnalysis(outputDir, manifest, options = {}) {
@@ -271,36 +435,51 @@ function updateRunIndex(outputDir, manifest, allResults, artifacts, helpers) {
   index = index.filter((item) => item.outputDir !== outputDir);
   index.push(entry);
   helpers.writeJson(indexPath, index);
+  const taskCenterStatePath = path.join(rootDir, 'task_center_state.json');
+  const taskCenterState = buildTaskCenterState(indexPath);
+  helpers.writeJson(taskCenterStatePath, taskCenterState);
   const indexMd = path.join(rootDir, 'daoge_run_index.md');
-  const lines = [
-    '# DAOGE Run Index',
-    '',
-    ...index.slice(-100).reverse().map((item) => `- ${item.generatedAt || 'unknown'} | success ${item.success}/${item.selectedCount} | failed ${item.failed} | skipped ${item.skipped || 0} | ${item.outputDir}`),
-  ];
-  fs.writeFileSync(indexMd, `${lines.join('\n')}\n`);
-  return { indexPath, indexMd };
+  execFileSync(process.execPath, [
+    path.join(__dirname, 'render_run_index.js'),
+    '--index-file', indexPath,
+    '--markdown-file', indexMd,
+  ], {
+    stdio: 'ignore',
+  });
+  return { indexPath, indexMd, taskCenterStatePath };
 }
 
-function createOperationalArtifacts(outputDir, manifest, allResults, helpers) {
+function createOperationalArtifacts(outputDir, manifest, allResults, helpers, options = {}) {
   ensurePortalUiAssets(outputDir);
-  const selection = createSelectionArtifacts(outputDir, manifest, allResults);
-  const operations = createOperationsReport(outputDir, manifest, allResults);
-  const contactSheetIndex = createContactSheetIndex(outputDir, manifest);
-  const resultHub = renderResultHub(outputDir);
-  const resultHubBoard = renderResultHubBoard(outputDir);
-  const runIndex = updateRunIndex(outputDir, manifest, allResults, { selection, operations, contactSheetIndex, resultHub, resultHubBoard }, helpers);
-  return { selection, operations, contactSheetIndex, resultHub, resultHubBoard, runIndex };
+  const generateDiagnosticMarkdown = options.generateDiagnosticMarkdown === true;
+  const generateArchiveMarkdown = options.generateArchiveMarkdown === true;
+  const selection = createSelectionArtifacts(outputDir, manifest, allResults, { generateDiagnosticMarkdown });
+  const operations = createOperationsReport(outputDir, manifest, allResults, { generateDiagnosticMarkdown });
+  const contactSheetIndex = createContactSheetIndex(outputDir, manifest, { generateArchiveMarkdown });
+  if (!generateDiagnosticMarkdown) {
+    removeFileIfExists(selection.selectionBoard);
+    removeFileIfExists(operations.reportMd);
+  }
+  const runIndex = updateRunIndex(outputDir, manifest, allResults, { selection, operations, contactSheetIndex }, helpers);
+  const taskCenter = renderTaskCenter(outputDir);
+  return { selection, operations, contactSheetIndex, runIndex, taskCenter };
 }
 
 module.exports = {
-  renderCompletionReport,
-  renderCompletionBoard,
-  renderRunOverview,
-  renderResultHub,
-  renderResultHubBoard,
-  renderPortalHome,
-  renderReviewBoard,
-  renderRerunBoard,
+  renderCompletionReport: renderCompletionReportWithOptions,
+  renderRunRecord,
+  renderTaskCenter,
+  renderWorkspaceHome,
+  renderPrepareWorkspace,
+  renderResultWorkspace,
+  renderExceptionWorkspace,
+  renderStoryboardBoard,
+  renderWorkspaceState,
   renderVisualReviewAnalysis,
   createOperationalArtifacts,
+  removeFileIfExists,
+  resolveOptionalPageEmission,
+  summarizeOptionalPageEmission,
+  buildDefaultGenerationContract,
+  buildOptionalPageDecision,
 };
