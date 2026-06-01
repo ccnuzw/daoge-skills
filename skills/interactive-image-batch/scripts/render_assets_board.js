@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail, renderPortalRouteCompass, renderPortalWorkbench } = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderWorkspaceChromeTopLinks, renderWorkspaceChromeContextBar, renderWorkspaceChromeModeSwitch, renderWorkspaceChromeProgressRail, renderWorkspaceChromeRouteCompass, renderWorkspaceChromeWorkbench } = require('./workspace_chrome');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const { deriveTaskLabel } = require('./task_label_utils');
 const { loadWorkbenchState } = require('./workbench_state_shared');
 const { resolveWorkspaceRouteFile } = require('./workspace_storyboard_shared');
@@ -88,7 +88,7 @@ function renderAssetTile(asset, analysisMap, slotAssignmentsByAsset, outputDir) 
         ${renderMetaRow('视觉建议', vision ? `${vision.slot_id || '未推荐'} / ${vision.type || '未设置'}` : '未启用')}
         ${renderMetaRow('备注', asset.notes || '未提供')}
       </div>
-      <div class="meta-list portal-audience-pro" style="margin-top:12px;">
+      <div class="meta-list workspace-audience-pro" style="margin-top:12px;">
         ${renderMetaRow('Asset ID', asset.asset_id || '未设置')}
         ${renderMetaRow('规则类型', analysis?.inferred_type || '未记录')}
         ${renderMetaRow('视觉置信度', vision ? Number(vision.confidence || 0).toFixed(2) : '未启用')}
@@ -162,7 +162,7 @@ function main() {
   const workspaceHomePath = resolveWorkspaceRouteFile(outputDir, pageState, 'home', path.join(outputDir, 'workspace_home.html'));
   const prepareWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'prepare', path.join(outputDir, 'prepare_workspace.html'));
   const resultWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
-  const assetsContextBar = renderPortalContextBar({
+  const assetsContextBar = renderWorkspaceChromeContextBar({
     runLabel: taskLabel,
     boardLabel: bindings.board_id || analysis.boardId || analysis.board_id || '',
     phaseLabel,
@@ -207,7 +207,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 素材补充页</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --bg: #0e1318;
@@ -402,11 +402,11 @@ ${renderPortalHeadAssets()}
     }
   </style>
 </head>
-<body data-portal-page="assets_board.html">
+<body data-workspace-chrome-page="assets_board.html">
   <div class="shell">
     <section class="hero">
       <div class="top-links">
-        ${renderPortalTopLinks(outputDir, {
+        ${renderWorkspaceChromeTopLinks(outputDir, {
           currentPage: 'assets_board.html',
           extraLinks: [
             { label: '回工作台首页', file: workspaceHomePath },
@@ -419,7 +419,7 @@ ${renderPortalHeadAssets()}
       <p class="hero-copy">素材看板已经退到准备补充页层。普通流程先回准备工作台；只有需要核对素材、槽位和绑定关系时，才停留在这里。</p>
       <p class="hero-copy">${escapeHtml(statusSummary)}</p>
       ${assetsContextBar}
-      ${renderPortalModeSwitch({
+      ${renderWorkspaceChromeModeSwitch({
         title: '素材补充页浏览模式',
         copy: '新手确认素材放对位置后就回准备工作台；专业用户再看规则判断、视觉建议和绑定细节。',
       })}
@@ -445,12 +445,12 @@ ${renderPortalHeadAssets()}
           <div class="metric-value">${escapeHtml(nextActionLabel)}</div>
         </div>
       </div>
-      ${renderPortalProgressRail(outputDir, {
+      ${renderWorkspaceChromeProgressRail(outputDir, {
         currentPage: 'assets_board.html',
         title: '准备主链进度',
         copy: '素材页只做准备补充核对，不再承担准备主控。通常看完这里就回准备工作台收口。',
       })}
-      ${renderPortalRouteCompass(outputDir, {
+      ${renderWorkspaceChromeRouteCompass(outputDir, {
         title: '素材补充页看完后，回准备主链',
         copy: '这里负责深看素材绑定，不再承担准备总控。把绑定结论送回准备工作台，再决定预检或执行。',
         previous: {
@@ -483,7 +483,7 @@ ${renderPortalHeadAssets()}
     <section class="section">
       <h2>素材补充判断</h2>
       <p class="section-copy">这里只补充素材、槽位和绑定关系判断，不再承担准备主控。看完后回准备工作台决定预检、回 Prompt，还是继续进入运行层。</p>
-      ${renderPortalWorkbench(outputDir, {
+      ${renderWorkspaceChromeWorkbench(outputDir, {
         title: '素材补充页，先看这里',
         copy: '只先回答素材有没有对上、有没有明显异常，再把结论带回准备主链。',
         cards: [

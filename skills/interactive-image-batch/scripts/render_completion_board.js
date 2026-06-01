@@ -2,14 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
 const {
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalModeSwitch,
-  renderPortalProgressRail,
-  renderPortalRouteCompass,
-  renderPortalWorkbench,
-} = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeModeSwitch,
+  renderWorkspaceChromeProgressRail,
+  renderWorkspaceChromeRouteCompass,
+  renderWorkspaceChromeWorkbench,
+} = require('./workspace_chrome');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const {
   relativeFile,
   renderMetricCard,
@@ -70,7 +70,7 @@ function main() {
     Number(manifest.failed || 0) === 0 && !successfulLocalEditSlotIds.length ? '这轮整体比较稳定，可以直接从审阅板继续筛图。' : null,
   ].filter(Boolean);
 
-  const completionContextBar = renderPortalContextBar({
+  const completionContextBar = renderWorkspaceChromeContextBar({
     runLabel: path.basename(outputDir),
     phaseLabel: '结果补充细页',
     flowLabel: '结果工作台 -> 审阅 / 整板 -> 完成摘要',
@@ -92,7 +92,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 完成摘要补充页</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --panel: rgba(255,255,255,0.06);
@@ -106,11 +106,11 @@ ${renderPortalHeadAssets()}
 ${renderWorkspaceStyles()}
   </style>
 </head>
-<body data-portal-page="completion_board.html">
+<body data-workspace-chrome-page="completion_board.html">
   <div class="shell">
     <section class="hero">
       <div class="top-links">
-        ${renderPortalTopLinks(outputDir, {
+        ${renderWorkspaceChromeTopLinks(outputDir, {
           currentPage: 'completion_board.html',
           extraLinks: [
             { label: '回结果工作台', file: resultWorkspacePath },
@@ -122,7 +122,7 @@ ${renderWorkspaceStyles()}
       <h1>DAOGE 完成摘要补充页</h1>
       <p class="hero-copy">这页现在是结果补充页，用来补充看本轮摘要、成功失败与覆盖范围。它还保留，但不再作为结果层主控入口。普通流程请先回结果工作台。</p>
       ${completionContextBar}
-      ${renderPortalModeSwitch({
+      ${renderWorkspaceChromeModeSwitch({
         title: '完成页定位',
         copy: '摘要信息继续保留，但默认入口已经迁移到结果工作台。',
         newcomerLabel: '回结果工作台',
@@ -136,13 +136,13 @@ ${renderWorkspaceStyles()}
       </div>
     </section>
 
-    ${renderPortalProgressRail(outputDir, {
+    ${renderWorkspaceChromeProgressRail(outputDir, {
       currentPage: 'completion_board.html',
       title: '结果主链',
       copy: '完成摘要页已经降到结果补充页层，真正的主链判断请回结果工作台和异常工作台。',
     })}
 
-    ${renderPortalRouteCompass(outputDir, {
+    ${renderWorkspaceChromeRouteCompass(outputDir, {
       title: '看完摘要后，建议这样走',
       copy: '先回结果工作台做主链判断，异常再交给异常工作台；其它结果补充页不再从这里堆入口。',
       previous: {
@@ -162,7 +162,7 @@ ${renderWorkspaceStyles()}
       ],
     })}
 
-    ${renderPortalWorkbench(outputDir, {
+    ${renderWorkspaceChromeWorkbench(outputDir, {
       title: '完成摘要入口',
       copy: '只保留和主链收口直接相关的入口，Markdown 归档和其它高级页继续后退。',
       cards: [

@@ -2,14 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
 const {
-  renderPortalModeSwitch,
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalProgressRail,
-  renderPortalRouteCompass,
-  renderPortalWorkbench,
-} = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+  renderWorkspaceChromeModeSwitch,
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeProgressRail,
+  renderWorkspaceChromeRouteCompass,
+  renderWorkspaceChromeWorkbench,
+} = require('./workspace_chrome');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const {
   relativeFile,
   readJsonIfExists,
@@ -735,7 +735,7 @@ function main() {
     homeView,
     homeFallbackBundle.route
   );
-  const specialWorkflowSection = specialWorkflowCards.length ? renderPortalWorkbench(outputDir, {
+  const specialWorkflowSection = specialWorkflowCards.length ? renderWorkspaceChromeWorkbench(outputDir, {
     title: '特殊工作流定位',
     copy: specialWorkflowProtocol.positioning || '这些能力是正式工作流，但默认不扩成新的普通用户主链。',
     cards: specialWorkflowCards,
@@ -743,13 +743,13 @@ function main() {
   }) : '';
 
   const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'home', homeView, homeFallbackBundle.context);
-  const contextBar = renderPortalContextBar(contextBarData);
+  const contextBar = renderWorkspaceChromeContextBar(contextBarData);
   const html = renderWorkspacePageShell({
     pageTitle: shell.pageTitle,
     currentPage: shell.currentPage,
-    headAssets: renderPortalHeadAssets(),
+    headAssets: renderWorkspaceChromeHeadAssets(),
     cssVars: shell.cssVars,
-    topLinks: renderPortalTopLinks(outputDir, {
+    topLinks: renderWorkspaceChromeTopLinks(outputDir, {
       currentPage: shell.currentPage,
       governance,
       extraLinks: [],
@@ -789,14 +789,14 @@ function main() {
         ...resolvedHomeConfirmationState,
       }),
     ].filter(Boolean).join(''),
-    modeSwitch: renderPortalModeSwitch({
+    modeSwitch: renderWorkspaceChromeModeSwitch({
       title: modeSwitch.title,
       copy: modeSwitch.copy,
       defaultMode: modeSwitch.defaultMode,
       newcomerLabel: modeSwitch.newcomerLabel,
       proLabel: modeSwitch.proLabel,
     }),
-    progressRail: renderPortalProgressRail(outputDir, {
+    progressRail: renderWorkspaceChromeProgressRail(outputDir, {
       currentPage: shell.currentPage,
       title: String(resolvedHomeProgress?.title || '').trim() || chrome.progressTitle,
       copy: String(resolvedHomeProgress?.copy || '').trim() || chrome.progressCopy,
@@ -804,7 +804,7 @@ function main() {
       windowRadius: surfaceRules.progressWindowRadius,
       governance,
     }),
-    routeCompass: renderPortalRouteCompass(outputDir, {
+    routeCompass: renderWorkspaceChromeRouteCompass(outputDir, {
       title: resolvedHomeRoute.title,
       copy: resolvedHomeRoute.copy,
       current: resolvedHomeRoute.current,
@@ -812,7 +812,7 @@ function main() {
       nextSteps: resolvedHomeRoute.nextSteps,
       maxNextSteps: surfaceRules.routeMaxNextSteps,
     }),
-    workbench: renderPortalWorkbench(outputDir, buildRenderableWorkbench({
+    workbench: renderWorkspaceChromeWorkbench(outputDir, buildRenderableWorkbench({
       section: resolvedHomeWorkbench,
       title: chrome.workbenchTitle,
       copy: chrome.workbenchCopy,

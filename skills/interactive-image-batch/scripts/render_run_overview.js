@@ -2,14 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
 const {
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalModeSwitch,
-  renderPortalProgressRail,
-  renderPortalRouteCompass,
-  renderPortalWorkbench,
-} = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeModeSwitch,
+  renderWorkspaceChromeProgressRail,
+  renderWorkspaceChromeRouteCompass,
+  renderWorkspaceChromeWorkbench,
+} = require('./workspace_chrome');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const {
   relativeFile,
   renderMetricCard,
@@ -83,7 +83,7 @@ function main() {
     || (fileExists(resultWorkspacePath) ? '回结果工作台' : '回工作台首页');
   const nextActionReason = String(pageState?.nextAction?.reason || '').trim() || statusSummary;
 
-  const contextBar = renderPortalContextBar({
+  const contextBar = renderWorkspaceChromeContextBar({
     runLabel: path.basename(outputDir),
     phaseLabel,
     flowLabel: '工作台首页 -> 结果工作台 -> 运行补充页',
@@ -105,7 +105,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 运行概览补充页</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --panel: rgba(255,255,255,0.06);
@@ -119,16 +119,16 @@ ${renderPortalHeadAssets()}
 ${renderWorkspaceStyles()}
   </style>
 </head>
-<body data-portal-page="run_overview.html">
+<body data-workspace-chrome-page="run_overview.html">
   <div class="shell">
     <section class="hero">
       <div class="top-links">
-        ${renderPortalTopLinks(outputDir, { currentPage: 'run_overview.html' })}
+        ${renderWorkspaceChromeTopLinks(outputDir, { currentPage: 'run_overview.html' })}
       </div>
       <div class="eyebrow">运行概览补充页</div>
       <h1>${taskLabel} · DAOGE 运行概览补充页</h1>
       <p class="hero-copy">${statusSummary}</p>
-      ${renderPortalModeSwitch({
+      ${renderWorkspaceChromeModeSwitch({
         title: '运行页定位',
         copy: '执行细节保留，但入口层已经迁移到新的工作台主链。',
         newcomerLabel: '回工作台首页',
@@ -143,13 +143,13 @@ ${renderWorkspaceStyles()}
       </div>
     </section>
 
-    ${renderPortalProgressRail(outputDir, {
+    ${renderWorkspaceChromeProgressRail(outputDir, {
       currentPage: 'run_overview.html',
       title: '工作台主链',
       copy: '运行概览页已经降到补充页层，主链判断请回工作台首页、结果工作台和异常工作台。',
     })}
 
-    ${renderPortalRouteCompass(outputDir, {
+    ${renderWorkspaceChromeRouteCompass(outputDir, {
       title: '建议路线',
       copy: '先回主链做结果判断，只有明确要查执行问题时，才停留在这张补充页。',
       previous: {
@@ -176,7 +176,7 @@ ${renderWorkspaceStyles()}
       ],
     })}
 
-    ${renderPortalWorkbench(outputDir, {
+    ${renderWorkspaceChromeWorkbench(outputDir, {
       title: '运行补充页入口',
       copy: '这页只保留回主链的少量动作；审阅、完成摘要和 Markdown 选择板不再从这里堆入口。',
       cards: [

@@ -1,14 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('./script_utils');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const {
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalRouteCompass,
-  renderPortalWorkbench,
-  renderPortalProgressRail,
-} = require('./portal_shared');
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeRouteCompass,
+  renderWorkspaceChromeWorkbench,
+  renderWorkspaceChromeProgressRail,
+} = require('./workspace_chrome');
 const {
   renderMetricCard,
   renderEntryCard,
@@ -342,7 +342,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 任务总控</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --panel: rgba(255,255,255,0.06);
@@ -425,7 +425,7 @@ ${renderWorkspaceStyles()}
   <div class="shell">
     <section class="hero">
       <div class="top-links">
-        ${renderPortalTopLinks(rootDir, {
+        ${renderWorkspaceChromeTopLinks(rootDir, {
           currentPage: 'task_center.html',
           maxLinks: 3,
           preferExtraLinks: true,
@@ -438,7 +438,7 @@ ${renderWorkspaceStyles()}
       <div class="eyebrow">DAOGE 任务总控</div>
       <h1>DAOGE 任务总控</h1>
       <p class="hero-copy">${supportCopy.heroCopy}</p>
-      ${renderPortalContextBar({
+      ${renderWorkspaceChromeContextBar({
         runLabel: entryState ? entryContext.runLabel : (latest?.taskLabel || '当前还没有历史任务'),
         phaseLabel: entryState ? `${entryContext.phaseLabel} / 总控层` : '总控层',
         flowLabel: entryState ? `中文模板展示板 -> 任务总控 -> ${entryContext.flowLabel}` : '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台',
@@ -468,18 +468,18 @@ ${renderWorkspaceStyles()}
       ${entryMainlineGuide?.copilotRelay?.summary ? `<div class="task-center-mainline-note">${escapeHtml(entryMainlineGuide.copilotRelay.summary)}</div>` : ''}
     </section>
 
-    ${mainlineGuideWorkbench ? renderPortalWorkbench(rootDir, mainlineGuideWorkbench) : ''}
+    ${mainlineGuideWorkbench ? renderWorkspaceChromeWorkbench(rootDir, mainlineGuideWorkbench) : ''}
 
-    ${renderPortalWorkbench(rootDir, protocolWorkbench)}
+    ${renderWorkspaceChromeWorkbench(rootDir, protocolWorkbench)}
 
-    ${renderPortalProgressRail(rootDir, {
+    ${renderWorkspaceChromeProgressRail(rootDir, {
       currentPage: 'task_center.html',
       title: '从这里进入任务',
       copy: supportCopy.workbenchCopy,
       visibleIds: ['task-center', 'workspace-home', 'prepare-workspace'],
     })}
 
-    ${renderPortalRouteCompass(rootDir, {
+    ${renderWorkspaceChromeRouteCompass(rootDir, {
       title: entryState ? entryRoute.title : supportCopy.routeTitle,
       copy: entryState ? entryRoute.copy : supportCopy.routeCopy,
       current: entryState ? entryRoute.current : (latest ? {
@@ -517,10 +517,10 @@ ${renderWorkspaceStyles()}
       ].filter(Boolean),
     })}
 
-    ${mergedTaskCenterWorkbench ? renderPortalWorkbench(rootDir, mergedTaskCenterWorkbench) : ''}
+    ${mergedTaskCenterWorkbench ? renderWorkspaceChromeWorkbench(rootDir, mergedTaskCenterWorkbench) : ''}
 
     ${otherCards ? `
-    <details class="section portal-audience-pro">
+    <details class="section workspace-audience-pro">
       <summary>${supportCopy.otherRunsSummaryLabel || supportCopy.otherRunsTitle}</summary>
       <p class="section-copy">${supportCopy.otherRunsCopy}</p>
       <div class="entry-grid">

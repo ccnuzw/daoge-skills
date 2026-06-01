@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const { shellQuote, portableRunnerPreambleLines } = require('./run_batch_cli');
-const { ensurePortalUiAssets } = require('./portal_ui_shared');
+const { ensureWorkspaceChromeAssets } = require('./workspace_chrome_ui');
 const { buildTaskCenterState } = require('./task_center_state_shared');
 const {
   buildOptionalPageDecision,
@@ -450,7 +450,7 @@ function updateRunIndex(outputDir, manifest, allResults, artifacts, helpers) {
 }
 
 function createOperationalArtifacts(outputDir, manifest, allResults, helpers, options = {}) {
-  ensurePortalUiAssets(outputDir);
+  ensureWorkspaceChromeAssets(outputDir);
   const generateDiagnosticMarkdown = options.generateDiagnosticMarkdown === true;
   const generateArchiveMarkdown = options.generateArchiveMarkdown === true;
   const selection = createSelectionArtifacts(outputDir, manifest, allResults, { generateDiagnosticMarkdown });

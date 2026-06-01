@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson } = require('./script_utils');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 
 function escapeHtml(text) {
   return String(text || '')
@@ -123,7 +123,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE Template Registry Report</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --bg: #0e1318;
@@ -294,7 +294,7 @@ ${renderPortalHeadAssets()}
     }
   </style>
 </head>
-<body data-portal-page="template-registry-report">
+<body data-workspace-chrome-page="template-registry-report">
   <div class="shell">
     <section class="hero">
       <div class="eyebrow">DAOGE Template Governance</div>

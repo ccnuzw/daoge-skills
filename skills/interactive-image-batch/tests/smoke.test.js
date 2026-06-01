@@ -3319,7 +3319,7 @@ test('render_review_board assembles html review dashboard from execution artifac
   ]);
 
   const html = fs.readFileSync(reviewBoardFile, 'utf8');
-  const sharedCss = fs.readFileSync(path.join(outputDir, 'portal_shared.css'), 'utf8');
+  const sharedCss = fs.readFileSync(path.join(outputDir, 'workspace_chrome.css'), 'utf8');
   assert.match(html, /DAOGE 结果审阅补充页/);
   assert.match(html, /审阅看板已经降为结果补充页/);
   assert.match(html, /回结果工作台/);
@@ -3382,7 +3382,7 @@ test('render_review_board assembles html review dashboard from execution artifac
   assert.match(html, /addEventListener\('input', applyFilters\)/);
   assert.match(html, /ArrowLeft/);
   assert.match(html, /ArrowRight/);
-  assert.match(sharedCss, /\.portal-workbench/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench/);
   assert.match(html, /Keep Item/);
   assert.match(html, /Review Item/);
   assert.match(html, /Failed Item/);
@@ -3435,7 +3435,7 @@ test('render_completion_report writes archive-layer completion markdown', () => 
   assert.doesNotMatch(markdown, /- 分镜整板页:/);
 });
 
-test('render_example_catalog_board links back into portal navigation', () => {
+test('render_example_catalog_board links back into workspace chrome navigation', () => {
   const tempDir = makeTempDir('interactive-image-batch-example-catalog-links-');
   const outputDir = path.join(tempDir, 'out');
   fs.mkdirSync(outputDir, { recursive: true });
@@ -6353,7 +6353,7 @@ test('render_result_workspace prefers workspace state and assets when available'
   assert.doesNotMatch(html, /结果大图区|这一页主控|当前 Run/);
   assert.doesNotMatch(html, /Storyboard Workbench/);
   assert.doesNotMatch(html, /<title>Demo Storyboard<\/title>/);
-  assert.doesNotMatch(html, /<div class="portal-route-label">回工作台首页<\/div>/);
+  assert.doesNotMatch(html, /<div class="workspace-chrome-route-label">回工作台首页<\/div>/);
 });
 
 test('render_result_workspace hides storyboard entry when it is only a leftover file', () => {
@@ -7588,7 +7588,7 @@ test('render_preflight_board writes html preflight summary', () => {
   ]);
 
   const html = fs.readFileSync(boardFile, 'utf8');
-  const sharedCss = fs.readFileSync(path.join(outputDir, 'portal_shared.css'), 'utf8');
+  const sharedCss = fs.readFileSync(path.join(outputDir, 'workspace_chrome.css'), 'utf8');
   assert.match(html, /DAOGE 预检补充页/);
   assert.match(html, /预检总览已经退到准备补充页层/);
   assert.match(html, /预检补充判断/);
@@ -7604,7 +7604,7 @@ test('render_preflight_board writes html preflight summary', () => {
   assert.match(html, /准备主链进度/);
   assert.doesNotMatch(html, /DAOGE Preflight Board/);
   assert.doesNotMatch(html, /<h2>预检主控<\/h2>/);
-  assert.match(sharedCss, /\.portal-workbench/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench/);
   assert.match(sharedCss, /padding: 12px 13px/);
 });
 
@@ -8378,7 +8378,7 @@ test('render_prompt_preview_board writes html prompt summary', () => {
   ]);
 
   const html = fs.readFileSync(boardFile, 'utf8');
-  const sharedCss = fs.readFileSync(path.join(outputDir, 'portal_shared.css'), 'utf8');
+  const sharedCss = fs.readFileSync(path.join(outputDir, 'workspace_chrome.css'), 'utf8');
   assert.match(html, /DAOGE 提示词预览补充页/);
   assert.match(html, /提示词预览已经退到准备补充页层/);
   assert.match(html, /提示词补充判断/);
@@ -8395,7 +8395,7 @@ test('render_prompt_preview_board writes html prompt summary', () => {
   assert.match(html, /准备主链进度/);
   assert.doesNotMatch(html, /提示词预览文字版|运行摘要文字版|批次计划 JSON|返回预检总览/);
   assert.doesNotMatch(html, /<h2>准备主控<\/h2>/);
-  assert.match(sharedCss, /\.portal-workbench/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench/);
   assert.match(sharedCss, /min-height: 42px/);
 });
 

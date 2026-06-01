@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { parseArgs, readJson, writeJson } = require('./script_utils');
-const { ensurePortalUiAssets } = require('./portal_ui_shared');
+const { ensureWorkspaceChromeAssets } = require('./workspace_chrome_ui');
 const { buildOptionalPageDecision, pruneHiddenHtmlFiles, resolveOptionalPageEmission } = require('./default_generation_contract');
 const { syncWorkspaceLayout } = require('./workspace_layout_migration');
 
@@ -89,7 +89,7 @@ function main() {
 
   const outputDir = path.resolve(args['output-dir'] || path.dirname(promptsFile));
   fs.mkdirSync(outputDir, { recursive: true });
-  ensurePortalUiAssets(outputDir);
+  ensureWorkspaceChromeAssets(outputDir);
 
   const scriptsDir = __dirname;
   const normalizedTaskSpec = path.join(outputDir, 'task_spec.normalized.json');
