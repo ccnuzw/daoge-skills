@@ -4,6 +4,7 @@ const { deriveTaskLabel } = require('./task_label_utils');
 const { translatePauseReason } = require('./run_batch_runtime');
 const { buildRuntimeUnifiedStateBundle } = require('./unified_status_summary');
 const { buildRuntimeConversationCopy } = require('./workspace_status_dictionary');
+const { resolveRecommendedWorkspacePath } = require('./workspace_layout_migration');
 
 function stageTypeLabel(stageType) {
   if (stageType === 'sample') return '样本阶段';
@@ -292,6 +293,23 @@ function buildRuntimeWorkflowState(options = {}) {
   };
 }
 
+function resolveRuntimeSurfacePath(outputDir, fileName) {
+  return resolveRecommendedWorkspacePath(outputDir, fileName, 'workspace').recommendedPath;
+}
+
+function resolveRuntimeNextActionTarget(outputDir, jobState, manifest = {}) {
+  const status = String(jobState?.status || 'planned').trim() || 'planned';
+  const failedCount = Number(jobState?.progress?.failed || manifest?.failed || 0);
+  if (status === 'paused') return resolveRuntimeSurfacePath(outputDir, 'exception_workspace.html');
+  if (status === 'completed') {
+    return resolveRuntimeSurfacePath(
+      outputDir,
+      failedCount > 0 ? 'exception_workspace.html' : 'result_workspace.html'
+    );
+  }
+  return resolveRuntimeSurfacePath(outputDir, 'workspace_home.html');
+}
+
 function buildRuntimeStateSnapshot(outputDir, options = {}) {
   const jobStatePath = path.join(outputDir, 'job_state.json');
   const checkpointPath = path.join(outputDir, 'checkpoint.json');
@@ -326,11 +344,7 @@ function buildRuntimeStateSnapshot(outputDir, options = {}) {
     progressSummary,
     nextActionLabel: narrative.nextActionLabel,
     nextActionReason: narrative.nextActionReason,
-    nextActionTarget: String(jobState.status || '') === 'paused'
-      ? path.join(outputDir, 'exception_workspace.html')
-      : (String(jobState.status || '') === 'completed' && Number(jobState?.progress?.failed || manifest?.failed || 0) === 0
-        ? path.join(outputDir, 'result_workspace.html')
-        : path.join(outputDir, 'workspace_home.html')),
+    nextActionTarget: resolveRuntimeNextActionTarget(outputDir, jobState, manifest),
     dialogueStatus,
     failedCount: Number(progress.failed || manifest?.failed || 0),
   });
@@ -359,6 +373,7 @@ function buildRuntimeStateSnapshot(outputDir, options = {}) {
     unifiedStatus: runtimeBundle.unifiedStatus,
     copilotSummary: runtimeBundle.copilotSummary,
     runtimeCopilotProtocol: runtimeBundle.runtimeCopilotProtocol,
+    liveCopilotDirective: runtimeBundle.liveCopilotDirective,
     workflowDialogue: runtimeBundle.workflowDialogue,
     dialogueStatus,
     successCount: Number(progress.success || manifest?.success || 0),

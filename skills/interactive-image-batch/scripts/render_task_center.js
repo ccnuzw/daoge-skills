@@ -54,10 +54,27 @@ function escapeHtml(text) {
 
 function renderLiveStatusStrip(taskCenterState = {}) {
   const language = getTaskCenterLanguage();
+  const liveCopilotDirective = taskCenterState.liveCopilotDirective && typeof taskCenterState.liveCopilotDirective === 'object'
+    ? taskCenterState.liveCopilotDirective
+    : (taskCenterState.liveRun?.liveCopilotDirective && typeof taskCenterState.liveRun.liveCopilotDirective === 'object'
+      ? taskCenterState.liveRun.liveCopilotDirective
+      : {});
   const copilotSummary = taskCenterState.copilotSummary && typeof taskCenterState.copilotSummary === 'object'
-    ? taskCenterState.copilotSummary
+    ? {
+      ...taskCenterState.copilotSummary,
+      nextActionLabel: liveCopilotDirective.nextActionLabel || liveCopilotDirective.nextAction?.label || taskCenterState.copilotSummary.nextActionLabel,
+      nextActionSummary: liveCopilotDirective.nextActionSummary || liveCopilotDirective.nextAction?.reason || taskCenterState.copilotSummary.nextActionSummary,
+      recommendedReply: liveCopilotDirective.recommendedReply || liveCopilotDirective.primarySay || taskCenterState.copilotSummary.recommendedReply,
+      progressSummary: liveCopilotDirective.progressSummary || taskCenterState.copilotSummary.progressSummary,
+    }
     : (taskCenterState.liveRun?.copilotSummary && typeof taskCenterState.liveRun.copilotSummary === 'object'
-      ? taskCenterState.liveRun.copilotSummary
+      ? {
+        ...taskCenterState.liveRun.copilotSummary,
+        nextActionLabel: liveCopilotDirective.nextActionLabel || liveCopilotDirective.nextAction?.label || taskCenterState.liveRun.copilotSummary.nextActionLabel,
+        nextActionSummary: liveCopilotDirective.nextActionSummary || liveCopilotDirective.nextAction?.reason || taskCenterState.liveRun.copilotSummary.nextActionSummary,
+        recommendedReply: liveCopilotDirective.recommendedReply || liveCopilotDirective.primarySay || taskCenterState.liveRun.copilotSummary.recommendedReply,
+        progressSummary: liveCopilotDirective.progressSummary || taskCenterState.liveRun.copilotSummary.progressSummary,
+      }
       : {});
   const unifiedStatus = taskCenterState.unifiedStatus && typeof taskCenterState.unifiedStatus === 'object'
     ? taskCenterState.unifiedStatus
@@ -69,10 +86,13 @@ function renderLiveStatusStrip(taskCenterState = {}) {
     : (taskCenterState.liveRun?.dialogueStatus && typeof taskCenterState.liveRun.dialogueStatus === 'object'
       ? taskCenterState.liveRun.dialogueStatus
       : {});
-  const currentStatus = String(taskCenterState.currentStatus || copilotSummary.status || unifiedStatus.status || '').trim();
-  const runningTask = String(taskCenterState.runningTask || unifiedStatus.taskLabel || taskCenterState.latest?.taskLabel || '').trim();
+  const currentStatus = String(liveCopilotDirective.currentStatus || taskCenterState.currentStatus || copilotSummary.status || unifiedStatus.status || '').trim();
+  const runningTask = String(liveCopilotDirective.taskLabel || taskCenterState.runningTask || unifiedStatus.taskLabel || taskCenterState.latest?.taskLabel || '').trim();
   const progressSummary = String(
-    taskCenterState.progressSummary
+    liveCopilotDirective.progressSummary
+    || liveCopilotDirective.statusSummary
+    || liveCopilotDirective.currentFocus
+    || taskCenterState.progressSummary
     || copilotSummary.progressSummary
     || unifiedStatus.progressSummary
     || unifiedStatus.statusSummary
@@ -80,14 +100,20 @@ function renderLiveStatusStrip(taskCenterState = {}) {
     || ''
   ).trim();
   const nextSuggestedAction = taskCenterState.nextSuggestedAction && typeof taskCenterState.nextSuggestedAction === 'object'
-    ? taskCenterState.nextSuggestedAction
-    : {
+    ? (liveCopilotDirective.nextAction && typeof liveCopilotDirective.nextAction === 'object'
+      ? liveCopilotDirective.nextAction
+      : taskCenterState.nextSuggestedAction)
+    : (liveCopilotDirective.nextAction && typeof liveCopilotDirective.nextAction === 'object'
+      ? liveCopilotDirective.nextAction
+      : {
         label: String(copilotSummary.nextActionLabel || '').trim(),
         reason: String(copilotSummary.nextActionSummary || '').trim(),
         ...(unifiedStatus.nextAction && typeof unifiedStatus.nextAction === 'object' ? unifiedStatus.nextAction : {}),
-      };
+      });
   const primarySay = String(
-    copilotSummary.recommendedReply
+    liveCopilotDirective.recommendedReply
+    || liveCopilotDirective.primarySay
+    || copilotSummary.recommendedReply
     ||
     unifiedStatus.recommendedReply
     || unifiedStatus.dialogue?.primarySay
@@ -116,9 +142,10 @@ function renderLiveStatusStrip(taskCenterState = {}) {
   };
   const statusLabel = statusLabelMap[currentStatus] || '当前任务状态';
   const tone = toneMap[currentStatus] || 'info';
-  const nextActionLabel = String(nextSuggestedAction.label || copilotSummary.nextActionLabel || '').trim();
+  const nextActionLabel = String(liveCopilotDirective.nextActionLabel || nextSuggestedAction.label || copilotSummary.nextActionLabel || '').trim();
   const nextActionReason = String(
-    nextSuggestedAction.reason
+    liveCopilotDirective.nextActionSummary
+    || nextSuggestedAction.reason
     || copilotSummary.nextActionSummary
     || copilotSummary.confirmationSummary
     || unifiedStatus.nextActionSummary
@@ -177,7 +204,25 @@ function main() {
     .map((filePath) => loadEntryState(filePath))
     .find(Boolean) || null;
   const entryActions = resolveEntryMainlineActions({ hasWorkspace: Boolean(latestWorkspace), latestWorkspace });
-  const entryMainlineProtocol = resolveEntryMainlineProtocol(entryState, { currentLayer: '总控层' });
+  const guideDefaultGenerationProtocol = entryMainlineGuide?.defaultGenerationProtocol && typeof entryMainlineGuide.defaultGenerationProtocol === 'object'
+    ? entryMainlineGuide.defaultGenerationProtocol
+    : null;
+  const entryMainlineProtocol = resolveEntryMainlineProtocol(entryState, {
+    currentLayer: '总控层',
+    optionalPageMode: guideDefaultGenerationProtocol?.mode || entryMainlineGuide?.optionalPageMode?.mode,
+  });
+  const defaultGenerationProtocol = guideDefaultGenerationProtocol || entryMainlineProtocol.defaultGenerationProtocol || {};
+  const defaultGenerationSummary = defaultGenerationProtocol.summary || entryMainlineProtocol.mainlineContract?.defaultGenerationSummary || '';
+  const hiddenHtmlFiles = Array.isArray(defaultGenerationProtocol.hiddenHtmlFiles)
+    ? defaultGenerationProtocol.hiddenHtmlFiles
+    : [];
+  const defaultGenerationGuardrail = defaultGenerationProtocol.guardrail && typeof defaultGenerationProtocol.guardrail === 'object'
+    ? defaultGenerationProtocol.guardrail
+    : (entryMainlineProtocol.mainlineContract?.defaultGenerationGuardrail || {});
+  const defaultGenerationCardSummary = [
+    defaultGenerationGuardrail.onDemandRule || defaultGenerationSummary,
+    hiddenHtmlFiles.length ? `默认隐藏: ${hiddenHtmlFiles.slice(0, 6).join('、')}${hiddenHtmlFiles.length > 6 ? ' 等' : ''}` : '',
+  ].filter(Boolean).join(' ');
   const entryPreview = resolveEntryPreview(entryState);
   const entryNextStep = resolveEntryNextStep(rootDir, entryState, {
     prepareFile: latest ? path.join(latest.outputDir, 'prepare_workspace.html') : path.join(rootDir, 'prepare_workspace.html'),
@@ -214,20 +259,27 @@ function main() {
     : null;
   const protocolWorkbench = {
     title: '入口主链协议',
-    copy: `${entryMainlineProtocol.summary} ${entryMainlineProtocol.taskCenterEntryProtocol?.userRule || ''}`.trim(),
-    maxCards: 3,
+    copy: `${entryMainlineProtocol.mainlineContract?.summary || entryMainlineProtocol.summary} ${entryMainlineProtocol.taskCenterEntryProtocol?.userRule || ''} ${defaultGenerationSummary}`.trim(),
+    maxCards: 4,
     cards: [
-      { label: '模板展示板', value: entryActions.chooseTemplate.value, summary: entryMainlineProtocol.entryRole, file: examplesCatalogPath, cta: entryActions.startNewTask.cta, tone: 'good' },
+      { label: '模板展示板', value: entryActions.chooseTemplate.value, summary: entryMainlineProtocol.mainlineContract?.entryRole || entryMainlineProtocol.entryRole, file: examplesCatalogPath, cta: entryActions.startNewTask.cta, tone: 'good' },
       {
         label: '任务总控',
         value: '跨任务入口',
-        summary: entryMainlineProtocol.taskCenterEntryProtocol?.summary || entryMainlineProtocol.taskCenterRole,
+        summary: entryMainlineProtocol.mainlineContract?.taskCenterRole || entryMainlineProtocol.taskCenterEntryProtocol?.summary || entryMainlineProtocol.taskCenterRole,
         hideLinkIfMissing: true,
         tone: 'info',
       },
       latestWorkspace
-        ? { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.workspaceRole, file: latestWorkspace, cta: entryActions.continueTask.cta, tone: 'neutral' }
-        : { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.workspaceRole, pendingLabel: entryActions.openWorkspaceHome.pendingLabel, tone: 'neutral' },
+        ? { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.mainlineContract?.workspaceRole || entryMainlineProtocol.workspaceRole, file: latestWorkspace, cta: entryActions.continueTask.cta, tone: 'neutral' }
+        : { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.mainlineContract?.workspaceRole || entryMainlineProtocol.workspaceRole, pendingLabel: entryActions.openWorkspaceHome.pendingLabel, tone: 'neutral' },
+      {
+        label: '默认生成策略',
+        value: defaultGenerationProtocol.mode || entryMainlineProtocol.mainlineContract?.defaultGenerationMode || 'mainline-only',
+        summary: defaultGenerationCardSummary,
+        hideLinkIfMissing: true,
+        tone: 'neutral',
+      },
     ],
   };
   const supportCopy = buildSupportPageCopy('task-center', {
@@ -242,17 +294,23 @@ function main() {
         : (item.bucket === 'active' ? '继续推进' : '可回看任务'),
     })))
     .join('');
+  const liveDirective = taskCenterState.liveCopilotDirective && typeof taskCenterState.liveCopilotDirective === 'object'
+    ? taskCenterState.liveCopilotDirective
+    : (taskCenterState.liveRun?.liveCopilotDirective && typeof taskCenterState.liveRun.liveCopilotDirective === 'object'
+      ? taskCenterState.liveRun.liveCopilotDirective
+      : {});
   const liveControlBar = buildTaskControlBarFromUnifiedStatus(taskCenterState.unifiedStatus || taskCenterState.liveRun?.unifiedStatus, {
-    taskLabel: taskCenterState.runningTask || latest?.taskLabel || '',
-    stageLabel: taskCenterState.currentStage || latest?.phaseLabel || '',
-    nextActionLabel: taskCenterState.nextSuggestedAction?.label || taskCenterState.copilotSummary?.nextActionLabel || taskCenterState.liveRun?.copilotSummary?.nextActionLabel || '',
-    nextActionSummary: taskCenterState.nextSuggestedAction?.reason || taskCenterState.copilotSummary?.nextActionSummary || taskCenterState.liveRun?.copilotSummary?.nextActionSummary || taskCenterState.progressSummary || '',
-    primarySay: taskCenterState.dialogueStatus?.primarySay || taskCenterState.copilotSummary?.recommendedReply || taskCenterState.liveRun?.copilotSummary?.recommendedReply || taskCenterState.liveRun?.dialogueStatus?.primarySay || '',
-    progressSummary: taskCenterState.progressSummary || taskCenterState.copilotSummary?.progressSummary || taskCenterState.liveRun?.copilotSummary?.progressSummary || '',
+    taskLabel: liveDirective.taskLabel || taskCenterState.runningTask || latest?.taskLabel || '',
+    stageLabel: liveDirective.stageLabel || taskCenterState.currentStage || latest?.phaseLabel || '',
+    nextActionLabel: liveDirective.nextActionLabel || liveDirective.nextAction?.label || taskCenterState.nextSuggestedAction?.label || taskCenterState.copilotSummary?.nextActionLabel || taskCenterState.liveRun?.copilotSummary?.nextActionLabel || '',
+    nextActionSummary: liveDirective.nextActionSummary || liveDirective.nextAction?.reason || taskCenterState.nextSuggestedAction?.reason || taskCenterState.copilotSummary?.nextActionSummary || taskCenterState.liveRun?.copilotSummary?.nextActionSummary || taskCenterState.progressSummary || '',
+    primarySay: liveDirective.recommendedReply || liveDirective.primarySay || taskCenterState.dialogueStatus?.primarySay || taskCenterState.copilotSummary?.recommendedReply || taskCenterState.liveRun?.copilotSummary?.recommendedReply || taskCenterState.liveRun?.dialogueStatus?.primarySay || '',
+    progressSummary: liveDirective.progressSummary || taskCenterState.progressSummary || taskCenterState.copilotSummary?.progressSummary || taskCenterState.liveRun?.copilotSummary?.progressSummary || '',
     status: taskCenterState.currentStatus || '',
   });
   const liveStatusState = liveControlBar ? {
     ...taskCenterState,
+    liveCopilotDirective: liveDirective,
     copilotSummary: {
       ...(taskCenterState.copilotSummary || taskCenterState.liveRun?.copilotSummary || {}),
       stageLabel: taskCenterState.copilotSummary?.stageLabel || taskCenterState.liveRun?.copilotSummary?.stageLabel || liveControlBar.stageLabel,

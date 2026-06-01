@@ -178,7 +178,7 @@ function main() {
   const phaseLabel = String(pageState?.status?.phase || '').trim() || '准备阶段';
   const statusHeadline = String(pageState?.status?.headline || '').trim() || `当前处于${phaseLabel}的放行判断`;
   const statusSummary = String(pageState?.status?.summary || '').trim()
-    || '这一页负责把预检结论、风险和放行建议收在一起，确认无误后再进入运行层。';
+    || '预检总览已经降为准备补充页，只负责把放行结论、风险和回退建议收在一起；主链判断请回准备工作台。';
   const nextActionTarget = pageState?.nextAction?.target
     ? path.join(outputDir, pageState.nextAction.target)
     : (fileExists(path.join(outputDir, 'prepare_workspace.html'))
@@ -202,7 +202,7 @@ function main() {
   const preflightContextBar = renderPortalContextBar({
     runLabel: taskLabel,
     phaseLabel,
-    flowLabel: '工作台首页 -> 准备工作台 -> Prompt 预览 -> 预检总览 -> 运行层',
+    flowLabel: '工作台首页 -> 准备工作台 -> 预检补充页 -> 回准备主链',
     counts: [
       { label: '提示词', value: validation.promptCount },
       { label: '批次', value: batchPlan.length },
@@ -220,7 +220,7 @@ function main() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DAOGE Preflight Board</title>
+  <title>DAOGE 预检补充页</title>
 ${renderPortalHeadAssets()}
   <style>
     :root {
@@ -399,14 +399,15 @@ ${renderPortalHeadAssets()}
           ],
         })}
       </div>
-      <div class="eyebrow">DAOGE Preflight Board</div>
+      <div class="eyebrow">准备预检补充页</div>
       <div class="pill ${escapeHtml(statusPillClass)}">当前信号灯：${escapeHtml(readiness.label)}</div>
-      <h1>${escapeHtml(taskLabel)} · DAOGE 预检总览</h1>
+      <h1>${escapeHtml(taskLabel)} · DAOGE 预检补充页</h1>
+      <p class="hero-copy">预检总览已经退到准备补充页层。普通流程先回准备工作台看当前主动作；只有需要细查放行、风险或批次压力时，才停留在这里。</p>
       <p class="hero-copy">${escapeHtml(statusSummary)}</p>
       ${preflightContextBar}
       ${renderPortalModeSwitch({
-        title: '预检浏览模式',
-        copy: '新手先看信号灯和风险，专业用户可以直接判断放行与回退路径。',
+        title: '预检补充页浏览模式',
+        copy: '新手看完信号灯就回准备工作台；专业用户才继续深看风险、分布和放行细节。',
       })}
       <div class="hero-grid">
         <div class="metric-card metric-info">
@@ -443,11 +444,11 @@ ${renderPortalHeadAssets()}
       ${renderPortalProgressRail(outputDir, {
         currentPage: 'preflight_board.html',
         title: '准备主链进度',
-        copy: 'Prompt 方向确认之后，这一站负责做最后放行；放行后才进入运行层。',
+        copy: '预检页只是准备补充页，不再承担准备主控。放行判断请回准备工作台收口。',
       })}
       ${renderPortalRouteCompass(outputDir, {
-        title: '看完预检总览后，建议这样继续',
-        copy: '预检页最重要的价值就是决定“放行还是回退”，不要停在中间态。',
+        title: '预检补充页看完后，回准备主链',
+        copy: '这里负责深看放行和风险，不再承担准备总控。把结论送回准备工作台，再决定执行或回退。',
         previous: {
           label: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回 Prompt 预览',
           summary: fileExists(prepareWorkspacePath) ? '回准备主链重新看当前局面、放行判断和页间交接。' : '如果你觉得方向不对、批次过重或者风格分布不理想，先回 Prompt 预览继续调整。',
@@ -466,7 +467,7 @@ ${renderPortalHeadAssets()}
           {
             kicker: '专业下一站',
             label: fileExists(runOverviewPath) ? '进入运行概览' : (fileExists(resultWorkspacePath) ? '进入结果工作台' : '去资产看板'),
-            summary: fileExists(runOverviewPath) ? '如果预检已放行且运行层产物存在，可以直接去运行概览判断执行是否稳定。' : (fileExists(resultWorkspacePath) ? '如果这一轮已经进入结果层，可以直接回结果工作台继续。' : '如果你更关心素材绑定，可以继续去资产看板。'),
+            summary: fileExists(runOverviewPath) ? '如果预检已放行且运行层产物存在，可以按需去运行概览排查执行细节。' : (fileExists(resultWorkspacePath) ? '如果这一轮已经进入结果层，可以直接回结果工作台继续。' : '如果你更关心素材绑定，可以按需去素材看板。'),
             file: fileExists(runOverviewPath) ? runOverviewPath : (fileExists(resultWorkspacePath) ? resultWorkspacePath : assetsBoardPath),
             cta: fileExists(runOverviewPath) ? '去运行概览' : (fileExists(resultWorkspacePath) ? '去结果工作台' : '去资产看板'),
             audience: 'pro',
@@ -476,11 +477,11 @@ ${renderPortalHeadAssets()}
     </section>
 
     <section class="section">
-      <h2>预检主控</h2>
-      <p class="section-copy">先看结论和风险，再看任务定义与执行参数，最后决定是直接开跑、先改 prompt，还是回到准备阶段调整规模和稳定性参数。</p>
+      <h2>预检补充判断</h2>
+      <p class="section-copy">这里只补充放行和风险判断，不再承担准备主控。看完后回准备工作台决定是开跑、回退 prompt，还是调整规模和稳定性参数。</p>
       ${renderPortalWorkbench(outputDir, {
-        title: '预检阶段，先看这里',
-        copy: '先判断能不能放行，再决定回退还是继续。',
+        title: '预检补充页，先看这里',
+        copy: '先判断能不能放行，再把结论带回准备主链。',
         cards: [
           {
             label: '放行结论',

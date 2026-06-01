@@ -63,9 +63,9 @@ function main() {
   const runIndexPath = path.join(path.dirname(path.dirname(manifestPath)), 'daoge_run_index.md');
 
   const lines = [
-    '# DAOGE 完成报告',
+    '# DAOGE 完成归档报告',
     '',
-    '这份完成报告只负责本轮是否已经可以收口，以及收口前后该怎么处理。看入口回 README，看过程回任务档案。',
+    '这份 Markdown 已经退到归档层，只负责本轮是否已经可以收口，以及收口前后该怎么处理。看主入口回 README 或工作台首页，看过程回任务档案。',
     '',
     '## 0. 本轮收口结论',
     '',
@@ -131,13 +131,14 @@ function main() {
   lines.push('');
   lines.push('- 不负责总入口说明：想知道先从哪里进入，回 README 或工作台首页。');
   lines.push('- 不负责完整过程时间线：想知道这轮具体怎么跑完、每批发生了什么，去看任务档案。');
+  lines.push('- 不负责结果主控：筛图、异常分流和最终取舍仍回结果工作台或异常工作台。');
   lines.push('');
   lines.push('## 8. 记录与定位');
   lines.push('');
   lines.push(`- 根 manifest: ${manifestPath}`);
   lines.push(`- README: ${path.join(path.dirname(manifestPath), 'README.md')}`);
   lines.push(`- 任务档案: ${path.join(path.dirname(manifestPath), 'run_record.html')}`);
-  if (fileExists(storyboardBoardPath)) lines.push(`- 分镜整板页: ${storyboardBoardPath}`);
+  if (fileExists(storyboardBoardPath)) lines.push(`- 分镜整板补充页: ${storyboardBoardPath}`);
   lines.push('');
   lines.push('## 9. DAOGE 建议');
   lines.push('');
@@ -156,7 +157,7 @@ function main() {
     lines.push('- 本轮没有失败项，可以直接回结果工作台继续筛图或判断是否进入下一轮。');
   }
   if (attemptedLocalEditSlotIds.length) {
-    lines.push('- 当前有局部编辑结果，建议再结合整板页看一次边界和衔接感。');
+    lines.push('- 当前有局部编辑结果，建议按需打开分镜整板补充页看一次边界和衔接感。');
   }
   lines.push('- 如果要继续扩图，优先沿用这轮已经稳定的参数和方向。');
 

@@ -62,9 +62,6 @@ function main() {
   const workspaceHomePath = resolveWorkspaceRouteFile(outputDir, pageState, 'home', path.join(outputDir, 'workspace_home.html'));
   const resultWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
   const exceptionWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'exception', path.join(outputDir, 'exception_workspace.html'));
-  const reviewBoardPath = path.join(outputDir, 'review_board.html');
-  const completionBoardPath = path.join(outputDir, 'completion_board.html');
-  const selectionBoardPath = path.join(outputDir, 'selection_board.md');
   const successCount = Number(pageState?.counts?.success || manifest.success || 0);
   const failedCount = Number(pageState?.counts?.failed || manifest.failed || 0);
   const selectedCount = Number(pageState?.counts?.selected || manifest.selectedCount || successCount + failedCount || 0);
@@ -181,12 +178,10 @@ ${renderWorkspaceStyles()}
 
     ${renderPortalWorkbench(outputDir, {
       title: '运行补充页入口',
-      copy: '这页只保留和执行问题相关的少量动作。',
+      copy: '这页只保留回主链的少量动作；审阅、完成摘要和 Markdown 选择板不再从这里堆入口。',
       cards: [
         { label: '回结果工作台', value: fileExists(resultWorkspacePath) ? '推荐入口' : '待生成', summary: nextActionReason, file: resultWorkspacePath, cta: '回结果工作台', tone: 'good' },
-        { label: '审阅看板', value: fileExists(reviewBoardPath) ? '可进入' : '待生成', summary: '如果执行没问题，就回图片判断层。', file: reviewBoardPath, cta: '进入审阅看板', tone: 'info' },
-        { label: '完成摘要页', value: fileExists(completionBoardPath) ? '可进入' : '待生成', summary: '确认结果收口时可进入。', file: completionBoardPath, cta: '进入完成摘要页', tone: 'good' },
-        { label: '选择板', value: fileExists(selectionBoardPath) ? '可进入' : '待生成', summary: '需要文字层结果清单时再打开。', file: selectionBoardPath, cta: '打开选择板', tone: 'neutral' },
+        { label: '回异常工作台', value: fileExists(exceptionWorkspacePath) ? '按需进入' : '待生成', summary: '如果执行问题已经影响结果，回异常主链统一处理。', file: exceptionWorkspacePath, cta: '回异常工作台', tone: failedCount > 0 ? 'warn' : 'neutral' },
       ],
     })}
 

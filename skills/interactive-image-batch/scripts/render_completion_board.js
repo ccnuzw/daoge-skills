@@ -63,8 +63,6 @@ function main() {
   const exceptionWorkspacePath = path.join(outputDir, 'exception_workspace.html');
   const reviewBoardPath = path.join(outputDir, 'review_board.html');
   const storyboardBoardPath = path.join(outputDir, 'storyboard_board.html');
-  const resultHubPath = path.join(outputDir, 'result_hub.html');
-  const resultHubMarkdownPath = path.join(outputDir, 'daoge_result_hub.md');
 
   const nextActionHints = [
     Number(manifest.failed || 0) > 0 ? '这轮存在失败项，通常应先进入异常工作台。' : null,
@@ -74,7 +72,7 @@ function main() {
 
   const completionContextBar = renderPortalContextBar({
     runLabel: path.basename(outputDir),
-    phaseLabel: '结果兼容细页',
+    phaseLabel: '结果补充细页',
     flowLabel: '结果工作台 -> 审阅 / 整板 -> 完成摘要',
     counts: [
       { label: '成功', value: Number(manifest.success || 0) },
@@ -115,8 +113,8 @@ ${renderWorkspaceStyles()}
         ${renderPortalTopLinks(outputDir, {
           currentPage: 'completion_board.html',
           extraLinks: [
-            { label: '旧结果说明页', file: resultHubPath },
-            { label: '结果说明文档', file: resultHubMarkdownPath },
+            { label: '回结果工作台', file: resultWorkspacePath },
+            { label: '回异常工作台', file: exceptionWorkspacePath },
           ],
         })}
       </div>
@@ -146,7 +144,7 @@ ${renderWorkspaceStyles()}
 
     ${renderPortalRouteCompass(outputDir, {
       title: '看完摘要后，建议这样走',
-      copy: '先回结果工作台做主链判断，再按需要进入审阅、整板或异常处理。',
+      copy: '先回结果工作台做主链判断，异常再交给异常工作台；其它结果补充页不再从这里堆入口。',
       previous: {
         label: '回结果工作台',
         summary: '这是新的结果阶段主入口。',
@@ -154,13 +152,6 @@ ${renderWorkspaceStyles()}
         cta: '回结果工作台',
       },
       nextSteps: [
-        {
-          kicker: '如果要继续筛图',
-          label: '审阅看板',
-          summary: '继续做保留、复核和淘汰判断。',
-          file: reviewBoardPath,
-          cta: '进入审阅看板',
-        },
         Number(manifest.failed || 0) > 0 ? {
           kicker: '如果存在异常',
           label: '异常工作台',
@@ -173,11 +164,9 @@ ${renderWorkspaceStyles()}
 
     ${renderPortalWorkbench(outputDir, {
       title: '完成摘要入口',
-      copy: '只保留和结果收口直接相关的入口。',
+      copy: '只保留和主链收口直接相关的入口，Markdown 归档和其它高级页继续后退。',
       cards: [
         { label: '回结果工作台', value: fileExists(resultWorkspacePath) ? '推荐入口' : '待生成', summary: '新的结果阶段主页面。', file: resultWorkspacePath, cta: '回结果工作台', tone: 'good' },
-        { label: '审阅看板', value: fileExists(reviewBoardPath) ? '可进入' : '待生成', summary: '真正要细筛图片时进入。', file: reviewBoardPath, cta: '进入审阅看板', tone: 'info' },
-        { label: '分镜整板页', value: fileExists(storyboardBoardPath) ? '可进入' : '待生成', summary: '只有分镜任务更依赖这个视角。', file: storyboardBoardPath, cta: '进入分镜整板页', tone: 'neutral' },
         { label: '异常工作台', value: fileExists(exceptionWorkspacePath) ? '按需进入' : '待生成', summary: '只有失败或待复核时需要。', file: exceptionWorkspacePath, cta: '进入异常工作台', tone: Number(manifest.failed || 0) > 0 ? 'warn' : 'neutral' },
       ],
       maxCards: 4,

@@ -4,7 +4,11 @@ const { loadWorkbenchState } = require('./workbench_state_shared');
 const { buildLiveRunStateBundle, normalizeRuntimeProtocolState } = require('./unified_status_summary');
 const { summarizeUserWorkbenchProtocol } = require('./workspace_page_shared');
 const { summarizeOptionalPageEmission } = require('./default_generation_contract');
-const { resolveEntryMainlineActions } = require('./entry_state_shared');
+const {
+  resolveEntryDefaultGenerationProtocol,
+  resolveEntryMainlineActions,
+} = require('./entry_state_shared');
+const { resolveRecommendedWorkspacePath } = require('./workspace_layout_migration');
 const {
   cleanLabel,
   pickPromptItems,
@@ -43,7 +47,7 @@ function mergeLiveRun(rawRuns, liveRun) {
   ];
 }
 
-function inferLegacyPhase(item, promptItems) {
+function inferArchivePhase(item, promptItems) {
   if (item.failedCount > 0) {
     return {
       phaseLabel: '异常阶段',
@@ -104,7 +108,7 @@ function classifyRun(item, index) {
 }
 
 function formatArtifactLayerSummary(artifactGovernance = {}) {
-  const summary = artifactGovernance.summary || {};
+  const summary = artifactGovernance.userFacingSummary || artifactGovernance.summary || {};
   const principle = String(summary.principle || '').trim();
   return {
     defaultEntryLabel: String(summary.defaultEntryLabel || '工作台首页').trim(),
@@ -112,9 +116,9 @@ function formatArtifactLayerSummary(artifactGovernance = {}) {
     supportCount: Number(summary.supportCount || 0),
     conditionalCount: Number(summary.conditionalCount || 0),
     advancedCount: Number(summary.advancedCount || 0),
-    legacyCount: Number(summary.legacyCount || 0),
     internalCount: Number(summary.internalCount || 0),
     principle: principle || '普通用户默认只看工作台主链，Markdown 与 JSON 退回补充说明或内部诊断层。',
+    userFacing: Boolean(artifactGovernance.userFacingSummary),
   };
 }
 
@@ -193,6 +197,9 @@ function normalizeRuntimeSummary(runtimeSummary, fallback = {}) {
     runtimeCopilotProtocol: normalized.runtimeCopilotProtocol && typeof normalized.runtimeCopilotProtocol === 'object'
       ? normalized.runtimeCopilotProtocol
       : null,
+    liveCopilotDirective: normalized.liveCopilotDirective && typeof normalized.liveCopilotDirective === 'object'
+      ? normalized.liveCopilotDirective
+      : null,
     workflowDialogue: normalized.workflowDialogue && typeof normalized.workflowDialogue === 'object'
       ? normalized.workflowDialogue
       : null,
@@ -228,6 +235,7 @@ function normalizeLiveRunSnapshot(rawLiveRun, fallback = {}) {
     dialogueStatus: runtimeSummary.dialogueStatus || null,
     runtimeWorkflow: runtimeSummary.runtimeWorkflow || null,
     runtimeCopilotProtocol: runtimeSummary.runtimeCopilotProtocol || liveRunBundle.runtimeCopilotProtocol || null,
+    liveCopilotDirective: runtimeSummary.liveCopilotDirective || liveRunBundle.liveCopilotDirective || null,
     workflowDialogue: runtimeSummary.workflowDialogue || null,
     sourceFiles: runtimeSummary.sourceFiles || fallback.sourceFiles || {},
   };
@@ -261,7 +269,7 @@ function enrichRunItem(item) {
     latestEventTitle: cleanLabel(latestEvent?.title) || null,
     latestEventTime: latestEvent?.time || null,
   };
-  const legacyStatus = inferLegacyPhase(base, promptItems);
+  const archiveStatus = inferArchivePhase(base, promptItems);
   const explicitPhaseLabel = cleanLabel(item.phaseLabel);
   const explicitPhaseHeadline = cleanLabel(item.phaseHeadline);
   const explicitPhaseSummary = cleanLabel(item.phaseSummary);
@@ -273,12 +281,12 @@ function enrichRunItem(item) {
     ...base,
     runtimeSummary,
     taskLabel: deriveTaskLabel({ ...base, taskLabel: resolveRunTaskLabel(pageState) }, outputDir),
-    phaseLabel: cleanLabel(status?.phase) || explicitPhaseLabel || legacyStatus.phaseLabel,
-    phaseHeadline: cleanLabel(status?.headline) || explicitPhaseHeadline || legacyStatus.phaseHeadline,
-    phaseSummary: cleanLabel(status?.summary) || explicitPhaseSummary || legacyStatus.phaseSummary,
-    phaseTone: cleanLabel(status?.tone) || explicitPhaseTone || legacyStatus.phaseTone,
+    phaseLabel: cleanLabel(status?.phase) || explicitPhaseLabel || archiveStatus.phaseLabel,
+    phaseHeadline: cleanLabel(status?.headline) || explicitPhaseHeadline || archiveStatus.phaseHeadline,
+    phaseSummary: cleanLabel(status?.summary) || explicitPhaseSummary || archiveStatus.phaseSummary,
+    phaseTone: cleanLabel(status?.tone) || explicitPhaseTone || archiveStatus.phaseTone,
     nextActionLabel: cleanLabel(nextAction?.label) || explicitNextActionLabel || null,
-    nextActionReason: cleanLabel(nextAction?.reason) || explicitNextActionReason || legacyStatus.nextActionReason,
+    nextActionReason: cleanLabel(nextAction?.reason) || explicitNextActionReason || archiveStatus.nextActionReason,
     artifactLayer: formatArtifactLayerSummary(pageState?.artifactGovernance),
     assetLayerSummary: summarizeUserAssetLayer(pageState?.assetLayers),
     workbenchProtocol: summarizeUserWorkbenchProtocol(pageState?.assetLayers?.userWorkbenchProtocol, {
@@ -351,6 +359,8 @@ function buildTaskCenterCopilotRelay(options = {}) {
     || '默认只沿主链工作台继续，细页按需打开。';
   const deepDiveRule = cleanLabel(optionalPageMode.deepDiveSuggestion)
     || '如果需要深看，再展开对应补充页。';
+  const defaultGenerationProtocol = buildTaskCenterDefaultGenerationProtocol(optionalPageMode);
+  const generationContract = buildTaskCenterGenerationContractSnapshot(optionalPageMode);
   const relayCopy = buildRuntimeCopilotRelayCopy({
     runtimeStatus,
     runtimeFocus,
@@ -371,10 +381,56 @@ function buildTaskCenterCopilotRelay(options = {}) {
     generationLabel: generationMode,
     generationRule,
     deepDiveRule,
+    defaultGenerationProtocol,
+    generationContract,
     flowMode: relayCopy.mode,
     currentLookValue: relayCopy.currentLookValue,
     currentLookSummary: relayCopy.currentLookSummary,
     summary: `实时副驾驶：${watch} 对话框可以说「${primarySay}」。${handoff} 当前是${generationMode}：${generationRule} ${deepDiveRule}`,
+  };
+}
+
+function buildTaskCenterDefaultGenerationProtocol(optionalPageMode = {}) {
+  const protocol = optionalPageMode?.defaultGenerationProtocol && typeof optionalPageMode.defaultGenerationProtocol === 'object'
+    ? optionalPageMode.defaultGenerationProtocol
+    : {};
+  const mode = cleanLabel(protocol.mode || optionalPageMode?.mode) || 'mainline-only';
+  return resolveEntryDefaultGenerationProtocol(protocol, {
+    mode,
+  });
+}
+
+function buildTaskCenterGenerationContractSnapshot(optionalPageMode = {}) {
+  const contract = optionalPageMode?.generationContract && typeof optionalPageMode.generationContract === 'object'
+    ? optionalPageMode.generationContract
+    : summarizeOptionalPageEmission({
+      optionalPageMode: optionalPageMode?.mode || 'mainline-only',
+    }).generationContract;
+  const currentMode = contract?.currentMode && typeof contract.currentMode === 'object'
+    ? contract.currentMode
+    : {};
+  return {
+    version: Number(contract?.version || 1),
+    defaultMode: cleanLabel(contract?.defaultMode) || 'mainline-only',
+    targetMode: cleanLabel(contract?.targetMode) || 'single-workbench-mainline',
+    principle: cleanLabel(contract?.principle)
+      || '默认只生成单一主链工作台和少量必要入口；深看页、诊断归档和程序状态文件不进入普通用户默认阅读层。',
+    currentMode: {
+      mode: cleanLabel(currentMode.mode || optionalPageMode?.mode) || 'mainline-only',
+      generatedHtmlFiles: Array.isArray(currentMode.generatedHtmlFiles)
+        ? currentMode.generatedHtmlFiles.slice()
+        : [],
+      hiddenHtmlFiles: Array.isArray(currentMode.hiddenHtmlFiles)
+        ? currentMode.hiddenHtmlFiles.slice()
+        : [],
+      userFocus: cleanLabel(currentMode.userFocus || optionalPageMode?.currentFocus)
+        || '普通用户只沿任务总控和四站工作台继续，不需要默认打开深看页。',
+    },
+    defaultGenerationGuardrail: contract?.defaultGenerationGuardrail && typeof contract.defaultGenerationGuardrail === 'object'
+      ? { ...contract.defaultGenerationGuardrail }
+      : {},
+    reductionRule: cleanLabel(contract?.reductionRule)
+      || '默认生成先收成主链，新增页面必须先证明能帮助用户做判断，否则进入按需层或内部层。',
   };
 }
 
@@ -387,6 +443,9 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
   const runtimeProtocol = liveRun?.runtimeCopilotProtocol && typeof liveRun.runtimeCopilotProtocol === 'object'
     ? liveRun.runtimeCopilotProtocol
     : {};
+  const liveDirective = liveRun?.liveCopilotDirective && typeof liveRun.liveCopilotDirective === 'object'
+    ? liveRun.liveCopilotDirective
+    : {};
   const runtimeStatus = cleanLabel(liveRun?.currentStatus || runtimeProtocol.status || '');
   const failedCount = Number(liveRun?.failedCount ?? liveRun?.runtimeSummary?.failedCount ?? latest?.failedCount ?? latest?.failed ?? 0);
   const progressSummary = cleanLabel(liveRun?.progressSummary)
@@ -394,11 +453,13 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
     || cleanLabel(latest?.phaseSummary)
     || cleanLabel(latest?.nextActionReason)
     || '当前还没有可继续的历史任务。';
-  const nextActionLabel = cleanLabel(liveRun?.nextSuggestedAction?.label)
+  const nextActionLabel = cleanLabel(liveDirective.nextActionLabel || liveDirective.nextAction?.label)
+    || cleanLabel(liveRun?.nextSuggestedAction?.label)
     || cleanLabel(runtimeProtocol.nextActionLabel)
     || cleanLabel(latest?.nextActionLabel)
     || (hasLatestWorkspace ? '进入工作台首页' : '从中文模板展示板开始');
-  const primarySay = cleanLabel(liveRun?.dialogueStatus?.primarySay)
+  const primarySay = cleanLabel(liveDirective.recommendedReply || liveDirective.primarySay)
+    || cleanLabel(liveRun?.dialogueStatus?.primarySay)
     || cleanLabel(liveRun?.copilotSummary?.recommendedReply)
     || cleanLabel(runtimeProtocol.primarySay)
     || cleanLabel(runtimeProtocol.dialogueFocus)
@@ -417,6 +478,8 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
     : summarizeOptionalPageEmission({
       optionalPageMode: latest?.optionalPageMode || latest?.pageState?.optionalPageMode?.mode || 'mainline-only',
     });
+  const defaultGenerationProtocol = buildTaskCenterDefaultGenerationProtocol(optionalPageMode);
+  const generationContract = buildTaskCenterGenerationContractSnapshot(optionalPageMode);
   const copilotRelay = buildTaskCenterCopilotRelay({
     runtimeStatus,
     runtimeFocus,
@@ -440,6 +503,8 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
     runtimeFocus,
     handoffRule,
     optionalPageMode,
+    defaultGenerationProtocol,
+    generationContract,
     copilotRelay,
     items: [
       {
@@ -475,6 +540,81 @@ function summarizeLiveRun(item) {
   return normalizeLiveRunSnapshot(item?.runtimeSummary, item);
 }
 
+function buildTaskCenterMarkdownLines(options = {}) {
+  const runs = Array.isArray(options.runs) ? options.runs : [];
+  const recent = Array.isArray(options.recent) ? options.recent : runs.slice(0, 100);
+  const latest = options.latest || null;
+  const liveRun = options.liveRun || null;
+  const stableCount = Number(options.stableCount || 0);
+  const issueCount = Number(options.issueCount || 0);
+  const entryMainlineGuide = options.entryMainlineGuide && typeof options.entryMainlineGuide === 'object'
+    ? options.entryMainlineGuide
+    : {};
+  const defaultGenerationProtocol = entryMainlineGuide.defaultGenerationProtocol && typeof entryMainlineGuide.defaultGenerationProtocol === 'object'
+    ? entryMainlineGuide.defaultGenerationProtocol
+    : {};
+  const generationContract = entryMainlineGuide.generationContract && typeof entryMainlineGuide.generationContract === 'object'
+    ? entryMainlineGuide.generationContract
+    : {};
+  const hiddenHtmlFiles = Array.isArray(defaultGenerationProtocol.hiddenHtmlFiles)
+    ? defaultGenerationProtocol.hiddenHtmlFiles
+    : (Array.isArray(generationContract.currentMode?.hiddenHtmlFiles) ? generationContract.currentMode.hiddenHtmlFiles : []);
+  const generatedHtmlFiles = Array.isArray(defaultGenerationProtocol.generatedHtmlFiles)
+    ? defaultGenerationProtocol.generatedHtmlFiles
+    : (Array.isArray(generationContract.currentMode?.generatedHtmlFiles) ? generationContract.currentMode.generatedHtmlFiles : []);
+  const hiddenSummary = hiddenHtmlFiles.length
+    ? `默认隐藏高级页: ${hiddenHtmlFiles.slice(0, 8).join('、')}${hiddenHtmlFiles.length > 8 ? ' 等' : ''}`
+    : '默认隐藏高级页: 无';
+  const generatedSummary = generatedHtmlFiles.length
+    ? `默认生成入口: ${generatedHtmlFiles.join('、')}`
+    : '默认生成入口: 任务总控和工作台主链';
+
+  return [
+    '# DAOGE 任务索引',
+    '',
+    '这份索引只负责跨轮回看和挑任务，不负责单轮判断。想看一轮任务内部情况，进入那一轮工作台首页或任务档案。',
+    '',
+    '## 1. 当前概况',
+    '',
+    `- 最近记录轮数: ${runs.length}`,
+    `- 整体稳定轮数: ${stableCount}`,
+    `- 存在异常轮数: ${issueCount}`,
+    `- 最近一轮: ${latest ? latest.taskLabel : '暂无记录'}`,
+    ...(liveRun ? [
+      `- 当前状态: ${latest.phaseLabel || '执行中'}`,
+      `- 当前进度: ${liveRun.progressSummary || '当前正在刷新状态中。'}`,
+    ] : []),
+    '',
+    '## 2. 入口主链协议',
+    '',
+    `- 当前入口层: ${entryMainlineGuide.title || '入口主链提醒'}`,
+    `- 任务总控职责: ${entryMainlineGuide.copy || '任务总控只负责开新任务或继续任务，选定后交给工作台首页。'}`,
+    `- 单轮判断归属: ${entryMainlineGuide.principle || '默认先从工作台首页进入，再顺着准备、结果、异常三站推进。'}`,
+    `- 实时副驾驶: ${entryMainlineGuide.copilotRelay?.summary || '进入工作台后，按页面推荐回复继续。'}`,
+    `- 默认生成模式: ${defaultGenerationProtocol.mode || generationContract.currentMode?.mode || 'mainline-only'}`,
+    `- ${generatedSummary}`,
+    `- ${hiddenSummary}`,
+    `- 生成守卫: ${defaultGenerationProtocol.guardrail?.onDemandRule || generationContract.defaultGenerationGuardrail?.onDemandRule || '提示词预览、素材页、审阅看板、运行概览和补跑页必须按需开启，不作为默认入口。'}`,
+    '',
+    '## 3. 最近任务',
+    '',
+    ...(recent.length
+      ? recent.map((item) => {
+          const status = Number(item.failedCount || 0) > 0
+            ? `有 ${item.failedCount} 个失败项`
+            : (Number(item.successCount || 0) > 0 ? '整体稳定' : '结果较少');
+          return `- ${formatTime(item.generatedAt)} | ${item.taskLabel} | ${status} | 成功 ${item.successCount}/${item.selectedCount || item.successCount || 0} | 输出目录 ${item.outputDir}`;
+        })
+      : ['- 当前还没有任务记录。']),
+    '',
+    '## 4. 使用方式',
+    '',
+    '- 想继续最近一轮：回任务总控或直接打开那一轮工作台首页',
+    '- 想看单轮细节：进入那一轮任务档案',
+    '- 想比较多轮状态：只在这里横向看，不在这里做单轮判断',
+  ];
+}
+
 function buildTaskCenterState(indexFile, options = {}) {
   const rootDir = path.dirname(path.resolve(indexFile));
   const runs = mergeLiveRun(loadRuns(indexFile), options.liveRun).map(enrichRunItem);
@@ -493,43 +633,24 @@ function buildTaskCenterState(indexFile, options = {}) {
     ...decoratedRuns.filter(({ bucket, item }) => bucket === 'active' && !isSameRun(item, latest)),
     ...decoratedRuns.filter(({ bucket, item }) => bucket === 'stable' && !isSameRun(item, latest)),
   ].map(({ item, bucket }) => ({ ...item, bucket }));
-  const latestWorkspace = latest ? path.join(latest.outputDir, 'workspace_home.html') : null;
+  const latestWorkspace = latest ? resolveRecommendedWorkspacePath(latest.outputDir, 'workspace_home.html', 'workspace').recommendedPath : null;
   const latestRecord = latest ? path.join(latest.outputDir, 'run_record.html') : null;
   const examplesCatalogPath = options.examplesCatalogPath || path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
   const recent = runs.slice(0, 100);
-  const markdownLines = [
-    '# DAOGE 任务索引',
-    '',
-    '这份索引只负责跨轮回看和挑任务，不负责单轮判断。想看一轮任务内部情况，进入那一轮工作台首页或任务档案。',
-    '',
-    '## 1. 当前概况',
-    '',
-    `- 最近记录轮数: ${runs.length}`,
-    `- 整体稳定轮数: ${stableCount}`,
-    `- 存在异常轮数: ${issueCount}`,
-    `- 最近一轮: ${latest ? latest.taskLabel : '暂无记录'}`,
-    ...(liveRun ? [
-      `- 当前状态: ${latest.phaseLabel || '执行中'}`,
-      `- 当前进度: ${liveRun.progressSummary || '当前正在刷新状态中。'}`,
-    ] : []),
-    '',
-    '## 2. 最近任务',
-    '',
-    ...(recent.length
-      ? recent.map((item) => {
-          const status = Number(item.failedCount || 0) > 0
-            ? `有 ${item.failedCount} 个失败项`
-            : (Number(item.successCount || 0) > 0 ? '整体稳定' : '结果较少');
-          return `- ${formatTime(item.generatedAt)} | ${item.taskLabel} | ${status} | 成功 ${item.successCount}/${item.selectedCount || item.successCount || 0} | 输出目录 ${item.outputDir}`;
-        })
-      : ['- 当前还没有任务记录。']),
-    '',
-    '## 3. 使用方式',
-    '',
-    '- 想继续最近一轮：回任务总控或直接打开那一轮工作台首页',
-    '- 想看单轮细节：进入那一轮任务档案',
-    '- 想比较多轮状态：只在这里横向看，不在这里做单轮判断',
-  ];
+  const taskCenterWorkbench = buildTaskCenterWorkbench(latest, latestWorkspace, examplesCatalogPath);
+  const entryMainlineGuide = buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPath, liveRun);
+  const workbenchProtocol = latest?.workbenchProtocol || summarizeUserWorkbenchProtocol({}, {
+    outputDir: latest?.outputDir || '',
+  });
+  const markdownLines = buildTaskCenterMarkdownLines({
+    runs,
+    recent,
+    latest,
+    liveRun,
+    stableCount,
+    issueCount,
+    entryMainlineGuide,
+  });
 
   return {
     schemaVersion: 1,
@@ -565,17 +686,16 @@ function buildTaskCenterState(indexFile, options = {}) {
     dialogueStatus: liveRun?.dialogueStatus || null,
     runtimeWorkflow: liveRun?.runtimeWorkflow || null,
     runtimeCopilotProtocol: liveRun?.runtimeCopilotProtocol || null,
+    liveCopilotDirective: liveRun?.liveCopilotDirective || null,
     workflowDialogue: liveRun?.workflowDialogue || null,
     stableCount,
     issueCount,
     activeCount,
     totalRuns: runs.length,
     otherRuns,
-    taskCenterWorkbench: buildTaskCenterWorkbench(latest, latestWorkspace, examplesCatalogPath),
-    entryMainlineGuide: buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPath, liveRun),
-    workbenchProtocol: latest?.workbenchProtocol || summarizeUserWorkbenchProtocol({}, {
-      outputDir: latest?.outputDir || '',
-    }),
+    taskCenterWorkbench,
+    entryMainlineGuide,
+    workbenchProtocol,
     markdownLines,
   };
 }
@@ -585,16 +705,49 @@ function normalizeTaskCenterState(snapshot, indexFile, options = {}) {
   const examplesCatalogPath = options.examplesCatalogPath || snapshot.examplesCatalogPath || path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
   const runs = Array.isArray(snapshot.runs) ? snapshot.runs : [];
   const latest = snapshot.latest && typeof snapshot.latest === 'object' ? snapshot.latest : (runs[0] || null);
-  const latestWorkspace = snapshot.latestWorkspace || (latest?.outputDir ? path.join(latest.outputDir, 'workspace_home.html') : null);
+  const latestWorkspace = snapshot.latestWorkspace || (latest?.outputDir ? resolveRecommendedWorkspacePath(latest.outputDir, 'workspace_home.html', 'workspace').recommendedPath : null);
   const latestRecord = snapshot.latestRecord || (latest?.outputDir ? path.join(latest.outputDir, 'run_record.html') : null);
   const otherRuns = Array.isArray(snapshot.otherRuns) ? snapshot.otherRuns : [];
   const stableCount = Number(snapshot.stableCount ?? runs.filter((item) => Number(item?.failedCount || 0) === 0).length);
   const issueCount = Number(snapshot.issueCount ?? runs.filter((item) => Number(item?.failedCount || 0) > 0 || Number(item?.reviewCount || 0) > 0).length);
   const activeCount = Number(snapshot.activeCount ?? runs.filter((item) => item?.bucket === 'active').length);
-  const markdownLines = Array.isArray(snapshot.markdownLines) ? snapshot.markdownLines : buildTaskCenterState(indexFile, options).markdownLines;
   const liveRun = snapshot.liveRun && typeof snapshot.liveRun === 'object'
     ? normalizeLiveRunSnapshot(snapshot.liveRun, latest || snapshot)
     : summarizeLiveRun(latest);
+  const normalizedRuntime = normalizeRuntimeProtocolState({
+    currentStatus: snapshot.currentStatus || liveRun?.currentStatus || null,
+    currentStage: snapshot.currentStage || liveRun?.currentStage || null,
+    runningTask: snapshot.runningTask || liveRun?.runningTask || null,
+    progressSummary: snapshot.progressSummary || liveRun?.progressSummary || null,
+    nextSuggestedAction: snapshot.nextSuggestedAction || liveRun?.nextSuggestedAction || null,
+    unifiedStatus: snapshot.unifiedStatus || liveRun?.unifiedStatus || null,
+    copilotSummary: snapshot.copilotSummary || liveRun?.copilotSummary || null,
+    dialogueStatus: snapshot.dialogueStatus || liveRun?.dialogueStatus || null,
+    runtimeWorkflow: snapshot.runtimeWorkflow || liveRun?.runtimeWorkflow || null,
+    runtimeCopilotProtocol: snapshot.runtimeCopilotProtocol || liveRun?.runtimeCopilotProtocol || null,
+    liveCopilotDirective: snapshot.liveCopilotDirective || liveRun?.liveCopilotDirective || null,
+    workflowDialogue: snapshot.workflowDialogue || liveRun?.workflowDialogue || null,
+  }, latest || {});
+  const workbenchProtocol = snapshot.workbenchProtocol && typeof snapshot.workbenchProtocol === 'object'
+    ? snapshot.workbenchProtocol
+    : (latest?.workbenchProtocol || summarizeUserWorkbenchProtocol({}, {
+      outputDir: latest?.outputDir || '',
+    }));
+  const taskCenterWorkbench = snapshot.taskCenterWorkbench || buildTaskCenterWorkbench(latest, latestWorkspace, examplesCatalogPath);
+  const entryMainlineGuide = snapshot.entryMainlineGuide || buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPath, liveRun);
+  const shouldRefreshMarkdown = !Array.isArray(snapshot.markdownLines)
+    || !snapshot.markdownLines.some((line) => /入口主链协议/.test(String(line || '')));
+  const markdownLines = shouldRefreshMarkdown
+    ? buildTaskCenterMarkdownLines({
+      runs,
+      recent: runs.slice(0, 100),
+      latest,
+      liveRun,
+      stableCount,
+      issueCount,
+      entryMainlineGuide,
+    })
+    : snapshot.markdownLines;
 
   return {
     ...snapshot,
@@ -625,25 +778,22 @@ function normalizeTaskCenterState(snapshot, indexFile, options = {}) {
     progressSummary: snapshot.progressSummary || liveRun?.progressSummary || null,
     updatedAt: snapshot.updatedAt || liveRun?.updatedAt || String(snapshot.generatedAt || '').trim() || new Date().toISOString(),
     runningTask: snapshot.runningTask || liveRun?.runningTask || null,
-    nextSuggestedAction: snapshot.nextSuggestedAction || liveRun?.nextSuggestedAction || null,
-    workbenchProtocol: snapshot.workbenchProtocol && typeof snapshot.workbenchProtocol === 'object'
-      ? snapshot.workbenchProtocol
-      : (latest?.workbenchProtocol || summarizeUserWorkbenchProtocol({}, {
-        outputDir: latest?.outputDir || '',
-      })),
-    unifiedStatus: snapshot.unifiedStatus || liveRun?.unifiedStatus || null,
-    copilotSummary: snapshot.copilotSummary || liveRun?.copilotSummary || null,
-    dialogueStatus: snapshot.dialogueStatus || liveRun?.dialogueStatus || null,
-    runtimeWorkflow: snapshot.runtimeWorkflow || liveRun?.runtimeWorkflow || null,
-    runtimeCopilotProtocol: snapshot.runtimeCopilotProtocol || liveRun?.runtimeCopilotProtocol || null,
-    workflowDialogue: snapshot.workflowDialogue || liveRun?.workflowDialogue || null,
+    nextSuggestedAction: snapshot.nextSuggestedAction || liveRun?.nextSuggestedAction || normalizedRuntime.nextSuggestedAction || null,
+    workbenchProtocol,
+    unifiedStatus: snapshot.unifiedStatus || liveRun?.unifiedStatus || normalizedRuntime.unifiedStatus || null,
+    copilotSummary: snapshot.copilotSummary || liveRun?.copilotSummary || normalizedRuntime.copilotSummary || null,
+    dialogueStatus: snapshot.dialogueStatus || liveRun?.dialogueStatus || normalizedRuntime.dialogueStatus || null,
+    runtimeWorkflow: snapshot.runtimeWorkflow || liveRun?.runtimeWorkflow || normalizedRuntime.runtimeWorkflow || null,
+    runtimeCopilotProtocol: snapshot.runtimeCopilotProtocol || liveRun?.runtimeCopilotProtocol || normalizedRuntime.runtimeCopilotProtocol || null,
+    liveCopilotDirective: snapshot.liveCopilotDirective || liveRun?.liveCopilotDirective || normalizedRuntime.liveCopilotDirective || null,
+    workflowDialogue: snapshot.workflowDialogue || liveRun?.workflowDialogue || normalizedRuntime.workflowDialogue || null,
     stableCount,
     issueCount,
     activeCount,
     totalRuns: Number(snapshot.totalRuns ?? runs.length),
     otherRuns,
-    taskCenterWorkbench: snapshot.taskCenterWorkbench || buildTaskCenterWorkbench(latest, latestWorkspace, examplesCatalogPath),
-    entryMainlineGuide: snapshot.entryMainlineGuide || buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPath, liveRun),
+    taskCenterWorkbench,
+    entryMainlineGuide,
     markdownLines,
   };
 }
@@ -667,7 +817,7 @@ function loadTaskCenterState(indexFile, options = {}) {
 }
 
 function renderRunCardModel(item, rootDir, options = {}) {
-  const workspace = path.join(item.outputDir, 'workspace_home.html');
+  const workspace = resolveRecommendedWorkspacePath(item.outputDir, 'workspace_home.html', 'workspace').recommendedPath;
   const record = path.join(item.outputDir, 'run_record.html');
   const href = fileExists(workspace)
     ? path.relative(rootDir, workspace)
@@ -697,7 +847,7 @@ module.exports = {
   enrichRunItem,
   formatArtifactLayerSummary,
   formatTime,
-  inferLegacyPhase,
+  inferArchivePhase,
   isSameRun,
   loadTaskCenterState,
   loadRuns,

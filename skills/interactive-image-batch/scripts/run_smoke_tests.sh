@@ -116,6 +116,13 @@ JSON
   }
 ]
 JSON
+  mkdir -p "$tmp_dir/out/workspace"
+  printf '%s' '<html>stale review board</html>' > "$tmp_dir/out/review_board.html"
+  printf '%s' '<html>stale result hub</html>' > "$tmp_dir/out/result_hub.html"
+  printf '%s' '<html>stale completion board</html>' > "$tmp_dir/out/completion_board.html"
+  printf '%s' '<html>stale review board mirror</html>' > "$tmp_dir/out/workspace/review_board.html"
+  printf '%s' '<html>stale result hub mirror</html>' > "$tmp_dir/out/workspace/result_hub.html"
+  printf '%s' '<html>stale completion board mirror</html>' > "$tmp_dir/out/workspace/completion_board.html"
   node "$SKILL_ROOT/scripts/ingest_host_native_results.js" \
     --prompt-pack-file "$tmp_dir/host_native_prompt_pack.json" \
     --results-file "$tmp_dir/host_native_results.json" \
@@ -127,6 +134,9 @@ JSON
   test ! -f "$tmp_dir/out/review_board.html"
   test ! -f "$tmp_dir/out/result_hub.html"
   test ! -f "$tmp_dir/out/completion_board.html"
+  test ! -f "$tmp_dir/out/workspace/review_board.html"
+  test ! -f "$tmp_dir/out/workspace/result_hub.html"
+  test ! -f "$tmp_dir/out/workspace/completion_board.html"
 )
 
 echo "[smoke] host-native results schema fixture"

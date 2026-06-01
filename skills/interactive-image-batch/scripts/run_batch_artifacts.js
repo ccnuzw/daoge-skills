@@ -66,7 +66,7 @@ function createSelectionArtifacts(outputDir, manifest, allResults, options = {})
     `- 成功结果: ${successful.length}`,
     `- 失败结果: ${failed.length}`,
     `- 待人工再看: ${needsReview.length}`,
-    `- 当前最推荐入口: ${failed.length || needsReview.length ? exceptionWorkspacePath : resultWorkspacePath}`,
+    `- 当前建议回到: ${failed.length || needsReview.length ? exceptionWorkspacePath : resultWorkspacePath}`,
     '',
     '## 2. 下一步建议',
     '',
@@ -83,7 +83,7 @@ function createSelectionArtifacts(outputDir, manifest, allResults, options = {})
   } else {
     lines.push(`- 当前没有明显补救压力，建议直接回结果工作台继续筛图: ${resultWorkspacePath}`);
     if (fs.existsSync(storyboardBoardPath)) {
-      lines.push(`- 如果你想结合整板上下文复看镜头关系，再打开整板页: ${storyboardBoardPath}`);
+      lines.push(`- 如果你想结合分镜上下文复看镜头关系，再按需打开分镜整板补充页: ${storyboardBoardPath}`);
     }
   }
 
@@ -214,7 +214,7 @@ function createOperationsReport(outputDir, manifest, allResults, options = {}) {
     '',
     ...(failed.length
       ? ['- 当前仍有失败项，建议先回异常工作台收口，再考虑继续扩图。']
-      : ['- 当前没有失败项，可以回结果工作台继续筛图或进入整板页看上下文。']),
+      : ['- 当前没有失败项，可以回结果工作台继续筛图；分镜任务再按需打开分镜整板补充页看上下文。']),
     ...(skipped ? ['- 本轮存在跳过结果，继续下一轮前建议确认这些已有结果是否仍然适用。'] : ['- 当前没有跳过项，结果覆盖比较完整。']),
   ];
 

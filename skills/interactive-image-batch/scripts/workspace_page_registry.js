@@ -19,7 +19,7 @@ const PAGE_REGISTRY = [
     audience: 'all',
     stage: 'hub',
     file: (outputDir) => path.join(path.dirname(outputDir), 'task_center.html'),
-    summary: '跨任务选择与继续旧任务',
+    summary: '跨任务选择与继续已有任务',
     group: 'entry',
     generateByDefault: true,
   },
@@ -80,12 +80,12 @@ const PAGE_REGISTRY = [
   },
   {
     id: 'storyboard',
-    label: '分镜整板页',
+    label: '分镜整板补充页',
     kind: 'conditional',
     audience: 'advanced',
     stage: 'result',
     file: (outputDir) => path.join(outputDir, 'storyboard_board.html'),
-    summary: '分镜任务按需回看整板上下文',
+    summary: '分镜任务按需回看整板上下文，普通任务默认不进入',
     group: 'conditional',
     generateByDefault: false,
   },
@@ -101,24 +101,13 @@ const PAGE_REGISTRY = [
     generateByDefault: false,
   },
   {
-    id: 'result-hub',
-    label: '旧结果说明页',
-    kind: 'legacy',
-    audience: 'advanced',
-    stage: 'legacy',
-    file: (outputDir) => path.join(outputDir, 'result_hub.html'),
-    summary: '旧结果说明页，后续不再面向普通用户',
-    group: 'legacy',
-    generateByDefault: false,
-  },
-  {
     id: 'completion-board',
     label: '完成摘要补充页',
     kind: 'secondary',
     audience: 'advanced',
     stage: 'summary',
     file: (outputDir) => path.join(outputDir, 'completion_board.html'),
-    summary: '完成摘要与历史兼容说明',
+    summary: '完成摘要与收口判断说明',
     group: 'advanced',
     generateByDefault: false,
   },
@@ -129,7 +118,7 @@ const PAGE_REGISTRY = [
     audience: 'advanced',
     stage: 'prepare',
     file: (outputDir) => path.join(outputDir, 'preflight_board.html'),
-    summary: '旧预检视图，已被准备工作台吸收',
+    summary: '准备层深看视图，默认由准备工作台吸收',
     group: 'advanced',
     generateByDefault: false,
   },
@@ -140,7 +129,7 @@ const PAGE_REGISTRY = [
     audience: 'advanced',
     stage: 'prepare',
     file: (outputDir) => path.join(outputDir, 'prompt_preview.html'),
-    summary: '旧提示词预览视图，已降级为辅助页',
+    summary: '提示词逐条预览视图，按需作为辅助页生成',
     group: 'advanced',
     generateByDefault: false,
   },
@@ -151,7 +140,7 @@ const PAGE_REGISTRY = [
     audience: 'advanced',
     stage: 'prepare',
     file: (outputDir) => path.join(outputDir, 'assets_board.html'),
-    summary: '旧素材视图，已降级为辅助页',
+    summary: '素材绑定视图，按需作为辅助页生成',
     group: 'advanced',
     generateByDefault: false,
   },
@@ -162,7 +151,7 @@ const PAGE_REGISTRY = [
     audience: 'advanced',
     stage: 'summary',
     file: (outputDir) => path.join(outputDir, 'run_overview.html'),
-    summary: '旧运行概览页，保留为辅助说明',
+    summary: '运行结构回看页，按需作为辅助说明生成',
     group: 'advanced',
     generateByDefault: false,
   },
@@ -175,17 +164,6 @@ const PAGE_REGISTRY = [
     file: (outputDir) => path.join(outputDir, 'rerun_board.html'),
     summary: '高级补跑入口，普通用户默认不看',
     group: 'advanced',
-    generateByDefault: false,
-  },
-  {
-    id: 'portal-home',
-    label: '旧入口说明页',
-    kind: 'legacy',
-    audience: 'advanced',
-    stage: 'legacy',
-    file: (outputDir) => path.join(outputDir, 'daoge_portal.html'),
-    summary: '旧入口说明页，后续不再纳入主链',
-    group: 'legacy',
     generateByDefault: false,
   },
 ];
@@ -229,10 +207,6 @@ function getSecondaryPageEntries(outputDir) {
   return buildPageEntries(outputDir).filter((entry) => ['conditional', 'advanced'].includes(entry.group));
 }
 
-function getLegacyPageEntries(outputDir) {
-  return buildPageEntries(outputDir).filter((entry) => entry.group === 'legacy');
-}
-
 function getDefaultGeneratedPageEntries(outputDir) {
   return buildPageEntries(outputDir).filter((entry) => entry.generateByDefault);
 }
@@ -260,7 +234,6 @@ module.exports = {
   getAdvancedPageEntries,
   getPrimaryPageEntries,
   getSecondaryPageEntries,
-  getLegacyPageEntries,
   getDefaultGeneratedPageEntries,
   getDefaultVisiblePageEntries,
   getDefaultGeneratedMainlinePageEntries,

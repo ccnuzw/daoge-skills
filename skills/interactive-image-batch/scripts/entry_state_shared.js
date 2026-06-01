@@ -102,7 +102,7 @@ function buildEntryDefaultGenerationProtocol(options = {}) {
     reductionRule: contract.reductionRule,
     summary: normalizeText(
       options.summary,
-      '入口层默认只带用户进入主链工作台；深看页、旧入口和内部资产不作为普通用户默认入口。'
+      '入口层默认只带用户进入主链工作台；深看页和内部资产不作为普通用户默认入口。'
     ),
   };
 }
@@ -125,6 +125,27 @@ function resolveEntryDefaultGenerationProtocol(source = {}, options = {}) {
       : fallback.guardrail,
     reductionRule: normalizeText(protocol.reductionRule, fallback.reductionRule),
     summary: normalizeText(protocol.summary, fallback.summary),
+  };
+}
+
+function buildEntryMainlineContract(protocol = {}) {
+  const source = protocol && typeof protocol === 'object' ? protocol : {};
+  const defaultGenerationProtocol = source.defaultGenerationProtocol && typeof source.defaultGenerationProtocol === 'object'
+    ? source.defaultGenerationProtocol
+    : buildEntryDefaultGenerationProtocol();
+  return {
+    version: 1,
+    language: 'entry-mainline-contract',
+    sequenceLabel: normalizeText(source.sequenceLabel, '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台'),
+    entryRole: normalizeText(source.entryRole, '模板展示板只负责选择任务类型和起步入口。'),
+    taskCenterRole: normalizeText(source.taskCenterRole, '任务总控只负责开新任务、继续当前任务和切换任务。'),
+    workspaceRole: normalizeText(source.workspaceRole, '工作台首页接住单轮任务判断，再顺着准备、结果、异常继续。'),
+    handoffRule: normalizeText(source.handoffRule, '入口层一旦选定任务，就把方向交给准备工作台；任务总控只做任务级切换，不展开单轮内部判断。'),
+    defaultGenerationMode: normalizeText(defaultGenerationProtocol.mode, 'mainline-only'),
+    defaultGenerationSummary: normalizeText(defaultGenerationProtocol.summary, '入口层默认只带用户进入主链工作台；深看页和内部资产不作为普通用户默认入口。'),
+    defaultGenerationGuardrail: defaultGenerationProtocol.guardrail || {},
+    hiddenHtmlFiles: normalizeList(defaultGenerationProtocol.hiddenHtmlFiles, []),
+    summary: normalizeText(source.summary, '先在中文模板展示板选任务，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。'),
   };
 }
 
@@ -167,6 +188,11 @@ function resolveEntryMainlineProtocol(entryState, options = {}) {
     handoffRule: normalizeText(source.handoffRule, '入口层一旦选定任务，就把方向交给准备工作台；任务总控只做任务级切换，不展开单轮内部判断。'),
     taskCenterEntryProtocol,
     defaultGenerationProtocol,
+    mainlineContract: buildEntryMainlineContract({
+      ...source,
+      sequenceLabel: normalizeText(source.sequenceLabel, sequence.join(' -> ')),
+      defaultGenerationProtocol,
+    }),
     summary: normalizeText(source.summary, '先在中文模板展示板选任务，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。'),
   };
 }
@@ -338,6 +364,7 @@ function resolveEntryContext(entryState, options = {}) {
 
 module.exports = {
   buildEntryDefaultGenerationProtocol,
+  buildEntryMainlineContract,
   buildTaskCenterEntryProtocol,
   entryModeLabel,
   loadEntryState,

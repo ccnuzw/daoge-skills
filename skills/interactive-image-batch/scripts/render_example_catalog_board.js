@@ -318,6 +318,19 @@ function main() {
     entryPreview,
     currentTaskCategory,
   });
+  const mainlineContract = entryMainlineProtocol.mainlineContract || {};
+  const defaultGenerationProtocol = entryMainlineProtocol.defaultGenerationProtocol || {};
+  const defaultGenerationGuardrail = defaultGenerationProtocol.guardrail && typeof defaultGenerationProtocol.guardrail === 'object'
+    ? defaultGenerationProtocol.guardrail
+    : (mainlineContract.defaultGenerationGuardrail || {});
+  const hiddenHtmlFiles = Array.isArray(defaultGenerationProtocol.hiddenHtmlFiles)
+    ? defaultGenerationProtocol.hiddenHtmlFiles
+    : (Array.isArray(mainlineContract.hiddenHtmlFiles) ? mainlineContract.hiddenHtmlFiles : []);
+  const defaultGenerationSummary = defaultGenerationProtocol.summary || mainlineContract.defaultGenerationSummary || '';
+  const defaultGenerationCardSummary = [
+    defaultGenerationGuardrail.onDemandRule || defaultGenerationSummary,
+    hiddenHtmlFiles.length ? `默认隐藏: ${hiddenHtmlFiles.slice(0, 6).join('、')}${hiddenHtmlFiles.length > 6 ? ' 等' : ''}` : '',
+  ].filter(Boolean).join(' ');
 
   const html = `<!doctype html>
 <html lang="zh-CN">
@@ -633,18 +646,25 @@ ${renderPortalHeadAssets()}
 
     ${renderPortalWorkbench(portalDir, {
       title: '入口主链协议',
-      copy: entryMainlineProtocol.summary,
-      maxCards: 3,
+      copy: `${mainlineContract.summary || entryMainlineProtocol.summary} ${defaultGenerationSummary}`.trim(),
+      maxCards: 4,
       cards: [
-        { label: '模板展示板', value: entryActions.chooseTemplate.value, summary: entryMainlineProtocol.entryRole, tone: 'good', hideLinkIfMissing: true },
+        { label: '模板展示板', value: entryActions.chooseTemplate.value, summary: mainlineContract.entryRole || entryMainlineProtocol.entryRole, tone: 'good', hideLinkIfMissing: true },
         {
           label: '任务总控',
           value: '跨任务入口',
-          summary: entryMainlineProtocol.taskCenterEntryProtocol?.summary || entryMainlineProtocol.taskCenterRole,
+          summary: `${mainlineContract.taskCenterRole || entryMainlineProtocol.taskCenterRole} ${entryMainlineProtocol.taskCenterEntryProtocol?.summary || ''}`.trim(),
           tone: 'info',
           hideLinkIfMissing: true,
         },
-        { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.workspaceRole, file: workspaceHomeFile, cta: entryActions.openWorkspaceHome.cta, pendingLabel: entryActions.openWorkspaceHome.pendingLabel, tone: 'neutral' },
+        { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: mainlineContract.workspaceRole || entryMainlineProtocol.workspaceRole, file: workspaceHomeFile, cta: entryActions.openWorkspaceHome.cta, pendingLabel: entryActions.openWorkspaceHome.pendingLabel, tone: 'neutral' },
+        {
+          label: '默认生成策略',
+          value: defaultGenerationProtocol.mode || mainlineContract.defaultGenerationMode || 'mainline-only',
+          summary: defaultGenerationCardSummary,
+          tone: 'neutral',
+          hideLinkIfMissing: true,
+        },
       ],
     })}
 

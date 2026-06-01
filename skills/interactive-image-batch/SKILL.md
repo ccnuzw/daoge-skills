@@ -178,7 +178,6 @@ Core execution artifacts:
 - `storyboard_board.html`
 - `completion_board.html`
 - `rerun_board.html`
-- `result_hub.html`
 - `operations_report.md`
 
 Not every turn needs every artifact, but the workflow should stay artifact-first.
@@ -194,7 +193,7 @@ node scripts/build_host_native_prompt_pack.js \
   --output-dir /abs/path/output_dir
 ```
 
-For user-facing browsing, prefer the HTML portal surfaces first. Markdown outputs remain useful as archival or debugging companions, but they should not be treated as the primary user portal once the HTML boards are available.
+For user-facing browsing, prefer the workspace-first HTML mainline: `task_center.html`, `workspace/workspace_home.html`, `workspace/prepare_workspace.html`, `workspace/result_workspace.html`, `workspace/exception_workspace.html`, and `workspace/run_record.html`. Markdown outputs remain useful as archival or debugging companions, but they should not be treated as the primary user entry once the workspace boards are available.
 
 ## Template system
 

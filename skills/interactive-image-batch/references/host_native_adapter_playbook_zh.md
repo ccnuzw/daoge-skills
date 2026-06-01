@@ -15,7 +15,7 @@ DAOGE 的 `host-native` 路径现在分成四层：
 1. 运行模式探测
 2. prompt 交接包
 3. 结果文件契约
-4. 结果回填与审阅门户
+4. 结果回填与工作台主链
 
 接入一个新宿主时，你的工作基本就是：
 
@@ -67,9 +67,15 @@ node scripts/ingest_host_native_results.js \
   --output-dir /abs/path/output_dir
 ```
 
-7. 进入现有审阅入口
+7. 进入工作台主链审阅入口
 
-- `result_hub.html`
+- `workspace/workspace_home.html`
+- `workspace/result_workspace.html`
+- `workspace/exception_workspace.html`
+- `workspace/run_record.html`
+
+如果显式开启结果深看模式，再检查：
+
 - `review_board.html`
 - `completion_board.html`
 
@@ -182,7 +188,7 @@ node scripts/ingest_host_native_results.js \
 原因很简单：
 
 - 校验负责挡住契约错误
-- 导入负责生成结果链和门户
+- 导入负责生成结果链和工作台主链
 
 这样出问题时更容易定位到底是“宿主结果文件错了”，还是“导入逻辑坏了”。
 

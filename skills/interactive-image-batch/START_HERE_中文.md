@@ -25,7 +25,19 @@
 
 这套系统的标准路径只有这一条：
 
-**选任务类型 -> 选一个入口 -> 生成预检面板 -> 确认后再执行**
+**选任务类型 -> 进任务总控 -> 打开工作台首页 -> 确认准备 -> 看结果 / 处理异常**
+
+当前终版入口链是：
+
+1. `references/examples/examples_catalog.html`
+2. `task_center.html`
+3. `workspace/workspace_home.html`
+4. `workspace/prepare_workspace.html`
+5. `workspace/result_workspace.html`
+6. `workspace/exception_workspace.html`
+7. `workspace/run_record.html`
+
+新 DAOGE 只有这条 workspace-first 主链。退役入口不再是产品入口，也不会在默认、深看或完整展开模式中重新生成。
 
 你不需要一开始就理解：
 
@@ -254,20 +266,30 @@ references/examples/examples_catalog.html
 
 ## 四、你真正需要看的结果文件
 
-第一次使用时，只看这两个：
+第一次使用时，优先只看工作台主链：
 
-- `prepare/preflight_board.html`
-- `prepare/prompt_preview.html`
+- `workspace/workspace_home.html`
+- `workspace/prepare_workspace.html`
+- `workspace/result_workspace.html`
+- `workspace/run_record.html`
 
 解释：
 
-- `preflight_board.html`
-  - 看这次任务能不能开跑
-  - 看有没有红灯 / 黄灯 / 绿灯
-- `prompt_preview.html`
-  - 看这次生成的 prompt 是否符合你的预期
+- `workspace_home.html`
+  - 看现在到哪一步、下一步该做什么
+- `prepare_workspace.html`
+  - 看这次任务能不能开跑、提示词和素材是否需要调整
+- `result_workspace.html`
+  - 看结果是否可用、哪些要复核、下一步是否补跑
+- `run_record.html`
+  - 只在需要回看本轮任务档案时打开
 
 如果你只做预检，不执行，到这里就够了。
+
+如果你确实要逐条深看提示词或预检细节，再开启准备深看模式，看：
+
+- `preflight_board.html`
+- `prompt_preview.html`
 
 ---
 

@@ -393,14 +393,196 @@ function buildRuntimeUnifiedStateBundle(options = {}) {
     copilotSummary,
     failedCount: Number(options.failedCount || 0),
   });
-
-  return {
-    nextSuggestedAction: nextAction,
-    workflowDialogue,
-    runtimeWorkflow,
+  const liveCopilotDirective = buildLiveCopilotDirective({
+    source: 'runtime-unified-state-bundle',
+    status,
+    stageLabel,
+    taskLabel,
+    headline,
+    summary,
+    progressSummary,
+    tone,
+    nextAction,
+    dialogueStatus: workflowDialogue,
     unifiedStatus,
     copilotSummary,
     runtimeCopilotProtocol,
+  });
+  const alignedNextAction = {
+    ...nextAction,
+    label: liveCopilotDirective.nextActionLabel || nextAction.label,
+    reason: liveCopilotDirective.nextActionSummary || nextAction.reason,
+    target: liveCopilotDirective.nextAction?.target || nextAction.target || null,
+    recommendedReply: liveCopilotDirective.recommendedReply || null,
+  };
+  const alignedWorkflowDialogue = {
+    ...workflowDialogue,
+    primarySay: liveCopilotDirective.recommendedReply,
+    actionReason: liveCopilotDirective.actionReason,
+    summary: liveCopilotDirective.dialogueSummary,
+    nextSayItems: liveCopilotDirective.nextSayItems,
+    alternativeSayItems: liveCopilotDirective.alternativeSayItems,
+    confirmItems: liveCopilotDirective.confirmItems,
+  };
+  const alignedRuntimeWorkflow = {
+    ...runtimeWorkflow,
+    nextAction: alignedNextAction,
+    dialogue: alignedWorkflowDialogue,
+  };
+  const alignedUnifiedStatus = buildStageUnifiedStatus({
+    stage: stageLabel,
+    conclusion: headline,
+    currentFocus: liveCopilotDirective.nextActionSummary,
+    progress: progressSummary,
+    status,
+    taskLabel,
+    nextAction: alignedNextAction,
+    nextActionSummary: liveCopilotDirective.nextActionSummary,
+    recommendedReply: liveCopilotDirective.recommendedReply,
+    dialogueStatus: alignedWorkflowDialogue,
+  });
+  const alignedCopilotSummary = {
+    ...copilotSummary,
+    stageLabel: liveCopilotDirective.stageLabel || copilotSummary.stageLabel || null,
+    status: liveCopilotDirective.currentStatus || copilotSummary.status || null,
+    conclusion: liveCopilotDirective.statusSummary || copilotSummary.conclusion || null,
+    progressSummary: liveCopilotDirective.progressSummary || copilotSummary.progressSummary || null,
+    nextActionLabel: liveCopilotDirective.nextActionLabel || copilotSummary.nextActionLabel || null,
+    nextActionSummary: liveCopilotDirective.nextActionSummary || copilotSummary.nextActionSummary || null,
+    recommendedReply: liveCopilotDirective.recommendedReply || copilotSummary.recommendedReply || null,
+    confirmationSummary: liveCopilotDirective.actionReason || copilotSummary.confirmationSummary || null,
+    confirmItems: liveCopilotDirective.confirmItems,
+    nextSayItems: liveCopilotDirective.nextSayItems,
+  };
+
+  return {
+    nextSuggestedAction: alignedNextAction,
+    workflowDialogue: alignedWorkflowDialogue,
+    runtimeWorkflow: alignedRuntimeWorkflow,
+    unifiedStatus: alignedUnifiedStatus,
+    copilotSummary: alignedCopilotSummary,
+    runtimeCopilotProtocol,
+    liveCopilotDirective,
+  };
+}
+
+function buildLiveCopilotDirective(options = {}) {
+  const runtimeCopilotProtocol = options.runtimeCopilotProtocol && typeof options.runtimeCopilotProtocol === 'object'
+    ? options.runtimeCopilotProtocol
+    : {};
+  const handoffState = runtimeCopilotProtocol.handoffState && typeof runtimeCopilotProtocol.handoffState === 'object'
+    ? runtimeCopilotProtocol.handoffState
+    : {};
+  const dialogueStatus = options.dialogueStatus && typeof options.dialogueStatus === 'object'
+    ? options.dialogueStatus
+    : {};
+  const copilotSummary = options.copilotSummary && typeof options.copilotSummary === 'object'
+    ? options.copilotSummary
+    : {};
+  const unifiedStatus = options.unifiedStatus && typeof options.unifiedStatus === 'object'
+    ? options.unifiedStatus
+    : {};
+  const nextAction = normalizeAction(
+    options.nextAction
+    || unifiedStatus.nextAction
+    || {
+      label: copilotSummary.nextActionLabel,
+      reason: copilotSummary.nextActionSummary,
+      target: handoffState.primarySurface,
+      recommendedReply: copilotSummary.recommendedReply,
+    }
+  ) || { label: '', reason: '', target: null, recommendedReply: null };
+  const recommendedReply = cleanText(
+    runtimeCopilotProtocol.primarySay
+    || copilotSummary.recommendedReply
+    || dialogueStatus.primarySay
+    || unifiedStatus.recommendedReply
+    || nextAction.recommendedReply
+    || runtimeCopilotProtocol.dialogueFocus
+  );
+  const nextActionSummary = cleanText(
+    copilotSummary.nextActionSummary
+    || nextAction.reason
+    || unifiedStatus.nextActionSummary
+    || runtimeCopilotProtocol.nextActionReason
+    || options.summary
+    || options.progressSummary
+  );
+  const actionReason = cleanText(
+    dialogueStatus.actionReason
+    || runtimeCopilotProtocol.nextActionReason
+    || copilotSummary.confirmationSummary
+    || nextActionSummary
+  );
+  const dialogueSummary = cleanText(
+    dialogueStatus.summary
+    || copilotSummary.confirmationSummary
+    || copilotSummary.progressSummary
+    || options.progressSummary
+    || actionReason
+  );
+  const nextSayItems = Array.isArray(dialogueStatus.nextSayItems)
+    ? dialogueStatus.nextSayItems.map((item) => cleanText(item)).filter(Boolean)
+    : [];
+  const normalizedNextSayItems = [
+    recommendedReply,
+    ...nextSayItems,
+  ].filter(Boolean).filter((item, index, list) => list.indexOf(item) === index);
+  const alternativeSayItems = Array.isArray(dialogueStatus.alternativeSayItems)
+    ? dialogueStatus.alternativeSayItems.map((item) => cleanText(item)).filter(Boolean)
+    : [];
+  const confirmItems = Array.isArray(dialogueStatus.confirmItems)
+    ? dialogueStatus.confirmItems.map((item) => cleanText(item)).filter(Boolean)
+    : (Array.isArray(copilotSummary.confirmItems)
+      ? copilotSummary.confirmItems.map((item) => cleanText(item)).filter(Boolean)
+      : []);
+  const pageSurface = cleanText(handoffState.primarySurface || nextAction.target);
+  const statusSummary = cleanText(
+    options.headline
+    || unifiedStatus.statusSummary
+    || unifiedStatus.conclusion
+    || copilotSummary.conclusion
+    || options.summary
+  );
+
+  return {
+    version: 1,
+    source: cleanText(options.source, 'runtime-unified-state-bundle'),
+    objectRole: 'live-copilot-directive',
+    currentStatus: cleanText(options.status || unifiedStatus.status || copilotSummary.status, 'planned'),
+    branch: cleanText(handoffState.branch || options.status || unifiedStatus.status, 'planned'),
+    stageLabel: cleanText(options.stageLabel || unifiedStatus.stage || copilotSummary.stageLabel),
+    taskLabel: cleanText(options.taskLabel || unifiedStatus.taskLabel),
+    statusSummary: statusSummary || null,
+    progressSummary: cleanText(options.progressSummary || copilotSummary.progressSummary || unifiedStatus.progressSummary) || null,
+    pressureLabel: cleanText(unifiedStatus.pressureLabel) || null,
+    pressureSummary: cleanText(unifiedStatus.pressureSummary) || null,
+    pressureTone: cleanText(unifiedStatus.pressureTone || options.tone) || null,
+    nextAction: {
+      ...nextAction,
+      label: cleanText(nextAction.label || copilotSummary.nextActionLabel || runtimeCopilotProtocol.nextActionLabel),
+      reason: nextActionSummary,
+      target: nextAction.target || null,
+      recommendedReply: recommendedReply || null,
+    },
+    nextActionLabel: cleanText(nextAction.label || copilotSummary.nextActionLabel || runtimeCopilotProtocol.nextActionLabel) || null,
+    nextActionSummary: nextActionSummary || null,
+    recommendedReply: recommendedReply || null,
+    primarySay: recommendedReply || null,
+    actionReason: actionReason || null,
+    dialogueSummary: dialogueSummary || null,
+    nextSayItems: normalizedNextSayItems,
+    alternativeSayItems,
+    confirmItems,
+    pageSurface: pageSurface || null,
+    dialogueSurface: 'codex-dialogue',
+    handoffRule: cleanText(runtimeCopilotProtocol.handoffRule) || null,
+    handoffState,
+    consumerContract: {
+      dialogueSuggestion: 'read recommendedReply/primarySay from this object',
+      workspaceFirstScreen: 'read nextActionSummary/recommendedReply from this object',
+      taskCenterLiveStrip: 'mirror the same object without rewriting copy',
+    },
   };
 }
 
@@ -415,6 +597,7 @@ function buildRuntimeCopilotProtocol(options = {}) {
   const primarySay = cleanText(dialogueStatus.primarySay || copilotSummary.recommendedReply);
   const actionReason = cleanText(dialogueStatus.actionReason || copilotSummary.nextActionSummary || nextAction.reason || progressSummary);
   const nextActionLabel = cleanText(nextAction.label || copilotSummary.nextActionLabel);
+  const failedCount = Number(options.failedCount || 0);
   const statusConfig = {
     running: {
       cadenceLabel: '运行中',
@@ -422,6 +605,12 @@ function buildRuntimeCopilotProtocol(options = {}) {
       pageFocus: '工作台持续刷新当前批次、成功失败数和下一步建议。',
       dialogueFocus: primarySay || '继续，先盯住当前进度',
       handoffRule: '运行中由工作台承担观察，Codex 对话只需要继续接收进度或等待当前批次结束。',
+      handoffState: {
+        branch: 'running',
+        primarySurface: 'workspace_live_state.json',
+        nextOwner: '实时副驾驶',
+        nextStep: '等待当前批次完成，再按完成、暂停或确认状态分流。',
+      },
     },
     paused: {
       cadenceLabel: '暂停待处理',
@@ -429,6 +618,12 @@ function buildRuntimeCopilotProtocol(options = {}) {
       pageFocus: '优先看异常工作台或当前阻塞说明。',
       dialogueFocus: primarySay || '继续，先处理暂停原因',
       handoffRule: '暂停态先把风险收掉，再决定继续执行、补跑或回结果层。',
+      handoffState: {
+        branch: 'paused',
+        primarySurface: 'exception_workspace.html',
+        nextOwner: '异常工作台',
+        nextStep: '先处理暂停原因，再决定继续执行、补跑或回结果层。',
+      },
     },
     awaiting_confirmation: {
       cadenceLabel: '等待确认',
@@ -436,6 +631,12 @@ function buildRuntimeCopilotProtocol(options = {}) {
       pageFocus: '优先看当前确认项和准备/结果交接说明。',
       dialogueFocus: primarySay || '继续，我先确认这一步',
       handoffRule: '等待确认时，对话框负责给出明确确认，工作台负责解释确认点和下一站。',
+      handoffState: {
+        branch: 'waiting-confirmation',
+        primarySurface: 'workspace_home.html',
+        nextOwner: '对话确认',
+        nextStep: '用户明确确认后，再回到运行态或对应工作台继续。',
+      },
     },
     waiting: {
       cadenceLabel: '等待确认',
@@ -443,13 +644,32 @@ function buildRuntimeCopilotProtocol(options = {}) {
       pageFocus: '优先看当前确认项和准备/结果交接说明。',
       dialogueFocus: primarySay || '继续，我先确认这一步',
       handoffRule: '等待确认时，对话框负责给出明确确认，工作台负责解释确认点和下一站。',
+      handoffState: {
+        branch: 'waiting-confirmation',
+        primarySurface: 'workspace_home.html',
+        nextOwner: '对话确认',
+        nextStep: '用户明确确认后，再回到运行态或对应工作台继续。',
+      },
     },
     completed: {
       cadenceLabel: '已完成',
-      userFocus: Number(options.failedCount || 0) > 0 ? '先处理异常，再回结果层收口。' : '先进入结果工作台筛图和收口。',
-      pageFocus: Number(options.failedCount || 0) > 0 ? '优先看异常工作台，再回结果工作台。' : '优先看结果工作台。',
-      dialogueFocus: primarySay || (Number(options.failedCount || 0) > 0 ? '继续，先处理异常' : '继续，进入结果工作台'),
+      userFocus: failedCount > 0 ? '先处理异常，再回结果层收口。' : '先进入结果工作台筛图和收口。',
+      pageFocus: failedCount > 0 ? '优先看异常工作台，再回结果工作台。' : '优先看结果工作台。',
+      dialogueFocus: primarySay || (failedCount > 0 ? '继续，先处理异常' : '继续，进入结果工作台'),
       handoffRule: '完成态由结果工作台接住筛选、复核和收口；如有失败项，先交给异常工作台。',
+      handoffState: failedCount > 0
+        ? {
+          branch: 'completed-failed',
+          primarySurface: 'exception_workspace.html',
+          nextOwner: '异常工作台',
+          nextStep: '先收失败项和补跑判断，再回结果工作台完成收口。',
+        }
+        : {
+          branch: 'completed-clean',
+          primarySurface: 'result_workspace.html',
+          nextOwner: '结果工作台',
+          nextStep: '进入结果工作台筛图、取舍并完成收口。',
+        },
     },
     planned: {
       cadenceLabel: '待开始',
@@ -457,6 +677,12 @@ function buildRuntimeCopilotProtocol(options = {}) {
       pageFocus: '优先看准备工作台的放行判断。',
       dialogueFocus: primarySay || '继续，进入准备工作台',
       handoffRule: '待开始时先由准备工作台确认方向、批次和素材绑定，再进入执行。',
+      handoffState: {
+        branch: 'planned',
+        primarySurface: 'prepare_workspace.html',
+        nextOwner: '准备工作台',
+        nextStep: '先确认方向、批次和素材绑定，再进入执行。',
+      },
     },
   };
   const config = statusConfig[status] || statusConfig.planned;
@@ -474,6 +700,7 @@ function buildRuntimeCopilotProtocol(options = {}) {
     nextActionLabel,
     nextActionReason: actionReason,
     primarySay: config.dialogueFocus,
+    handoffState: config.handoffState,
   };
 }
 
@@ -529,6 +756,22 @@ function buildLiveRunStateBundle(options = {}) {
       copilotSummary,
       failedCount: Number(runtimeSummary.failedCount ?? fallback.failedCount ?? fallback.failed ?? 0),
     });
+  const liveCopilotDirective = runtimeSummary.liveCopilotDirective && typeof runtimeSummary.liveCopilotDirective === 'object'
+    ? runtimeSummary.liveCopilotDirective
+    : buildLiveCopilotDirective({
+      source: 'live-run-state-bundle',
+      status: cleanText(runtimeSummary.currentStatus),
+      stageLabel: cleanText(runtimeSummary.currentStage || fallback.phaseLabel),
+      taskLabel: cleanText(runtimeSummary.taskLabel || fallback.taskLabel),
+      headline: cleanText(fallback.phaseHeadline || fallback.phaseSummary),
+      summary: cleanText(fallback.phaseSummary),
+      progressSummary: cleanText(runtimeSummary.progressSummary || fallback.phaseSummary),
+      nextAction: nextSuggestedAction,
+      dialogueStatus: runtimeSummary.workflowDialogue || runtimeSummary.dialogueStatus || fallback.pageState?.runtimeSummary?.dialogueStatus || null,
+      unifiedStatus,
+      copilotSummary,
+      runtimeCopilotProtocol,
+    });
 
   return {
     nextSuggestedAction,
@@ -537,6 +780,7 @@ function buildLiveRunStateBundle(options = {}) {
     runningTask: cleanText(runtimeSummary.runningTask || fallback.taskLabel, '未命名任务'),
     copilotSummary,
     runtimeCopilotProtocol,
+    liveCopilotDirective,
   };
 }
 
@@ -793,6 +1037,23 @@ function normalizeRuntimeProtocolState(runtimeState = {}, fallback = {}) {
       copilotSummary,
       failedCount,
     });
+  const liveCopilotDirective = primary.liveCopilotDirective && typeof primary.liveCopilotDirective === 'object'
+    ? primary.liveCopilotDirective
+    : buildLiveCopilotDirective({
+      source: 'normalized-runtime-protocol-state',
+      status: currentStatus,
+      stageLabel: phaseLabel || currentStage,
+      taskLabel,
+      headline: phaseHeadline,
+      summary: phaseSummary,
+      progressSummary,
+      tone: phaseTone,
+      nextAction: nextSuggestedAction,
+      dialogueStatus: workflowDialogue,
+      unifiedStatus: resolvedUnifiedStatus,
+      copilotSummary,
+      runtimeCopilotProtocol,
+    });
 
   return {
     outputDir: cleanText(primary.outputDir || secondary.outputDir) || null,
@@ -822,12 +1083,14 @@ function normalizeRuntimeProtocolState(runtimeState = {}, fallback = {}) {
     unifiedStatus: resolvedUnifiedStatus,
     copilotSummary,
     runtimeCopilotProtocol,
+    liveCopilotDirective,
     sourceFiles: primary.sourceFiles || secondary.sourceFiles || {},
   };
 }
 
 module.exports = {
   buildCopilotSummary,
+  buildLiveCopilotDirective,
   buildLiveRunStateBundle,
   buildRuntimeCopilotProtocol,
   normalizeRuntimeProtocolState,

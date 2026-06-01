@@ -5,6 +5,7 @@ const { execFileSync } = require('child_process');
 const { parseArgs, readJson, writeJson } = require('./script_utils');
 const { ensurePortalUiAssets } = require('./portal_ui_shared');
 const { buildOptionalPageDecision, pruneHiddenHtmlFiles, resolveOptionalPageEmission } = require('./default_generation_contract');
+const { syncWorkspaceLayout } = require('./workspace_layout_migration');
 
 function required(args, key) {
   if (!args[key]) throw new Error(`Missing required flag: --${key}`);
@@ -386,6 +387,16 @@ function main() {
       removeFileIfExists(path.join(outputDir, 'daoge_preflight_dashboard.md'));
     }
     pruneHiddenHtmlFiles(outputDir, optionalPageDecision);
+    syncWorkspaceLayout(outputDir, { source: 'daoge_prepare_run' });
+    runNode(path.join(scriptsDir, 'build_workspace_state.js'), [
+      '--manifest-file', path.join(outputDir, 'manifest.json'),
+      '--output-dir', outputDir,
+      '--workspace-state-file', workspaceState,
+      '--workspace-assets-file', workspaceAssets,
+      '--workspace-timeline-file', workspaceTimeline,
+      '--workbench-state-file', path.join(outputDir, 'workbench_state.json'),
+    ]);
+    syncWorkspaceLayout(outputDir, { source: 'daoge_prepare_run' });
   }
 }
 

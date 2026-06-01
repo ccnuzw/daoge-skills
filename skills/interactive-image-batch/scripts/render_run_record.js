@@ -22,7 +22,6 @@ const { deriveTaskLabel } = require('./task_label_utils');
 const { loadWorkbenchState } = require('./workbench_state_shared');
 const {
   resolveWorkspaceRouteFile,
-  shouldShowStoryboardPage,
 } = require('./workspace_storyboard_shared');
 
 function formatTime(value) {
@@ -173,6 +172,9 @@ function main() {
   const workspaceTimeline = workbenchState.workspaceTimeline || {};
   const directoryProtocol = pageState?.assetLayers?.directoryProtocol || workbenchState.workspaceAssets?.layers?.directoryProtocol || {};
   const directorySurfaces = directoryProtocol?.surfaces || {};
+  const specialWorkflowProtocol = pageState?.specialWorkflowProtocol && typeof pageState.specialWorkflowProtocol === 'object'
+    ? pageState.specialWorkflowProtocol
+    : {};
   const workbenchProtocol = {
     ...summarizeUserWorkbenchProtocol(pageState?.assetLayers?.userWorkbenchProtocol, { outputDir }),
     summary: String(pageState?.assetLayers?.userWorkbenchProtocol?.summary || '').trim()
@@ -182,7 +184,6 @@ function main() {
   const workspaceHomePath = resolveWorkspaceRouteFile(outputDir, pageState, 'home', path.join(outputDir, 'workspace_home.html'));
   const resultWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
   const exceptionWorkspacePath = resolveWorkspaceRouteFile(outputDir, pageState, 'exception', path.join(outputDir, 'exception_workspace.html'));
-  const storyboardPath = resolveWorkspaceRouteFile(outputDir, pageState, 'storyboard', path.join(outputDir, 'storyboard_board.html'));
 
   const failedCount = Number(pageState?.counts?.failed || manifest.failed || failedItems.length || 0);
   const reviewCount = Number(pageState?.counts?.needsReview || reviewItems.length || 0);
@@ -206,14 +207,6 @@ function main() {
   const hasHome = fileExists(workspaceHomePath);
   const hasResult = fileExists(resultWorkspacePath);
   const hasException = fileExists(exceptionWorkspacePath);
-  const hasStoryboard = shouldShowStoryboardPage({
-    outputDir,
-    workspaceState: pageState,
-    storyboardPath,
-    manifest,
-    failedItems,
-    reviewItems,
-  });
   const recommendation = String(pageState?.nextAction?.reason || '').trim()
     || buildRecommendation(status, hasException, hasResult, hasHome);
   const timelineEvents = Array.isArray(workspaceTimeline?.events) ? workspaceTimeline.events : [];
@@ -246,8 +239,7 @@ function main() {
         : null));
   const workbenchCards = [
     recommendedEntry ? { label: recommendedEntry.label, value: '推荐入口', summary: recommendedEntry.summary, file: recommendedEntry.file, cta: recommendedEntry.cta, tone: recommendedEntry.tone } : null,
-    hasHome ? { label: '工作台首页', value: '回主控', summary: '重新看当前阶段、主链位置和下一步推荐。', file: workspaceHomePath, cta: '回工作台首页', tone: 'info' } : null,
-    hasStoryboard ? { label: '分镜整板页', value: '按需页面', summary: '只有分镜任务才需要回这里看上下文。', file: storyboardPath, cta: '进入整板页', tone: 'warn' } : null,
+    hasHome ? { label: '工作台首页', value: '回主链', summary: '重新看当前阶段、主链位置和下一步推荐。', file: workspaceHomePath, cta: '回工作台首页', tone: 'info' } : null,
   ].filter(Boolean);
   const keyFacts = [
     { label: '任务规模', value: `${selectedCount} 张 / ${batchCount} 批 / ${stageCount} 段` },
@@ -261,10 +253,36 @@ function main() {
     { label: '主状态源', value: path.basename(workbenchProtocol.primaryRuntimeSource || 'workspace_live_state.json'), summary: workbenchProtocol.runtimeRule, tone: 'info' },
     { label: '统一状态模型', value: path.basename(workbenchProtocol.canonicalState || 'workspace_state.json'), summary: '负责把页面真正需要的任务判断统一收成一套稳定状态模型。', tone: 'good' },
     { label: '运行状态源', value: path.basename(workbenchProtocol.runtimeState || 'runtime_state.json'), summary: '只负责运行中的批次进度、暂停状态和下一步运行提示。', tone: 'neutral' },
-    { label: '兼容快照', value: path.basename(workbenchProtocol.compatibilitySnapshot || 'workbench_state.json'), summary: '只为兼容旧读取方式保留，不属于普通用户默认阅读层。', tone: 'neutral' },
+    { label: '派生快照', value: path.basename(workbenchProtocol.derivedWorkbenchSnapshot || 'workbench_state.json'), summary: '内部派生状态文件，不属于普通用户默认阅读层。', tone: 'neutral' },
     { label: '文件落盘层', value: `${Number(directorySurfaces?.filesystem?.count || 0)} 个文件`, summary: '只服务本地目录入口，不再算工作台补充层。', tone: 'neutral' },
     { label: '已后退文件', value: `${Number(directorySurfaces?.archive?.count || 0) + Number(directorySurfaces?.internal?.count || 0)} 个文件`, summary: '归档层和内部状态层默认都不占阅读注意力。', tone: 'warn' },
   ];
+  const specialWorkflowFacts = [
+    specialWorkflowProtocol?.hostNative?.officialMainline ? {
+      label: 'host-native',
+      value: specialWorkflowProtocol.hostNative.active ? '当前启用' : '正式模式，本轮未启用',
+      summary: specialWorkflowProtocol.hostNative.active
+        ? (specialWorkflowProtocol.hostNative.defaultMainlineBehavior || specialWorkflowProtocol.hostNative.responsibility)
+        : '宿主原生图像工具是正式运行模式之一，但不会伪造成本地 runner 记录。',
+      tone: specialWorkflowProtocol.hostNative.active ? 'good' : 'neutral',
+    } : null,
+    specialWorkflowProtocol?.storyboard?.officialSubsystem ? {
+      label: 'storyboard',
+      value: specialWorkflowProtocol.storyboard.active ? '当前启用' : '按需启用',
+      summary: specialWorkflowProtocol.storyboard.active
+        ? `保留 ${specialWorkflowProtocol.storyboard.structureContract?.contentSlots || '分镜'} 个 content slot / layout / reference / mask / continuity / camera_move 语义。`
+        : specialWorkflowProtocol.storyboard.defaultMainlineBehavior,
+      tone: specialWorkflowProtocol.storyboard.active ? 'info' : 'neutral',
+    } : null,
+    specialWorkflowProtocol?.localEditRerun?.officialProfessionalPath ? {
+      label: 'local-edit / rerun',
+      value: specialWorkflowProtocol.localEditRerun.active ? '当前需要关注' : '异常时再启用',
+      summary: specialWorkflowProtocol.localEditRerun.active
+        ? (specialWorkflowProtocol.localEditRerun.defaultMainlineBehavior || specialWorkflowProtocol.localEditRerun.responsibility)
+        : '局部修订和补跑是异常页与分镜局部修订的专业路径，不进入普通用户第一主链。',
+      tone: specialWorkflowProtocol.localEditRerun.active ? 'warn' : 'neutral',
+    } : null,
+  ].filter(Boolean);
   const supportCopy = buildSupportPageCopy('record', {
     defaultEntryLabel: workbenchProtocol.defaultEntryLabel,
     supportEntryLabel: workbenchProtocol.supportEntryLabel,
@@ -314,7 +332,7 @@ function main() {
     ...(hasHome ? [`- 工作台首页: ${workspaceHomePath}`] : []),
     ...(hasResult ? [`- 结果工作台: ${resultWorkspacePath}`] : []),
     ...(hasException ? [`- 异常工作台: ${exceptionWorkspacePath}`] : []),
-    ...(hasStoryboard ? [`- 分镜整板页: ${storyboardPath}`] : []),
+    '- 高级补充页: 已后退到 prepare-details / result-details / all 模式，需要深看时从对应工作台按需进入',
     '',
     `## 7. ${supportCopy.archiveBoundaryTitle}`,
     '',
@@ -327,10 +345,20 @@ function main() {
     `- 默认先看: ${workbenchProtocol.defaultVisibleLabels.join(' -> ')}`,
     `- 任务档案定位: ${workbenchProtocol.supportEntryLabel}，只作为按需补充入口`,
     `- 主状态源: ${workbenchProtocol.primaryRuntimeSource}`,
-    `- 兼容快照: ${workbenchProtocol.compatibilitySnapshot}`,
+    `- 派生快照: ${workbenchProtocol.derivedWorkbenchSnapshot}`,
     '',
-    '## 9. 原始记录位置',
+    '## 9. 特殊工作流定位',
     '',
+    ...(specialWorkflowFacts.length
+      ? [
+        `- 定位原则: ${specialWorkflowProtocol.positioning || '特殊工作流是正式能力，但不会回到普通用户第一主链。'}`,
+        ...specialWorkflowFacts.map((item) => `- ${item.label}: ${item.value}，${item.summary}`),
+      ]
+      : ['- 当前没有特殊工作流定位信息。']),
+    '',
+    '## 10. 维护者诊断位置',
+    '',
+    '- 下面文件只服务维护者诊断、续跑和程序读取，普通用户不用打开。',
     `- manifest: ${manifestPath}`,
     `- job_state: ${path.join(outputDir, 'job_state.json')}`,
   ];
@@ -472,10 +500,28 @@ ${renderWorkspaceStyles()}
       ])}
     </section>
 
+    ${specialWorkflowFacts.length ? `
+    <section class="section">
+      <h2>特殊工作流定位</h2>
+      <p class="section-copy">${specialWorkflowProtocol.positioning || '特殊工作流是正式能力，但不会回到普通用户第一主链。'}</p>
+      <div class="metric-grid">
+        ${specialWorkflowFacts.map((item) => renderMetricCard(item.label, item.value, item.tone, item.summary)).join('')}
+      </div>
+    </section>` : ''}
+
     <section class="section">
       <h2>任务概况</h2>
-      <p class="section-copy">这里先收最重要的信息，让你不用再翻原始 JSON 也能知道这轮任务的规模、状态和时间记录。</p>
+      <p class="section-copy">这里先收最重要的信息；普通用户不用翻内部记录，也能知道这轮任务的规模、状态和时间记录。</p>
       ${renderKeyValueGrid(keyFacts)}
+    </section>
+
+    <section class="section">
+      <h2>维护者诊断位置</h2>
+      <p class="section-copy">manifest 和 job_state 只服务维护者诊断、续跑和程序读取，普通用户不用打开。</p>
+      ${renderKeyValueGrid([
+        { label: 'manifest', value: manifestPath },
+        { label: 'job_state', value: path.join(outputDir, 'job_state.json') },
+      ])}
     </section>
 
     <section class="section">

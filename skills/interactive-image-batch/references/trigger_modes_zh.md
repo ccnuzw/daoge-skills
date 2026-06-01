@@ -172,8 +172,10 @@ node scripts/daoge_prepare_run.js \
   - `manifest.json`
   - `success.json`
   - `needs_review.json`
-  - `review_board.html`
-  - `result_hub.html`
+  - `workspace/workspace_home.html`
+  - `workspace/result_workspace.html`
+  - `workspace/exception_workspace.html`
+  - `workspace/run_record.html`
 
 ## 何时触发 execute
 

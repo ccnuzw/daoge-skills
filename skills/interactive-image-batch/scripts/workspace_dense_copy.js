@@ -19,7 +19,7 @@ function getWorkspaceDenseCopy(stage) {
     runRecordEntrySummary: '只在想翻完整记录时再打开。',
     routeCurrentSummary: '这一块只负责说明当前这一站在做什么，不再展开重复细节。',
     routeBackSummary: '只有需要回看上一站判断时，再回去。',
-    contextPrimaryHint: '当前只沿主链继续，不需要自己从旧页面里猜下一步。',
+    contextPrimaryHint: '当前只沿主链继续，不需要自己从补充页里猜下一步。',
     directionSectionTitle: '当前方向',
     directionSectionCopy: '这里只保留这一轮真正影响执行的方向信息。',
     readinessSectionTitle: '当前放行判断',
@@ -43,7 +43,7 @@ function getWorkspaceDenseCopy(stage) {
       optionalEntrySummary: '这里只留补充入口，不抢首页当前主判断。',
       routeCurrentSummary: '首页只负责统一判断下一站，不在这里展开细节操作。',
       routeBackSummary: '只有想切换任务时，再回入口层。',
-      contextPrimaryHint: '首页只负责把你送到当前该去的那一站，不需要自己回旧页面猜下一步。',
+      contextPrimaryHint: '首页只负责把你送到当前该去的那一站，不需要自己回补充页猜下一步。',
       contentSectionOrder: ['preview', 'guide', 'visibility'],
     },
     prepare: {
@@ -60,7 +60,7 @@ function getWorkspaceDenseCopy(stage) {
       optionalEntrySummary: '这里只留补充入口，不抢准备层当前主动作。',
       routeCurrentSummary: '准备页只负责方向、放行和素材判断，不在这里扩散到其它页面。',
       routeBackSummary: '只有需要回看总览判断时，再回首页。',
-      contextPrimaryHint: '准备页只负责把这一轮放行判断收清，不需要自己回旧准备页里猜下一步。',
+      contextPrimaryHint: '准备页只负责把这一轮放行判断收清，不需要自己回补充页里猜下一步。',
       contentSectionOrder: ['direction', 'readiness', 'assets', 'guide', 'visibility'],
     },
     result: {

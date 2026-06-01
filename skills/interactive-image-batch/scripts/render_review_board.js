@@ -1,8 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail } = require('./portal_shared');
+const {
+  renderPortalTopLinks,
+  renderPortalContextBar,
+  renderPortalModeSwitch,
+  renderPortalProgressRail,
+  renderPortalRouteCompass,
+} = require('./portal_shared');
 const { ensurePortalUiAssets, renderPortalHeadAssets } = require('./portal_ui_shared');
+const { loadWorkbenchState } = require('./workbench_state_shared');
+const { resolveWorkspaceRouteFile } = require('./workspace_storyboard_shared');
 
 function ensureArray(value) {
   if (Array.isArray(value)) return value;
@@ -322,6 +330,8 @@ function main() {
   const outputDir = path.resolve(args['output-dir'] || path.dirname(manifestPath));
   const outputPath = path.resolve(args['output-file'] || path.join(outputDir, 'review_board.html'));
   const manifest = readJson(manifestPath);
+  const workbenchState = loadWorkbenchState(outputDir);
+  const pageState = workbenchState.pageState || workbenchState.workspaceState || {};
   const successFile = path.join(outputDir, 'success.json');
   const failedFile = path.join(outputDir, 'failed.json');
   const needsReviewFile = path.join(outputDir, 'needs_review.json');
@@ -330,22 +340,14 @@ function main() {
   const reviewAnalysisFile = path.join(outputDir, 'review_analysis.json');
   const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
   const assetsBoardFile = path.join(outputDir, 'assets_board.html');
-  const resultHubFile = path.join(outputDir, 'result_hub.html');
-  const resultHubMarkdownFile = path.join(outputDir, 'daoge_result_hub.md');
-  const completionReportFile = path.join(outputDir, 'daoge_completion_report.md');
-  const completionBoardFile = path.join(outputDir, 'completion_board.html');
-  const rerunBoardFile = path.join(outputDir, 'rerun_board.html');
-  const portalHomeFile = path.join(outputDir, 'daoge_portal.html');
+  const resultWorkspaceFile = resolveWorkspaceRouteFile(outputDir, pageState, 'result', path.join(outputDir, 'result_workspace.html'));
+  const exceptionWorkspaceFile = resolveWorkspaceRouteFile(outputDir, pageState, 'exception', path.join(outputDir, 'exception_workspace.html'));
+  const workspaceHomeFile = resolveWorkspaceRouteFile(outputDir, pageState, 'home', path.join(outputDir, 'workspace_home.html'));
   const storyboardBoardRelative = fileExists(storyboardBoardFile) ? relativeFile(outputDir, storyboardBoardFile) : null;
   const assetsBoardRelative = fileExists(assetsBoardFile) ? relativeFile(outputDir, assetsBoardFile) : null;
-  const portalHomeRelative = fileExists(portalHomeFile) ? relativeFile(outputDir, portalHomeFile) : null;
-  const resultHubRelative = fileExists(resultHubFile) ? relativeFile(outputDir, resultHubFile) : null;
-  const promptPreviewRelative = fileExists(path.join(outputDir, 'prompt_preview.html')) ? relativeFile(outputDir, path.join(outputDir, 'prompt_preview.html')) : null;
-  const runOverviewRelative = fileExists(path.join(outputDir, 'run_overview.html')) ? relativeFile(outputDir, path.join(outputDir, 'run_overview.html')) : null;
-  const completionBoardRelative = fileExists(completionBoardFile) ? relativeFile(outputDir, completionBoardFile) : null;
-  const rerunBoardRelative = fileExists(rerunBoardFile) ? relativeFile(outputDir, rerunBoardFile) : null;
-  const resultHubMarkdownRelative = fileExists(resultHubMarkdownFile) ? relativeFile(outputDir, resultHubMarkdownFile) : null;
-  const completionReportRelative = fileExists(completionReportFile) ? relativeFile(outputDir, completionReportFile) : null;
+  const resultWorkspaceRelative = fileExists(resultWorkspaceFile) ? relativeFile(outputDir, resultWorkspaceFile) : null;
+  const exceptionWorkspaceRelative = fileExists(exceptionWorkspaceFile) ? relativeFile(outputDir, exceptionWorkspaceFile) : null;
+  const workspaceHomeRelative = fileExists(workspaceHomeFile) ? relativeFile(outputDir, workspaceHomeFile) : null;
   const examplesCatalogPath = path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
   const examplesCatalogRelative = fileExists(examplesCatalogPath) ? relativeFile(outputDir, examplesCatalogPath) : null;
 
@@ -384,8 +386,8 @@ function main() {
   const reviewContextBar = renderPortalContextBar({
     runLabel: path.basename(outputDir),
     boardLabel: manifest.boardId || manifest.board_id || manifest.storyboardBoardId || '',
-    phaseLabel: '结果审阅',
-    flowLabel: '运行 -> 审阅 -> 整板 / 完成 / 补跑',
+    phaseLabel: '结果审阅补充页',
+    flowLabel: '结果工作台 -> 审阅补充页 -> 结果 / 异常主链',
     counts: [
       { label: '成功', value: success.length },
       { label: '失败', value: failed.length },
@@ -402,7 +404,7 @@ function main() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DAOGE 结果审阅看板</title>
+  <title>DAOGE 结果审阅补充页</title>
 ${renderPortalHeadAssets()}
   <style>
     :root {
@@ -1291,10 +1293,10 @@ ${renderPortalHeadAssets()}
       <section class="hero-panel">
         <div class="hero-topline">
           <div>
-            <div class="eyebrow">结果审阅工作台</div>
-            <h1>DAOGE 结果审阅看板</h1>
+            <div class="eyebrow">结果审阅补充页</div>
+            <h1>DAOGE 结果审阅补充页</h1>
             <p class="hero-copy">
-              这一页只做结果判断。先决定哪些图保留、哪些图复核、哪些图值得重跑，再继续去整板或完成报告确认结论。
+              审阅看板已经降为结果补充页。主链判断先回结果工作台；只有需要深度筛图、人工复核或定位重跑候选时，再停留在这里。
             </p>
           </div>
         </div>
@@ -1305,21 +1307,45 @@ ${renderPortalHeadAssets()}
           <div class="hero-actions-label">快捷入口</div>
           <div class="hero-action-strip">
             ${[
-              makeToolbarLink('旧结果说明页', resultHubRelative),
-              makeToolbarLink('去分镜整板页', storyboardBoardRelative),
-              makeToolbarLink('进入完成摘要页', completionBoardRelative),
-              makeToolbarLink('进入失败补跑页', rerunBoardRelative),
+              makeToolbarLink('回结果工作台', resultWorkspaceRelative),
+              makeToolbarLink('回异常工作台', exceptionWorkspaceRelative),
+              makeToolbarLink('回工作台首页', workspaceHomeRelative),
             ].filter(Boolean).join('\n            ')}
           </div>
         </div>
         ${renderPortalModeSwitch({
           title: '审阅浏览模式',
-          copy: '简洁查看更适合按建议顺序看，进阶查看更适合直接跳整板、报告和素材来源。',
+          copy: '简洁查看先回结果主链做判断；进阶查看才适合停留在这里批量筛图。整板位置和素材来源只在卡片内按项定位。',
         })}
         ${renderPortalProgressRail(outputDir, {
           currentPage: 'review_board.html',
           title: '结果主链进度',
-          copy: '结果层通常先从审阅页做决策，再进入整板和完成报告，最后才考虑补跑。',
+          copy: '审阅看板已经退到结果补充页层，主链判断请回结果工作台，再按需进入异常工作台或分镜整板补充页。',
+        })}
+        ${renderPortalRouteCompass(outputDir, {
+          title: '审阅补充页看完后，回主链收口',
+          copy: '这里负责深度筛图，不再承担结果总控。先把结论送回结果工作台，异常再交给异常工作台。',
+          previous: {
+            label: '结果工作台',
+            summary: '回结果主链做保留、复核、异常流转和最终取舍。',
+            file: resultWorkspaceFile,
+            cta: '回结果工作台',
+          },
+          nextSteps: [
+            failed.length || rerunCandidates.length ? {
+              kicker: '有失败或补跑候选',
+              label: '异常工作台',
+              summary: '失败项和补跑候选先在异常主链统一判断，不在审阅页直接分岔。',
+              file: exceptionWorkspaceFile,
+              cta: '回异常工作台',
+            } : {
+              kicker: '结果已可继续',
+              label: '结果工作台',
+              summary: '把保留候选和待复核判断送回结果主链继续收口。',
+              file: resultWorkspaceFile,
+              cta: '回结果工作台',
+            },
+          ],
         })}
         <div class="toolbar-shell">
           <div class="control-panel">
