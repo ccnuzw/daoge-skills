@@ -16,6 +16,22 @@
 - 跑哪条命令
 - 看哪些结果文件
 
+## 终版工作台入口
+
+当前 DAOGE 已收口为 **单一主链工作台**。普通用户默认只需要沿这条链路走：
+
+1. `references/examples/examples_catalog.html`
+2. `task_center.html`
+3. `workspace/workspace_home.html`
+4. `workspace/prepare_workspace.html`
+5. `workspace/result_workspace.html`
+6. `workspace/exception_workspace.html`
+7. `workspace/run_record.html`
+
+`review_board.html`、`rerun_board.html`、`run_overview.html`、`completion_board.html`、`prompt_preview.html`、`preflight_board.html`、`assets_board.html` 只在 `prepare-details` / `result-details` / `all` 这类深看模式里生成或强调。
+
+新 DAOGE 的入口只围绕 workspace-first 主链组织产物。退役入口不再是产品页面；默认、`prepare-details`、`result-details`、`all` 都不会重新生成退役入口，目录里如有同名残留会在运行时清理。
+
 如果你只是想快速上手，优先走这条路径：
 
 ```bash
@@ -74,7 +90,7 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 尤其适合：
 
 - 已经有一套 `.env` 和 provider，需要稳定落地
-- 需要一边保留“新路径”，一边保留“可回退旧路径”
+- 需要在不同 provider 能力之间自动选择更稳的执行路径
 - 不希望一次失败就整批废掉
 - 需要把准备、执行、复跑、选图做成可追踪流程
 
@@ -123,11 +139,12 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 - `failed.json`
 - `needs_review.json`
 - `rerun_candidates.json`
-- `selection_board.md`
-- `review_board.html`
-- `operations_report.md`
-- `result_hub.html`
-- `daoge_result_hub.md`
+- `workspace/workspace_home.html`
+- `workspace/result_workspace.html`
+- `workspace/exception_workspace.html`
+- `workspace/run_record.html`
+- `review_board.html`（仅结果深看模式）
+- `operations_report.md`（仅诊断归档）
 
 这意味着：
 
@@ -138,18 +155,22 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 - 还可以直接打开 HTML 审阅看板做“保留 / 复核 / 重跑”决策
 - HTML 审阅看板会给出基础风险标签和启发式审阅分，方便先做一轮半自动筛选
 
-现在的推荐浏览方式已经升级成 **HTML 门户优先**：
+现在的推荐浏览方式已经升级成 **工作台主链优先**：
 
-- `daoge_portal.html`
-- `prompt_preview.html`
-- `preflight_board.html`
-- `assets_board.html`
-- `run_overview.html`
-- `review_board.html`
-- `storyboard_board.html`
-- `completion_board.html`
-- `rerun_board.html`
-- `result_hub.html`
+- `task_center.html`
+- `workspace/workspace_home.html`
+- `workspace/prepare_workspace.html`
+- `workspace/result_workspace.html`
+- `workspace/exception_workspace.html`
+- `workspace/run_record.html`
+
+高级页只在深看模式里出现：
+
+- 准备深看：`prompt_preview.html`、`preflight_board.html`、`assets_board.html`
+- 结果深看：`review_board.html`、`run_overview.html`、`completion_board.html`、`rerun_board.html`
+- 条件深看：`storyboard_board.html`
+
+退役入口文件会由运行时清理；普通用户不需要打开或寻找它们。
 
 Markdown 产物现在更适合作为：
 
@@ -1106,7 +1127,6 @@ node scripts/run_real_provider_smoke.js \
 
 - `scripts/run_batch.js`
 - `scripts/render_completion_report.js`
-- `scripts/render_result_hub.js`
 
 ---
 
@@ -1124,7 +1144,6 @@ node scripts/run_real_provider_smoke.js \
 - `failed.json`
 - `needs_review.json`
 - `rerun_candidates.json`
-- `daoge_result_hub.md`
 - `operations_report.md`
 
 如果走的是 `host-native-image-tool` 轻量路径，推荐至少保留：
@@ -1191,8 +1210,13 @@ node scripts/validate_host_native_results.js \
 - `success.json`
 - `failed.json`
 - `needs_review.json`
-- `daoge_result_hub.md`
-- `result_hub.html`
+- `workspace/workspace_home.html`
+- `workspace/result_workspace.html`
+- `workspace/exception_workspace.html`
+- `workspace/run_record.html`
+
+如果显式开启结果深看模式，才会额外生成或强调：
+
 - `review_board.html`
 - `completion_board.html`
 

@@ -47,7 +47,7 @@ function mergeLiveRun(rawRuns, liveRun) {
   ];
 }
 
-function inferLegacyPhase(item, promptItems) {
+function inferArchivePhase(item, promptItems) {
   if (item.failedCount > 0) {
     return {
       phaseLabel: '异常阶段',
@@ -116,7 +116,6 @@ function formatArtifactLayerSummary(artifactGovernance = {}) {
     supportCount: Number(summary.supportCount || 0),
     conditionalCount: Number(summary.conditionalCount || 0),
     advancedCount: Number(summary.advancedCount || 0),
-    legacyCount: Number(summary.legacyCount || 0),
     internalCount: Number(summary.internalCount || 0),
     principle: principle || '普通用户默认只看工作台主链，Markdown 与 JSON 退回补充说明或内部诊断层。',
     userFacing: Boolean(artifactGovernance.userFacingSummary),
@@ -270,7 +269,7 @@ function enrichRunItem(item) {
     latestEventTitle: cleanLabel(latestEvent?.title) || null,
     latestEventTime: latestEvent?.time || null,
   };
-  const legacyStatus = inferLegacyPhase(base, promptItems);
+  const archiveStatus = inferArchivePhase(base, promptItems);
   const explicitPhaseLabel = cleanLabel(item.phaseLabel);
   const explicitPhaseHeadline = cleanLabel(item.phaseHeadline);
   const explicitPhaseSummary = cleanLabel(item.phaseSummary);
@@ -282,12 +281,12 @@ function enrichRunItem(item) {
     ...base,
     runtimeSummary,
     taskLabel: deriveTaskLabel({ ...base, taskLabel: resolveRunTaskLabel(pageState) }, outputDir),
-    phaseLabel: cleanLabel(status?.phase) || explicitPhaseLabel || legacyStatus.phaseLabel,
-    phaseHeadline: cleanLabel(status?.headline) || explicitPhaseHeadline || legacyStatus.phaseHeadline,
-    phaseSummary: cleanLabel(status?.summary) || explicitPhaseSummary || legacyStatus.phaseSummary,
-    phaseTone: cleanLabel(status?.tone) || explicitPhaseTone || legacyStatus.phaseTone,
+    phaseLabel: cleanLabel(status?.phase) || explicitPhaseLabel || archiveStatus.phaseLabel,
+    phaseHeadline: cleanLabel(status?.headline) || explicitPhaseHeadline || archiveStatus.phaseHeadline,
+    phaseSummary: cleanLabel(status?.summary) || explicitPhaseSummary || archiveStatus.phaseSummary,
+    phaseTone: cleanLabel(status?.tone) || explicitPhaseTone || archiveStatus.phaseTone,
     nextActionLabel: cleanLabel(nextAction?.label) || explicitNextActionLabel || null,
-    nextActionReason: cleanLabel(nextAction?.reason) || explicitNextActionReason || legacyStatus.nextActionReason,
+    nextActionReason: cleanLabel(nextAction?.reason) || explicitNextActionReason || archiveStatus.nextActionReason,
     artifactLayer: formatArtifactLayerSummary(pageState?.artifactGovernance),
     assetLayerSummary: summarizeUserAssetLayer(pageState?.assetLayers),
     workbenchProtocol: summarizeUserWorkbenchProtocol(pageState?.assetLayers?.userWorkbenchProtocol, {
@@ -415,7 +414,7 @@ function buildTaskCenterGenerationContractSnapshot(optionalPageMode = {}) {
     defaultMode: cleanLabel(contract?.defaultMode) || 'mainline-only',
     targetMode: cleanLabel(contract?.targetMode) || 'single-workbench-mainline',
     principle: cleanLabel(contract?.principle)
-      || '默认只生成单一主链工作台和少量必要入口；深看页、旧说明页、诊断归档和程序状态文件不进入普通用户默认阅读层。',
+      || '默认只生成单一主链工作台和少量必要入口；深看页、诊断归档和程序状态文件不进入普通用户默认阅读层。',
     currentMode: {
       mode: cleanLabel(currentMode.mode || optionalPageMode?.mode) || 'mainline-only',
       generatedHtmlFiles: Array.isArray(currentMode.generatedHtmlFiles)
@@ -819,7 +818,6 @@ function loadTaskCenterState(indexFile, options = {}) {
 
 function renderRunCardModel(item, rootDir, options = {}) {
   const workspace = resolveRecommendedWorkspacePath(item.outputDir, 'workspace_home.html', 'workspace').recommendedPath;
-  const compatibilityWorkspace = path.join(item.outputDir, 'workspace_home.html');
   const record = path.join(item.outputDir, 'run_record.html');
   const href = fileExists(workspace)
     ? path.relative(rootDir, workspace)
@@ -835,7 +833,7 @@ function renderRunCardModel(item, rootDir, options = {}) {
     title: `${item.taskLabel} · ${item.phaseLabel || '任务记录'}`,
     copy: `${formatTime(item.latestEventTime || item.generatedAt)} · ${summary}`,
     href,
-    cta: href && (fileExists(workspace) || fileExists(compatibilityWorkspace)) ? '继续这轮任务' : '查看任务档案',
+    cta: href && fileExists(workspace) ? '继续这轮任务' : '查看任务档案',
     tone: item.phaseTone || 'info',
   };
 }
@@ -849,7 +847,7 @@ module.exports = {
   enrichRunItem,
   formatArtifactLayerSummary,
   formatTime,
-  inferLegacyPhase,
+  inferArchivePhase,
   isSameRun,
   loadTaskCenterState,
   loadRuns,

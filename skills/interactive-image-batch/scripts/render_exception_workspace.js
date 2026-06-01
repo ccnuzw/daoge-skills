@@ -19,7 +19,6 @@ const {
   getWorkspaceIdentityCopy,
   resolveWorkspaceShellRuntime,
   getWorkspaceActionCopy,
-  buildWorkspaceContextFallback,
   resolveWorkspaceStageContextBarData,
   resolveWorkspaceStageViewValue,
   resolveWorkspaceStageSection,
@@ -39,14 +38,9 @@ const {
   renderWorkspaceActionStatusSection,
   buildWorkspaceSummarySectionData,
   buildWorkspaceStageGuideFallback,
-  buildWorkspaceStageWorkbenchCards,
   buildWorkspaceStageVisibilityFallback,
   buildWorkspaceDecisionItems,
-  buildWorkspaceWorkbenchSectionData,
-  buildWorkspaceStandardWorkbenchCard,
-  buildWorkspaceStandardRoutePoint,
-  buildWorkspaceRouteFallback,
-  buildWorkspaceStageRouteFallback,
+  buildWorkspaceStageFallbackBundle,
   buildWorkspaceDecisionSectionData,
   renderWorkspaceSessionConsoleSection,
   renderWorkspaceCockpitSummarySection,
@@ -93,7 +87,6 @@ const {
   buildWorkspaceFallbackGuide,
   buildWorkspaceFallbackTimeline,
   buildWorkspaceFallbackAssetOverview,
-  buildWorkspaceStageDefaultHints,
   buildStageWorkspaceFallbackState,
   buildUnifiedWorkflowCockpitSummary,
   buildUnifiedWorkflowJudgment,
@@ -660,52 +653,8 @@ function main() {
       }),
     }
   );
-  const fallbackWorkbenchCards = [
-    ...buildWorkspaceStageWorkbenchCards('exception', {
-      denseCopy,
-      resultValue: totalIssueCount > 0 ? '回去复核' : '回工作台继续',
-      resultSummary: '问题判断完后，再回结果工作台继续取舍。',
-      resultFile: resultWorkspacePath,
-      resultCta: actionCopy.returnResult,
-      includeStoryboard: hasStoryboard && path.resolve(workspaceHomePath) !== path.resolve(storyboardPath),
-      storyboardFile: storyboardPath,
-      storyboardCta: actionCopy.openStoryboard,
-    }),
-    ...guideCards,
-  ].filter(Boolean).filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
-  const resolvedExceptionWorkbench = resolveWorkspaceStageWorkbenchSection(
-    pageState,
-    'exception',
-    exceptionView,
-    buildWorkspaceWorkbenchSectionData({
-      title: chrome.workbenchTitle,
-      copy: chrome.workbenchCopy,
-      cards: fallbackWorkbenchCards,
-    })
-  );
-  const resolvedExceptionRoute = resolveWorkspaceStageRouteSection(
-    pageState,
-    'exception',
-    exceptionView,
-    buildWorkspaceStageRouteFallback('exception', {
-      title: chrome.routeTitle,
-      copy: chrome.routeCopy,
-      denseCopy,
-      currentLabel: statusLabel,
-      currentPendingLabel: stagePhrases.routeCurrentPendingLabel,
-      previousFile: resultWorkspacePath,
-      previousCta: actionCopy.returnResult,
-      nextLabel: nextActionLabel || '工作台首页',
-      nextSummary: nextActionReason || '如果问题已经判断清楚，就回工作台首页继续，不把按需页面当成默认下一步。',
-      nextFile: nextActionPath,
-      nextCta: path.resolve(nextActionPath) === path.resolve(workspaceHomePath)
-        ? actionCopy.returnHome
-        : actionCopy.enterNow,
-    })
-  );
-
-  const exceptionHeroCards = Array.isArray(exceptionView?.heroCards) ? exceptionView.heroCards : [];
-  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'exception', exceptionView, buildWorkspaceContextFallback('exception', {
+  const exceptionFallbackBundle = buildWorkspaceStageFallbackBundle('exception', {
+    denseCopy,
     runLabel: taskLabel,
     phaseLabel: currentPhaseLabel,
     flowLabel: identity.flows.exception,
@@ -715,15 +664,51 @@ function main() {
       next: nextActionLabel,
       pressure: totalIssueCount > 0 ? '还有问题待处理' : '当前平稳',
     },
-    defaultHints: buildWorkspaceStageDefaultHints('exception', {
-      hasIssue: totalIssueCount > 0,
-      stageSummary: exceptionStageSummary,
-      densePrimaryHint: denseCopy.contextPrimaryHint,
-      currentFocus: exceptionCurrentFocus,
-      nextActionReason: nextActionReason || '问题判断清楚后，就回主链继续，不把这页当默认入口。',
-    }),
+    hasIssue: totalIssueCount > 0,
+    stageSummary: exceptionStageSummary,
+    currentFocus: exceptionCurrentFocus,
+    nextActionReason: nextActionReason || '问题判断清楚后，就回主链继续，不把这页当默认入口。',
     extraHints: exceptionContext.hints,
-  }));
+    resultValue: totalIssueCount > 0 ? '回去复核' : '回工作台继续',
+    resultSummary: '问题判断完后，再回结果工作台继续取舍。',
+    resultFile: resultWorkspacePath,
+    resultCta: actionCopy.returnResult,
+    includeStoryboard: hasStoryboard && path.resolve(workspaceHomePath) !== path.resolve(storyboardPath),
+    storyboardFile: storyboardPath,
+    storyboardCta: actionCopy.openStoryboard,
+    routeTitle: chrome.routeTitle,
+    routeCopy: chrome.routeCopy,
+    currentLabel: statusLabel,
+    previousFile: resultWorkspacePath,
+    previousCta: actionCopy.returnResult,
+    nextLabel: nextActionLabel || '工作台首页',
+    nextSummary: nextActionReason || '如果问题已经判断清楚，就回工作台首页继续，不把按需页面当成默认下一步。',
+    nextFile: nextActionPath,
+    nextCta: path.resolve(nextActionPath) === path.resolve(workspaceHomePath)
+      ? actionCopy.returnHome
+      : actionCopy.enterNow,
+    workbenchTitle: chrome.workbenchTitle,
+    workbenchCopy: chrome.workbenchCopy,
+    extraWorkbenchCards: guideCards,
+  });
+  const fallbackWorkbenchCards = exceptionFallbackBundle.workbench.cards
+    .filter(Boolean)
+    .filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
+  const resolvedExceptionWorkbench = resolveWorkspaceStageWorkbenchSection(
+    pageState,
+    'exception',
+    exceptionView,
+    { ...exceptionFallbackBundle.workbench, cards: fallbackWorkbenchCards }
+  );
+  const resolvedExceptionRoute = resolveWorkspaceStageRouteSection(
+    pageState,
+    'exception',
+    exceptionView,
+    exceptionFallbackBundle.route
+  );
+
+  const exceptionHeroCards = Array.isArray(exceptionView?.heroCards) ? exceptionView.heroCards : [];
+  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'exception', exceptionView, exceptionFallbackBundle.context);
   const contextBar = renderPortalContextBar(contextBarData);
 
   const html = renderWorkspacePageShell({

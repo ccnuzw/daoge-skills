@@ -19,7 +19,6 @@ const {
   getWorkspaceStagePhrases,
   getWorkspaceIdentityCopy,
   resolveWorkspaceShellRuntime,
-  buildWorkspaceContextFallback,
   resolveWorkspaceStageContextBarData,
   resolveWorkspaceStageViewValue,
   resolveWorkspaceStageSection,
@@ -31,15 +30,9 @@ const {
   buildWorkspaceDecisionSectionData,
   buildWorkspaceHeroCardsData,
   buildWorkspaceStageGuideFallback,
-  buildWorkspaceStageWorkbenchCards,
   buildWorkspaceStageVisibilityFallback,
   buildWorkspaceSummarySectionData,
   buildWorkspaceDecisionItems,
-  buildWorkspaceWorkbenchSectionData,
-  buildWorkspaceStandardWorkbenchCard,
-  buildWorkspaceStandardRoutePoint,
-  buildWorkspaceRouteFallback,
-  buildWorkspaceStageRouteFallback,
   renderList,
   renderMetricCard,
   renderKeyValueGrid,
@@ -87,7 +80,7 @@ const {
   buildWorkspaceDirectionSectionData,
   buildWorkspaceReadinessSectionData,
   buildWorkspaceAssetsSectionData,
-  buildWorkspaceStageDefaultHints,
+  buildWorkspaceStageFallbackBundle,
   resolveWorkspaceGuideSectionData,
   resolveWorkspaceDirectionSectionData,
   resolveWorkspaceReadinessSectionData,
@@ -763,66 +756,57 @@ function main() {
       ? normalizedPrepareAssetsSection.assetItems.slice(0, 6).map((item, index) => renderPrepareAssetCard(outputDir, item, index))
       : [],
   });
-  const fallbackWorkbenchCards = [
-    ...buildWorkspaceStageWorkbenchCards('prepare', {
-      denseCopy,
-      resultAvailable: fileExists(resultWorkspacePath),
-      resultFile: resultWorkspacePath,
-      homeFile: workspaceHomePath,
-      focusValue: readiness.label,
-      focusSummary: readiness.detail,
-      focusTone: readiness.tone,
-    }),
-    ...guideCards,
-  ].filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
-  const resolvedPrepareWorkbench = resolveWorkspaceStageWorkbenchSection(
-    pageState,
-    'prepare',
-    prepareView,
-    buildWorkspaceWorkbenchSectionData({
-      title: chrome.workbenchTitle,
-      copy: chrome.workbenchCopy,
-      cards: fallbackWorkbenchCards,
-    })
-  );
-  const resolvedPrepareRoute = resolveWorkspaceStageRouteSection(
-    pageState,
-    'prepare',
-    prepareView,
-    buildWorkspaceStageRouteFallback('prepare', {
-      title: chrome.routeTitle,
-      copy: chrome.routeCopy,
-      denseCopy,
-      currentLabel: readiness.label,
-      currentSummary: readiness.detail,
-      currentPendingLabel: stagePhrases.routeCurrentPendingLabel,
-      previousFile: workspaceHomePath,
-      nextLabel: nextActionLabel,
-      nextSummary: nextActionReason || '正式执行完成后，用统一结果页做筛图、收口和下一步判断。',
-      nextFile: resultWorkspacePath,
-      nextCta: '进入结果工作台',
-      nextPendingLabel: '执行完成后生成',
-    })
-  );
-
-  const prepareHeroCards = Array.isArray(prepareView?.heroCards) ? prepareView.heroCards : [];
-  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'prepare', prepareView, buildWorkspaceContextFallback('prepare', {
-    items: Array.isArray(prepareContext.items) ? prepareContext.items : [],
+  const prepareFallbackBundle = buildWorkspaceStageFallbackBundle('prepare', {
+    denseCopy,
     runLabel: taskLabel,
     phaseLabel: currentPhaseLabel,
     flowLabel: identity.flows.prepare,
+    contextItems: prepareContext.items,
     countValues: {
       focus: prepareCurrentFocus,
       status: readiness.label,
       assets: importedBindingCount > 0 ? '这一轮已带入素材约束' : '这一轮没有素材约束',
       pressure: readiness.blockingItems.length + readiness.cautionItems.length > 0 ? '还有内容要确认' : '当前平稳',
     },
-    defaultHints: buildWorkspaceStageDefaultHints('prepare', {
-      stageSummary: prepareStageSummary,
-      densePrimaryHint: denseCopy.contextPrimaryHint,
-      currentFocus: prepareCurrentFocus || currentSummary,
-    }),
-  }));
+    stageSummary: prepareStageSummary,
+    currentFocus: prepareCurrentFocus || currentSummary,
+    resultAvailable: fileExists(resultWorkspacePath),
+    resultFile: resultWorkspacePath,
+    homeFile: workspaceHomePath,
+    focusValue: readiness.label,
+    focusSummary: readiness.detail,
+    focusTone: readiness.tone,
+    routeTitle: chrome.routeTitle,
+    routeCopy: chrome.routeCopy,
+    currentLabel: readiness.label,
+    currentSummary: readiness.detail,
+    previousFile: workspaceHomePath,
+    nextLabel: nextActionLabel,
+    nextSummary: nextActionReason || '正式执行完成后，用统一结果页做筛图、收口和下一步判断。',
+    nextFile: resultWorkspacePath,
+    nextCta: '进入结果工作台',
+    nextPendingLabel: '执行完成后生成',
+    workbenchTitle: chrome.workbenchTitle,
+    workbenchCopy: chrome.workbenchCopy,
+    extraWorkbenchCards: guideCards,
+  });
+  const fallbackWorkbenchCards = prepareFallbackBundle.workbench.cards
+    .filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
+  const resolvedPrepareWorkbench = resolveWorkspaceStageWorkbenchSection(
+    pageState,
+    'prepare',
+    prepareView,
+    { ...prepareFallbackBundle.workbench, cards: fallbackWorkbenchCards }
+  );
+  const resolvedPrepareRoute = resolveWorkspaceStageRouteSection(
+    pageState,
+    'prepare',
+    prepareView,
+    prepareFallbackBundle.route
+  );
+
+  const prepareHeroCards = Array.isArray(prepareView?.heroCards) ? prepareView.heroCards : [];
+  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'prepare', prepareView, prepareFallbackBundle.context);
   const contextBar = renderPortalContextBar(contextBarData);
 
   const html = renderWorkspacePageShell({

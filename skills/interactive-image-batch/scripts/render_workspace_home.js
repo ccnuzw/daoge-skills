@@ -17,7 +17,7 @@ const {
   getWorkspaceStagePhrases,
   getWorkspaceIdentityCopy,
   resolveWorkspaceShellRuntime,
-  buildWorkspaceContextFallback,
+  buildWorkspaceStageFallbackBundle,
   buildWorkspaceCockpitSummaryData,
   resolveWorkspaceStageContextBarData,
   resolveWorkspaceStageViewValue,
@@ -33,12 +33,7 @@ const {
   buildWorkspaceHeroCardsData,
   buildWorkspaceSummarySectionData,
   buildWorkspaceDecisionItems,
-  buildWorkspaceWorkbenchSectionData,
   buildWorkspaceStandardWorkbenchCard,
-  buildWorkspaceStandardRoutePoint,
-  buildWorkspaceRouteFallback,
-  buildWorkspaceStageRouteFallback,
-  buildWorkspaceStageDefaultHints,
   renderMetricCard,
   renderWorkspaceFlowSection,
   renderWorkspaceConfirmationSection,
@@ -662,7 +657,7 @@ function main() {
       }) : '',
     }
   );
-  const fallbackWorkbenchCards = [
+  const homeExtraWorkbenchCards = [
     shouldRouteToException
       ? (hasResult
         ? { id: 'result-workspace', label: '结果工作台', value: '处理完再回看', summary: '问题收口后，再回结果工作台做保留、复核和最终取舍。', file: resultPath, cta: '回结果工作台', tone: 'info' }
@@ -699,31 +694,46 @@ function main() {
       ? { id: 'task-center', label: '任务总控', value: '切换任务', summary: '只有想换一轮任务时，再从这里回入口层。', file: taskCenterPath, cta: '回任务总控', tone: 'neutral' }
       : null,
     ...guideCards,
-  ].filter(Boolean).filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
+  ].filter(Boolean);
+  const homeFallbackBundle = buildWorkspaceStageFallbackBundle('home', {
+    denseCopy,
+    runLabel: taskLabel,
+    phaseLabel: `${currentStage} · 当前任务`,
+    entryFlowLabel: String(entryBridge?.context?.flowLabel || '').trim(),
+    contextItems: homeContext.items,
+    countValues: {
+      focus: currentFocus,
+      stage: currentStage,
+      next: nextTitle,
+      pressure: issueCount > 0 ? '还有内容要收口' : '当前平稳',
+    },
+    hasResult,
+    entryTitle: entryBridge?.selectedEntry?.title,
+    extraHints: homeContext.hints,
+    routeTitle: chrome.routeTitle,
+    routeCopy: chrome.routeCopy,
+    currentLabel: decisionSummary,
+    nextLabel: nextTitle,
+    nextSummary: nextCopy,
+    nextHref,
+    nextCta: '现在进入',
+    workbenchTitle: chrome.workbenchTitle,
+    workbenchCopy: chrome.workbenchCopy,
+    extraWorkbenchCards: homeExtraWorkbenchCards,
+  });
+  const fallbackWorkbenchCards = homeFallbackBundle.workbench.cards
+    .filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
   const resolvedHomeWorkbench = resolveWorkspaceStageWorkbenchSection(
     pageState,
     'home',
     homeView,
-    buildWorkspaceWorkbenchSectionData({
-      title: chrome.workbenchTitle,
-      copy: chrome.workbenchCopy,
-      cards: fallbackWorkbenchCards,
-    })
+    { ...homeFallbackBundle.workbench, cards: fallbackWorkbenchCards }
   );
   const resolvedHomeRoute = resolveWorkspaceStageRouteSection(
     pageState,
     'home',
     homeView,
-    buildWorkspaceStageRouteFallback('home', {
-      title: chrome.routeTitle,
-      copy: chrome.routeCopy,
-      denseCopy,
-      currentLabel: decisionSummary,
-      nextLabel: nextTitle,
-      nextSummary: nextCopy,
-      nextHref,
-      nextCta: '现在进入',
-    })
+    homeFallbackBundle.route
   );
   const specialWorkflowSection = specialWorkflowCards.length ? renderPortalWorkbench(outputDir, {
     title: '特殊工作流定位',
@@ -732,26 +742,7 @@ function main() {
     maxCards: 3,
   }) : '';
 
-  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'home', homeView, buildWorkspaceContextFallback('home', {
-    items: Array.isArray(homeContext.items) ? homeContext.items : [],
-    runLabel: taskLabel,
-    phaseLabel: `${currentStage} · 当前任务`,
-    entryFlowLabel: String(entryBridge?.context?.flowLabel || '').trim(),
-    countValues: {
-      focus: currentFocus,
-      stage: currentStage,
-      next: nextTitle,
-      pressure: issueCount > 0 ? '还有内容要收口' : '当前平稳',
-    },
-    defaultHints: buildWorkspaceStageDefaultHints('home', {
-      hasResult,
-      densePrimaryHint: denseCopy.contextPrimaryHint,
-      entryTitle: entryBridge?.selectedEntry?.title,
-    }),
-    extraHints: [
-      ...((Array.isArray(homeContext.hints) ? homeContext.hints : [])),
-    ],
-  }));
+  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'home', homeView, homeFallbackBundle.context);
   const contextBar = renderPortalContextBar(contextBarData);
   const html = renderWorkspacePageShell({
     pageTitle: shell.pageTitle,

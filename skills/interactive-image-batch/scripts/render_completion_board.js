@@ -63,8 +63,6 @@ function main() {
   const exceptionWorkspacePath = path.join(outputDir, 'exception_workspace.html');
   const reviewBoardPath = path.join(outputDir, 'review_board.html');
   const storyboardBoardPath = path.join(outputDir, 'storyboard_board.html');
-  const resultHubPath = path.join(outputDir, 'result_hub.html');
-  const resultHubMarkdownPath = path.join(outputDir, 'daoge_result_hub.md');
 
   const nextActionHints = [
     Number(manifest.failed || 0) > 0 ? '这轮存在失败项，通常应先进入异常工作台。' : null,
@@ -74,7 +72,7 @@ function main() {
 
   const completionContextBar = renderPortalContextBar({
     runLabel: path.basename(outputDir),
-    phaseLabel: '结果兼容细页',
+    phaseLabel: '结果补充细页',
     flowLabel: '结果工作台 -> 审阅 / 整板 -> 完成摘要',
     counts: [
       { label: '成功', value: Number(manifest.success || 0) },
@@ -166,7 +164,7 @@ ${renderWorkspaceStyles()}
 
     ${renderPortalWorkbench(outputDir, {
       title: '完成摘要入口',
-      copy: '只保留和主链收口直接相关的入口，旧 Markdown 和其它高级页继续后退。',
+      copy: '只保留和主链收口直接相关的入口，Markdown 归档和其它高级页继续后退。',
       cards: [
         { label: '回结果工作台', value: fileExists(resultWorkspacePath) ? '推荐入口' : '待生成', summary: '新的结果阶段主页面。', file: resultWorkspacePath, cta: '回结果工作台', tone: 'good' },
         { label: '异常工作台', value: fileExists(exceptionWorkspacePath) ? '按需进入' : '待生成', summary: '只有失败或待复核时需要。', file: exceptionWorkspacePath, cta: '进入异常工作台', tone: Number(manifest.failed || 0) > 0 ? 'warn' : 'neutral' },

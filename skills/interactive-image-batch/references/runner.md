@@ -123,7 +123,8 @@ The preview file should be treated as the human review surface. It should summar
 
 When both versions exist:
 
-- prefer `prompt_preview.html` for the primary user-facing portal flow
+- prefer `workspace/prepare_workspace.html` for the primary user-facing preparation flow
+- use `prompt_preview.html` only when prepare detail mode is explicitly enabled
 - keep `prompt_preview.md` as the archival / debug companion surface
 
 ## Runner flags

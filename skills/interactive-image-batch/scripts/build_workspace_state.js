@@ -17,9 +17,6 @@ const { buildRuntimeStateSnapshot } = require('./runtime_state_snapshot');
 const { buildUnifiedStatusSummary, buildStageUnifiedStatus, buildStageUiUnifiedStatus } = require('./unified_status_summary');
 const { getWorkspaceDenseCopy } = require('./workspace_dense_copy');
 const {
-  getLegacyPageEntries,
-} = require('./workspace_page_registry');
-const {
   inferStoryboardSpecialization,
   shouldShowStoryboardPage,
 } = require('./workspace_storyboard_shared');
@@ -175,19 +172,9 @@ function inferOptionalPageMode(outputDir) {
     path.join(outputDir, 'run_overview.html'),
     path.join(outputDir, 'rerun_board.html'),
   ].some((filePath) => fileExists(filePath));
-  const hasLegacyPages = [
-    path.join(outputDir, 'result_hub.html'),
-    path.join(outputDir, 'daoge_portal.html'),
-  ].some((filePath) => fileExists(filePath));
-
-  if (hasPrepareDetails && hasResultDetails && hasLegacyPages) return 'all';
-  if (hasPrepareDetails && !hasResultDetails && !hasLegacyPages) return 'prepare-details';
-  if (!hasPrepareDetails && hasResultDetails && !hasLegacyPages) return 'result-details';
-  if (!hasPrepareDetails && !hasResultDetails && hasLegacyPages) return 'legacy';
   if (hasPrepareDetails && hasResultDetails) return 'all';
   if (hasPrepareDetails) return 'prepare-details';
   if (hasResultDetails) return 'result-details';
-  if (hasLegacyPages) return 'legacy';
   return 'mainline-only';
 }
 
@@ -1111,7 +1098,7 @@ function buildHomeStageRelay(workspaceState, nextAction, options = {}) {
     currentItems: buildRelayItems([
       String(status.headline || '').trim(),
       String(workspaceState?.risk?.summary || '').trim(),
-      '首页只负责判断当前主链入口，不负责展开所有旧页面。',
+      '首页只负责判断当前主链入口，不负责展开所有补充页。',
     ]),
     nextLabel: String(nextStep.label || nextAction?.label || '继续当前主链').trim() || '继续当前主链',
     nextSummary: String(nextStep.summary || nextAction?.reason || '').trim() || '完成首页判断后，按推荐入口继续。',
@@ -5003,7 +4990,7 @@ function buildUserWorkbenchProtocol(outputDir, options = {}) {
       runtimeState: resolvedTopology.runtimeState,
       assetsState: resolvedTopology.assetsState,
       timelineState: resolvedTopology.timelineState,
-      compatibilitySnapshot: resolvedTopology.compatibilitySnapshot,
+      derivedWorkbenchSnapshot: resolvedTopology.derivedWorkbenchSnapshot,
       taskCenterUnifiedState,
     },
     taskCenterEntryProtocol,
@@ -5020,7 +5007,7 @@ function buildUserWorkbenchProtocol(outputDir, options = {}) {
     consumerReadPlan: resolvedTopology.consumerReadPlan,
     consumerRule: resolvedTopology.consumerRule,
     taskCenterConsumerRule: resolvedTopology.taskCenterConsumerRule,
-    summary: `默认主链仍是${defaultVisibleLabels.join('、') || '工作台主链页面'}；当前已生成入口按文件存在情况展示，任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 只保留兼容快照角色，普通用户不用直接看这些文件名。`,
+    summary: `默认主链仍是${defaultVisibleLabels.join('、') || '工作台主链页面'}；当前已生成入口按文件存在情况展示，任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 是内部派生快照，普通用户不用直接看这些文件名。`,
   };
 }
 
@@ -5039,7 +5026,7 @@ function buildUnifiedAssetLayers(outputDir, options = {}) {
     buildSystemAssetRecord('workspace-timeline', 'workspace_timeline.json', path.join(outputDir, 'workspace_timeline.json'), '阶段时间线源'),
   ];
   const snapshotFiles = [
-    buildSystemAssetRecord('workbench-state', 'workbench_state.json', path.join(outputDir, 'workbench_state.json'), '兼容旧读取方式的页面快照'),
+    buildSystemAssetRecord('workbench-state', 'workbench_state.json', path.join(outputDir, 'workbench_state.json'), '内部派生工作台快照'),
   ];
   const executionFiles = [
     buildSystemAssetRecord('manifest', 'manifest.json', keyFiles.manifest || path.join(outputDir, 'manifest.json'), '执行清单与输出索引'),
@@ -5092,9 +5079,9 @@ function buildUnifiedAssetLayers(outputDir, options = {}) {
     },
     {
       key: 'page-snapshot',
-      label: '兼容快照',
+      label: '派生快照',
       count: snapshotFiles.length,
-      summary: '这组文件只负责兼容旧读取方式，目标是逐步退居说明层。',
+      summary: '这组文件是内部派生快照，只服务页面读取和诊断，不作为用户入口。',
     },
     {
       key: 'execution',
@@ -5146,8 +5133,6 @@ function buildUnifiedAssetLayers(outputDir, options = {}) {
         buildDirectoryAssetRecord('completion-board-file', '完成摘要页', path.join(outputDir, 'completion_board.html'), { role: 'advanced', summary: '属于结果层深看页。', defaultVisible: false }),
         buildDirectoryAssetRecord('run-overview-file', '运行概览页', path.join(outputDir, 'run_overview.html'), { role: 'advanced', summary: '属于结果层深看页。', defaultVisible: false }),
         buildDirectoryAssetRecord('rerun-board-file', '补跑页', path.join(outputDir, 'rerun_board.html'), { role: 'advanced', summary: '属于异常层深看页。', defaultVisible: false }),
-        buildDirectoryAssetRecord('result-hub-file', '旧结果维护说明页', path.join(outputDir, 'result_hub.html'), { role: 'maintenance', summary: '只保留维护观察意义。', defaultVisible: false }),
-        buildDirectoryAssetRecord('portal-home-file', '旧入口维护说明页', path.join(outputDir, 'daoge_portal.html'), { role: 'maintenance', summary: '只保留维护观察意义。', defaultVisible: false }),
       ],
     },
     filesystem: {
@@ -5175,7 +5160,7 @@ function buildUnifiedAssetLayers(outputDir, options = {}) {
         buildDirectoryAssetRecord('workspace-state-file', 'workspace_state.json', path.join(outputDir, 'workspace_state.json'), { role: 'state-model', summary: '工作台统一状态模型。', defaultVisible: false }),
         buildDirectoryAssetRecord('workspace-assets-file', 'workspace_assets.json', path.join(outputDir, 'workspace_assets.json'), { role: 'asset-model', summary: '资产分层与集合快照。', defaultVisible: false }),
         buildDirectoryAssetRecord('workspace-timeline-file', 'workspace_timeline.json', path.join(outputDir, 'workspace_timeline.json'), { role: 'timeline-model', summary: '阶段时间线源。', defaultVisible: false }),
-        buildDirectoryAssetRecord('workbench-state-file', 'workbench_state.json', path.join(outputDir, 'workbench_state.json'), { role: 'compatibility-snapshot', summary: '兼容旧读取方式的快照。', defaultVisible: false }),
+        buildDirectoryAssetRecord('workbench-state-file', 'workbench_state.json', path.join(outputDir, 'workbench_state.json'), { role: 'derived-snapshot', summary: '内部派生工作台快照。', defaultVisible: false }),
         buildDirectoryAssetRecord('manifest-file', 'manifest.json', keyFiles.manifest || path.join(outputDir, 'manifest.json'), { role: 'execution-manifest', summary: '执行清单与输出索引。', defaultVisible: false }),
         buildDirectoryAssetRecord('job-state-file', 'job_state.json', keyFiles.jobState || path.join(outputDir, 'job_state.json'), { role: 'execution-state', summary: '续跑与执行状态。', defaultVisible: false }),
         buildDirectoryAssetRecord('batch-plan-file', 'batch_plan.json', path.join(outputDir, 'batch_plan.json'), { role: 'execution-plan', summary: '批次执行计划。', defaultVisible: false }),
@@ -5713,16 +5698,12 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
   const completionBoardPath = path.join(outputDir, 'completion_board.html');
   const runOverviewPath = path.join(outputDir, 'run_overview.html');
   const rerunBoardPath = path.join(outputDir, 'rerun_board.html');
-  const resultHubPath = path.join(outputDir, 'result_hub.html');
-  const portalHomePath = path.join(outputDir, 'daoge_portal.html');
-
   const userEntry = [
     { id: 'task-center', label: '任务总控', path: taskCenterPath, audience: 'all', role: 'cross-run-entry', exists: fileExists(taskCenterPath) },
     {
       id: 'workspace-home',
       label: '工作台首页',
       path: layoutEntry.recommendedPath,
-      compatibilityPath: workspaceHomePath,
       mirrorPath: layoutEntry.mirrorPath,
       audience: 'all',
       role: 'default-entry',
@@ -5757,11 +5738,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
     { id: 'completion-board', label: '完成摘要页', path: completionBoardPath, audience: 'advanced', role: 'result-detail', exists: fileExists(completionBoardPath) },
     { id: 'run-overview', label: '运行概览页', path: runOverviewPath, audience: 'advanced', role: 'result-detail', exists: fileExists(runOverviewPath) },
     { id: 'rerun-board', label: '补跑页', path: rerunBoardPath, audience: 'advanced', role: 'exception-detail', exists: fileExists(rerunBoardPath) },
-  ];
-
-  const legacyPages = [
-    { id: 'result-hub', label: '旧结果维护说明页', path: resultHubPath, audience: 'advanced', role: 'legacy-result-entry', exists: fileExists(resultHubPath) },
-    { id: 'portal-home', label: '旧入口维护说明页', path: portalHomePath, audience: 'advanced', role: 'legacy-home-entry', exists: fileExists(portalHomePath) },
   ];
 
   const internalAssets = [
@@ -5801,10 +5777,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
       'rerun-board',
       'storyboard-board',
     ],
-    legacyVisible: [
-      'result-hub',
-      'portal-home',
-    ],
     diagnosticInternal: [
       'operations-report-json',
       'run-record-markdown',
@@ -5816,7 +5788,7 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
   const artifactStrategy = {
     defaultGenerationMode: 'mainline-minimal',
     targetMode: 'workspace-first',
-    principle: '默认只保留主链工作台和少量必要补充，进阶页面、旧入口说明和诊断归档统一后退到按需层；普通用户默认不感知内部文件。',
+    principle: '默认只保留主链工作台和少量必要补充，进阶页面和诊断归档统一后退到按需层；普通用户默认不感知内部文件。',
     groups: {
       mainlineRequired: {
         label: '主链必需',
@@ -5847,12 +5819,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
         generation: 'on-demand-target',
         audience: 'advanced-user',
         description: '这组页面只服务进阶查看、复检和专项场景，目标是逐步收成按需打开，而不是默认展示。',
-      },
-      legacyVisible: {
-        label: '旧入口说明',
-        generation: 'retire-first',
-        audience: 'maintenance-only',
-        description: '旧入口维护说明页和旧结果维护说明页只保留给维护观察，不再属于个人工作台正式链路。',
       },
       diagnosticInternal: {
         label: '诊断归档',
@@ -5926,13 +5892,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
       group: 'advancedVisible',
       futureMode: 'eligible-on-demand',
     })),
-    ...legacyPages.map((item) => ({
-      ...item,
-      visibility: 'legacy-visible',
-      generation: 'retire-first',
-      group: 'legacyVisible',
-      futureMode: 'retire-when-safe',
-    })),
     ...internalAssets.map((item) => ({
       ...item,
       visibility: 'internal',
@@ -5972,11 +5931,11 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
           ? '属于进阶页面，目标是继续压到按需打开，而不是默认陪跑。'
           : item.group === 'archiveVisible'
             ? '属于归档补充产物，应该继续保留按需生成，而不是算进工作台默认补充层。'
-            : '属于旧入口说明、文件落盘入口或补充入口，后续应继续围绕单一主链减少默认暴露。',
+            : '属于文件落盘入口或补充入口，后续应继续围绕单一主链减少默认暴露。',
     }));
 
   const visibleToUser = userEntry
-    .concat(workspaceSupport, filesystemSupport, archiveSupport, conditionalPages, advancedPages, legacyPages)
+    .concat(workspaceSupport, filesystemSupport, archiveSupport, conditionalPages, advancedPages)
     .filter((item) => item.exists);
   const internalOnly = internalAssets.filter((item) => item.exists);
   const mainlineEntries = userEntry.filter((item) => item.role === 'mainline' || item.role === 'default-entry' || item.role === 'conditional-mainline');
@@ -5988,7 +5947,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
   const visibleArchiveCount = archiveSupport.filter((item) => item.exists).length;
   const visibleConditionalCount = conditionalPages.filter((item) => item.exists).length;
   const visibleAdvancedCount = advancedPages.filter((item) => item.exists).length;
-  const visibleLegacyCount = legacyPages.filter((item) => item.exists).length;
   const totalOptionalCount = visibleConditionalCount + visibleAdvancedCount;
   const defaultUserJourney = ['task-center', 'workspace-home', 'prepare-workspace', 'result-workspace', 'exception-workspace'];
   const advancedPagePolicy = [
@@ -6020,9 +5978,8 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
     defaultUserJourney,
     defaultVisibleLayers: ['mainline', 'support'],
     onDemandLayers: ['conditional', 'advanced'],
-    maintenanceLayers: ['legacy'],
     internalLayers: ['internal'],
-    userFacingRule: '普通用户默认只理解主链层和少量补充入口。深看页、旧说明页和内部资产统一后退，只在明确需要时再出现。',
+    userFacingRule: '普通用户默认只理解主链层和少量补充入口。深看页按需出现；内部资产只服务程序和维护。',
     layers: {
       mainline: buildLayerSnapshot('mainline', {
         title: '主链层',
@@ -6063,16 +6020,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
         description: '面向深看、复检和专项回看，目标是进一步向按需生成收拢。',
         hiddenByDefaultReason: '这些页面保留能力，但默认不应陪跑主流程。',
       }),
-      legacy: buildLayerSnapshot('legacy', {
-        title: '旧说明层',
-        audience: 'maintenance',
-        attention: 'retired',
-        defaultVisible: false,
-        generation: 'retire-first',
-        items: legacyPages,
-        description: '旧门户和旧结果说明只保留维护观察意义。',
-        hiddenByDefaultReason: '这层已经不属于个人工作台正式链路，应继续后退。',
-      }),
       internal: buildLayerSnapshot('internal', {
         title: '内部资产层',
         audience: 'diagnostic',
@@ -6102,12 +6049,10 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
     version: 1,
     defaultEntryLabel: '工作台首页',
     defaultEntryPath: layoutEntry.recommendedPath,
-    defaultEntryCompatibilityPath: workspaceHomePath,
     defaultUserJourney,
     principle: '普通用户默认只走任务总控和四站工作台；任务档案是唯一常驻补充入口。',
     defaultVisibleLayers: ['mainline', 'support'],
     onDemandLayers: ['conditional', 'advanced'],
-    maintenanceLayers: ['legacy'],
     internalLayers: ['internal'],
     defaultVisibleRule: '默认只看主链工作台和任务档案页。',
     onDemandRule: '高级页只在 prepare-details / result-details / all 模式生成。',
@@ -6117,7 +6062,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
       mainline: visibleMainlineCount,
       support: visibleSupportCount,
       optional: totalOptionalCount,
-      legacy: visibleLegacyCount,
       internal: internalOnly.length,
     },
     advancedPagePolicy,
@@ -6127,7 +6071,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
     summary: {
       defaultEntryLabel: '工作台首页',
       defaultEntryPath: layoutEntry.recommendedPath,
-      defaultEntryCompatibilityPath: workspaceHomePath,
       workspaceLayoutMode: layoutEntry.mode,
       workspaceLayoutManifest: path.join(outputDir, 'workspace_layout_manifest.json'),
       userVisibleCount: visibleToUser.length,
@@ -6136,9 +6079,8 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
       supportCount: visibleSupportCount,
       conditionalCount: visibleConditionalCount,
       advancedCount: visibleAdvancedCount,
-      legacyCount: visibleLegacyCount,
       internalCount: internalOnly.length,
-      principle: '普通用户默认只走任务总控和四站工作台。任务档案保留为唯一工作台补充入口，README 与完成报告退回文件落盘或归档层，其它深看页和旧说明页统一后退。',
+      principle: '普通用户默认只走任务总控和四站工作台。任务档案保留为唯一工作台补充入口，README 与完成报告退回文件落盘或归档层；深看页按需生成。',
       reducibleCount: reductionCandidates.length,
       defaultVisibleLayerCount: artifactLayerProtocol.defaultVisibleLayers.length,
       optionalVisibleCount: totalOptionalCount,
@@ -6153,7 +6095,6 @@ function summarizeArtifactGovernance(outputDir, options = {}) {
     conditionalPages,
     advancedPages,
     optionalPages: advancedPages,
-    legacyPages,
     internalOnly,
     groupedAssets,
     artifactStrategy,
@@ -6175,17 +6116,13 @@ function buildWorkbenchGuide(stage, artifactGovernance = {}, optionalPageMode = 
   const advancedPages = Array.isArray(artifactGovernance.advancedPages)
     ? artifactGovernance.advancedPages.filter((item) => item.exists)
     : [];
-  const legacyPages = Array.isArray(artifactGovernance.legacyPages)
-    ? artifactGovernance.legacyPages.filter((item) => item.exists)
-    : [];
   const defaultEntryLabel = String(summary.defaultEntryLabel || '工作台首页').trim() || '工作台首页';
   const principle = String(summary.principle || '').trim()
-    || '普通用户默认只走任务总控和四站工作台。任务档案保留为唯一工作台补充入口，其它深看页和旧说明页统一后退，不再形成第二套导航。';
+    || '普通用户默认只走任务总控和四站工作台。任务档案保留为唯一工作台补充入口，深看页按需生成。';
   const mainlineCount = Number(summary.mainlineCount || 0);
   const supportCount = Number(summary.supportCount || workspaceSupport.length || 0);
   const conditionalCount = Number(summary.conditionalCount || conditionalPages.length || 0);
   const advancedCount = Number(summary.advancedCount || advancedPages.length || 0);
-  const legacyCount = Number(summary.legacyCount || legacyPages.length || 0);
   const stageCopyMap = {
     home: '工作台首页负责总览当前阶段、下一步和异常压力。',
     prepare: '准备工作台只负责方向、放行和素材判断。',
@@ -6204,13 +6141,6 @@ function buildWorkbenchGuide(stage, artifactGovernance = {}, optionalPageMode = 
     result: '需要深挖时再开，不必来回切换。',
     exception: '保留复检入口，默认不回头翻找。',
   };
-  const legacySummaryMap = {
-    home: '仅供维护观察，不推荐进入。',
-    prepare: '不再承担导航，只保留维护意义。',
-    result: '不再承担主控，只保留维护意义。',
-    exception: '不再承担处理入口，只保留维护意义。',
-  };
-
   return {
     section: {
       title: denseCopy.guideSectionTitle,
@@ -6219,7 +6149,7 @@ function buildWorkbenchGuide(stage, artifactGovernance = {}, optionalPageMode = 
         { label: '主入口', value: defaultEntryLabel },
         { label: '主链', value: `${mainlineCount} 站连续工作台` },
         { label: '补充入口', value: supportCount > 0 ? '默认只保留任务档案' : '默认不额外展开' },
-        { label: '已后退页面', value: `${conditionalCount + advancedCount + legacyCount} 个深看页 / 旧说明页` },
+        { label: '已后退页面', value: `${conditionalCount + advancedCount} 个深看页` },
         { label: '当前细页模式', value: optionalPageMode.label },
         { label: '现在怎么用', value: optionalPageMode.currentFocus },
         { label: '如果想深看', value: optionalPageMode.deepDiveSuggestion },
@@ -6244,13 +6174,6 @@ function buildWorkbenchGuide(stage, artifactGovernance = {}, optionalPageMode = 
         label: '深看页面层',
         value: `${conditionalCount + advancedCount} 个页面`,
         summary: advancedSummaryMap[stage] || advancedSummaryMap.home,
-        tone: 'neutral',
-        hideLinkIfMissing: true,
-      } : null,
-      legacyCount > 0 ? {
-        label: '旧说明页层',
-        value: `${legacyCount} 个入口`,
-        summary: legacySummaryMap[stage] || legacySummaryMap.home,
         tone: 'neutral',
         hideLinkIfMissing: true,
       } : null,
@@ -6344,7 +6267,7 @@ function buildGovernanceStagePlan() {
       },
       {
         label: '产物减法正式化',
-        summary: '继续收紧进阶页面、旧入口说明和诊断归档的默认生成与默认暴露策略。',
+        summary: '继续收紧进阶页面和诊断归档的默认生成与默认暴露策略。',
       },
       {
         label: '实时工作台产品化',
@@ -6760,7 +6683,6 @@ function main() {
       support: governanceSnapshot.support,
       conditional: governanceSnapshot.conditional,
       advanced: governanceSnapshot.advanced,
-      legacy: governanceSnapshot.legacy,
       defaultVisible: governanceSnapshot.defaultVisible,
       defaultGenerated: governanceSnapshot.defaultGenerated,
       defaultGeneratedMainline: governanceSnapshot.defaultGeneratedMainline,
@@ -7907,7 +7829,7 @@ function main() {
   writeJson(workspaceStateFile, workspaceState);
   writeJson(workspaceAssetsFile, persistedWorkspaceAssets);
   writeJson(workspaceTimelineFile, workspaceTimeline);
-  const compatibilityWorkbenchSnapshot = buildWorkbenchStateSnapshot(outputDir, {
+  const derivedWorkbenchSnapshot = buildWorkbenchStateSnapshot(outputDir, {
     workspaceState,
     workspaceAssets: persistedWorkspaceAssets,
     workspaceTimeline,
@@ -7923,7 +7845,7 @@ function main() {
     snapshotRole: 'live-workbench-state',
     outputFile: unifiedWorkbenchStateFile,
   });
-  writeJson(workbenchStateFile, compatibilityWorkbenchSnapshot);
+  writeJson(workbenchStateFile, derivedWorkbenchSnapshot);
   writeJson(unifiedWorkbenchStateFile, unifiedWorkbenchSnapshot);
   console.log(JSON.stringify({
     workspaceStateFile,

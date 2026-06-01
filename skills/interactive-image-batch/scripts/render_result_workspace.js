@@ -19,7 +19,6 @@ const {
   getWorkspaceIdentityCopy,
   resolveWorkspaceShellRuntime,
   getWorkspaceActionCopy,
-  buildWorkspaceContextFallback,
   resolveWorkspaceStageContextBarData,
   resolveWorkspaceStageViewValue,
   resolveWorkspaceStageSection,
@@ -30,7 +29,6 @@ const {
   resolveWorkspaceStageConfirmationState,
   buildWorkspaceHeroCardsData,
   buildWorkspaceStageGuideFallback,
-  buildWorkspaceStageWorkbenchCards,
   buildWorkspaceStageVisibilityFallback,
   renderList,
   renderMetricCard,
@@ -45,11 +43,7 @@ const {
   buildWorkspaceRouteSectionData,
   buildWorkspaceSummarySectionData,
   buildWorkspaceDecisionItems,
-  buildWorkspaceWorkbenchSectionData,
-  buildWorkspaceStandardWorkbenchCard,
-  buildWorkspaceStandardRoutePoint,
-  buildWorkspaceRouteFallback,
-  buildWorkspaceStageRouteFallback,
+  buildWorkspaceStageFallbackBundle,
   buildWorkspaceDecisionSectionData,
   renderWorkspaceSessionConsoleSection,
   renderWorkspaceCockpitSummarySection,
@@ -89,7 +83,6 @@ const {
   buildWorkspacePreviewSectionData,
   buildWorkspaceIssuesSectionData,
   buildWorkspaceAdvancedSectionData,
-  buildWorkspaceStageDefaultHints,
   resolveWorkspaceGuideSectionData,
   resolveWorkspaceIssuesSectionData,
   resolveWorkspaceDecisionSectionData,
@@ -727,53 +720,8 @@ function main() {
     previewCardsHtml: previewItems.map((item, index) => renderPreviewCard(outputDir, item, index, normalizedResultPreviewSection)),
     issueCardsHtml: issuePreviewItems.map((item, index) => renderIssueCard(outputDir, item, index, item.issueType, normalizedResultIssuesSection)),
   });
-  const fallbackWorkbenchCards = [
-    ...buildWorkspaceStageWorkbenchCards('result', {
-      denseCopy,
-      exceptionValue: failedCount > 0 ? '需要先处理' : (reviewCount > 0 ? '建议再确认' : denseCopy.optionalEntryValue),
-      exceptionSummary: failedCount > 0 ? '有失败项时，再到这里集中处理。' : (reviewCount > 0 ? '边界结果还想再确认时，再进入。' : denseCopy.optionalEntrySummary),
-      exceptionFile: exceptionWorkspacePath,
-      exceptionCta: actionCopy.enterException,
-      exceptionTone: failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'neutral'),
-      includeStoryboard: hasStoryboard && path.resolve(nextActionPath) !== path.resolve(storyboardPath),
-      storyboardFile: storyboardPath,
-      storyboardCta: actionCopy.openStoryboard,
-    }),
-    ...guideCards,
-  ].filter(Boolean).filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
-  const resolvedResultWorkbench = resolveWorkspaceStageWorkbenchSection(
-    pageState,
-    'result',
-    resultView,
-    buildWorkspaceWorkbenchSectionData({
-      title: chrome.workbenchTitle,
-      copy: chrome.workbenchCopy,
-      cards: fallbackWorkbenchCards,
-    })
-  );
-  const resolvedResultRoute = resolveWorkspaceStageRouteSection(
-    pageState,
-    'result',
-    resultView,
-    buildWorkspaceStageRouteFallback('result', {
-      title: chrome.routeTitle,
-      copy: chrome.routeCopy,
-      denseCopy,
-      currentLabel: statusLabel,
-      currentPendingLabel: stagePhrases.routeCurrentPendingLabel,
-      previousFile: workspaceHomePath,
-      previousCta: actionCopy.returnHome,
-      nextLabel: nextActionLabel,
-      nextSummary: nextActionReason,
-      nextFile: nextActionPath,
-      nextCta: failedCount > 0 ? actionCopy.enterException : actionCopy.enterNow,
-      extraNextSteps: !failedCount && !reviewCount && fileExists(runRecordPath)
-        ? [{ kicker: '辅助说明', label: '任务档案', summary: '想看这轮完整记录时再打开。', file: runRecordPath, cta: actionCopy.viewRecordShort, audience: 'pro' }]
-        : [],
-    })
-  );
-  const resultHeroCards = Array.isArray(resultView?.heroCards) ? resultView.heroCards : [];
-  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'result', resultView, buildWorkspaceContextFallback('result', {
+  const resultFallbackBundle = buildWorkspaceStageFallbackBundle('result', {
+    denseCopy,
     runLabel: taskLabel,
     phaseLabel: currentPhaseLabel,
     flowLabel: identity.flows.result,
@@ -783,14 +731,51 @@ function main() {
       next: nextActionLabel,
       pressure: failedCount > 0 ? '还有异常要收口' : (reviewCount > 0 ? '还有边界结果要确认' : '当前平稳'),
     },
-    defaultHints: buildWorkspaceStageDefaultHints('result', {
-      stageSummary: resultStageSummary,
-      densePrimaryHint: denseCopy.contextPrimaryHint,
-      currentFocus: resultCurrentFocus,
-      nextActionReason: nextActionReason || (failedCount > 0 ? '先处理异常相关结果，再决定是否补跑。' : '先筛出最值得保留的图，再决定是否看整板。'),
-    }),
+    stageSummary: resultStageSummary,
+    currentFocus: resultCurrentFocus,
+    nextActionReason: nextActionReason || (failedCount > 0 ? '先处理异常相关结果，再决定是否补跑。' : '先筛出最值得保留的图，再决定是否看整板。'),
     extraHints: resultContext.hints,
-  }));
+    exceptionValue: failedCount > 0 ? '需要先处理' : (reviewCount > 0 ? '建议再确认' : denseCopy.optionalEntryValue),
+    exceptionSummary: failedCount > 0 ? '有失败项时，再到这里集中处理。' : (reviewCount > 0 ? '边界结果还想再确认时，再进入。' : denseCopy.optionalEntrySummary),
+    exceptionFile: exceptionWorkspacePath,
+    exceptionCta: actionCopy.enterException,
+    exceptionTone: failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'neutral'),
+    includeStoryboard: hasStoryboard && path.resolve(nextActionPath) !== path.resolve(storyboardPath),
+    storyboardFile: storyboardPath,
+    storyboardCta: actionCopy.openStoryboard,
+    routeTitle: chrome.routeTitle,
+    routeCopy: chrome.routeCopy,
+    currentLabel: statusLabel,
+    previousFile: workspaceHomePath,
+    previousCta: actionCopy.returnHome,
+    nextLabel: nextActionLabel,
+    nextSummary: nextActionReason,
+    nextFile: nextActionPath,
+    nextCta: failedCount > 0 ? actionCopy.enterException : actionCopy.enterNow,
+    extraNextSteps: !failedCount && !reviewCount && fileExists(runRecordPath)
+      ? [{ kicker: '辅助说明', label: '任务档案', summary: '想看这轮完整记录时再打开。', file: runRecordPath, cta: actionCopy.viewRecordShort, audience: 'pro' }]
+      : [],
+    workbenchTitle: chrome.workbenchTitle,
+    workbenchCopy: chrome.workbenchCopy,
+    extraWorkbenchCards: guideCards,
+  });
+  const fallbackWorkbenchCards = resultFallbackBundle.workbench.cards
+    .filter(Boolean)
+    .filter((card) => !governedWorkbenchIds || !card.id || governedWorkbenchIds.has(card.id));
+  const resolvedResultWorkbench = resolveWorkspaceStageWorkbenchSection(
+    pageState,
+    'result',
+    resultView,
+    { ...resultFallbackBundle.workbench, cards: fallbackWorkbenchCards }
+  );
+  const resolvedResultRoute = resolveWorkspaceStageRouteSection(
+    pageState,
+    'result',
+    resultView,
+    resultFallbackBundle.route
+  );
+  const resultHeroCards = Array.isArray(resultView?.heroCards) ? resultView.heroCards : [];
+  const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'result', resultView, resultFallbackBundle.context);
   const contextBar = renderPortalContextBar(contextBarData);
 
   const html = renderWorkspacePageShell({

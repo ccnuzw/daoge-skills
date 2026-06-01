@@ -15,8 +15,6 @@ const WORKSPACE_FILES = [
   'prompt_preview.html',
   'preflight_board.html',
   'assets_board.html',
-  'result_hub.html',
-  'daoge_portal.html',
 ];
 
 const INTERNAL_FILES = [
@@ -115,7 +113,7 @@ function copyIfExists(outputDir, fileName, targetDir, layer) {
     file: fileName,
     source,
     mirror: target,
-    compatibility: 'top-level-source-preserved',
+    layoutRole: layer === 'workspace' ? 'workspace-entry' : `${layer}-asset`,
   };
 }
 
@@ -134,9 +132,9 @@ function syncWorkspaceLayout(outputDir, options = {}) {
     kind: 'daoge-workspace-layout-manifest',
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    mode: 'compatibility-mirror',
+    mode: 'workspace-first',
     outputDir: root,
-    principle: '顶层文件继续作为兼容源；workspace/internal/debug 先作为分层镜像，后续再逐步切换入口读取。',
+    principle: 'workspace/internal/debug 是正式分层输出；用户入口固定从 workspace/ 开始，内部状态固定从 internal/ 查看。',
     directories: {
       workspace: workspaceDir,
       internal: internalDir,
@@ -166,13 +164,12 @@ function resolveWorkspaceMirrorPath(outputDir, fileName, layer = 'workspace') {
 
 function resolveRecommendedWorkspacePath(outputDir, fileName, layer = 'workspace') {
   const root = path.resolve(outputDir);
-  const compatibilityPath = path.join(root, fileName);
   const mirrorPath = resolveWorkspaceMirrorPath(root, fileName, layer);
   return {
-    recommendedPath: mirrorPath && fs.existsSync(mirrorPath) ? mirrorPath : compatibilityPath,
-    compatibilityPath,
+    recommendedPath: mirrorPath && fs.existsSync(mirrorPath) ? mirrorPath : path.join(root, fileName),
+    sourcePath: path.join(root, fileName),
     mirrorPath,
-    mode: mirrorPath && fs.existsSync(mirrorPath) ? 'workspace-mirror-first' : 'top-level-compatibility',
+    mode: mirrorPath && fs.existsSync(mirrorPath) ? 'workspace-first' : 'source-pending',
   };
 }
 

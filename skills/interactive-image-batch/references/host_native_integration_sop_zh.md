@@ -79,15 +79,16 @@ node scripts/ingest_host_native_results.js \
 
 ---
 
-## 5. 检查结果门户
+## 5. 检查工作台结果主链
 
 导入后至少检查：
 
-- `result_hub.html`
-- `review_board.html`
-- `completion_board.html`
+- `workspace/workspace_home.html`
+- `workspace/result_workspace.html`
+- `workspace/exception_workspace.html`
+- `workspace/run_record.html`
 
-如果这些都没出来，不要宣称接入完成。
+如果这些主链入口都没出来，不要宣称接入完成。`review_board.html`、`completion_board.html` 只在显式开启结果深看模式时检查。
 
 ---
 

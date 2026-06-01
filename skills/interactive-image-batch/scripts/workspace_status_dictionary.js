@@ -1129,7 +1129,7 @@ function buildHomeCardPlan(options = {}) {
     contextFlowLabel: hasResult ? '首页 -> 准备 -> 结果 -> 异常' : '首页 -> 准备 -> 结果',
     contextHints: [
       { text: hasResult ? '先按推荐下一步继续。' : '先进入准备工作台。', audience: 'all' },
-      { text: '不需要再自己判断旧页面。', audience: 'pro' },
+      { text: '不需要再自己翻补充页判断下一步。', audience: 'pro' },
     ],
     heroCards: [
       { label: '当前阶段', value: String(options.phase || '未提供').trim() || '未提供', tone: 'info', detail: hasResult ? '已具备统一结果入口' : '先确认准备层', audience: 'all' },

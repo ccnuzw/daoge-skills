@@ -29,8 +29,6 @@ const GOVERNANCE_SNAPSHOT_PAGES = [
   'assets_board.html',
   'run_overview.html',
   'rerun_board.html',
-  'result_hub.html',
-  'daoge_portal.html',
   'examples-catalog',
 ];
 
@@ -66,8 +64,6 @@ const DISPLAY_GOVERNANCE_FALLBACK_BY_PAGE = {
   'assets_board.html': 'prepare_workspace.html',
   'run_overview.html': 'result_workspace.html',
   'rerun_board.html': 'exception_workspace.html',
-  'result_hub.html': 'result_workspace.html',
-  'daoge_portal.html': 'workspace_home.html',
   'examples-catalog': 'workspace_home.html',
 };
 
@@ -371,9 +367,7 @@ function buildGovernedPages(outputDir) {
     href: fileExists(entry.file) ? path.relative(outputDir, entry.file) : null,
     level: ['entry', 'mainline'].includes(entry.group)
       ? 'primary'
-      : (['support', 'conditional', 'advanced'].includes(entry.group)
-        ? 'secondary'
-        : 'legacy'),
+      : 'secondary',
     defaultVisible: ['entry', 'mainline'].includes(entry.group),
   }));
 }
@@ -392,7 +386,7 @@ function getProgressVisibleIds() {
 
 function getTopLinkPlan(currentPage, options = {}) {
   const currentEntryLevel = String(options.currentEntryLevel || '').trim();
-  const defaultPrimaryIds = currentEntryLevel === 'secondary' || currentEntryLevel === 'legacy'
+  const defaultPrimaryIds = currentEntryLevel === 'secondary'
     ? ['workspace-home', 'task-center', 'result-workspace']
     : BASE_NAVIGATION_GOVERNANCE.topLinkIds;
   return (NAVIGATION_GOVERNANCE_BY_PAGE[currentPage]?.topLinkIds || PAGE_TOPLINK_PLANS[currentPage] || defaultPrimaryIds).slice();
@@ -449,7 +443,6 @@ function buildOptionalSurfaceGovernance(pages = [], options = {}) {
     if (optionalPageMode === 'all') return true;
     if (optionalPageMode === 'prepare-details') return ['preflight-board', 'prompt-preview', 'assets-board'].includes(entry.id);
     if (optionalPageMode === 'result-details') return ['review-board', 'completion-board', 'run-overview', 'rerun-board'].includes(entry.id);
-    if (optionalPageMode === 'legacy') return false;
     return false;
   }).map((entry) => entry.id);
 
@@ -592,7 +585,6 @@ function buildGovernanceSnapshot(outputDir, options = {}) {
     support,
     conditional,
     advanced,
-    legacy: pages.filter((entry) => entry.group === 'legacy'),
     defaultVisible: pages.filter((entry) => navigation.defaultVisibleGroups.includes(entry.group)),
     defaultGenerated: pages.filter((entry) => entry.generateByDefault && navigation.defaultGeneratedGroups.includes(entry.group)),
     defaultGeneratedMainline: pages.filter((entry) => entry.generateByDefault && navigation.defaultGeneratedMainlineGroups.includes(entry.group)),

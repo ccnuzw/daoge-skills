@@ -169,19 +169,14 @@ test('run_batch dry-run produces expected artifacts', () => {
   });
   const layoutManifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'workspace_layout_manifest.json'), 'utf8'));
   assert.equal(layoutManifest.kind, 'daoge-workspace-layout-manifest');
-  assert.equal(layoutManifest.mode, 'compatibility-mirror');
+  assert.equal(layoutManifest.mode, 'workspace-first');
   assert.equal(layoutManifest.source, 'run_batch');
-  assert.match(layoutManifest.principle, /顶层文件继续作为兼容源/);
+  assert.match(layoutManifest.principle, /workspace\/internal\/debug 是正式分层输出/);
   assert.ok(layoutManifest.counts.workspace >= 4);
   assert.ok(layoutManifest.counts.internal >= 4);
   const workspaceState = JSON.parse(fs.readFileSync(path.join(outputDir, 'workspace_state.json'), 'utf8'));
-  assert.equal(workspaceState.artifactGovernance?.summary?.workspaceLayoutMode, 'workspace-mirror-first');
+  assert.equal(workspaceState.artifactGovernance?.summary?.workspaceLayoutMode, 'workspace-first');
   assert.equal(workspaceState.artifactGovernance?.summary?.defaultEntryPath, path.join(outputDir, 'workspace', 'workspace_home.html'));
-  assert.equal(workspaceState.artifactGovernance?.summary?.defaultEntryCompatibilityPath, path.join(outputDir, 'workspace_home.html'));
-  assert.equal(
-    JSON.parse(fs.readFileSync(path.join(outputDir, 'internal', 'workspace_state.json'), 'utf8')).artifactGovernance?.summary?.defaultEntryCompatibilityPath,
-    path.join(outputDir, 'workspace_home.html')
-  );
   assert.equal(
     JSON.parse(fs.readFileSync(path.join(outputDir, 'internal', 'workspace_live_state.json'), 'utf8')).liveCopilotDirective?.recommendedReply,
     JSON.parse(fs.readFileSync(path.join(outputDir, 'workspace_live_state.json'), 'utf8')).liveCopilotDirective?.recommendedReply
@@ -245,10 +240,9 @@ test('run_batch dry-run produces expected artifacts', () => {
   assert.match(readme, /请先打开工作台首页/);
   assert.match(readme, /先看这里:/);
   assert.match(readme, /workspace\/workspace_home\.html/);
-  assert.match(readme, /兼容旧入口:/);
-  assert.match(readme, /目录迁移: 推荐先看 workspace\/ 分层入口/);
+  assert.match(readme, /workspace\/ 是正式工作台入口/);
   assert.match(readme, /打开后先看: 当前阶段、推荐下一步、回到对话框怎么说/);
-  assert.match(readme, /不用先看: JSON \/ Markdown 内部记录、旧说明页、深看页/);
+  assert.match(readme, /不用先看: JSON \/ Markdown 内部记录、深看页/);
   assert.match(readme, /内部记录: 仅维护者诊断和续跑使用，不作为普通阅读入口/);
   assert.match(readme, /任务档案只作回看，内部记录仅维护者诊断使用/);
   assert.match(readme, /其它补充页: 默认不生成；需要深看时从对应工作台按需进入/);
@@ -263,7 +257,7 @@ test('run_batch dry-run produces expected artifacts', () => {
   assert.match(readme, /完成报告: 只看这轮是否已经可以收口/);
   assert.match(readme, /目录分层/);
   assert.match(readme, /用户直看层|文件落盘层|归档层|内部状态层/);
-  assert.match(readme, /内部状态层: .*仅维护者诊断、续跑和兼容读取使用/);
+  assert.match(readme, /内部状态层: .*仅维护者诊断、续跑和程序读取使用/);
   assert.doesNotMatch(readme, /- 分镜整板页:/);
   assert.doesNotMatch(readme, /- 分镜整板补充页: .*storyboard_board\.html/);
   assert.doesNotMatch(readme, /- 完成报告: .*daoge_completion_report\.md/);
@@ -283,7 +277,7 @@ test('summarizeUserWorkbenchProtocol provides shared fallback language', () => {
   assert.equal(summary.runtimeState, '/tmp/demo-output/runtime_state.json');
   assert.equal(summary.assetsState, '/tmp/demo-output/workspace_assets.json');
   assert.equal(summary.timelineState, '/tmp/demo-output/workspace_timeline.json');
-  assert.equal(summary.compatibilitySnapshot, '/tmp/demo-output/workbench_state.json');
+  assert.equal(summary.derivedWorkbenchSnapshot, '/tmp/demo-output/workbench_state.json');
   assert.equal(summary.taskCenterUnifiedState, '/tmp/task_center_live_state.json');
   assert.match(summary.stateSourceSummary, /入口主链提醒和运行态副驾驶交接/);
   assert.equal(summary.stateRoles?.canonicalState, '任务内统一状态模型');
@@ -393,7 +387,7 @@ test('unified status summary keeps recommended reply and next action summary as 
   assert.equal(runtimeProtocol.handoffState?.primarySurface, 'workspace_home.html');
 });
 
-test('workspace shared consumers prefer unified status contract over legacy copilot fallbacks', () => {
+test('workspace shared consumers prefer unified status contract over stale copilot fallbacks', () => {
   const {
     buildActionStatusFromUnifiedStatus,
     buildDialogueStatusFromUnifiedStatus,
@@ -481,7 +475,7 @@ test('copilot summary and workspace shared consumers can fallback to shared runt
   assert.equal(dialogueStatus.nextSayItems[0], '继续，先盯住当前进度');
 });
 
-test('workspace shared narrative prefers unified status summary and current focus over legacy summary phrasing', () => {
+test('workspace shared narrative prefers unified status summary and current focus over stale summary phrasing', () => {
   const {
     buildTaskControlBarFromUnifiedStatus,
     resolveUnifiedStageNarrative,
@@ -990,7 +984,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
     assert.equal(fs.existsSync(path.join(outputDir, name)), true, `missing prepare layout mirror ${name}`);
   });
   const prepareLayoutManifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'workspace_layout_manifest.json'), 'utf8'));
-  assert.equal(prepareLayoutManifest.mode, 'compatibility-mirror');
+  assert.equal(prepareLayoutManifest.mode, 'workspace-first');
   assert.equal(prepareLayoutManifest.source, 'daoge_prepare_run');
   const mirroredPrepareHome = fs.readFileSync(path.join(outputDir, 'workspace', 'workspace_home.html'), 'utf8');
   assert.match(mirroredPrepareHome, /href="prepare_workspace\.html"/);
@@ -1011,7 +1005,6 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.ok(Array.isArray(workspaceState.pageGroups?.support));
   assert.ok(Array.isArray(workspaceState.pageGroups?.conditional));
   assert.ok(Array.isArray(workspaceState.pageGroups?.advanced));
-  assert.ok(Array.isArray(workspaceState.pageGroups?.legacy));
   assert.ok(Array.isArray(workspaceState.pageGroups?.defaultVisible));
   assert.ok(Array.isArray(workspaceState.pageGroups?.defaultGenerated));
   assert.ok(Array.isArray(workspaceState.pageGroups?.defaultGeneratedMainline));
@@ -1038,7 +1031,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.equal(workspaceState.assetLayers?.stateTopology?.runtimeState, path.join(outputDir, 'runtime_state.json'));
   assert.equal(workspaceState.assetLayers?.stateTopology?.assetsState, path.join(outputDir, 'workspace_assets.json'));
   assert.equal(workspaceState.assetLayers?.stateTopology?.timelineState, path.join(outputDir, 'workspace_timeline.json'));
-  assert.equal(workspaceState.assetLayers?.stateTopology?.compatibilitySnapshot, path.join(outputDir, 'workbench_state.json'));
+  assert.equal(workspaceState.assetLayers?.stateTopology?.derivedWorkbenchSnapshot, path.join(outputDir, 'workbench_state.json'));
   assert.equal(workspaceState.assetLayers?.stateTopology?.taskCenterUnifiedState, path.join(path.dirname(outputDir), 'task_center_live_state.json'));
   assert.equal(workspaceState.assetLayers?.stateTopology?.taskCenterEntryProtocol?.source, path.join(path.dirname(outputDir), 'task_center_live_state.json'));
   assert.equal(workspaceState.assetLayers?.stateTopology?.taskCenterEntryProtocol?.entryGuideKey, 'entryMainlineGuide');
@@ -1082,7 +1075,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.equal(workspaceState.assetLayers?.userWorkbenchProtocol?.stateSources?.runtimeState, path.join(outputDir, 'runtime_state.json'));
   assert.equal(workspaceState.assetLayers?.userWorkbenchProtocol?.stateSources?.assetsState, path.join(outputDir, 'workspace_assets.json'));
   assert.equal(workspaceState.assetLayers?.userWorkbenchProtocol?.stateSources?.timelineState, path.join(outputDir, 'workspace_timeline.json'));
-  assert.equal(workspaceState.assetLayers?.userWorkbenchProtocol?.stateSources?.compatibilitySnapshot, path.join(outputDir, 'workbench_state.json'));
+  assert.equal(workspaceState.assetLayers?.userWorkbenchProtocol?.stateSources?.derivedWorkbenchSnapshot, path.join(outputDir, 'workbench_state.json'));
   assert.equal(workspaceState.assetLayers?.userWorkbenchProtocol?.stateSources?.taskCenterUnifiedState, path.join(path.dirname(outputDir), 'task_center_live_state.json'));
   assert.equal(workspaceState.assetLayers?.userWorkbenchProtocol?.taskCenterEntryProtocol?.source, path.join(path.dirname(outputDir), 'task_center_live_state.json'));
   assert.equal(workspaceState.assetLayers?.userWorkbenchProtocol?.taskCenterEntryProtocol?.entryGuideKey, 'entryMainlineGuide');
@@ -1141,20 +1134,17 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.equal(workspaceState.artifactGovernance?.artifactStrategy?.targetMode, 'workspace-first');
   assert.equal(workspaceState.artifactGovernance?.artifactStrategy?.groups?.supportVisible?.generation, 'mainline-plus-core-support');
   assert.equal(workspaceState.artifactGovernance?.artifactStrategy?.groups?.advancedVisible?.generation, 'on-demand-target');
-  assert.equal(workspaceState.artifactGovernance?.artifactStrategy?.groups?.legacyVisible?.generation, 'retire-first');
   assert.equal(workspaceState.artifactGovernance?.artifactStrategy?.groups?.diagnosticInternal?.generation, 'eligible-on-demand');
   assert.equal(workspaceState.artifactGovernance?.artifactStrategy?.runtimeToggles?.diagnosticMarkdown?.default, false);
   assert.equal(workspaceState.artifactGovernance?.artifactLayerProtocol?.version, 1);
   assert.deepEqual(workspaceState.artifactGovernance?.artifactLayerProtocol?.defaultVisibleLayers, ['mainline', 'support']);
   assert.deepEqual(workspaceState.artifactGovernance?.artifactLayerProtocol?.onDemandLayers, ['conditional', 'advanced']);
-  assert.deepEqual(workspaceState.artifactGovernance?.artifactLayerProtocol?.maintenanceLayers, ['legacy']);
   assert.deepEqual(workspaceState.artifactGovernance?.artifactLayerProtocol?.internalLayers, ['internal']);
   assert.match(String(workspaceState.artifactGovernance?.artifactLayerProtocol?.userFacingRule || ''), /普通用户默认只理解主链层和少量补充入口/);
   assert.equal(workspaceState.artifactGovernance?.artifactLayerProtocol?.layers?.mainline?.title, '主链层');
   assert.equal(workspaceState.artifactGovernance?.artifactLayerProtocol?.layers?.mainline?.generation, 'always');
   assert.equal(workspaceState.artifactGovernance?.artifactLayerProtocol?.layers?.support?.generation, 'mainline-plus-core-support');
   assert.equal(workspaceState.artifactGovernance?.artifactLayerProtocol?.layers?.advanced?.defaultVisible, false);
-  assert.equal(workspaceState.artifactGovernance?.artifactLayerProtocol?.layers?.legacy?.attention, 'retired');
   assert.equal(workspaceState.artifactGovernance?.artifactLayerProtocol?.layers?.internal?.audience, 'diagnostic');
   assert.match(String(workspaceState.artifactGovernance?.artifactLayerProtocol?.layers?.advanced?.hiddenByDefaultReason || ''), /默认不应陪跑主流程/);
   assert.equal(workspaceState.artifactGovernance?.summary?.defaultVisibleLayerCount, 2);
@@ -1165,7 +1155,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.match(String(workspaceState.optionalPageMode?.deepDiveSuggestion || ''), /准备补充页|结果补充页/);
   assert.deepEqual(workspaceState.optionalPageMode?.layerPolicy?.visibleLayers, ['mainline', 'support']);
   assert.deepEqual(workspaceState.optionalPageMode?.layerPolicy?.generatedLayers, ['mainline', 'support']);
-  assert.deepEqual(workspaceState.optionalPageMode?.layerPolicy?.hiddenLayers, ['conditional', 'advanced', 'legacy', 'internal']);
+  assert.deepEqual(workspaceState.optionalPageMode?.layerPolicy?.hiddenLayers, ['conditional', 'advanced', 'internal']);
   assert.match(String(workspaceState.optionalPageMode?.layerPolicy?.summary || ''), /主链层和补充层/);
   assert.equal(workspaceState.optionalPageMode?.generationPolicy?.source, 'default-generation-contract');
   assert.match(String(workspaceState.optionalPageMode?.generationPolicy?.summary || ''), /主链极简模式生成/);
@@ -1174,7 +1164,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.equal(workspaceState.optionalPageMode?.generationPolicy?.targetMode, 'single-workbench-mainline');
   assert.match(String(workspaceState.optionalPageMode?.generationPolicy?.guardrail?.defaultVisibleRule || ''), /默认只看主链工作台和任务档案页/);
   assert.match(String(workspaceState.optionalPageMode?.generationPolicy?.guardrail?.onDemandRule || ''), /必须按需开启/);
-  assert.match(String(workspaceState.optionalPageMode?.generationPolicy?.guardrail?.legacyRule || ''), /不进入个人工作台正式链路/);
+  assert.match(String(workspaceState.optionalPageMode?.generationPolicy?.guardrail?.removedRule || ''), /不再生成|残留会被清理/);
   assert.match(String(workspaceState.optionalPageMode?.generationPolicy?.guardrail?.internalRule || ''), /默认不展示给普通用户/);
   assert.deepEqual(workspaceState.optionalPageMode?.generationPolicy?.defaultHtmlFiles, [
     'task_center.html',
@@ -1231,7 +1221,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
     /review_board\.html.*result-details/
   );
   assert.match(
-    JSON.stringify(workspaceState.optionalPageMode?.generationContract?.maintenanceHtml || []),
+    JSON.stringify(workspaceState.optionalPageMode?.generationContract?.removedHtml || []),
     /result_hub\.html|daoge_portal\.html/
   );
   assert.match(
@@ -1288,7 +1278,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   const homeFallbackGuide = buildWorkspaceFallbackGuide('home', artifactLayerSnapshot);
   assert.equal(homeFallbackGuide.guide.items?.[1]?.label, '默认可见层');
   assert.match(String(homeFallbackGuide.guide.items?.[1]?.value || ''), /主链层|补充层/);
-  assert.match(String(homeFallbackGuide.guide.items?.[3]?.value || ''), /条件页层|进阶页层|旧说明层|内部资产层/);
+  assert.match(String(homeFallbackGuide.guide.items?.[3]?.value || ''), /条件页层|进阶页层|内部资产层/);
   assert.match(String(homeFallbackGuide.visibility.items?.[1]?.value || ''), /补充层/);
   assert.match(String(homeFallbackGuide.visibility.items?.[2]?.value || ''), /内部资产层|条件页层|进阶页层/);
   assert.equal(workspaceState.views?.prepare?.sections?.direction?.title, '任务方向');
@@ -1674,7 +1664,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.match(prepareWorkspace, /阻塞清单/);
   assert.match(prepareWorkspace, /提醒清单/);
   assert.doesNotMatch(prepareWorkspace, /当前 Run|准备层视图|这一页主控|任务中心/);
-  assert.doesNotMatch(prepareWorkspace, /兼容细分页|Prompt 预览页|预检总览页|素材绑定页/);
+  assert.doesNotMatch(prepareWorkspace, /Prompt 预览页|预检总览页|素材绑定页/);
 
   const workspaceHome = fs.readFileSync(path.join(outputDir, 'workspace_home.html'), 'utf8');
   assert.match(workspaceHome, /DAOGE 工作台首页/);
@@ -1697,7 +1687,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.match(workspaceHome, /如果想深看/);
   assert.doesNotMatch(workspaceHome, /任务摘要/);
   assert.doesNotMatch(workspaceHome, /图片速览/);
-  assert.doesNotMatch(workspaceHome, /查看兼容旧页面|旧门户入口|Prompt 预览页/);
+  assert.doesNotMatch(workspaceHome, /Prompt 预览页/);
 
   [
     'prompt_preview.md',
@@ -2135,7 +2125,7 @@ test('workspace mainline pages render copilot deck when generated', () => {
   assert.match(exceptionWorkspace, /会话副驾驶/);
 });
 
-test('run_batch can emit result detail and legacy pages only when explicitly enabled', () => {
+test('run_batch can emit result detail pages while removed history pages stay deleted', () => {
   const tempDir = makeTempDir('interactive-image-batch-optional-pages-');
   const outputDir = path.join(tempDir, 'out');
   const envFile = path.join(tempDir, '.env');
@@ -2163,27 +2153,34 @@ test('run_batch can emit result detail and legacy pages only when explicitly ena
     'completion_board.html',
     'run_overview.html',
     'rerun_board.html',
+  ].forEach((name) => {
+    assert.equal(fs.existsSync(path.join(outputDir, name)), true, `missing ${name}`);
+  });
+  [
     'result_hub.html',
     'daoge_portal.html',
   ].forEach((name) => {
-    assert.equal(fs.existsSync(path.join(outputDir, name)), true, `missing ${name}`);
+    assert.equal(fs.existsSync(path.join(outputDir, name)), false, `unexpected removed history page ${name}`);
   });
   assert.equal(fs.existsSync(path.join(outputDir, 'storyboard_board.html')), false, 'storyboard board should require storyboard data');
 
   const workspaceState = JSON.parse(fs.readFileSync(path.join(outputDir, 'workspace_state.json'), 'utf8'));
   assert.equal(workspaceState.optionalPageMode?.mode, 'all');
   assert.equal(workspaceState.optionalPageMode?.label, '完整展开模式');
-  assert.match(String(workspaceState.optionalPageMode?.currentFocus || ''), /所有细页都可用/);
+  assert.match(String(workspaceState.optionalPageMode?.currentFocus || ''), /所有深看细页都可用/);
   assert.match(String(workspaceState.optionalPageMode?.deepDiveSuggestion || ''), /不必把所有页都逐个打开/);
-  assert.deepEqual(workspaceState.optionalPageMode?.layerPolicy?.visibleLayers, ['mainline', 'support', 'conditional', 'advanced', 'legacy']);
+  assert.deepEqual(workspaceState.optionalPageMode?.layerPolicy?.visibleLayers, ['mainline', 'support', 'conditional', 'advanced']);
   assert.deepEqual(workspaceState.optionalPageMode?.layerPolicy?.hiddenLayers, ['internal']);
-  assert.match(String(workspaceState.optionalPageMode?.layerPolicy?.summary || ''), /除了内部层外/);
+  assert.match(String(workspaceState.optionalPageMode?.layerPolicy?.summary || ''), /准备\/结果深看层/);
   assert.match(String(workspaceState.optionalPageMode?.generationPolicy?.summary || ''), /完整展开模式/);
   assert.match(
     JSON.stringify(workspaceState.optionalPageMode?.generationContract?.currentMode?.generatedHtmlFiles || []),
-    /review_board\.html|preflight_board\.html|result_hub\.html|daoge_portal\.html/
+    /review_board\.html|preflight_board\.html/
   );
-  assert.deepEqual(workspaceState.optionalPageMode?.generationContract?.currentMode?.hiddenHtmlFiles, []);
+  assert.match(
+    JSON.stringify(workspaceState.optionalPageMode?.generationContract?.currentMode?.hiddenHtmlFiles || []),
+    /result_hub\.html|daoge_portal\.html/
+  );
 });
 
 test('run_batch removes leftover storyboard board in mainline-only mode', () => {
@@ -2213,7 +2210,7 @@ test('run_batch removes leftover storyboard board in mainline-only mode', () => 
   assert.equal(fs.existsSync(path.join(outputDir, 'storyboard_board.html')), false);
 });
 
-test('run_batch prunes leftover advanced and legacy html in mainline-only mode', () => {
+test('run_batch prunes leftover advanced and removed history html in mainline-only mode', () => {
   const tempDir = makeTempDir('interactive-image-batch-mainline-advanced-prune-');
   const outputDir = path.join(tempDir, 'out');
   const envFile = path.join(tempDir, '.env');
@@ -3394,59 +3391,6 @@ test('render_review_board assembles html review dashboard from execution artifac
   assert.doesNotMatch(html, /看完审阅看板后，下一步通常是/);
 });
 
-test('render_result_hub writes guided navigation for review and storyboard flow', () => {
-  const tempDir = makeTempDir('interactive-image-batch-result-hub-');
-  const outputDir = path.join(tempDir, 'out');
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const manifestFile = path.join(outputDir, 'manifest.json');
-  const completionReportFile = path.join(outputDir, 'daoge_completion_report.md');
-  const reviewBoardFile = path.join(outputDir, 'review_board.html');
-  const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
-  const selectionBoardFile = path.join(outputDir, 'selection_board.md');
-  const hubFile = path.join(outputDir, 'daoge_result_hub.md');
-
-  fs.writeFileSync(manifestFile, JSON.stringify({
-    outputDir,
-    success: 2,
-    failed: 1,
-    batchCount: 2,
-    defaultSize: '1024x1024',
-    paused: false,
-    pauseReason: '',
-    batches: [
-      {
-        results: [
-          { ok: true, index: '001', title: 'Keep Item', output: path.join(outputDir, 'keep.png'), slotId: 'shot_1' },
-          { ok: true, index: '002', title: 'Review Item', output: path.join(outputDir, 'review.png'), slotId: 'shot_2', requestMode: 'masked-edit' },
-          { ok: false, index: '003', title: 'Failed Item', output: null, slotId: 'shot_3' }
-        ]
-      }
-    ]
-  }, null, 2));
-  fs.writeFileSync(completionReportFile, '# completion');
-  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
-  fs.writeFileSync(storyboardBoardFile, '<html>storyboard</html>');
-  fs.writeFileSync(selectionBoardFile, '# selection');
-
-  runNode('render_result_hub.js', [
-    '--manifest-file', manifestFile,
-    '--output-file', hubFile,
-  ]);
-
-  const markdown = fs.readFileSync(hubFile, 'utf8');
-  assert.match(markdown, /DAOGE 结果补充说明/);
-  assert.match(markdown, /已经退到结果补充说明层/);
-  assert.match(markdown, /回主链入口/);
-  assert.match(markdown, /结果工作台/);
-  assert.match(markdown, /异常工作台/);
-  assert.match(markdown, /这些入口分别什么时候用/);
-  assert.match(markdown, /分镜整板补充页/);
-  assert.match(markdown, /只有分镜任务且需要复看上下文和镜头关系时才按需打开/);
-  assert.doesNotMatch(markdown, /## 1\. 最推荐入口/);
-  assert.doesNotMatch(markdown, /- 整板页:/);
-});
-
 test('render_completion_report writes archive-layer completion markdown', () => {
   const tempDir = makeTempDir('interactive-image-batch-completion-report-');
   const outputDir = path.join(tempDir, 'out');
@@ -3489,248 +3433,6 @@ test('render_completion_report writes archive-layer completion markdown', () => 
   assert.match(markdown, /按需打开分镜整板补充页/);
   assert.doesNotMatch(markdown, /# DAOGE 完成报告/);
   assert.doesNotMatch(markdown, /- 分镜整板页:/);
-});
-
-test('render_result_hub_board writes html portal-style result navigation', () => {
-  const tempDir = makeTempDir('interactive-image-batch-result-hub-board-');
-  const outputDir = path.join(tempDir, 'out');
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const manifestFile = path.join(outputDir, 'manifest.json');
-  const hubBoardFile = path.join(outputDir, 'result_hub.html');
-  const hubMarkdownFile = path.join(outputDir, 'daoge_result_hub.md');
-  const completionBoardFile = path.join(outputDir, 'completion_board.html');
-  const reviewBoardFile = path.join(outputDir, 'review_board.html');
-  const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
-  const rerunBoardFile = path.join(outputDir, 'rerun_board.html');
-  const runOverviewFile = path.join(outputDir, 'run_overview.html');
-
-  fs.writeFileSync(manifestFile, JSON.stringify({
-    outputDir,
-    success: 2,
-    failed: 1,
-    batchCount: 2,
-    defaultSize: '1024x1024',
-    paused: false,
-    pauseReason: '',
-    batches: [
-      {
-        results: [
-          { ok: true, index: '001', title: 'Keep Item', output: path.join(outputDir, 'keep.png'), slotId: 'shot_1' },
-          { ok: true, index: '002', title: 'Review Item', output: path.join(outputDir, 'review.png'), slotId: 'shot_2', requestMode: 'masked-edit' },
-          { ok: false, index: '003', title: 'Failed Item', output: null, slotId: 'shot_3' }
-        ]
-      }
-    ]
-  }, null, 2));
-  fs.writeFileSync(hubMarkdownFile, '# hub');
-  fs.writeFileSync(completionBoardFile, '<html>completion</html>');
-  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
-  fs.writeFileSync(storyboardBoardFile, '<html>storyboard</html>');
-  fs.writeFileSync(rerunBoardFile, '<html>rerun</html>');
-  fs.writeFileSync(runOverviewFile, '<html>overview</html>');
-
-  runNode('render_result_hub_board.js', [
-    '--manifest-file', manifestFile,
-    '--output-file', hubBoardFile,
-  ]);
-
-  const html = fs.readFileSync(hubBoardFile, 'utf8');
-  assert.match(html, /DAOGE 旧结果维护说明页/);
-  assert.match(html, /结果入口迁移说明/);
-  assert.match(html, /结果工作台/);
-  assert.match(html, /异常工作台/);
-  assert.match(html, /结果迁移入口/);
-  assert.match(html, /旧结果维护说明页/);
-  assert.match(html, /审阅看板/);
-  assert.match(html, /分镜整板补充页/);
-  assert.match(html, /完成摘要页/);
-  assert.match(html, /失败补跑页/);
-  assert.doesNotMatch(html, /结果主链进度/);
-  assert.doesNotMatch(html, /结果工作台主控/);
-});
-
-test('render_result_hub_board can prefer unified workbench_state snapshot', () => {
-  const tempDir = makeTempDir('interactive-image-batch-result-hub-board-workbench-state-');
-  const outputDir = path.join(tempDir, 'out');
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const manifestFile = path.join(outputDir, 'manifest.json');
-  const hubBoardFile = path.join(outputDir, 'result_hub.html');
-  const resultWorkspaceFile = path.join(outputDir, 'result_workspace.html');
-  const exceptionWorkspaceFile = path.join(outputDir, 'exception_workspace.html');
-  const workbenchStateFile = path.join(outputDir, 'workbench_state.json');
-
-  fs.writeFileSync(resultWorkspaceFile, '<html>result</html>');
-  fs.writeFileSync(exceptionWorkspaceFile, '<html>exception</html>');
-  fs.writeFileSync(manifestFile, JSON.stringify({
-    outputDir,
-    success: 1,
-    failed: 0,
-    selectedCount: 1,
-  }, null, 2));
-  fs.writeFileSync(workbenchStateFile, JSON.stringify({
-    kind: 'daoge-workbench-state',
-    schemaVersion: 1,
-    generatedAt: '2026-05-24T10:00:00.000Z',
-    outputDir,
-    taskLabel: '统一快照结果入口任务',
-    status: {
-      phase: '结果阶段',
-      headline: '统一快照已经接管结果入口',
-      summary: '统一快照建议直接进入结果工作台继续筛图。',
-      tone: 'good',
-    },
-    counts: {
-      selected: 3,
-      success: 3,
-      failed: 0,
-    },
-    nextAction: {
-      label: '进入结果工作台',
-      reason: '统一快照把结果主链收成一个入口。',
-      target: 'result_workspace.html',
-    },
-    routes: {
-      result: resultWorkspaceFile,
-      exception: exceptionWorkspaceFile,
-    },
-  }, null, 2));
-
-  runNode('render_result_hub_board.js', [
-    '--manifest-file', manifestFile,
-    '--output-file', hubBoardFile,
-  ]);
-
-  const html = fs.readFileSync(hubBoardFile, 'utf8');
-  assert.match(html, /统一快照结果入口任务/);
-  assert.match(html, /统一快照已经接管结果入口/);
-  assert.match(html, /统一快照建议直接进入结果工作台继续筛图。/);
-  assert.match(html, /统一快照把结果主链收成一个入口。/);
-});
-
-test('render_portal_home writes unified html portal shell', () => {
-  const tempDir = makeTempDir('interactive-image-batch-portal-home-');
-  const outputDir = path.join(tempDir, 'out');
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const manifestFile = path.join(outputDir, 'manifest.json');
-  const portalFile = path.join(outputDir, 'daoge_portal.html');
-  const reviewBoardFile = path.join(outputDir, 'review_board.html');
-  const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
-  const completionBoardFile = path.join(outputDir, 'completion_board.html');
-  const runOverviewFile = path.join(outputDir, 'run_overview.html');
-  const preflightBoardFile = path.join(outputDir, 'preflight_board.html');
-  const promptPreviewBoardFile = path.join(outputDir, 'prompt_preview.html');
-  const assetsBoardFile = path.join(outputDir, 'assets_board.html');
-  const selectionBoardFile = path.join(outputDir, 'selection_board.md');
-  const rerunBoardFile = path.join(outputDir, 'rerun_board.html');
-  const examplesCatalogFile = path.join(path.dirname(outputDir), 'references', 'examples', 'examples_catalog.html');
-  fs.mkdirSync(path.dirname(examplesCatalogFile), { recursive: true });
-
-  fs.writeFileSync(manifestFile, JSON.stringify({
-    outputDir,
-    success: 2,
-    failed: 1,
-    selectedCount: 3,
-    batchCount: 2,
-  }, null, 2));
-  fs.writeFileSync(reviewBoardFile, '<html>review</html>');
-  fs.writeFileSync(storyboardBoardFile, '<html>storyboard</html>');
-  fs.writeFileSync(completionBoardFile, '<html>completion</html>');
-  fs.writeFileSync(runOverviewFile, '<html>run overview</html>');
-  fs.writeFileSync(preflightBoardFile, '<html>preflight</html>');
-  fs.writeFileSync(promptPreviewBoardFile, '<html>prompt preview</html>');
-  fs.writeFileSync(assetsBoardFile, '<html>assets</html>');
-  fs.writeFileSync(rerunBoardFile, '<html>rerun</html>');
-  fs.writeFileSync(selectionBoardFile, '# selection');
-  fs.writeFileSync(examplesCatalogFile, '<html>examples</html>');
-
-  runNode('render_portal_home.js', [
-    '--manifest-file', manifestFile,
-    '--output-file', portalFile,
-  ]);
-
-  const html = fs.readFileSync(portalFile, 'utf8');
-  assert.match(html, /DAOGE 旧入口维护说明页/);
-  assert.match(html, /入口迁移说明/);
-  assert.match(html, /工作台首页/);
-  assert.match(html, /准备工作台/);
-  assert.match(html, /结果工作台/);
-  assert.match(html, /异常工作台/);
-  assert.match(html, /新主链入口/);
-  assert.match(html, /旧入口说明/);
-  assert.match(html, /提示词预览 \/ 预检 \/ 素材页/);
-  assert.match(html, /审阅 \/ 整板 \/ 完成摘要/);
-  assert.match(html, /中文模板展示板/);
-  assert.doesNotMatch(html, /总入口建议路线/);
-  assert.doesNotMatch(html, /工作台直达/);
-});
-
-test('render_portal_home can prefer unified workbench_state snapshot', () => {
-  const tempDir = makeTempDir('interactive-image-batch-portal-home-workbench-state-');
-  const outputDir = path.join(tempDir, 'out');
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const manifestFile = path.join(outputDir, 'manifest.json');
-  const portalFile = path.join(outputDir, 'daoge_portal.html');
-  const workspaceHomeFile = path.join(outputDir, 'workspace_home.html');
-  const prepareWorkspaceFile = path.join(outputDir, 'prepare_workspace.html');
-  const resultWorkspaceFile = path.join(outputDir, 'result_workspace.html');
-  const workbenchStateFile = path.join(outputDir, 'workbench_state.json');
-  const examplesCatalogFile = path.join(skillRoot, 'references', 'examples', 'examples_catalog.html');
-
-  fs.writeFileSync(workspaceHomeFile, '<html>workspace</html>');
-  fs.writeFileSync(prepareWorkspaceFile, '<html>prepare</html>');
-  fs.writeFileSync(resultWorkspaceFile, '<html>result</html>');
-  fs.writeFileSync(examplesCatalogFile, '<html>examples</html>');
-  fs.writeFileSync(manifestFile, JSON.stringify({
-    outputDir,
-    success: 0,
-    failed: 0,
-    selectedCount: 4,
-    batchCount: 2,
-  }, null, 2));
-  fs.writeFileSync(workbenchStateFile, JSON.stringify({
-    kind: 'daoge-workbench-state',
-    schemaVersion: 1,
-    generatedAt: '2026-05-24T11:00:00.000Z',
-    outputDir,
-    taskLabel: '统一快照门户任务',
-    status: {
-      phase: '准备阶段',
-      headline: '统一快照已经接管旧门户判断',
-      summary: '统一快照建议先回工作台首页，再按阶段进入准备工作台。',
-      tone: 'info',
-    },
-    counts: {
-      selected: 4,
-      success: 0,
-      failed: 0,
-      batches: 2,
-    },
-    nextAction: {
-      label: '进入工作台首页',
-      reason: '统一快照已经接管总控入口。',
-      target: 'workspace_home.html',
-    },
-    routes: {
-      home: workspaceHomeFile,
-      prepare: prepareWorkspaceFile,
-      result: resultWorkspaceFile,
-    },
-  }, null, 2));
-
-  runNode('render_portal_home.js', [
-    '--manifest-file', manifestFile,
-    '--output-file', portalFile,
-  ]);
-
-  const html = fs.readFileSync(portalFile, 'utf8');
-  assert.match(html, /统一快照门户任务/);
-  assert.match(html, /统一快照已经接管旧门户判断/);
-  assert.match(html, /统一快照建议先回工作台首页，再按阶段进入准备工作台。/);
-  assert.match(html, /统一快照已经接管总控入口。/);
 });
 
 test('render_example_catalog_board links back into portal navigation', () => {
@@ -3887,7 +3589,7 @@ test('render_example_catalog_board prefers entry state when available', () => {
   assert.equal(resolvedProtocol.mainlineContract?.defaultGenerationMode, 'mainline-only');
   assert.match(String(resolvedProtocol.mainlineContract?.defaultGenerationSummary || ''), /默认只带用户进入主链工作台/);
   assert.match(String(resolvedProtocol.mainlineContract?.defaultGenerationGuardrail?.onDemandRule || ''), /必须按需开启/);
-  assert.match(String(resolvedProtocol.defaultGenerationProtocol?.guardrail?.legacyRule || ''), /不进入个人工作台正式链路/);
+  assert.match(String(resolvedProtocol.defaultGenerationProtocol?.guardrail?.removedRule || ''), /不再生成|残留会被清理/);
   assert.match(html, /默认隐藏:/);
   assert.match(html, /prompt_preview\.html/);
   assert.match(html, /review_board\.html/);
@@ -4061,23 +3763,24 @@ test('ingest_host_native_results mirrors workspace layout and keeps mirror navig
     'completion_board.html',
     'run_overview.html',
     'rerun_board.html',
+    'daoge_portal.html',
   ].forEach((name) => {
     assert.equal(fs.existsSync(path.join(outputDir, name)), false, `unexpected host-native optional page ${name}`);
   });
 
   const layoutManifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'workspace_layout_manifest.json'), 'utf8'));
-  assert.equal(layoutManifest.mode, 'compatibility-mirror');
+  assert.equal(layoutManifest.mode, 'workspace-first');
   assert.equal(layoutManifest.source, 'ingest_host_native_results');
   assert.ok(layoutManifest.counts.workspace >= 4);
   assert.ok(layoutManifest.counts.internal >= 7);
   const workspaceState = JSON.parse(fs.readFileSync(path.join(outputDir, 'workspace_state.json'), 'utf8'));
   assert.equal(workspaceState.runtimeMode, 'host-native-image-tool');
   assert.equal(workspaceState.workflowKind, 'host-native');
-  assert.equal(workspaceState.artifactGovernance?.summary?.workspaceLayoutMode, 'workspace-mirror-first');
+  assert.equal(workspaceState.artifactGovernance?.summary?.workspaceLayoutMode, 'workspace-first');
   assert.equal(workspaceState.artifactGovernance?.summary?.defaultEntryPath, path.join(outputDir, 'workspace', 'workspace_home.html'));
   const readme = fs.readFileSync(path.join(outputDir, 'README.md'), 'utf8');
   assert.match(readme, /workspace\/workspace_home\.html/);
-  assert.match(readme, /兼容旧入口:/);
+  assert.match(readme, /workspace\/ 是正式工作台入口/);
   assert.match(readme, /其它补充页: 默认不生成；需要深看时从对应工作台按需进入/);
   assert.doesNotMatch(readme, /- 完成报告: .*daoge_completion_report\.md/);
   assert.doesNotMatch(readme, /review_board\.html|completion_board\.html|run_overview\.html|rerun_board\.html|storyboard_board\.html/);
@@ -4196,8 +3899,8 @@ test('render_task_center prefers workspace state when available', () => {
   assert.doesNotMatch(html, /主链控制台/);
 });
 
-test('render_task_center translates legacy runs into user-facing task groups', () => {
-  const tempDir = makeTempDir('interactive-image-batch-task-center-legacy-');
+test('render_task_center translates existing runs into user-facing task groups', () => {
+  const tempDir = makeTempDir('interactive-image-batch-task-center-existing-');
   const rootDir = path.join(tempDir, 'runs');
   const fullRunDir = path.join(rootDir, 'board_B_full');
   const fixRunDir = path.join(rootDir, 'board_B_shot10_fix');
@@ -4377,7 +4080,7 @@ test('render_task_center can prefer unified workbench_state snapshot', () => {
         taskCenterCopy: '默认先从工作台首页进入，再顺着准备、结果、异常三站推进；任务档案只作为按需补充入口。',
         stateSources: {
           primaryRuntimeSource: path.join(outputDir, 'workspace_live_state.json'),
-          compatibilitySnapshot: path.join(outputDir, 'workbench_state.json'),
+          derivedWorkbenchSnapshot: path.join(outputDir, 'workbench_state.json'),
         },
       },
     },
@@ -4784,11 +4487,11 @@ test('loadTaskCenterState prefers unified task center live state when available'
   fs.mkdirSync(rootDir, { recursive: true });
 
   const indexFile = path.join(rootDir, 'daoge_run_index.json');
-  const legacyStateFile = path.join(rootDir, 'task_center_state.json');
+  const derivedStateFile = path.join(rootDir, 'task_center_state.json');
   const unifiedStateFile = path.join(rootDir, 'task_center_live_state.json');
 
   fs.writeFileSync(indexFile, JSON.stringify([], null, 2));
-  fs.writeFileSync(legacyStateFile, JSON.stringify({
+  fs.writeFileSync(derivedStateFile, JSON.stringify({
     schemaVersion: 1,
     kind: 'daoge-task-center-state',
     role: 'task-center-derived-state',
@@ -5685,8 +5388,8 @@ test('loadWorkbenchState prefers unified workspace live state when available', (
   assert.equal(loaded.pageState.status?.phase, '统一阶段');
   assert.equal(loaded.pageState.runtimeSummary?.currentStatus, 'completed');
   assert.equal(loaded.pageState.liveCopilotDirective?.recommendedReply, '继续，进入结果工作台');
-  assert.equal(loaded.workspaceAssets.previewImages?.[0]?.title, '统一出口预览图');
-  assert.equal(loaded.workspaceAssets.resultAssets?.[0]?.title, '统一出口结果图');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.preview?.[0]?.title, '统一出口预览图');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.result?.[0]?.title, '统一出口结果图');
 });
 
 test('loadWorkbenchState backfills risk and confirmation state from canonical workspace state', () => {
@@ -5794,7 +5497,7 @@ test('loadWorkbenchState backfills status counts and next action from canonical 
   assert.match(String(loaded.pageState.nextAction?.reason || ''), /结果取舍/);
 });
 
-test('loadWorkbenchState normalizes asset collections into legacy mirrors', () => {
+test('loadWorkbenchState keeps canonical asset collections without flat mirrors', () => {
   const tempDir = makeTempDir('interactive-image-batch-workbench-assets-normalize-');
   const outputDir = path.join(tempDir, 'out');
   fs.mkdirSync(outputDir, { recursive: true });
@@ -5833,16 +5536,19 @@ test('loadWorkbenchState normalizes asset collections into legacy mirrors', () =
   }, null, 2));
 
   const loaded = loadWorkbenchState(outputDir);
-  assert.deepEqual(loaded.workspaceAssets.previewImages, loaded.workspaceAssets.assetCollections?.userFacing?.preview);
-  assert.deepEqual(loaded.workspaceAssets.resultAssets, loaded.workspaceAssets.assetCollections?.userFacing?.result);
-  assert.deepEqual(loaded.workspaceAssets.reviewAssets, loaded.workspaceAssets.assetCollections?.userFacing?.review);
-  assert.deepEqual(loaded.workspaceAssets.exceptionItems, loaded.workspaceAssets.assetCollections?.userFacing?.exception);
-  assert.deepEqual(loaded.workspaceAssets.referenceAssets, loaded.workspaceAssets.assetCollections?.userFacing?.reference);
-  assert.equal(loaded.workspaceAssets.previewImages?.[0]?.title, '预览图 1');
-  assert.equal(loaded.workspaceAssets.resultAssets?.[0]?.title, '结果 1');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.preview?.[0]?.title, '预览图 1');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.result?.[0]?.title, '结果 1');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.review?.[0]?.title, '待复核 1');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.exception?.[0]?.title, '失败项 1');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.reference?.[0]?.title, '参考图 1');
+  assert.equal('previewImages' in loaded.workspaceAssets, false);
+  assert.equal('resultAssets' in loaded.workspaceAssets, false);
+  assert.equal('reviewAssets' in loaded.workspaceAssets, false);
+  assert.equal('exceptionItems' in loaded.workspaceAssets, false);
+  assert.equal('referenceAssets' in loaded.workspaceAssets, false);
 });
 
-test('loadWorkbenchState prefers canonical asset collections over conflicting legacy mirrors', () => {
+test('loadWorkbenchState ignores removed flat asset mirrors', () => {
   const tempDir = makeTempDir('interactive-image-batch-workbench-assets-canonical-first-');
   const outputDir = path.join(tempDir, 'out');
   fs.mkdirSync(outputDir, { recursive: true });
@@ -5865,11 +5571,11 @@ test('loadWorkbenchState prefers canonical asset collections over conflicting le
           keyFiles: {},
         },
       },
-      previewImages: [{ title: '旧预览图' }],
-      resultAssets: [{ title: '旧结果图' }],
-      reviewAssets: [{ title: '旧待复核' }],
-      exceptionItems: [{ title: '旧失败项' }],
-      referenceAssets: [{ title: '旧参考图' }],
+      previewImages: [{ title: '历史预览图' }],
+      resultAssets: [{ title: '历史结果图' }],
+      reviewAssets: [{ title: '历史待复核' }],
+      exceptionItems: [{ title: '历史失败项' }],
+      referenceAssets: [{ title: '历史参考图' }],
     },
     timeline: {
       events: [],
@@ -5877,12 +5583,16 @@ test('loadWorkbenchState prefers canonical asset collections over conflicting le
   }, null, 2));
 
   const loaded = loadWorkbenchState(outputDir);
-  assert.equal(loaded.workspaceAssets.previewImages?.[0]?.title, '规范预览图');
-  assert.equal(loaded.workspaceAssets.resultAssets?.[0]?.title, '规范结果图');
-  assert.equal(loaded.workspaceAssets.reviewAssets?.[0]?.title, '规范待复核');
-  assert.equal(loaded.workspaceAssets.exceptionItems?.[0]?.title, '规范失败项');
-  assert.equal(loaded.workspaceAssets.referenceAssets?.[0]?.title, '规范参考图');
-  assert.deepEqual(loaded.workspaceAssets.previewImages, loaded.workspaceAssets.assetCollections?.userFacing?.preview);
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.preview?.[0]?.title, '规范预览图');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.result?.[0]?.title, '规范结果图');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.review?.[0]?.title, '规范待复核');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.exception?.[0]?.title, '规范失败项');
+  assert.equal(loaded.workspaceAssets.assetCollections?.userFacing?.reference?.[0]?.title, '规范参考图');
+  assert.equal('previewImages' in loaded.workspaceAssets, false);
+  assert.equal('resultAssets' in loaded.workspaceAssets, false);
+  assert.equal('reviewAssets' in loaded.workspaceAssets, false);
+  assert.equal('exceptionItems' in loaded.workspaceAssets, false);
+  assert.equal('referenceAssets' in loaded.workspaceAssets, false);
 });
 
 test('buildTaskCenterState prefers shared runtime summary for live run', () => {
@@ -6097,7 +5807,7 @@ test('render_workspace_home prefers user-facing task label in context and naviga
         guides: {
           entryStructure: {
             title: '工作台使用规则',
-            copy: '统一首页已经切换到单一工作台规则，补充入口和旧说明页默认后退。',
+            copy: '统一首页已经切换到单一工作台规则，补充入口和默认后退。',
             items: [
               { label: '主入口', value: '工作台首页' },
               { label: '主链', value: '4 站连续工作台' },
@@ -6151,9 +5861,18 @@ test('render_workspace_home prefers user-facing task label in context and naviga
   }, null, 2));
 
   fs.writeFileSync(workspaceAssetsFile, JSON.stringify({
-    previewImages: [],
-    exceptionItems: [],
-    reviewAssets: [],
+    assetCollections: {
+      userFacing: {
+        preview: [],
+        result: [],
+        review: [],
+        exception: [],
+        reference: [],
+      },
+      system: {
+        keyFiles: {},
+      },
+    },
     layers: {
       userFacing: {
         groups: [
@@ -6829,7 +6548,7 @@ test('build_workspace_state infers storyboard specialization from execution mani
   assert.equal(unifiedWorkbenchState.kind, 'daoge-workbench-state');
   assert.equal(workbenchState.schemaVersion, 1);
   assert.equal(workbenchState.role, 'derived-page-snapshot');
-  assert.equal(workbenchState.snapshotIntent, 'compatibility-page-snapshot');
+  assert.equal(workbenchState.snapshotIntent, 'derived-workbench-snapshot');
   assert.equal(workbenchState.taskLabel, workspaceState.taskLabel);
   assert.equal(workspaceState.entryBridge?.selectedEntry?.title, '半导体口播整板');
   assert.equal(workspaceState.entryBridge?.route?.next?.label, '进入准备工作台');
@@ -6842,7 +6561,7 @@ test('build_workspace_state infers storyboard specialization from execution mani
   assert.equal(workbenchState.stateSources?.canonicalState, workspaceStateFile);
   assert.equal(workbenchState.stateSources?.preferredState, path.join(outputDir, 'workspace_live_state.json'));
   assert.equal(workbenchState.stateSources?.liveState, path.join(outputDir, 'workspace_live_state.json'));
-  assert.equal(workbenchState.stateSources?.legacyPageSnapshot, path.join(outputDir, 'workbench_state.json'));
+  assert.equal(workbenchState.stateSources?.derivedWorkbenchSnapshot, path.join(outputDir, 'workbench_state.json'));
   assert.equal(workbenchState.stateSources?.currentState, path.join(outputDir, 'workbench_state.json'));
   assert.equal(workbenchState.stateSources?.unifiedState, path.join(outputDir, 'workspace_live_state.json'));
   assert.equal(workbenchState.stateSources?.assetsState, workspaceAssetsFile);
@@ -6856,7 +6575,7 @@ test('build_workspace_state infers storyboard specialization from execution mani
   assert.equal(unifiedWorkbenchState.role, 'live-workbench-state');
   assert.equal(unifiedWorkbenchState.snapshotIntent, 'primary-runtime-source');
   assert.equal(unifiedWorkbenchState.stateSources?.currentState, path.join(outputDir, 'workspace_live_state.json'));
-  assert.equal(unifiedWorkbenchState.stateSources?.legacyPageSnapshot, path.join(outputDir, 'workbench_state.json'));
+  assert.equal(unifiedWorkbenchState.stateSources?.derivedWorkbenchSnapshot, path.join(outputDir, 'workbench_state.json'));
   assert.equal(unifiedWorkbenchState.stateSources?.preferredState, path.join(outputDir, 'workspace_live_state.json'));
   assert.equal(unifiedWorkbenchState.stateSources?.liveState, path.join(outputDir, 'workspace_live_state.json'));
   assert.equal(unifiedWorkbenchState.entryBridge, null);
@@ -6957,7 +6676,7 @@ test('build_workspace_state infers storyboard specialization from execution mani
   assert.deepEqual({
     ...unifiedWorkbenchState,
     role: 'derived-page-snapshot',
-    snapshotIntent: 'compatibility-page-snapshot',
+    snapshotIntent: 'derived-workbench-snapshot',
     outputFile: path.join(outputDir, 'workbench_state.json'),
     stateSources: {
       ...unifiedWorkbenchState.stateSources,
@@ -7020,11 +6739,11 @@ test('build_workspace_state infers storyboard specialization from execution mani
   assert.ok(workbenchState.assets?.layers?.userFacing?.groups?.some((item) => item.key === 'result'));
   assert.ok(workbenchState.assets?.layers?.systemFacing?.items?.state?.some((item) => item.id === 'workspace-state'));
   assert.ok(workbenchState.assets?.layers?.workbenchState?.items?.liveState?.some((item) => item.id === 'workspace-live-state'));
-  assert.deepEqual(workbenchState.assets?.assetCollections?.userFacing?.preview, workbenchState.assets?.previewImages);
-  assert.deepEqual(workbenchState.assets?.assetCollections?.userFacing?.result, workbenchState.assets?.resultAssets);
-  assert.deepEqual(workbenchState.assets?.assetCollections?.userFacing?.review, workbenchState.assets?.reviewAssets);
-  assert.deepEqual(workbenchState.assets?.assetCollections?.userFacing?.exception, workbenchState.assets?.exceptionItems);
-  assert.deepEqual(workbenchState.assets?.assetCollections?.userFacing?.reference, workbenchState.assets?.referenceAssets);
+  assert.equal('previewImages' in (workbenchState.assets || {}), false);
+  assert.equal('resultAssets' in (workbenchState.assets || {}), false);
+  assert.equal('reviewAssets' in (workbenchState.assets || {}), false);
+  assert.equal('exceptionItems' in (workbenchState.assets || {}), false);
+  assert.equal('referenceAssets' in (workbenchState.assets || {}), false);
   assert.equal(workspaceState.panels.showStoryboard, true);
   assert.equal(workspaceState.governanceByPage?.['result_workspace.html']?.optionalSurface?.showStoryboardEntry, true);
   assert.ok((workspaceState.governanceByPage?.['result_workspace.html']?.optionalSurface?.conditionalVisibleIds || []).includes('storyboard'));
@@ -7575,11 +7294,11 @@ test('render_run_record prefers workspace state and timeline when available', ()
         supportEntryLabel: '任务档案页',
         defaultVisibleLabels: ['工作台首页', '准备工作台', '结果工作台', '异常工作台'],
         taskCenterCopy: '默认先从工作台首页进入，再顺着准备、结果、异常三站推进；任务档案只作为按需补充入口。',
-        runtimeRule: '工作台页面优先读取 workspace_live_state.json，兼容快照只保留旧读取作用。',
-        summary: '默认先看工作台首页、准备工作台、结果工作台、异常工作台；任务档案按需打开；workspace_live_state.json 是主实时状态源，workbench_state.json 只作兼容快照。',
+        runtimeRule: '工作台页面优先读取 workspace_live_state.json，派生快照只保留旧读取作用。',
+        summary: '默认先看工作台首页、准备工作台、结果工作台、异常工作台；任务档案按需打开；workspace_live_state.json 是主实时状态源，workbench_state.json 只作派生快照。',
         stateSources: {
           primaryRuntimeSource: path.join(outputDir, 'workspace_live_state.json'),
-          compatibilitySnapshot: path.join(outputDir, 'workbench_state.json'),
+          derivedWorkbenchSnapshot: path.join(outputDir, 'workbench_state.json'),
         },
       },
     },
@@ -7735,10 +7454,8 @@ test('render_completion_board writes html completion summary', () => {
   fs.mkdirSync(outputDir, { recursive: true });
 
   const manifestFile = path.join(outputDir, 'manifest.json');
-  const portalFile = path.join(outputDir, 'daoge_portal.html');
   const reviewBoardFile = path.join(outputDir, 'review_board.html');
   const storyboardBoardFile = path.join(outputDir, 'storyboard_board.html');
-  const resultHubFile = path.join(outputDir, 'daoge_result_hub.md');
   const boardFile = path.join(outputDir, 'completion_board.html');
 
   fs.writeFileSync(manifestFile, JSON.stringify({
@@ -7760,10 +7477,8 @@ test('render_completion_board writes html completion summary', () => {
       }
     ]
   }, null, 2));
-  fs.writeFileSync(portalFile, '<html>portal</html>');
   fs.writeFileSync(reviewBoardFile, '<html>review</html>');
   fs.writeFileSync(storyboardBoardFile, '<html>storyboard</html>');
-  fs.writeFileSync(resultHubFile, '# hub');
 
   runNode('render_completion_board.js', [
     '--manifest-file', manifestFile,
@@ -7779,7 +7494,7 @@ test('render_completion_board writes html completion summary', () => {
   assert.match(html, /完成概览/);
   assert.match(html, /结果样例/);
   assert.match(html, /回结果工作台/);
-  assert.doesNotMatch(html, /旧结果维护说明页|结果说明文档|进入审阅看板|进入分镜整板补充页/);
+  assert.doesNotMatch(html, /结果说明文档|进入审阅看板|进入分镜整板补充页/);
   assert.doesNotMatch(html, /结果主链进度/);
   assert.doesNotMatch(html, /完成主控/);
 });
@@ -8455,9 +8170,18 @@ test('render_workspace_home can prefer unified workbench_state snapshot', () => 
       },
     },
     assets: {
-      previewImages: [],
-      exceptionItems: [],
-      reviewAssets: [],
+      assetCollections: {
+        userFacing: {
+          preview: [],
+          result: [],
+          review: [],
+          exception: [],
+          reference: [],
+        },
+        system: {
+          keyFiles: {},
+        },
+      },
       summary: {
         previewCount: 0,
         resultCount: 2,
@@ -8566,9 +8290,18 @@ test('render_workspace_home routes to exception first when issue pressure exists
       },
     },
     assets: {
-      previewImages: [],
-      exceptionItems: [{ title: '失败项 1' }],
-      reviewAssets: [{ title: '待复核项 1' }, { title: '待复核项 2' }],
+      assetCollections: {
+        userFacing: {
+          preview: [],
+          result: [],
+          review: [{ title: '待复核项 1' }, { title: '待复核项 2' }],
+          exception: [{ title: '失败项 1' }],
+          reference: [],
+        },
+        system: {
+          keyFiles: {},
+        },
+      },
       summary: {
         previewCount: 0,
         resultCount: 2,
@@ -9293,7 +9026,7 @@ test('run_example_catalog_prepare can run third-wave lookbook variants from wide
     assert.match(String(entryState.entryMainlineProtocol?.taskCenterEntryProtocol?.summary || ''), /跨任务入口看任务总控/);
     assert.equal(entryState.entryMainlineProtocol?.defaultGenerationProtocol?.mode, 'mainline-only');
     assert.match(String(entryState.entryMainlineProtocol?.defaultGenerationProtocol?.summary || ''), /默认只带用户进入主链工作台/);
-    assert.match(String(entryState.entryMainlineProtocol?.defaultGenerationProtocol?.guardrail?.legacyRule || ''), /不进入个人工作台正式链路/);
+    assert.match(String(entryState.entryMainlineProtocol?.defaultGenerationProtocol?.guardrail?.removedRule || ''), /不再生成|残留会被清理/);
     assert.match(
       JSON.stringify(entryState.entryMainlineProtocol?.defaultGenerationProtocol?.hiddenHtmlFiles || []),
       /review_board\.html|result_hub\.html|daoge_portal\.html/

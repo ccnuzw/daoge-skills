@@ -2,19 +2,19 @@ const path = require('path');
 const { readJsonIfExists } = require('./script_utils');
 const { normalizeRuntimeProtocolState } = require('./unified_status_summary');
 
-const LEGACY_ASSET_FIELD_MAP = {
-  preview: 'previewImages',
-  result: 'resultAssets',
-  review: 'reviewAssets',
-  exception: 'exceptionItems',
-  reference: 'referenceAssets',
-};
+const REMOVED_FLAT_ASSET_FIELDS = [
+  'previewImages',
+  'resultAssets',
+  'reviewAssets',
+  'exceptionItems',
+  'referenceAssets',
+];
 
 function resolveUnifiedWorkbenchStatePath(outputDir) {
   return path.join(path.resolve(outputDir), 'workspace_live_state.json');
 }
 
-function resolveLegacyWorkbenchStatePath(outputDir) {
+function resolveDerivedWorkbenchStatePath(outputDir) {
   return path.join(path.resolve(outputDir), 'workbench_state.json');
 }
 
@@ -22,7 +22,7 @@ function buildWorkbenchStateSources(outputDir, overrides = {}) {
   return {
     preferredState: resolveUnifiedWorkbenchStatePath(outputDir),
     liveState: resolveUnifiedWorkbenchStatePath(outputDir),
-    legacyPageSnapshot: resolveLegacyWorkbenchStatePath(outputDir),
+    derivedWorkbenchSnapshot: resolveDerivedWorkbenchStatePath(outputDir),
     canonicalState: path.join(outputDir, 'workspace_state.json'),
     assetsState: path.join(outputDir, 'workspace_assets.json'),
     timelineState: path.join(outputDir, 'workspace_timeline.json'),
@@ -132,12 +132,6 @@ function normalizeWorkbenchAssets(workspaceAssets = {}) {
     ? { ...assetCollections.system }
     : {};
 
-  for (const [collectionKey, legacyField] of Object.entries(LEGACY_ASSET_FIELD_MAP)) {
-    const canonicalItems = toAssetArray(userFacing[collectionKey]);
-    const legacyItems = toAssetArray(source[legacyField]);
-    userFacing[collectionKey] = canonicalItems.length ? canonicalItems : legacyItems;
-  }
-
   const normalizedAssetCollections = {
     ...assetCollections,
     userFacing,
@@ -149,8 +143,8 @@ function normalizeWorkbenchAssets(workspaceAssets = {}) {
     assetCollections: normalizedAssetCollections,
   };
 
-  for (const [collectionKey, legacyField] of Object.entries(LEGACY_ASSET_FIELD_MAP)) {
-    normalizedAssets[legacyField] = toAssetArray(userFacing[collectionKey]);
+  for (const field of REMOVED_FLAT_ASSET_FIELDS) {
+    delete normalizedAssets[field];
   }
 
   return normalizedAssets;
@@ -191,16 +185,7 @@ function mergeWorkbenchAssets(primaryAssets = {}, fallbackAssets = {}) {
 }
 
 function buildCanonicalWorkbenchAssets(workspaceAssets = {}) {
-  const normalizedAssets = normalizeWorkbenchAssets(workspaceAssets);
-  const canonicalAssets = {
-    ...normalizedAssets,
-  };
-
-  for (const legacyField of Object.values(LEGACY_ASSET_FIELD_MAP)) {
-    delete canonicalAssets[legacyField];
-  }
-
-  return canonicalAssets;
+  return normalizeWorkbenchAssets(workspaceAssets);
 }
 
 function shouldEmbedPageGovernance(snapshotRole) {
@@ -255,7 +240,7 @@ function shouldEmbedTaskSessionSnapshots(snapshotRole) {
   return snapshotRole === 'derived-page-snapshot';
 }
 
-function shouldEmbedCompatibilitySections(snapshotRole) {
+function shouldEmbedDetailedPageSections(snapshotRole) {
   return false;
 }
 
@@ -286,7 +271,7 @@ function buildWorkbenchStateSnapshot(outputDir, options = {}) {
   const outputFile = String(
     options.outputFile
     || (snapshotRole === 'derived-page-snapshot'
-      ? resolveLegacyWorkbenchStatePath(outputDir)
+      ? resolveDerivedWorkbenchStatePath(outputDir)
       : resolveUnifiedWorkbenchStatePath(outputDir))
   ).trim();
   const liveCopilotDirective = buildLiveCopilotDirectiveFallback(
@@ -301,7 +286,7 @@ function buildWorkbenchStateSnapshot(outputDir, options = {}) {
     kind: 'daoge-workbench-state',
     role: snapshotRole,
     snapshotIntent: snapshotRole === 'derived-page-snapshot'
-      ? 'compatibility-page-snapshot'
+      ? 'derived-workbench-snapshot'
       : 'primary-runtime-source',
     generatedAt,
     outputDir,
@@ -328,8 +313,8 @@ function buildWorkbenchStateSnapshot(outputDir, options = {}) {
     governance: shouldEmbedPageGovernance(snapshotRole) ? (workspaceState.governance || {}) : {},
     governanceByPage: shouldEmbedPageGovernance(snapshotRole) ? (workspaceState.governanceByPage || {}) : {},
     artifactGovernance: shouldEmbedPageGovernance(snapshotRole) ? (workspaceState.artifactGovernance || {}) : {},
-    workbenchGuide: shouldEmbedCompatibilitySections(snapshotRole) ? (workspaceState.workbenchGuide || {}) : {},
-    assetVisibilityGuide: shouldEmbedCompatibilitySections(snapshotRole) ? (workspaceState.assetVisibilityGuide || {}) : {},
+    workbenchGuide: shouldEmbedDetailedPageSections(snapshotRole) ? (workspaceState.workbenchGuide || {}) : {},
+    assetVisibilityGuide: shouldEmbedDetailedPageSections(snapshotRole) ? (workspaceState.assetVisibilityGuide || {}) : {},
     workflowSessions: snapshotRole === 'derived-page-snapshot'
       ? (workspaceState.workflowSessions || {})
       : {},
@@ -346,8 +331,8 @@ function buildWorkbenchStateSnapshot(outputDir, options = {}) {
       ? (workspaceState.workflowTextProtocol || {})
       : {},
     pageGroups: shouldEmbedPageGovernance(snapshotRole) ? (workspaceState.pageGroups || {}) : {},
-    pageData: shouldEmbedCompatibilitySections(snapshotRole) ? (workspaceState.pageData || {}) : {},
-    views: shouldEmbedCompatibilitySections(snapshotRole) ? (workspaceState.views || {}) : {},
+    pageData: shouldEmbedDetailedPageSections(snapshotRole) ? (workspaceState.pageData || {}) : {},
+    views: shouldEmbedDetailedPageSections(snapshotRole) ? (workspaceState.views || {}) : {},
     runtimeSummary: shouldEmbedRuntimeSummary(snapshotRole)
       ? (workspaceState.runtimeSummary || runtimeState || {})
       : {},
@@ -519,13 +504,13 @@ function hydrateWorkbenchSnapshot(outputDir, snapshot = {}, options = {}) {
 
 function loadWorkbenchState(outputDir, options = {}) {
   const snapshotPath = resolveUnifiedWorkbenchStatePath(outputDir);
-  const legacySnapshotPath = resolveLegacyWorkbenchStatePath(outputDir);
-  const snapshot = readJsonIfExists(snapshotPath) || readJsonIfExists(legacySnapshotPath);
+  const derivedSnapshotPath = resolveDerivedWorkbenchStatePath(outputDir);
+  const snapshot = readJsonIfExists(snapshotPath) || readJsonIfExists(derivedSnapshotPath);
   if (snapshot && typeof snapshot === 'object') {
-    const loadedFrom = readJsonIfExists(snapshotPath) ? snapshotPath : legacySnapshotPath;
+    const loadedFrom = readJsonIfExists(snapshotPath) ? snapshotPath : derivedSnapshotPath;
     const normalizedSnapshot = {
-      role: loadedFrom === legacySnapshotPath ? 'derived-page-snapshot' : 'live-workbench-state',
-      snapshotIntent: loadedFrom === legacySnapshotPath ? 'compatibility-page-snapshot' : 'primary-runtime-source',
+      role: loadedFrom === derivedSnapshotPath ? 'derived-page-snapshot' : 'live-workbench-state',
+      snapshotIntent: loadedFrom === derivedSnapshotPath ? 'derived-workbench-snapshot' : 'primary-runtime-source',
       outputFile: loadedFrom,
       stateSources: buildWorkbenchStateSources(outputDir, {
         currentState: loadedFrom,
@@ -569,6 +554,6 @@ module.exports = {
   loadWorkbenchState,
   mergeWorkbenchAssets,
   normalizeWorkbenchAssets,
-  resolveLegacyWorkbenchStatePath,
+  resolveDerivedWorkbenchStatePath,
   resolveUnifiedWorkbenchStatePath,
 };

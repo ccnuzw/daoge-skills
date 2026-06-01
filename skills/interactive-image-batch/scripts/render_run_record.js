@@ -253,7 +253,7 @@ function main() {
     { label: '主状态源', value: path.basename(workbenchProtocol.primaryRuntimeSource || 'workspace_live_state.json'), summary: workbenchProtocol.runtimeRule, tone: 'info' },
     { label: '统一状态模型', value: path.basename(workbenchProtocol.canonicalState || 'workspace_state.json'), summary: '负责把页面真正需要的任务判断统一收成一套稳定状态模型。', tone: 'good' },
     { label: '运行状态源', value: path.basename(workbenchProtocol.runtimeState || 'runtime_state.json'), summary: '只负责运行中的批次进度、暂停状态和下一步运行提示。', tone: 'neutral' },
-    { label: '兼容快照', value: path.basename(workbenchProtocol.compatibilitySnapshot || 'workbench_state.json'), summary: '只为兼容旧读取方式保留，不属于普通用户默认阅读层。', tone: 'neutral' },
+    { label: '派生快照', value: path.basename(workbenchProtocol.derivedWorkbenchSnapshot || 'workbench_state.json'), summary: '内部派生状态文件，不属于普通用户默认阅读层。', tone: 'neutral' },
     { label: '文件落盘层', value: `${Number(directorySurfaces?.filesystem?.count || 0)} 个文件`, summary: '只服务本地目录入口，不再算工作台补充层。', tone: 'neutral' },
     { label: '已后退文件', value: `${Number(directorySurfaces?.archive?.count || 0) + Number(directorySurfaces?.internal?.count || 0)} 个文件`, summary: '归档层和内部状态层默认都不占阅读注意力。', tone: 'warn' },
   ];
@@ -345,7 +345,7 @@ function main() {
     `- 默认先看: ${workbenchProtocol.defaultVisibleLabels.join(' -> ')}`,
     `- 任务档案定位: ${workbenchProtocol.supportEntryLabel}，只作为按需补充入口`,
     `- 主状态源: ${workbenchProtocol.primaryRuntimeSource}`,
-    `- 兼容快照: ${workbenchProtocol.compatibilitySnapshot}`,
+    `- 派生快照: ${workbenchProtocol.derivedWorkbenchSnapshot}`,
     '',
     '## 9. 特殊工作流定位',
     '',
@@ -358,7 +358,7 @@ function main() {
     '',
     '## 10. 维护者诊断位置',
     '',
-    '- 下面文件只服务维护者诊断、续跑和兼容读取，普通用户不用打开。',
+    '- 下面文件只服务维护者诊断、续跑和程序读取，普通用户不用打开。',
     `- manifest: ${manifestPath}`,
     `- job_state: ${path.join(outputDir, 'job_state.json')}`,
   ];
@@ -517,7 +517,7 @@ ${renderWorkspaceStyles()}
 
     <section class="section">
       <h2>维护者诊断位置</h2>
-      <p class="section-copy">manifest 和 job_state 只服务维护者诊断、续跑和兼容读取，普通用户不用打开。</p>
+      <p class="section-copy">manifest 和 job_state 只服务维护者诊断、续跑和程序读取，普通用户不用打开。</p>
       ${renderKeyValueGrid([
         { label: 'manifest', value: manifestPath },
         { label: 'job_state', value: path.join(outputDir, 'job_state.json') },

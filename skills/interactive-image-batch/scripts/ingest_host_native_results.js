@@ -69,8 +69,7 @@ function writeReadme(outputDir, summary) {
     `请先打开${workbenchProtocol.defaultEntryLabel || governanceSummary.defaultEntryLabel || '工作台首页'}。这份 README 只负责告诉你从哪里进入，不负责解释本轮过程细节或最终收口结论。任务档案只作回看，内部记录仅维护者诊断使用。`,
     '',
     `- 先看这里: ${layoutEntry.recommendedPath || governanceSummary.defaultEntryPath || summary.workspaceHome}`,
-    layoutEntry.mode === 'workspace-mirror-first' ? `- 兼容旧入口: ${layoutEntry.compatibilityPath}` : '',
-    '- 不用先看: JSON / Markdown 内部记录、旧说明页、深看页',
+    '- 不用先看: JSON / Markdown 内部记录、深看页',
     '- 内部记录: 仅维护者诊断和续跑使用，不作为普通阅读入口',
     '',
     '## 当前状态',
@@ -84,10 +83,10 @@ function writeReadme(outputDir, summary) {
     `- 主链: 任务总控 -> ${workbenchProtocol.defaultVisibleLabels.join(' -> ')}`,
     `- 当前主入口: ${workbenchProtocol.defaultEntryLabel || governanceSummary.defaultEntryLabel || '工作台首页'}`,
     `- 补充入口: ${workspaceSupport.length ? workspaceSupport.map((item) => item.label).join('、') : workbenchProtocol.supportEntryLabel}`,
-    '- 已后退: 深看页、旧说明页、JSON / Markdown 内部记录',
+    '- 已后退: 深看页、JSON / Markdown 内部记录',
     `- 使用原则: ${governanceSummary.principle || workbenchProtocol.userRule}`,
     `- 目录规则: ${workbenchProtocol.summary}`,
-    layoutEntry.mode === 'workspace-mirror-first' ? '- 目录迁移: 推荐先看 workspace/ 分层入口，顶层文件继续保留给旧脚本兼容。' : '',
+    '- 目录规则: workspace/ 是正式工作台入口，internal/ 是程序状态层，debug/ 是维护诊断层',
     '',
     '## 按需直达',
     '',
@@ -112,7 +111,7 @@ function writeReadme(outputDir, summary) {
     '- 用户直看层: 主链工作台 + 任务档案这类少量补充入口',
     `- 文件落盘层: ${filesystemCount > 0 ? `${filesystemCount} 个文件，仅用于目录落盘说明` : '当前没有额外文件落盘入口'}`,
     `- 归档层: ${archiveCount > 0 ? `${archiveCount} 个文件，仅在归档回看时使用` : '当前没有归档文件'}`,
-    `- 内部状态层: ${internalCount > 0 ? `${internalCount} 个文件，仅维护者诊断、续跑和兼容读取使用` : '当前没有内部状态文件'}`,
+    `- 内部状态层: ${internalCount > 0 ? `${internalCount} 个文件，仅维护者诊断、续跑和程序读取使用` : '当前没有内部状态文件'}`,
   ].filter((line) => line !== '');
   writeMarkdown(path.join(outputDir, 'README.md'), lines);
 }
@@ -369,16 +368,6 @@ function main() {
     runNode('render_completion_board.js', [
       '--manifest-file', manifestPath,
       '--output-file', path.join(outputDir, 'completion_board.html'),
-    ]);
-  }
-  if (optionalPageDecision.shouldGenerateLegacyPages) {
-    runNode('render_result_hub_board.js', [
-      '--manifest-file', manifestPath,
-      '--output-file', path.join(outputDir, 'result_hub.html'),
-    ]);
-    runNode('render_portal_home.js', [
-      '--manifest-file', manifestPath,
-      '--output-file', path.join(outputDir, 'daoge_portal.html'),
     ]);
   }
   if (optionalPageDecision.shouldRefreshExpandedWorkspace) {

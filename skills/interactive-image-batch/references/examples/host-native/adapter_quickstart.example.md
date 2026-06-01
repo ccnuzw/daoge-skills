@@ -120,7 +120,13 @@ node scripts/ingest_host_native_results.js \
 - `success.json`
 - `failed.json`
 - `needs_review.json`
-- `result_hub.html`
+- `workspace/workspace_home.html`
+- `workspace/result_workspace.html`
+- `workspace/exception_workspace.html`
+- `workspace/run_record.html`
+
+如果显式开启结果深看模式，再检查：
+
 - `review_board.html`
 - `completion_board.html`
 

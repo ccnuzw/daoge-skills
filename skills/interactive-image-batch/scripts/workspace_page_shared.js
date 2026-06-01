@@ -290,16 +290,13 @@ function summarizeArtifactLayer(artifactGovernance = {}) {
   const optionalPages = Array.isArray(artifactGovernance.optionalPages)
     ? artifactGovernance.optionalPages.filter((item) => item.exists)
     : [];
-  const layerOrder = ['mainline', 'support', 'conditional', 'advanced', 'legacy', 'internal'];
+  const layerOrder = ['mainline', 'support', 'conditional', 'advanced', 'internal'];
   const defaultVisibleLayers = Array.isArray(userFacingSummary.defaultVisibleLayers) && userFacingSummary.defaultVisibleLayers.length
     ? userFacingSummary.defaultVisibleLayers
     : (Array.isArray(protocol.defaultVisibleLayers) ? protocol.defaultVisibleLayers : []);
   const onDemandLayers = Array.isArray(userFacingSummary.onDemandLayers) && userFacingSummary.onDemandLayers.length
     ? userFacingSummary.onDemandLayers
     : (Array.isArray(protocol.onDemandLayers) ? protocol.onDemandLayers : []);
-  const maintenanceLayers = Array.isArray(userFacingSummary.maintenanceLayers) && userFacingSummary.maintenanceLayers.length
-    ? userFacingSummary.maintenanceLayers
-    : (Array.isArray(protocol.maintenanceLayers) ? protocol.maintenanceLayers : []);
   const internalLayers = Array.isArray(userFacingSummary.internalLayers) && userFacingSummary.internalLayers.length
     ? userFacingSummary.internalLayers
     : (Array.isArray(protocol.internalLayers) ? protocol.internalLayers : []);
@@ -311,7 +308,6 @@ function summarizeArtifactLayer(artifactGovernance = {}) {
     userFacingRule: String(protocol.userFacingRule || '').trim() || '',
     defaultVisibleLayers,
     onDemandLayers,
-    maintenanceLayers,
     internalLayers,
     userFacingSummary,
     layerProtocol: protocol,
@@ -360,7 +356,7 @@ function buildWorkspaceStateTopology(outputDir = '', overrides = {}) {
     || resolveInOutput('workspace_assets.json');
   const timelineState = String(source.timelineState || nestedSources.timelineState || '').trim()
     || resolveInOutput('workspace_timeline.json');
-  const compatibilitySnapshot = String(source.compatibilitySnapshot || nestedSources.compatibilitySnapshot || '').trim()
+  const derivedWorkbenchSnapshot = String(source.derivedWorkbenchSnapshot || nestedSources.derivedWorkbenchSnapshot || '').trim()
     || resolveInOutput('workbench_state.json');
   const taskCenterUnifiedState = String(source.taskCenterUnifiedState || nestedSources.taskCenterUnifiedState || '').trim()
     || resolveInTaskRoot('task_center_live_state.json');
@@ -373,7 +369,7 @@ function buildWorkspaceStateTopology(outputDir = '', overrides = {}) {
     runtimeState: '运行阶段状态源',
     assetsState: '资产分层状态源',
     timelineState: '阶段时间线状态源',
-    compatibilitySnapshot: '兼容旧读取方式的页面快照',
+    derivedWorkbenchSnapshot: '派生工作台快照',
     taskCenterUnifiedState: '跨任务总控实时状态源',
   };
   const readPriority = [
@@ -389,9 +385,9 @@ function buildWorkspaceStateTopology(outputDir = '', overrides = {}) {
     'task_center_state.json',
     'daoge_run_index.json',
   ];
-  const runtimeRule = '工作台会优先使用 workspace_live_state.json 作为主实时状态源；workspace_state.json 负责统一状态模型；runtime_state.json 只负责运行期进度；workspace_assets.json 和 workspace_timeline.json 分别承接资产分层与阶段时间线；workbench_state.json 只保留兼容旧读取作用。';
+  const runtimeRule = '工作台会优先使用 workspace_live_state.json 作为主实时状态源；workspace_state.json 负责统一状态模型；runtime_state.json 只负责运行期进度；workspace_assets.json 和 workspace_timeline.json 分别承接资产分层与阶段时间线；workbench_state.json 是内部派生快照。';
   const stateSourceSummary = '任务内优先读取主实时状态源，再由统一状态模型、运行状态、资产状态和时间线状态补全；跨任务切换、入口主链提醒和运行态副驾驶交接再交给任务总控实时状态源处理。';
-  const summary = 'workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，runtime_state.json / workspace_assets.json / workspace_timeline.json 分别承接运行、资产和时间线信息，workbench_state.json 退为兼容快照，task_center_live_state.json 负责跨任务总控实时状态、入口主链提醒和运行态副驾驶交接。';
+  const summary = 'workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，runtime_state.json / workspace_assets.json / workspace_timeline.json 分别承接运行、资产和时间线信息，workbench_state.json 是内部派生快照，task_center_live_state.json 负责跨任务总控实时状态、入口主链提醒和运行态副驾驶交接。';
   const duplicateFieldRule = 'currentFocus、nextActionSummary、recommendedReply、pressureLabel、statusSummary 统一由 workspace_state.json 持有语义源；workspace_live_state.json 只做页面首屏镜像，runtime_state.json 只在运行中、暂停、等待确认、异常和完成收口时提供实时覆盖，task_center_live_state.json 只保留跨任务摘要与交接副本。';
   const fieldBoundaries = {
     currentFocus: {
@@ -483,7 +479,7 @@ function buildWorkspaceStateTopology(outputDir = '', overrides = {}) {
     runtimeState,
     assetsState,
     timelineState,
-    compatibilitySnapshot,
+    derivedWorkbenchSnapshot,
     taskCenterUnifiedState,
     diagnosticArchiveDefaultVisible: Boolean(source.diagnosticArchiveDefaultVisible),
     taskCenterEntryProtocol,
@@ -495,7 +491,7 @@ function buildWorkspaceStateTopology(outputDir = '', overrides = {}) {
     consumerReadPlan,
     runtimeRule,
     stateSourceSummary,
-    consumerRule: '任务内页面优先消费 workspace_live_state.json；缺失时回落到 workspace_state.json，再补 runtime_state.json、workspace_assets.json 和 workspace_timeline.json；旧页面只把 workbench_state.json 当兼容兜底。',
+    consumerRule: '任务内页面优先消费 workspace_live_state.json；缺失时回落到 workspace_state.json，再补 runtime_state.json、workspace_assets.json、workspace_timeline.json 和 workbench_state.json。',
     taskCenterConsumerRule: '任务总控优先消费 task_center_live_state.json；缺失时回落到 task_center_state.json 和 daoge_run_index.json；单轮任务判断仍交给对应工作台首页。',
     summary,
   };
@@ -513,7 +509,7 @@ function buildWorkspaceStateProtocol(outputDir = '', overrides = {}) {
       defaultVisible: false,
       updateCadence: '工作台刷新或运行态变化时优先更新。',
       owns: ['实时入口状态', '轻量页面快照', '当前状态源指针'],
-      doesNotOwn: ['currentFocus 等长期语义源', '完整用户资产分层', '完整页面治理配置', '历史兼容快照'],
+      doesNotOwn: ['currentFocus 等长期语义源', '完整用户资产分层', '完整页面治理配置', '内部派生快照'],
     },
     workspaceState: {
       file: 'workspace_state.json',
@@ -546,7 +542,7 @@ function buildWorkspaceStateProtocol(outputDir = '', overrides = {}) {
       defaultVisible: false,
       updateCadence: '任务总控刷新或单轮运行态变化时同步。',
       owns: ['entryMainlineGuide', 'liveRun', 'taskCenterConsumerRule', '跨任务继续建议'],
-      doesNotOwn: ['单轮 currentFocus/pressureLabel 等内部判断', '单轮结果资产细节', '旧页面兼容快照'],
+      doesNotOwn: ['单轮 currentFocus/pressureLabel 等内部判断', '单轮结果资产细节', '任务内派生快照'],
     },
   };
 
@@ -584,7 +580,7 @@ function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
     ? source.defaultVisibleLabels.filter(Boolean)
     : fallbackDefaultVisibleLabels;
   const primaryRuntimeSource = stateTopology.primaryRuntimeSource;
-  const compatibilitySnapshot = stateTopology.compatibilitySnapshot;
+  const derivedWorkbenchSnapshot = stateTopology.derivedWorkbenchSnapshot;
   const canonicalState = stateTopology.canonicalState;
   const runtimeState = stateTopology.runtimeState;
   const assetsState = stateTopology.assetsState;
@@ -598,7 +594,7 @@ function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
   const taskCenterCopy = String(source.taskCenterCopy || '').trim()
     || '默认先从工作台首页进入，再顺着准备、结果、异常三站推进；任务档案只作为按需补充入口。';
   const summary = String(source.summary || '').trim()
-    || `默认先看${defaultVisibleLabels.join('、')}；任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 只保留兼容快照角色，普通用户不用直接看这些文件名。`;
+    || `默认先看${defaultVisibleLabels.join('、')}；任务档案按需打开；workspace_live_state.json 是主实时状态源，workspace_state.json 是统一状态模型，workbench_state.json 是内部派生快照，普通用户不用直接看这些文件名。`;
   const stateSourceSummary = String(source.stateSourceSummary || '').trim()
     || stateTopology.stateSourceSummary;
   const stateRoles = stateTopology.stateRoles;
@@ -618,7 +614,7 @@ function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
     taskCenterCopy,
     summary,
     primaryRuntimeSource,
-    compatibilitySnapshot,
+    derivedWorkbenchSnapshot,
     canonicalState,
     runtimeState,
     assetsState,
@@ -641,7 +637,7 @@ function summarizeUserWorkbenchProtocol(protocol = {}, options = {}) {
       runtimeState,
       assetsState,
       timelineState,
-      compatibilitySnapshot,
+      derivedWorkbenchSnapshot,
       taskCenterUnifiedState,
     },
   };
@@ -710,10 +706,6 @@ function buildWorkspaceFallbackGuide(stage, artifactLayer = {}) {
     .map((keyName) => artifactLayer.layers?.[keyName]?.title || '')
     .filter(Boolean)
     .join('、');
-  const maintenanceLayerLabels = (artifactLayer.maintenanceLayers || [])
-    .map((keyName) => artifactLayer.layers?.[keyName]?.title || '')
-    .filter(Boolean)
-    .join('、');
   const internalLayerLabels = (artifactLayer.internalLayers || [])
     .map((keyName) => artifactLayer.layers?.[keyName]?.title || '')
     .filter(Boolean)
@@ -726,7 +718,7 @@ function buildWorkspaceFallbackGuide(stage, artifactLayer = {}) {
         { label: '主入口', value: defaultEntryLabel },
         { label: '默认可见层', value: visibleLayerLabels || '主链层、补充层' },
         { label: '这一站负责什么', value: '先看当前阶段、下一步入口和异常压力，再决定往哪一站继续' },
-        { label: '哪些内容先后退', value: `${onDemandLayerLabels || '条件页层、进阶页层'}、${maintenanceLayerLabels || '旧说明层'}、${internalLayerLabels || '内部资产层'} 默认后退，不占首页主判断` },
+        { label: '哪些内容先后退', value: `${onDemandLayerLabels || '条件页层、进阶页层'}、${internalLayerLabels || '内部资产层'} 默认后退，不占首页主判断` },
       ],
       visibilityCopy: denseCopy.visibilitySectionCopy,
       visibilityItems: [
@@ -756,7 +748,7 @@ function buildWorkspaceFallbackGuide(stage, artifactLayer = {}) {
         { label: '主入口', value: defaultEntryLabel },
         { label: '默认可见层', value: visibleLayerLabels || '主链层、补充层' },
         { label: '这一站负责什么', value: '把可用结果、待确认结果和异常结果放在同一套判断里收口' },
-        { label: '哪些内容先后退', value: `${onDemandLayerLabels || '条件页层、进阶页层'}、${maintenanceLayerLabels || '旧说明层'}和${internalLayerLabels || '内部资产层'}继续保留，但默认不占主链注意力` },
+        { label: '哪些内容先后退', value: `${onDemandLayerLabels || '条件页层、进阶页层'}和${internalLayerLabels || '内部资产层'}继续保留，但默认不占主链注意力` },
       ],
       visibilityCopy: denseCopy.visibilitySectionCopy,
       visibilityItems: [
@@ -771,7 +763,7 @@ function buildWorkspaceFallbackGuide(stage, artifactLayer = {}) {
         { label: '主入口', value: defaultEntryLabel },
         { label: '默认可见层', value: visibleLayerLabels || '主链层、补充层' },
         { label: '这一站负责什么', value: '只把会打断主链继续的问题集中收口，不把按需页面当成新的主控页' },
-        { label: '哪些内容先后退', value: `${onDemandLayerLabels || '条件页层、进阶页层'}、${maintenanceLayerLabels || '旧说明层'}和${internalLayerLabels || '内部资产层'}继续保留，但默认不占这一步注意力` },
+        { label: '哪些内容先后退', value: `${onDemandLayerLabels || '条件页层、进阶页层'}和${internalLayerLabels || '内部资产层'}继续保留，但默认不占这一步注意力` },
       ],
       visibilityCopy: denseCopy.visibilitySectionCopy,
       visibilityItems: [
@@ -3029,6 +3021,97 @@ function buildWorkspaceContextHints(stage, hints = [], fallback = []) {
   }
 
   return fallbackItems.slice(0, denseCopy.hintLimit || 2);
+}
+
+function buildWorkspaceStageFallbackBundle(stage, options = {}) {
+  const key = String(stage || '').trim() || 'home';
+  const values = options && typeof options === 'object' ? options : {};
+  const denseCopy = values.denseCopy && typeof values.denseCopy === 'object'
+    ? values.denseCopy
+    : getWorkspaceDenseCopy(key);
+  const stagePhrases = getWorkspaceStagePhrases(key);
+  const chrome = getWorkspaceStageChrome(key);
+  const actionCopy = getWorkspaceActionCopy();
+  const context = buildWorkspaceContextFallback(key, {
+    items: Array.isArray(values.contextItems) ? values.contextItems : [],
+    runLabel: values.runLabel,
+    phaseLabel: values.phaseLabel,
+    flowLabel: values.flowLabel,
+    entryFlowLabel: values.entryFlowLabel,
+    countValues: values.countValues,
+    defaultHints: buildWorkspaceStageDefaultHints(key, {
+      stageSummary: values.stageSummary,
+      densePrimaryHint: values.densePrimaryHint || denseCopy.contextPrimaryHint,
+      currentFocus: values.currentFocus,
+      nextActionReason: values.nextActionReason,
+      hasIssue: values.hasIssue,
+      hasResult: values.hasResult,
+      entryTitle: values.entryTitle,
+      primaryHint: values.primaryHint,
+      secondaryHint: values.secondaryHint,
+      tertiaryHint: values.tertiaryHint,
+    }),
+    extraHints: values.extraHints,
+  });
+  const route = buildWorkspaceStageRouteFallback(key, {
+    title: values.routeTitle || chrome.routeTitle,
+    copy: values.routeCopy || chrome.routeCopy,
+    denseCopy,
+    currentLabel: values.currentLabel,
+    currentSummary: values.currentSummary,
+    currentPendingLabel: values.currentPendingLabel || stagePhrases.routeCurrentPendingLabel,
+    previousLabel: values.previousLabel,
+    previousSummary: values.previousSummary,
+    previousFile: values.previousFile,
+    previousCta: values.previousCta,
+    nextLabel: values.nextLabel,
+    nextSummary: values.nextSummary,
+    nextFile: values.nextFile,
+    nextHref: values.nextHref,
+    nextCta: values.nextCta,
+    nextPendingLabel: values.nextPendingLabel,
+    extraNextSteps: values.extraNextSteps,
+  });
+  const workbenchCards = buildWorkspaceStageWorkbenchCards(key, {
+    denseCopy,
+    resultAvailable: values.resultAvailable,
+    resultFile: values.resultFile,
+    resultCta: values.resultCta,
+    resultPendingLabel: values.resultPendingLabel,
+    resultValue: values.resultValue,
+    resultSummary: values.resultSummary,
+    resultTone: values.resultTone,
+    homeFile: values.homeFile,
+    homeCta: values.homeCta,
+    focusLabel: values.focusLabel,
+    focusValue: values.focusValue,
+    focusSummary: values.focusSummary,
+    focusTone: values.focusTone,
+    exceptionValue: values.exceptionValue,
+    exceptionSummary: values.exceptionSummary,
+    exceptionFile: values.exceptionFile,
+    exceptionCta: values.exceptionCta,
+    exceptionTone: values.exceptionTone,
+    includeStoryboard: values.includeStoryboard,
+    storyboardFile: values.storyboardFile,
+    storyboardCta: values.storyboardCta,
+    storyboardTone: values.storyboardTone,
+  });
+  const workbench = buildWorkspaceWorkbenchSectionData({
+    title: values.workbenchTitle || chrome.workbenchTitle,
+    copy: values.workbenchCopy || chrome.workbenchCopy,
+    cards: workbenchCards.concat(toArray(values.extraWorkbenchCards)),
+  });
+
+  return {
+    context,
+    route,
+    workbench,
+    denseCopy,
+    stagePhrases,
+    chrome,
+    actionCopy,
+  };
 }
 
 function buildWorkspaceRoutePointData(point) {
@@ -5528,6 +5611,7 @@ module.exports = {
   buildWorkspaceGuideSectionData,
   buildWorkspaceContextCounts,
   buildWorkspaceContextHints,
+  buildWorkspaceStageFallbackBundle,
   buildWorkspaceStageDefaultHints,
   buildWorkspaceHeroCardsData,
   buildWorkspaceIssuesSectionData,
