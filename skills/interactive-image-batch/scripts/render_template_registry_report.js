@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson } = require('./script_utils');
-const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
+const { ensureWorkspaceChromeAssets, renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 
 function escapeHtml(text) {
   return String(text || '')
@@ -384,7 +384,8 @@ ${renderWorkspaceChromeHeadAssets()}
 </body>
 </html>`;
 
-  fs.writeFileSync(htmlPath, html);
+  fs.writeFileSync(htmlPath, html.replace(/[ \t]+$/gm, ''));
+  ensureWorkspaceChromeAssets(path.dirname(htmlPath));
 
   console.log(JSON.stringify({
     markdownPath,

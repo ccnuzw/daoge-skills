@@ -828,8 +828,8 @@ const SHARED_JS = `document.addEventListener('DOMContentLoaded', () => {
 function ensureWorkspaceChromeAssets(outputDir) {
   const cssPath = path.join(outputDir, SHARED_CSS_FILE);
   const jsPath = path.join(outputDir, SHARED_JS_FILE);
-  fs.writeFileSync(cssPath, `${SHARED_CSS}\n`);
-  fs.writeFileSync(jsPath, `${SHARED_JS}\n`);
+  fs.writeFileSync(cssPath, `${SHARED_CSS.trimEnd()}\n`);
+  fs.writeFileSync(jsPath, `${SHARED_JS.trimEnd()}\n`);
   return { cssPath, jsPath };
 }
 

@@ -1798,6 +1798,8 @@ test('render_template_registry_report writes markdown and html reports', () => {
   const reportFile = path.join(tempDir, 'template_registry_validation_report.json');
   const markdownFile = path.join(tempDir, 'template_registry_report.md');
   const htmlFile = path.join(tempDir, 'template_registry_report.html');
+  const sharedCssFile = path.join(tempDir, 'workspace_chrome.css');
+  const sharedJsFile = path.join(tempDir, 'workspace_chrome.js');
 
   runNode('validate_template_registry.js', [
     '--output-file', reportFile,
@@ -1813,13 +1815,49 @@ test('render_template_registry_report writes markdown and html reports', () => {
   assert.equal(summary.ok, true);
   assert.equal(fs.existsSync(markdownFile), true);
   assert.equal(fs.existsSync(htmlFile), true);
+  assert.equal(fs.existsSync(sharedCssFile), true);
+  assert.equal(fs.existsSync(sharedJsFile), true);
 
   const markdown = fs.readFileSync(markdownFile, 'utf8');
   const html = fs.readFileSync(htmlFile, 'utf8');
+  const sharedCss = fs.readFileSync(sharedCssFile, 'utf8');
+  const sharedJs = fs.readFileSync(sharedJsFile, 'utf8');
   assert.match(markdown, /# 模板主链校验报告/);
   assert.match(markdown, /### campaign-poster/);
   assert.match(html, /模板主链校验看板/);
   assert.match(html, /campaign-poster/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench-card/);
+  assert.match(sharedCss, /\.workspace-chrome-context-bar/);
+  assert.match(sharedJs, /workspaceChromePage/);
+});
+
+test('packaged static html pages ship their referenced chrome assets', () => {
+  const staticHtmlFiles = [
+    path.join(skillRoot, 'references', 'examples', 'examples_catalog.html'),
+    path.join(skillRoot, 'references', 'template_registry_report.html'),
+  ];
+
+  for (const htmlFile of staticHtmlFiles) {
+    const html = fs.readFileSync(htmlFile, 'utf8');
+    const dir = path.dirname(htmlFile);
+    const cssRefs = Array.from(html.matchAll(/<link[^>]+href="([^"]+\.css)"/g)).map((match) => match[1]);
+    const jsRefs = Array.from(html.matchAll(/<script[^>]+src="([^"]+\.js)"/g)).map((match) => match[1]);
+    assert.ok(cssRefs.length > 0, `${htmlFile} should reference css`);
+    assert.ok(jsRefs.length > 0, `${htmlFile} should reference js`);
+    for (const ref of cssRefs) {
+      const cssPath = path.join(dir, ref);
+      assert.equal(fs.existsSync(cssPath), true, `${cssPath} should exist`);
+      const css = fs.readFileSync(cssPath, 'utf8');
+      assert.match(css, /\.workspace-chrome-workbench-card/);
+      assert.match(css, /\.workspace-chrome-workbench-summary/);
+    }
+    for (const ref of jsRefs) {
+      const jsPath = path.join(dir, ref);
+      assert.equal(fs.existsSync(jsPath), true, `${jsPath} should exist`);
+      const js = fs.readFileSync(jsPath, 'utf8');
+      assert.match(js, /workspaceChromePage/);
+    }
+  }
 });
 
 test('run_batch executes prompt-only against mock images provider', async () => {
@@ -3455,6 +3493,8 @@ test('render_example_catalog_board links back into workspace chrome navigation',
   ]);
 
   const html = fs.readFileSync(outputFile, 'utf8');
+  const sharedCss = fs.readFileSync(path.join(outputDir, 'workspace_chrome.css'), 'utf8');
+  const sharedJs = fs.readFileSync(path.join(outputDir, 'workspace_chrome.js'), 'utf8');
   assert.match(html, /中文任务入口总览/);
   assert.match(html, /按任务意图开始/);
   assert.match(html, /推荐起步/);
@@ -3468,6 +3508,9 @@ test('render_example_catalog_board links back into workspace chrome navigation',
   assert.match(html, /只看主链/);
   assert.match(html, /只看变体/);
   assert.match(html, /折叠分组/);
+  assert.match(html, /data-copy-command/);
+  assert.match(html, /复制运行命令|复制意图命令/);
+  assert.match(html, /navigator\.clipboard|document\.execCommand\('copy'\)/);
   assert.match(html, /入口主链协议/);
   assert.match(html, /模板展示板只负责选择任务类型和起步入口/);
   assert.match(html, /跨任务入口/);
@@ -3483,6 +3526,32 @@ test('render_example_catalog_board links back into workspace chrome navigation',
   assert.match(html, /工作台首页/);
   assert.match(html, /准备工作台/);
   assert.match(html, /结果工作台/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench-grid/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench-card/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench-summary/);
+  assert.match(sharedJs, /workspaceChromePage/);
+});
+
+test('packaged examples catalog is a generated interactive board', () => {
+  const examplesCatalogFile = path.join(skillRoot, 'references', 'examples', 'examples_catalog.html');
+  const examplesChromeCssFile = path.join(skillRoot, 'references', 'examples', 'workspace_chrome.css');
+  const examplesChromeJsFile = path.join(skillRoot, 'references', 'examples', 'workspace_chrome.js');
+  const html = fs.readFileSync(examplesCatalogFile, 'utf8');
+  const sharedCss = fs.readFileSync(examplesChromeCssFile, 'utf8');
+  const sharedJs = fs.readFileSync(examplesChromeJsFile, 'utf8');
+  assert.match(html, /<!doctype html>/);
+  assert.match(html, /DAOGE 中文模板展示板/);
+  assert.match(html, /catalog-search/);
+  assert.match(html, /data-filter-type="mainline"/);
+  assert.match(html, /group-toggle/);
+  assert.match(html, /data-copy-command/);
+  assert.match(html, /复制运行命令|复制意图命令/);
+  assert.match(html, /addEventListener\('click'/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench-grid/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench-card/);
+  assert.match(sharedCss, /\.workspace-chrome-workbench-summary/);
+  assert.match(sharedJs, /workspaceChromePage/);
+  assert.doesNotMatch(html.trim(), /^<html>examples<\/html>$/);
 });
 
 test('render_example_catalog_board prefers entry state when available', () => {

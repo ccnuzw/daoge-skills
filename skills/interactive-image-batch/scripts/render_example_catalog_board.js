@@ -18,7 +18,7 @@ const {
   renderWorkspaceChromeRouteCompass,
   renderWorkspaceChromeWorkbench,
 } = require('./workspace_chrome');
-const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
+const { ensureWorkspaceChromeAssets, renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 
 function escapeHtml(text) {
   return String(text || '')
@@ -153,8 +153,30 @@ function starterIntentCards(examples) {
     }));
 }
 
+function exampleCommand(item) {
+  return `node scripts/run_example_catalog_prepare.js \\
+  --example-id ${String(item.id || '').trim()} \\
+  --output-dir /tmp/daoge-${String(item.id || '').trim()}-demo`;
+}
+
+function intentCommand(intent) {
+  const normalizedIntent = String(intent || '').trim();
+  return `node scripts/run_example_catalog_prepare.js \\
+  --intent ${normalizedIntent} \\
+  --output-dir /tmp/daoge-${normalizedIntent}-starter`;
+}
+
+function renderCommandActions(command, label = '复制运行命令') {
+  return `
+      <div class="card-actions">
+        <button class="copy-command-button" type="button" data-copy-command="${escapeHtml(command)}">${escapeHtml(label)}</button>
+      </div>
+  `;
+}
+
 function renderCard(item, entryType) {
   const detailSummary = entryType === 'mainline' ? '查看模板细节（维护者）' : '查看变体细节（维护者）';
+  const command = exampleCommand(item);
   return `
     <article class="card" data-entry-type="${entryType}" data-searchable="${escapeHtml(`${item.id} ${item.name} ${item.category} ${item.template_id} ${item.template_variant} ${item.description || ''}`.toLowerCase())}">
       <div class="card-top">
@@ -170,12 +192,11 @@ function renderCard(item, entryType) {
         <div class="meta-row"><div class="meta-label">适合什么</div><div class="meta-value">${escapeHtml(item.description || '适合当前这一类任务。')}</div></div>
         <div class="meta-row"><div class="meta-label">怎么选</div><div class="meta-value">${entryType === 'mainline' ? '如果你还在判断这类任务该怎么起步，先从这里开始。' : '如果你已经确认主任务方向，但想进一步控制表现风格，再选这个细分入口。'}</div></div>
       </div>
+      ${renderCommandActions(command)}
       <details class="card-details">
         <summary>${detailSummary}</summary>
         <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
-        <div class="cmd">node scripts/run_example_catalog_prepare.js \\
-  --example-id ${escapeHtml(item.id)} \\
-  --output-dir /tmp/daoge-${escapeHtml(item.id)}-demo</div>
+        <div class="cmd">${escapeHtml(command)}</div>
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">内部 ID</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
           <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
@@ -189,6 +210,7 @@ function renderCard(item, entryType) {
 }
 
 function renderStarterCard(item) {
+  const command = exampleCommand(item);
   return `
     <article class="card starter-card" data-entry-type="starter" data-searchable="${escapeHtml(`${item.id} ${item.name} ${item.category} ${item.template_id} ${item.template_variant} ${item.description || ''} ${item.starter_reason || ''}`.toLowerCase())}">
       <div class="card-top">
@@ -204,12 +226,11 @@ function renderStarterCard(item) {
         <div class="meta-row"><div class="meta-label">为什么推荐</div><div class="meta-value">${escapeHtml(item.starter_reason || item.description || '适合作为第一次使用时的起步入口。')}</div></div>
         <div class="meta-row"><div class="meta-label">建议用法</div><div class="meta-value">如果你还不确定这类任务该从哪里开始，先用这个入口跑预检，再决定要不要继续细分。</div></div>
       </div>
+      ${renderCommandActions(command)}
       <details class="card-details">
         <summary>查看模板细节（维护者）</summary>
         <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
-        <div class="cmd">node scripts/run_example_catalog_prepare.js \\
-  --example-id ${escapeHtml(item.id)} \\
-  --output-dir /tmp/daoge-${escapeHtml(item.id)}-demo</div>
+        <div class="cmd">${escapeHtml(command)}</div>
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
           <div class="meta-row"><div class="meta-label">模板 ID</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
@@ -221,6 +242,7 @@ function renderStarterCard(item) {
 }
 
 function renderIntentCard(item) {
+  const command = intentCommand(item.intent);
   return `
     <article class="card starter-card">
       <div class="card-top">
@@ -236,12 +258,11 @@ function renderIntentCard(item) {
         <div class="meta-row"><div class="meta-label">适合谁</div><div class="meta-value">适合已经知道自己要做哪一类任务，但不想先理解模板内部名字的人。</div></div>
         <div class="meta-row"><div class="meta-label">建议动作</div><div class="meta-value">先按这个任务意图起步，再看预检结果是否接近你的目标。</div></div>
       </div>
+      ${renderCommandActions(command, '复制意图命令')}
       <details class="card-details">
         <summary>查看模板细节（维护者）</summary>
         <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
-        <div class="cmd">node scripts/run_example_catalog_prepare.js \\
-  --intent ${escapeHtml(item.intent)} \\
-  --output-dir /tmp/daoge-${escapeHtml(item.intent)}-starter</div>
+        <div class="cmd">${escapeHtml(command)}</div>
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">推荐入口</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
           <div class="meta-row"><div class="meta-label">入口名称</div><div class="meta-value">${escapeHtml(item.name)}</div></div>
@@ -252,6 +273,7 @@ function renderIntentCard(item) {
 }
 
 function renderTaskStarter(item) {
+  const command = intentCommand(item.intent);
   return `
     <article class="card starter-card">
       <div class="card-top">
@@ -266,12 +288,11 @@ function renderTaskStarter(item) {
         <div class="meta-row"><div class="meta-label">为什么先走这里</div><div class="meta-value">这个入口能先帮你建立这类任务的基本路径，不用一上来就面对太多细分变体。</div></div>
         <div class="meta-row"><div class="meta-label">建议动作</div><div class="meta-value">先按任务意图起步，等预检方向对了，再决定要不要切到更具体的变体。</div></div>
       </div>
+      ${renderCommandActions(command, '复制意图命令')}
       <details class="card-details">
         <summary>查看模板细节（维护者）</summary>
         <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
-        <div class="cmd">node scripts/run_example_catalog_prepare.js \\
-  --intent ${escapeHtml(item.intent)} \\
-  --output-dir /tmp/daoge-${escapeHtml(item.intent)}-starter</div>
+        <div class="cmd">${escapeHtml(command)}</div>
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">任务意图</div><div class="meta-value">${escapeHtml(item.intent)}</div></div>
           <div class="meta-row"><div class="meta-label">对应入口</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
@@ -576,6 +597,34 @@ ${renderWorkspaceChromeHeadAssets()}
       font-size: 12px;
       line-height: 1.4;
     }
+    .card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .copy-command-button {
+      appearance: none;
+      border: 1px solid rgba(217,179,109,0.36);
+      background: rgba(217,179,109,0.14);
+      color: var(--accent);
+      border-radius: 999px;
+      padding: 9px 13px;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+    .copy-command-button:hover {
+      background: rgba(217,179,109,0.2);
+      border-color: rgba(217,179,109,0.52);
+      transform: translateY(-1px);
+    }
+    .copy-command-button.is-copied {
+      color: var(--success);
+      border-color: rgba(124,197,163,0.5);
+      background: rgba(124,197,163,0.14);
+    }
     .cmd {
       margin-top: 16px;
       padding: 14px 16px;
@@ -846,6 +895,44 @@ ${renderWorkspaceChromeHeadAssets()}
         });
       });
 
+      async function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+
+      document.querySelectorAll('[data-copy-command]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const command = String(button.dataset.copyCommand || '').trim();
+          if (!command) return;
+          const originalLabel = button.textContent;
+          try {
+            await copyText(command);
+            button.textContent = '已复制';
+            button.classList.add('is-copied');
+            window.setTimeout(() => {
+              button.textContent = originalLabel;
+              button.classList.remove('is-copied');
+            }, 1600);
+          } catch (error) {
+            button.textContent = '复制失败，请展开查看命令';
+            window.setTimeout(() => {
+              button.textContent = originalLabel;
+            }, 2200);
+          }
+        });
+      });
+
       searchInput.addEventListener('input', applyFilters);
       applyFilters();
     })();
@@ -853,7 +940,8 @@ ${renderWorkspaceChromeHeadAssets()}
 </body>
 </html>`;
 
-  fs.writeFileSync(outputFile, html);
+  fs.writeFileSync(outputFile, html.replace(/[ \t]+$/gm, ''));
+  ensureWorkspaceChromeAssets(workspaceDir);
   console.log(JSON.stringify({
     catalogFile,
     outputFile,
