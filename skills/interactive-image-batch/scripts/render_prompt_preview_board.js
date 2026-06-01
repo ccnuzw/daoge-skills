@@ -1,7 +1,7 @@
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail, renderPortalRouteCompass, renderPortalWorkbench } = require('./portal_shared');
-const { ensurePortalUiAssets, renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderWorkspaceChromeTopLinks, renderWorkspaceChromeContextBar, renderWorkspaceChromeModeSwitch, renderWorkspaceChromeProgressRail, renderWorkspaceChromeRouteCompass, renderWorkspaceChromeWorkbench } = require('./workspace_chrome');
+const { ensureWorkspaceChromeAssets, renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const { topLabel, resolveProfile, buildDisplayDistributions, normalizeValue } = require('./template_display_profile');
 const { deriveTaskLabel } = require('./task_label_utils');
 const { loadWorkbenchState } = require('./workbench_state_shared');
@@ -118,7 +118,7 @@ function main() {
 
   const preflightBoardPath = path.join(outputDir, 'preflight_board.html');
   const assetsBoardPath = path.join(outputDir, 'assets_board.html');
-  const promptContextBar = renderPortalContextBar({
+  const promptContextBar = renderWorkspaceChromeContextBar({
     runLabel: taskLabel,
     phaseLabel,
     flowLabel: '工作台首页 -> 准备工作台 -> 提示词补充页 -> 回准备主链',
@@ -139,7 +139,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 提示词预览</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --bg: #0e1318;
@@ -282,11 +282,11 @@ ${renderPortalHeadAssets()}
     }
   </style>
 </head>
-<body data-portal-page="prompt_preview.html">
+<body data-workspace-chrome-page="prompt_preview.html">
   <div class="shell">
     <section class="hero">
       <div class="top-links">
-        ${renderPortalTopLinks(outputDir, {
+        ${renderWorkspaceChromeTopLinks(outputDir, {
           currentPage: 'prompt_preview.html',
           extraLinks: [
             { label: '回工作台首页', file: workspaceHomePath },
@@ -299,7 +299,7 @@ ${renderPortalHeadAssets()}
       <p class="hero-copy">提示词预览已经退到准备补充页层。普通流程先回准备工作台；只有需要逐条看 prompt、分布或样本覆盖时，才停留在这里。</p>
       <p class="hero-copy">${escapeHtml(statusSummary)}</p>
       ${promptContextBar}
-      ${renderPortalModeSwitch({
+      ${renderWorkspaceChromeModeSwitch({
         title: '提示词补充页浏览模式',
         copy: '新手看完方向摘要就回准备工作台；熟练用户才继续深看批次、分布和样本。',
       })}
@@ -325,12 +325,12 @@ ${renderPortalHeadAssets()}
           <div class="metric-value">${escapeHtml(nextActionLabel)}</div>
         </div>
       </div>
-      ${renderPortalProgressRail(outputDir, {
+      ${renderWorkspaceChromeProgressRail(outputDir, {
         currentPage: 'prompt_preview.html',
         title: '准备主链进度',
         copy: '提示词预览只做准备补充说明，不再承担准备主控。主判断回准备工作台完成。',
       })}
-      ${renderPortalRouteCompass(outputDir, {
+      ${renderWorkspaceChromeRouteCompass(outputDir, {
         title: '提示词补充页看完后，回准备主链',
         copy: '这里负责逐条深看 prompt，不再承担准备总控。方向结论要送回准备工作台，再决定预检或回退。',
         previous: {
@@ -363,7 +363,7 @@ ${renderPortalHeadAssets()}
     <section class="section">
       <h2>提示词补充判断</h2>
       <p class="section-copy">${escapeHtml(displayProfile.firstLookCopy)}</p>
-      ${renderPortalWorkbench(outputDir, {
+      ${renderWorkspaceChromeWorkbench(outputDir, {
         title: '提示词补充页，先看这里',
         copy: '先判断方向是否正确，再把结论带回准备主链。',
         cards: [
@@ -460,7 +460,7 @@ ${renderPortalHeadAssets()}
 </body>
 </html>`;
 
-  ensurePortalUiAssets(outputDir);
+  ensureWorkspaceChromeAssets(outputDir);
   require('fs').writeFileSync(outputPath, html);
   console.log(JSON.stringify({
     outputPath,

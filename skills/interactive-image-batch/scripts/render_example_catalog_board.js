@@ -13,12 +13,12 @@ const {
   resolveEntryWorkbench,
 } = require('./entry_state_shared');
 const {
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalRouteCompass,
-  renderPortalWorkbench,
-} = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeRouteCompass,
+  renderWorkspaceChromeWorkbench,
+} = require('./workspace_chrome');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 
 function escapeHtml(text) {
   return String(text || '')
@@ -285,11 +285,11 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const catalogFile = path.resolve(args['catalog-file'] || path.join(__dirname, '..', 'references', 'examples', 'examples.catalog.json'));
   const outputFile = path.resolve(args['output-file'] || path.join(path.dirname(catalogFile), 'examples_catalog.html'));
-  const portalDir = path.dirname(outputFile);
-  const workspaceHomeFile = path.join(portalDir, 'workspace_home.html');
-  const prepareWorkspaceFile = path.join(portalDir, 'prepare_workspace.html');
-  const resultWorkspaceFile = path.join(portalDir, 'result_workspace.html');
-  const entryStateFile = path.resolve(args['entry-state-file'] || path.join(portalDir, 'entry_state.json'));
+  const workspaceDir = path.dirname(outputFile);
+  const workspaceHomeFile = path.join(workspaceDir, 'workspace_home.html');
+  const prepareWorkspaceFile = path.join(workspaceDir, 'prepare_workspace.html');
+  const resultWorkspaceFile = path.join(workspaceDir, 'result_workspace.html');
+  const entryStateFile = path.resolve(args['entry-state-file'] || path.join(workspaceDir, 'entry_state.json'));
   const catalog = readJson(catalogFile);
   const examples = Array.isArray(catalog.examples) ? catalog.examples : [];
   const grouped = groupExamplesByTask(examples);
@@ -301,7 +301,7 @@ function main() {
   const entryActions = resolveEntryMainlineActions({ hasWorkspace: fs.existsSync(workspaceHomeFile) });
   const entryMainlineProtocol = resolveEntryMainlineProtocol(entryState, { currentLayer: '模板展示层' });
   const entryPreview = resolveEntryPreview(entryState);
-  const nextStep = resolveEntryNextStep(portalDir, entryState, {
+  const nextStep = resolveEntryNextStep(workspaceDir, entryState, {
     prepareFile: prepareWorkspaceFile,
     homeFile: workspaceHomeFile,
   });
@@ -312,8 +312,8 @@ function main() {
     nextStep,
     mainlineProtocol: entryMainlineProtocol,
   });
-  const entryRoute = resolveEntryRoute(portalDir, entryState, { nextStep });
-  const entryWorkbench = resolveEntryWorkbench(portalDir, entryState, {
+  const entryRoute = resolveEntryRoute(workspaceDir, entryState, { nextStep });
+  const entryWorkbench = resolveEntryWorkbench(workspaceDir, entryState, {
     nextStep,
     entryPreview,
     currentTaskCategory,
@@ -338,7 +338,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 中文模板展示板</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --bg: #0e1318;
@@ -625,11 +625,11 @@ ${renderPortalHeadAssets()}
     }
   </style>
 </head>
-<body data-portal-page="examples-catalog">
+<body data-workspace-chrome-page="examples-catalog">
   <div class="shell">
     <section class="hero">
       <div class="top-links">
-        ${renderPortalTopLinks(portalDir, {
+        ${renderWorkspaceChromeTopLinks(workspaceDir, {
           currentPage: 'examples-catalog',
           extraLinks: [
             { label: '返回工作台首页', file: workspaceHomeFile },
@@ -641,10 +641,10 @@ ${renderPortalHeadAssets()}
       <div class="eyebrow">DAOGE Template Board</div>
       <h1>中文模板展示板</h1>
       <p class="hero-copy">这就是中文任务入口总览，也是新版示例目录。这个页面优先按中文任务组织，而不是先按内部分类组织。你不需要先理解模板名，只要先判断自己属于哪类任务，再看推荐意图入口、主链入口和细分入口。对第一次使用的人来说，先选中文任务，再决定要不要继续细分，会比直接在全部 example 里盲选稳定得多。</p>
-      ${renderPortalContextBar(entryContext)}
+      ${renderWorkspaceChromeContextBar(entryContext)}
     </section>
 
-    ${renderPortalWorkbench(portalDir, {
+    ${renderWorkspaceChromeWorkbench(workspaceDir, {
       title: '入口主链协议',
       copy: `${mainlineContract.summary || entryMainlineProtocol.summary} ${defaultGenerationSummary}`.trim(),
       maxCards: 4,
@@ -668,7 +668,7 @@ ${renderPortalHeadAssets()}
       ],
     })}
 
-    ${renderPortalRouteCompass(portalDir, {
+    ${renderWorkspaceChromeRouteCompass(workspaceDir, {
       title: entryRoute.title,
       copy: entryRoute.copy,
       current: entryRoute.current,
@@ -683,7 +683,7 @@ ${renderPortalHeadAssets()}
       ],
     })}
 
-    ${renderPortalWorkbench(portalDir, {
+    ${renderWorkspaceChromeWorkbench(workspaceDir, {
       title: entryWorkbench.title,
       copy: entryWorkbench.copy,
       cards: entryWorkbench.cards,

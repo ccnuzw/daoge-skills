@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const {
   relativeFile,
   readJsonIfExists,
@@ -12,12 +12,12 @@ const {
   buildSupportPageCopy,
 } = require('./workspace_page_shared');
 const {
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalProgressRail,
-  renderPortalRouteCompass,
-  renderPortalWorkbench,
-} = require('./portal_shared');
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeProgressRail,
+  renderWorkspaceChromeRouteCompass,
+  renderWorkspaceChromeWorkbench,
+} = require('./workspace_chrome');
 const { deriveTaskLabel } = require('./task_label_utils');
 const { loadWorkbenchState } = require('./workbench_state_shared');
 const {
@@ -365,7 +365,7 @@ function main() {
 
   fs.writeFileSync(markdownPath, `${markdownLines.join('\n')}\n`);
 
-  const contextBar = renderPortalContextBar({
+  const contextBar = renderWorkspaceChromeContextBar({
     runLabel: taskLabel,
     phaseLabel: currentPhaseLabel,
     flowLabel: '工作台首页 -> 结果工作台 -> 任务档案',
@@ -387,7 +387,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 任务档案</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --panel: rgba(255,255,255,0.06);
@@ -401,11 +401,11 @@ ${renderPortalHeadAssets()}
 ${renderWorkspaceStyles()}
   </style>
 </head>
-<body data-portal-page="run_record.html">
+<body data-workspace-chrome-page="run_record.html">
   <div class="shell">
     <section class="hero">
       <div class="top-links">
-        ${renderPortalTopLinks(outputDir, {
+        ${renderWorkspaceChromeTopLinks(outputDir, {
           currentPage: 'run_record.html',
           governance,
           maxLinks: 3,
@@ -428,14 +428,14 @@ ${renderWorkspaceStyles()}
       </div>
     </section>
 
-    ${renderPortalProgressRail(outputDir, {
+    ${renderWorkspaceChromeProgressRail(outputDir, {
       currentPage: 'run_record.html',
       title: '工作台主链',
       copy: supportCopy.workbenchCopy,
       governance,
     })}
 
-    ${renderPortalRouteCompass(outputDir, {
+    ${renderWorkspaceChromeRouteCompass(outputDir, {
       title: supportCopy.routeTitle,
       copy: supportCopy.routeCopy,
       previous: hasResult ? {
@@ -466,7 +466,7 @@ ${renderWorkspaceStyles()}
       ],
     })}
 
-    ${renderPortalWorkbench(outputDir, {
+    ${renderWorkspaceChromeWorkbench(outputDir, {
       title: '可进入的页面',
       copy: supportCopy.workbenchCopy,
       cards: workbenchCards,

@@ -2,13 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
 const {
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalModeSwitch,
-  renderPortalProgressRail,
-  renderPortalRouteCompass,
-} = require('./portal_shared');
-const { ensurePortalUiAssets, renderPortalHeadAssets } = require('./portal_ui_shared');
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeModeSwitch,
+  renderWorkspaceChromeProgressRail,
+  renderWorkspaceChromeRouteCompass,
+} = require('./workspace_chrome');
+const { ensureWorkspaceChromeAssets, renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const { loadWorkbenchState } = require('./workbench_state_shared');
 const { resolveWorkspaceRouteFile } = require('./workspace_storyboard_shared');
 
@@ -383,7 +383,7 @@ function main() {
     : 0;
   const keepCandidates = summarizeKeepCandidates(success);
   const metrics = summarizeActionCounts(success, failed, needsReview, averageScore);
-  const reviewContextBar = renderPortalContextBar({
+  const reviewContextBar = renderWorkspaceChromeContextBar({
     runLabel: path.basename(outputDir),
     boardLabel: manifest.boardId || manifest.board_id || manifest.storyboardBoardId || '',
     phaseLabel: '结果审阅补充页',
@@ -405,7 +405,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 结果审阅补充页</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --bg: #0e1318;
@@ -1287,7 +1287,7 @@ ${renderPortalHeadAssets()}
     }
   </style>
 </head>
-<body data-portal-page="review_board.html">
+<body data-workspace-chrome-page="review_board.html">
   <div class="shell">
     <div class="hero">
       <section class="hero-panel">
@@ -1313,16 +1313,16 @@ ${renderPortalHeadAssets()}
             ].filter(Boolean).join('\n            ')}
           </div>
         </div>
-        ${renderPortalModeSwitch({
+        ${renderWorkspaceChromeModeSwitch({
           title: '审阅浏览模式',
           copy: '简洁查看先回结果主链做判断；进阶查看才适合停留在这里批量筛图。整板位置和素材来源只在卡片内按项定位。',
         })}
-        ${renderPortalProgressRail(outputDir, {
+        ${renderWorkspaceChromeProgressRail(outputDir, {
           currentPage: 'review_board.html',
           title: '结果主链进度',
           copy: '审阅看板已经退到结果补充页层，主链判断请回结果工作台，再按需进入异常工作台或分镜整板补充页。',
         })}
-        ${renderPortalRouteCompass(outputDir, {
+        ${renderWorkspaceChromeRouteCompass(outputDir, {
           title: '审阅补充页看完后，回主链收口',
           copy: '这里负责深度筛图，不再承担结果总控。先把结论送回结果工作台，异常再交给异常工作台。',
           previous: {
@@ -1684,7 +1684,7 @@ ${renderPortalHeadAssets()}
 </body>
 </html>`;
 
-  ensurePortalUiAssets(outputDir);
+  ensureWorkspaceChromeAssets(outputDir);
   fs.writeFileSync(outputPath, html);
   console.log(JSON.stringify({
     outputPath,

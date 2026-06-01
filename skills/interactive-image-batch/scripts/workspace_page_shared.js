@@ -75,7 +75,7 @@ function renderDialogueSayList(items, emptyText = '当前可以直接按主动�
 function renderMetricCard(label, value, tone = 'neutral', detail = '', options = {}) {
   const audience = String(options.audience || 'all').trim() || 'all';
   return `
-    <article class="metric-card tone-${escapeHtml(tone)} portal-audience-${escapeHtml(audience)}">
+    <article class="metric-card tone-${escapeHtml(tone)} workspace-audience-${escapeHtml(audience)}">
       <div class="metric-label">${escapeHtml(label)}</div>
       <div class="metric-value">${escapeHtml(value)}</div>
       ${detail ? `<div class="metric-detail">${escapeHtml(detail)}</div>` : ''}
@@ -1407,7 +1407,7 @@ function renderWorkspaceDensityGroup(title, copy, items, options = {}) {
     'workspace-density-group',
     options.open ? 'workspace-density-open' : 'workspace-density-fold',
     `workspace-density-${escapeHtml(tone)}`,
-    `portal-audience-${escapeHtml(audience)}`,
+    `workspace-audience-${escapeHtml(audience)}`,
     ...extraClasses.map((item) => escapeHtml(item)),
   ].join(' ');
   const open = Boolean(options.open);
@@ -1462,7 +1462,7 @@ function renderWorkspaceSection(options = {}) {
     : [];
   const className = [
     'section',
-    `portal-audience-${escapeHtml(audience)}`,
+    `workspace-audience-${escapeHtml(audience)}`,
     ...extraClasses.map((item) => escapeHtml(item)),
   ].join(' ');
   return `
@@ -1515,7 +1515,7 @@ function renderWorkspaceGridSection(options = {}) {
     ? options.itemsHtml.filter(Boolean).join('')
     : String(options.itemsHtml || '').trim();
   return `
-    <section class="section portal-audience-${escapeHtml(String(options.audience || 'all').trim() || 'all')} ${escapeHtml(String(options.extraClass || '').trim())}">
+    <section class="section workspace-audience-${escapeHtml(String(options.audience || 'all').trim() || 'all')} ${escapeHtml(String(options.extraClass || '').trim())}">
       <h2>${escapeHtml(title)}</h2>
       ${copy ? `<p class="section-copy">${escapeHtml(copy)}</p>` : ''}
       <div class="${escapeHtml(gridClass)}">
@@ -4345,7 +4345,7 @@ ${cssVars}
 ${renderWorkspaceStyles()}
   </style>
 </head>
-<body data-portal-page="${escapeHtml(currentPage)}">
+<body data-workspace-chrome-page="${escapeHtml(currentPage)}">
   <div class="shell workspace-stage-shell workspace-stage-${escapeHtml(currentPage.replace('.html', ''))}">
     <section class="hero">
       <div class="top-links">
@@ -4716,10 +4716,10 @@ function renderWorkspaceStyles() {
       display: grid;
       gap: 12px;
     }
-    .workspace-command-deck .portal-mode-switch,
-    .workspace-command-deck .portal-progress,
-    .workspace-command-deck .portal-route-compass,
-    .workspace-command-deck .portal-workbench {
+    .workspace-command-deck .workspace-chrome-mode-switch,
+    .workspace-command-deck .workspace-chrome-progress,
+    .workspace-command-deck .workspace-chrome-route-compass,
+    .workspace-command-deck .workspace-chrome-workbench {
       margin-top: 0;
       height: 100%;
     }

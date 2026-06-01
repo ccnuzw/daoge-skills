@@ -2,14 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists, resolvePromptFileForRerun } = require('./script_utils');
 const {
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalModeSwitch,
-  renderPortalProgressRail,
-  renderPortalRouteCompass,
-  renderPortalWorkbench,
-} = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeModeSwitch,
+  renderWorkspaceChromeProgressRail,
+  renderWorkspaceChromeRouteCompass,
+  renderWorkspaceChromeWorkbench,
+} = require('./workspace_chrome');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const {
   relativeFile,
   renderMetricCard,
@@ -66,7 +66,7 @@ function main() {
     || (fileExists(exceptionWorkspacePath) ? '回异常工作台' : '回结果工作台');
   const nextActionReason = String(pageState?.nextAction?.reason || '').trim() || statusSummary;
 
-  const rerunContextBar = renderPortalContextBar({
+  const rerunContextBar = renderWorkspaceChromeContextBar({
     runLabel: path.basename(outputDir),
     phaseLabel,
     flowLabel: '结果工作台 -> 异常工作台 -> 补跑补充页',
@@ -87,7 +87,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DAOGE 失败补跑补充页</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --panel: rgba(255,255,255,0.06);
@@ -101,16 +101,16 @@ ${renderPortalHeadAssets()}
 ${renderWorkspaceStyles()}
   </style>
 </head>
-<body data-portal-page="rerun_board.html">
+<body data-workspace-chrome-page="rerun_board.html">
   <div class="shell">
     <section class="hero">
       <div class="top-links">
-        ${renderPortalTopLinks(outputDir, { currentPage: 'rerun_board.html' })}
+        ${renderWorkspaceChromeTopLinks(outputDir, { currentPage: 'rerun_board.html' })}
       </div>
       <div class="eyebrow">失败补跑补充页</div>
       <h1>${taskLabel} · DAOGE 失败补跑补充页</h1>
       <p class="hero-copy">${statusSummary}</p>
-      ${renderPortalModeSwitch({
+      ${renderWorkspaceChromeModeSwitch({
         title: '补跑页定位',
         copy: '补跑信息保留，但默认异常入口已经迁移到异常工作台。',
         newcomerLabel: '回异常工作台',
@@ -125,13 +125,13 @@ ${renderWorkspaceStyles()}
       </div>
     </section>
 
-    ${renderPortalProgressRail(outputDir, {
+    ${renderWorkspaceChromeProgressRail(outputDir, {
       currentPage: 'rerun_board.html',
       title: '异常主链',
       copy: '补跑页已经退到异常补充页层，是否补跑的主判断请先回异常工作台，再回结果工作台复核。',
     })}
 
-    ${renderPortalRouteCompass(outputDir, {
+    ${renderWorkspaceChromeRouteCompass(outputDir, {
       title: '补跑前，建议这样判断',
       copy: '先回异常工作台做统一判断，再决定是否真的需要补跑。',
       previous: {
@@ -151,7 +151,7 @@ ${renderWorkspaceStyles()}
       ],
     })}
 
-    ${renderPortalWorkbench(outputDir, {
+    ${renderWorkspaceChromeWorkbench(outputDir, {
       title: '补跑补充页入口',
       copy: '保留和补跑判断直接相关的主链入口；运行概览、审阅看板和完成摘要不再从这里继续分叉。',
       cards: [

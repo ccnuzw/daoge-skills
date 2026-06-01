@@ -2,14 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
 const {
-  renderPortalModeSwitch,
-  renderPortalTopLinks,
-  renderPortalContextBar,
-  renderPortalProgressRail,
-  renderPortalRouteCompass,
-  renderPortalWorkbench,
-} = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+  renderWorkspaceChromeModeSwitch,
+  renderWorkspaceChromeTopLinks,
+  renderWorkspaceChromeContextBar,
+  renderWorkspaceChromeProgressRail,
+  renderWorkspaceChromeRouteCompass,
+  renderWorkspaceChromeWorkbench,
+} = require('./workspace_chrome');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 const {
   relativeFile,
   readJsonIfExists,
@@ -807,14 +807,14 @@ function main() {
 
   const prepareHeroCards = Array.isArray(prepareView?.heroCards) ? prepareView.heroCards : [];
   const contextBarData = resolveWorkspaceStageContextBarData(pageState, 'prepare', prepareView, prepareFallbackBundle.context);
-  const contextBar = renderPortalContextBar(contextBarData);
+  const contextBar = renderWorkspaceChromeContextBar(contextBarData);
 
   const html = renderWorkspacePageShell({
     pageTitle: shell.pageTitle,
     currentPage: shell.currentPage,
-    headAssets: renderPortalHeadAssets(),
+    headAssets: renderWorkspaceChromeHeadAssets(),
     cssVars: shell.cssVars,
-    topLinks: renderPortalTopLinks(outputDir, { currentPage: shell.currentPage, governance }),
+    topLinks: renderWorkspaceChromeTopLinks(outputDir, { currentPage: shell.currentPage, governance }),
     heroEyebrow: String(prepareHero.eyebrow || '').trim() || shell.heroEyebrow,
     heroTitle: String(prepareHero.title || '').trim() || shell.heroTitle,
     heroCopy: String(prepareHero.intro || '').trim() || shell.heroCopy,
@@ -850,14 +850,14 @@ function main() {
       ...resolvedPrepareCockpitSummary,
     }),
     stageSignals: renderWorkspaceSignalBar(resolvedPrepareSignalBar),
-    modeSwitch: renderPortalModeSwitch({
+    modeSwitch: renderWorkspaceChromeModeSwitch({
       title: modeSwitch.title,
       copy: modeSwitch.copy,
       defaultMode: modeSwitch.defaultMode,
       newcomerLabel: modeSwitch.newcomerLabel,
       proLabel: modeSwitch.proLabel,
     }),
-    progressRail: renderPortalProgressRail(outputDir, {
+    progressRail: renderWorkspaceChromeProgressRail(outputDir, {
       currentPage: shell.currentPage,
       title: String(resolvedPrepareProgress?.title || '').trim() || chrome.progressTitle,
       copy: String(resolvedPrepareProgress?.copy || '').trim() || chrome.progressCopy,
@@ -865,11 +865,11 @@ function main() {
       windowRadius: surfaceRules.progressWindowRadius,
       governance,
     }),
-    routeCompass: renderPortalRouteCompass(outputDir, {
+    routeCompass: renderWorkspaceChromeRouteCompass(outputDir, {
       ...resolvedPrepareRoute,
       maxNextSteps: surfaceRules.routeMaxNextSteps,
     }),
-    workbench: renderPortalWorkbench(outputDir, buildRenderableWorkbench({
+    workbench: renderWorkspaceChromeWorkbench(outputDir, buildRenderableWorkbench({
       section: resolvedPrepareWorkbench,
       maxCards: surfaceRules.workbenchMaxCards,
     })),

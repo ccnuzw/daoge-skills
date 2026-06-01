@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists } = require('./script_utils');
-const { renderPortalTopLinks, renderPortalContextBar, renderPortalModeSwitch, renderPortalProgressRail, renderPortalRouteCompass } = require('./portal_shared');
-const { renderPortalHeadAssets } = require('./portal_ui_shared');
+const { renderWorkspaceChromeTopLinks, renderWorkspaceChromeContextBar, renderWorkspaceChromeModeSwitch, renderWorkspaceChromeProgressRail, renderWorkspaceChromeRouteCompass } = require('./workspace_chrome');
+const { renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
 
 function ensureArray(value) {
   if (Array.isArray(value)) return value;
@@ -186,7 +186,7 @@ function main() {
   const slotMap = buildSlotMap(storyboard);
   const boardSummary = buildBoardSummary(regions, bindingMap, slotMap, content, results, outputDir);
   const boardHero = buildBoardHero(content, boardSummary);
-  const boardContextBar = renderPortalContextBar({
+  const boardContextBar = renderWorkspaceChromeContextBar({
     runLabel: path.basename(outputDir),
     boardLabel: content.board_id || content.board_title || '',
     phaseLabel: '分镜整板补充页',
@@ -219,7 +219,7 @@ function main() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(content.board_title || content.board_id || '未命名分镜')} · DAOGE 分镜整板补充页</title>
-${renderPortalHeadAssets()}
+${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
       --board-bg: ${canvas.background || '#0f1115'};
@@ -452,38 +452,38 @@ ${renderPortalHeadAssets()}
       font-size: 15px;
       line-height: 1.75;
     }
-    body[data-portal-page="storyboard_board.html"] .portal-actions {
+    body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-actions {
       margin: 22px 0 30px;
       padding: 18px;
     }
-    body[data-portal-page="storyboard_board.html"] .portal-actions-grid {
+    body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-actions-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 16px;
       align-items: stretch;
     }
-    body[data-portal-page="storyboard_board.html"] .portal-action-card {
+    body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-action-card {
       min-width: 0;
       min-height: 176px;
       padding: 18px 20px 16px;
       gap: 10px;
       align-content: start;
     }
-    body[data-portal-page="storyboard_board.html"] .portal-action-label {
+    body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-action-label {
       font-size: 15px;
       line-height: 1.35;
     }
-    body[data-portal-page="storyboard_board.html"] .portal-action-summary {
+    body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-action-summary {
       min-height: 0;
       max-width: 28ch;
       font-size: 13px;
       line-height: 1.68;
     }
-    body[data-portal-page="storyboard_board.html"] .portal-action-link {
+    body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-action-link {
       margin-top: auto;
       padding-top: 10px;
     }
-    body[data-portal-page="storyboard_board.html"] .portal-action-link a,
-    body[data-portal-page="storyboard_board.html"] .portal-action-link span {
+    body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-action-link a,
+    body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-action-link span {
       font-size: 13px;
     }
     @media (max-width: 1180px) {
@@ -495,10 +495,10 @@ ${renderPortalHeadAssets()}
       .board-overview {
         grid-template-columns: 1fr;
       }
-      body[data-portal-page="storyboard_board.html"] .portal-actions-grid {
+      body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-actions-grid {
         grid-template-columns: 1fr;
       }
-      body[data-portal-page="storyboard_board.html"] .portal-action-card {
+      body[data-workspace-chrome-page="storyboard_board.html"] .workspace-chrome-action-card {
         min-height: 0;
       }
     }
@@ -669,23 +669,23 @@ ${renderPortalHeadAssets()}
     }
   </style>
 </head>
-<body data-portal-page="storyboard_board.html">
+<body data-workspace-chrome-page="storyboard_board.html">
   <div class="board-shell">
     <div class="top-links">
-      ${renderPortalTopLinks(outputDir, {
+      ${renderWorkspaceChromeTopLinks(outputDir, {
         currentPage: 'storyboard_board.html',
       })}
     </div>
-    ${renderPortalModeSwitch({
+    ${renderWorkspaceChromeModeSwitch({
       title: '分镜整板补充页浏览模式',
       copy: '这里专门按需回看整板节奏与镜头关系。普通流程看完就回结果工作台，只有发现缺图或异常时才去异常工作台。',
     })}
-    ${renderPortalProgressRail(outputDir, {
+    ${renderWorkspaceChromeProgressRail(outputDir, {
       currentPage: 'storyboard_board.html',
       title: '结果主链进度',
       copy: '分镜整板补充页已经降成结果补充页，只有分镜任务且需要上下文复看时才进入，不再抢结果主链入口。',
     })}
-    ${renderPortalRouteCompass(outputDir, {
+    ${renderWorkspaceChromeRouteCompass(outputDir, {
       title: '分镜整板补充页看完后，回结果主链',
       copy: '这里负责深看镜头衔接、品牌区和整板观感，不再承担结果总控。把结论送回结果工作台，异常再交给异常工作台。',
       previous: {
@@ -755,7 +755,7 @@ ${renderPortalHeadAssets()}
           </div>
         </div>
         <div class="board-meta-list" style="margin-top:14px;">
-          <div class="board-meta-item portal-audience-pro"><strong>Board ID</strong><span>${escapeHtml(content.board_id || '未设置')}</span></div>
+          <div class="board-meta-item workspace-audience-pro"><strong>Board ID</strong><span>${escapeHtml(content.board_id || '未设置')}</span></div>
           <div class="board-meta-item"><strong>主题</strong><span>${escapeHtml(content.board_theme || '未设置')}</span></div>
           <div class="board-meta-item"><strong>先看哪里</strong><span>先看“失败 / 缺图”，再看“待复核”，最后回到整板检查镜头节奏、品牌区与主画面关系。</span></div>
         </div>
