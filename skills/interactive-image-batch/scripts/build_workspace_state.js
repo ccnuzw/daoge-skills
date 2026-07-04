@@ -670,20 +670,22 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
   const rerunCount = Array.isArray(rerunCandidates) ? rerunCandidates.length : 0;
   const totalIssueCount = failedCount + reviewCount;
   const hasStoryboard = Boolean(options.hasStoryboard);
+  const exceptionActionKey = failedCount > 0
+    ? 'resolve_failed'
+    : (reviewCount > 0 ? 'review_exception' : 'go_home');
   const exceptionAction = failedCount > 0
     ? buildActionLanguage('resolve_failed')
-    : buildActionLanguage('review_exception');
-  const exceptionNextAction = buildActionLanguage('go_home');
+    : (reviewCount > 0 ? buildActionLanguage('review_exception') : buildActionLanguage('go_home'));
   const currentFocus = failedCount > 0 ? '先处理失败项' : (reviewCount > 0 ? '先确认待复核项' : '当前没有明显异常');
   const nextStepReason = failedCount > 0
     ? '先把失败项和补跑判断收口，再回工作台继续。'
     : (reviewCount > 0
-      ? '先把待复核项确认清楚，再决定是否回结果工作台继续。'
+      ? '回结果工作台结合图片把待复核项确认清楚，再回主链继续。'
       : '当前异常压力较低，可以回工作台继续。');
   const exceptionConfirmationPlan = buildExceptionConfirmationPlan({
     failedCount,
     reviewCount,
-    actionKey: failedCount > 0 ? 'resolve_failed' : 'review_exception',
+    actionKey: exceptionActionKey,
   });
   const secondaryActionHints = [
     reviewCount > 0 ? `当前还有 ${reviewCount} 项待复核，需要人工确认边界结果。` : '',
@@ -692,14 +694,18 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
   ].filter(Boolean);
   const transitionSummary = failedCount > 0
     ? '异常层当前主要承担问题收口，不应把未处理的失败项直接送回工作台。'
-    : '异常层已经更接近收口判断，处理完即可回工作台或回结果工作台复核。';
+    : (reviewCount > 0
+      ? '异常层当前主要承担复核分流，待复核项需要回结果工作台结合图片判断。'
+      : '异常层已经清空，可以回工作台首页继续主链判断。');
   const handoffSummary = failedCount > 0
     ? `异常层会先接住 ${failedCount} 项失败，再决定是否带着 ${rerunCount} 个补跑候选回到工作台。`
     : (reviewCount > 0
-      ? `异常层会先确认 ${reviewCount} 项待复核，再把结论送回工作台。`
+      ? `异常层会把 ${reviewCount} 项待复核送回结果工作台，结合图片完成判断。`
       : '异常层当前压力较低，可以把判断交回工作台继续。');
   const confirmationState = buildConfirmationState({
-    currentIntent: failedCount > 0 ? '先收口异常问题' : '回工作台继续判断',
+    currentIntent: failedCount > 0
+      ? '先收口异常问题'
+      : (reviewCount > 0 ? '回结果工作台复核待复核项' : '回工作台继续判断'),
     stageLabel: '异常阶段',
     stageTone: failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'),
     confirmedItems: [
@@ -714,13 +720,19 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
     summary: exceptionConfirmationPlan.summary,
   });
   const statusLabel = String(workspaceState?.status?.headline || '').trim()
-    || buildExceptionStatusLabel({ totalIssueCount });
+    || (failedCount > 0
+      ? buildExceptionStatusLabel({ totalIssueCount })
+      : (reviewCount > 0 ? '建议先复核待确认结果' : '当前没有明显异常'));
   const statusTone = String(workspaceState?.status?.tone || '').trim()
-    || (totalIssueCount > 0 ? 'bad' : 'good');
+    || (failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'));
   const statusSummary = String(workspaceState?.status?.summary || '').trim()
-    || buildExceptionStatusSummary({ totalIssueCount });
+    || (failedCount > 0
+      ? buildExceptionStatusSummary({ totalIssueCount })
+      : (reviewCount > 0 ? '当前主要剩余待复核项，建议回结果工作台结合图片确认。' : '当前可以回工作台首页继续主链。'));
   const issueSummary = String(workspaceState?.risk?.summary || '').trim()
-    || buildExceptionIssueSummary({ totalIssueCount });
+    || (failedCount > 0
+      ? buildExceptionIssueSummary({ totalIssueCount })
+      : (reviewCount > 0 ? '当前需要优先复核边界结果。' : '当前没有明显异常压力。'));
   const cockpitSummary = buildExceptionCockpitSummary({
     statusLabel,
     statusTone,
@@ -737,7 +749,7 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
     statusSummary,
     issueSummary,
     currentFocus,
-    nextStepLabel: exceptionNextAction.summaryLabel,
+    nextStepLabel: exceptionAction.summaryLabel,
     nextStepReason,
     failedCount,
     reviewCount,
@@ -750,7 +762,7 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
     totalIssueCount,
     failedCount,
     issueSummary,
-    nextActionLabel: exceptionNextAction.summaryLabel,
+    nextActionLabel: exceptionAction.summaryLabel,
     nextActionSummary: nextStepReason,
   });
 
@@ -767,10 +779,10 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
       : '异常层负责异常确认与回工作台交接。',
     actionSummary: exceptionAction.summaryLabel,
     nextStepReason,
-    primaryActionKey: failedCount > 0 ? 'resolve_failed' : 'review_exception',
-    nextStepLabel: exceptionNextAction.summaryLabel,
+    primaryActionKey: exceptionActionKey,
+    nextStepLabel: exceptionAction.summaryLabel,
     primaryAction: {
-      key: failedCount > 0 ? 'resolve_failed' : 'review_exception',
+      key: exceptionActionKey,
       label: exceptionAction.actionLabel,
       cta: exceptionAction.ctaLabel,
       summary: nextStepReason || String(workspaceState?.risk?.summary || '').trim(),
@@ -791,9 +803,11 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
       progress: statusSummary,
       status: failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'),
       taskLabel: workspaceState?.taskLabel,
-      nextActionLabel: exceptionNextAction.summaryLabel,
+      nextActionLabel: exceptionAction.summaryLabel,
       nextActionReason: nextStepReason,
-      nextActionTarget: 'workspace_home.html',
+      nextActionTarget: failedCount > 0
+        ? 'exception_workspace.html'
+        : (reviewCount > 0 ? 'result_workspace.html' : 'workspace_home.html'),
       recommendedReply: exceptionConfirmationPlan.recommendedReply,
       actionReason: exceptionConfirmationPlan.summary,
       dialogueSummary: exceptionConfirmationPlan.summary,
@@ -1223,15 +1237,18 @@ function buildExceptionStageRelay(exceptionSummary, options = {}) {
   const handoffToNext = options.handoffToNext || {};
   const route = options.route || {};
   const nextStep = toArray(route.nextSteps)[0] || {};
+  const failedCount = Number(exceptionSummary?.failedCount || 0);
+  const reviewCount = Number(exceptionSummary?.reviewCount || 0);
+  const primaryReply = failedCount > 0
+    ? '继续，先处理失败项'
+    : (reviewCount > 0 ? '继续，回结果工作台复核' : '继续，回工作台首页');
   const cadence = buildStageCadence({
     recommendedReply: confirmationState.recommendedReply,
     summary: exceptionSummary?.nextStepReason || confirmationState.summary || exceptionSummary?.issueSummary,
-    directReplies: [
-      Number(exceptionSummary?.failedCount || 0) > 0 ? '继续，先处理失败项' : '继续，回结果工作台复核',
-    ],
+    directReplies: [primaryReply],
     digestItems: [
       String(exceptionSummary?.currentFocus || '').trim(),
-      `问题概况：${Number(exceptionSummary?.failedCount || 0)} 失败 / ${Number(exceptionSummary?.reviewCount || 0)} 待复核 / ${Number(exceptionSummary?.rerunCount || 0)} 补跑候选`,
+      `问题概况：${failedCount} 失败 / ${reviewCount} 待复核 / ${Number(exceptionSummary?.rerunCount || 0)} 补跑候选`,
     ],
   });
   return buildStageRelay({
@@ -1252,7 +1269,9 @@ function buildExceptionStageRelay(exceptionSummary, options = {}) {
       [
         `问题概况：${Number(exceptionSummary?.failedCount || 0)} 失败 / ${Number(exceptionSummary?.reviewCount || 0)} 待复核 / ${Number(exceptionSummary?.rerunCount || 0)} 补跑候选`,
         String(exceptionSummary?.currentFocus || '').trim() ? `当前重点：${String(exceptionSummary.currentFocus).trim()}` : '',
-        Number(exceptionSummary?.failedCount || 0) > 0 ? '硬失败会直接阻塞工作台继续判断，优先级最高。' : '当前主要剩余人工复核与是否补跑的判断。',
+        failedCount > 0
+          ? '硬失败会直接阻塞工作台继续判断，优先级最高。'
+          : (reviewCount > 0 ? '当前主要剩余人工复核与是否补跑的判断。' : '当前没有明显异常，可以交回工作台首页继续主链判断。'),
       ],
     ),
     nextTitle: String(handoffToNext.confirmedTitle || '').trim() || '完成后送去',
@@ -2883,7 +2902,9 @@ function buildExceptionActionStatus(workspaceState, routes, rerunCandidates, opt
   const reviewCount = Number(workspaceState?.counts?.needsReview || 0);
   const rerunCount = Array.isArray(rerunCandidates) ? rerunCandidates.length : 0;
   const hasStoryboard = Boolean(options.hasStoryboard);
-  const primaryAction = failedCount > 0 ? buildActionLanguage('resolve_failed') : buildActionLanguage('review_exception');
+  const primaryAction = failedCount > 0
+    ? buildActionLanguage('resolve_failed')
+    : (reviewCount > 0 ? buildActionLanguage('review_exception') : buildActionLanguage('go_home'));
   const reviewAction = buildActionLanguage('view_review_items');
   const rerunAction = buildActionLanguage('view_rerun_candidates');
   const storyboardAction = buildActionLanguage('go_storyboard');
@@ -2895,10 +2916,10 @@ function buildExceptionActionStatus(workspaceState, routes, rerunCandidates, opt
       title: primaryAction.actionLabel,
       summary: failedCount > 0
         ? interaction.action.primaryFailed
-        : interaction.action.primaryClear,
-      file: failedCount > 0 ? routes.exception : routes.result,
+        : (reviewCount > 0 ? interaction.action.primaryClear : '当前没有明显异常，回工作台首页继续主链判断。'),
+      file: failedCount > 0 ? routes.exception : (reviewCount > 0 ? routes.result : routes.home),
       cta: primaryAction.ctaLabel,
-      tone: failedCount > 0 ? 'bad' : 'good',
+      tone: failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'),
     },
     secondary: [
       reviewCount > 0 ? {
@@ -3043,11 +3064,19 @@ function buildExceptionBackToMainlineTransitionStatus(exceptionSummary, resultSu
   const rerunCount = Number(exceptionSummary?.rerunCount || 0);
   const returnLabel = String(options.returnLabel || '').trim() || '回结果工作台';
   const hasStoryboard = Boolean(options.hasStoryboard);
+  const title = String(options.title || '').trim()
+    || (reviewCount > 0 && failedCount === 0
+      ? '待复核项送回结果工作台前先确认什么'
+      : language.backToMainlineTitle);
+  const nextFocusTitle = String(options.nextFocusTitle || '').trim()
+    || (reviewCount > 0 && failedCount === 0
+      ? '回结果工作台后先看'
+      : language.backToMainlineNextFocusTitle);
   return buildTransitionStatus({
-    title: language.backToMainlineTitle,
+    title,
     copy: panelLanguage.transitionCopy,
     confirmedTitle: language.backToMainlineConfirmedTitle,
-    nextFocusTitle: language.backToMainlineNextFocusTitle,
+    nextFocusTitle,
     confirmedItems: buildExceptionBackToMainlineConfirmedItems({
       failedCount,
       reviewCount,
@@ -6892,14 +6921,25 @@ function main() {
       ? buildActionLanguage('go_exception')
       : resolvePrimaryActionLanguage({ target: nextAction.target }, { hasStoryboard, outputDir })).ctaLabel,
   });
+  const exceptionNextAction = exceptionSummary.unifiedStatus?.nextAction || {};
+  const exceptionNextActionTarget = String(exceptionNextAction.target || '').trim();
+  const exceptionNextActionFile = exceptionNextActionTarget
+    ? path.join(outputDir, exceptionNextActionTarget)
+    : (hasStoryboard ? routes.storyboard : routes.home);
+  const exceptionNextActionLanguage = resolvePrimaryActionLanguage(
+    { target: exceptionNextActionTarget || (hasStoryboard ? 'storyboard_board.html' : 'workspace_home.html') },
+    { hasStoryboard, outputDir }
+  );
   const exceptionRoutePlan = buildExceptionRoutePlan({
     hasStoryboard,
     currentLabel: exceptionSummary.statusLabel,
     currentSummary: exceptionSummary.issueSummary || exceptionSummary.statusSummary,
     resultFile: routes.result,
     previousCta: buildActionLanguage('review_exception').ctaLabel,
-    file: hasStoryboard ? routes.storyboard : routes.home,
-    nextCta: (hasStoryboard ? buildActionLanguage('go_storyboard') : buildActionLanguage('go_home')).ctaLabel,
+    nextActionLabel: exceptionNextAction.label || exceptionSummary.nextStepLabel,
+    nextActionReason: exceptionNextAction.reason || exceptionSummary.nextStepReason,
+    file: exceptionNextActionFile,
+    nextCta: exceptionNextActionLanguage.ctaLabel,
   });
   const homeWorkbenchCards = buildHomeWorkbenchPlan({
     hasPrepare,

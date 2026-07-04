@@ -41,6 +41,16 @@ function readText(filePath) {
   return fs.readFileSync(path.resolve(filePath), 'utf8');
 }
 
+function normalizeReportPath(filePath, skillRoot) {
+  if (!filePath) return null;
+  const absolutePath = path.resolve(filePath);
+  const relativePath = path.relative(path.resolve(skillRoot), absolutePath);
+  if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+    return relativePath.replace(/\\/g, '/');
+  }
+  return path.basename(absolutePath);
+}
+
 function collectDocSections(markdownText) {
   return markdownText
     .split(/\r?\n/)
@@ -124,12 +134,14 @@ function main() {
   const registryPath = path.resolve(args['registry-file'] || path.join(__dirname, '..', 'references', 'template_registry_zh.json'));
   const skillRoot = path.resolve(args['skill-root'] || path.join(__dirname, '..'));
   const outputPath = path.resolve(args['output-file'] || path.join(path.dirname(registryPath), 'template_registry_validation_report.json'));
+  const registryReportPath = normalizeReportPath(registryPath, skillRoot);
+  const skillRootReportPath = '.';
 
   const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
   const templates = ensureArray(registry.templates);
   const report = {
-    registryPath,
-    skillRoot,
+    registryPath: registryReportPath,
+    skillRoot: skillRootReportPath,
     templateCount: templates.length,
     ok: true,
     errorCount: 0,
@@ -155,7 +167,7 @@ function main() {
       family: String(template.family || '').trim(),
       category: String(template.category || '').trim(),
       templateDoc: String(template.template_doc || '').trim() || null,
-      docPath: doc.path,
+      docPath: normalizeReportPath(doc.path, skillRoot),
       docExists: doc.exists,
       docSections: doc.sections,
       missingDocSections: doc.missingSections,

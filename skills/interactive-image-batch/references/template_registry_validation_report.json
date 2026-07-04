@@ -1,6 +1,6 @@
 {
-  "registryPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/template_registry_zh.json",
-  "skillRoot": "/Users/apple/Progame/newfeng/skills/interactive-image-batch",
+  "registryPath": "references/template_registry_zh.json",
+  "skillRoot": ".",
   "templateCount": 22,
   "ok": true,
   "errorCount": 0,
@@ -12,7 +12,7 @@
       "family": "brand-visual",
       "category": "poster-and-campaigns",
       "templateDoc": "references/templates/poster-and-campaigns/campaign-poster.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/poster-and-campaigns/campaign-poster.md",
+      "docPath": "references/templates/poster-and-campaigns/campaign-poster.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -36,7 +36,7 @@
       "family": "portrait-fashion",
       "category": "portraits-and-characters",
       "templateDoc": "references/templates/portraits-and-characters/studio-editorial.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/portraits-and-characters/studio-editorial.md",
+      "docPath": "references/templates/portraits-and-characters/studio-editorial.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -60,7 +60,7 @@
       "family": "product-commerce",
       "category": "product-visuals",
       "templateDoc": "references/templates/product-visuals/ecommerce-clean.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/product-visuals/ecommerce-clean.md",
+      "docPath": "references/templates/product-visuals/ecommerce-clean.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -84,7 +84,7 @@
       "family": "brand-visual",
       "category": "grids-and-collages",
       "templateDoc": "references/templates/grids-and-collages/lookbook.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/grids-and-collages/lookbook.md",
+      "docPath": "references/templates/grids-and-collages/lookbook.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -108,7 +108,7 @@
       "family": "portrait-fashion",
       "category": "portraits-and-characters",
       "templateDoc": "references/templates/portraits-and-characters/portrait-kv.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/portraits-and-characters/portrait-kv.md",
+      "docPath": "references/templates/portraits-and-characters/portrait-kv.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -132,7 +132,7 @@
       "family": "editing-ops",
       "category": "editing-workflows",
       "templateDoc": "references/templates/editing-workflows/image-edit.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/editing-workflows/image-edit.md",
+      "docPath": "references/templates/editing-workflows/image-edit.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -156,7 +156,7 @@
       "family": "storyboard-sequence",
       "category": "cinematic-sequences",
       "templateDoc": "references/templates/cinematic-sequences/oral-storyboard-board.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/cinematic-sequences/oral-storyboard-board.md",
+      "docPath": "references/templates/cinematic-sequences/oral-storyboard-board.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -183,7 +183,7 @@
       "family": "storyboard-sequence",
       "category": "cinematic-sequences",
       "templateDoc": "references/templates/cinematic-sequences/cinematic-storyboard.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/cinematic-sequences/cinematic-storyboard.md",
+      "docPath": "references/templates/cinematic-sequences/cinematic-storyboard.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -207,7 +207,7 @@
       "family": "social-performance",
       "category": "social-campaigns",
       "templateDoc": "references/templates/social-campaigns/social-grid.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/social-campaigns/social-grid.md",
+      "docPath": "references/templates/social-campaigns/social-grid.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -231,7 +231,7 @@
       "family": "social-performance",
       "category": "performance-creatives",
       "templateDoc": "references/templates/performance-creatives/ab-ad-test.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/performance-creatives/ab-ad-test.md",
+      "docPath": "references/templates/performance-creatives/ab-ad-test.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -255,7 +255,7 @@
       "family": "product-commerce",
       "category": "product-visuals",
       "templateDoc": "references/templates/product-visuals/detail-page-set.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/product-visuals/detail-page-set.md",
+      "docPath": "references/templates/product-visuals/detail-page-set.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -279,7 +279,7 @@
       "family": "ui-interface",
       "category": "ui-mockups",
       "templateDoc": "references/templates/ui-mockups/ui-mockup-board.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/ui-mockups/ui-mockup-board.md",
+      "docPath": "references/templates/ui-mockups/ui-mockup-board.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -303,7 +303,7 @@
       "family": "information-design",
       "category": "infographics",
       "templateDoc": "references/templates/infographics/infographic-board.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/infographics/infographic-board.md",
+      "docPath": "references/templates/infographics/infographic-board.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -327,7 +327,7 @@
       "family": "technical-explainer",
       "category": "technical-diagrams",
       "templateDoc": "references/templates/technical-diagrams/technical-diagram.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/technical-diagrams/technical-diagram.md",
+      "docPath": "references/templates/technical-diagrams/technical-diagram.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -351,7 +351,7 @@
       "family": "identity-assets",
       "category": "avatars-and-profile",
       "templateDoc": "references/templates/avatars-and-profile/avatar-profile-pack.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/avatars-and-profile/avatar-profile-pack.md",
+      "docPath": "references/templates/avatars-and-profile/avatar-profile-pack.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -375,7 +375,7 @@
       "family": "visual-docs",
       "category": "slides-and-visual-docs",
       "templateDoc": "references/templates/slides-and-visual-docs/visual-doc-slide.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/slides-and-visual-docs/visual-doc-slide.md",
+      "docPath": "references/templates/slides-and-visual-docs/visual-doc-slide.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -399,7 +399,7 @@
       "family": "academic-figures",
       "category": "academic-figures",
       "templateDoc": "references/templates/academic-figures/academic-figure-board.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/academic-figures/academic-figure-board.md",
+      "docPath": "references/templates/academic-figures/academic-figure-board.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -423,7 +423,7 @@
       "family": "brand-packaging",
       "category": "branding-and-packaging",
       "templateDoc": "references/templates/branding-and-packaging/brand-packaging-board.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/branding-and-packaging/brand-packaging-board.md",
+      "docPath": "references/templates/branding-and-packaging/brand-packaging-board.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -447,7 +447,7 @@
       "family": "illustrated-scenes",
       "category": "scenes-and-illustrations",
       "templateDoc": "references/templates/scenes-and-illustrations/illustrated-scene-set.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/scenes-and-illustrations/illustrated-scene-set.md",
+      "docPath": "references/templates/scenes-and-illustrations/illustrated-scene-set.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -471,7 +471,7 @@
       "family": "map-and-route",
       "category": "maps",
       "templateDoc": "references/templates/maps/map-route-board.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/maps/map-route-board.md",
+      "docPath": "references/templates/maps/map-route-board.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -495,7 +495,7 @@
       "family": "typography-layout",
       "category": "typography-and-text-layout",
       "templateDoc": "references/templates/typography-and-text-layout/type-layout-poster.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/typography-and-text-layout/type-layout-poster.md",
+      "docPath": "references/templates/typography-and-text-layout/type-layout-poster.md",
       "docExists": true,
       "docSections": [
         "适用范围",
@@ -519,7 +519,7 @@
       "family": "prop-assets",
       "category": "assets-and-props",
       "templateDoc": "references/templates/assets-and-props/asset-prop-sheet.md",
-      "docPath": "/Users/apple/Progame/newfeng/skills/interactive-image-batch/references/templates/assets-and-props/asset-prop-sheet.md",
+      "docPath": "references/templates/assets-and-props/asset-prop-sheet.md",
       "docExists": true,
       "docSections": [
         "适用范围",

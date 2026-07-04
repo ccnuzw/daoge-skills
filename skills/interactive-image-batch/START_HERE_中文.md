@@ -7,17 +7,17 @@
 3. 我应该运行哪条命令
 4. 跑完以后应该看哪个结果
 
-如果你是第一次用这套 skill，**先看这份，不要先看大 README，也不要先看 100 多个 example。**
+如果你是第一次用这套批量生图能力，**先看这份，不要先看大 README，也不要先看 100 多个示例。**
 
 如果你已经知道自己属于哪类任务，但不知道系统里的名字怎么对应，再看：
 
 - [references/template_map_zh.md](./references/template_map_zh.md)
 
-如果你更习惯先看可视化模板板，再做选择，也可以直接打开：
+如果你更习惯先看可视化任务展示板，再做选择，也可以直接打开：
 
 - `references/examples/examples_catalog.html`
 
-这份中文模板展示板随 `interactive-image-batch` 一起安装，不是额外下载物。
+这份中文任务展示板随 `interactive-image-batch` 一起安装，不是额外下载物。
 
 ---
 
@@ -37,22 +37,13 @@
 6. `workspace/exception_workspace.html`
 7. `workspace/run_record.html`
 
-新 DAOGE 只有这条 workspace-first 主链。退役入口不再是产品入口，也不会在默认、深看或完整展开模式中重新生成。
+新 DAOGE 只有这条“先看工作台”的主链。退役入口不再是产品入口，也不会在默认、深看或完整展开模式中重新生成。
 
-你不需要一开始就理解：
-
-- `template_registry`
-- `variant_axes`
-- `prompt_slots`
-- `prompt_draft_bundle`
-- `family`
-- `tier`
-
-这些是维护层概念，不是第一次使用必须理解的东西。
+你不需要一开始就理解任务地图、细分版本、素材位、提示词草稿包、任务家族、层级这些维护层概念。第一次使用只要先选任务类型，再沿工作台往下走。
 
 ---
 
-## 二、第一次使用，推荐你只用这 3 种入口
+## 二、第一次使用，推荐你只用这 4 种入口
 
 ### 入口 1：看最常用的 6 个起步任务
 
@@ -62,7 +53,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 适合：
 
-- 你不知道该选哪个模板
+- 你不知道该选哪个任务类型
 - 你希望第一屏只看到最常用、最不容易选错的入口
 
 当前默认只列这 6 个：
@@ -83,7 +74,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 - `references/examples/examples_catalog.html`
 
-它更像一块中文模板选择展示板，适合先浏览，再决定用哪个 `intent` 或 `example-id`。
+它更像一块中文任务选择展示板，适合先浏览，再决定用哪个起步入口或示例入口。
 
 ---
 
@@ -124,7 +115,7 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 
 ---
 
-### 入口 3：按具体 example 直接跑
+### 入口 3：按具体示例入口直接跑
 
 如果你已经知道要跑哪个入口，可以直接：
 
@@ -137,13 +128,13 @@ node scripts/run_example_catalog_prepare.js \
 适合：
 
 - 你已经熟悉这套系统
-- 你已经知道具体 example id
+- 你已经知道具体示例入口
 
 ---
 
-### 入口 4：先看中文模板展示板再决定
+### 入口 4：先看中文任务展示板再决定
 
-如果你现在最卡的是“我不知道该选哪个模板”，优先直接打开：
+如果你现在最卡的是“我不知道该选哪个任务类型”，优先直接打开：
 
 ```text
 references/examples/examples_catalog.html
@@ -151,15 +142,15 @@ references/examples/examples_catalog.html
 
 适合：
 
-- 你更习惯先按视觉浏览模板
-- 你不想先记 `intent`
-- 你想先从中文版模板板里挑一个，再回头运行命令
+- 你更习惯先按视觉浏览任务类型
+- 你不想先记起步入口参数
+- 你想先从中文任务展示板里挑一个，再回头运行命令
 
 ---
 
 ## 三、怎么判断自己属于哪类任务
 
-先按中文任务想，不要先按模板名想。
+先按中文任务想，不要先按内部任务类型名想。
 
 ### 人物与品牌视觉
 
@@ -301,7 +292,7 @@ references/examples/examples_catalog.html
 node scripts/run_example_catalog_prepare.js --starter true
 ```
 
-看完推荐入口，再挑一个 example id 跑。
+看完推荐入口，再挑一个示例入口跑。
 
 ### 方法 B：最快
 
@@ -329,15 +320,15 @@ node scripts/render_example_catalog_board.js
 
 先不要：
 
-- 直接读 `template_registry_zh.json`
+- 直接读任务地图源文件 `template_registry_zh.json`
 - 直接读全部 `examples.catalog.json`
-- 一开始就理解所有 `variant`
+- 一开始就理解所有细分版本
 - 试图从 100 多个入口里盲选
 
 正确顺序是：
 
 1. 先按任务类型判断自己属于哪类
-2. 再选一个 starter / intent
+2. 再选一个起步入口
 3. 先看预检面板
 4. 再决定是否继续执行
 

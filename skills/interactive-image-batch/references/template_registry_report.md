@@ -6,7 +6,7 @@
 - 模板总数: 22
 - 错误数: 0
 - 警告数: 0
-- 注册表路径: /Users/apple/Progame/newfeng/skills/interactive-image-batch/references/template_registry_zh.json
+- 注册表路径: references/template_registry_zh.json
 
 ## 2. 分类分布
 

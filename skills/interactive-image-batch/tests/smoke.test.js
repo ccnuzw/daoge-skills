@@ -1622,7 +1622,8 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.equal(workspaceState.result?.confirmationState?.stageLabel, '结果阶段');
   assert.equal(workspaceState.result?.confirmationState?.recommendedReply, '继续，回工作台首页');
   assert.equal(workspaceState.exception?.confirmationState?.stageLabel, '异常阶段');
-  assert.equal(workspaceState.exception?.confirmationState?.recommendedReply, '继续，回结果工作台复核');
+  assert.equal(workspaceState.exception?.confirmationState?.recommendedReply, '继续，回工作台首页');
+  assert.equal(workspaceState.exception?.unifiedStatus?.nextAction?.target, 'workspace_home.html');
   assert.match(String(workspaceState.prepare?.confirmationState?.summary || ''), /准备层/);
   assert.match(String(workspaceState.result?.confirmationState?.summary || ''), /结果层/);
   assert.match(String(workspaceState.exception?.confirmationState?.summary || ''), /异常层/);
@@ -3737,6 +3738,65 @@ test('build_workspace_state promotes host-native as an official mainline mode', 
   assert.match(runRecordHtml, /host-native/);
   assert.match(runRecordMarkdown, /特殊工作流定位/);
   assert.match(runRecordMarkdown, /host-native: 当前启用/);
+});
+
+test('build_workspace_state keeps exception next action aligned for review-only runs', () => {
+  const tempDir = makeTempDir('interactive-image-batch-exception-review-only-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const workspaceStateFile = path.join(outputDir, 'workspace_state.json');
+  const workspaceAssetsFile = path.join(outputDir, 'workspace_assets.json');
+  const workspaceTimelineFile = path.join(outputDir, 'workspace_timeline.json');
+  const workbenchStateFile = path.join(outputDir, 'workbench_state.json');
+  const reviewImage = path.join(outputDir, 'review.png');
+
+  fs.writeFileSync(reviewImage, Buffer.from(tinyPngBase64(), 'base64'));
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    selectedCount: 1,
+    success: 1,
+    failed: 0,
+    generatedAt: '2026-05-27T09:00:00.000Z',
+  }, null, 2));
+  fs.writeFileSync(path.join(outputDir, 'success.json'), JSON.stringify([
+    {
+      ok: true,
+      index: '001',
+      title: 'Review Item',
+      output: reviewImage,
+      requestMode: 'masked-edit',
+      slotId: 'shot_1',
+    },
+  ], null, 2));
+  fs.writeFileSync(path.join(outputDir, 'needs_review.json'), JSON.stringify([
+    {
+      ok: true,
+      index: '001',
+      title: 'Review Item',
+      output: reviewImage,
+      requestMode: 'masked-edit',
+      slotId: 'shot_1',
+    },
+  ], null, 2));
+  fs.writeFileSync(path.join(outputDir, 'failed.json'), '[]');
+
+  runNode('build_workspace_state.js', [
+    '--manifest-file', manifestFile,
+    '--output-dir', outputDir,
+    '--workspace-state-file', workspaceStateFile,
+    '--workspace-assets-file', workspaceAssetsFile,
+    '--workspace-timeline-file', workspaceTimelineFile,
+    '--workbench-state-file', workbenchStateFile,
+  ]);
+
+  const workspaceState = JSON.parse(fs.readFileSync(workspaceStateFile, 'utf8'));
+  assert.equal(workspaceState.exception?.primaryAction?.key, 'review_exception');
+  assert.equal(workspaceState.exception?.unifiedStatus?.nextAction?.target, 'result_workspace.html');
+  assert.equal(workspaceState.views?.exception?.actionStatus?.primary?.file, path.join(outputDir, 'result_workspace.html'));
+  assert.equal(workspaceState.views?.exception?.route?.nextSteps?.[0]?.file, path.join(outputDir, 'result_workspace.html'));
+  assert.match(String(workspaceState.views?.exception?.stageRelay?.nextLabel || ''), /结果工作台/);
 });
 
 test('ingest_host_native_results mirrors workspace layout and keeps mirror navigation usable', () => {

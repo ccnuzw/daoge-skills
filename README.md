@@ -2,7 +2,7 @@
 
 DAOGE Skills 是一个面向 Codex 的技能仓库，目前主打中文工作流下的批量生图能力。
 
-当前仓库包含的核心 skill：
+当前仓库包含的核心能力：
 
 - `skills/interactive-image-batch`
 
@@ -12,7 +12,7 @@ DAOGE Skills 是一个面向 Codex 的技能仓库，目前主打中文工作流
 - 带参考图的图生图
 - 带 mask 的局部重绘
 - 口播分镜板 / 故事板 / 连续分镜任务
-- 从 Markdown 提示词库生成成批 prompts
+- 从 Markdown 提示词库生成成批提示词
 - 带预检、预览、分批执行、失败续跑、结果汇总的稳定工作流
 
 ---
@@ -28,7 +28,7 @@ DAOGE Skills 是一个面向 Codex 的技能仓库，目前主打中文工作流
 DAOGE 走的是另一条路线：
 
 - 先把需求结构化
-- 再把 prompt 分发策略显式化
+- 再把提示词分发策略显式化
 - 再批量执行
 - 最后把失败、复跑、看板、结果归档全部做出来
 
@@ -36,25 +36,25 @@ DAOGE 走的是另一条路线：
 
 ---
 
-## 当前包含的 skill
+## 当前包含的能力
 
 ### `interactive-image-batch`
 
-这是仓库当前的主 skill，能力包括：
+这是仓库当前的主能力，能力包括：
 
-- 中文优先的对话式 intake
-- `task_spec.json` / `prompt_strategy.json` / `prompts.generated.json` 工作流
-- prompt preview / preflight dashboard
-- batch / staged run / sample run
-- retry / timeout / concurrency / skip-existing
-- failure rerun / resume manifest
-- storyboard / reference bindings / slot-based generation
+- 中文优先的对话式需求收集
+- 任务说明 / 提示词策略 / 成批提示词工作流
+- 提示词预览 / 执行前检查
+- 分批执行 / 分阶段执行 / 小样测试
+- 重试 / 超时 / 并发 / 跳过已有结果
+- 失败补跑 / 运行记录续跑
+- 分镜 / 参考图绑定 / 按素材位生成
 - 文生图 / 图生图 / 局部重绘
 
 完整说明见：
 
+- [`skills/interactive-image-batch/START_HERE_中文.md`](./skills/interactive-image-batch/START_HERE_中文.md)
 - [`skills/interactive-image-batch/README.md`](./skills/interactive-image-batch/README.md)
-- [`skills/interactive-image-batch/SKILL.md`](./skills/interactive-image-batch/SKILL.md)
 
 ---
 
@@ -176,10 +176,9 @@ OPENAI_RESPONSES_MODEL=gpt-5.4
 如果你是第一次接触这个仓库，建议按这个顺序看：
 
 1. 仓库首页 `README.md`
-2. `skills/interactive-image-batch/README.md`
-3. `skills/interactive-image-batch/SKILL.md`
-4. `skills/interactive-image-batch/references/`
-5. `skills/interactive-image-batch/scripts/`
+2. `skills/interactive-image-batch/START_HERE_中文.md`
+3. `skills/interactive-image-batch/references/template_map_zh.md`
+4. `skills/interactive-image-batch/README.md`
 
 ---
 

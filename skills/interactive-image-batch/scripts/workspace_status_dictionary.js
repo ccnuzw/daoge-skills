@@ -1340,6 +1340,8 @@ function buildExceptionRoutePlan(options = {}) {
   const hasStoryboard = Boolean(options.hasStoryboard);
   const currentLabel = String(options.currentLabel || '异常层当前已完成判断').trim() || '异常层当前已完成判断';
   const currentSummary = String(options.currentSummary || '这里先把问题收清，再决定回工作台还是继续看上下文。').trim() || '这里先把问题收清，再决定回工作台还是继续看上下文。';
+  const nextActionLabel = String(options.nextActionLabel || '').trim();
+  const nextActionReason = String(options.nextActionReason || '').trim();
   return {
     current: {
       kicker: '当前判断',
@@ -1356,8 +1358,8 @@ function buildExceptionRoutePlan(options = {}) {
     nextSteps: [
       {
         kicker: '推荐下一步',
-        label: hasStoryboard ? '分镜整板补充页' : '工作台首页',
-        summary: hasStoryboard ? '当问题和镜头衔接有关时，回分镜整板补充页更容易看出上下文。' : '如果问题已经判断清楚，可以回首页重新进入主链。',
+        label: nextActionLabel || (hasStoryboard ? '分镜整板补充页' : '工作台首页'),
+        summary: nextActionReason || (hasStoryboard ? '当问题和镜头衔接有关时，回分镜整板补充页更容易看出上下文。' : '如果问题已经判断清楚，可以回首页重新进入主链。'),
         file: String(options.file || '').trim() || (hasStoryboard ? 'storyboard_board.html' : 'workspace_home.html'),
         cta: String(options.nextCta || '现在继续').trim() || '现在继续',
       },

@@ -58,14 +58,14 @@ node scripts/run_example_catalog_prepare.js --intent cinematic
 node scripts/run_example_catalog_prepare.js --intent oralboard
 ```
 
-`interactive-image-batch` 是一套面向 DAOGE / 刀哥工作流的批量生图 skill。
+`interactive-image-batch` 是一套面向 DAOGE / 刀哥工作流的批量生图能力。
 
-它不是一个“只会读 prompts.json 然后盲跑接口”的简易脚本，而是一套完整的批量生图工作流：
+它不是一个“只会读提示词文件然后盲跑接口”的简易脚本，而是一套完整的批量生图工作流：
 
 - 对话式参数收集
-- `task_spec.json` 规范化
-- `prompt_strategy.json` 分发策略
-- `prompts.generated.json` 生成
+- 任务说明规范化
+- 提示词分发策略
+- 成批提示词生成
 - 批次执行与失败续跑
 - 预检、预览、看板、结果汇总
 - 文生图 / 图生图 / 分镜板 / 局部重绘 的统一编排
@@ -78,14 +78,14 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 
 ## 适合什么场景
 
-这个 skill 适合下面几类任务：
+这套能力适合下面几类任务：
 
 - 批量文生图
 - 带参考图的图生图
 - 带 mask 的局部重绘
 - 分镜板 / 口播分镜 / 故事板生成
-- 从 Markdown 提示词库批量生成 prompts
-- 多模板、多风格、多批次的可控出图
+- 从 Markdown 提示词库批量生成提示词
+- 多任务类型、多风格、多批次的可控出图
 
 尤其适合：
 
@@ -100,7 +100,7 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 
 ### 1. 结构化准备阶段
 
-不是直接对用户输入做一次性 prompt 拼接，而是拆成多个中间产物：
+不是直接对用户输入做一次性提示词拼接，而是拆成多个中间产物：
 
 - `task_spec.json`
 - `prompt_strategy.json`
@@ -117,7 +117,7 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 - `reference_images`
 - `mask_image`
 - `reference_bindings.json`
-- 分镜 slot 绑定
+- 分镜格 / 素材位绑定
 - continuity / camera move / shot id 等结构字段
 
 适合做：

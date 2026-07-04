@@ -4,10 +4,10 @@
 
 - 我脑子里的任务，应该映射到哪个入口
 - 哪个是起步入口
-- 哪个是细分变体
-- 我什么时候该停在 starter，什么时候再往下选 variant
+- 哪个是细分版本
+- 我什么时候该停在起步入口，什么时候再往下选细分版本
 
-如果你是普通使用者，这份文档比 `template_registry_zh.json` 更适合看。
+如果你是普通使用者，这份文档比任务地图源文件更适合看。
 
 ---
 
@@ -30,7 +30,7 @@
 
 这是**普通用户最应该先思考的一层**。
 
-### 2. starter / intent
+### 2. 起步入口
 
 这是最适合直接起步的入口，比如：
 
@@ -43,9 +43,9 @@
 
 这是**第一次使用最推荐的层**。
 
-### 3. template
+### 3. 任务类型名
 
-这是系统内部的主链模板名，比如：
+这是系统内部的任务类型名，比如：
 
 - `portrait-kv`
 - `studio-editorial`
@@ -57,9 +57,9 @@
 - 你已经明确自己属于哪条任务主线
 - 你准备继续细分
 
-### 4. variant
+### 4. 细分版本
 
-这是模板下的正式变体，比如：
+这是任务类型下的细分版本，比如：
 
 - `portrait-kv-headline-safe-portrait-kv`
 - `studio-editorial-beauty-detail-studio`
@@ -82,7 +82,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 默认第一屏只保留 6 个最常用起步入口：
 
-| 中文任务 | intent | 主链模板 |
+| 中文任务 | 起步入口 | 任务类型名 |
 |---|---|---|
 | 肖像主视觉 | `portrait` | `portrait-kv` |
 | 棚拍大片 | `studio` | `studio-editorial` |
@@ -93,7 +93,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 如果这 6 个都不符合，再继续看完整推荐起步任务：
 
-| 中文任务 | intent | 主链模板 |
+| 中文任务 | 起步入口 | 任务类型名 |
 |---|---|---|
 | UI 界面视觉稿 | `ui` | `ui-mockup-board` |
 | 学术图板 | `academic` | `academic-figure-board` |
@@ -119,11 +119,11 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 ---
 
-## 三、按中文任务找主链模板
+## 三、按中文任务找任务类型名
 
 ### 人物与时尚视觉
 
-| 中文任务 | 主链模板 | 什么时候用 |
+| 中文任务 | 任务类型名 | 什么时候用 |
 |---|---|---|
 | 肖像主视觉 | `portrait-kv` | 近景人物海报、品牌人物封面、人物气质主导的 KV |
 | 棚拍大片 | `studio-editorial` | 摄影棚人物大片、时尚棚拍、美妆棚拍、高定棚拍 |
@@ -131,7 +131,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 ### 电商与商业视觉
 
-| 中文任务 | 主链模板 | 什么时候用 |
+| 中文任务 | 任务类型名 | 什么时候用 |
 |---|---|---|
 | 电商主图 | `ecommerce-clean` | 白底主图、纯净商品图、平台安全主图 |
 | 详情页组图 | `detail-page-set` | 卖点页、对比页、功能堆栈页、场景证明页 |
@@ -142,7 +142,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 ### 信息与说明型视觉
 
-| 中文任务 | 主链模板 | 什么时候用 |
+| 中文任务 | 任务类型名 | 什么时候用 |
 |---|---|---|
 | 信息图 | `infographic-board` | 对比信息图、步骤信息图、手绘信息图、 Bento 信息图 |
 | 技术图解 | `technical-diagram` | 流程图、时序图、ER 图、拓扑图、状态机 |
@@ -153,7 +153,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 ### 资产与编辑
 
-| 中文任务 | 主链模板 | 什么时候用 |
+| 中文任务 | 任务类型名 | 什么时候用 |
 |---|---|---|
 | 头像资产包 | `avatar-profile-pack` | 头像、贴纸、角色头像、3D icon、自拍风格迁移 |
 | 图像编辑 | `image-edit` | 局部修复、材质替换、光线统一、风格对齐 |
@@ -161,7 +161,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 ### 分镜与叙事
 
-| 中文任务 | 主链模板 | 什么时候用 |
+| 中文任务 | 任务类型名 | 什么时候用 |
 |---|---|---|
 | 电影分镜组 | `cinematic-storyboard` | 广告分镜、产品演示分镜、微电影分镜、 reveal 分镜 |
 | 口播分镜整板 | `oral-storyboard-board` | 主持人口播、专家讲解、案例见证、产品解说整板 |
@@ -169,14 +169,14 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 ---
 
-## 四、什么时候该继续选 variant
+## 四、什么时候该继续选细分版本
 
 只有当你已经明确：
 
 - 不是泛任务
 - 而是很具体的业务分型
 
-再往下选 variant。
+再往下选细分版本。
 
 ### 例 1：人物主视觉
 
@@ -249,9 +249,9 @@ node scripts/run_example_catalog_prepare.js --intent portrait
 
 ### 进阶顺序
 
-1. 先确定主链模板
-2. 再判断是否真的需要某个 variant
-3. 再运行具体 `example-id`
+1. 先确定任务类型名
+2. 再判断是否真的需要某个细分版本
+3. 再运行具体示例入口
 
 ---
 
