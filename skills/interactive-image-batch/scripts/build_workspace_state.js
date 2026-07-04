@@ -84,6 +84,7 @@ const {
   getDefaultDialogueTitles,
   getWorkspaceInteractionTemplates,
   getActionLanguage,
+  resolveExceptionDecision,
   buildNextReplyCandidates,
   buildDialogueReplyFallbacks,
   buildPrepareTransitionNextFocusItems,
@@ -243,7 +244,7 @@ function buildEntryBridge(entryState, routes = {}) {
     context: {
       runLabel: normalizeText(entryContext.runLabel, normalizeText(selectedExample.name, '当前还没有选中的入口')),
       phaseLabel: normalizeText(entryContext.phaseLabel, '入口层'),
-      flowLabel: normalizeText(entryContext.flowLabel, mainlineProtocol.sequenceLabel || '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台'),
+      flowLabel: normalizeText(entryContext.flowLabel, mainlineProtocol.sequenceLabel || '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台'),
       counts: Array.isArray(entryContext.counts) ? entryContext.counts : [],
       hints: Array.isArray(entryContext.hints) ? entryContext.hints : [],
     },
@@ -292,7 +293,7 @@ function buildPrepareReadiness(validation) {
   if (!validation || !validation.ok) blockingItems.push('提示词校验还没有完全通过');
   if (errors.length) blockingItems.push(`还有 ${errors.length} 条明确错误`);
   if (missingCount > 0) blockingItems.push(`还有 ${missingCount} 个核心字段缺失`);
-  if (templateMissingCount > 0) blockingItems.push(`还有 ${templateMissingCount} 个模板必填项缺失`);
+  if (templateMissingCount > 0) blockingItems.push(`还有 ${templateMissingCount} 个任务类型必填项缺失`);
   if (sizeIssueCount > 0) blockingItems.push(`还有 ${sizeIssueCount} 个尺寸问题待处理`);
   if (duplicatePromptCount > 0) blockingItems.push(`发现 ${duplicatePromptCount} 条重复提示词`);
   if (slugCollisionCount > 0) blockingItems.push(`发现 ${slugCollisionCount} 个命名冲突`);
@@ -410,7 +411,7 @@ function summarizePrepareState(outputDir, taskSpec, modeDetection, prompts, vali
       stageLabel: '准备阶段',
       stageTone: readiness.tone === 'bad' ? 'bad' : (readiness.tone === 'warn' ? 'warn' : 'good'),
       confirmedItems: [
-        `模板类型: ${templateName}`,
+        `任务类型: ${templateName}`,
         `任务主轴: ${mainDirection}`,
       ],
       pendingItems: prepareConfirmationPlan.pendingItems,
@@ -434,7 +435,7 @@ function summarizePrepareState(outputDir, taskSpec, modeDetection, prompts, vali
     stageLabel: '准备阶段',
     stageTone: readiness.tone === 'bad' ? 'bad' : (readiness.tone === 'warn' ? 'warn' : 'good'),
     confirmedItems: [
-      `模板类型: ${templateName}`,
+      `任务类型: ${templateName}`,
       `任务主轴: ${mainDirection}`,
     ],
     pendingItems: prepareConfirmationPlan.pendingItems,
@@ -511,7 +512,10 @@ function summarizeResultState(manifest, workspaceState, workspaceAssets, reviewI
     : buildActionLanguage('review_result');
   const resultNextAction = failedCount > 0
     ? buildActionLanguage('go_exception')
-    : buildActionLanguage('go_home');
+    : (reviewCount > 0 ? buildActionLanguage('review_result') : buildActionLanguage('go_home'));
+  const resultNextActionTarget = failedCount > 0
+    ? 'exception_workspace.html'
+    : (reviewCount > 0 ? 'result_workspace.html' : 'workspace_home.html');
   const currentFocus = hasCompletedExecution
     ? (failedCount > 0 ? '先看异常与可用性' : '先看保留取舍')
     : '当前还没有正式结果，先确认执行节奏';
@@ -654,7 +658,7 @@ function summarizeResultState(manifest, workspaceState, workspaceAssets, reviewI
       taskLabel: workspaceState?.taskLabel,
       nextActionLabel: resultNextAction.actionLabel,
       nextActionReason: nextStepReason,
-      nextActionTarget: failedCount > 0 ? 'exception_workspace.html' : 'workspace_home.html',
+      nextActionTarget: resultNextActionTarget,
       recommendedReply: resultConfirmationPlan.recommendedReply,
       actionReason: resultConfirmationPlan.summary,
       dialogueSummary: resultConfirmationPlan.summary,
@@ -668,23 +672,30 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
   const failedCount = Number(workspaceState?.counts?.failed || manifest?.failed || 0);
   const reviewCount = Number(workspaceState?.counts?.needsReview || 0);
   const rerunCount = Array.isArray(rerunCandidates) ? rerunCandidates.length : 0;
-  const totalIssueCount = failedCount + reviewCount;
+  const totalIssueCount = failedCount + reviewCount + rerunCount;
   const hasStoryboard = Boolean(options.hasStoryboard);
-  const exceptionActionKey = failedCount > 0
-    ? 'resolve_failed'
-    : (reviewCount > 0 ? 'review_exception' : 'go_home');
-  const exceptionAction = failedCount > 0
-    ? buildActionLanguage('resolve_failed')
-    : (reviewCount > 0 ? buildActionLanguage('review_exception') : buildActionLanguage('go_home'));
-  const currentFocus = failedCount > 0 ? '先处理失败项' : (reviewCount > 0 ? '先确认待复核项' : '当前没有明显异常');
-  const nextStepReason = failedCount > 0
-    ? '先把失败项和补跑判断收口，再回工作台继续。'
-    : (reviewCount > 0
-      ? '回结果工作台结合图片把待复核项确认清楚，再回主链继续。'
-      : '当前异常压力较低，可以回工作台继续。');
+  const exceptionDecision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
+  const exceptionActionKey = exceptionDecision.actionKey;
+  const exceptionAction = buildActionLanguage(exceptionActionKey);
+  const explicitStatus = workspaceState?.status && typeof workspaceState.status === 'object'
+    ? workspaceState.status
+    : {};
+  const explicitPhase = String(explicitStatus.phase || '').trim();
+  const hasExplicitStatusCopy = Boolean(String(
+    explicitStatus.headline
+    || explicitStatus.label
+    || explicitStatus.summary
+    || explicitStatus.tone
+    || ''
+  ).trim());
+  const shouldUseExplicitStatus = Boolean(manifest?.hostNative)
+    || (hasExplicitStatusCopy && !['准备阶段', '结果阶段', '待开始'].includes(explicitPhase));
+  const currentFocus = exceptionDecision.currentFocus;
+  const nextStepReason = exceptionDecision.reason;
   const exceptionConfirmationPlan = buildExceptionConfirmationPlan({
     failedCount,
     reviewCount,
+    rerunCount,
     actionKey: exceptionActionKey,
   });
   const secondaryActionHints = [
@@ -696,43 +707,43 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
     ? '异常层当前主要承担问题收口，不应把未处理的失败项直接送回工作台。'
     : (reviewCount > 0
       ? '异常层当前主要承担复核分流，待复核项需要回结果工作台结合图片判断。'
-      : '异常层已经清空，可以回工作台首页继续主链判断。');
+      : (rerunCount > 0
+        ? '异常层当前主要承担补跑价值判断，只有值得补时才继续补跑。'
+        : '异常层已经清空，可以回工作台首页继续主链判断。'));
   const handoffSummary = failedCount > 0
     ? `异常层会先接住 ${failedCount} 项失败，再决定是否带着 ${rerunCount} 个补跑候选回到工作台。`
     : (reviewCount > 0
       ? `异常层会把 ${reviewCount} 项待复核送回结果工作台，结合图片完成判断。`
-      : '异常层当前压力较低，可以把判断交回工作台继续。');
+      : (rerunCount > 0
+        ? `异常层会把 ${rerunCount} 个补跑候选留在这里做价值判断。`
+        : '异常层当前压力较低，可以把判断交回工作台继续。'));
   const confirmationState = buildConfirmationState({
-    currentIntent: failedCount > 0
-      ? '先收口异常问题'
-      : (reviewCount > 0 ? '回结果工作台复核待复核项' : '回工作台继续判断'),
+    currentIntent: exceptionDecision.currentFocus,
     stageLabel: '异常阶段',
-    stageTone: failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'),
+    stageTone: exceptionDecision.tone,
     confirmedItems: [
       failedCount > 0 ? `失败项: ${failedCount} 项` : '失败项: 当前没有硬失败',
       reviewCount > 0 ? `待复核项: ${reviewCount} 项` : '待复核项: 当前压力较低',
+      rerunCount > 0 ? `补跑候选: ${rerunCount} 项` : '补跑候选: 当前没有明确补跑压力',
     ],
     pendingItems: exceptionConfirmationPlan.pendingItems,
     blockingItems: exceptionConfirmationPlan.blockingItems,
     recommendedReply: exceptionConfirmationPlan.recommendedReply,
     recentEvent: options.timelinePausedEvent || options.timelineResultEvent,
-    canContinue: failedCount === 0,
+    canContinue: exceptionDecision.canContinue,
     summary: exceptionConfirmationPlan.summary,
   });
-  const statusLabel = String(workspaceState?.status?.headline || '').trim()
-    || (failedCount > 0
-      ? buildExceptionStatusLabel({ totalIssueCount })
-      : (reviewCount > 0 ? '建议先复核待确认结果' : '当前没有明显异常'));
-  const statusTone = String(workspaceState?.status?.tone || '').trim()
-    || (failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'));
-  const statusSummary = String(workspaceState?.status?.summary || '').trim()
-    || (failedCount > 0
-      ? buildExceptionStatusSummary({ totalIssueCount })
-      : (reviewCount > 0 ? '当前主要剩余待复核项，建议回结果工作台结合图片确认。' : '当前可以回工作台首页继续主链。'));
+  const statusLabel = (shouldUseExplicitStatus ? String(explicitStatus.headline || explicitStatus.label || '').trim() : '')
+    || exceptionDecision.statusLabel
+    || buildExceptionStatusLabel({ totalIssueCount });
+  const statusTone = (shouldUseExplicitStatus ? String(explicitStatus.tone || '').trim() : '')
+    || exceptionDecision.tone;
+  const statusSummary = (shouldUseExplicitStatus ? String(explicitStatus.summary || '').trim() : '')
+    || exceptionDecision.statusSummary
+    || buildExceptionStatusSummary({ totalIssueCount });
   const issueSummary = String(workspaceState?.risk?.summary || '').trim()
-    || (failedCount > 0
-      ? buildExceptionIssueSummary({ totalIssueCount })
-      : (reviewCount > 0 ? '当前需要优先复核边界结果。' : '当前没有明显异常压力。'));
+    || exceptionDecision.issueSummary
+    || buildExceptionIssueSummary({ totalIssueCount });
   const cockpitSummary = buildExceptionCockpitSummary({
     statusLabel,
     statusTone,
@@ -742,6 +753,8 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
     issueSummary,
     failedCount,
     reviewCount,
+    rerunCount,
+    totalIssueCount,
   });
   const judgment = buildExceptionJudgmentPanel({
     statusLabel,
@@ -751,8 +764,10 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
     currentFocus,
     nextStepLabel: exceptionAction.summaryLabel,
     nextStepReason,
+    rerunCount,
     failedCount,
     reviewCount,
+    totalIssueCount,
     confirmationState,
   });
   const statusStack = buildExceptionStatusStack({
@@ -761,6 +776,8 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
     statusTone,
     totalIssueCount,
     failedCount,
+    reviewCount,
+    rerunCount,
     issueSummary,
     nextActionLabel: exceptionAction.summaryLabel,
     nextActionSummary: nextStepReason,
@@ -801,13 +818,11 @@ function summarizeExceptionState(manifest, workspaceState, rerunCandidates, opti
       conclusion: statusLabel,
       currentFocus,
       progress: statusSummary,
-      status: failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'),
+      status: exceptionDecision.tone,
       taskLabel: workspaceState?.taskLabel,
       nextActionLabel: exceptionAction.summaryLabel,
       nextActionReason: nextStepReason,
-      nextActionTarget: failedCount > 0
-        ? 'exception_workspace.html'
-        : (reviewCount > 0 ? 'result_workspace.html' : 'workspace_home.html'),
+      nextActionTarget: exceptionDecision.nextActionTarget,
       recommendedReply: exceptionConfirmationPlan.recommendedReply,
       actionReason: exceptionConfirmationPlan.summary,
       dialogueSummary: exceptionConfirmationPlan.summary,
@@ -1239,16 +1254,17 @@ function buildExceptionStageRelay(exceptionSummary, options = {}) {
   const nextStep = toArray(route.nextSteps)[0] || {};
   const failedCount = Number(exceptionSummary?.failedCount || 0);
   const reviewCount = Number(exceptionSummary?.reviewCount || 0);
-  const primaryReply = failedCount > 0
-    ? '继续，先处理失败项'
-    : (reviewCount > 0 ? '继续，回结果工作台复核' : '继续，回工作台首页');
+  const rerunCount = Number(exceptionSummary?.rerunCount || 0);
+  const exceptionDecision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
+  const primaryReply = exceptionDecision.recommendedReply;
   const cadence = buildStageCadence({
-    recommendedReply: confirmationState.recommendedReply,
+    recommendedReply: primaryReply,
+    primarySay: primaryReply,
     summary: exceptionSummary?.nextStepReason || confirmationState.summary || exceptionSummary?.issueSummary,
     directReplies: [primaryReply],
     digestItems: [
       String(exceptionSummary?.currentFocus || '').trim(),
-      `问题概况：${failedCount} 失败 / ${reviewCount} 待复核 / ${Number(exceptionSummary?.rerunCount || 0)} 补跑候选`,
+      `问题概况：${failedCount} 失败 / ${reviewCount} 待复核 / ${rerunCount} 补跑候选`,
     ],
   });
   return buildStageRelay({
@@ -1267,11 +1283,13 @@ function buildExceptionStageRelay(exceptionSummary, options = {}) {
     currentItems: buildRelayItems(
       handoffFromPrevious.nextFocusItems,
       [
-        `问题概况：${Number(exceptionSummary?.failedCount || 0)} 失败 / ${Number(exceptionSummary?.reviewCount || 0)} 待复核 / ${Number(exceptionSummary?.rerunCount || 0)} 补跑候选`,
+        `问题概况：${failedCount} 失败 / ${reviewCount} 待复核 / ${rerunCount} 补跑候选`,
         String(exceptionSummary?.currentFocus || '').trim() ? `当前重点：${String(exceptionSummary.currentFocus).trim()}` : '',
         failedCount > 0
           ? '硬失败会直接阻塞工作台继续判断，优先级最高。'
-          : (reviewCount > 0 ? '当前主要剩余人工复核与是否补跑的判断。' : '当前没有明显异常，可以交回工作台首页继续主链判断。'),
+          : (reviewCount > 0
+            ? '当前主要剩余人工复核与是否补跑的判断。'
+            : (rerunCount > 0 ? '当前主要剩余补跑价值判断，先留在异常层确认是否值得补。' : '当前没有明显异常，可以交回工作台首页继续主链判断。')),
       ],
     ),
     nextTitle: String(handoffToNext.confirmedTitle || '').trim() || '完成后送去',
@@ -1279,13 +1297,13 @@ function buildExceptionStageRelay(exceptionSummary, options = {}) {
     nextSummary: String(handoffToNext.copy || nextStep.summary || exceptionSummary?.nextStepReason || '').trim() || '这一站收口后，再回结果工作台或工作台首页继续判断。',
     nextItems: buildRelayItems(
       [
+        cadence.primarySay ? `回到对话框可直接说：${cadence.primarySay}` : '',
         String(handoffToNext.nextFocusTitle || '').trim(),
         ...toArray(handoffToNext.confirmedItems),
         ...toArray(handoffToNext.nextFocusItems),
       ],
-      [
-        cadence.primarySay ? `回到对话框可直接说：${cadence.primarySay}` : '',
-      ],
+      [],
+      4,
     ),
   });
 }
@@ -2866,7 +2884,7 @@ function buildResultActionStatus(workspaceState, routes, options = {}) {
         kicker: '辅助动作',
         title: reviewAction.actionLabel,
         summary: interaction.action.secondaryReviewSummary,
-        file: routes.exception,
+        file: routes.result,
         cta: reviewAction.ctaLabel,
         tone: 'warn',
       } : null,
@@ -2902,24 +2920,24 @@ function buildExceptionActionStatus(workspaceState, routes, rerunCandidates, opt
   const reviewCount = Number(workspaceState?.counts?.needsReview || 0);
   const rerunCount = Array.isArray(rerunCandidates) ? rerunCandidates.length : 0;
   const hasStoryboard = Boolean(options.hasStoryboard);
-  const primaryAction = failedCount > 0
-    ? buildActionLanguage('resolve_failed')
-    : (reviewCount > 0 ? buildActionLanguage('review_exception') : buildActionLanguage('go_home'));
+  const decision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
+  const primaryAction = buildActionLanguage(decision.actionKey);
   const reviewAction = buildActionLanguage('view_review_items');
   const rerunAction = buildActionLanguage('view_rerun_candidates');
   const storyboardAction = buildActionLanguage('go_storyboard');
+  const primaryTargetFile = decision.nextActionTarget === 'result_workspace.html'
+    ? routes.result
+    : (decision.nextActionTarget === 'workspace_home.html' ? routes.home : routes.exception);
   return buildActionStatus({
     title: '行动建议',
     copy: panelLanguage.actionCopy,
     primary: {
       kicker: '现在先做',
       title: primaryAction.actionLabel,
-      summary: failedCount > 0
-        ? interaction.action.primaryFailed
-        : (reviewCount > 0 ? interaction.action.primaryClear : '当前没有明显异常，回工作台首页继续主链判断。'),
-      file: failedCount > 0 ? routes.exception : (reviewCount > 0 ? routes.result : routes.home),
+      summary: decision.reason,
+      file: primaryTargetFile,
       cta: primaryAction.ctaLabel,
-      tone: failedCount > 0 ? 'bad' : (reviewCount > 0 ? 'warn' : 'good'),
+      tone: decision.tone,
     },
     secondary: [
       reviewCount > 0 ? {
@@ -2952,7 +2970,7 @@ function buildExceptionActionStatus(workspaceState, routes, rerunCandidates, opt
         ? interaction.action.noteFailed
         : (rerunCount > 0 ? interaction.action.noteRerun : interaction.action.noteReviewOnly),
     ],
-    recommendedReply: String(exceptionSummary?.confirmationState?.recommendedReply || '').trim(),
+    recommendedReply: String(exceptionSummary?.confirmationState?.recommendedReply || decision.recommendedReply || '').trim(),
     actionReason: String(
       exceptionSummary?.nextStepReason
       || exceptionSummary?.confirmationState?.summary
@@ -3906,6 +3924,10 @@ function buildExceptionStageUiState(taskLabel, stageLabel, exceptionSummary, opt
   const stageCopy = buildExceptionStaticStageCopy(exceptionSummary);
   const nextActionLabel = exceptionSummary.nextStepLabel;
   const nextActionSummary = exceptionSummary.nextStepReason || exceptionSummary.issueSummary;
+  const failedCount = Number(exceptionSummary?.failedCount || 0);
+  const reviewCount = Number(exceptionSummary?.reviewCount || 0);
+  const rerunCount = Number(exceptionSummary?.rerunCount || 0);
+  const totalIssueCount = Number(exceptionSummary?.totalIssueCount ?? (failedCount + reviewCount + rerunCount));
   return buildStaticStageUiState({
     taskLabel,
     taskSummary: stageCopy.taskSummary,
@@ -3926,8 +3948,10 @@ function buildExceptionStageUiState(taskLabel, stageLabel, exceptionSummary, opt
       stageLabel,
       statusLabel: exceptionSummary.statusLabel,
       statusTone: exceptionSummary.statusTone,
-      totalIssueCount: exceptionSummary.failedCount + exceptionSummary.reviewCount,
-      failedCount: exceptionSummary.failedCount,
+      totalIssueCount,
+      failedCount,
+      reviewCount,
+      rerunCount,
       nextActionLabel,
       nextActionSummary,
     }),
@@ -3936,7 +3960,10 @@ function buildExceptionStageUiState(taskLabel, stageLabel, exceptionSummary, opt
       statusLabel: exceptionSummary.statusLabel,
       statusSummary: exceptionSummary.statusSummary,
       statusTone: exceptionSummary.statusTone,
-      failedCount: exceptionSummary.failedCount,
+      failedCount,
+      reviewCount,
+      rerunCount,
+      totalIssueCount,
       nextActionLabel,
       nextActionSummary,
       replyLabel: exceptionSummary.confirmationState?.recommendedReply,
@@ -3945,8 +3972,10 @@ function buildExceptionStageUiState(taskLabel, stageLabel, exceptionSummary, opt
       statusLabel: exceptionSummary.statusLabel,
       statusSummary: exceptionSummary.statusSummary,
       statusTone: exceptionSummary.statusTone,
-      totalIssueCount: exceptionSummary.failedCount + exceptionSummary.reviewCount,
-      failedCount: exceptionSummary.failedCount,
+      totalIssueCount,
+      failedCount,
+      reviewCount,
+      rerunCount,
       nextActionLabel,
       nextActionSummary,
     }),
@@ -4039,18 +4068,20 @@ function buildResultJudgmentPanel(resultSummary) {
 function buildExceptionCockpitSummary(exceptionSummary) {
   const failedCount = Number(exceptionSummary?.failedCount || 0);
   const reviewCount = Number(exceptionSummary?.reviewCount || 0);
-  const totalIssueCount = failedCount + reviewCount;
+  const rerunCount = Number(exceptionSummary?.rerunCount || 0);
+  const totalIssueCount = Number(exceptionSummary?.totalIssueCount ?? (failedCount + reviewCount + rerunCount));
+  const decision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
   return buildStageReviewCockpitSummary({
     copy: '这里只解释异常层当前结论、当前重点和阻塞情况，不重复上方动作建议。',
     statusLabel: String(exceptionSummary?.statusLabel || '未提供').trim() || '未提供',
     statusSummary: String(exceptionSummary?.statusSummary || '未提供').trim() || '未提供',
     statusTone: String(exceptionSummary?.statusTone || '').trim() || 'info',
-    focusValue: String(exceptionSummary?.currentFocus || '').trim() || (failedCount > 0 ? '先处理失败项' : (reviewCount > 0 ? '先确认待复核项' : '可回工作台')),
+    focusValue: String(exceptionSummary?.currentFocus || '').trim() || decision.currentFocus,
     focusSummary: String(exceptionSummary?.nextStepReason || exceptionSummary?.issueSummary || '').trim() || '先按异常层当前判断继续。',
-    focusTone: failedCount > 0 ? 'bad' : 'good',
-    pressureValue: totalIssueCount > 0 ? `${totalIssueCount} 项问题待处理` : '当前可回工作台',
+    focusTone: decision.tone,
+    pressureValue: totalIssueCount > 0 ? `${totalIssueCount} 项待处理` : '当前可回工作台',
     pressureSummary: String(exceptionSummary?.issueSummary || '当前没有明显异常压力。').trim() || '当前没有明显异常压力。',
-    pressureTone: totalIssueCount > 0 ? 'bad' : 'good',
+    pressureTone: String(exceptionSummary?.statusTone || '').trim() || (totalIssueCount > 0 ? decision.tone : 'good'),
   });
 }
 
@@ -4058,20 +4089,23 @@ function buildExceptionJudgmentPanel(exceptionSummary) {
   const confirmationState = exceptionSummary?.confirmationState || {};
   const failedCount = Number(exceptionSummary?.failedCount || 0);
   const reviewCount = Number(exceptionSummary?.reviewCount || 0);
-  const totalIssueCount = failedCount + reviewCount;
-  const primaryActionLabel = getStagePrimaryActionLabel('exception', { failedCount });
+  const rerunCount = Number(exceptionSummary?.rerunCount || 0);
+  const totalIssueCount = Number(exceptionSummary?.totalIssueCount ?? (failedCount + reviewCount + rerunCount));
+  const decision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
+  const primaryActionLabel = getStagePrimaryActionLabel('exception', { failedCount, reviewCount, rerunCount });
   return buildStageReviewJudgmentPanel({
     stageKey: 'exception',
     stageLabel: '异常层',
     confirmationState,
     statusLabel: String(exceptionSummary?.statusLabel || '异常层判断').trim() || '异常层判断',
     statusSummary: String(exceptionSummary?.issueSummary || exceptionSummary?.statusSummary || '').trim() || '先按异常层当前判断继续。',
-    statusTone: String(exceptionSummary?.statusTone || '').trim() || (totalIssueCount > 0 ? 'bad' : 'good'),
-    actionLabel: String(exceptionSummary?.nextStepLabel || primaryActionLabel).trim() || '继续异常层',
+    statusTone: String(exceptionSummary?.statusTone || '').trim() || (totalIssueCount > 0 ? decision.tone : 'good'),
+    actionLabel: String(exceptionSummary?.nextStepLabel || primaryActionLabel || decision.nextActionLabel).trim() || '继续异常层',
     actionSummary: String(exceptionSummary?.nextStepReason || confirmationState.summary || exceptionSummary?.issueSummary || '').trim() || '当前建议先把异常收口。',
     noteItems: [
       failedCount > 0 ? `当前仍有 ${failedCount} 项失败项` : '当前没有硬失败',
       reviewCount > 0 ? `当前仍有 ${reviewCount} 项待复核` : '当前复核压力较低',
+      rerunCount > 0 ? `当前仍有 ${rerunCount} 个补跑候选待决定` : '当前没有明确补跑压力',
     ],
   });
 }
@@ -6858,6 +6892,7 @@ function main() {
   const exceptionCardPlan = buildExceptionCardPlan({
     failedCount: workspaceState.counts.failed,
     reviewCount: workspaceState.counts.needsReview,
+    rerunCount: Number(exceptionSummary?.rerunCount || 0),
     issueSummary: exceptionSummary.issueSummary,
     statusLabel: exceptionSummary.statusLabel,
     statusTone: exceptionSummary.statusTone,
@@ -6932,6 +6967,10 @@ function main() {
   );
   const exceptionRoutePlan = buildExceptionRoutePlan({
     hasStoryboard,
+    storyboardFile: routes.storyboard,
+    failedCount: workspaceState.counts.failed,
+    reviewCount: workspaceState.counts.needsReview,
+    rerunCount: Number(exceptionSummary?.rerunCount || 0),
     currentLabel: exceptionSummary.statusLabel,
     currentSummary: exceptionSummary.issueSummary || exceptionSummary.statusSummary,
     resultFile: routes.result,
@@ -6962,7 +7001,7 @@ function main() {
     recordFile: routes.record,
   });
   const exceptionWorkbenchCards = buildExceptionWorkbenchPlan({
-    totalIssueCount: workspaceState.counts.failed + workspaceState.counts.needsReview,
+    totalIssueCount: Number(exceptionSummary?.totalIssueCount || 0),
     hasHome: fileExists(routes.home),
   });
   const homeEntryGuide = workbenchGuide?.home?.section || null;
@@ -7646,7 +7685,7 @@ function main() {
       readinessBlockingEmptyText: '当前没有硬阻塞',
       readinessCautionEmptyText: '当前没有明显提醒项',
       assetsTitle: '素材绑定',
-      assetsCopy: '只有存在参考图、遮罩图或槽位绑定时，这部分才需要重点看。',
+      assetsCopy: '只有存在参考图、遮罩图或素材位绑定时，这部分才需要重点看。',
       assetsItems: [
         { label: '当前状态', value: prepareSummary.importedBindingCount > 0 ? `已绑定 ${prepareSummary.importedBindingCount} 项素材` : '当前没有绑定素材' },
         { label: '素材判断', value: prepareSummary.importedBindingCount > 0 ? '这是带约束的任务' : '这是自由度更高的任务' },
@@ -7738,7 +7777,7 @@ function main() {
       advancedSummary: '展开查看结构分布',
       advancedRequestModeTitle: '请求方式分布',
       advancedStyleTitle: '风格分布',
-      advancedSlotRoleTitle: '槽位角色分布',
+      advancedSlotRoleTitle: '素材位角色分布',
       advancedEmptyText: '当前没有可展示的分布',
       guideTitle: resultEntryGuide?.title,
       guideCopy: resultEntryGuide?.copy,

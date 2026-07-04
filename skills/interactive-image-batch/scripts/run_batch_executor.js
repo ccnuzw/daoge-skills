@@ -58,6 +58,8 @@ function findExistingResult(item, ctx) {
   if (!fs.existsSync(outputPath) || !fs.existsSync(metaPath)) return null;
   try {
     const meta = ctx.readJson(metaPath);
+    if (meta.output && path.resolve(meta.output) !== path.resolve(outputPath)) return null;
+    if (meta.requestedSize && String(meta.requestedSize) !== req.size) return null;
     return {
       ok: true,
       skipped: true,

@@ -61,6 +61,9 @@ function main() {
   const failing = templates.filter((item) => !item.ok);
   const warningOnly = templates.filter((item) => item.ok && item.warnings && item.warnings.length);
   const healthy = templates.filter((item) => item.ok && (!item.warnings || item.warnings.length === 0));
+  const catalogValidation = report.catalogValidation && typeof report.catalogValidation === 'object'
+    ? report.catalogValidation
+    : {};
 
   const markdown = [
     '# 模板主链校验报告',
@@ -72,6 +75,9 @@ function main() {
     `- 错误数: ${report.errorCount || 0}`,
     `- 警告数: ${report.warningCount || 0}`,
     `- 注册表路径: ${report.registryPath || '未记录'}`,
+    `- 示例目录路径: ${catalogValidation.catalogPath || '未记录'}`,
+    `- 示例目录映射: ${catalogValidation.ok === false ? '失败' : '通过'}`,
+    `- 示例总数: ${catalogValidation.exampleCount || 0}`,
     '',
     '## 2. 分类分布',
     '',
@@ -91,7 +97,21 @@ function main() {
     `- 仅警告: ${warningOnly.length}`,
     `- 失败: ${failing.length}`,
     '',
-    '## 6. 模板明细',
+    '## 6. 示例目录映射',
+    '',
+    `- 校验结果: ${catalogValidation.ok === false ? '失败' : '通过'}`,
+    `- 示例总数: ${catalogValidation.exampleCount || 0}`,
+    `- 错误数: ${catalogValidation.errorCount || 0}`,
+    `- 警告数: ${catalogValidation.warningCount || 0}`,
+    `- 目录路径: ${catalogValidation.catalogPath || '未记录'}`,
+    '',
+    '错误：',
+    ...renderMarkdownList(catalogValidation.errors, '无'),
+    '',
+    '警告：',
+    ...renderMarkdownList(catalogValidation.warnings, '无'),
+    '',
+    '## 7. 模板明细',
     '',
   ];
 
@@ -103,6 +123,7 @@ function main() {
     markdown.push(`- 分类: ${item.category || '未记录'}`);
     markdown.push(`- 文档存在: ${item.docExists ? '是' : '否'}`);
     markdown.push(`- 文档路径: ${item.templateDoc || '未记录'}`);
+    markdown.push(`- 示例映射数: ${item.catalogExampleCount || 0}`);
     markdown.push(`- 缺失章节: ${(item.missingDocSections || []).length ? item.missingDocSections.join(', ') : '无'}`);
     markdown.push(`- 错误数: ${(item.errors || []).length}`);
     markdown.push(`- 警告数: ${(item.warnings || []).length}`);
@@ -342,7 +363,33 @@ ${renderWorkspaceChromeHeadAssets()}
             `仅警告: ${warningOnly.length}`,
             `失败: ${failing.length}`,
             `注册表: ${report.registryPath || '未记录'}`,
+            `示例目录: ${catalogValidation.catalogPath || '未记录'}`,
+            `示例映射: ${catalogValidation.ok === false ? '失败' : '通过'} / ${catalogValidation.exampleCount || 0} 条`,
           ])}
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>示例目录映射</h2>
+      <div class="section-grid">
+        <article class="info-card">
+          <h3>映射状态</h3>
+          ${renderList([
+            `校验结果: ${catalogValidation.ok === false ? '失败' : '通过'}`,
+            `示例总数: ${catalogValidation.exampleCount || 0}`,
+            `错误数: ${catalogValidation.errorCount || 0}`,
+            `警告数: ${catalogValidation.warningCount || 0}`,
+            `目录路径: ${catalogValidation.catalogPath || '未记录'}`,
+          ])}
+        </article>
+        <article class="info-card">
+          <h3>错误</h3>
+          ${renderList(catalogValidation.errors, '无')}
+        </article>
+        <article class="info-card">
+          <h3>警告</h3>
+          ${renderList(catalogValidation.warnings, '无')}
         </article>
       </div>
     </section>
@@ -363,6 +410,7 @@ ${renderWorkspaceChromeHeadAssets()}
                 <div class="meta-row"><div class="meta-label">分类</div><div class="meta-value">${escapeHtml(item.category || '未记录')}</div></div>
                 <div class="meta-row"><div class="meta-label">文档存在</div><div class="meta-value">${escapeHtml(item.docExists ? '是' : '否')}</div></div>
                 <div class="meta-row"><div class="meta-label">文档路径</div><div class="meta-value">${escapeHtml(item.templateDoc || '未记录')}</div></div>
+                <div class="meta-row"><div class="meta-label">示例映射数</div><div class="meta-value">${escapeHtml(item.catalogExampleCount || 0)}</div></div>
                 <div class="meta-row"><div class="meta-label">缺失章节</div><div class="meta-value">${escapeHtml((item.missingDocSections || []).length ? item.missingDocSections.join(', ') : '无')}</div></div>
               </div>
               <div class="section-grid">

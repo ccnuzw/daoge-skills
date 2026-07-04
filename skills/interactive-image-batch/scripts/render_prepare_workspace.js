@@ -137,7 +137,7 @@ function buildReadiness(validation) {
   if (!validation || !validation.ok) blockingItems.push('提示词校验还没有完全通过');
   if (errors.length) blockingItems.push(`还有 ${errors.length} 条明确错误`);
   if (missingCount > 0) blockingItems.push(`还有 ${missingCount} 个核心字段缺失`);
-  if (templateMissingCount > 0) blockingItems.push(`还有 ${templateMissingCount} 个模板必填项缺失`);
+  if (templateMissingCount > 0) blockingItems.push(`还有 ${templateMissingCount} 个任务类型必填项缺失`);
   if (sizeIssueCount > 0) blockingItems.push(`还有 ${sizeIssueCount} 个尺寸问题待处理`);
   if (duplicatePromptCount > 0) blockingItems.push(`发现 ${duplicatePromptCount} 条重复提示词`);
   if (slugCollisionCount > 0) blockingItems.push(`发现 ${slugCollisionCount} 个命名冲突`);
@@ -192,7 +192,7 @@ function renderPrepareAssetCard(outputDir, asset, index) {
   const href = resolveAssetPath(outputDir, asset);
   const tags = [
     String(asset?.asset_type || '').trim() || null,
-    String(asset?.slot_id || '').trim() ? `槽位 ${String(asset.slot_id).trim()}` : null,
+    String(asset?.slot_id || '').trim() ? `素材位 ${String(asset.slot_id).trim()}` : null,
   ].filter(Boolean);
   return `
     <article class="entry-card">

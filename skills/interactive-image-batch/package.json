@@ -7,7 +7,10 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "bash scripts/run_smoke_tests.sh"
+    "test": "bash scripts/run_smoke_tests.sh",
+    "test:unit": "node --test --test-name-pattern \"unified status|workspace shared|template_registry|host_native_results|runtime mode\" tests/smoke.test.js",
+    "test:contracts": "node --test --test-name-pattern \"^(run_batch|daoge_prepare_run|build_workspace_state|ingest_host_native_results|render_prepare_workspace|render_task_center)\" tests/smoke.test.js",
+    "test:smoke": "bash scripts/run_smoke_tests.sh"
   },
   "keywords": [],
   "author": "",

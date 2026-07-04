@@ -7,6 +7,9 @@
 - 错误数: 0
 - 警告数: 0
 - 注册表路径: references/template_registry_zh.json
+- 示例目录路径: references/examples/examples.catalog.json
+- 示例目录映射: 通过
+- 示例总数: 140
 
 ## 2. 分类分布
 
@@ -63,7 +66,21 @@
 - 仅警告: 0
 - 失败: 0
 
-## 6. 模板明细
+## 6. 示例目录映射
+
+- 校验结果: 通过
+- 示例总数: 140
+- 错误数: 0
+- 警告数: 0
+- 目录路径: references/examples/examples.catalog.json
+
+错误：
+- 无
+
+警告：
+- 无
+
+## 7. 模板明细
 
 ### campaign-poster
 
@@ -72,6 +89,7 @@
 - 分类: poster-and-campaigns
 - 文档存在: 是
 - 文档路径: references/templates/poster-and-campaigns/campaign-poster.md
+- 示例映射数: 6
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -89,6 +107,7 @@
 - 分类: portraits-and-characters
 - 文档存在: 是
 - 文档路径: references/templates/portraits-and-characters/studio-editorial.md
+- 示例映射数: 9
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -106,6 +125,7 @@
 - 分类: product-visuals
 - 文档存在: 是
 - 文档路径: references/templates/product-visuals/ecommerce-clean.md
+- 示例映射数: 5
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -123,6 +143,7 @@
 - 分类: grids-and-collages
 - 文档存在: 是
 - 文档路径: references/templates/grids-and-collages/lookbook.md
+- 示例映射数: 7
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -140,6 +161,7 @@
 - 分类: portraits-and-characters
 - 文档存在: 是
 - 文档路径: references/templates/portraits-and-characters/portrait-kv.md
+- 示例映射数: 9
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -157,6 +179,7 @@
 - 分类: editing-workflows
 - 文档存在: 是
 - 文档路径: references/templates/editing-workflows/image-edit.md
+- 示例映射数: 5
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -174,6 +197,7 @@
 - 分类: cinematic-sequences
 - 文档存在: 是
 - 文档路径: references/templates/cinematic-sequences/oral-storyboard-board.md
+- 示例映射数: 7
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -191,6 +215,7 @@
 - 分类: cinematic-sequences
 - 文档存在: 是
 - 文档路径: references/templates/cinematic-sequences/cinematic-storyboard.md
+- 示例映射数: 6
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -208,6 +233,7 @@
 - 分类: social-campaigns
 - 文档存在: 是
 - 文档路径: references/templates/social-campaigns/social-grid.md
+- 示例映射数: 6
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -225,6 +251,7 @@
 - 分类: performance-creatives
 - 文档存在: 是
 - 文档路径: references/templates/performance-creatives/ab-ad-test.md
+- 示例映射数: 6
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -242,6 +269,7 @@
 - 分类: product-visuals
 - 文档存在: 是
 - 文档路径: references/templates/product-visuals/detail-page-set.md
+- 示例映射数: 6
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -259,6 +287,7 @@
 - 分类: ui-mockups
 - 文档存在: 是
 - 文档路径: references/templates/ui-mockups/ui-mockup-board.md
+- 示例映射数: 6
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -276,6 +305,7 @@
 - 分类: infographics
 - 文档存在: 是
 - 文档路径: references/templates/infographics/infographic-board.md
+- 示例映射数: 6
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -293,6 +323,7 @@
 - 分类: technical-diagrams
 - 文档存在: 是
 - 文档路径: references/templates/technical-diagrams/technical-diagram.md
+- 示例映射数: 7
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -310,6 +341,7 @@
 - 分类: avatars-and-profile
 - 文档存在: 是
 - 文档路径: references/templates/avatars-and-profile/avatar-profile-pack.md
+- 示例映射数: 5
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -327,6 +359,7 @@
 - 分类: slides-and-visual-docs
 - 文档存在: 是
 - 文档路径: references/templates/slides-and-visual-docs/visual-doc-slide.md
+- 示例映射数: 10
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -344,6 +377,7 @@
 - 分类: academic-figures
 - 文档存在: 是
 - 文档路径: references/templates/academic-figures/academic-figure-board.md
+- 示例映射数: 5
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -361,6 +395,7 @@
 - 分类: branding-and-packaging
 - 文档存在: 是
 - 文档路径: references/templates/branding-and-packaging/brand-packaging-board.md
+- 示例映射数: 12
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -378,6 +413,7 @@
 - 分类: scenes-and-illustrations
 - 文档存在: 是
 - 文档路径: references/templates/scenes-and-illustrations/illustrated-scene-set.md
+- 示例映射数: 4
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -395,6 +431,7 @@
 - 分类: maps
 - 文档存在: 是
 - 文档路径: references/templates/maps/map-route-board.md
+- 示例映射数: 5
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -412,6 +449,7 @@
 - 分类: typography-and-text-layout
 - 文档存在: 是
 - 文档路径: references/templates/typography-and-text-layout/type-layout-poster.md
+- 示例映射数: 4
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0
@@ -429,6 +467,7 @@
 - 分类: assets-and-props
 - 文档存在: 是
 - 文档路径: references/templates/assets-and-props/asset-prop-sheet.md
+- 示例映射数: 4
 - 缺失章节: 无
 - 错误数: 0
 - 警告数: 0

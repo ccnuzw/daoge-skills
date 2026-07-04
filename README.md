@@ -6,14 +6,16 @@ DAOGE Skills 是一个面向 Codex 的技能仓库，目前主打中文工作流
 
 - `skills/interactive-image-batch`
 
-它适合需要下面这些能力的场景：
+第一次使用只需要记住这条主链：
 
-- 批量文生图
-- 带参考图的图生图
-- 带 mask 的局部重绘
-- 口播分镜板 / 故事板 / 连续分镜任务
-- 从 Markdown 提示词库生成成批提示词
-- 带预检、预览、分批执行、失败续跑、结果汇总的稳定工作流
+**选任务类型 -> 进任务总控 -> 打开工作台首页 -> 确认准备 -> 看结果 / 处理异常**
+
+优先入口：
+
+- `skills/interactive-image-batch/START_HERE_中文.md`
+- `skills/interactive-image-batch/references/examples/examples_catalog.html`
+
+进阶能力仍然保留，包括批量文生图、图生图、局部重绘、口播分镜板、从提示词库生成成批提示词、失败续跑和结果归档；这些不需要第一次就理解。
 
 ---
 
@@ -177,8 +179,13 @@ OPENAI_RESPONSES_MODEL=gpt-5.4
 
 1. 仓库首页 `README.md`
 2. `skills/interactive-image-batch/START_HERE_中文.md`
-3. `skills/interactive-image-batch/references/template_map_zh.md`
-4. `skills/interactive-image-batch/README.md`
+3. `skills/interactive-image-batch/references/examples/examples_catalog.html`
+4. `skills/interactive-image-batch/references/template_map_zh.md`
+
+维护者或进阶使用者再看：
+
+- `skills/interactive-image-batch/README.md`
+- `skills/interactive-image-batch/references/template_authoring_zh.md`
 
 ---
 

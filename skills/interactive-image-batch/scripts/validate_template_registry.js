@@ -129,16 +129,115 @@ function validateTemplateDoc(skillRoot, template) {
   };
 }
 
+function validateExampleCatalog(skillRoot, catalogPath, templates) {
+  const reportPath = normalizeReportPath(catalogPath, skillRoot);
+  if (!fs.existsSync(catalogPath)) {
+    return {
+      ok: true,
+      catalogPath: reportPath,
+      exampleCount: 0,
+      errorCount: 0,
+      warningCount: 1,
+      errors: [],
+      warnings: [`examples catalog not found: ${reportPath}`],
+      templateExampleCounts: {},
+      variantExampleCounts: {},
+    };
+  }
+
+  const registryById = new Map(templates.map((template) => [String(template.id || '').trim(), template]));
+  const templateExampleCounts = {};
+  const variantExampleCounts = {};
+  const errors = [];
+  const warnings = [];
+  let examples = [];
+
+  try {
+    const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+    examples = ensureArray(catalog.examples);
+  } catch (error) {
+    return {
+      ok: false,
+      catalogPath: reportPath,
+      exampleCount: 0,
+      errorCount: 1,
+      warningCount: 0,
+      errors: [`failed to read examples catalog: ${error.message || error}`],
+      warnings: [],
+      templateExampleCounts,
+      variantExampleCounts,
+    };
+  }
+
+  examples.forEach((example, index) => {
+    const label = String(example.id || `example[${index}]`).trim();
+    const templateId = String(example.template_id || '').trim();
+    const variantId = String(example.template_variant || '').trim();
+    const exampleFile = String(example.example_file || '').trim();
+    if (!templateId) {
+      errors.push(`${label} missing template_id`);
+      return;
+    }
+    const template = registryById.get(templateId);
+    if (!template) {
+      errors.push(`${label} references unknown template_id: ${templateId}`);
+      return;
+    }
+
+    templateExampleCounts[templateId] = (templateExampleCounts[templateId] || 0) + 1;
+    const variantSet = new Set(ensureArray(template.variants).map((item) => String(item.id || '').trim()).filter(Boolean));
+    if (variantId) {
+      const variantKey = `${templateId}/${variantId}`;
+      variantExampleCounts[variantKey] = (variantExampleCounts[variantKey] || 0) + 1;
+      if (!variantSet.has(variantId)) {
+        errors.push(`${label} references unknown template_variant: ${templateId}/${variantId}`);
+      }
+    } else {
+      warnings.push(`${label} missing template_variant`);
+    }
+
+    if (!exampleFile) {
+      warnings.push(`${label} missing example_file`);
+      return;
+    }
+    const examplePath = path.resolve(skillRoot, exampleFile);
+    if (!fs.existsSync(examplePath)) {
+      errors.push(`${label} example_file not found: ${normalizeReportPath(examplePath, skillRoot)}`);
+    }
+  });
+
+  const sortedTemplateExampleCounts = Object.fromEntries(
+    Object.entries(templateExampleCounts).sort((a, b) => a[0].localeCompare(b[0]))
+  );
+  const sortedVariantExampleCounts = Object.fromEntries(
+    Object.entries(variantExampleCounts).sort((a, b) => a[0].localeCompare(b[0]))
+  );
+
+  return {
+    ok: errors.length === 0,
+    catalogPath: reportPath,
+    exampleCount: examples.length,
+    errorCount: errors.length,
+    warningCount: warnings.length,
+    errors,
+    warnings,
+    templateExampleCounts: sortedTemplateExampleCounts,
+    variantExampleCounts: sortedVariantExampleCounts,
+  };
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const registryPath = path.resolve(args['registry-file'] || path.join(__dirname, '..', 'references', 'template_registry_zh.json'));
   const skillRoot = path.resolve(args['skill-root'] || path.join(__dirname, '..'));
+  const catalogPath = path.resolve(args['catalog-file'] || path.join(skillRoot, 'references', 'examples', 'examples.catalog.json'));
   const outputPath = path.resolve(args['output-file'] || path.join(path.dirname(registryPath), 'template_registry_validation_report.json'));
   const registryReportPath = normalizeReportPath(registryPath, skillRoot);
   const skillRootReportPath = '.';
 
   const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
   const templates = ensureArray(registry.templates);
+  const catalogValidation = validateExampleCatalog(skillRoot, catalogPath, templates);
   const report = {
     registryPath: registryReportPath,
     skillRoot: skillRootReportPath,
@@ -146,6 +245,7 @@ function main() {
     ok: true,
     errorCount: 0,
     warningCount: 0,
+    catalogValidation,
     templates: [],
   };
 
@@ -171,6 +271,7 @@ function main() {
       docExists: doc.exists,
       docSections: doc.sections,
       missingDocSections: doc.missingSections,
+      catalogExampleCount: Number(catalogValidation.templateExampleCounts[id] || 0),
       errors,
       warnings,
       ok: errors.length === 0,
@@ -180,6 +281,8 @@ function main() {
     report.warningCount += warnings.length;
   });
 
+  report.errorCount += catalogValidation.errorCount;
+  report.warningCount += catalogValidation.warningCount;
   report.ok = report.errorCount === 0;
   writeJson(outputPath, report);
   console.log(JSON.stringify({
@@ -193,9 +296,20 @@ function main() {
   if (!report.ok) process.exit(1);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(String(error.message || error));
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(String(error.message || error));
+    process.exit(1);
+  }
 }
+
+module.exports = {
+  collectDocSections,
+  ensureArray,
+  normalizeReportPath,
+  validateExampleCatalog,
+  validateTemplateDoc,
+  validateTemplateShape,
+};

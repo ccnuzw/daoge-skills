@@ -254,6 +254,7 @@ function buildManifest(outputDir, promptPack, results, options = {}) {
   const batchResults = results.map((item) => item);
   const success = batchResults.filter((item) => item.ok).length;
   const failed = batchResults.filter((item) => !item.ok).length;
+  const needsReview = batchResults.filter((item) => item.hostNativeStatus === 'needs_review').length;
   const size = promptPack?.task_summary?.width && promptPack?.task_summary?.height
     ? `${promptPack.task_summary.width}x${promptPack.task_summary.height}`
     : 'unknown';
@@ -267,6 +268,7 @@ function buildManifest(outputDir, promptPack, results, options = {}) {
     selectedCount: results.length,
     success,
     failed,
+    needsReview,
     skipped: 0,
     batchCount: 1,
     batchSize: Number(promptPack?.task_summary?.batch_size || results.length || 1),
@@ -286,6 +288,7 @@ function buildManifest(outputDir, promptPack, results, options = {}) {
         batchNumber: 1,
         success,
         failed,
+        needsReview,
         outputDir,
         results: batchResults,
       },

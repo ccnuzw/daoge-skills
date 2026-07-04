@@ -657,7 +657,7 @@ function buildSupportPageCopy(pageKey, options = {}) {
       workbenchCopy: '这里只保留当前最值得继续的任务入口，不把所有页面都堆在第一屏。',
       liveStripHint: hasLatest
         ? '总控层只负责切任务和决定下一步，不展开任务内部操作。'
-        : '当前还没有可继续的历史任务，先从中文模板展示板开始。',
+        : '当前还没有可继续的历史任务，先从中文任务展示板开始。',
       otherRunsTitle: '其它可继续任务',
       otherRunsCopy: '如果不是继续当前这轮，只在这里挑一轮旧任务；需要先处理的任务会自动排在前面。',
       otherRunsSummaryLabel: '展开其它可继续任务',
@@ -2776,10 +2776,12 @@ function buildWorkspaceContextFallback(stage, options = {}) {
   let flowLabel = explicitFlowLabel;
 
   if (!flowLabel && key === 'home' && entryFlowLabel) {
-    flowLabel = `入口页 -> 工作台首页 -> ${entryFlowLabel
-      .replace(/^中文模板展示板\s*->\s*/u, '')
+    const strippedEntryFlowLabel = entryFlowLabel
+      .replace(/^中文(?:任务|模板)展示板\s*->\s*/u, '')
+      .replace(/^中文模板展示板$/u, '中文任务展示板')
       .replace(/^入口页\s*->\s*/u, '')
-      .trim()}`;
+      .trim();
+    flowLabel = strippedEntryFlowLabel ? `入口页 -> ${strippedEntryFlowLabel}` : '';
   }
   if (!flowLabel) flowLabel = defaultFlowValue;
 

@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const vm = require('vm');
+const { createRequire } = require('module');
 const { execFileSync, spawn } = require('child_process');
 const http = require('http');
 const { refreshTaskCenterRuntimeState } = require('../scripts/task_center_state_runtime');
@@ -29,6 +31,29 @@ function runNode(scriptName, args, options = {}) {
     encoding: 'utf8',
     ...options,
   });
+}
+
+function loadBuildWorkspaceStateInternal(exportNames) {
+  const filename = path.join(scriptsDir, 'build_workspace_state.js');
+  const source = fs.readFileSync(filename, 'utf8');
+  const exportList = exportNames.join(', ');
+  const patchedSource = source.replace(
+    /\ntry \{\n  main\(\);\n\} catch \(error\) \{\n  console\.error\(String\(error\.message \|\| error\)\);\n  process\.exit\(1\);\n\}\n?$/u,
+    `\nmodule.exports = { ${exportList} };\n`
+  );
+  assert.notEqual(patchedSource, source, 'build_workspace_state.js entrypoint wrapper changed; update loadBuildWorkspaceStateInternal before testing internals');
+  const moduleObject = { exports: {} };
+  vm.runInNewContext(patchedSource, {
+    require: createRequire(filename),
+    module: moduleObject,
+    exports: moduleObject.exports,
+    __dirname: scriptsDir,
+    __filename: filename,
+    console,
+    process: { env: process.env },
+    Buffer,
+  }, { filename });
+  return moduleObject.exports;
 }
 
 function runNodeAsync(scriptName, args, options = {}) {
@@ -223,6 +248,7 @@ test('run_batch dry-run produces expected artifacts', () => {
 
   const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'manifest.json'), 'utf8'));
   assert.equal(manifest.dryRun, true);
+  assert.equal(manifest.runtimeMode, 'local-batch-runner');
   assert.equal(manifest.selectedCount, 2);
   assert.equal(manifest.batchCount, 2);
 
@@ -504,6 +530,24 @@ test('workspace shared narrative prefers unified status summary and current focu
 
   assert.equal(taskControlBar.statusSummary, '当前重点是确认放行条件已经齐备。');
   assert.equal(narrative.currentFocus, '先确认放行条件');
+});
+
+test('workspace home fallback strips legacy catalog prefixes from entry flow', () => {
+  const { buildWorkspaceContextFallback } = require('../scripts/workspace_page_shared');
+
+  const context = buildWorkspaceContextFallback('home', {
+    entryFlowLabel: '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台',
+  });
+  const emptyEntryContext = buildWorkspaceContextFallback('home', {
+    entryFlowLabel: '中文模板展示板',
+  });
+
+  assert.match(context.flowLabel, /^入口页 -> 任务总控 -> 工作台首页/u);
+  assert.doesNotMatch(context.flowLabel, /中文模板展示板/);
+  assert.equal(emptyEntryContext.flowLabel, '入口页 -> 中文任务展示板');
+  assert.doesNotMatch(emptyEntryContext.flowLabel, /中文模板展示板/);
+  assert.doesNotMatch(emptyEntryContext.flowLabel, /->\s*$/u);
+  assert.notEqual(emptyEntryContext.flowLabel, '入口页 ->');
 });
 
 test('workspace shared view resolvers prefer state view contracts before page fallbacks', () => {
@@ -1618,6 +1662,8 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.equal(workspaceState.prepare?.confirmationState?.canContinue, true);
   assert.equal(workspaceState.prepare?.confirmationState?.recentEvent?.title, '准备阶段已生成');
   assert.equal(workspaceState.prepare?.confirmationState?.recommendedReply, '继续，进入结果工作台');
+  assert.ok((workspaceState.prepare?.confirmationState?.confirmedItems || []).some((item) => /^任务类型:/u.test(item)));
+  assert.ok(!(workspaceState.prepare?.confirmationState?.confirmedItems || []).some((item) => /^模板类型:/u.test(item)));
   assert.equal(workspaceState.views?.prepare?.dialogueStatus?.primarySay, '继续，进入结果工作台');
   assert.equal(workspaceState.result?.confirmationState?.stageLabel, '结果阶段');
   assert.equal(workspaceState.result?.confirmationState?.recommendedReply, '继续，回工作台首页');
@@ -1639,7 +1685,8 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.ok(Array.isArray(workspaceState.views?.exception?.workbench?.cards));
   assert.ok(Array.isArray(workspaceState.views?.exception?.heroCards));
   assert.ok(String(workspaceState.result?.nextStepLabel || '').trim().length > 0);
-  assert.equal(workspaceState.exception?.currentFocus, '当前没有明显异常');
+  assert.equal(workspaceState.exception?.currentFocus, '回工作台首页继续主链');
+  assert.equal(workspaceState.exception?.statusLabel, '当前没有明显异常');
 
   const prepareWorkspace = fs.readFileSync(path.join(outputDir, 'prepare_workspace.html'), 'utf8');
   assert.match(prepareWorkspace, /DAOGE 准备工作台/);
@@ -1664,6 +1711,7 @@ test('daoge_prepare_run preflight pipeline succeeds on minimal fixture', () => {
   assert.match(prepareWorkspace, /素材绑定/);
   assert.match(prepareWorkspace, /阻塞清单/);
   assert.match(prepareWorkspace, /提醒清单/);
+  assert.doesNotMatch(prepareWorkspace, /已出图|已经出图|已生成图片/);
   assert.doesNotMatch(prepareWorkspace, /当前 Run|准备层视图|这一页主控|任务中心/);
   assert.doesNotMatch(prepareWorkspace, /Prompt 预览页|预检总览页|素材绑定页/);
 
@@ -1787,11 +1835,20 @@ test('validate_template_registry reports healthy template mainline', () => {
   assert.equal(report.ok, true);
   assert.ok(report.templateCount >= 10);
   assert.equal(report.errorCount, 0);
+  assert.equal(report.registryPath, 'references/template_registry_zh.json');
+  assert.equal(report.skillRoot, '.');
+  assert.equal(report.catalogValidation?.ok, true);
+  assert.equal(report.catalogValidation?.catalogPath, 'references/examples/examples.catalog.json');
+  assert.ok(report.catalogValidation?.exampleCount >= report.templateCount);
+  assert.equal(report.catalogValidation?.errorCount, 0);
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(skillRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(tempDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
   const campaignPoster = report.templates.find((item) => item.id === 'campaign-poster');
   assert.ok(campaignPoster);
   assert.equal(campaignPoster.docExists, true);
   assert.equal(campaignPoster.missingDocSections.length, 0);
+  assert.ok(campaignPoster.catalogExampleCount > 0);
 });
 
 test('render_template_registry_report writes markdown and html reports', () => {
@@ -1825,8 +1882,16 @@ test('render_template_registry_report writes markdown and html reports', () => {
   const sharedJs = fs.readFileSync(sharedJsFile, 'utf8');
   assert.match(markdown, /# 模板主链校验报告/);
   assert.match(markdown, /### campaign-poster/);
+  assert.match(markdown, /示例目录映射/);
+  assert.match(markdown, /示例目录路径: references\/examples\/examples\.catalog\.json/);
   assert.match(html, /模板主链校验看板/);
   assert.match(html, /campaign-poster/);
+  assert.match(html, /示例目录映射/);
+  assert.match(html, /references\/examples\/examples\.catalog\.json/);
+  assert.doesNotMatch(markdown, new RegExp(skillRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(markdown, new RegExp(tempDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(html, new RegExp(skillRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(html, new RegExp(tempDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(sharedCss, /\.workspace-chrome-workbench-card/);
   assert.match(sharedCss, /\.workspace-chrome-context-bar/);
   assert.match(sharedJs, /workspaceChromePage/);
@@ -1907,6 +1972,7 @@ test('run_batch executes prompt-only against mock images provider', async () => 
     assert.match(stdout, /\[done\]/);
 
     const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.runtimeMode, 'local-batch-runner');
     assert.equal(manifest.success, 2);
     assert.equal(manifest.failed, 0);
 
@@ -1916,6 +1982,72 @@ test('run_batch executes prompt-only against mock images provider', async () => 
       assert.equal(fs.existsSync(item.output), true);
       assert.equal(item.responseModel, 'gpt-image-2');
     });
+  });
+});
+
+test('run_batch skip-existing requires metadata to match the expected output file', async () => {
+  let requestCount = 0;
+  await withMockImageServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/v1/images/generations') {
+      requestCount += 1;
+      req.on('data', () => {});
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          created: Date.now(),
+          data: [{ b64_json: tinyPngBase64(), revised_prompt: 'fresh image after stale meta' }],
+          model: 'gpt-image-2',
+          size: '1440x2560',
+        }));
+      });
+      return;
+    }
+    res.writeHead(404);
+    res.end('not found');
+  }, async (baseUrl) => {
+    const tempDir = makeTempDir('interactive-image-batch-skip-existing-meta-');
+    const outputDir = path.join(tempDir, 'out');
+    const envFile = path.join(tempDir, '.env');
+    const promptsFile = path.join(tempDir, 'prompts.generated.json');
+    const batchDir = path.join(outputDir, 'batch_001');
+    const expectedOutput = path.join(batchDir, '001_skip-existing-test_1440x2560.png');
+    const staleOutput = path.join(batchDir, 'old-output.png');
+
+    writeMockEnv(envFile, baseUrl);
+    fs.writeFileSync(promptsFile, JSON.stringify([
+      {
+        index: 1,
+        slug: 'skip-existing-test',
+        title: 'Skip Existing Test',
+        generation_prompt: 'Photoreal product image with clean lighting.',
+      },
+    ], null, 2));
+    fs.mkdirSync(batchDir, { recursive: true });
+    fs.writeFileSync(expectedOutput, Buffer.from(tinyPngBase64(), 'base64'));
+    fs.writeFileSync(staleOutput, Buffer.from(tinyPngBase64(), 'base64'));
+    fs.writeFileSync(path.join(batchDir, '001_skip-existing-test.json'), JSON.stringify({
+      index: '001',
+      slug: 'skip-existing-test',
+      output: staleOutput,
+      requestedSize: '1440x2560',
+    }, null, 2));
+
+    await runNodeAsync('run_batch.js', [
+      '--prompts-file', promptsFile,
+      '--env-file', envFile,
+      '--output-dir', outputDir,
+      '--batch-size', '1',
+      '--concurrency', '1',
+      '--contact-sheet', 'false',
+      '--skip-existing', 'true',
+    ]);
+
+    assert.equal(requestCount, 1);
+    const success = JSON.parse(fs.readFileSync(path.join(outputDir, 'success.json'), 'utf8'));
+    assert.equal(success.length, 1);
+    assert.equal(success[0].skipped, undefined);
+    assert.equal(path.resolve(success[0].output), path.resolve(expectedOutput));
+    assert.equal(success[0].revisedPrompt, 'fresh image after stale meta');
   });
 });
 
@@ -3504,7 +3636,7 @@ test('render_example_catalog_board links back into workspace chrome navigation',
   assert.match(html, /信息与说明型视觉/);
   assert.match(html, /分镜与叙事/);
   assert.match(html, /界面与产品样机/);
-  assert.match(html, /推荐意图入口/);
+  assert.match(html, /推荐任务入口/);
   assert.match(html, /catalog-search/);
   assert.match(html, /只看主链/);
   assert.match(html, /只看变体/);
@@ -3513,7 +3645,7 @@ test('render_example_catalog_board links back into workspace chrome navigation',
   assert.match(html, /复制运行命令|复制意图命令/);
   assert.match(html, /navigator\.clipboard|document\.execCommand\('copy'\)/);
   assert.match(html, /入口主链协议/);
-  assert.match(html, /模板展示板只负责选择任务类型和起步入口/);
+  assert.match(html, /中文任务展示板只负责选择任务类型和起步入口/);
   assert.match(html, /跨任务入口/);
   assert.match(html, /单轮任务怎么推进，看工作台首页/);
   assert.match(html, /默认生成策略/);
@@ -3522,8 +3654,8 @@ test('render_example_catalog_board links back into workspace chrome navigation',
   assert.match(html, /默认隐藏:/);
   assert.match(html, /prompt_preview\.html/);
   assert.match(html, /review_board\.html/);
-  assert.match(html, /查看模板细节（维护者）|查看变体细节（维护者）/);
-  assert.match(html, /第一次使用优先选它|适合不想先理解模板名的人/);
+  assert.match(html, /查看任务类型细节（维护者）|查看变体细节（维护者）/);
+  assert.match(html, /第一次使用优先选它|适合不想先理解内部名字的人/);
   assert.match(html, /工作台首页/);
   assert.match(html, /准备工作台/);
   assert.match(html, /结果工作台/);
@@ -3541,7 +3673,7 @@ test('packaged examples catalog is a generated interactive board', () => {
   const sharedCss = fs.readFileSync(examplesChromeCssFile, 'utf8');
   const sharedJs = fs.readFileSync(examplesChromeJsFile, 'utf8');
   assert.match(html, /<!doctype html>/);
-  assert.match(html, /DAOGE 中文模板展示板/);
+  assert.match(html, /DAOGE 中文任务展示板/);
   assert.match(html, /catalog-search/);
   assert.match(html, /data-filter-type="mainline"/);
   assert.match(html, /group-toggle/);
@@ -3576,7 +3708,7 @@ test('render_example_catalog_board prefers entry state when available', () => {
     entryContext: {
       runLabel: '财经口播整板',
       phaseLabel: '入口层',
-      flowLabel: '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
+      flowLabel: '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
       counts: [
         { label: '进入方式', value: '按任务意图进入' },
         { label: '当前任务组', value: '分镜与叙事' },
@@ -3590,13 +3722,13 @@ test('render_example_catalog_board prefers entry state when available', () => {
     entryMainlineProtocol: {
       version: 1,
       currentLayer: '入口层',
-      sequence: ['中文模板展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'],
-      sequenceLabel: '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
-      entryRole: '模板展示板只负责选择任务类型和起步入口。',
+      sequence: ['中文任务展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'],
+      sequenceLabel: '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
+      entryRole: '中文任务展示板只负责选择任务类型和起步入口。',
       taskCenterRole: '任务总控只负责开新任务、继续当前任务和切换任务。',
       workspaceRole: '工作台首页接住单轮任务判断，再顺着准备、结果、异常继续。',
       handoffRule: '入口层一旦选定任务，就把方向交给准备工作台；任务总控只做任务级切换，不展开单轮内部判断。',
-      summary: '先在中文模板展示板选任务，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。',
+      summary: '先在中文任务展示板选任务类型，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。',
     },
     taskCategory: '分镜与叙事',
     starterIntent: 'oralboard',
@@ -3652,7 +3784,7 @@ test('render_example_catalog_board prefers entry state when available', () => {
   assert.match(html, /先确认这类整板任务的方向和放行条件/);
   assert.match(html, /入口层主控/);
   assert.match(html, /入口主链协议/);
-  assert.match(html, /中文模板展示板 -&gt; 任务总控 -&gt; 工作台首页|中文模板展示板 -&gt; 任务总控|模板展示板只负责选择任务类型和起步入口/);
+  assert.match(html, /中文任务展示板 -&gt; 任务总控 -&gt; 工作台首页|中文任务展示板 -&gt; 任务总控|中文任务展示板只负责选择任务类型和起步入口/);
   const { resolveEntryMainlineProtocol } = require('../scripts/entry_state_shared');
   const resolvedProtocol = resolveEntryMainlineProtocol(JSON.parse(fs.readFileSync(entryStateFile, 'utf8')));
   assert.equal(resolvedProtocol.defaultGenerationProtocol?.mode, 'mainline-only');
@@ -3792,6 +3924,12 @@ test('build_workspace_state keeps exception next action aligned for review-only 
   ]);
 
   const workspaceState = JSON.parse(fs.readFileSync(workspaceStateFile, 'utf8'));
+  assert.equal(workspaceState.result?.primaryAction?.key, 'review_result');
+  assert.equal(workspaceState.result?.unifiedStatus?.nextAction?.label, '继续筛图收口');
+  assert.equal(workspaceState.result?.unifiedStatus?.nextAction?.target, 'result_workspace.html');
+  assert.equal(workspaceState.views?.result?.actionStatus?.primary?.file, path.join(outputDir, 'result_workspace.html'));
+  assert.equal(workspaceState.views?.result?.route?.nextSteps?.[0]?.file, path.join(outputDir, 'result_workspace.html'));
+  assert.equal(workspaceState.views?.result?.dialogueStatus?.primarySay, '继续，筛图收口');
   assert.equal(workspaceState.exception?.primaryAction?.key, 'review_exception');
   assert.equal(workspaceState.exception?.unifiedStatus?.nextAction?.target, 'result_workspace.html');
   assert.equal(workspaceState.views?.exception?.actionStatus?.primary?.file, path.join(outputDir, 'result_workspace.html'));
@@ -3903,8 +4041,25 @@ test('ingest_host_native_results mirrors workspace layout and keeps mirror navig
   assert.ok(layoutManifest.counts.workspace >= 4);
   assert.ok(layoutManifest.counts.internal >= 7);
   const workspaceState = JSON.parse(fs.readFileSync(path.join(outputDir, 'workspace_state.json'), 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'manifest.json'), 'utf8'));
+  const successItems = JSON.parse(fs.readFileSync(path.join(outputDir, 'success.json'), 'utf8'));
+  const failedItems = JSON.parse(fs.readFileSync(path.join(outputDir, 'failed.json'), 'utf8'));
+  const needsReviewItems = JSON.parse(fs.readFileSync(path.join(outputDir, 'needs_review.json'), 'utf8'));
+  assert.equal(manifest.hostNative, true);
+  assert.equal(manifest.runtimeMode, 'host-native-image-tool');
+  assert.equal(manifest.success, 2);
+  assert.equal(manifest.failed, 1);
+  assert.equal(manifest.needsReview, 1);
+  assert.equal(manifest.batches?.[0]?.needsReview, 1);
+  assert.equal(successItems.length, 2);
+  assert.equal(failedItems.length, 1);
+  assert.equal(needsReviewItems.length, 1);
+  assert.equal(needsReviewItems[0].hostNativeStatus, 'needs_review');
   assert.equal(workspaceState.runtimeMode, 'host-native-image-tool');
   assert.equal(workspaceState.workflowKind, 'host-native');
+  assert.equal(workspaceState.counts?.success, 2);
+  assert.equal(workspaceState.counts?.failed, 1);
+  assert.equal(workspaceState.counts?.needsReview, 1);
   assert.equal(workspaceState.artifactGovernance?.summary?.workspaceLayoutMode, 'workspace-first');
   assert.equal(workspaceState.artifactGovernance?.summary?.defaultEntryPath, path.join(outputDir, 'workspace', 'workspace_home.html'));
   const readme = fs.readFileSync(path.join(outputDir, 'README.md'), 'utf8');
@@ -4236,7 +4391,7 @@ test('render_task_center can prefer unified workbench_state snapshot', () => {
   assert.match(html, /结果阶段/);
   assert.match(html, /任务总控/);
   assert.match(html, /开始新任务/);
-  assert.match(html, /中文模板展示板/);
+  assert.match(html, /中文任务展示板/);
   assert.match(html, /入口主链提醒/);
   assert.match(html, /从哪里进/);
   assert.match(html, /现在看什么/);
@@ -4272,7 +4427,7 @@ test('render_task_center can reuse unified entry state language', () => {
     entryContext: {
       runLabel: '财经口播整板',
       phaseLabel: '入口层',
-      flowLabel: '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
+      flowLabel: '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
       counts: [
         { label: '进入方式', value: '按任务意图进入' },
         { label: '当前任务组', value: '分镜与叙事' },
@@ -4286,13 +4441,13 @@ test('render_task_center can reuse unified entry state language', () => {
     entryMainlineProtocol: {
       version: 1,
       currentLayer: '入口层',
-      sequence: ['中文模板展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'],
-      sequenceLabel: '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
-      entryRole: '模板展示板只负责选择任务类型和起步入口。',
+      sequence: ['中文任务展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'],
+      sequenceLabel: '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
+      entryRole: '中文任务展示板只负责选择任务类型和起步入口。',
       taskCenterRole: '任务总控只负责开新任务、继续当前任务和切换任务。',
       workspaceRole: '工作台首页接住单轮任务判断，再顺着准备、结果、异常继续。',
       handoffRule: '入口层一旦选定任务，就把方向交给准备工作台；任务总控只做任务级切换，不展开单轮内部判断。',
-      summary: '先在中文模板展示板选任务，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。',
+      summary: '先在中文任务展示板选任务类型，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。',
     },
     taskCategory: '分镜与叙事',
     starterIntent: 'oralboard',
@@ -4348,8 +4503,105 @@ test('render_task_center can reuse unified entry state language', () => {
   assert.match(html, /分镜与叙事/);
   assert.match(html, /先确认这类整板任务的方向和放行条件/);
   assert.match(html, /入口层 \/ 总控层/);
+  assert.match(html, /中文任务展示板 -&gt; 任务总控 -&gt; 工作台首页 -&gt; 准备工作台/);
+  assert.doesNotMatch(html, /中文任务展示板 -&gt; 任务总控 -&gt; 中文任务展示板/);
   assert.match(html, /跨任务入口/);
   assert.match(html, /任务内判断交给工作台首页/);
+
+  const baseEntryState = JSON.parse(fs.readFileSync(entryStateFile, 'utf8'));
+  fs.writeFileSync(entryStateFile, JSON.stringify({
+    ...baseEntryState,
+    entryContext: {
+      ...baseEntryState.entryContext,
+      flowLabel: '中文模板展示板 -> 中文任务展示板 -> 工作台首页 -> 准备工作台',
+    },
+    entryMainlineProtocol: {
+      ...baseEntryState.entryMainlineProtocol,
+      summary: '先在中文模板展示板选任务类型，再到任务总控继续。',
+      entryRole: '中文模板展示板只负责选择任务类型和起步入口。',
+      taskCenterEntryProtocol: {
+        ...(baseEntryState.entryMainlineProtocol.taskCenterEntryProtocol || {}),
+        userRule: '中文模板展示板只做入口选择，任务内判断看工作台首页。',
+        summary: '跨任务入口看任务总控，不回中文模板展示板做单轮判断。',
+      },
+      mainlineContract: {
+        ...(baseEntryState.entryMainlineProtocol.mainlineContract || {}),
+        summary: '先从中文模板展示板进入任务总控。',
+        entryRole: '中文模板展示板只负责入口选择。',
+      },
+    },
+  }, null, 2));
+  runNode('render_task_center.js', [
+    '--index-file', indexFile,
+    '--output-file', outputFile,
+  ]);
+  const legacyProtocolHtml = fs.readFileSync(outputFile, 'utf8');
+  assert.match(legacyProtocolHtml, /中文任务展示板 -&gt; 任务总控 -&gt; 工作台首页 -&gt; 准备工作台/);
+  assert.doesNotMatch(legacyProtocolHtml, /中文模板展示板/);
+  assert.doesNotMatch(legacyProtocolHtml, /中文任务展示板 -&gt; 任务总控 -&gt; 中文任务展示板/);
+
+  fs.writeFileSync(entryStateFile, JSON.stringify({
+    ...baseEntryState,
+    entryContext: {
+      ...baseEntryState.entryContext,
+      flowLabel: '中文模板展示板 -> 任务总控 -> 中文模板展示板 -> 工作台首页 -> 准备工作台',
+    },
+  }, null, 2));
+  runNode('render_task_center.js', [
+    '--index-file', indexFile,
+    '--output-file', outputFile,
+  ]);
+  const repeatedEntryAfterTaskCenterHtml = fs.readFileSync(outputFile, 'utf8');
+  assert.match(repeatedEntryAfterTaskCenterHtml, /中文任务展示板 -&gt; 任务总控 -&gt; 工作台首页 -&gt; 准备工作台/);
+  assert.doesNotMatch(repeatedEntryAfterTaskCenterHtml, /中文模板展示板/);
+  assert.doesNotMatch(repeatedEntryAfterTaskCenterHtml, /中文任务展示板 -&gt; 任务总控 -&gt; 中文任务展示板/);
+  assert.doesNotMatch(repeatedEntryAfterTaskCenterHtml, /任务总控 -&gt; 任务总控/);
+
+  fs.writeFileSync(entryStateFile, JSON.stringify({
+    ...baseEntryState,
+    entryContext: {
+      ...baseEntryState.entryContext,
+      flowLabel: '中文任务展示板 -> 任务总控',
+    },
+  }, null, 2));
+  runNode('render_task_center.js', [
+    '--index-file', indexFile,
+    '--output-file', outputFile,
+  ]);
+  const taskCenterTerminalHtml = fs.readFileSync(outputFile, 'utf8');
+  assert.doesNotMatch(taskCenterTerminalHtml, /任务总控 -&gt; 任务总控/);
+
+  fs.writeFileSync(entryStateFile, JSON.stringify({
+    ...baseEntryState,
+    entryContext: {
+      ...baseEntryState.entryContext,
+      flowLabel: '中文模板展示板 -> 任务总控',
+    },
+  }, null, 2));
+  runNode('render_task_center.js', [
+    '--index-file', indexFile,
+    '--output-file', outputFile,
+  ]);
+  const legacyTaskCenterTerminalHtml = fs.readFileSync(outputFile, 'utf8');
+  assert.match(legacyTaskCenterTerminalHtml, /中文任务展示板 -&gt; 任务总控/);
+  assert.doesNotMatch(legacyTaskCenterTerminalHtml, /中文模板展示板/);
+  assert.doesNotMatch(legacyTaskCenterTerminalHtml, /任务总控 -&gt; 任务总控/);
+
+  fs.writeFileSync(entryStateFile, JSON.stringify({
+    ...baseEntryState,
+    entryContext: {
+      ...baseEntryState.entryContext,
+      flowLabel: '中文模板展示板',
+    },
+  }, null, 2));
+  runNode('render_task_center.js', [
+    '--index-file', indexFile,
+    '--output-file', outputFile,
+  ]);
+  const legacyTerminalHtml = fs.readFileSync(outputFile, 'utf8');
+  assert.match(legacyTerminalHtml, /中文任务展示板 -&gt; 任务总控/);
+  assert.doesNotMatch(legacyTerminalHtml, /中文模板展示板/);
+  assert.doesNotMatch(legacyTerminalHtml, /任务总控 -&gt; 任务总控/);
 });
 
 test('render_task_center can prefer task center state snapshot', () => {
@@ -6564,7 +6816,7 @@ test('build_workspace_state infers storyboard specialization from execution mani
     entryContext: {
       runLabel: '半导体口播整板',
       phaseLabel: '入口层',
-      flowLabel: '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
+      flowLabel: '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
       counts: [
         { label: '进入方式', value: '按任务意图进入' },
         { label: '当前任务组', value: '分镜与叙事' },
@@ -6578,13 +6830,13 @@ test('build_workspace_state infers storyboard specialization from execution mani
     entryMainlineProtocol: {
       version: 1,
       currentLayer: '入口层',
-      sequence: ['中文模板展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'],
-      sequenceLabel: '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
-      entryRole: '模板展示板只负责选择任务类型和起步入口。',
+      sequence: ['中文任务展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'],
+      sequenceLabel: '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台',
+      entryRole: '中文任务展示板只负责选择任务类型和起步入口。',
       taskCenterRole: '任务总控只负责开新任务、继续当前任务和切换任务。',
       workspaceRole: '工作台首页接住单轮任务判断，再顺着准备、结果、异常继续。',
       handoffRule: '入口层一旦选定任务，就把方向交给准备工作台；任务总控只做任务级切换，不展开单轮内部判断。',
-      summary: '先在中文模板展示板选任务，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。',
+      summary: '先在中文任务展示板选任务类型，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。',
     },
     recommendedNextStep: {
       label: '进入准备工作台',
@@ -6682,7 +6934,7 @@ test('build_workspace_state infers storyboard specialization from execution mani
   assert.equal(workspaceState.entryBridge?.selectedEntry?.title, '半导体口播整板');
   assert.equal(workspaceState.entryBridge?.route?.next?.label, '进入准备工作台');
   assert.equal(workspaceState.entryBridge?.mainlineProtocol?.taskCenterRole, '任务总控只负责开新任务、继续当前任务和切换任务。');
-  assert.match(String(workspaceState.entryBridge?.mainlineProtocol?.sequenceLabel || ''), /中文模板展示板 -> 任务总控 -> 工作台首页/);
+  assert.match(String(workspaceState.entryBridge?.mainlineProtocol?.sequenceLabel || ''), /中文任务展示板 -> 任务总控 -> 工作台首页/);
   assert.equal(workspaceState.entryBridge?.mainlineProtocol?.defaultGenerationProtocol?.mode, 'mainline-only');
   assert.match(String(workspaceState.entryBridge?.mainlineProtocol?.defaultGenerationProtocol?.guardrail?.internalRule || ''), /默认不展示给普通用户/);
   assert.equal(workbenchState.entryBridge?.context?.phaseLabel, '入口层');
@@ -6878,6 +7130,8 @@ test('build_workspace_state infers storyboard specialization from execution mani
   assert.ok((workspaceState.governanceByPage?.['result_workspace.html']?.optionalSurface?.conditionalVisibleIds || []).includes('storyboard'));
   assert.ok((workspaceState.governanceByPage?.['result_workspace.html']?.workbenchEntryIds || []).includes('storyboard'));
   assert.ok((workspaceState.governanceByPage?.['exception_workspace.html']?.workbenchEntryIds || []).includes('storyboard'));
+  assert.ok((workspaceState.views?.exception?.route?.nextSteps || []).some((item) => item.file === storyboardBoardFile));
+  assert.notEqual(workspaceState.views?.exception?.route?.nextSteps?.[0]?.file, storyboardBoardFile);
   assert.equal(workspaceState.result?.nextStepLabel, '回工作台首页');
   assert.equal(workspaceState.unifiedStatus?.taskLabel, workspaceState.taskLabel);
   assert.ok(String(workspaceState.unifiedStatus?.stage || '').trim().length > 0);
@@ -8216,7 +8470,7 @@ test('render_workspace_home can prefer unified workbench_state snapshot', () => 
       context: {
         runLabel: '半导体口播整板',
         phaseLabel: '入口层',
-        flowLabel: '中文模板展示板 -> 准备工作台 -> 结果工作台',
+        flowLabel: '中文任务展示板 -> 准备工作台 -> 结果工作台',
         counts: [
           { label: '进入方式', value: '按任务意图进入' },
           { label: '当前任务组', value: '分镜与叙事' },
@@ -9150,7 +9404,9 @@ test('run_example_catalog_prepare can run third-wave lookbook variants from wide
     const entryState = JSON.parse(fs.readFileSync(summary.entryState, 'utf8'));
     assert.equal(summary.selectedExample.id, item.exampleId);
     assert.equal(summary.selectedExample.template_variant, item.variant);
-    assert.match(entryState.entryMainlineProtocol?.sequenceLabel || '', /中文模板展示板 -> 任务总控 -> 工作台首页/);
+    assert.equal(summary.selectedExample.maintainer?.template_variant, item.variant);
+    assert.equal(summary.selectedExample.template_id, summary.selectedExample.maintainer?.template_id);
+    assert.match(entryState.entryMainlineProtocol?.sequenceLabel || '', /中文任务展示板 -> 任务总控 -> 工作台首页/);
     assert.equal(entryState.entryMainlineProtocol?.taskCenterEntryProtocol?.entryGuideKey, 'entryMainlineGuide');
     assert.match(String(entryState.entryMainlineProtocol?.taskCenterEntryProtocol?.summary || ''), /跨任务入口看任务总控/);
     assert.equal(entryState.entryMainlineProtocol?.defaultGenerationProtocol?.mode, 'mainline-only');
@@ -9184,7 +9440,7 @@ test('run_example_catalog_prepare can resolve second-wave oral storyboard starte
     const summary = JSON.parse(runStdout);
     const entryState = JSON.parse(fs.readFileSync(summary.entryState, 'utf8'));
     assert.equal(summary.selectedExample.id, item.exampleId);
-    assert.equal(summary.selectedExample.template_variant, item.variant);
+    assert.equal(summary.selectedExample.maintainer?.template_variant, item.variant);
     assert.match(entryState.entryMainlineProtocol?.handoffRule || '', /任务总控只做任务级切换/);
     assert.equal(entryState.entryMainlineProtocol?.defaultGenerationProtocol?.mode, 'mainline-only');
     assert.match(String(entryState.entryMainlineProtocol?.defaultGenerationProtocol?.guardrail?.onDemandRule || ''), /必须按需开启/);
@@ -9211,7 +9467,7 @@ test('run_example_catalog_prepare can run third-wave portrait-fashion variants f
     ]);
     const summary = JSON.parse(runStdout);
     assert.equal(summary.selectedExample.id, item.exampleId);
-    assert.equal(summary.selectedExample.template_variant, item.variant);
+    assert.equal(summary.selectedExample.maintainer?.template_variant, item.variant);
     assert.equal(fs.existsSync(summary.entryState), true);
     assert.equal(fs.existsSync(summary.workspaceHome), true);
     assert.equal(fs.existsSync(summary.prepareWorkspace), true);
@@ -9235,7 +9491,7 @@ test('run_example_catalog_prepare can run fourth-wave portrait-fashion variants 
     ]);
     const summary = JSON.parse(runStdout);
     assert.equal(summary.selectedExample.id, item.exampleId);
-    assert.equal(summary.selectedExample.template_variant, item.variant);
+    assert.equal(summary.selectedExample.maintainer?.template_variant, item.variant);
     assert.equal(fs.existsSync(summary.entryState), true);
     assert.equal(fs.existsSync(summary.workspaceHome), true);
     assert.equal(fs.existsSync(summary.prepareWorkspace), true);
@@ -9246,4 +9502,159 @@ test('run_example_catalog_prepare can run fourth-wave portrait-fashion variants 
     assert.deepEqual(promptValidation.warnings || [], []);
     assert.equal(promptValidation.qualityGates.ok, true);
   });
+});
+
+test('exception decision keeps primary action, target, and reply aligned across boundary states', () => {
+  const { resolveExceptionDecision } = require('../scripts/workspace_status_dictionary');
+  const cases = [
+    {
+      input: { failedCount: 2, reviewCount: 1, rerunCount: 3 },
+      category: 'hard-failure',
+      actionKey: 'resolve_failed',
+      target: 'exception_workspace.html',
+      reply: '继续，先处理失败项',
+      tone: 'bad',
+    },
+    {
+      input: { failedCount: 0, reviewCount: 2, rerunCount: 1 },
+      category: 'needs-review',
+      actionKey: 'review_exception',
+      target: 'result_workspace.html',
+      reply: '继续，回结果工作台复核',
+      tone: 'warn',
+    },
+    {
+      input: { failedCount: 0, reviewCount: 0, rerunCount: 2 },
+      category: 'rerun-candidate',
+      actionKey: 'view_rerun_candidates',
+      target: 'exception_workspace.html',
+      reply: '继续，查看补跑候选',
+      tone: 'info',
+    },
+    {
+      input: { failedCount: 0, reviewCount: 0, rerunCount: 0 },
+      category: 'clear',
+      actionKey: 'go_home',
+      target: 'workspace_home.html',
+      reply: '继续，回工作台首页',
+      tone: 'good',
+    },
+  ];
+
+  cases.forEach((item) => {
+    const decision = resolveExceptionDecision(item.input);
+    assert.equal(decision.category, item.category);
+    assert.equal(decision.actionKey, item.actionKey);
+    assert.equal(decision.nextActionTarget, item.target);
+    assert.equal(decision.recommendedReply, item.reply);
+    assert.equal(decision.tone, item.tone);
+    assert.ok(String(decision.reason || '').trim().length > 0);
+  });
+});
+
+test('build_workspace_state promotes rerun-only exception decisions consistently', () => {
+  const tempDir = makeTempDir('interactive-image-batch-exception-rerun-only-');
+  const outputDir = path.join(tempDir, 'out');
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  const workspaceStateFile = path.join(outputDir, 'workspace_state.json');
+  const workspaceAssetsFile = path.join(outputDir, 'workspace_assets.json');
+  const workspaceTimelineFile = path.join(outputDir, 'workspace_timeline.json');
+  const workbenchStateFile = path.join(outputDir, 'workbench_state.json');
+  const successImage = path.join(outputDir, 'success.png');
+
+  fs.writeFileSync(successImage, Buffer.from(tinyPngBase64(), 'base64'));
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    outputDir,
+    selectedCount: 1,
+    success: 1,
+    failed: 0,
+    generatedAt: '2026-05-27T09:00:00.000Z',
+  }, null, 2));
+  fs.writeFileSync(path.join(outputDir, 'success.json'), JSON.stringify([
+    { ok: true, index: '001', title: 'Success Item', output: successImage },
+  ], null, 2));
+  fs.writeFileSync(path.join(outputDir, 'failed.json'), '[]');
+  fs.writeFileSync(path.join(outputDir, 'needs_review.json'), '[]');
+  fs.writeFileSync(path.join(outputDir, 'rerun_candidates.json'), JSON.stringify([
+    { index: '001', title: 'Worth checking', reason: '用户可能想补一张备选图' },
+  ], null, 2));
+
+  runNode('build_workspace_state.js', [
+    '--manifest-file', manifestFile,
+    '--output-dir', outputDir,
+    '--workspace-state-file', workspaceStateFile,
+    '--workspace-assets-file', workspaceAssetsFile,
+    '--workspace-timeline-file', workspaceTimelineFile,
+    '--workbench-state-file', workbenchStateFile,
+  ]);
+
+  const workspaceState = JSON.parse(fs.readFileSync(workspaceStateFile, 'utf8'));
+  assert.equal(workspaceState.exception?.primaryAction?.key, 'view_rerun_candidates');
+  assert.equal(workspaceState.exception?.totalIssueCount, 1);
+  assert.equal(workspaceState.exception?.statusStack?.find((item) => item.label === '压力信号')?.value, '1 项待处理');
+  assert.equal(workspaceState.exception?.cockpitSummary?.items?.find((item) => item.label === '当前重点')?.value, '按价值决定是否补跑');
+  assert.equal(workspaceState.exception?.cockpitSummary?.items?.find((item) => item.label === '阻塞情况')?.value, '1 项待处理');
+  assert.match(String(workspaceState.exception?.judgment?.actionLabel || ''), /补跑候选/);
+  assert.ok((workspaceState.exception?.judgment?.noteItems || []).some((item) => /补跑候选/.test(item)));
+  assert.equal(workspaceState.views?.exception?.taskControlBar?.pressureLabel, '还有补跑候选待决定');
+  assert.equal(workspaceState.views?.exception?.taskControlBar?.pressureTone, 'info');
+  assert.equal(workspaceState.views?.exception?.signalBar?.find((item) => item.label === '当前压力')?.value, '1 项待处理');
+  assert.equal(workspaceState.exception?.unifiedStatus?.nextAction?.target, 'exception_workspace.html');
+  assert.equal(workspaceState.exception?.confirmationState?.recommendedReply, '继续，查看补跑候选');
+  assert.equal(workspaceState.views?.exception?.actionStatus?.primary?.file, path.join(outputDir, 'exception_workspace.html'));
+  assert.equal(workspaceState.views?.exception?.route?.nextSteps?.[0]?.file, path.join(outputDir, 'exception_workspace.html'));
+  assert.equal(workspaceState.views?.exception?.workflowCopilot?.action?.recommendedReply, '继续，查看补跑候选');
+  assert.equal(workspaceState.views?.exception?.workflowCopilot?.action?.recommendedReply, workspaceState.exception?.confirmationState?.recommendedReply);
+  assert.ok((workspaceState.views?.exception?.stageRelay?.nextItems || []).some((item) => /继续，查看补跑候选/.test(item)));
+  assert.ok((workspaceState.views?.exception?.stageRelay?.currentItems || []).some((item) => /价值决定是否补跑/.test(item)));
+  assert.doesNotMatch(JSON.stringify(workspaceState.views?.exception?.stageRelay || {}), /继续，回工作台首页/);
+});
+
+test('build_workspace_state exception stage ui keeps legacy count fallback', () => {
+  const { buildExceptionStageUiState } = loadBuildWorkspaceStateInternal(['buildExceptionStageUiState']);
+  const stageUi = buildExceptionStageUiState('补跑候选任务', '异常阶段', {
+    statusLabel: '补跑候选待决定',
+    statusSummary: '当前没有硬失败，但仍有补跑候选要判断。',
+    statusTone: 'info',
+    failedCount: 0,
+    reviewCount: 0,
+    rerunCount: 1,
+    nextStepLabel: '评估补跑候选',
+    nextStepReason: '先确认是否值得补跑。',
+    issueSummary: '当前有 1 个补跑候选。',
+    confirmationState: {
+      recommendedReply: '继续，查看补跑候选',
+    },
+  });
+
+  assert.equal(stageUi.taskControlBar?.pressureLabel, '还有补跑候选待决定');
+  assert.equal(stageUi.signalBar?.find((item) => item.label === '当前压力')?.value, '1 项待处理');
+  assert.equal(stageUi.statusStack?.find((item) => item.label === '压力信号')?.value, '1 项待处理');
+});
+
+test('catalog starter and intent entry states expose Chinese task semantics first', () => {
+  const starterStdout = runNode('run_example_catalog_prepare.js', ['--starter', 'true']);
+  ['人物主视觉', '摄影棚大片', '电商主图', '品牌包装', '电影分镜', '口播分镜整板'].forEach((label) => {
+    assert.match(starterStdout, new RegExp(label));
+  });
+  assert.match(starterStdout, /^portrait-kv\t[^\t]+\tportrait\tmedium\t[^\t]+\t人物主视觉\t--intent portrait\t/m);
+  assert.match(starterStdout, /^oral-storyboard-board\t[^\t]+\toralboard\tmedium\t[^\t]+\t口播分镜整板\t--intent oralboard\t/m);
+  assert.doesNotMatch(starterStdout, /^portrait-kv\t[^\t]+\tportrait\t未标注\t/m);
+
+  const tempDir = makeTempDir('interactive-image-batch-catalog-intent-zh-');
+  const outputDir = path.join(tempDir, 'portrait');
+  const runStdout = runNode('run_example_catalog_prepare.js', [
+    '--intent', 'portrait',
+    '--output-dir', outputDir,
+  ]);
+  const summary = JSON.parse(runStdout);
+  const entryState = JSON.parse(fs.readFileSync(summary.entryState, 'utf8'));
+  assert.equal(summary.selectedExample.taskTypeLabel, '人物主视觉');
+  assert.equal(summary.selectedExample.taskIntent, 'portrait');
+  assert.equal(entryState.starterIntentLabel, '人物主视觉');
+  assert.equal(entryState.entryContext?.counts?.find((item) => item.label === '当前任务类型')?.value, '人物主视觉');
+  assert.match(String(entryState.entryWorkbench?.workbench?.cards?.[0]?.value || ''), /人物主视觉/);
+  assert.match(String(entryState.recommendedNextStep?.reason || ''), /人物主视觉/);
 });

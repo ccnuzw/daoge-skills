@@ -3,7 +3,7 @@ const path = require('path');
 const PAGE_REGISTRY = [
   {
     id: 'catalog',
-    label: '中文模板展示板',
+    label: '中文任务展示板',
     kind: 'entry',
     audience: 'starter',
     stage: 'starter',

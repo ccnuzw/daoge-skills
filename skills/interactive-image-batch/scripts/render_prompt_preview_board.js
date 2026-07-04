@@ -334,7 +334,7 @@ ${renderWorkspaceChromeHeadAssets()}
         title: '提示词补充页看完后，回准备主链',
         copy: '这里负责逐条深看 prompt，不再承担准备总控。方向结论要送回准备工作台，再决定预检或回退。',
         previous: {
-          label: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回中文模板展示板',
+          label: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回中文任务展示板',
           summary: fileExists(prepareWorkspacePath) ? '回准备主链重新看当前阶段、路线和工作台建议。' : '当你发现任务类型、风格方向或任务意图一开始就选偏了，回这里重选更省时间。',
           file: fileExists(prepareWorkspacePath) ? prepareWorkspacePath : path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html'),
           cta: fileExists(prepareWorkspacePath) ? '回准备工作台' : '回展示板重选',

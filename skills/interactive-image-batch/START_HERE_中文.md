@@ -262,6 +262,7 @@ references/examples/examples_catalog.html
 - `workspace/workspace_home.html`
 - `workspace/prepare_workspace.html`
 - `workspace/result_workspace.html`
+- `workspace/exception_workspace.html`
 - `workspace/run_record.html`
 
 解释：
@@ -272,6 +273,8 @@ references/examples/examples_catalog.html
   - 看这次任务能不能开跑、提示词和素材是否需要调整
 - `result_workspace.html`
   - 看结果是否可用、哪些要复核、下一步是否补跑
+- `exception_workspace.html`
+  - 只在有失败、待复核或补跑候选时打开，看哪些必须处理、哪些建议复核、哪些值得补跑
 - `run_record.html`
   - 只在需要回看本轮任务档案时打开
 
@@ -329,8 +332,9 @@ node scripts/render_example_catalog_board.js
 
 1. 先按任务类型判断自己属于哪类
 2. 再选一个起步入口
-3. 先看预检面板
-4. 再决定是否继续执行
+3. 先进工作台首页
+4. 再到准备工作台确认能不能开跑
+5. 执行后看结果工作台；有问题再进异常工作台
 
 ---
 

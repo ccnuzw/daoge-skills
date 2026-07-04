@@ -243,9 +243,11 @@ node scripts/run_example_catalog_prepare.js --starter true
 node scripts/run_example_catalog_prepare.js --intent portrait
 ```
 
-5. 看：
-   - `prepare/preflight_board.html`
-   - `prepare/prompt_preview.html`
+5. 看工作台主链：
+   - `workspace/workspace_home.html`
+   - `workspace/prepare_workspace.html`
+   - `workspace/result_workspace.html`
+   - `workspace/exception_workspace.html`（有失败、待复核或补跑候选时再看）
 
 ### 进阶顺序
 

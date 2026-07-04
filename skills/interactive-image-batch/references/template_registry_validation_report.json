@@ -5,6 +5,172 @@
   "ok": true,
   "errorCount": 0,
   "warningCount": 0,
+  "catalogValidation": {
+    "ok": true,
+    "catalogPath": "references/examples/examples.catalog.json",
+    "exampleCount": 140,
+    "errorCount": 0,
+    "warningCount": 0,
+    "errors": [],
+    "warnings": [],
+    "templateExampleCounts": {
+      "ab-ad-test": 6,
+      "academic-figure-board": 5,
+      "asset-prop-sheet": 4,
+      "avatar-profile-pack": 5,
+      "brand-packaging-board": 12,
+      "campaign-poster": 6,
+      "cinematic-storyboard": 6,
+      "detail-page-set": 6,
+      "ecommerce-clean": 5,
+      "illustrated-scene-set": 4,
+      "image-edit": 5,
+      "infographic-board": 6,
+      "lookbook": 7,
+      "map-route-board": 5,
+      "oral-storyboard-board": 7,
+      "portrait-kv": 9,
+      "social-grid": 6,
+      "studio-editorial": 9,
+      "technical-diagram": 7,
+      "type-layout-poster": 4,
+      "ui-mockup-board": 6,
+      "visual-doc-slide": 10
+    },
+    "variantExampleCounts": {
+      "ab-ad-test/audience-angle": 1,
+      "ab-ad-test/benefit-stack": 1,
+      "ab-ad-test/cta-emphasis-test": 1,
+      "ab-ad-test/hook-contrast-test": 1,
+      "ab-ad-test/layout-test": 1,
+      "ab-ad-test/single-variable": 1,
+      "academic-figure-board/graphical-abstract": 1,
+      "academic-figure-board/mechanism-diagram": 1,
+      "academic-figure-board/method-pipeline-overview": 1,
+      "academic-figure-board/multi-condition-comparison": 1,
+      "academic-figure-board/research-overview-poster": 1,
+      "asset-prop-sheet/collectible-item-sheet": 1,
+      "asset-prop-sheet/game-screenshot-mockup": 1,
+      "asset-prop-sheet/prop-lineup-board": 1,
+      "asset-prop-sheet/retro-skeuomorphic-icons": 1,
+      "avatar-profile-pack/character-grid-portrait": 1,
+      "avatar-profile-pack/cultural-portrait-series": 1,
+      "avatar-profile-pack/sticker-set": 1,
+      "avatar-profile-pack/style-transfer-selfie": 1,
+      "avatar-profile-pack/themed-3d-icon": 1,
+      "brand-packaging-board/beverage-label-design": 2,
+      "brand-packaging-board/brand-identity-board": 2,
+      "brand-packaging-board/character-merch-board": 2,
+      "brand-packaging-board/cosmetic-packaging": 2,
+      "brand-packaging-board/gift-box-campaign-packaging": 1,
+      "brand-packaging-board/mascot-brand-kit": 2,
+      "brand-packaging-board/seasonal-limited-packaging": 1,
+      "campaign-poster/campaign-extension": 1,
+      "campaign-poster/co-brand-kv": 1,
+      "campaign-poster/headline-safe-kv": 1,
+      "campaign-poster/people-hero": 1,
+      "campaign-poster/people-product-dual-hero": 1,
+      "campaign-poster/product-hero": 1,
+      "cinematic-storyboard/demo-explainer-sequence": 1,
+      "cinematic-storyboard/four-beat-ad": 1,
+      "cinematic-storyboard/micro-film": 1,
+      "cinematic-storyboard/mood-sequence": 1,
+      "cinematic-storyboard/product-reveal-sequence": 1,
+      "cinematic-storyboard/vertical-short": 1,
+      "detail-page-set/benefit-breakdown": 1,
+      "detail-page-set/comparison-proof-detail": 1,
+      "detail-page-set/feature-stack-page": 1,
+      "detail-page-set/fit-and-material": 1,
+      "detail-page-set/hero-plus-details": 1,
+      "detail-page-set/lifestyle-proof": 1,
+      "ecommerce-clean/flatlay-commerce": 1,
+      "ecommerce-clean/material-focus-commerce": 1,
+      "ecommerce-clean/platform-safe-packshot": 1,
+      "ecommerce-clean/soft-scene-commerce": 1,
+      "ecommerce-clean/white-clean-hero": 1,
+      "illustrated-scene-set/concept-scene": 1,
+      "illustrated-scene-set/healing-scene": 1,
+      "illustrated-scene-set/minimalist-mood-scene": 1,
+      "illustrated-scene-set/picture-book-scene": 1,
+      "image-edit/background-replacement": 1,
+      "image-edit/lighting-consistency-fix": 1,
+      "image-edit/localized-fix": 1,
+      "image-edit/material-replacement-edit": 1,
+      "image-edit/style-alignment-edit": 1,
+      "infographic-board/bento-grid-infographic": 1,
+      "infographic-board/comparison-infographic": 1,
+      "infographic-board/hand-drawn-infographic": 1,
+      "infographic-board/kpi-dashboard-infographic": 1,
+      "infographic-board/legend-heavy-infographic": 1,
+      "infographic-board/step-by-step-infographic": 1,
+      "lookbook/chapter-lookbook": 1,
+      "lookbook/chapter-scene-progressive": 1,
+      "lookbook/cover-and-range": 1,
+      "lookbook/editorial-pairing-lookbook": 1,
+      "lookbook/lookbook-detail-mix": 1,
+      "lookbook/multi-outfit-commercial": 1,
+      "lookbook/series-unified": 1,
+      "map-route-board/food-map": 1,
+      "map-route-board/illustrated-city-map": 1,
+      "map-route-board/itinerary-day-trip-map": 1,
+      "map-route-board/store-distribution-map": 1,
+      "map-route-board/travel-route-map": 1,
+      "oral-storyboard-board/educational-explainer": 1,
+      "oral-storyboard-board/expert-led": 1,
+      "oral-storyboard-board/horizontal-board": 1,
+      "oral-storyboard-board/host-led": 1,
+      "oral-storyboard-board/industry-led": 1,
+      "oral-storyboard-board/product-led": 1,
+      "oral-storyboard-board/testimonial-led": 1,
+      "portrait-kv/beauty-crop-kv": 1,
+      "portrait-kv/brand-portrait-kv": 1,
+      "portrait-kv/dramatic-gaze-kv": 1,
+      "portrait-kv/editorial-closeup": 1,
+      "portrait-kv/emotion-contrast-kv": 1,
+      "portrait-kv/headline-safe-portrait-kv": 1,
+      "portrait-kv/product-linked-portrait-kv": 1,
+      "portrait-kv/profile-silhouette-kv": 1,
+      "portrait-kv/soft-character-focus": 1,
+      "social-grid/benefit-carousel-grid": 1,
+      "social-grid/brand-feed-system": 1,
+      "social-grid/countdown-campaign-grid": 1,
+      "social-grid/cover-detail-mood": 1,
+      "social-grid/nine-grid-launch": 1,
+      "social-grid/ugc-polished": 1,
+      "studio-editorial/beauty-detail-studio": 1,
+      "studio-editorial/clean-fashion-editorial": 1,
+      "studio-editorial/couture-minimal-studio": 1,
+      "studio-editorial/gesture-sequence-studio": 1,
+      "studio-editorial/high-contrast-studio": 1,
+      "studio-editorial/mono-backdrop-editorial": 1,
+      "studio-editorial/motion-pose-studio": 1,
+      "studio-editorial/sharp-tailoring-studio": 1,
+      "studio-editorial/soft-beauty-studio": 1,
+      "technical-diagram/er-diagram": 1,
+      "technical-diagram/flowchart-decision": 1,
+      "technical-diagram/mind-map-tech": 1,
+      "technical-diagram/network-topology": 1,
+      "technical-diagram/sequence-diagram": 1,
+      "technical-diagram/state-machine": 1,
+      "technical-diagram/system-architecture": 1,
+      "type-layout-poster/bilingual-layout-visual": 1,
+      "type-layout-poster/editorial-phrase-block": 1,
+      "type-layout-poster/image-type-balance-poster": 1,
+      "type-layout-poster/title-safe-poster": 1,
+      "ui-mockup-board/chat-interface-scene": 1,
+      "ui-mockup-board/landing-page-case-study": 1,
+      "ui-mockup-board/live-commerce-ui": 1,
+      "ui-mockup-board/product-card-overlay": 1,
+      "ui-mockup-board/short-video-cover-ui": 1,
+      "ui-mockup-board/social-interface-mockup": 1,
+      "visual-doc-slide/before-after-explainer-slide": 1,
+      "visual-doc-slide/data-summary-slide": 1,
+      "visual-doc-slide/dense-explainer-slides": 2,
+      "visual-doc-slide/educational-diagram-slide": 2,
+      "visual-doc-slide/policy-style-slide": 2,
+      "visual-doc-slide/visual-report-page": 2
+    }
+  },
   "templates": [
     {
       "id": "campaign-poster",
@@ -26,6 +192,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 6,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -50,6 +217,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 9,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -74,6 +242,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 5,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -98,6 +267,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 7,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -122,6 +292,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 9,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -146,6 +317,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 5,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -173,6 +345,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 7,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -197,6 +370,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 6,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -221,6 +395,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 6,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -245,6 +420,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 6,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -269,6 +445,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 6,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -293,6 +470,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 6,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -317,6 +495,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 6,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -341,6 +520,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 7,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -365,6 +545,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 5,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -389,6 +570,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 10,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -413,6 +595,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 5,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -437,6 +620,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 12,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -461,6 +645,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 4,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -485,6 +670,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 5,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -509,6 +695,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 4,
       "errors": [],
       "warnings": [],
       "ok": true
@@ -533,6 +720,7 @@
         "反模式"
       ],
       "missingDocSections": [],
+      "catalogExampleCount": 4,
       "errors": [],
       "warnings": [],
       "ok": true

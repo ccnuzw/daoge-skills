@@ -14,15 +14,68 @@ function normalizeList(value, fallback = []) {
   return normalized.length ? normalized : fallback;
 }
 
+const STARTER_INTENT_COPY = {
+  portrait: {
+    label: '人物主视觉',
+    shortLabel: '人物主视觉',
+    summary: '适合人物海报、品牌人物封面、近景肖像主视觉。',
+    commandHint: '--intent portrait',
+  },
+  studio: {
+    label: '摄影棚大片',
+    shortLabel: '棚拍大片',
+    summary: '适合摄影棚人物大片、时尚棚拍、美妆棚拍和高定人物棚拍。',
+    commandHint: '--intent studio',
+  },
+  ecommerce: {
+    label: '电商主图',
+    shortLabel: '电商主图',
+    summary: '适合白底主图、干净商品图、平铺产品图和平台安全主图。',
+    commandHint: '--intent ecommerce',
+  },
+  packaging: {
+    label: '品牌包装',
+    shortLabel: '品牌包装',
+    summary: '适合礼盒包装、限定包装、标签设计和品牌包装系统。',
+    commandHint: '--intent packaging',
+  },
+  cinematic: {
+    label: '电影分镜',
+    shortLabel: '电影分镜',
+    summary: '适合连续镜头分镜、广告分镜、产品演示分镜和短片分镜。',
+    commandHint: '--intent cinematic',
+  },
+  oralboard: {
+    label: '口播分镜整板',
+    shortLabel: '口播整板',
+    summary: '适合主持人口播、专家讲解、案例见证和产品解说整板。',
+    commandHint: '--intent oralboard',
+  },
+};
+
+function resolveStarterIntentCopy(intent, fallback = {}) {
+  const key = normalizeText(intent).toLowerCase();
+  const copy = STARTER_INTENT_COPY[key] || {};
+  const fallbackLabel = normalizeText(fallback.label || fallback.name || intent, '未选择任务');
+  const fallbackSummary = normalizeText(fallback.summary || fallback.description, '先按中文任务类型起步，再进入准备工作台确认方向。');
+  return {
+    intent: key || normalizeText(intent),
+    label: normalizeText(copy.label, fallbackLabel),
+    shortLabel: normalizeText(copy.shortLabel, copy.label || fallbackLabel),
+    summary: normalizeText(copy.summary, fallbackSummary),
+    commandHint: normalizeText(copy.commandHint, key ? `--intent ${key}` : ''),
+  };
+}
+
 function resolveEntryMainlineActions(options = {}) {
   const hasWorkspace = Boolean(options.hasWorkspace || options.latestWorkspace);
   return {
     startNewTask: {
       label: '开始新任务',
-      value: '中文模板展示板',
+      value: '中文任务展示板',
       cta: '开始新任务',
-      summary: '先从中文模板展示板选择任务类型和起步入口。',
-      pendingLabel: '中文模板展示板尚未生成',
+      summary: '先从中文任务展示板选择任务类型和起步入口。',
+      pendingLabel: '中文任务展示板尚未生成',
     },
     continueTask: {
       label: '继续当前任务',
@@ -49,11 +102,11 @@ function resolveEntryMainlineActions(options = {}) {
       pendingLabel: '选定任务后生成',
     },
     chooseTemplate: {
-      label: '中文模板展示板',
-      value: '选任务',
+      label: '中文任务展示板',
+      value: '选任务类型',
       cta: '开始新任务',
-      summary: '模板展示板只负责选择任务类型和起步入口。',
-      pendingLabel: '中文模板展示板尚未生成',
+      summary: '中文任务展示板只负责选择任务类型和起步入口。',
+      pendingLabel: '中文任务展示板尚未生成',
     },
   };
 }
@@ -136,8 +189,8 @@ function buildEntryMainlineContract(protocol = {}) {
   return {
     version: 1,
     language: 'entry-mainline-contract',
-    sequenceLabel: normalizeText(source.sequenceLabel, '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台'),
-    entryRole: normalizeText(source.entryRole, '模板展示板只负责选择任务类型和起步入口。'),
+    sequenceLabel: normalizeText(source.sequenceLabel, '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台 -> 结果工作台 -> 异常工作台'),
+    entryRole: normalizeText(source.entryRole, '中文任务展示板只负责选择任务类型和起步入口。'),
     taskCenterRole: normalizeText(source.taskCenterRole, '任务总控只负责开新任务、继续当前任务和切换任务。'),
     workspaceRole: normalizeText(source.workspaceRole, '工作台首页接住单轮任务判断，再顺着准备、结果、异常继续。'),
     handoffRule: normalizeText(source.handoffRule, '入口层一旦选定任务，就把方向交给准备工作台；任务总控只做任务级切换，不展开单轮内部判断。'),
@@ -145,7 +198,7 @@ function buildEntryMainlineContract(protocol = {}) {
     defaultGenerationSummary: normalizeText(defaultGenerationProtocol.summary, '入口层默认只带用户进入主链工作台；深看页和内部资产不作为普通用户默认入口。'),
     defaultGenerationGuardrail: defaultGenerationProtocol.guardrail || {},
     hiddenHtmlFiles: normalizeList(defaultGenerationProtocol.hiddenHtmlFiles, []),
-    summary: normalizeText(source.summary, '先在中文模板展示板选任务，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。'),
+    summary: normalizeText(source.summary, '先在中文任务展示板选任务类型，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。'),
   };
 }
 
@@ -175,14 +228,14 @@ function resolveEntryMainlineProtocol(entryState, options = {}) {
   });
   const sequence = Array.isArray(source.sequence) && source.sequence.length
     ? source.sequence
-    : ['中文模板展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'];
+    : ['中文任务展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'];
   const currentLayer = normalizeText(options.currentLayer || source.currentLayer, '入口层');
   return {
     version: Number(source.version || 1),
     currentLayer,
     sequence,
     sequenceLabel: normalizeText(source.sequenceLabel, sequence.join(' -> ')),
-    entryRole: normalizeText(source.entryRole, '模板展示板只负责选择任务类型和起步入口。'),
+    entryRole: normalizeText(source.entryRole, '中文任务展示板只负责选择任务类型和起步入口。'),
     taskCenterRole: normalizeText(source.taskCenterRole, '任务总控只负责开新任务、继续当前任务和切换任务。'),
     workspaceRole: normalizeText(source.workspaceRole, '工作台首页接住单轮任务判断，再顺着准备、结果、异常继续。'),
     handoffRule: normalizeText(source.handoffRule, '入口层一旦选定任务，就把方向交给准备工作台；任务总控只做任务级切换，不展开单轮内部判断。'),
@@ -193,7 +246,7 @@ function resolveEntryMainlineProtocol(entryState, options = {}) {
       sequenceLabel: normalizeText(source.sequenceLabel, sequence.join(' -> ')),
       defaultGenerationProtocol,
     }),
-    summary: normalizeText(source.summary, '先在中文模板展示板选任务，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。'),
+    summary: normalizeText(source.summary, '先在中文任务展示板选任务类型，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。'),
   };
 }
 
@@ -344,7 +397,7 @@ function resolveEntryContext(entryState, options = {}) {
   return {
     runLabel: normalizeText(source.runLabel, entryPreview.title),
     phaseLabel: normalizeText(source.phaseLabel, '入口层'),
-    flowLabel: normalizeText(source.flowLabel, mainlineProtocol.sequenceLabel || '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台'),
+    flowLabel: normalizeText(source.flowLabel, mainlineProtocol.sequenceLabel || '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台'),
     counts: Array.isArray(source.counts) && source.counts.length
       ? source.counts
       : [
@@ -368,6 +421,7 @@ module.exports = {
   buildTaskCenterEntryProtocol,
   entryModeLabel,
   loadEntryState,
+  resolveStarterIntentCopy,
   resolveEntryMainlineActions,
   resolveEntryDefaultGenerationProtocol,
   resolveEntryContext,

@@ -1,6 +1,7 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { parseArgs, readJson, ensureDir } = require('./script_utils');
+const { resolveStarterIntentCopy } = require('./entry_state_shared');
 
 function catalogPath() {
   return path.resolve(__dirname, '..', 'references', 'examples', 'examples.catalog.json');
@@ -42,7 +43,19 @@ function listExamples(examples) {
 
 function listStarterExamples(examples) {
   const starters = shortlistStarterExamples(examples);
-  const lines = starters.map((item) => `${item.id}\t${item.name}\t${item.starter_intent || 'unspecified'}\t${item.difficulty || 'unspecified'}\t${item.starter_reason || item.description || ''}`);
+  const lines = starters.map((item) => {
+    const intentCopy = resolveStarterIntentCopy(item.starter_intent, item);
+    return [
+      item.id,
+      item.name,
+      item.starter_intent || 'unspecified',
+      item.difficulty || 'unspecified',
+      item.starter_reason || item.description || '',
+      intentCopy.label,
+      intentCopy.commandHint,
+      intentCopy.summary,
+    ].join('\t');
+  });
   console.log(lines.join('\n'));
 }
 
@@ -89,8 +102,14 @@ function runPrepare(exampleId, outputDir, entryMode = 'example') {
       id: match.id,
       name: match.name,
       category: match.category,
+      taskTypeLabel: resolveStarterIntentCopy(match.starter_intent, match).label,
+      taskIntent: match.starter_intent,
       template_id: match.template_id,
       template_variant: match.template_variant,
+      maintainer: {
+        template_id: match.template_id,
+        template_variant: match.template_variant,
+      },
     },
     entryState: entryStateFile,
     ...summary,

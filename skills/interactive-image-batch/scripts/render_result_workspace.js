@@ -133,7 +133,7 @@ function renderPreviewCard(outputDir, item, index, sectionCopy = {}) {
   const href = item.output && fileExists(item.output) ? relativeFile(outputDir, item.output) : null;
   const title = item.title || item.shotLabel || item.slug || `结果 ${index + 1}`;
   const tags = [
-    item.slotId ? `槽位 ${item.slotId}` : null,
+    item.slotId ? `素材位 ${item.slotId}` : null,
     modeLabel(item.requestMode),
   ].filter(Boolean).slice(0, 2);
   const summary = String(item.scene || item.composition || normalizedSection.itemFallbackSummary || '').trim();
@@ -164,7 +164,7 @@ function renderIssueCard(outputDir, item, index, typeLabel, sectionCopy = {}) {
   const compactReason = issueReason.length > 52 ? `${issueReason.slice(0, 52).trim()}…` : issueReason;
   const tags = [
     typeLabel,
-    item.slotId ? `槽位 ${item.slotId}` : null,
+    item.slotId ? `素材位 ${item.slotId}` : null,
     modeLabel(item.requestMode),
   ].filter(Boolean).slice(0, 2);
 

@@ -3,6 +3,7 @@ const { parseArgs, readJson, writeJson } = require('./script_utils');
 const {
   buildEntryDefaultGenerationProtocol,
   buildTaskCenterEntryProtocol,
+  resolveStarterIntentCopy,
 } = require('./entry_state_shared');
 
 function loadCatalog(catalogFile) {
@@ -27,21 +28,25 @@ function inferTaskCategory(example = {}) {
 }
 
 function buildRecommendedNextStep(example, outputDir) {
+  const intentCopy = resolveStarterIntentCopy(example?.starter_intent, {
+    name: example?.name,
+    description: example?.description,
+  });
   return {
     label: '进入准备工作台',
     target: path.join(outputDir, 'prepare_workspace.html'),
-    reason: normalizeText(example?.starter_reason || example?.description, '先生成准备工作台，再判断是否进入正式执行。'),
+    reason: `先用“${intentCopy.label}”进入准备工作台，确认方向、素材和执行前检查。`,
   };
 }
 
 function buildEntryMainlineProtocol(options = {}) {
-  const sequence = ['中文模板展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'];
+  const sequence = ['中文任务展示板', '任务总控', '工作台首页', '准备工作台', '结果工作台', '异常工作台'];
   return {
     version: 1,
     currentLayer: '入口层',
     sequence,
     sequenceLabel: sequence.join(' -> '),
-    entryRole: '模板展示板只负责选择任务类型和起步入口。',
+    entryRole: '中文任务展示板只负责选择任务类型和起步入口。',
     taskCenterRole: '任务总控只负责开新任务、继续当前任务和切换任务。',
     workspaceRole: '工作台首页接住单轮任务判断，再顺着准备、结果、异常继续。',
     handoffRule: '入口层一旦选定任务，就把方向交给准备工作台；任务总控只做任务级切换，不展开单轮内部判断。',
@@ -51,15 +56,19 @@ function buildEntryMainlineProtocol(options = {}) {
     defaultGenerationProtocol: buildEntryDefaultGenerationProtocol({
       mode: options.optionalPageMode,
     }),
-    summary: '先在中文模板展示板选任务，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。',
+    summary: '先在中文任务展示板选任务类型，再到任务总控决定开新任务或继续任务，进入工作台首页后就沿四站主链推进。',
   };
 }
 
 function buildEntryContext(example, entryMode, outputDir) {
   const taskCategory = inferTaskCategory(example);
-  const starterIntent = normalizeText(example?.starter_intent, '尚未选择');
+  const intentCopy = resolveStarterIntentCopy(example?.starter_intent, {
+    name: example?.name,
+    description: example?.description,
+  });
+  const starterIntent = intentCopy.label;
   const selectedName = normalizeText(example?.name, '当前还没有选中的入口');
-  const description = normalizeText(example?.description, '先按任务意图开始，或者从推荐起步里挑一个最像你需求的入口。');
+  const description = intentCopy.summary;
   const mainlineProtocol = buildEntryMainlineProtocol({
     taskCenterUnifiedState: outputDir ? path.join(path.dirname(outputDir), 'task_center_live_state.json') : null,
   });
@@ -70,20 +79,24 @@ function buildEntryContext(example, entryMode, outputDir) {
     counts: [
       { label: '进入方式', value: entryMode === 'intent' ? '按任务意图进入' : '按示例入口进入' },
       { label: '当前任务组', value: taskCategory },
-      { label: '当前意图', value: starterIntent },
+      { label: '当前任务类型', value: starterIntent },
     ],
     hints: [
       description,
       mainlineProtocol.handoffRule,
-      normalizeText(example?.starter_reason, '先进入准备工作台确认方向、放行和素材绑定。'),
+      '下一步只需要进入准备工作台，看能不能开跑以及还差什么。',
     ],
   };
 }
 
 function buildEntryWorkbench(example, outputDir) {
   const selectedName = normalizeText(example?.name, '当前还没有选中的入口');
-  const description = normalizeText(example?.description, '先按任务意图开始，或者从推荐起步里挑一个最像你需求的入口。');
-  const starterIntent = normalizeText(example?.starter_intent, null);
+  const intentCopy = resolveStarterIntentCopy(example?.starter_intent, {
+    name: selectedName,
+    description: example?.description,
+  });
+  const description = intentCopy.summary;
+  const starterIntent = intentCopy.label;
 
   return {
     stageLabel: '入口层',
@@ -106,11 +119,11 @@ function buildEntryWorkbench(example, outputDir) {
     },
     workbench: {
       title: '入口层主控',
-      copy: '入口层只保留选任务、看入口和进入准备层这几件高频动作。',
+      copy: '入口层只保留选任务类型、确认起步方向和进入准备工作台这几件高频动作。',
       cards: [
         {
-          label: '当前入口',
-          value: selectedName,
+          label: '当前任务类型',
+          value: starterIntent,
           summary: description,
           tone: 'good',
           hideLinkIfMissing: true,
@@ -125,7 +138,7 @@ function buildEntryWorkbench(example, outputDir) {
         {
           label: '推荐下一步',
           value: '进入准备工作台',
-          summary: normalizeText(example?.starter_reason || example?.description, '先确认方向、放行和素材绑定，再决定是否继续。'),
+          summary: '先确认方向、放行和素材绑定，再决定是否继续。',
           file: path.join(outputDir, 'prepare_workspace.html'),
           cta: '进入下一步',
           pendingLabel: '下一步页面尚未生成',
@@ -161,6 +174,7 @@ function main() {
     entryMode,
     taskCategory: inferTaskCategory(selectedExample),
     starterIntent: normalizeText(selectedExample.starter_intent, null),
+    starterIntentLabel: resolveStarterIntentCopy(selectedExample.starter_intent, selectedExample).label,
     templateId: normalizeText(selectedExample.template_id, null),
     templateVariant: normalizeText(selectedExample.template_variant, null),
     runtimeMode,

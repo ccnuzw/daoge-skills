@@ -86,13 +86,14 @@ function buildExceptionStaticStageCopy(exceptionSummary = {}) {
   const failedCount = Number(exceptionSummary.failedCount || 0);
   const reviewCount = Number(exceptionSummary.reviewCount || 0);
   const rerunCount = Number(exceptionSummary.rerunCount || 0);
+  const pressureTone = String(exceptionSummary.statusTone || '').trim() || (totalIssueCount > 0 ? 'bad' : 'good');
 
   return {
     taskSummary: exceptionSummary.currentFocus || '当前正在处理异常相关问题。',
     consoleStageSummary: '异常层负责失败项、待复核项和补跑判断。',
-    pressureLabel: totalIssueCount > 0 ? `${totalIssueCount} 项问题待处理` : '当前平稳',
+    pressureLabel: totalIssueCount > 0 ? `${totalIssueCount} 项待处理` : '当前平稳',
     pressureSummary: exceptionSummary.issueSummary,
-    pressureTone: totalIssueCount > 0 ? 'bad' : 'good',
+    pressureTone,
     runScaleLabel: `${failedCount} 失败 / ${reviewCount} 待复核`,
     runScaleSummary: `${rerunCount} 个补跑候选`,
   };
@@ -207,6 +208,7 @@ function buildExceptionIssueSummary(options = {}) {
 function buildExceptionFlowCompletion(options = {}) {
   if (options.failedCount > 0) return '异常尚未清空';
   if (options.reviewCount > 0) return '当前主要剩余待复核项';
+  if (Number(options.rerunCount || 0) > 0) return '当前只剩补跑价值判断';
   return '异常层当前基本清空';
 }
 
@@ -838,9 +840,111 @@ function getStagePrimaryActionLabel(stage, options = {}) {
   const key = String(stage || '').trim();
   const hasBlocking = Boolean(options.hasBlocking);
   const failedCount = Number(options.failedCount || 0);
+  const reviewCount = Number(options.reviewCount || 0);
+  const rerunCount = Number(options.rerunCount || 0);
   if (key === 'prepare') return hasBlocking ? '先修正准备层' : '进入结果工作台';
-  if (key === 'exception') return failedCount > 0 ? '先处理失败项' : '回结果工作台复核';
+  if (key === 'exception') return resolveExceptionDecision({ failedCount, reviewCount, rerunCount }).nextActionLabel;
   return String(options.fallback || '').trim() || '继续下一步';
+}
+
+function resolveExceptionDecision(options = {}) {
+  const failedCount = Number(options.failedCount || 0);
+  const reviewCount = Number(options.reviewCount || 0);
+  const rerunCount = Number(options.rerunCount || 0);
+
+  if (failedCount > 0) {
+    const action = getActionLanguage('resolve_failed');
+    return {
+      category: 'hard-failure',
+      label: '硬失败',
+      tone: 'bad',
+      actionKey: 'resolve_failed',
+      nextActionLabel: action.summaryLabel,
+      nextActionCta: action.ctaLabel,
+      nextActionTarget: 'exception_workspace.html',
+      recommendedReply: action.replyLabel,
+      currentFocus: '先处理硬失败',
+      statusLabel: '必须先处理失败项',
+      statusSummary: '失败项会直接阻塞主链继续，先在异常工作台处理清楚。',
+      issueSummary: `当前有 ${failedCount} 项硬失败必须先处理。`,
+      reason: rerunCount > 0
+        ? `先处理 ${failedCount} 项硬失败，再判断 ${rerunCount} 个补跑候选是否值得补。`
+        : `先处理 ${failedCount} 项硬失败，再回工作台继续。`,
+      pendingItems: [action.questionLabel],
+      blockingItems: ['硬失败会直接阻塞主链继续'],
+      summary: '异常层当前仍有硬失败待收口',
+      canContinue: false,
+    };
+  }
+
+  if (reviewCount > 0) {
+    const action = getActionLanguage('review_exception');
+    return {
+      category: 'needs-review',
+      label: '待复核',
+      tone: 'warn',
+      actionKey: 'review_exception',
+      nextActionLabel: action.summaryLabel,
+      nextActionCta: action.ctaLabel,
+      nextActionTarget: 'result_workspace.html',
+      recommendedReply: action.replyLabel,
+      currentFocus: '先回结果工作台复核',
+      statusLabel: '建议先复核待确认结果',
+      statusSummary: '当前没有硬失败，但仍有待复核项，建议回结果工作台结合图片判断。',
+      issueSummary: `当前有 ${reviewCount} 项待复核，先结合图片确认是否可用。`,
+      reason: rerunCount > 0
+        ? `先回结果工作台复核 ${reviewCount} 项边界结果，再决定 ${rerunCount} 个补跑候选是否值得补。`
+        : `先回结果工作台复核 ${reviewCount} 项边界结果，再回主链继续。`,
+      pendingItems: ['是否先确认待复核项'],
+      blockingItems: [],
+      summary: '异常层当前主要剩余待复核项',
+      canContinue: true,
+    };
+  }
+
+  if (rerunCount > 0) {
+    const action = getActionLanguage('view_rerun_candidates');
+    return {
+      category: 'rerun-candidate',
+      label: '补跑候选',
+      tone: 'info',
+      actionKey: 'view_rerun_candidates',
+      nextActionLabel: action.summaryLabel,
+      nextActionCta: action.ctaLabel,
+      nextActionTarget: 'exception_workspace.html',
+      recommendedReply: action.replyLabel,
+      currentFocus: '按价值决定是否补跑',
+      statusLabel: '当前只剩补跑候选',
+      statusSummary: '当前没有硬失败和待复核项，只需要判断补跑是否值得。',
+      issueSummary: `当前有 ${rerunCount} 个补跑候选，按价值决定是否补跑。`,
+      reason: `当前有 ${rerunCount} 个补跑候选；只有确定值得补时才补跑，否则回工作台首页继续主链。`,
+      pendingItems: [action.questionLabel],
+      blockingItems: [],
+      summary: '异常层当前只剩补跑价值判断',
+      canContinue: true,
+    };
+  }
+
+  const action = getActionLanguage('go_home');
+  return {
+    category: 'clear',
+    label: '无异常',
+    tone: 'good',
+    actionKey: 'go_home',
+    nextActionLabel: action.summaryLabel,
+    nextActionCta: action.ctaLabel,
+    nextActionTarget: 'workspace_home.html',
+    recommendedReply: action.replyLabel,
+    currentFocus: '回工作台首页继续主链',
+    statusLabel: '当前没有明显异常',
+    statusSummary: '当前没有硬失败、待复核项或补跑压力，可以回工作台首页继续主链。',
+    issueSummary: '当前没有明显异常压力。',
+    reason: '当前异常压力已经清空，可以回工作台首页继续主链。',
+    pendingItems: [action.questionLabel],
+    blockingItems: [],
+    summary: '异常层当前压力已经清空',
+    canContinue: true,
+  };
 }
 
 function normalizeReplyText(text) {
@@ -1005,14 +1109,13 @@ function buildResultConfirmationPlan(options = {}) {
 function buildExceptionConfirmationPlan(options = {}) {
   const failedCount = Number(options.failedCount || 0);
   const reviewCount = Number(options.reviewCount || 0);
-  const action = getActionLanguage(String(options.actionKey || '').trim() || (failedCount > 0 ? 'resolve_failed' : 'review_exception'));
+  const rerunCount = Number(options.rerunCount || 0);
+  const decision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
   return {
-    pendingItems: [action.questionLabel],
-    blockingItems: failedCount > 0 ? ['失败项会直接阻塞主链继续'] : [],
-    recommendedReply: action.replyLabel,
-    summary: failedCount > 0
-      ? '异常层当前仍有硬失败待收口'
-      : (reviewCount > 0 ? '异常层当前主要剩余待复核项' : '异常层当前压力已经较低'),
+    pendingItems: decision.pendingItems,
+    blockingItems: decision.blockingItems,
+    recommendedReply: decision.recommendedReply,
+    summary: decision.summary,
   };
 }
 
@@ -1095,24 +1198,25 @@ function buildExceptionFlowPlan(options = {}) {
   const failedCount = Number(options.failedCount || 0);
   const reviewCount = Number(options.reviewCount || 0);
   const rerunCount = Number(options.rerunCount || 0);
+  const decision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
   const hasStoryboard = Boolean(options.hasStoryboard);
-  const nextStepLabel = String(options.nextStepLabel || '未提供').trim() || '未提供';
-  const issueSummary = String(options.issueSummary || '未提供').trim() || '未提供';
-  const currentFocus = String(options.currentFocus || '').trim() || (failedCount > 0 ? '先处理失败项' : (reviewCount > 0 ? '先确认待复核项' : '当前没有明显异常'));
+  const nextStepLabel = String(options.nextStepLabel || decision.nextActionLabel || '未提供').trim() || '未提供';
+  const issueSummary = String(options.issueSummary || decision.issueSummary || '未提供').trim() || '未提供';
+  const currentFocus = String(options.currentFocus || '').trim() || decision.currentFocus;
 
   return {
-    completion: buildExceptionFlowCompletion({ failedCount, reviewCount }),
+    completion: buildExceptionFlowCompletion({ failedCount, reviewCount, rerunCount }),
     focus: currentFocus,
     actionLabel: nextStepLabel,
-    actionSummary: issueSummary,
-    blockers: failedCount > 0 ? ['失败项会直接阻塞主链继续。'] : [],
+    actionSummary: String(options.nextActionReason || decision.reason || issueSummary).trim(),
+    blockers: decision.blockingItems,
     availableActions: [
-      hasStoryboard ? getActionLanguage('go_storyboard').actionLabel : getActionLanguage('go_home').actionLabel,
-      getActionLanguage('review_exception').actionLabel,
+      decision.nextActionLabel,
       rerunCount > 0 ? getActionLanguage('view_rerun_candidates').actionLabel : null,
+      hasStoryboard ? getActionLanguage('go_storyboard').actionLabel : null,
     ].filter(Boolean),
-    readiness: String(options.readiness || '').trim() || String(options.statusSummary || '未提供').trim() || '未提供',
-    status: String(options.status || '').trim() || String(options.statusLabel || '未提供').trim() || '未提供',
+    readiness: String(options.readiness || '').trim() || String(options.statusSummary || decision.statusSummary || '未提供').trim() || '未提供',
+    status: String(options.status || '').trim() || String(options.statusLabel || decision.statusLabel || '未提供').trim() || '未提供',
   };
 }
 
@@ -1164,7 +1268,7 @@ function buildPrepareCardPlan(options = {}) {
         audience: 'all',
       },
       {
-        label: '当前模板',
+        label: '当前任务类型',
         value: String(options.templateName || '未检测').trim() || '未检测',
         tone: 'info',
         detail: `模式：${String(options.modeLabel || '未检测').trim() || '未检测'}`,
@@ -1222,11 +1326,13 @@ function buildResultCardPlan(options = {}) {
 function buildExceptionCardPlan(options = {}) {
   const failedCount = Number(options.failedCount || 0);
   const reviewCount = Number(options.reviewCount || 0);
-  const issueSummary = String(options.issueSummary || '当前没有明显异常压力').trim() || '当前没有明显异常压力';
+  const rerunCount = Number(options.rerunCount || 0);
+  const decision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
+  const issueSummary = String(options.issueSummary || decision.issueSummary).trim() || '当前没有明显异常压力';
   return {
     flowLabel: '工作台首页 -> 结果工作台 -> 异常工作台',
     contextHints: [
-      failedCount + reviewCount > 0 ? '把异常集中处理，比在多个结果页之间来回切换更稳。' : '当前这页只是按需页面，平时可以不进入。',
+      failedCount + reviewCount + rerunCount > 0 ? '把异常集中处理，比在多个结果页之间来回切换更稳。' : '当前这页只是按需页面，平时可以不进入。',
       issueSummary,
     ],
     heroCards: [
@@ -1243,10 +1349,12 @@ function buildExceptionCardPlan(options = {}) {
         detail: failedCount > 0 ? '优先缩小失败范围' : '当前没有硬失败',
       },
       {
-        label: '待复核',
-        value: reviewCount > 0 ? reviewCount : '无',
-        tone: reviewCount > 0 ? 'warn' : 'good',
-        detail: reviewCount > 0 ? '多见于局部编辑或边界敏感结果' : '当前复核压力较小',
+        label: decision.category === 'rerun-candidate' ? '补跑候选' : '待复核',
+        value: decision.category === 'rerun-candidate' ? rerunCount : (reviewCount > 0 ? reviewCount : '无'),
+        tone: decision.category === 'rerun-candidate' ? 'info' : (reviewCount > 0 ? 'warn' : 'good'),
+        detail: decision.category === 'rerun-candidate'
+          ? '按价值决定是否补跑'
+          : (reviewCount > 0 ? '建议回结果工作台结合图片判断' : '当前复核压力较小'),
       },
     ],
   };
@@ -1338,10 +1446,16 @@ function buildResultRoutePlan(options = {}) {
 
 function buildExceptionRoutePlan(options = {}) {
   const hasStoryboard = Boolean(options.hasStoryboard);
+  const storyboardFile = String(options.storyboardFile || '').trim();
+  const decision = resolveExceptionDecision({
+    failedCount: options.failedCount,
+    reviewCount: options.reviewCount,
+    rerunCount: options.rerunCount,
+  });
   const currentLabel = String(options.currentLabel || '异常层当前已完成判断').trim() || '异常层当前已完成判断';
   const currentSummary = String(options.currentSummary || '这里先把问题收清，再决定回工作台还是继续看上下文。').trim() || '这里先把问题收清，再决定回工作台还是继续看上下文。';
-  const nextActionLabel = String(options.nextActionLabel || '').trim();
-  const nextActionReason = String(options.nextActionReason || '').trim();
+  const nextActionLabel = String(options.nextActionLabel || decision.nextActionLabel || '').trim();
+  const nextActionReason = String(options.nextActionReason || decision.reason || '').trim();
   return {
     current: {
       kicker: '当前判断',
@@ -1358,12 +1472,19 @@ function buildExceptionRoutePlan(options = {}) {
     nextSteps: [
       {
         kicker: '推荐下一步',
-        label: nextActionLabel || (hasStoryboard ? '分镜整板补充页' : '工作台首页'),
-        summary: nextActionReason || (hasStoryboard ? '当问题和镜头衔接有关时，回分镜整板补充页更容易看出上下文。' : '如果问题已经判断清楚，可以回首页重新进入主链。'),
-        file: String(options.file || '').trim() || (hasStoryboard ? 'storyboard_board.html' : 'workspace_home.html'),
-        cta: String(options.nextCta || '现在继续').trim() || '现在继续',
+        label: nextActionLabel || decision.nextActionLabel,
+        summary: nextActionReason || decision.reason,
+        file: String(options.file || '').trim() || decision.nextActionTarget || (hasStoryboard ? 'storyboard_board.html' : 'workspace_home.html'),
+        cta: String(options.nextCta || decision.nextActionCta || '现在继续').trim() || '现在继续',
       },
-    ],
+      hasStoryboard && storyboardFile ? {
+        kicker: '按需再看',
+        label: getActionLanguage('go_storyboard').actionLabel,
+        summary: '分镜相关问题需要看镜头上下文时，再回整板页辅助判断。',
+        file: storyboardFile,
+        cta: getActionLanguage('go_storyboard').ctaLabel,
+      } : null,
+    ].filter(Boolean),
   };
 }
 
@@ -1459,6 +1580,11 @@ function buildResultStatusStack(options = {}) {
 
 function buildExceptionStatusStack(options = {}) {
   const totalIssueCount = Number(options.totalIssueCount || 0);
+  const decision = resolveExceptionDecision({
+    failedCount: options.failedCount,
+    reviewCount: options.reviewCount,
+    rerunCount: options.rerunCount,
+  });
   return [
     {
       label: '异常信号',
@@ -1468,9 +1594,9 @@ function buildExceptionStatusStack(options = {}) {
     },
     {
       label: '压力信号',
-      value: totalIssueCount > 0 ? `${totalIssueCount} 项待处理` : '当前平稳',
-      summary: String(options.issueSummary || '当前没有明显异常压力。').trim() || '当前没有明显异常压力。',
-      tone: totalIssueCount > 0 ? 'bad' : 'good',
+      value: totalIssueCount > 0 ? `${totalIssueCount} 项待处理` : decision.label,
+      summary: String(options.issueSummary || decision.issueSummary || '当前没有明显异常压力。').trim() || '当前没有明显异常压力。',
+      tone: decision.tone,
     },
   ];
 }
@@ -1526,16 +1652,21 @@ function buildResultTaskControlBar(options = {}) {
 function buildExceptionTaskControlBar(options = {}) {
   const totalIssueCount = Number(options.totalIssueCount || 0);
   const failedCount = Number(options.failedCount || 0);
+  const reviewCount = Number(options.reviewCount || 0);
+  const rerunCount = Number(options.rerunCount || 0);
+  const decision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
   return {
     taskLabel: String(options.taskLabel || '未提供').trim() || '未提供',
     stageLabel: String(options.stageLabel || '未提供').trim() || '未提供',
     statusLabel: String(options.statusLabel || '未提供').trim() || '未提供',
     statusTone: String(options.statusTone || '').trim() || 'info',
-    pressureLabel: totalIssueCount > 0 ? '还有问题待处理' : '当前平稳',
-    pressureTone: totalIssueCount > 0 ? 'bad' : 'good',
-    nextActionLabel: String(options.nextActionLabel || (failedCount > 0 ? '先处理失败项' : '回结果工作台复核')).trim() || '未提供',
-    nextActionSummary: String(options.nextActionSummary || '按推荐下一步继续。').trim() || '按推荐下一步继续。',
-    nextActionTone: failedCount > 0 ? 'bad' : 'good',
+    pressureLabel: totalIssueCount > 0
+      ? (decision.category === 'rerun-candidate' ? '还有补跑候选待决定' : '还有问题待处理')
+      : '当前平稳',
+    pressureTone: totalIssueCount > 0 ? decision.tone : 'good',
+    nextActionLabel: String(options.nextActionLabel || decision.nextActionLabel).trim() || '未提供',
+    nextActionSummary: String(options.nextActionSummary || decision.reason).trim() || '按推荐下一步继续。',
+    nextActionTone: decision.tone,
   };
 }
 
@@ -1570,11 +1701,14 @@ function buildResultSignalBar(options = {}) {
 
 function buildExceptionSignalBar(options = {}) {
   const failedCount = Number(options.failedCount || 0);
+  const reviewCount = Number(options.reviewCount || 0);
+  const rerunCount = Number(options.rerunCount || 0);
   const totalIssueCount = Number(options.totalIssueCount || 0);
+  const decision = resolveExceptionDecision({ failedCount, reviewCount, rerunCount });
   return [
     { label: '当前阶段', value: String(options.stageLabel || '未提供').trim() || '未提供', summary: '这一步只在需要处理问题时进入。', tone: 'info' },
     { label: '当前状态', value: String(options.statusLabel || '未提供').trim() || '未提供', summary: String(options.statusSummary || '未提供').trim() || '未提供', tone: String(options.statusTone || '').trim() || 'info' },
-    { label: '当前压力', value: totalIssueCount > 0 ? `${totalIssueCount} 项问题待处理` : '当前平稳', summary: failedCount > 0 ? '硬失败会继续阻塞主链。' : '当前主要是回流确认压力。', tone: totalIssueCount > 0 ? 'warn' : 'good' },
+    { label: '当前压力', value: totalIssueCount > 0 ? `${totalIssueCount} 项待处理` : decision.label, summary: decision.issueSummary, tone: decision.tone },
   ];
 }
 
@@ -1669,4 +1803,5 @@ module.exports = {
   getTaskCenterLanguage,
   getStageContinuationCopy,
   getStagePrimaryActionLabel,
+  resolveExceptionDecision,
 };

@@ -457,7 +457,7 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
     || cleanLabel(liveRun?.nextSuggestedAction?.label)
     || cleanLabel(runtimeProtocol.nextActionLabel)
     || cleanLabel(latest?.nextActionLabel)
-    || (hasLatestWorkspace ? '进入工作台首页' : '从中文模板展示板开始');
+    || (hasLatestWorkspace ? '进入工作台首页' : '从中文任务展示板开始');
   const primarySay = cleanLabel(liveDirective.recommendedReply || liveDirective.primarySay)
     || cleanLabel(liveRun?.dialogueStatus?.primarySay)
     || cleanLabel(liveRun?.copilotSummary?.recommendedReply)
@@ -509,10 +509,10 @@ function buildTaskCenterMainlineGuide(latest, latestWorkspace, examplesCatalogPa
     items: [
       {
         label: '从哪里进',
-        value: hasLatestWorkspace ? '先打开工作台首页' : '先打开中文模板展示板',
+        value: hasLatestWorkspace ? '先打开工作台首页' : '先打开中文任务展示板',
         summary: hasLatestWorkspace
           ? `${latest.taskLabel || '当前任务'} 已经有主入口，先点进这轮工作台。`
-          : '当前还没有历史任务，先从模板展示板选择任务类型。',
+          : '当前还没有历史任务，先从中文任务展示板选择任务类型。',
         file: hasLatestWorkspace ? latestWorkspace : examplesCatalogPath,
         cta: hasLatestWorkspace ? entryActions.openWorkspaceHome.cta : entryActions.startNewTask.cta,
         tone: hasLatestWorkspace ? 'good' : 'info',

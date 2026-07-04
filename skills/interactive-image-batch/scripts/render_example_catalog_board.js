@@ -11,6 +11,7 @@ const {
   resolveEntryPreview,
   resolveEntryRoute,
   resolveEntryWorkbench,
+  resolveStarterIntentCopy,
 } = require('./entry_state_shared');
 const {
   renderWorkspaceChromeTopLinks,
@@ -145,12 +146,17 @@ function shortlistStarterExamples(examples) {
 function starterIntentCards(examples) {
   return shortlistStarterExamples(examples)
     .filter((item) => item.starter_intent)
-    .map((item) => ({
-      intent: item.starter_intent,
-      name: item.name,
-      id: item.id,
-      reason: item.starter_reason || item.description || '',
-    }));
+    .map((item) => {
+      const intentCopy = resolveStarterIntentCopy(item.starter_intent, item);
+      return {
+        intent: item.starter_intent,
+        title: intentCopy.label,
+        name: item.name,
+        id: item.id,
+        reason: intentCopy.summary,
+        commandHint: intentCopy.commandHint,
+      };
+    });
 }
 
 function exampleCommand(item) {
@@ -211,13 +217,14 @@ function renderCard(item, entryType) {
 
 function renderStarterCard(item) {
   const command = exampleCommand(item);
+  const intentCopy = resolveStarterIntentCopy(item.starter_intent, item);
   return `
     <article class="card starter-card" data-entry-type="starter" data-searchable="${escapeHtml(`${item.id} ${item.name} ${item.category} ${item.template_id} ${item.template_variant} ${item.description || ''} ${item.starter_reason || ''}`.toLowerCase())}">
       <div class="card-top">
-        <h3>${escapeHtml(item.name)}</h3>
+        <h3>${escapeHtml(intentCopy.label)}</h3>
         <span class="entry-tag entry-tag-main">推荐起步</span>
       </div>
-      <div class="copy">${escapeHtml(item.starter_reason || item.description || '')}</div>
+      <div class="copy">${escapeHtml(intentCopy.summary)}</div>
       <div class="quick-tips">
         <span class="quick-tag">推荐难度：${escapeHtml(item.difficulty || '未标注')}</span>
         <span class="quick-tag">第一次使用优先选它</span>
@@ -228,10 +235,11 @@ function renderStarterCard(item) {
       </div>
       ${renderCommandActions(command)}
       <details class="card-details">
-        <summary>查看模板细节（维护者）</summary>
+        <summary>查看任务类型细节（维护者）</summary>
         <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
         <div class="cmd">${escapeHtml(command)}</div>
         <div class="meta meta-maintainer">
+          <div class="meta-row"><div class="meta-label">示例名称</div><div class="meta-value">${escapeHtml(item.name)}</div></div>
           <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
           <div class="meta-row"><div class="meta-label">模板 ID</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
           <div class="meta-row"><div class="meta-label">正式变体</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
@@ -246,13 +254,13 @@ function renderIntentCard(item) {
   return `
     <article class="card starter-card">
       <div class="card-top">
-        <h3>${escapeHtml(item.intent)}</h3>
-        <span class="entry-tag entry-tag-main">任务意图</span>
+        <h3>${escapeHtml(item.title || item.name)}</h3>
+        <span class="entry-tag entry-tag-main">任务类型</span>
       </div>
       <div class="copy">${escapeHtml(item.reason)}</div>
       <div class="quick-tips">
-        <span class="quick-tag">直接按任务意图起步</span>
-        <span class="quick-tag">适合不想先理解模板名的人</span>
+        <span class="quick-tag">${escapeHtml(item.commandHint || `--intent ${item.intent}`)}</span>
+        <span class="quick-tag">适合不想先理解内部名字的人</span>
       </div>
       <div class="meta meta-user">
         <div class="meta-row"><div class="meta-label">适合谁</div><div class="meta-value">适合已经知道自己要做哪一类任务，但不想先理解模板内部名字的人。</div></div>
@@ -260,7 +268,7 @@ function renderIntentCard(item) {
       </div>
       ${renderCommandActions(command, '复制意图命令')}
       <details class="card-details">
-        <summary>查看模板细节（维护者）</summary>
+        <summary>查看任务类型细节（维护者）</summary>
         <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
         <div class="cmd">${escapeHtml(command)}</div>
         <div class="meta meta-maintainer">
@@ -277,12 +285,12 @@ function renderTaskStarter(item) {
   return `
     <article class="card starter-card">
       <div class="card-top">
-        <h3>${escapeHtml(item.name)}</h3>
-        <span class="entry-tag entry-tag-main">推荐意图入口</span>
+        <h3>${escapeHtml(item.title || item.name)}</h3>
+        <span class="entry-tag entry-tag-main">推荐任务入口</span>
       </div>
       <div class="copy">${escapeHtml(item.reason)}</div>
       <div class="quick-tips">
-        <span class="quick-tag">这类任务建议先走意图入口</span>
+        <span class="quick-tag">${escapeHtml(item.commandHint || `--intent ${item.intent}`)}</span>
       </div>
       <div class="meta meta-user">
         <div class="meta-row"><div class="meta-label">为什么先走这里</div><div class="meta-value">这个入口能先帮你建立这类任务的基本路径，不用一上来就面对太多细分变体。</div></div>
@@ -290,7 +298,7 @@ function renderTaskStarter(item) {
       </div>
       ${renderCommandActions(command, '复制意图命令')}
       <details class="card-details">
-        <summary>查看模板细节（维护者）</summary>
+        <summary>查看任务类型细节（维护者）</summary>
         <div class="copy">如果你需要命令行方式，可以直接使用下面这条命令：</div>
         <div class="cmd">${escapeHtml(command)}</div>
         <div class="meta meta-maintainer">
@@ -358,7 +366,7 @@ function main() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DAOGE 中文模板展示板</title>
+  <title>DAOGE 中文任务展示板</title>
 ${renderWorkspaceChromeHeadAssets()}
   <style>
     :root {
@@ -687,9 +695,9 @@ ${renderWorkspaceChromeHeadAssets()}
           ],
         })}
       </div>
-      <div class="eyebrow">DAOGE Template Board</div>
-      <h1>中文模板展示板</h1>
-      <p class="hero-copy">这就是中文任务入口总览，也是新版示例目录。这个页面优先按中文任务组织，而不是先按内部分类组织。你不需要先理解模板名，只要先判断自己属于哪类任务，再看推荐意图入口、主链入口和细分入口。对第一次使用的人来说，先选中文任务，再决定要不要继续细分，会比直接在全部 example 里盲选稳定得多。</p>
+      <div class="eyebrow">DAOGE Task Board</div>
+      <h1>中文任务展示板</h1>
+      <p class="hero-copy">这就是中文任务入口总览，也是新版示例目录。这个页面优先按中文任务组织，而不是先按内部分类组织。你不需要先理解内部任务名，只要先判断自己属于哪类任务，再看推荐任务入口、主链入口和细分入口。第一次使用只要记住：选任务类型 -> 进任务总控 -> 打开工作台首页 -> 确认准备 -> 看结果 / 处理异常。</p>
       ${renderWorkspaceChromeContextBar(entryContext)}
     </section>
 
@@ -698,7 +706,7 @@ ${renderWorkspaceChromeHeadAssets()}
       copy: `${mainlineContract.summary || entryMainlineProtocol.summary} ${defaultGenerationSummary}`.trim(),
       maxCards: 4,
       cards: [
-        { label: '模板展示板', value: entryActions.chooseTemplate.value, summary: mainlineContract.entryRole || entryMainlineProtocol.entryRole, tone: 'good', hideLinkIfMissing: true },
+        { label: '中文任务展示板', value: '选任务类型', summary: '中文任务展示板只负责选择任务类型和起步入口。', tone: 'good', hideLinkIfMissing: true },
         {
           label: '任务总控',
           value: '跨任务入口',

@@ -52,6 +52,33 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+function normalizeTaskCenterDisplayText(text) {
+  return String(text ?? '').replace(/中文模板展示板/g, '中文任务展示板');
+}
+
+function normalizeTaskCenterDisplayObject(value) {
+  if (typeof value === 'string') return normalizeTaskCenterDisplayText(value);
+  if (Array.isArray(value)) return value.map((item) => normalizeTaskCenterDisplayObject(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, normalizeTaskCenterDisplayObject(item)]));
+  }
+  return value;
+}
+
+function normalizeTaskCenterFlowLabel(flowLabel) {
+  const defaultFlowLabel = '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台';
+  const entryLabel = '中文任务展示板';
+  const taskCenterLabel = '任务总控';
+  const segments = normalizeTaskCenterDisplayText(flowLabel).trim()
+    .split(/\s*->\s*/u)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .map((item) => (item === '中文模板展示板' ? entryLabel : item));
+  if (!segments.length) return defaultFlowLabel;
+  const tailSegments = segments.filter((item) => item !== entryLabel && item !== taskCenterLabel);
+  return [entryLabel, taskCenterLabel, ...tailSegments].join(' -> ');
+}
+
 function renderLiveStatusStrip(taskCenterState = {}) {
   const language = getTaskCenterLanguage();
   const liveCopilotDirective = taskCenterState.liveCopilotDirective && typeof taskCenterState.liveCopilotDirective === 'object'
@@ -211,14 +238,16 @@ function main() {
     currentLayer: '总控层',
     optionalPageMode: guideDefaultGenerationProtocol?.mode || entryMainlineGuide?.optionalPageMode?.mode,
   });
-  const defaultGenerationProtocol = guideDefaultGenerationProtocol || entryMainlineProtocol.defaultGenerationProtocol || {};
-  const defaultGenerationSummary = defaultGenerationProtocol.summary || entryMainlineProtocol.mainlineContract?.defaultGenerationSummary || '';
+  const displayEntryMainlineGuide = normalizeTaskCenterDisplayObject(entryMainlineGuide);
+  const displayEntryMainlineProtocol = normalizeTaskCenterDisplayObject(entryMainlineProtocol);
+  const defaultGenerationProtocol = normalizeTaskCenterDisplayObject(guideDefaultGenerationProtocol || displayEntryMainlineProtocol.defaultGenerationProtocol || {});
+  const defaultGenerationSummary = defaultGenerationProtocol.summary || displayEntryMainlineProtocol.mainlineContract?.defaultGenerationSummary || '';
   const hiddenHtmlFiles = Array.isArray(defaultGenerationProtocol.hiddenHtmlFiles)
     ? defaultGenerationProtocol.hiddenHtmlFiles
     : [];
   const defaultGenerationGuardrail = defaultGenerationProtocol.guardrail && typeof defaultGenerationProtocol.guardrail === 'object'
     ? defaultGenerationProtocol.guardrail
-    : (entryMainlineProtocol.mainlineContract?.defaultGenerationGuardrail || {});
+    : (displayEntryMainlineProtocol.mainlineContract?.defaultGenerationGuardrail || {});
   const defaultGenerationCardSummary = [
     defaultGenerationGuardrail.onDemandRule || defaultGenerationSummary,
     hiddenHtmlFiles.length ? `默认隐藏: ${hiddenHtmlFiles.slice(0, 6).join('、')}${hiddenHtmlFiles.length > 6 ? ' 等' : ''}` : '',
@@ -233,49 +262,49 @@ function main() {
     currentStarterIntent: entryState?.starterIntent,
     entryPreview,
     nextStep: entryNextStep,
-    mainlineProtocol: entryMainlineProtocol,
+    mainlineProtocol: displayEntryMainlineProtocol,
   });
   const entryRoute = resolveEntryRoute(rootDir, entryState, { nextStep: entryNextStep });
-  const entryWorkbench = resolveEntryWorkbench(rootDir, entryState, {
+  const entryWorkbench = normalizeTaskCenterDisplayObject(resolveEntryWorkbench(rootDir, entryState, {
     nextStep: entryNextStep,
     entryPreview,
     currentTaskCategory: entryState?.taskCategory,
-  });
+  }));
   const mergedTaskCenterWorkbench = entryState ? {
     title: entryWorkbench.title,
     copy: entryWorkbench.copy,
     cards: [
       ...entryWorkbench.cards,
-      ...(taskCenterWorkbench?.cards || []),
+      ...(normalizeTaskCenterDisplayObject(taskCenterWorkbench?.cards || [])),
     ],
-  } : taskCenterWorkbench;
-  const mainlineGuideWorkbench = entryMainlineGuide && typeof entryMainlineGuide === 'object'
+  } : normalizeTaskCenterDisplayObject(taskCenterWorkbench);
+  const mainlineGuideWorkbench = displayEntryMainlineGuide && typeof displayEntryMainlineGuide === 'object'
     ? {
-      title: entryMainlineGuide.title || '入口主链提醒',
-      copy: entryMainlineGuide.copy || '任务总控只负责开新任务或继续任务，选定后交给工作台首页。',
+      title: displayEntryMainlineGuide.title || '入口主链提醒',
+      copy: displayEntryMainlineGuide.copy || '任务总控只负责开新任务或继续任务，选定后交给工作台首页。',
       maxCards: 3,
-      cards: Array.isArray(entryMainlineGuide.items) ? entryMainlineGuide.items : [],
+      cards: Array.isArray(displayEntryMainlineGuide.items) ? displayEntryMainlineGuide.items : [],
     }
     : null;
   const protocolWorkbench = {
     title: '入口主链协议',
-    copy: `${entryMainlineProtocol.mainlineContract?.summary || entryMainlineProtocol.summary} ${entryMainlineProtocol.taskCenterEntryProtocol?.userRule || ''} ${defaultGenerationSummary}`.trim(),
+    copy: `${displayEntryMainlineProtocol.mainlineContract?.summary || displayEntryMainlineProtocol.summary} ${displayEntryMainlineProtocol.taskCenterEntryProtocol?.userRule || ''} ${defaultGenerationSummary}`.trim(),
     maxCards: 4,
     cards: [
-      { label: '模板展示板', value: entryActions.chooseTemplate.value, summary: entryMainlineProtocol.mainlineContract?.entryRole || entryMainlineProtocol.entryRole, file: examplesCatalogPath, cta: entryActions.startNewTask.cta, tone: 'good' },
+      { label: '中文任务展示板', value: entryActions.chooseTemplate.value, summary: displayEntryMainlineProtocol.mainlineContract?.entryRole || displayEntryMainlineProtocol.entryRole, file: examplesCatalogPath, cta: entryActions.startNewTask.cta, tone: 'good' },
       {
         label: '任务总控',
         value: '跨任务入口',
-        summary: entryMainlineProtocol.mainlineContract?.taskCenterRole || entryMainlineProtocol.taskCenterEntryProtocol?.summary || entryMainlineProtocol.taskCenterRole,
+        summary: displayEntryMainlineProtocol.mainlineContract?.taskCenterRole || displayEntryMainlineProtocol.taskCenterEntryProtocol?.summary || displayEntryMainlineProtocol.taskCenterRole,
         hideLinkIfMissing: true,
         tone: 'info',
       },
       latestWorkspace
-        ? { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.mainlineContract?.workspaceRole || entryMainlineProtocol.workspaceRole, file: latestWorkspace, cta: entryActions.continueTask.cta, tone: 'neutral' }
-        : { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: entryMainlineProtocol.mainlineContract?.workspaceRole || entryMainlineProtocol.workspaceRole, pendingLabel: entryActions.openWorkspaceHome.pendingLabel, tone: 'neutral' },
+        ? { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: displayEntryMainlineProtocol.mainlineContract?.workspaceRole || displayEntryMainlineProtocol.workspaceRole, file: latestWorkspace, cta: entryActions.continueTask.cta, tone: 'neutral' }
+        : { label: entryActions.openWorkspaceHome.label, value: entryActions.openWorkspaceHome.value, summary: displayEntryMainlineProtocol.mainlineContract?.workspaceRole || displayEntryMainlineProtocol.workspaceRole, pendingLabel: entryActions.openWorkspaceHome.pendingLabel, tone: 'neutral' },
       {
         label: '默认生成策略',
-        value: defaultGenerationProtocol.mode || entryMainlineProtocol.mainlineContract?.defaultGenerationMode || 'mainline-only',
+        value: defaultGenerationProtocol.mode || displayEntryMainlineProtocol.mainlineContract?.defaultGenerationMode || 'mainline-only',
         summary: defaultGenerationCardSummary,
         hideLinkIfMissing: true,
         tone: 'neutral',
@@ -430,7 +459,7 @@ ${renderWorkspaceStyles()}
           maxLinks: 3,
           preferExtraLinks: true,
           extraLinks: [
-            { label: '中文模板展示板', file: examplesCatalogPath },
+            { label: '中文任务展示板', file: examplesCatalogPath },
             latestWorkspace ? { label: entryActions.continueTask.label, file: latestWorkspace } : null,
           ],
         })}
@@ -441,7 +470,7 @@ ${renderWorkspaceStyles()}
       ${renderWorkspaceChromeContextBar({
         runLabel: entryState ? entryContext.runLabel : (latest?.taskLabel || '当前还没有历史任务'),
         phaseLabel: entryState ? `${entryContext.phaseLabel} / 总控层` : '总控层',
-        flowLabel: entryState ? `中文模板展示板 -> 任务总控 -> ${entryContext.flowLabel}` : '中文模板展示板 -> 任务总控 -> 工作台首页 -> 准备工作台',
+        flowLabel: entryState ? normalizeTaskCenterFlowLabel(entryContext.flowLabel) : '中文任务展示板 -> 任务总控 -> 工作台首页 -> 准备工作台',
         counts: [
           { label: language.taskCountLabel, value: runs.length },
           { label: language.readyCountLabel, value: stableCount },
@@ -463,9 +492,9 @@ ${renderWorkspaceStyles()}
         ${renderMetricCard(language.issueCountLabel, issueCount, issueCount > 0 ? 'bad' : 'good', issueCount > 0 ? '这些任务建议先打开一眼' : '当前没有卡住主线的问题')}
       </div>
       ${renderLiveStatusStrip(liveStatusState)}
-      ${entryMainlineGuide?.principle ? `<div class="task-center-mainline-note">${escapeHtml(entryMainlineGuide.principle)}</div>` : ''}
-      ${entryMainlineGuide?.runtimeFocus ? `<div class="task-center-mainline-note">${escapeHtml(entryMainlineGuide.runtimeFocus)} ${entryMainlineGuide?.handoffRule ? escapeHtml(entryMainlineGuide.handoffRule) : ''}</div>` : ''}
-      ${entryMainlineGuide?.copilotRelay?.summary ? `<div class="task-center-mainline-note">${escapeHtml(entryMainlineGuide.copilotRelay.summary)}</div>` : ''}
+      ${displayEntryMainlineGuide?.principle ? `<div class="task-center-mainline-note">${escapeHtml(displayEntryMainlineGuide.principle)}</div>` : ''}
+      ${displayEntryMainlineGuide?.runtimeFocus ? `<div class="task-center-mainline-note">${escapeHtml(displayEntryMainlineGuide.runtimeFocus)} ${displayEntryMainlineGuide?.handoffRule ? escapeHtml(displayEntryMainlineGuide.handoffRule) : ''}</div>` : ''}
+      ${displayEntryMainlineGuide?.copilotRelay?.summary ? `<div class="task-center-mainline-note">${escapeHtml(displayEntryMainlineGuide.copilotRelay.summary)}</div>` : ''}
     </section>
 
     ${mainlineGuideWorkbench ? renderWorkspaceChromeWorkbench(rootDir, mainlineGuideWorkbench) : ''}

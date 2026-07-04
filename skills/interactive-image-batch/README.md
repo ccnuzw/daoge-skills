@@ -7,14 +7,14 @@
 先读：
 
 - [START_HERE_中文.md](./START_HERE_中文.md)
+- `references/examples/examples_catalog.html`
 - [references/template_map_zh.md](./references/template_map_zh.md)
 
 这份文档只讲：
 
-- 从哪里开始
-- 按什么任务类型选入口
-- 跑哪条命令
-- 看哪些结果文件
+- 普通用户从哪里开始
+- 这条工作台主链长什么样
+- 进阶能力放在哪里
 
 ## 终版工作台入口
 
@@ -47,7 +47,7 @@ node scripts/run_example_catalog_prepare.js --starter true
 - `cinematic`
 - `oralboard`
 
-如果你已经知道任务类型，也建议第一次先只记这 6 个：
+如果你已经知道任务类型，也建议第一次先只记这 6 个中文起步入口：
 
 ```bash
 node scripts/run_example_catalog_prepare.js --intent portrait
@@ -59,6 +59,8 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 ```
 
 `interactive-image-batch` 是一套面向 DAOGE / 刀哥工作流的批量生图能力。
+
+普通用户第一轮不需要理解 template、variant、manifest、slot、runtime 这些维护层概念。先按中文任务类型起步，再跟着工作台首页、准备工作台、结果工作台、异常工作台走即可。下面的能力说明主要给进阶使用者和维护者做全貌参考。
 
 它不是一个“只会读提示词文件然后盲跑接口”的简易脚本，而是一套完整的批量生图工作流：
 
@@ -765,7 +767,7 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/interacti
 
 - `references/examples/examples_catalog.html` 属于这个 skill 包内文件
 - 使用 `npx skills` 安装 `interactive-image-batch` 时，它会随 skill 一起安装
-- 手动复制 `skills/interactive-image-batch/` 时，只要整目录复制完整，这份中文模板展示板也会一起带过去
+- 手动复制 `skills/interactive-image-batch/` 时，只要整目录复制完整，这份中文任务展示板也会一起带过去
 
 ### 手动安装
 
