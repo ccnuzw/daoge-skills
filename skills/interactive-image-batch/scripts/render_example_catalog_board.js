@@ -20,6 +20,7 @@ const {
   renderWorkspaceChromeWorkbench,
 } = require('./workspace_chrome');
 const { ensureWorkspaceChromeAssets, renderWorkspaceChromeHeadAssets } = require('./workspace_chrome_ui');
+const { v2WorkspacePaths } = require('./workspace_v2_shared');
 
 function escapeHtml(text) {
   return String(text || '')
@@ -181,13 +182,13 @@ function renderCommandActions(command, label = '复制运行命令') {
 }
 
 function renderCard(item, entryType) {
-  const detailSummary = entryType === 'mainline' ? '查看模板细节（维护者）' : '查看变体细节（维护者）';
+  const detailSummary = entryType === 'mainline' ? '查看维护映射（维护者）' : '查看任务版本细节（维护者）';
   const command = exampleCommand(item);
   return `
     <article class="card" data-entry-type="${entryType}" data-searchable="${escapeHtml(`${item.id} ${item.name} ${item.category} ${item.template_id} ${item.template_variant} ${item.description || ''}`.toLowerCase())}">
       <div class="card-top">
         <h3>${escapeHtml(item.name)}</h3>
-        <span class="entry-tag ${entryType === 'mainline' ? 'entry-tag-main' : 'entry-tag-variant'}">${entryType === 'mainline' ? '主链入口' : '变体入口'}</span>
+        <span class="entry-tag ${entryType === 'mainline' ? 'entry-tag-main' : 'entry-tag-variant'}">${entryType === 'mainline' ? '主链入口' : '细分方向'}</span>
       </div>
       <div class="copy">${escapeHtml(item.description || '')}</div>
       <div class="quick-tips">
@@ -206,8 +207,8 @@ function renderCard(item, entryType) {
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">内部 ID</div><div class="meta-value">${escapeHtml(item.id)}</div></div>
           <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
-          <div class="meta-row"><div class="meta-label">模板 ID</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
-          <div class="meta-row"><div class="meta-label">正式变体</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
+          <div class="meta-row"><div class="meta-label">维护映射</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
+          <div class="meta-row"><div class="meta-label">任务版本</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
           <div class="meta-row"><div class="meta-label">示例文件</div><div class="meta-value">${escapeHtml(item.example_file)}</div></div>
         </div>
       </details>
@@ -241,8 +242,8 @@ function renderStarterCard(item) {
         <div class="meta meta-maintainer">
           <div class="meta-row"><div class="meta-label">示例名称</div><div class="meta-value">${escapeHtml(item.name)}</div></div>
           <div class="meta-row"><div class="meta-label">内部分类</div><div class="meta-value">${escapeHtml(item.category)}</div></div>
-          <div class="meta-row"><div class="meta-label">模板 ID</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
-          <div class="meta-row"><div class="meta-label">正式变体</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
+          <div class="meta-row"><div class="meta-label">维护映射</div><div class="meta-value">${escapeHtml(item.template_id)}</div></div>
+          <div class="meta-row"><div class="meta-label">任务版本</div><div class="meta-value">${escapeHtml(item.template_variant)}</div></div>
         </div>
       </details>
     </article>
@@ -293,8 +294,8 @@ function renderTaskStarter(item) {
         <span class="quick-tag">${escapeHtml(item.commandHint || `--intent ${item.intent}`)}</span>
       </div>
       <div class="meta meta-user">
-        <div class="meta-row"><div class="meta-label">为什么先走这里</div><div class="meta-value">这个入口能先帮你建立这类任务的基本路径，不用一上来就面对太多细分变体。</div></div>
-        <div class="meta-row"><div class="meta-label">建议动作</div><div class="meta-value">先按任务意图起步，等预检方向对了，再决定要不要切到更具体的变体。</div></div>
+        <div class="meta-row"><div class="meta-label">为什么先走这里</div><div class="meta-value">这个入口能先帮你建立这类任务的基本路径，不用一上来就面对太多细分方向。</div></div>
+        <div class="meta-row"><div class="meta-label">建议动作</div><div class="meta-value">先按任务意图起步，等预检方向对了，再决定要不要切到更具体的任务版本。</div></div>
       </div>
       ${renderCommandActions(command, '复制意图命令')}
       <details class="card-details">
@@ -315,9 +316,10 @@ function main() {
   const catalogFile = path.resolve(args['catalog-file'] || path.join(__dirname, '..', 'references', 'examples', 'examples.catalog.json'));
   const outputFile = path.resolve(args['output-file'] || path.join(path.dirname(catalogFile), 'examples_catalog.html'));
   const workspaceDir = path.dirname(outputFile);
-  const workspaceHomeFile = path.join(workspaceDir, 'workspace_home.html');
-  const prepareWorkspaceFile = path.join(workspaceDir, 'prepare_workspace.html');
-  const resultWorkspaceFile = path.join(workspaceDir, 'result_workspace.html');
+  const workspacePaths = v2WorkspacePaths(workspaceDir);
+  const workspaceHomeFile = workspacePaths.workspaceIndex;
+  const prepareWorkspaceFile = workspacePaths.workspacePrepare;
+  const resultWorkspaceFile = workspacePaths.workspaceResults;
   const entryStateFile = path.resolve(args['entry-state-file'] || path.join(workspaceDir, 'entry_state.json'));
   const catalog = readJson(catalogFile);
   const examples = Array.isArray(catalog.examples) ? catalog.examples : [];
@@ -752,7 +754,7 @@ ${renderWorkspaceChromeHeadAssets()}
 
     <section class="section">
       <h2 class="section-title">第一次使用，先这样选</h2>
-      <p class="section-copy">第一次使用先不要看全部卡片，先按任务意图起步，再看推荐入口，最后才看细分变体。</p>
+      <p class="section-copy">第一次使用先不要看全部卡片，先按任务意图起步，再看推荐入口，最后才看细分方向。</p>
       <div class="grid">
         <article class="card starter-card">
           <div class="card-top">
@@ -797,13 +799,13 @@ ${renderWorkspaceChromeHeadAssets()}
     <section class="section">
       <div class="toolbar">
         <div class="toolbar-row">
-          <input id="catalog-search" class="search-input" type="search" placeholder="搜索 ID、类目、模板、变体或描述" />
+          <input id="catalog-search" class="search-input" type="search" placeholder="搜索名称、类目、任务版本或描述" />
         </div>
         <div class="toolbar-row">
           <div class="toggle-group" role="group" aria-label="入口过滤">
             <button class="toggle-button is-active" type="button" data-filter-type="all">全部入口</button>
             <button class="toggle-button" type="button" data-filter-type="mainline">只看主链</button>
-            <button class="toggle-button" type="button" data-filter-type="variant">只看变体</button>
+            <button class="toggle-button" type="button" data-filter-type="variant">只看细分方向</button>
           </div>
         </div>
         <div class="copy">如果你更习惯看命令，可以用这条方式只列推荐起步入口：<span class="cmd">node scripts/run_example_catalog_prepare.js --starter true</span></div>
@@ -818,7 +820,7 @@ ${renderWorkspaceChromeHeadAssets()}
             <div class="group-header">
               <div>
                 <h2 class="section-title">${escapeHtml(group.title)}</h2>
-                <p class="section-copy">${escapeHtml(group.description)} 当前共 ${group.mainline.length + group.variants.length} 个入口，其中主链入口 ${group.mainline.length} 个，变体入口 ${group.variants.length} 个。</p>
+                <p class="section-copy">${escapeHtml(group.description)} 当前共 ${group.mainline.length + group.variants.length} 个入口，其中主链入口 ${group.mainline.length} 个，细分方向 ${group.variants.length} 个。</p>
               </div>
               <button class="group-toggle" type="button" aria-expanded="true">折叠分组</button>
             </div>
@@ -841,7 +843,7 @@ ${renderWorkspaceChromeHeadAssets()}
             ` : ''}
             ${group.variants.length ? `
               <div class="subsection-block" data-subsection="variant">
-              <h3 class="subsection-title">变体入口</h3>
+              <h3 class="subsection-title">细分方向</h3>
               <div class="grid">
                 ${group.variants.map((item) => renderCard(item, 'variant')).join('')}
               </div>

@@ -11,6 +11,15 @@ const {
   resolveOptionalPageEmission,
   summarizeOptionalPageEmission,
 } = require('./default_generation_contract');
+const { refreshWorkspaceV2 } = require('./refresh_workspace_v2');
+
+function refreshWorkspaceV2ForArtifacts(outputDir, options = {}) {
+  const root = path.resolve(outputDir);
+  return refreshWorkspaceV2({
+    outputDir: root,
+    pruneLegacy: options.pruneLegacy === true,
+  });
+}
 
 function countBy(items, key) {
   const counts = {};
@@ -22,6 +31,57 @@ function countBy(items, key) {
   return Object.entries(counts)
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count);
+}
+
+function isRegularFile(filePath) {
+  if (!filePath) return false;
+  const absolutePath = path.resolve(filePath);
+  return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
+}
+
+function copyIfExists(sourcePath, targetPath) {
+  if (!sourcePath) return false;
+  const absoluteSource = path.resolve(sourcePath);
+  if (!isRegularFile(absoluteSource)) return false;
+  if (absoluteSource === path.resolve(targetPath)) return true;
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(absoluteSource, targetPath);
+  return true;
+}
+
+function resolveCompatManifestPath(outputDir) {
+  const compatManifestPath = path.join(outputDir, 'debug', 'compat', 'manifest.json');
+  return fs.existsSync(compatManifestPath)
+    ? compatManifestPath
+    : path.join(outputDir, 'manifest.json');
+}
+
+function materializeSelectionCommandInputs(outputDir, manifest = {}) {
+  const debugDir = path.join(outputDir, 'debug');
+  const compatDir = path.join(debugDir, 'compat');
+  fs.mkdirSync(compatDir, { recursive: true });
+
+  const finalManifestPath = path.join(compatDir, 'manifest.json');
+  if (!copyIfExists(path.join(outputDir, 'manifest.json'), finalManifestPath)) {
+    fs.writeFileSync(finalManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  const finalPromptPath = path.join(debugDir, 'prompts.generated.json');
+  const promptCandidates = [
+    path.join(outputDir, 'prompts.generated.json'),
+    manifest.promptSnapshot,
+    manifest.promptSource,
+    manifest.promptSourceOriginal,
+  ].filter(Boolean);
+  const copiedPrompt = promptCandidates.some((candidate) => copyIfExists(candidate, finalPromptPath));
+  const fallbackPrompt = promptCandidates.find((candidate) => isRegularFile(candidate));
+  const promptPath = copiedPrompt ? finalPromptPath : (fallbackPrompt || null);
+
+  return {
+    promptPath,
+    manifestPath: finalManifestPath,
+    canRerun: Boolean(promptPath),
+  };
 }
 
 function createSelectionArtifacts(outputDir, manifest, allResults, options = {}) {
@@ -53,9 +113,10 @@ function createSelectionArtifacts(outputDir, manifest, allResults, options = {})
   fs.writeFileSync(files.needsReviewFile, JSON.stringify(needsReview, null, 2));
   fs.writeFileSync(files.rerunCandidatesFile, JSON.stringify(rerunCandidates, null, 2));
 
-  const resultWorkspacePath = path.join(outputDir, 'result_workspace.html');
-  const exceptionWorkspacePath = path.join(outputDir, 'exception_workspace.html');
+  const resultWorkspacePath = path.join(outputDir, 'workspace', 'results.html');
+  const exceptionWorkspacePath = path.join(outputDir, 'workspace', 'issues.html');
   const storyboardBoardPath = path.join(outputDir, 'storyboard_board.html');
+  const commandInputs = materializeSelectionCommandInputs(outputDir, manifest);
   const lines = [
     '# DAOGE 结果挑选与补救说明',
     '',
@@ -104,7 +165,7 @@ function createSelectionArtifacts(outputDir, manifest, allResults, options = {})
     lines.push('- 当前没有失败项，也没有明显待复核项。');
   }
 
-  if (failed.length) {
+  if (failed.length && commandInputs.canRerun) {
     lines.push('');
     lines.push('## 4. 维护者补跑命令');
     lines.push('');
@@ -113,10 +174,15 @@ function createSelectionArtifacts(outputDir, manifest, allResults, options = {})
     lines.push('```bash');
     lines.push(...portableRunnerPreambleLines());
     lines.push('node "$DAOGE_RUNNER" \\');
-    lines.push(`  --prompts-file ${shellQuote(path.join(outputDir, 'prompts.generated.json'))} \\`);
-    lines.push(`  --resume-manifest ${shellQuote(path.join(outputDir, 'manifest.json'))} \\`);
+    lines.push(`  --prompts-file ${shellQuote(commandInputs.promptPath)} \\`);
+    lines.push(`  --resume-manifest ${shellQuote(commandInputs.manifestPath)} \\`);
     lines.push('  --failed-only true');
     lines.push('```');
+  } else if (failed.length) {
+    lines.push('');
+    lines.push('## 4. 维护者补跑命令');
+    lines.push('');
+    lines.push('缺少可用的提示词文件，无法直接生成补跑命令。请先恢复本轮提示词文件，再按失败项补跑。');
   }
 
   if (options.generateDiagnosticMarkdown !== false) {
@@ -156,7 +222,7 @@ function createOperationsReport(outputDir, manifest, allResults, options = {}) {
   const report = {
     generatedAt: new Date().toISOString(),
     outputDir,
-    manifest: path.join(outputDir, 'manifest.json'),
+    manifest: resolveCompatManifestPath(outputDir),
     counts: {
       success: successful.length,
       failed: failed.length,
@@ -299,42 +365,42 @@ function renderTaskCenter(outputDir) {
 }
 
 function renderWorkspaceHome(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_workspace_home.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const workspacePath = path.join(outputDir, 'workspace_home.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', workspacePath], {
-    stdio: 'ignore',
-  });
-  return workspacePath;
+  return refreshWorkspaceV2ForArtifacts(outputDir, { pruneLegacy: false }).workspaceIndex;
 }
 
 function renderPrepareWorkspace(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_prepare_workspace.js');
-  const workspacePath = path.join(outputDir, 'prepare_workspace.html');
-  execFileSync(process.execPath, [scriptPath, '--output-dir', outputDir, '--output-file', workspacePath], {
-    stdio: 'ignore',
-  });
-  return workspacePath;
+  return refreshWorkspaceV2ForArtifacts(outputDir, { pruneLegacy: false }).prepare;
 }
 
 function renderResultWorkspace(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_result_workspace.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const workspacePath = path.join(outputDir, 'result_workspace.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', workspacePath], {
-    stdio: 'ignore',
-  });
-  return workspacePath;
+  return refreshWorkspaceV2ForArtifacts(outputDir, { pruneLegacy: false }).results;
 }
 
 function renderExceptionWorkspace(outputDir) {
-  const scriptPath = path.join(__dirname, 'render_exception_workspace.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const workspacePath = path.join(outputDir, 'exception_workspace.html');
-  execFileSync(process.execPath, [scriptPath, '--manifest-file', manifestPath, '--output-file', workspacePath], {
-    stdio: 'ignore',
-  });
-  return workspacePath;
+  return refreshWorkspaceV2ForArtifacts(outputDir, { pruneLegacy: false }).issues;
+}
+
+function renderWorkspaceBundle(outputDir, options = {}) {
+  const refreshed = refreshWorkspaceV2ForArtifacts(outputDir, options);
+  return {
+    workspaceStateArtifacts: {
+      workspaceStatePath: refreshed.internal.workspaceState,
+      assetLibraryPath: refreshed.internal.assetLibrary,
+      issueQueuePath: refreshed.internal.issueQueue,
+      runPlanPath: refreshed.internal.runPlan,
+    },
+    workspaceIndex: refreshed.workspaceIndex,
+    workspacePrepare: refreshed.prepare,
+    workspaceResults: refreshed.results,
+    workspaceIssues: refreshed.issues,
+    workspaceRecord: refreshed.record,
+    // 兼容旧调用方；用户可见 summary 必须使用上面的 v2 字段。
+    workspaceHomePath: refreshed.workspaceIndex,
+    prepareWorkspacePath: refreshed.prepare,
+    resultWorkspacePath: refreshed.results,
+    exceptionWorkspacePath: refreshed.issues,
+    runRecordPath: refreshed.record,
+  };
 }
 
 function renderStoryboardBoard(outputDir) {
@@ -356,30 +422,8 @@ function renderStoryboardBoard(outputDir) {
   return boardPath;
 }
 
-function renderWorkspaceState(outputDir) {
-  const scriptPath = path.join(__dirname, 'build_workspace_state.js');
-  const manifestPath = path.join(outputDir, 'manifest.json');
-  const workspaceStatePath = path.join(outputDir, 'workspace_state.json');
-  const workspaceAssetsPath = path.join(outputDir, 'workspace_assets.json');
-  const workspaceTimelinePath = path.join(outputDir, 'workspace_timeline.json');
-  const workbenchStatePath = path.join(outputDir, 'workbench_state.json');
-  execFileSync(process.execPath, [
-    scriptPath,
-    '--manifest-file', manifestPath,
-    '--output-dir', outputDir,
-    '--workspace-state-file', workspaceStatePath,
-    '--workspace-assets-file', workspaceAssetsPath,
-    '--workspace-timeline-file', workspaceTimelinePath,
-    '--workbench-state-file', workbenchStatePath,
-  ], {
-    stdio: 'ignore',
-  });
-  return {
-    workspaceStatePath,
-    workspaceAssetsPath,
-    workspaceTimelinePath,
-    workbenchStatePath,
-  };
+function renderWorkspaceState(outputDir, options = {}) {
+  return renderWorkspaceBundle(outputDir, options).workspaceStateArtifacts;
 }
 
 function renderVisualReviewAnalysis(outputDir, manifest, options = {}) {
@@ -418,7 +462,7 @@ function updateRunIndex(outputDir, manifest, allResults, artifacts, helpers) {
   }
   const entry = {
     outputDir,
-    manifest: path.join(outputDir, 'manifest.json'),
+    manifest: resolveCompatManifestPath(outputDir),
     generatedAt: manifest.generatedAt,
     promptSource: manifest.promptSource,
     selectedCount: manifest.selectedCount,
@@ -473,6 +517,7 @@ module.exports = {
   renderPrepareWorkspace,
   renderResultWorkspace,
   renderExceptionWorkspace,
+  renderWorkspaceBundle,
   renderStoryboardBoard,
   renderWorkspaceState,
   renderVisualReviewAnalysis,

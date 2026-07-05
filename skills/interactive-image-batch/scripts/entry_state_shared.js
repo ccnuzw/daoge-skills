@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { resolveV2WorkspacePage } = require('./workspace_v2_shared');
 const { readJson, fileExists } = require('./script_utils');
 const { buildDefaultGenerationContract } = require('./default_generation_contract');
 
@@ -276,8 +277,8 @@ function resolveEntryNextStep(baseDir, entryState, options = {}) {
   const routedLabel = normalizeText(routedNext?.label);
   const routedReason = normalizeText(routedNext?.reason || routedNext?.summary);
   const routedTarget = normalizeText(routedNext?.target || routedNext?.file);
-  const fallbackPrepare = options.prepareFile || path.join(baseDir, 'prepare_workspace.html');
-  const fallbackHome = options.homeFile || path.join(baseDir, 'workspace_home.html');
+  const fallbackPrepare = options.prepareFile || resolveV2WorkspacePage(baseDir, 'prepare');
+  const fallbackHome = options.homeFile || resolveV2WorkspacePage(baseDir, 'index');
   const target = routedTarget || normalizeText(entryState?.recommendedNextStep?.target);
   const label = routedLabel || normalizeText(entryState?.recommendedNextStep?.label, '生成预检工作台');
   const reason = routedReason

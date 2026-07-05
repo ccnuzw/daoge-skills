@@ -1,5 +1,5 @@
-const path = require('path');
 const { buildRuntimeConversationCopy } = require('./workspace_status_dictionary');
+const { resolveV2WorkspacePage } = require('./workspace_v2_shared');
 
 function cleanText(value, fallback = '') {
   const text = String(value || '').trim();
@@ -333,7 +333,7 @@ function buildRuntimeUnifiedStateBundle(options = {}) {
   const taskLabel = cleanText(options.taskLabel);
   const progressSummary = cleanText(options.progressSummary);
   const nextActionTarget = cleanText(options.nextActionTarget)
-    || (outputDir ? `${outputDir.replace(/\/$/, '')}/workspace_home.html` : '');
+    || (outputDir ? resolveV2WorkspacePage(outputDir, 'index') : '');
   const nextAction = {
     label: cleanText(options.nextActionLabel),
     reason: cleanText(options.nextActionReason),
@@ -620,7 +620,7 @@ function buildRuntimeCopilotProtocol(options = {}) {
       handoffRule: '暂停态先把风险收掉，再决定继续执行、补跑或回结果层。',
       handoffState: {
         branch: 'paused',
-        primarySurface: 'exception_workspace.html',
+        primarySurface: 'workspace/issues.html',
         nextOwner: '异常工作台',
         nextStep: '先处理暂停原因，再决定继续执行、补跑或回结果层。',
       },
@@ -633,7 +633,7 @@ function buildRuntimeCopilotProtocol(options = {}) {
       handoffRule: '等待确认时，对话框负责给出明确确认，工作台负责解释确认点和下一站。',
       handoffState: {
         branch: 'waiting-confirmation',
-        primarySurface: 'workspace_home.html',
+        primarySurface: 'workspace/index.html',
         nextOwner: '对话确认',
         nextStep: '用户明确确认后，再回到运行态或对应工作台继续。',
       },
@@ -646,7 +646,7 @@ function buildRuntimeCopilotProtocol(options = {}) {
       handoffRule: '等待确认时，对话框负责给出明确确认，工作台负责解释确认点和下一站。',
       handoffState: {
         branch: 'waiting-confirmation',
-        primarySurface: 'workspace_home.html',
+        primarySurface: 'workspace/index.html',
         nextOwner: '对话确认',
         nextStep: '用户明确确认后，再回到运行态或对应工作台继续。',
       },
@@ -660,13 +660,13 @@ function buildRuntimeCopilotProtocol(options = {}) {
       handoffState: failedCount > 0
         ? {
           branch: 'completed-failed',
-          primarySurface: 'exception_workspace.html',
+          primarySurface: 'workspace/issues.html',
           nextOwner: '异常工作台',
           nextStep: '先收失败项和补跑判断，再回结果工作台完成收口。',
         }
         : {
           branch: 'completed-clean',
-          primarySurface: 'result_workspace.html',
+          primarySurface: 'workspace/results.html',
           nextOwner: '结果工作台',
           nextStep: '进入结果工作台筛图、取舍并完成收口。',
         },
@@ -679,7 +679,7 @@ function buildRuntimeCopilotProtocol(options = {}) {
       handoffRule: '待开始时先由准备工作台确认方向、批次和素材绑定，再进入执行。',
       handoffState: {
         branch: 'planned',
-        primarySurface: 'prepare_workspace.html',
+        primarySurface: 'workspace/prepare.html',
         nextOwner: '准备工作台',
         nextStep: '先确认方向、批次和素材绑定，再进入执行。',
       },
@@ -717,7 +717,7 @@ function buildLiveRunStateBundle(options = {}) {
     : {
         label: cleanText(fallback.nextActionLabel, '进入当前任务'),
         reason: cleanText(fallback.nextActionReason || fallback.phaseSummary),
-        target: outputDir ? path.join(outputDir, 'workspace_home.html') : null,
+        target: outputDir ? resolveV2WorkspacePage(outputDir, 'index') : null,
       };
   const unifiedStatus = runtimeSummary.unifiedStatus && typeof runtimeSummary.unifiedStatus === 'object'
     ? runtimeSummary.unifiedStatus

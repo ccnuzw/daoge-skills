@@ -5,6 +5,7 @@ const {
   buildTaskCenterEntryProtocol,
   resolveStarterIntentCopy,
 } = require('./entry_state_shared');
+const { resolveV2WorkspacePage } = require('./workspace_v2_shared');
 
 function loadCatalog(catalogFile) {
   const parsed = readJson(catalogFile);
@@ -34,7 +35,7 @@ function buildRecommendedNextStep(example, outputDir) {
   });
   return {
     label: '进入准备工作台',
-    target: path.join(outputDir, 'prepare_workspace.html'),
+    target: resolveV2WorkspacePage(outputDir, 'prepare'),
     reason: `先用“${intentCopy.label}”进入准备工作台，确认方向、素材和执行前检查。`,
   };
 }
@@ -139,7 +140,7 @@ function buildEntryWorkbench(example, outputDir) {
           label: '推荐下一步',
           value: '进入准备工作台',
           summary: '先确认方向、放行和素材绑定，再决定是否继续。',
-          file: path.join(outputDir, 'prepare_workspace.html'),
+          file: resolveV2WorkspacePage(outputDir, 'prepare'),
           cta: '进入下一步',
           pendingLabel: '下一步页面尚未生成',
           tone: 'good',

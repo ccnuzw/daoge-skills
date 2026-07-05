@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs, readJson, fileExists, resolvePromptFileForRerun } = require('./script_utils');
+const { v2WorkspacePaths } = require('./workspace_v2_shared');
 
 function portableRunnerPreambleLines() {
   return [
@@ -56,9 +57,11 @@ function main() {
   const contactSheetPath = path.join(path.dirname(manifestPath), 'contact_sheet.png');
   const selectionBoardPath = path.join(path.dirname(manifestPath), 'selection_board.md');
   const operationsReportPath = path.join(path.dirname(manifestPath), 'operations_report.md');
-  const workspaceHomePath = path.join(path.dirname(manifestPath), 'workspace_home.html');
-  const resultWorkspacePath = path.join(path.dirname(manifestPath), 'result_workspace.html');
-  const exceptionWorkspacePath = path.join(path.dirname(manifestPath), 'exception_workspace.html');
+  const workspacePaths = v2WorkspacePaths(path.dirname(manifestPath));
+  const workspaceHomePath = workspacePaths.workspaceIndex;
+  const resultWorkspacePath = workspacePaths.workspaceResults;
+  const exceptionWorkspacePath = workspacePaths.workspaceIssues;
+  const recordWorkspacePath = workspacePaths.workspaceRecord;
   const storyboardBoardPath = path.join(path.dirname(manifestPath), 'storyboard_board.html');
   const runIndexPath = path.join(path.dirname(path.dirname(manifestPath)), 'daoge_run_index.md');
 
@@ -78,7 +81,7 @@ function main() {
     '',
     `- 回结果工作台: ${fileExists(resultWorkspacePath) ? resultWorkspacePath : '尚未生成'}`,
     `- 回异常工作台: ${fileExists(exceptionWorkspacePath) ? exceptionWorkspacePath : '尚未生成'}`,
-    `- 看任务档案: ${path.join(path.dirname(manifestPath), 'run_record.html')}`,
+    `- 看任务档案: ${recordWorkspacePath}`,
     `- 最终图片目录: ${manifest.outputDir || path.dirname(manifestPath)}`,
     '',
     '## 2. 运行概况',
@@ -137,7 +140,7 @@ function main() {
   lines.push('');
   lines.push(`- 根 manifest: ${manifestPath}`);
   lines.push(`- README: ${path.join(path.dirname(manifestPath), 'README.md')}`);
-  lines.push(`- 任务档案: ${path.join(path.dirname(manifestPath), 'run_record.html')}`);
+  lines.push(`- 任务档案: ${recordWorkspacePath}`);
   if (fileExists(storyboardBoardPath)) lines.push(`- 分镜整板补充页: ${storyboardBoardPath}`);
   lines.push('');
   lines.push('## 9. DAOGE 建议');

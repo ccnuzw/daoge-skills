@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { parseArgs, ensureDir, readJson, writeJson } = require('./script_utils');
+const { v2WorkspacePaths } = require('./workspace_v2_shared');
 
 function required(args, key) {
   if (!args[key]) throw new Error(`Missing required flag: --${key}`);
@@ -89,6 +90,7 @@ function main() {
     ...(args['emit-optional-pages'] ? ['--emit-optional-pages', args['emit-optional-pages']] : []),
   ]);
 
+  const workspacePaths = v2WorkspacePaths(prepareOutputDir);
   console.log(JSON.stringify({
     exampleFile,
     outputDir,
@@ -103,8 +105,8 @@ function main() {
     promptDraftBundle,
     promptsQuickstart,
     prepareOutputDir,
-    workspaceHome: path.join(prepareOutputDir, 'workspace_home.html'),
-    prepareWorkspace: path.join(prepareOutputDir, 'prepare_workspace.html'),
+    workspaceIndex: workspacePaths.workspaceIndex,
+    workspacePrepare: workspacePaths.workspacePrepare,
   }, null, 2));
 }
 

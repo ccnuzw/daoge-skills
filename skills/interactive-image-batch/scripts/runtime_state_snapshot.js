@@ -4,7 +4,7 @@ const { deriveTaskLabel } = require('./task_label_utils');
 const { translatePauseReason } = require('./run_batch_runtime');
 const { buildRuntimeUnifiedStateBundle } = require('./unified_status_summary');
 const { buildRuntimeConversationCopy } = require('./workspace_status_dictionary');
-const { resolveRecommendedWorkspacePath } = require('./workspace_layout_migration');
+const { resolveV2WorkspacePage } = require('./workspace_v2_shared');
 
 function stageTypeLabel(stageType) {
   if (stageType === 'sample') return '样本阶段';
@@ -293,21 +293,22 @@ function buildRuntimeWorkflowState(options = {}) {
   };
 }
 
-function resolveRuntimeSurfacePath(outputDir, fileName) {
-  return resolveRecommendedWorkspacePath(outputDir, fileName, 'workspace').recommendedPath;
+function resolveRuntimeSurfacePath(outputDir, pageId) {
+  if (!outputDir) return null;
+  return resolveV2WorkspacePage(outputDir, pageId);
 }
 
 function resolveRuntimeNextActionTarget(outputDir, jobState, manifest = {}) {
   const status = String(jobState?.status || 'planned').trim() || 'planned';
   const failedCount = Number(jobState?.progress?.failed || manifest?.failed || 0);
-  if (status === 'paused') return resolveRuntimeSurfacePath(outputDir, 'exception_workspace.html');
+  if (status === 'paused') return resolveRuntimeSurfacePath(outputDir, 'issues');
   if (status === 'completed') {
     return resolveRuntimeSurfacePath(
       outputDir,
-      failedCount > 0 ? 'exception_workspace.html' : 'result_workspace.html'
+      failedCount > 0 ? 'issues' : 'results'
     );
   }
-  return resolveRuntimeSurfacePath(outputDir, 'workspace_home.html');
+  return resolveRuntimeSurfacePath(outputDir, 'index');
 }
 
 function buildRuntimeStateSnapshot(outputDir, options = {}) {

@@ -7,9 +7,11 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "bash scripts/run_smoke_tests.sh",
-    "test:unit": "node --test --test-name-pattern \"unified status|workspace shared|template_registry|host_native_results|runtime mode\" tests/smoke.test.js",
-    "test:contracts": "node --test --test-name-pattern \"^(run_batch|daoge_prepare_run|build_workspace_state|ingest_host_native_results|render_prepare_workspace|render_task_center)\" tests/smoke.test.js",
+    "test": "npm run test:unit && npm run test:contracts && npm run test:integration && npm run test:artifacts && npm run test:smoke",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:contracts": "node --test tests/contracts/*.test.js",
+    "test:integration": "node --test tests/integration/*.test.js",
+    "test:artifacts": "node --test tests/artifacts/*.test.js",
     "test:smoke": "bash scripts/run_smoke_tests.sh"
   },
   "keywords": [],

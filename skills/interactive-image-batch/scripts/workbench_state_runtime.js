@@ -1,78 +1,88 @@
+const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
 const { writeRuntimeStateSnapshot } = require('./runtime_state_snapshot');
 const { resolveUnifiedWorkbenchStatePath } = require('./workbench_state_shared');
+const { refreshWorkspaceV2 } = require('./refresh_workspace_v2');
+const { readJsonIfExists, writeJson } = require('./script_utils');
+
+const RETIRED_WORKSPACE_HTML = [
+  'workspace_home.html',
+  'prepare_workspace.html',
+  'result_workspace.html',
+  'exception_workspace.html',
+  'run_record.html',
+];
+
+function removeRetiredWorkspaceHtml(outputDir) {
+  RETIRED_WORKSPACE_HTML.forEach((fileName) => {
+    [
+      path.join(outputDir, fileName),
+      path.join(outputDir, 'workspace', fileName),
+    ].forEach((filePath) => {
+      if (fs.existsSync(filePath)) fs.rmSync(filePath, { force: true });
+    });
+  });
+}
 
 function refreshRuntimeWorkbench(outputDir) {
   const absoluteOutputDir = path.resolve(outputDir);
-  const manifestPath = path.join(absoluteOutputDir, 'manifest.json');
-  const workspaceStatePath = path.join(absoluteOutputDir, 'workspace_state.json');
-  const workspaceAssetsPath = path.join(absoluteOutputDir, 'workspace_assets.json');
-  const workspaceTimelinePath = path.join(absoluteOutputDir, 'workspace_timeline.json');
-  const workbenchStatePath = path.join(absoluteOutputDir, 'workbench_state.json');
   const unifiedWorkbenchStatePath = resolveUnifiedWorkbenchStatePath(absoluteOutputDir);
-  const workspaceHomePath = path.join(absoluteOutputDir, 'workspace_home.html');
-  const prepareWorkspacePath = path.join(absoluteOutputDir, 'prepare_workspace.html');
-  const resultWorkspacePath = path.join(absoluteOutputDir, 'result_workspace.html');
-  const exceptionWorkspacePath = path.join(absoluteOutputDir, 'exception_workspace.html');
   const runtimeState = writeRuntimeStateSnapshot(absoluteOutputDir);
-
-  execFileSync(process.execPath, [
-    path.join(__dirname, 'build_workspace_state.js'),
-    '--manifest-file', manifestPath,
-    '--output-dir', absoluteOutputDir,
-    '--workspace-state-file', workspaceStatePath,
-    '--workspace-assets-file', workspaceAssetsPath,
-    '--workspace-timeline-file', workspaceTimelinePath,
-    '--workbench-state-file', workbenchStatePath,
-    '--unified-workbench-state-file', unifiedWorkbenchStatePath,
-  ], {
-    stdio: 'ignore',
+  const refreshed = refreshWorkspaceV2({
+    outputDir: absoluteOutputDir,
+    pruneLegacy: false,
   });
-
-  execFileSync(process.execPath, [
-    path.join(__dirname, 'render_workspace_home.js'),
-    '--manifest-file', manifestPath,
-    '--output-file', workspaceHomePath,
-  ], {
-    stdio: 'ignore',
-  });
-  execFileSync(process.execPath, [
-    path.join(__dirname, 'render_prepare_workspace.js'),
-    '--manifest-file', manifestPath,
-    '--output-file', prepareWorkspacePath,
-  ], {
-    stdio: 'ignore',
-  });
-  execFileSync(process.execPath, [
-    path.join(__dirname, 'render_result_workspace.js'),
-    '--manifest-file', manifestPath,
-    '--output-file', resultWorkspacePath,
-  ], {
-    stdio: 'ignore',
-  });
-  execFileSync(process.execPath, [
-    path.join(__dirname, 'render_exception_workspace.js'),
-    '--manifest-file', manifestPath,
-    '--output-file', exceptionWorkspacePath,
-  ], {
-    stdio: 'ignore',
+  removeRetiredWorkspaceHtml(absoluteOutputDir);
+  const workspaceStatePath = refreshed.internal.workspaceState;
+  const assetLibraryPath = refreshed.internal.assetLibrary;
+  const runtimeSnapshot = runtimeState?.snapshot || null;
+  writeJson(unifiedWorkbenchStatePath, {
+    schemaVersion: 2,
+    kind: 'daoge-workbench-state',
+    role: 'live-workbench-state',
+    generatedAt: new Date().toISOString(),
+    outputDir: absoluteOutputDir,
+    outputFile: unifiedWorkbenchStatePath,
+    stateSources: {
+      runtimeState: runtimeState?.outputFile || path.join(absoluteOutputDir, 'runtime_state.json'),
+      workspaceState: workspaceStatePath,
+      assetLibrary: assetLibraryPath,
+      issueQueue: refreshed.internal.issueQueue,
+      runPlan: refreshed.internal.runPlan,
+      executionManifest: refreshed.internal.executionManifest,
+    },
+    runtimeState: runtimeSnapshot,
+    workspaceState: readJsonIfExists(workspaceStatePath),
+    paths: {
+      workspaceIndex: refreshed.workspaceIndex,
+      workspacePrepare: refreshed.prepare,
+      workspaceResults: refreshed.results,
+      workspaceIssues: refreshed.issues,
+      workspaceRecord: refreshed.record,
+      assets: path.join(absoluteOutputDir, 'assets'),
+    },
   });
 
   return {
     runtimeStatePath: runtimeState?.outputFile || null,
-    workspaceStatePath,
-    workspaceAssetsPath,
-    workspaceTimelinePath,
-    workbenchStatePath,
     unifiedWorkbenchStatePath,
-    workspaceHomePath,
-    prepareWorkspacePath,
-    resultWorkspacePath,
-    exceptionWorkspacePath,
+    workspaceStatePath,
+    workspaceAssetsPath: assetLibraryPath,
+    workspaceTimelinePath: workspaceStatePath,
+    workbenchStatePath: unifiedWorkbenchStatePath,
+    workspaceIndexPath: refreshed.workspaceIndex,
+    workspacePreparePath: refreshed.prepare,
+    workspaceResultsPath: refreshed.results,
+    workspaceIssuesPath: refreshed.issues,
+    workspaceRecordPath: refreshed.record,
+    workspaceHomePath: refreshed.workspaceIndex,
+    prepareWorkspacePath: refreshed.prepare,
+    resultWorkspacePath: refreshed.results,
+    exceptionWorkspacePath: refreshed.issues,
   };
 }
 
 module.exports = {
   refreshRuntimeWorkbench,
+  removeRetiredWorkspaceHtml,
 };

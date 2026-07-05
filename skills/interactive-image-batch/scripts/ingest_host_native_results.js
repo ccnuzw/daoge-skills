@@ -4,8 +4,8 @@ const { execFileSync } = require('child_process');
 const { parseArgs, readJson, readJsonIfExists, ensureDir, writeJson } = require('./script_utils');
 const { loadWorkbenchState } = require('./workbench_state_shared');
 const { summarizeUserWorkbenchProtocol } = require('./workspace_page_shared');
-const { resolveOptionalPageEmission, buildOptionalPageDecision, pruneHiddenHtmlFiles } = require('./default_generation_contract');
-const { syncWorkspaceLayout, resolveRecommendedWorkspacePath } = require('./workspace_layout_migration');
+const { buildOptionalPageDecision } = require('./default_generation_contract');
+const { v2WorkspacePaths } = require('./workspace_v2_shared');
 
 function asArray(value) {
   if (Array.isArray(value)) return value;
@@ -62,13 +62,12 @@ function writeReadme(outputDir, summary) {
       || directorySummary
       || summarizeUserWorkbenchProtocol(workspaceState?.assetLayers?.userWorkbenchProtocol, { outputDir }).summary,
   };
-  const layoutEntry = resolveRecommendedWorkspacePath(outputDir, 'workspace_home.html', 'workspace');
   const lines = [
     '# DAOGE 当前任务入口',
     '',
     `请先打开${workbenchProtocol.defaultEntryLabel || governanceSummary.defaultEntryLabel || '工作台首页'}。这份 README 只负责告诉你从哪里进入，不负责解释本轮过程细节或最终收口结论。任务档案只作回看，内部记录仅维护者诊断使用。`,
     '',
-    `- 先看这里: ${layoutEntry.recommendedPath || governanceSummary.defaultEntryPath || summary.workspaceHome}`,
+    `- 先看这里: ${path.join(outputDir, 'workspace', 'index.html')}`,
     '- 不用先看: JSON / Markdown 内部记录、深看页',
     '- 内部记录: 仅维护者诊断和续跑使用，不作为普通阅读入口',
     '',
@@ -312,7 +311,6 @@ function main() {
   const optionalPageDecision = buildOptionalPageDecision({
     optionalPageMode: args['emit-optional-pages'],
   });
-  const optionalPageEmission = optionalPageDecision;
   runNode('validate_host_native_results.js', ['--results-file', resultsFile]);
   const rawResults = asArray(readJson(resultsFile));
   const normalizedResults = rawResults.map(normalizeResult);
@@ -320,7 +318,7 @@ function main() {
   ensureDir(outputDir);
 
   const manifest = buildManifest(outputDir, promptPack, normalizedResults, {
-    optionalPageMode: optionalPageEmission.mode,
+    optionalPageMode: optionalPageDecision.mode,
   });
   const manifestPath = path.join(outputDir, 'manifest.json');
   writeJson(manifestPath, manifest);
@@ -339,17 +337,6 @@ function main() {
     removeFileIfExists(path.join(outputDir, '.tmp_run_record.md'));
     removeFileIfExists(path.join(outputDir, 'run_record.md'));
   }
-  runNode('build_workspace_state.js', [
-    '--manifest-file', manifestPath,
-    '--output-dir', outputDir,
-    '--workspace-state-file', path.join(outputDir, 'workspace_state.json'),
-    '--workspace-assets-file', path.join(outputDir, 'workspace_assets.json'),
-    '--workspace-timeline-file', path.join(outputDir, 'workspace_timeline.json'),
-    '--workbench-state-file', path.join(outputDir, 'workbench_state.json'),
-  ]);
-  runNode('render_result_workspace.js', ['--manifest-file', manifestPath, '--output-file', path.join(outputDir, 'result_workspace.html')]);
-  runNode('render_exception_workspace.js', ['--manifest-file', manifestPath, '--output-file', path.join(outputDir, 'exception_workspace.html')]);
-  runNode('render_workspace_home.js', ['--manifest-file', manifestPath, '--output-file', path.join(outputDir, 'workspace_home.html')]);
   if (optionalPageDecision.shouldGenerateResultDetails) {
     runNode('render_review_board.js', [
       '--manifest-file', manifestPath,
@@ -373,19 +360,6 @@ function main() {
       '--output-file', path.join(outputDir, 'completion_board.html'),
     ]);
   }
-  if (optionalPageDecision.shouldRefreshExpandedWorkspace) {
-    runNode('build_workspace_state.js', [
-      '--manifest-file', manifestPath,
-      '--output-dir', outputDir,
-      '--workspace-state-file', path.join(outputDir, 'workspace_state.json'),
-      '--workspace-assets-file', path.join(outputDir, 'workspace_assets.json'),
-      '--workspace-timeline-file', path.join(outputDir, 'workspace_timeline.json'),
-      '--workbench-state-file', path.join(outputDir, 'workbench_state.json'),
-    ]);
-    runNode('render_result_workspace.js', ['--manifest-file', manifestPath, '--output-file', path.join(outputDir, 'result_workspace.html')]);
-    runNode('render_exception_workspace.js', ['--manifest-file', manifestPath, '--output-file', path.join(outputDir, 'exception_workspace.html')]);
-    runNode('render_workspace_home.js', ['--manifest-file', manifestPath, '--output-file', path.join(outputDir, 'workspace_home.html')]);
-  }
   const storyboardBundleFile = path.join(outputDir, 'storyboard_bundle.validation.json');
   const successFile = path.join(outputDir, 'success.json');
   if (optionalPageDecision.shouldGenerateStoryboardDetails && fs.existsSync(storyboardBundleFile) && fs.existsSync(successFile)) {
@@ -398,41 +372,13 @@ function main() {
   } else {
     removeFileIfExists(path.join(outputDir, 'storyboard_board.html'));
   }
-  pruneHiddenHtmlFiles(outputDir, optionalPageDecision);
-
-  writeReadme(outputDir, {
-    workspaceHome: path.join(outputDir, 'workspace_home.html'),
-    resultWorkspace: path.join(outputDir, 'result_workspace.html'),
-    exceptionWorkspace: path.join(outputDir, 'exception_workspace.html'),
-    runRecordHtml: path.join(outputDir, 'run_record.html'),
-    runRecordMarkdown: path.join(outputDir, 'run_record.md'),
-    completionReport: emitArchiveMarkdown ? path.join(outputDir, 'daoge_completion_report.md') : null,
-    storyboardBoard: fs.existsSync(path.join(outputDir, 'storyboard_board.html')) ? path.join(outputDir, 'storyboard_board.html') : null,
-    success: manifest.success,
-    failed: manifest.failed,
-  });
-  syncWorkspaceLayout(outputDir, { source: 'ingest_host_native_results' });
-  runNode('build_workspace_state.js', [
-    '--manifest-file', manifestPath,
+  runNode('refresh_workspace_v2.js', [
     '--output-dir', outputDir,
-    '--workspace-state-file', path.join(outputDir, 'workspace_state.json'),
-    '--workspace-assets-file', path.join(outputDir, 'workspace_assets.json'),
-    '--workspace-timeline-file', path.join(outputDir, 'workspace_timeline.json'),
-    '--workbench-state-file', path.join(outputDir, 'workbench_state.json'),
+    '--manifest-file', manifestPath,
+    '--results-file', resultsFile,
   ]);
-  writeReadme(outputDir, {
-    workspaceHome: path.join(outputDir, 'workspace_home.html'),
-    resultWorkspace: path.join(outputDir, 'result_workspace.html'),
-    exceptionWorkspace: path.join(outputDir, 'exception_workspace.html'),
-    runRecordHtml: path.join(outputDir, 'run_record.html'),
-    runRecordMarkdown: path.join(outputDir, 'run_record.md'),
-    completionReport: emitArchiveMarkdown ? path.join(outputDir, 'daoge_completion_report.md') : null,
-    storyboardBoard: fs.existsSync(path.join(outputDir, 'storyboard_board.html')) ? path.join(outputDir, 'storyboard_board.html') : null,
-    success: manifest.success,
-    failed: manifest.failed,
-  });
-  syncWorkspaceLayout(outputDir, { source: 'ingest_host_native_results' });
 
+  const workspacePaths = v2WorkspacePaths(outputDir);
   const summary = {
     ok: true,
     outputDir,
@@ -440,11 +386,12 @@ function main() {
     success: manifest.success,
     failed: manifest.failed,
     generated: {
-      completion_report: emitArchiveMarkdown ? path.join(outputDir, 'daoge_completion_report.md') : null,
-      result_workspace: path.join(outputDir, 'result_workspace.html'),
-      exception_workspace: path.join(outputDir, 'exception_workspace.html'),
-      workspace_home: path.join(outputDir, 'workspace_home.html'),
-      run_record: path.join(outputDir, 'run_record.html'),
+      completionReport: emitArchiveMarkdown ? path.join(outputDir, 'daoge_completion_report.md') : null,
+      workspaceIndex: workspacePaths.workspaceIndex,
+      workspacePrepare: workspacePaths.workspacePrepare,
+      workspaceResults: workspacePaths.workspaceResults,
+      workspaceIssues: workspacePaths.workspaceIssues,
+      workspaceRecord: workspacePaths.workspaceRecord,
       storyboard_board: fs.existsSync(path.join(outputDir, 'storyboard_board.html')) ? path.join(outputDir, 'storyboard_board.html') : null,
     },
   };

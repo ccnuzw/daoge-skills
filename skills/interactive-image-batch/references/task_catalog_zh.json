@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "tasks": [
+    {
+      "id": "portrait",
+      "name": "人物主视觉",
+      "plainSummary": "适合头像、人物海报、品牌人物封面。",
+      "bestFor": ["人物封面", "品牌主视觉", "社媒头像"],
+      "userNeeds": ["主题人物", "用途", "风格方向", "是否有参考图"],
+      "startCommand": "--intent portrait",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "studio",
+      "name": "棚拍质感图",
+      "plainSummary": "适合产品、人物或道具的干净棚拍视觉。",
+      "bestFor": ["棚拍主图", "质感图", "产品氛围图"],
+      "userNeeds": ["拍摄对象", "背景偏好", "光线方向", "成片用途"],
+      "startCommand": "--intent studio",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "ecommerce",
+      "name": "电商商品图",
+      "plainSummary": "适合商品主图、详情页素材和货架转化图。",
+      "bestFor": ["商品主图", "详情页", "卖点图"],
+      "userNeeds": ["商品信息", "卖点", "目标平台", "参考图"],
+      "startCommand": "--intent ecommerce",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "packaging",
+      "name": "品牌包装图",
+      "plainSummary": "适合包装概念、瓶盒展示和品牌资产板。",
+      "bestFor": ["包装概念", "礼盒展示", "品牌周边"],
+      "userNeeds": ["品牌信息", "包装类型", "使用场景", "风格方向"],
+      "startCommand": "--intent packaging",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "cinematic",
+      "name": "电影感分镜",
+      "plainSummary": "适合短片、广告和叙事镜头序列。",
+      "bestFor": ["短片分镜", "广告镜头", "剧情画面"],
+      "userNeeds": ["故事主题", "镜头数量", "角色或产品", "情绪节奏"],
+      "startCommand": "--intent cinematic",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "oralboard",
+      "name": "口播分镜板",
+      "plainSummary": "适合知识讲解、专家口播和产品说明分镜。",
+      "bestFor": ["口播脚本", "专家讲解", "产品说明"],
+      "userNeeds": ["讲述主题", "人物设定", "镜头段落", "画面风格"],
+      "startCommand": "--intent oralboard",
+      "defaultStart": "prepare"
+    }
+  ]
+}

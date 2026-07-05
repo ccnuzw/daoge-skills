@@ -4,8 +4,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { parseArgs, readJson, writeJson } = require('./script_utils');
 const { ensureWorkspaceChromeAssets } = require('./workspace_chrome_ui');
-const { buildOptionalPageDecision, pruneHiddenHtmlFiles, resolveOptionalPageEmission } = require('./default_generation_contract');
-const { syncWorkspaceLayout } = require('./workspace_layout_migration');
+const { resolveOptionalPageEmission } = require('./default_generation_contract');
 
 function required(args, key) {
   if (!args[key]) throw new Error(`Missing required flag: --${key}`);
@@ -81,9 +80,15 @@ function hasStoryboardPlan(taskSpecPath) {
   return Boolean(taskSpec.storyboard_plan && taskSpec.storyboard_plan.enabled);
 }
 
+function importReferenceAssetsEnabled(args) {
+  return args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1';
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   let taskSpecPath = required(args, 'task-spec');
+  const originalTaskSpecPath = taskSpecPath;
+  const originalTaskSpecBaseDir = path.dirname(taskSpecPath);
   const strategyPath = required(args, 'strategy-file');
   const promptsFile = required(args, 'prompts-file');
 
@@ -101,11 +106,8 @@ function main() {
   const promptDraftBundle = path.join(outputDir, 'prompt_draft_bundle.json');
   const promptValidationReport = path.join(outputDir, 'prompt_validation_report.json');
   const batchPlan = path.join(outputDir, 'batch_plan.json');
-  const prepareWorkspace = path.join(outputDir, 'prepare_workspace.html');
-  const workspaceHome = path.join(outputDir, 'workspace_home.html');
-  const workspaceState = path.join(outputDir, 'workspace_state.json');
-  const workspaceAssets = path.join(outputDir, 'workspace_assets.json');
-  const workspaceTimeline = path.join(outputDir, 'workspace_timeline.json');
+  const workspacePrepare = path.join(outputDir, 'workspace', 'prepare.html');
+  const workspaceIndex = path.join(outputDir, 'workspace', 'index.html');
   const daogeModeDetection = path.join(outputDir, 'daoge_mode_detection.json');
   const storyboardBundleValidation = path.join(outputDir, 'storyboard_bundle.validation.json');
   const importedReferenceBindings = path.join(outputDir, 'reference_bindings.imported.json');
@@ -119,16 +121,14 @@ function main() {
   const optionalPageEmission = resolveOptionalPageEmission({
     optionalPageMode: args['emit-optional-pages'],
   });
-  const optionalPageDecision = buildOptionalPageDecision({
-    optionalPageMode: args['emit-optional-pages'],
-  });
   const prepareMarkdownArtifacts = createEphemeralPrepareMarkdownPaths(outputDir, keepPrepareMarkdown);
   const promptPreview = prepareMarkdownArtifacts.promptPreview;
   const daogeSummary = prepareMarkdownArtifacts.daogeSummary;
   const daogePreflight = prepareMarkdownArtifacts.daogePreflight;
 
   try {
-    if (args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1') {
+    const didImportReferenceAssets = importReferenceAssetsEnabled(args);
+    if (didImportReferenceAssets) {
       if ((args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') && args['binding-text']) {
         const draftArgs = [
           '--task-spec', taskSpecPath,
@@ -286,69 +286,19 @@ function main() {
       runtimeMode: 'prepare-only',
     };
     writeJson(path.join(outputDir, 'manifest.json'), prepareManifest);
-    runNode(path.join(scriptsDir, 'build_workspace_state.js'), [
+    const materialsFile = didImportReferenceAssets ? taskSpecPath : originalTaskSpecPath;
+    const materialBaseDir = didImportReferenceAssets ? path.dirname(path.resolve(taskSpecPath)) : originalTaskSpecBaseDir;
+    runNode(path.join(scriptsDir, 'refresh_workspace_v2.js'), [
+      '--output-dir', outputDir,
       '--manifest-file', path.join(outputDir, 'manifest.json'),
-      '--output-dir', outputDir,
-      '--workspace-state-file', workspaceState,
-      '--workspace-assets-file', workspaceAssets,
-      '--workspace-timeline-file', workspaceTimeline,
-      '--workbench-state-file', path.join(outputDir, 'workbench_state.json'),
+      '--task-spec', normalizedTaskSpec,
+      '--prompts-file', promptsFile,
+      '--batch-plan', batchPlan,
+      '--validation-report', promptValidationReport,
+      '--mode-file', daogeModeDetection,
+      '--material-base-dir', materialBaseDir,
+      '--materials-file', materialsFile,
     ]);
-    runNode(path.join(scriptsDir, 'render_prepare_workspace.js'), [
-      '--output-dir', outputDir,
-      '--output-file', prepareWorkspace,
-    ]);
-    runNode(path.join(scriptsDir, 'render_workspace_home.js'), [
-      '--output-dir', outputDir,
-      '--output-file', workspaceHome,
-    ]);
-    if (optionalPageEmission.prepareDetails) {
-      runNode(path.join(scriptsDir, 'render_prompt_preview_board.js'), [
-        '--prompts-file', promptsFile,
-        '--plan-file', batchPlan,
-        '--summary-file', daogeSummary,
-        '--markdown-file', promptPreview,
-        '--preview-count', String(args['preview-count'] || 8),
-        '--output-file', path.join(outputDir, 'prompt_preview.html'),
-      ]);
-
-      runNode(path.join(scriptsDir, 'render_preflight_board.js'), [
-        '--task-spec', normalizedTaskSpec,
-        '--strategy-file', enrichedStrategy,
-        '--prompts-file', promptsFile,
-        '--validation-report', promptValidationReport,
-        '--preview-file', promptPreview,
-        '--plan-file', batchPlan,
-        '--summary-file', daogeSummary,
-        '--mode-file', daogeModeDetection,
-        ...(storyboardEnabled ? ['--storyboard-file', storyboardBundleValidation] : []),
-        '--output-file', path.join(outputDir, 'preflight_board.html'),
-      ]);
-
-      if ((args['import-reference-assets'] === 'true' || args['import-reference-assets'] === '1')) {
-        runNode(path.join(scriptsDir, 'render_assets_board.js'), [
-          '--bindings-file', importedReferenceBindings,
-          '--analysis-file', importedReferenceAnalysis,
-          '--output-file', path.join(outputDir, 'assets_board.html'),
-        ]);
-      }
-      runNode(path.join(scriptsDir, 'build_workspace_state.js'), [
-        '--manifest-file', path.join(outputDir, 'manifest.json'),
-        '--output-dir', outputDir,
-        '--workspace-state-file', workspaceState,
-        '--workspace-assets-file', workspaceAssets,
-        '--workspace-timeline-file', workspaceTimeline,
-        '--workbench-state-file', path.join(outputDir, 'workbench_state.json'),
-      ]);
-      runNode(path.join(scriptsDir, 'render_prepare_workspace.js'), [
-        '--output-dir', outputDir,
-        '--output-file', prepareWorkspace,
-      ]);
-      runNode(path.join(scriptsDir, 'render_workspace_home.js'), [
-        '--output-dir', outputDir,
-        '--output-file', workspaceHome,
-      ]);
-    }
 
     console.log(JSON.stringify({
       outputDir,
@@ -368,12 +318,12 @@ function main() {
       daogeSummary: keepPrepareMarkdown ? daogeSummary : null,
       daogeModeDetection,
       daogePreflight: keepPrepareMarkdown ? daogePreflight : null,
-      prepareWorkspace,
-      workspaceHome,
+      workspacePrepare,
+      workspaceIndex,
       optionalPageMode: optionalPageEmission.mode,
-      workspaceState,
-      workspaceAssets,
-      workspaceTimeline,
+      workspaceState: path.join(outputDir, 'internal', 'workspace_state.json'),
+      workspaceAssets: path.join(outputDir, 'internal', 'asset_library.json'),
+      workspaceTimeline: null,
       bindingIntentDraft: (args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? bindingIntentDraft : null,
       bindingPlan: (args['use-llm-binding-planner'] === 'true' || args['use-llm-binding-planner'] === '1') ? bindingPlan : null,
     }, null, 2));
@@ -386,17 +336,6 @@ function main() {
       removeFileIfExists(path.join(outputDir, 'daoge_run_summary.md'));
       removeFileIfExists(path.join(outputDir, 'daoge_preflight_dashboard.md'));
     }
-    pruneHiddenHtmlFiles(outputDir, optionalPageDecision);
-    syncWorkspaceLayout(outputDir, { source: 'daoge_prepare_run' });
-    runNode(path.join(scriptsDir, 'build_workspace_state.js'), [
-      '--manifest-file', path.join(outputDir, 'manifest.json'),
-      '--output-dir', outputDir,
-      '--workspace-state-file', workspaceState,
-      '--workspace-assets-file', workspaceAssets,
-      '--workspace-timeline-file', workspaceTimeline,
-      '--workbench-state-file', path.join(outputDir, 'workbench_state.json'),
-    ]);
-    syncWorkspaceLayout(outputDir, { source: 'daoge_prepare_run' });
   }
 }
 

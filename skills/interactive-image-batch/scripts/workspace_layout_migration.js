@@ -1,21 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const WORKSPACE_FILES = [
-  'workspace_home.html',
-  'prepare_workspace.html',
-  'result_workspace.html',
-  'exception_workspace.html',
-  'run_record.html',
-  'storyboard_board.html',
-  'review_board.html',
-  'completion_board.html',
-  'run_overview.html',
-  'rerun_board.html',
-  'prompt_preview.html',
-  'preflight_board.html',
-  'assets_board.html',
-];
+const WORKSPACE_FILES = [];
 
 const INTERNAL_FILES = [
   'manifest.json',

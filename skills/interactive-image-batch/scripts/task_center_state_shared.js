@@ -8,7 +8,7 @@ const {
   resolveEntryDefaultGenerationProtocol,
   resolveEntryMainlineActions,
 } = require('./entry_state_shared');
-const { resolveRecommendedWorkspacePath } = require('./workspace_layout_migration');
+const { normalizeRetiredWorkspacePageRefs, v2WorkspacePaths } = require('./workspace_v2_shared');
 const {
   cleanLabel,
   pickPromptItems,
@@ -633,8 +633,9 @@ function buildTaskCenterState(indexFile, options = {}) {
     ...decoratedRuns.filter(({ bucket, item }) => bucket === 'active' && !isSameRun(item, latest)),
     ...decoratedRuns.filter(({ bucket, item }) => bucket === 'stable' && !isSameRun(item, latest)),
   ].map(({ item, bucket }) => ({ ...item, bucket }));
-  const latestWorkspace = latest ? resolveRecommendedWorkspacePath(latest.outputDir, 'workspace_home.html', 'workspace').recommendedPath : null;
-  const latestRecord = latest ? path.join(latest.outputDir, 'run_record.html') : null;
+  const latestPaths = latest ? v2WorkspacePaths(latest.outputDir) : null;
+  const latestWorkspace = latestPaths?.workspaceIndex || null;
+  const latestRecord = latestPaths?.workspaceRecord || null;
   const examplesCatalogPath = options.examplesCatalogPath || path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
   const recent = runs.slice(0, 100);
   const taskCenterWorkbench = buildTaskCenterWorkbench(latest, latestWorkspace, examplesCatalogPath);
@@ -652,7 +653,7 @@ function buildTaskCenterState(indexFile, options = {}) {
     entryMainlineGuide,
   });
 
-  return {
+  return normalizeRetiredWorkspacePageRefs({
     schemaVersion: 1,
     kind: 'daoge-task-center-state',
     role: 'task-center-derived-state',
@@ -697,7 +698,7 @@ function buildTaskCenterState(indexFile, options = {}) {
     entryMainlineGuide,
     workbenchProtocol,
     markdownLines,
-  };
+  });
 }
 
 function normalizeTaskCenterState(snapshot, indexFile, options = {}) {
@@ -705,8 +706,9 @@ function normalizeTaskCenterState(snapshot, indexFile, options = {}) {
   const examplesCatalogPath = options.examplesCatalogPath || snapshot.examplesCatalogPath || path.join(__dirname, '..', 'references', 'examples', 'examples_catalog.html');
   const runs = Array.isArray(snapshot.runs) ? snapshot.runs : [];
   const latest = snapshot.latest && typeof snapshot.latest === 'object' ? snapshot.latest : (runs[0] || null);
-  const latestWorkspace = snapshot.latestWorkspace || (latest?.outputDir ? resolveRecommendedWorkspacePath(latest.outputDir, 'workspace_home.html', 'workspace').recommendedPath : null);
-  const latestRecord = snapshot.latestRecord || (latest?.outputDir ? path.join(latest.outputDir, 'run_record.html') : null);
+  const latestPaths = latest?.outputDir ? v2WorkspacePaths(latest.outputDir) : null;
+  const latestWorkspace = latestPaths?.workspaceIndex || snapshot.latestWorkspace || null;
+  const latestRecord = latestPaths?.workspaceRecord || snapshot.latestRecord || null;
   const otherRuns = Array.isArray(snapshot.otherRuns) ? snapshot.otherRuns : [];
   const stableCount = Number(snapshot.stableCount ?? runs.filter((item) => Number(item?.failedCount || 0) === 0).length);
   const issueCount = Number(snapshot.issueCount ?? runs.filter((item) => Number(item?.failedCount || 0) > 0 || Number(item?.reviewCount || 0) > 0).length);
@@ -749,7 +751,7 @@ function normalizeTaskCenterState(snapshot, indexFile, options = {}) {
     })
     : snapshot.markdownLines;
 
-  return {
+  return normalizeRetiredWorkspacePageRefs({
     ...snapshot,
     schemaVersion: Number(snapshot.schemaVersion || 1),
     kind: String(snapshot.kind || 'daoge-task-center-state'),
@@ -795,7 +797,7 @@ function normalizeTaskCenterState(snapshot, indexFile, options = {}) {
     taskCenterWorkbench,
     entryMainlineGuide,
     markdownLines,
-  };
+  });
 }
 
 function loadTaskCenterState(indexFile, options = {}) {
@@ -817,8 +819,9 @@ function loadTaskCenterState(indexFile, options = {}) {
 }
 
 function renderRunCardModel(item, rootDir, options = {}) {
-  const workspace = resolveRecommendedWorkspacePath(item.outputDir, 'workspace_home.html', 'workspace').recommendedPath;
-  const record = path.join(item.outputDir, 'run_record.html');
+  const paths = v2WorkspacePaths(item.outputDir);
+  const workspace = paths.workspaceIndex;
+  const record = paths.workspaceRecord;
   const href = fileExists(workspace)
     ? path.relative(rootDir, workspace)
     : (fileExists(record) ? path.relative(rootDir, record) : null);

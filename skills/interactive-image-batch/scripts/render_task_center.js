@@ -26,6 +26,7 @@ const {
   resolveEntryRoute,
   resolveEntryWorkbench,
 } = require('./entry_state_shared');
+const { resolveV2WorkspacePage } = require('./workspace_v2_shared');
 const {
   loadTaskCenterState,
   renderRunCardModel,
@@ -254,7 +255,7 @@ function main() {
   ].filter(Boolean).join(' ');
   const entryPreview = resolveEntryPreview(entryState);
   const entryNextStep = resolveEntryNextStep(rootDir, entryState, {
-    prepareFile: latest ? path.join(latest.outputDir, 'prepare_workspace.html') : path.join(rootDir, 'prepare_workspace.html'),
+    prepareFile: latest ? resolveV2WorkspacePage(latest.outputDir, 'prepare') : resolveV2WorkspacePage(rootDir, 'prepare'),
     homeFile: latestWorkspace,
   });
   const entryContext = resolveEntryContext(entryState, {
