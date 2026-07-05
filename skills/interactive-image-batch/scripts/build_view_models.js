@@ -22,7 +22,10 @@ function issueGroups(issueQueue = {}) {
       id: item.id,
       title: item.title,
       impact: item.impact,
+      userImpact: item.userImpact || item.impact,
       recommendedAction: item.recommendedAction,
+      availableActions: item.availableActions || [],
+      resolutionState: item.resolutionState || item.status,
       status: item.status,
       relatedAssetIds: item.relatedAssetIds || [],
     })),
@@ -44,7 +47,9 @@ function baseView(pageId, workspaceState) {
     task: workspaceState.task,
     stage: workspaceState.stage,
     decision: workspaceState.decision,
+    nextBestStep: workspaceState.nextBestStep,
     primaryAction: workspaceState.primaryAction,
+    secondaryActions: workspaceState.secondaryActions || [],
     replySuggestions: workspaceState.replySuggestions,
     counts: workspaceState.counts,
     nav: [
@@ -63,9 +68,11 @@ function buildViewModels(options = {}) {
   const runPlan = readJsonIfExists(options.runPlanFile || path.join(outputDir, 'internal', 'run_plan.json')) || {};
   const issueQueue = readJsonIfExists(options.issueQueueFile || path.join(outputDir, 'internal', 'issue_queue.json')) || {};
   const assetLibrary = readJsonIfExists(options.assetLibraryFile || path.join(outputDir, 'internal', 'asset_library.json')) || {};
-  const readyAssets = pickAssets(assetLibrary, (item) => item.usage?.canSelect);
-  const reviewAssets = pickAssets(assetLibrary, (item) => item.usage?.needsReview);
-  const issueAssets = pickAssets(assetLibrary, (item) => item.usage?.hasIssue);
+  const readyAssets = pickAssets(assetLibrary, (item) => item.kind === 'image_result' && item.usage?.canSelect);
+  const reviewAssets = pickAssets(assetLibrary, (item) => item.kind === 'image_result' && item.usage?.needsReview);
+  const issueAssets = pickAssets(assetLibrary, (item) => item.kind === 'issue_record' && item.usage?.hasIssue);
+  const selectedAssets = pickAssets(assetLibrary, (item) => item.kind === 'selected_result');
+  const exportAssets = pickAssets(assetLibrary, (item) => item.kind === 'export_image');
 
   const models = {
     index: {
@@ -75,7 +82,7 @@ function buildViewModels(options = {}) {
         { title: '当前任务', body: workspaceState.task?.summary || '' },
         { title: '当前步骤', body: `${workspaceState.stage?.name || ''}：${workspaceState.decision?.headline || ''}` },
         { title: '现在只做', body: workspaceState.primaryAction?.label || '' },
-        { title: '为什么', body: workspaceState.primaryAction?.reason || '' },
+        { title: '为什么', body: workspaceState.decision?.whyNow || workspaceState.primaryAction?.reason || '' },
       ],
     },
     prepare: {
@@ -97,6 +104,8 @@ function buildViewModels(options = {}) {
         ready: readyAssets,
         review: reviewAssets,
         issues: issueAssets,
+        selected: selectedAssets,
+        exports: exportAssets,
       },
       worthRerunCount: Number(issueQueue.summary?.rerunCandidates || 0),
     },

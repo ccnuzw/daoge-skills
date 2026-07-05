@@ -59,3 +59,38 @@ test('issue queue supports ignored, resolved and empty states', () => {
   assert.equal(queue.summary.resolved, 1);
   assert.equal(queue.groups.some((group) => group.id === 'resolved'), true);
 });
+
+test('issue queue exposes action loop for blocking review rerun ignored and resolved', () => {
+  const outputDir = makeTempDir();
+  const executionPath = path.join(outputDir, 'internal', 'execution_manifest.json');
+  writeJson(executionPath, {
+    counts: { total: 3, success: 1 },
+    results: [
+      { id: 'result_001', status: 'failed', worthRerun: true, rerunReason: '关键镜头失败' },
+      { id: 'result_002', status: 'needs_review' },
+      { id: 'result_003', status: 'success' },
+    ],
+  });
+  const queue = buildIssueQueue({
+    outputDir,
+    executionManifestFile: executionPath,
+    extraItems: [
+      { id: 'ignored_001', type: 'ignored', title: '不用处理', status: 'ignored' },
+      { id: 'resolved_001', type: 'resolved', title: '已经处理', status: 'resolved' },
+    ],
+  });
+  ['必须处理', '建议确认', '值得补跑', '已忽略', '已处理'].forEach((title) => {
+    assert.equal(queue.groups.some((group) => group.title === title), true, title);
+  });
+  ['hard_failure', 'needs_review', 'rerun_candidate', 'ignored', 'resolved'].forEach((type) => {
+    const item = queue.items.find((entry) => entry.type === type);
+    assert.equal(Boolean(item), true, type);
+    assert.equal(Boolean(item.userImpact), true);
+    assert.equal(Array.isArray(item.availableActions), true);
+    assert.equal(item.availableActions.length > 0, true);
+    assert.equal(Boolean(item.resolutionState), true);
+  });
+  assert.equal(queue.items.find((item) => item.type === 'rerun_candidate').availableActions.some((action) => action.id === 'rerun_candidate'), true);
+  assert.equal(queue.items.find((item) => item.type === 'ignored').resolutionState, 'ignored');
+  assert.equal(queue.items.find((item) => item.type === 'resolved').resolutionState, 'resolved');
+});

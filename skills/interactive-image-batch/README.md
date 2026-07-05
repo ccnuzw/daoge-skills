@@ -42,8 +42,8 @@ node scripts/run_example_catalog_prepare.js --intent oralboard
 - `assets/results/`：全部生成结果
 - `assets/review/`：建议复核结果
 - `assets/issues/`：问题资料
-- `assets/selected/`：建议优先看的候选
-- `assets/exports/`：可交付成果
+- `assets/selected/`：用户已选、建议优先看的候选，或等待选择的占位
+- `assets/exports/`：可交付候选和交付清单
 - `assets/archive/`：历史过程资料
 
 维护资料在 `internal/` 和 `debug/`。新手不用打开。

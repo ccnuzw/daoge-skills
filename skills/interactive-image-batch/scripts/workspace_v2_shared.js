@@ -236,10 +236,15 @@ function publicAsset(asset) {
     kind: asset.kind,
     userTitle: asset.userTitle,
     userStatus: asset.userStatus,
+    userPurpose: asset.userPurpose || '',
+    userAction: asset.userAction || '',
+    lifecycleStatus: asset.lifecycleStatus || '',
+    sourceReason: asset.sourceReason || '',
     path: asset.path,
     previewPath: asset.previewPath || null,
     group: asset.group,
     usage: asset.usage || {},
+    relationships: asset.relationships || {},
   };
 }
 
@@ -249,10 +254,10 @@ function summarizeCounts(executionManifest = {}, issueQueue = {}, assetLibrary =
   const assets = toArray(assetLibrary.assets);
   return {
     total: Number(counts.total || assets.filter((item) => item.kind === 'image_result').length || 0),
-    success: Number(counts.success || assets.filter((item) => item.usage?.canSelect).length || 0),
+    success: Number(counts.success || assets.filter((item) => item.kind === 'image_result' && item.usage?.canSelect).length || 0),
     failed: Number(counts.failed || issueItems.filter((item) => item.type === 'hard_failure').length || 0),
     needsReview: Number(counts.needsReview || issueItems.filter((item) => item.type === 'needs_review').length || 0),
-    rerunCandidates: issueItems.filter((item) => item.type === 'rerun_candidate').length,
+    rerunCandidates: issueItems.filter((item) => item.type === 'rerun_candidate' && item.status !== 'ignored' && item.status !== 'resolved').length,
   };
 }
 

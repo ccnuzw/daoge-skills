@@ -18,7 +18,7 @@ test('asset_library contract exposes user asset directories and groups', () => {
   assert.equal(library.directories.selected, 'assets/selected');
   assert.equal(Array.isArray(library.groups), true);
   const asset = library.assets.find((item) => item.id === 'input_001');
-  ['id', 'kind', 'userTitle', 'userStatus', 'path', 'group', 'usage', 'source'].forEach((key) => {
+  ['id', 'kind', 'userTitle', 'userStatus', 'userPurpose', 'userAction', 'lifecycleStatus', 'sourceReason', 'path', 'group', 'usage', 'relationships', 'source'].forEach((key) => {
     assert.equal(Object.prototype.hasOwnProperty.call(asset, key), true, key);
   });
   assert.equal(typeof asset.usage.canExport, 'boolean');

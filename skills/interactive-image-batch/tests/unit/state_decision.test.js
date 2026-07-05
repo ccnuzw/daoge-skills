@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { decideStage, decideAction } = require('../../scripts/build_workspace_state_v2');
+const { buildUserJourneyDecision } = require('../../scripts/build_user_journey_decision');
 
 test('state decision chooses prepare action when run plan is ready', () => {
   const runPlan = { readiness: { canRun: true } };
@@ -30,4 +31,20 @@ test('state decision can route explicit record phase to record page', () => {
   const action = decideAction(stage, {}, {}, { summary: { blocking: 0 } }, {});
   assert.equal(stage.id, 'record');
   assert.equal(action.targetPage, 'record.html');
+});
+
+test('user journey decision exposes stable action and next-step contract', () => {
+  const journey = buildUserJourneyDecision(
+    { readiness: { canRun: true } },
+    { results: [{ id: 'result_001', status: 'success' }], counts: { total: 1, success: 1 } },
+    { summary: { blocking: 0, attention: 0, rerunCandidates: 0 }, items: [] },
+    { assets: [] }
+  );
+  ['stage', 'primaryAction', 'secondaryActions', 'replySuggestions', 'decision', 'nextBestStep'].forEach((key) => {
+    assert.equal(Object.prototype.hasOwnProperty.call(journey, key), true, key);
+  });
+  assert.equal(journey.primaryAction.id, 'review_results');
+  assert.equal(journey.nextBestStep.actionId, journey.primaryAction.id);
+  assert.equal(typeof journey.decision.whyNow, 'string');
+  assert.equal(Array.isArray(journey.secondaryActions), true);
 });

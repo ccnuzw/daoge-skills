@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { refreshWorkspaceV2 } = require('../../scripts/refresh_workspace_v2');
+const { renderWorkspacePage } = require('../../scripts/render_workspace_page_v2');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
 test('generated workspace pages are the five v2 pages', () => {
@@ -33,4 +34,47 @@ test('workspace pages do not link debug compatibility files as primary entries',
     .join('\n');
   assert.doesNotMatch(html, /debug\/compat/);
   assert.doesNotMatch(html, /\.json["']/);
+});
+
+test('legacy workspace pages are pruned from user path while compat diagnostics stay under debug', () => {
+  const outputDir = makeTempDir();
+  writeJson(path.join(outputDir, 'manifest.json'), { runtimeMode: 'prepare-only', selectedCount: 0, batchCount: 0 });
+  fs.mkdirSync(path.join(outputDir, 'workspace'), { recursive: true });
+  ['workspace_home.html', 'prepare_workspace.html', 'result_workspace.html', 'exception_workspace.html', 'run_record.html'].forEach((name) => {
+    fs.writeFileSync(path.join(outputDir, name), name);
+    fs.writeFileSync(path.join(outputDir, 'workspace', name), name);
+  });
+  refreshWorkspaceV2({ outputDir, manifestFile: path.join(outputDir, 'manifest.json') });
+  ['workspace_home.html', 'prepare_workspace.html', 'result_workspace.html', 'exception_workspace.html', 'run_record.html'].forEach((name) => {
+    assert.equal(fs.existsSync(path.join(outputDir, name)), false, name);
+    assert.equal(fs.existsSync(path.join(outputDir, 'workspace', name)), false, name);
+  });
+  assert.equal(fs.existsSync(path.join(outputDir, 'debug', 'compat', 'manifest.json')), true);
+});
+
+test('disabled primary action renders as non-clickable with disabled reason', () => {
+  const html = renderWorkspacePage({
+    pageId: 'index',
+    title: '任务首页',
+    task: { title: '人物主视觉', summary: '生成人物主视觉' },
+    stage: { name: '开跑前确认' },
+    decision: { headline: '先补准备' },
+    primaryAction: {
+      id: 'fix_prepare',
+      label: '先补准备',
+      href: 'prepare.html',
+      targetPage: 'prepare.html',
+      reply: '先补齐准备项',
+      reason: '还有准备项',
+      enabled: false,
+      disabledReason: '缺少任务说明',
+    },
+    secondaryActions: [],
+    replySuggestions: ['先补齐准备项'],
+    nav: [],
+    sections: [],
+  });
+  assert.match(html, /缺少任务说明/);
+  assert.doesNotMatch(html, /<a class="primary-action" href="prepare\.html">/);
+  assert.match(html, /<span class="primary-action disabled">/);
 });

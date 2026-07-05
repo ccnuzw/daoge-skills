@@ -43,17 +43,23 @@ function usage(overrides = {}) {
 }
 
 function assetRecord(fields) {
+  const sourceStage = fields.source?.stage || 'prepare';
   return {
     id: fields.id,
     kind: fields.kind,
     userTitle: fields.userTitle,
     userStatus: fields.userStatus,
+    userPurpose: fields.userPurpose || '帮助完成当前生图任务',
+    userAction: fields.userAction || '按当前页面建议处理',
+    lifecycleStatus: fields.lifecycleStatus || (sourceStage === 'prepare' ? 'ready_for_run' : 'ready_for_review'),
+    sourceReason: fields.sourceReason || '由当前任务整理生成',
     path: fields.path,
     previewPath: fields.previewPath || null,
     group: fields.group,
     usage: usage(fields.usage),
+    relationships: fields.relationships || {},
     source: {
-      stage: fields.source?.stage || 'prepare',
+      stage: sourceStage,
     },
   };
 }
@@ -117,6 +123,10 @@ function addPrepareAssets({ outputDir, runPlan, assets }) {
       path: relativeToOutput(outputDir, materialFile.path),
       previewPath: materialFile.preview ? relativeToOutput(outputDir, materialFile.path) : null,
       group: '用户原始输入',
+      userPurpose: '保留本轮任务的原始说明和输入素材',
+      userAction: '开跑前确认内容是否正确',
+      lifecycleStatus: 'ready_for_run',
+      sourceReason: material.note || '来自用户输入或任务文档',
       usage: { canExport: true },
       source: { stage: 'prepare' },
     }));
@@ -135,6 +145,10 @@ function addPrepareAssets({ outputDir, runPlan, assets }) {
       path: relativeToOutput(outputDir, materialFile.path),
       previewPath: materialFile.preview ? relativeToOutput(outputDir, materialFile.path) : null,
       group,
+      userPurpose: `作为${group}影响生成结果`,
+      userAction: '开跑前确认参考是否符合预期',
+      lifecycleStatus: 'ready_for_run',
+      sourceReason: material.note || '来自用户提供的参考素材',
       usage: { canExport: true },
       source: { stage: 'prepare' },
     }));
@@ -153,6 +167,10 @@ function addPrepareAssets({ outputDir, runPlan, assets }) {
       path: relativeToOutput(outputDir, materialFile.path),
       previewPath: materialFile.preview ? relativeToOutput(outputDir, materialFile.path) : null,
       group: '局部重绘遮罩',
+      userPurpose: '限定局部修改范围',
+      userAction: '开跑前确认修改区域是否正确',
+      lifecycleStatus: 'ready_for_run',
+      sourceReason: material.note || '来自用户提供的局部修改范围',
       usage: { canExport: false },
       source: { stage: 'prepare' },
     }));
@@ -175,20 +193,74 @@ function sourceForResult(outputDir, result) {
   return path.isAbsolute(result.output) ? result.output : path.join(outputDir, result.output);
 }
 
+function userLifecycleLabel(status) {
+  const labels = {
+    ready_for_run: '开跑前已整理',
+    ready_for_review: '等待复核',
+    ready_for_selection: '可筛选',
+    needs_review: '需要复核',
+    needs_attention: '需要处理',
+    recommended_first_pass: '建议优先看',
+    user_selected: '用户已选',
+    deliverable_candidate: '交付候选',
+    waiting_for_user_selection: '等待选择',
+    report_ready: '清单已生成',
+  };
+  return labels[status] || '待确认';
+}
+
 function writeExportReport(outputDir, assets) {
   const reportPath = path.join(outputDir, 'assets', 'exports', 'report.html');
-  const selected = assets.filter((item) => item.group === '已选结果');
-  const rows = selected.length
-    ? selected.map((item) => `<li><a href="../../${escapeHtml(item.path)}">${escapeHtml(item.userTitle)}</a> - ${escapeHtml(item.userStatus)}</li>`).join('\n')
-    : '<li>当前还没有已选结果，先回结果页筛选。</li>';
+  const selected = assets.filter((item) => item.kind === 'selected_result');
+  const deliverables = assets.filter((item) => item.group === '交付成果' && item.kind === 'export_image');
+  const related = assets.filter((item) => ['建议复核', '问题相关'].includes(item.group));
+  const renderRows = (items, emptyText) => items.length
+    ? items.map((item) => `<tr><td><a href="../../${escapeHtml(item.path)}">${escapeHtml(item.userTitle)}</a></td><td>${escapeHtml(item.userPurpose)}</td><td>${escapeHtml(item.userAction)}</td><td>${escapeHtml(userLifecycleLabel(item.lifecycleStatus))}</td></tr>`).join('\n')
+    : `<tr><td colspan="4">${escapeHtml(emptyText)}</td></tr>`;
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   fs.writeFileSync(reportPath, `<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><title>交付报告</title></head>
-<body><h1>交付报告</h1><ul>${rows}</ul></body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>交付清单</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;color:#202124;background:#fff;line-height:1.55}
+    main{max-width:960px;margin:0 auto;padding:28px}
+    h1{font-size:30px;margin:0 0 8px}
+    h2{font-size:18px;margin:24px 0 10px}
+    p{color:#5f6368}
+    table{width:100%;border-collapse:collapse}
+    th,td{border:1px solid #d7d9de;padding:10px;text-align:left;vertical-align:top}
+    th{background:#f6f7f9}
+    a{color:#0f766e}
+  </style>
+</head>
+<body>
+<main>
+  <h1>交付清单</h1>
+  <p>这里列出建议交付图、推荐优先看的候选，以及仍需复核或处理的项目。</p>
+  <h2>建议交付</h2>
+  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(deliverables, '当前还没有建议交付图，先回结果页筛选。')}</tbody></table>
+  <h2>推荐候选</h2>
+  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(selected, '当前还没有推荐候选。')}</tbody></table>
+  <h2>需要留意</h2>
+  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(related, '当前没有需要留意的项目。')}</tbody></table>
+</main>
+</body>
 </html>
 `);
   return reportPath;
+}
+
+function shouldRecommendResult(result, index, successCount) {
+  if (result.userSelected || result.selected || result.recommended || result.priority === 'high') return true;
+  if (successCount <= 3) return true;
+  return index < 3;
+}
+
+function resultAssetId(result, index) {
+  return result.id || `result_${String(index + 1).padStart(3, '0')}`;
 }
 
 function buildAssetLibrary(options = {}) {
@@ -198,10 +270,21 @@ function buildAssetLibrary(options = {}) {
   const taskTitle = normalizeText(runPlan.task?.title, '生图结果');
   const results = toArray(executionManifest.results);
   const assets = [];
+  const successfulResults = results.filter((item) => item.status === 'success');
+  const recommendedResultIds = new Set();
+  let successIndex = 0;
+  results.forEach((result, index) => {
+    if (result.status !== 'success') return;
+    if (shouldRecommendResult(result, successIndex, successfulResults.length)) {
+      recommendedResultIds.add(resultAssetId(result, index));
+    }
+    successIndex += 1;
+  });
 
   addPrepareAssets({ outputDir, runPlan, assets });
 
   results.forEach((result, index) => {
+    const stableResultAssetId = resultAssetId(result, index);
     const statusMap = {
       success: '可筛选',
       needs_review: '待复核',
@@ -227,18 +310,26 @@ function buildAssetLibrary(options = {}) {
       const issuePath = path.join(outputDir, 'assets', 'issues', numberedName(result.index || index + 1, taskTitle, '文件缺失', '.json'));
       createMissingResultRecord(issuePath, result);
       assets.push(assetRecord({
-        id: result.id || `result_${String(index + 1).padStart(3, '0')}`,
+        id: stableResultAssetId,
         kind: 'issue_record',
         userTitle,
         userStatus: '文件缺失',
         path: relativeToOutput(outputDir, issuePath),
         previewPath: null,
         group: '问题相关',
+        userPurpose: '记录缺失的结果文件',
+        userAction: '回问题页确认是否需要补跑或忽略',
+        lifecycleStatus: 'needs_attention',
+        sourceReason: '结果记录存在，但图片文件没有复制成功',
         usage: {
           canSelect: false,
           needsReview: false,
           hasIssue: true,
           canExport: false,
+        },
+        relationships: {
+          sourceResultId: stableResultAssetId,
+          issueRecordPath: relativeToOutput(outputDir, issuePath),
         },
         source: { stage: 'execute' },
       }));
@@ -246,23 +337,39 @@ function buildAssetLibrary(options = {}) {
     }
 
     assets.push(assetRecord({
-      id: result.id || `result_${String(index + 1).padStart(3, '0')}`,
+      id: stableResultAssetId,
       kind: result.status === 'failed' ? 'issue_record' : 'image_result',
       userTitle,
       userStatus,
       path: relativeToOutput(outputDir, targetPath),
       previewPath: result.status === 'failed' ? null : relativeToOutput(outputDir, targetPath),
       group: result.status === 'needs_review' ? '建议复核' : (result.status === 'failed' ? '问题相关' : '所有生成结果'),
+      userPurpose: result.status === 'success'
+        ? '本轮生成的可筛选图片'
+        : (result.status === 'needs_review' ? '可能可用但需要人工确认的图片' : '记录生成失败原因'),
+      userAction: result.status === 'success'
+        ? '在结果页筛选，满意后作为交付候选'
+        : (result.status === 'needs_review' ? '先放大复核主体、构图和文字区域' : '到问题页决定处理、忽略或补跑'),
+      lifecycleStatus: result.status === 'success'
+        ? 'ready_for_selection'
+        : (result.status === 'needs_review' ? 'needs_review' : 'needs_attention'),
+      sourceReason: result.status === 'success'
+        ? '生成成功，进入结果筛选'
+        : (result.status === 'needs_review' ? '生成完成但标记为建议复核' : '生成失败，保留错误记录'),
       usage: {
         canSelect: result.status === 'success',
         needsReview: result.status === 'needs_review',
         hasIssue: result.status === 'failed',
         canExport: result.status === 'success' || result.status === 'needs_review',
       },
+      relationships: {
+        sourceResultId: stableResultAssetId,
+        resultPath: relativeToOutput(outputDir, targetPath),
+      },
       source: { stage: 'execute' },
     }));
 
-    if (result.status === 'success') {
+    if (result.status === 'success' && recommendedResultIds.has(stableResultAssetId)) {
       const selectedPath = path.join(outputDir, 'assets', 'selected', fileName);
       const exportPath = path.join(outputDir, 'assets', 'exports', 'selected_images', fileName);
       copyFileIfExists(targetPath, selectedPath);
@@ -275,7 +382,16 @@ function buildAssetLibrary(options = {}) {
         path: relativeToOutput(outputDir, selectedPath),
         previewPath: relativeToOutput(outputDir, selectedPath),
         group: '已选结果',
+        userPurpose: result.userSelected || result.selected ? '用户已选的候选图' : '系统建议优先查看的候选图',
+        userAction: '先在结果页放大确认，满意后保留到交付清单',
+        lifecycleStatus: result.userSelected || result.selected ? 'user_selected' : 'recommended_first_pass',
+        sourceReason: result.userSelected || result.selected ? '用户已标记选择' : '结果成功且排在推荐优先查看范围',
         usage: { canSelect: true, canExport: true },
+        relationships: {
+          sourceResultId: stableResultAssetId,
+          derivedFromAssetId: stableResultAssetId,
+          copiedFrom: relativeToOutput(outputDir, targetPath),
+        },
         source: { stage: 'execute' },
       }));
       assets.push(assetRecord({
@@ -286,11 +402,45 @@ function buildAssetLibrary(options = {}) {
         path: relativeToOutput(outputDir, exportPath),
         previewPath: relativeToOutput(outputDir, exportPath),
         group: '交付成果',
+        userPurpose: '可放入交付包的候选图片',
+        userAction: '交付前再确认是否最终采用',
+        lifecycleStatus: 'deliverable_candidate',
+        sourceReason: '来自推荐优先查看或用户已选结果',
         usage: { canSelect: false, canExport: true },
+        relationships: {
+          sourceResultId: stableResultAssetId,
+          derivedFromAssetId: `selected_${String(index + 1).padStart(3, '0')}`,
+          copiedFrom: relativeToOutput(outputDir, selectedPath),
+        },
         source: { stage: 'execute' },
       }));
     }
   });
+
+  const hasUserSelectedResult = successfulResults.some((item) => item.userSelected || item.selected);
+  if (successfulResults.length && !hasUserSelectedResult) {
+    const placeholderPath = path.join(outputDir, 'assets', 'selected', 'README.json');
+    writeJson(placeholderPath, {
+      title: '用户已选占位',
+      note: '当前还没有明确选择；请先在结果页筛选。',
+    });
+    assets.push(assetRecord({
+      id: 'selected_placeholder',
+      kind: 'selection_placeholder',
+      userTitle: '用户已选占位',
+      userStatus: '等待选择',
+      userPurpose: '标记这里放最终选择，不自动等于全部成功结果',
+      userAction: '回结果页选择真正要保留的图片',
+      lifecycleStatus: 'waiting_for_user_selection',
+      sourceReason: '有成功结果，但没有明确用户选择',
+      path: relativeToOutput(outputDir, placeholderPath),
+      previewPath: null,
+      group: '已选结果',
+      usage: { canExport: false },
+      relationships: {},
+      source: { stage: 'execute' },
+    }));
+  }
 
   const reportPath = writeExportReport(outputDir, assets);
   assets.push(assetRecord({
@@ -298,6 +448,10 @@ function buildAssetLibrary(options = {}) {
     kind: 'export_report',
     userTitle: '交付报告',
     userStatus: '已生成',
+    userPurpose: '汇总本轮建议交付、推荐候选和待处理项目',
+    userAction: '交付前打开核对清单',
+    lifecycleStatus: 'report_ready',
+    sourceReason: '根据当前资产库自动生成',
     path: relativeToOutput(outputDir, reportPath),
     previewPath: null,
     group: '交付成果',

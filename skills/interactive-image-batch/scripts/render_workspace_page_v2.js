@@ -18,14 +18,51 @@ function renderReplySuggestions(items) {
   return `<div class="reply-list">${(items || []).map((item) => `<code>${escapeHtml(item)}</code>`).join('')}</div>`;
 }
 
+function renderAction(action, className = 'action-link') {
+  if (!action) return '';
+  const href = action.href || action.targetPage || '#';
+  const disabled = action.enabled === false;
+  const tag = disabled ? 'span' : 'a';
+  const attrs = disabled ? `class="${className} disabled"` : `class="${className}" href="${escapeHtml(href)}"`;
+  const reason = disabled && action.disabledReason ? action.disabledReason : action.reason;
+  return `<${tag} ${attrs}><strong>${escapeHtml(action.label)}</strong><span>${escapeHtml(reason)}</span></${tag}>`;
+}
+
+function renderSecondaryActions(actions) {
+  const values = (Array.isArray(actions) ? actions : []).filter(Boolean);
+  if (!values.length) return '';
+  return `<div class="secondary-actions">${values.map((item) => renderAction(item, 'mini-action')).join('')}</div>`;
+}
+
+function renderPrimaryAction(action) {
+  if (!action) return '';
+  const disabled = action.enabled === false;
+  const content = `
+            <strong>${escapeHtml(action.label)}</strong>
+            <p>${escapeHtml(disabled && action.disabledReason ? action.disabledReason : action.reason)}</p>
+            <code>${escapeHtml(action.reply)}</code>
+            ${disabled ? '<span class="go disabled">不可用</span>' : '<span class="go">打开</span>'}
+  `;
+  if (disabled) return `<span class="primary-action disabled">${content}</span>`;
+  const href = action.href || action.targetPage || '#';
+  return `<a class="primary-action" href="${escapeHtml(href)}">${content}</a>`;
+}
+
 function renderAssets(assets, emptyText) {
   if (!assets.length) return `<p class="muted">${escapeHtml(emptyText)}</p>`;
   return `<div class="asset-grid">${assets.map((asset) => {
     const image = asset.previewPath && !asset.path.endsWith('.json')
       ? `<a class="thumb" href="../${escapeHtml(asset.path)}"><img src="../${escapeHtml(asset.previewPath)}" alt="${escapeHtml(asset.userTitle)}" loading="lazy"></a>`
       : '<div class="thumb empty"></div>';
-    return `<article class="asset-card">${image}<h3>${escapeHtml(asset.userTitle)}</h3><p>${escapeHtml(asset.userStatus)}</p>${asset.path && !asset.path.endsWith('.json') ? `<a href="../${escapeHtml(asset.path)}">打开图片</a>` : ''}</article>`;
+    const openLabel = asset.previewPath ? '打开图片' : '打开文件';
+    return `<article class="asset-card">${image}<h3>${escapeHtml(asset.userTitle)}</h3><p class="status">${escapeHtml(asset.userStatus)}</p><p>${escapeHtml(asset.userPurpose || '当前任务资产')}</p><p class="muted">${escapeHtml(asset.sourceReason || '')}</p><strong>${escapeHtml(asset.userAction || '按页面建议处理')}</strong>${asset.path && !asset.path.endsWith('.json') ? `<a href="../${escapeHtml(asset.path)}">${openLabel}</a>` : ''}</article>`;
   }).join('')}</div>`;
+}
+
+function renderIssueActions(actions) {
+  const values = (Array.isArray(actions) ? actions : []).filter(Boolean).slice(0, 4);
+  if (!values.length) return '';
+  return `<div class="issue-actions">${values.map((item) => renderAction(item, 'mini-action')).join('')}</div>`;
 }
 
 function renderIssueGroups(groups) {
@@ -36,8 +73,9 @@ function renderIssueGroups(groups) {
       ${group.items.length ? group.items.map((item) => `
         <article class="issue-card">
           <h3>${escapeHtml(item.title)}</h3>
-          <p>${escapeHtml(item.impact)}</p>
+          <p>${escapeHtml(item.userImpact || item.impact)}</p>
           <strong>${escapeHtml(item.recommendedAction)}</strong>
+          ${renderIssueActions(item.availableActions)}
         </article>
       `).join('') : '<p class="muted">暂无。</p>'}
     </section>
@@ -49,7 +87,8 @@ function renderPageBody(vm) {
     return `
       <section class="panel">
         <h2>${vm.readiness.canRun ? '可以开跑' : '先补准备'}</h2>
-        <div class="metrics"><span>${vm.readiness.promptCount} 条提示词</span><span>${vm.readiness.batchCount} 轮执行</span></div>
+        <p>${escapeHtml(vm.decision.summary || '')}</p>
+        <div class="metrics"><span>${vm.readiness.promptCount} 条提示词</span><span>${vm.readiness.batchCount} 轮执行</span><span>${vm.readiness.canRun ? '准备可执行' : '准备未完成'}</span></div>
       </section>
       <section class="panel"><h2>还缺什么</h2>${renderList(vm.readiness.blockingItems, '没有必须补齐的项目。')}</section>
       <section class="panel"><h2>提醒</h2>${renderList([...vm.readiness.attentionItems, ...vm.readiness.materialNotes], '当前没有额外提醒。')}</section>
@@ -58,6 +97,8 @@ function renderPageBody(vm) {
   if (vm.pageId === 'results') {
     return `
       <section class="panel"><h2>可筛选结果</h2>${renderAssets(vm.assets.ready, '当前还没有可筛选结果。')}</section>
+      <section class="panel"><h2>推荐优先看</h2>${renderAssets(vm.assets.selected, '当前没有推荐候选。')}</section>
+      <section class="panel"><h2>交付候选</h2>${renderAssets(vm.assets.exports, '当前还没有交付候选。')}</section>
       <section class="panel"><h2>建议复核</h2>${renderAssets(vm.assets.review, '当前没有建议复核的结果。')}</section>
       <section class="panel"><h2>失败和补跑</h2><p>${escapeHtml(vm.worthRerunCount ? `${vm.worthRerunCount} 个结果值得补跑。` : '当前没有明确补跑压力。')}</p>${renderAssets(vm.assets.issues, '当前没有失败记录。')}</section>
     `;
@@ -108,25 +149,37 @@ function renderWorkspacePage(vm) {
     .summary { color:var(--muted); max-width:760px; }
     .action { border:2px solid var(--accent); border-radius:8px; padding:16px; background:#f2fbf9; }
     .action strong { display:block; font-size:20px; margin-bottom:4px; }
+    .action .primary-action { color:inherit; text-decoration:none; display:block; }
+    .action .primary-action.disabled { color:var(--muted); }
+    .action .go { display:inline-block; margin-top:10px; color:#fff; background:var(--accent); padding:8px 10px; border-radius:6px; }
+    .action .go.disabled { background:var(--muted); }
     .grid { display:flex; flex-wrap:wrap; gap:16px; margin-top:20px; }
     .grid > .panel { flex:1 1 420px; }
     .panel { border:1px solid var(--line); border-radius:8px; padding:18px; background:#fff; min-width:0; }
     .muted { color:var(--muted); }
     .reply-list { display:flex; flex-wrap:wrap; gap:8px; }
     code { display:inline-block; color:#17443f; background:#eef7f5; border:1px solid #c6e7df; border-radius:6px; padding:5px 8px; white-space:normal; }
+    .secondary-actions, .issue-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+    .mini-action { flex:1 1 190px; display:block; border:1px solid var(--line); border-radius:8px; padding:10px; color:var(--ink); text-decoration:none; background:#fff; }
+    .mini-action strong { display:block; font-size:14px; }
+    .mini-action span { display:block; color:var(--muted); font-size:13px; }
+    .mini-action.disabled { color:var(--muted); background:var(--soft); }
     ul { margin:0; padding-left:20px; }
     .metrics { display:flex; gap:10px; flex-wrap:wrap; }
     .metrics span { border:1px solid var(--line); border-radius:6px; padding:8px 10px; background:var(--soft); }
     .asset-grid { display:flex; flex-wrap:wrap; gap:12px; }
     .asset-grid > .asset-card { flex:1 1 180px; max-width:260px; }
     .asset-card { border:1px solid var(--line); border-radius:8px; padding:10px; }
+    .asset-card p { font-size:14px; }
+    .asset-card .status { color:#17443f; font-weight:700; }
+    .asset-card strong { display:block; font-size:13px; margin:8px 0; }
     .thumb { display:block; aspect-ratio:4/3; background:var(--soft); border-radius:6px; overflow:hidden; }
     .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
     .thumb.empty { border:1px dashed var(--line); }
     .asset-card a { color:var(--accent); }
     .issue-card { border-left:4px solid var(--warn); padding:10px 0 10px 12px; }
     footer { border-top:1px solid var(--line); margin-top:28px; color:var(--muted); }
-    @media (max-width: 760px) { .wrap { padding:18px; } .hero { display:block; } .action { margin-top:18px; } h1 { font-size:27px; } }
+    @media (max-width: 760px) { .wrap { padding:18px; } .hero { display:block; } .action { margin-top:18px; } h1 { font-size:27px; } .asset-grid > .asset-card { max-width:none; flex-basis:100%; } }
   </style>
 </head>
 <body>
@@ -140,9 +193,7 @@ function renderWorkspacePage(vm) {
           <p>${escapeHtml(vm.stage.name)} · ${escapeHtml(vm.decision.headline)}</p>
         </div>
         <aside class="action">
-          <strong>${escapeHtml(vm.primaryAction.label)}</strong>
-          <p>${escapeHtml(vm.primaryAction.reason)}</p>
-          <code>${escapeHtml(vm.primaryAction.reply)}</code>
+          ${renderPrimaryAction(vm.primaryAction)}
         </aside>
       </div>
     </div>
@@ -151,6 +202,7 @@ function renderWorkspacePage(vm) {
     <section class="panel">
       <h2>下一句可以说</h2>
       ${renderReplySuggestions(vm.replySuggestions)}
+      ${renderSecondaryActions(vm.secondaryActions)}
     </section>
     <div class="grid">${renderPageBody(vm)}</div>
   </main>

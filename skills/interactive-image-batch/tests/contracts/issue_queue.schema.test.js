@@ -19,7 +19,13 @@ test('issue_queue contract exposes supported groups and item fields', () => {
     assert.equal(queue.groups.some((group) => group.id === id), true);
   });
   const item = queue.items[0];
-  ['id', 'type', 'severity', 'title', 'impact', 'recommendedAction', 'status', 'relatedAssetIds', 'blocking', 'worthRerun', 'userNextStep'].forEach((key) => {
+  ['id', 'type', 'severity', 'title', 'impact', 'userImpact', 'recommendedAction', 'availableActions', 'resolutionState', 'status', 'relatedAssetIds', 'blocking', 'worthRerun', 'userNextStep'].forEach((key) => {
     assert.equal(Object.prototype.hasOwnProperty.call(item, key), true, key);
+  });
+  assert.equal(Array.isArray(item.availableActions), true);
+  item.availableActions.forEach((action) => {
+    ['id', 'label', 'intent', 'targetPage', 'reply', 'reason', 'enabled', 'disabledReason', 'riskLevel'].forEach((key) => {
+      assert.equal(Object.prototype.hasOwnProperty.call(action, key), true, key);
+    });
   });
 });
