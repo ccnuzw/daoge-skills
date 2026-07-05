@@ -20,23 +20,20 @@
 
 ---
 
-## 2. 先生成 prompt 交接包
+## 2. 先准备工作台和提示词
 
 先跑：
 
 ```bash
-node scripts/build_host_native_prompt_pack.js \
-  --prompts-file /abs/path/prompts.generated.json \
-  --task-spec /abs/path/task_spec.normalized.json \
-  --strategy-file /abs/path/prompt_strategy.normalized.json \
-  --runtime-mode-file /abs/path/runtime_mode.json \
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
   --output-dir /abs/path/output_dir
 ```
 
 最低检查：
 
-- `host_native_prompt_pack.json`
-- `host_native_summary.md`
+- `debug/prompts.generated.json`
+- `workspace/index.html`
 
 ---
 
@@ -57,25 +54,15 @@ node scripts/build_host_native_prompt_pack.js \
 
 ---
 
-## 4. 先校验，再导入
-
-先跑校验：
+## 4. 导入结果
 
 ```bash
-node scripts/validate_host_native_results.js \
-  --results-file /abs/path/host_native_results.json
-```
-
-再跑导入：
-
-```bash
-node scripts/ingest_host_native_results.js \
-  --prompt-pack-file /abs/path/host_native_prompt_pack.json \
+node scripts/daoge.js ingest \
   --results-file /abs/path/host_native_results.json \
   --output-dir /abs/path/output_dir
 ```
 
-不要跳过校验。
+如果宿主侧另有交接包，也可以补 `--prompt-pack-file /abs/path/host_native_prompt_pack.json`。
 
 ---
 
@@ -83,12 +70,12 @@ node scripts/ingest_host_native_results.js \
 
 导入后至少检查：
 
-- `workspace/workspace_home.html`
-- `workspace/result_workspace.html`
-- `workspace/exception_workspace.html`
-- `workspace/run_record.html`
+- `workspace/index.html`
+- `workspace/results.html`
+- `workspace/issues.html`
+- `workspace/record.html`
 
-如果这些主链入口都没出来，不要宣称接入完成。`review_board.html`、`completion_board.html` 只在显式开启结果深看模式时检查。
+如果这些主链入口都没出来，不要宣称接入完成。
 
 ---
 

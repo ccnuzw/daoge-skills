@@ -75,27 +75,13 @@
 ## 5. 已跑命令
 
 ```bash
-# detect runtime
-node skills/interactive-image-batch/scripts/detect_runtime_mode.js \
-  --host-native-signal image-tool \
-  --prefer-host-native true \
-  --output-file /tmp/daoge-host-native-demo.z0FzP4/runtime_mode.json
-
-# build prompt pack
-node skills/interactive-image-batch/scripts/build_host_native_prompt_pack.js \
-  --prompts-file /tmp/daoge-host-native-demo.z0FzP4/prompts.generated.json \
-  --task-spec /tmp/daoge-host-native-demo.z0FzP4/task_spec.normalized.json \
-  --strategy-file /tmp/daoge-host-native-demo.z0FzP4/prompt_strategy.normalized.json \
-  --runtime-mode-file /tmp/daoge-host-native-demo.z0FzP4/runtime_mode.json \
+# prepare prompt list and workspace
+node skills/interactive-image-batch/scripts/daoge.js prepare \
+  --task-spec /tmp/daoge-host-native-demo.z0FzP4/task_spec.json \
   --output-dir /tmp/daoge-host-native-demo.z0FzP4/out
 
-# validate host-native results
-node skills/interactive-image-batch/scripts/validate_host_native_results.js \
-  --results-file /tmp/daoge-host-native-demo.z0FzP4/host_native_results.json
-
 # ingest host-native results
-node skills/interactive-image-batch/scripts/ingest_host_native_results.js \
-  --prompt-pack-file /tmp/daoge-host-native-demo.z0FzP4/out/host_native_prompt_pack.json \
+node skills/interactive-image-batch/scripts/daoge.js ingest \
   --results-file /tmp/daoge-host-native-demo.z0FzP4/host_native_results.json \
   --output-dir /tmp/daoge-host-native-demo.z0FzP4/out/ingested
 
@@ -158,6 +144,6 @@ bash skills/interactive-image-batch/scripts/run_smoke_tests.sh
 补充说明：
 
 - 本次演练过程中发现并修复了一个真实问题：
-  - `ingest_host_native_results.js` 原来先渲染 `result_hub`，后渲染 `review_board`
+  - `scripts/daoge.js ingest` 原来先渲染 `result_hub`，后渲染 `review_board`
   - 这会导致结果总入口第一次生成时看不到审阅入口
   - 现已调整顺序，先产出 `review_board` / `rerun_board`，再产出 `result_hub`

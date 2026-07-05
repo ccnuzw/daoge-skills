@@ -30,7 +30,7 @@ git log --oneline -3
 如有脚本改动，至少做语法检查：
 
 ```bash
-node --check skills/interactive-image-batch/scripts/run_batch.js
+node --check skills/interactive-image-batch/scripts/daoge.js execute
 node --check skills/interactive-image-batch/scripts/render_completion_report.js
 node --check skills/interactive-image-batch/scripts/render_result_hub.js
 ```

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { buildIssueQueue } = require('../../scripts/build_issue_queue');
+const { buildIssueQueue } = require('../../src/domain/issue_queue');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
 test('issue_queue contract exposes supported groups and item fields', () => {
@@ -14,6 +14,9 @@ test('issue_queue contract exposes supported groups and item fields', () => {
   const queue = buildIssueQueue({ outputDir, executionManifestFile });
   assert.equal(queue.schemaVersion, 2);
   assert.equal(Array.isArray(queue.supportedTypes), true);
+  assert.deepEqual(queue.supportedResolutionStates, ['open', 'ignored', 'resolved']);
+  assert.equal(queue.supportedActionIds.includes('handle_issue'), true);
+  assert.equal(queue.supportedGroupIds.includes('worth_rerun'), true);
   assert.equal(Array.isArray(queue.groups), true);
   ['must_handle', 'needs_confirmation', 'worth_rerun', 'can_ignore', 'resolved'].forEach((id) => {
     assert.equal(queue.groups.some((group) => group.id === id), true);

@@ -184,7 +184,7 @@ node scripts/import_reference_assets.js \
 推荐入口：
 
 ```bash
-node scripts/daoge_prepare_run.js \
+node scripts/daoge.js prepare \
   --task-spec /abs/path/task_spec.storyboard.json \
   --strategy-file /abs/path/prompt_strategy.json \
   --prompts-file /abs/path/prompts.generated.json \
@@ -206,7 +206,7 @@ node scripts/daoge_prepare_run.js \
 或者：
 
 ```bash
-node scripts/daoge_prepare_run.js \
+node scripts/daoge.js prepare \
   --task-spec /abs/path/task_spec.storyboard.json \
   --strategy-file /abs/path/prompt_strategy.json \
   --prompts-file /abs/path/prompts.generated.json \

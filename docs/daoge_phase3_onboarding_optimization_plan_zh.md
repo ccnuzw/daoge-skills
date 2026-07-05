@@ -73,7 +73,7 @@
 
 ### B. 入口层
 
-在 `scripts/run_example_catalog_prepare.js` 中新增：
+在 `scripts/daoge.js prepare` 中新增：
 
 - `--starter true`
 
@@ -98,7 +98,7 @@
 
 本轮完成后必须验证：
 
-1. `run_example_catalog_prepare.js --starter true` 能输出推荐入口
+1. `scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir out` 能输出推荐入口
 2. HTML catalog 中能看到“推荐起步”区
 3. 现有 `--list true` 和 `--example-id` 不回归
 4. 全量 smoke 继续全绿

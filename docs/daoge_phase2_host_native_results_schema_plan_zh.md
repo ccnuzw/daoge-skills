@@ -4,7 +4,7 @@
 
 第四批已经补齐了 `host-native` 结果回填层：
 
-- `ingest_host_native_results.js`
+- `scripts/daoge.js ingest`
 - 轻量 `manifest`
 - 审阅 / 完成 / 归档看板复用
 
@@ -14,7 +14,7 @@
 
 1. 正式 schema
 2. 示例模板
-3. 校验脚本
+3. `scripts/daoge.js ingest` 内置校验能力
 
 这样不同宿主工具接入时，才不会每次重新约定字段。
 
@@ -32,7 +32,7 @@
 - 只在 README 里有简略字段说明
 - 没有正式 schema 文件
 - 没有 example 文件
-- 没有单独校验入口
+- 缺少统一导入入口内的契约校验
 
 结果是：
 
@@ -48,7 +48,7 @@
 
 1. 新增 `host_native_results` schema
 2. 新增 example 文件
-3. 新增校验脚本
+3. 在 `scripts/daoge.js ingest` 中新增内置校验能力
 4. 将校验接入文档、测试和统一 smoke
 
 本批暂不做：
@@ -99,11 +99,11 @@
 - 给不同宿主工具一个可直接抄用的模板
 - 让 README 和测试不再重复手写内嵌示例
 
-### Task 3. 新增校验脚本
+### Task 3. 结果校验入口
 
-新增脚本：
+当前结果校验与回填已合并到单入口：
 
-- `skills/interactive-image-batch/scripts/validate_host_native_results.js`
+- `skills/interactive-image-batch/scripts/daoge.js ingest`
 
 职责：
 
@@ -115,7 +115,7 @@
 
 ### Task 4. 接入导入链路
 
-`ingest_host_native_results.js` 在导入前应优先跑一次自身校验逻辑，至少做到：
+`scripts/daoge.js ingest` 在导入前应优先跑一次自身校验逻辑，至少做到：
 
 - 非法结果文件直接阻断
 - 输出明确错误
@@ -127,7 +127,7 @@
 
 1. example 文件可通过校验
 2. 非法 `status` 会报错
-3. smoke 里加入独立 schema 校验
+3. smoke 里覆盖 `ingest` 内置 schema 校验
 
 ---
 
@@ -138,8 +138,8 @@
 1. 新增本计划文档
 2. 新增 `host_native_results.schema.json`
 3. 新增 example 文件
-4. 实现 `validate_host_native_results.js`
-5. 让 `ingest_host_native_results.js` 复用校验
+4. 在 `scripts/daoge.js ingest` 中实现内置校验
+5. 让导入流程先校验、再生成工作台
 6. 更新 README / `trigger_modes_zh.md`
 7. 接入 smoke 并完成验证
 
@@ -151,8 +151,8 @@
 
 1. 存在正式 schema 文件
 2. 存在可复用 example 文件
-3. 存在独立校验脚本
-4. `ingest_host_native_results.js` 不再盲信输入
+3. `scripts/daoge.js ingest` 内置结果校验
+4. `scripts/daoge.js ingest` 不再盲信输入
 5. smoke test 有 schema 校验覆盖
 6. 统一 smoke 全绿
 
@@ -183,8 +183,7 @@
 - `docs/daoge_phase2_host_native_results_schema_plan_zh.md`
 - `skills/interactive-image-batch/references/host_native_results.schema.json`
 - `skills/interactive-image-batch/references/examples/host-native/host_native_results.example.json`
-- `skills/interactive-image-batch/scripts/validate_host_native_results.js`
-- `skills/interactive-image-batch/scripts/ingest_host_native_results.js`
+- `skills/interactive-image-batch/scripts/daoge.js`
 - `skills/interactive-image-batch/tests/smoke.test.js`
 - `skills/interactive-image-batch/scripts/run_smoke_tests.sh`
 - `skills/interactive-image-batch/README.md`

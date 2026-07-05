@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { buildWorkspaceState } = require('../../scripts/build_workspace_state_v2');
+const { buildWorkspaceState } = require('../../src/domain/workspace_state');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
 test('workspace_state contract has one primaryAction and replySuggestions', () => {

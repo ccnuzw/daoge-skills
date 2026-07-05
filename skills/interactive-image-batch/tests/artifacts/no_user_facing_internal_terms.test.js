@@ -2,8 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { refreshWorkspaceV2 } = require('../../scripts/refresh_workspace_v2');
-const { USER_FORBIDDEN_TERMS } = require('../../scripts/workspace_v2_shared');
+const { refreshWorkspaceV2 } = require('../../src/domain/workspace_service');
+const { USER_FORBIDDEN_TERMS } = require('../../src/shared/workspace');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
 test('workspace pages do not expose internal engineering terms', () => {

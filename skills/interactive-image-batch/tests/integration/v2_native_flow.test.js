@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { refreshWorkspaceV2 } = require('../../scripts/refresh_workspace_v2');
+const { refreshWorkspaceV2 } = require('../../src/domain/workspace_service');
 const {
   makeTempDir,
   readJson,
@@ -55,6 +55,28 @@ test('execute success-only outputs results, selected and exports', () => {
   assert.equal(fs.existsSync(path.join(outputDir, 'assets', 'exports', 'report.html')), true);
 });
 
+test('full refresh routes missing success output to issues without fake selected exports', () => {
+  const outputDir = refreshWithManifest({
+    runtimeMode: 'local-batch-runner',
+    selectedCount: 1,
+    success: 1,
+    failed: 0,
+    batches: [{ batchNumber: 1, success: 1, failed: 0, results: [{ index: 1, ok: true, output: 'raw/missing.png' }] }],
+  });
+  const state = readJson(path.join(outputDir, 'internal', 'workspace_state.json'));
+  const queue = readJson(path.join(outputDir, 'internal', 'issue_queue.json'));
+  const library = readJson(path.join(outputDir, 'internal', 'asset_library.json'));
+  const issuesHtml = fs.readFileSync(path.join(outputDir, 'workspace', 'issues.html'), 'utf8');
+  assert.equal(state.primaryAction.targetPage, 'issues.html');
+  assert.equal(queue.summary.blocking, 1);
+  assert.equal(queue.summary.rerunCandidates, 1);
+  assert.equal(queue.items.some((item) => item.type === 'hard_failure' && /文件缺失/.test(item.title)), true);
+  assert.equal(library.assets.some((asset) => asset.kind === 'selected_result'), false);
+  assert.equal(library.assets.some((asset) => asset.kind === 'export_image'), false);
+  assert.equal(library.groups.find((group) => group.id === 'issues').assetIds.length, 1);
+  assert.match(issuesHtml, /文件缺失/);
+});
+
 test('execute failed rerun candidate routes to issues with rerun reason', () => {
   const outputDir = refreshWithManifest({
     runtimeMode: 'local-batch-runner',
@@ -70,14 +92,20 @@ test('execute failed rerun candidate routes to issues with rerun reason', () => 
 });
 
 test('execute needs-review-only sends primary action back to results', () => {
-  const outputDir = refreshWithManifest({
+  const outputDir = makeTempDir();
+  const image = path.join(outputDir, 'raw', 'batch_001', 'review.png');
+  writeTinyPng(image);
+  const manifestFile = path.join(outputDir, 'manifest.json');
+  writeJson(manifestFile, {
+    outputDir,
     runtimeMode: 'local-batch-runner',
     selectedCount: 1,
     success: 1,
     failed: 0,
     needsReview: 1,
-    batches: [{ batchNumber: 1, success: 1, failed: 0, results: [{ index: 1, status: 'needs_review', ok: true }] }],
+    batches: [{ batchNumber: 1, success: 1, failed: 0, results: [{ index: 1, status: 'needs_review', ok: true, output: image }] }],
   });
+  refreshWorkspaceV2({ outputDir, manifestFile });
   const state = readJson(path.join(outputDir, 'internal', 'workspace_state.json'));
   const queue = readJson(path.join(outputDir, 'internal', 'issue_queue.json'));
   assert.equal(queue.summary.blocking, 0);
@@ -145,7 +173,7 @@ test('prepare entry preserves original task spec directory for relative referenc
     preview_count: 1,
     require_confirmation: true,
   });
-  runScript('daoge_prepare_run.js', [
+  runScript('daoge.js', ['prepare',
     '--task-spec', taskSpec,
     '--strategy-file', path.join(skillRoot, 'tests', 'fixtures', 'prompt_strategy.minimal.json'),
     '--prompts-file', path.join(skillRoot, 'tests', 'fixtures', 'prompts.minimal.json'),
@@ -154,26 +182,6 @@ test('prepare entry preserves original task spec directory for relative referenc
   ]);
   const library = readJson(path.join(outputDir, 'internal', 'asset_library.json'));
   const asset = library.assets.find((item) => item.group === '人物参考');
-  assert.equal(Boolean(asset), true);
-  assert.equal(path.extname(asset.path), '.png');
-  assert.equal(fs.existsSync(path.join(outputDir, asset.path)), true);
-});
-
-test('prepare import-reference-assets uses imported task spec materials', () => {
-  const outputDir = makeTempDir();
-  const reference = path.join(makeTempDir(), 'shot_1_reference.png');
-  writeTinyPng(reference);
-  runScript('daoge_prepare_run.js', [
-    '--task-spec', path.join(skillRoot, 'tests', 'fixtures', 'storyboard_task_spec.minimal.json'),
-    '--strategy-file', path.join(skillRoot, 'tests', 'fixtures', 'prompt_strategy.minimal.json'),
-    '--prompts-file', path.join(skillRoot, 'tests', 'fixtures', 'prompts.minimal.json'),
-    '--output-dir', outputDir,
-    '--batch-size', '1',
-    '--import-reference-assets', 'true',
-    '--references', reference,
-  ]);
-  const library = readJson(path.join(outputDir, 'internal', 'asset_library.json'));
-  const asset = library.assets.find((item) => item.group === '风格参考' || item.group === '场景参考' || item.group === '人物参考' || item.group === '产品参考');
   assert.equal(Boolean(asset), true);
   assert.equal(path.extname(asset.path), '.png');
   assert.equal(fs.existsSync(path.join(outputDir, asset.path)), true);

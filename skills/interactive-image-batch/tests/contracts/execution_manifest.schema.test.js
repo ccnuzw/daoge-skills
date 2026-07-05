@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { buildExecutionManifest } = require('../../scripts/build_execution_manifest');
+const { buildExecutionManifest } = require('../../src/domain/execution_manifest');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
 test('execution_manifest contract normalizes execution results', () => {

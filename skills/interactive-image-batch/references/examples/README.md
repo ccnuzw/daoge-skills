@@ -4,7 +4,7 @@
 
 请先读：
 
-- [../../START_HERE_中文.md](../../START_HERE_中文.md)
+- [../../README.md](../../README.md)
 
 这个目录用于存放 `interactive-image-batch` 的示例输入和示例结构。
 
@@ -91,7 +91,7 @@ node scripts/build_example_quickstart.js \
 
 - `scripts/validate_task_spec.js`
 - `scripts/validate_prompt_strategy.js`
-- 后续也可以接 `scripts/daoge_prepare_run.js`
+- 后续也可以接 `scripts/daoge.js prepare`
 
 如果你想直接从 example 跑到完整预检面板，可以运行：
 
@@ -110,31 +110,31 @@ node scripts/run_example_quickstart_prepare.js \
 如果你不想手写路径，可以先列出 catalog：
 
 ```bash
-node scripts/run_example_catalog_prepare.js --list true
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --list true
 ```
 
 如果你是第一次使用，建议先看推荐起步入口：
 
 ```bash
-node scripts/run_example_catalog_prepare.js --starter true
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --starter true
 ```
 
 如果你已经知道自己要做什么类型的任务，也可以直接按任务意图进入：
 
 ```bash
-node scripts/run_example_catalog_prepare.js --intent ui
-node scripts/run_example_catalog_prepare.js --intent academic
-node scripts/run_example_catalog_prepare.js --intent packaging
-node scripts/run_example_catalog_prepare.js --intent map
-node scripts/run_example_catalog_prepare.js --intent typography
-node scripts/run_example_catalog_prepare.js --intent cinematic
-node scripts/run_example_catalog_prepare.js --intent oralboard
-node scripts/run_example_catalog_prepare.js --intent financeboard
-node scripts/run_example_catalog_prepare.js --intent hostboard
-node scripts/run_example_catalog_prepare.js --intent productboard
-node scripts/run_example_catalog_prepare.js --intent eduboard
-node scripts/run_example_catalog_prepare.js --intent expertboard
-node scripts/run_example_catalog_prepare.js --intent testimonialboard
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent ui
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent academic
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent packaging
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent map
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent typography
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent cinematic
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent oralboard
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent financeboard
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent hostboard
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent productboard
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent eduboard
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent expertboard
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent testimonialboard
 ```
 
 如果你想先打开一个可点击的中文任务展示板，可以运行：
@@ -424,7 +424,7 @@ node scripts/render_example_catalog_board.js
 再按 example id 一键生成预检面板：
 
 ```bash
-node scripts/run_example_catalog_prepare.js \
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json \
   --example-id ui-mockup-board \
   --output-dir /tmp/daoge-example-catalog-demo
 ```
@@ -432,7 +432,7 @@ node scripts/run_example_catalog_prepare.js \
 如果你想直接体验 UI mockup 的高频子类，也可以运行：
 
 ```bash
-node scripts/run_example_catalog_prepare.js \
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json \
   --example-id ui-mockup-board-social-interface-mockup \
   --output-dir /tmp/daoge-ui-social-mockup-demo
 ```
@@ -440,7 +440,7 @@ node scripts/run_example_catalog_prepare.js \
 也可以直接体验剩余两个 UI 高频尾项：
 
 ```bash
-node scripts/run_example_catalog_prepare.js \
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json \
   --example-id ui-mockup-board-product-card-overlay \
   --output-dir /tmp/daoge-ui-product-card-demo
 ```

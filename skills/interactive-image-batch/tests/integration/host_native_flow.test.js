@@ -30,7 +30,7 @@ test('host-native ingest emits the same v2 workspace and asset library', () => {
     { index: '002', title: 'B', output: imageB, requestMode: 'masked-edit', status: 'needs_review' },
     { index: '003', title: 'C', requestMode: 'prompt-only', status: 'failed', error: 'timeout' },
   ]);
-  runScript('ingest_host_native_results.js', [
+  runScript('daoge.js', ['ingest',
     '--prompt-pack-file', promptPack,
     '--results-file', resultsFile,
     '--output-dir', outputDir,

@@ -2,8 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { refreshWorkspaceV2 } = require('../../scripts/refresh_workspace_v2');
-const { renderWorkspacePage } = require('../../scripts/render_workspace_page_v2');
+const { refreshWorkspaceV2 } = require('../../src/domain/workspace_service');
+const { renderWorkspacePage } = require('../../src/renderers/workspace_page');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
 test('generated workspace pages are the five v2 pages', () => {
@@ -24,7 +24,7 @@ test('assets directory has full user lifecycle folders and export report', () =>
   assert.equal(fs.existsSync(path.join(outputDir, 'assets', 'exports', 'report.html')), true);
 });
 
-test('workspace pages do not link debug compatibility files as primary entries', () => {
+test('workspace pages do not link debug files as primary entries', () => {
   const outputDir = makeTempDir();
   writeJson(path.join(outputDir, 'manifest.json'), { runtimeMode: 'prepare-only', selectedCount: 0, batchCount: 0 });
   refreshWorkspaceV2({ outputDir, manifestFile: path.join(outputDir, 'manifest.json') });
@@ -32,11 +32,11 @@ test('workspace pages do not link debug compatibility files as primary entries',
     .filter((item) => item.endsWith('.html'))
     .map((item) => fs.readFileSync(path.join(outputDir, 'workspace', item), 'utf8'))
     .join('\n');
-  assert.doesNotMatch(html, /debug\/compat/);
+  assert.doesNotMatch(html, /debug\//);
   assert.doesNotMatch(html, /\.json["']/);
 });
 
-test('legacy workspace pages are pruned from user path while compat diagnostics stay under debug', () => {
+test('legacy workspace pages are not kept in user path', () => {
   const outputDir = makeTempDir();
   writeJson(path.join(outputDir, 'manifest.json'), { runtimeMode: 'prepare-only', selectedCount: 0, batchCount: 0 });
   fs.mkdirSync(path.join(outputDir, 'workspace'), { recursive: true });
@@ -49,7 +49,7 @@ test('legacy workspace pages are pruned from user path while compat diagnostics 
     assert.equal(fs.existsSync(path.join(outputDir, name)), false, name);
     assert.equal(fs.existsSync(path.join(outputDir, 'workspace', name)), false, name);
   });
-  assert.equal(fs.existsSync(path.join(outputDir, 'debug', 'compat', 'manifest.json')), true);
+  assert.equal(fs.existsSync(path.join(outputDir, 'debug', 'compat', 'manifest.json')), false);
 });
 
 test('disabled primary action renders as non-clickable with disabled reason', () => {

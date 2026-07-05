@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { buildViewModels } = require('../../scripts/build_view_models');
+const { buildViewModels } = require('../../src/domain/view_models');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
 test('view models are generated for five pages and each has one primaryAction', () => {

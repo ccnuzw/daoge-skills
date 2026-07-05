@@ -8,7 +8,7 @@
 
 本轮试用刻意不允许先看：
 
-- `START_HERE_中文.md`
+- `README.md`
 - `README.md`
 - `template_map_zh.md`
 
@@ -56,9 +56,9 @@
 执行命令：
 
 ```bash
-node skills/interactive-image-batch/scripts/run_example_catalog_prepare.js --intent portrait --output-dir /tmp/daoge-trial-catalog-only-portrait
-node skills/interactive-image-batch/scripts/run_example_catalog_prepare.js --intent ecommerce --output-dir /tmp/daoge-trial-catalog-only-ecommerce
-node skills/interactive-image-batch/scripts/run_example_catalog_prepare.js --intent oralboard --output-dir /tmp/daoge-trial-catalog-only-oralboard
+node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent portrait --output-dir /tmp/daoge-trial-catalog-only-portrait
+node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent ecommerce --output-dir /tmp/daoge-trial-catalog-only-ecommerce
+node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent oralboard --output-dir /tmp/daoge-trial-catalog-only-oralboard
 ```
 
 ## 四、试用结果

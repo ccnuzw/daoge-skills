@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildAssetLibrary } = require('../../scripts/build_asset_library');
+const { buildAssetLibrary } = require('../../src/domain/asset_library');
 const path = require('path');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
@@ -11,6 +11,9 @@ test('asset_library contract exposes user asset directories and groups', () => {
   });
   const library = buildAssetLibrary({ outputDir });
   assert.equal(library.schemaVersion, 2);
+  assert.equal(library.supportedKinds.includes('image_result'), true);
+  assert.equal(library.supportedKinds.includes('issue_record'), true);
+  assert.equal(library.supportedLifecycleStatuses.includes('needs_attention'), true);
   ['inputs', 'references', 'masks', 'results', 'review', 'issues', 'selected', 'exports', 'archive'].forEach((key) => {
     assert.equal(typeof library.directories[key], 'string');
   });

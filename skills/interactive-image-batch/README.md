@@ -1,55 +1,94 @@
 # DAOGE Interactive Image Batch
 
-## 新手路径
+DAOGE 是批量生图任务工作台。普通用户只有一个推荐入口：输出目录里的 `workspace/index.html`。
 
-普通用户只走这一条：
+## 最短使用路径
 
-1. 选任务类型：`references/task_catalog_zh.json`
-2. 生成准备或执行输出
-3. 打开输出目录的 `workspace/index.html`
-4. 看准备：`workspace/prepare.html`
-5. 看结果：`workspace/results.html`
-6. 处理问题：`workspace/issues.html`
-7. 找资产和回看记录：`assets/`、`workspace/record.html`
-
-`workspace/index.html` 是唯一推荐入口。页面上的主动作会告诉你下一步进准备、结果、问题还是记录。
-
-## 常用起步
-
-先看 6 个常用任务：
+准备任务：
 
 ```bash
-node scripts/run_example_catalog_prepare.js --starter true
+node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
 ```
 
-按任务方向起步：
+执行任务：
 
 ```bash
-node scripts/run_example_catalog_prepare.js --intent portrait
-node scripts/run_example_catalog_prepare.js --intent studio
-node scripts/run_example_catalog_prepare.js --intent ecommerce
-node scripts/run_example_catalog_prepare.js --intent packaging
-node scripts/run_example_catalog_prepare.js --intent cinematic
-node scripts/run_example_catalog_prepare.js --intent oralboard
+node scripts/daoge.js execute --output-dir out --env-file .env
 ```
 
-## 输出目录
+打开工作台：
 
-- `workspace/`：五个用户页面
-- `assets/inputs/`：原始输入
-- `assets/references/`：人物、风格、场景、产品参考
-- `assets/masks/`：局部修改范围
-- `assets/results/`：全部生成结果
-- `assets/review/`：建议复核结果
-- `assets/issues/`：问题资料
-- `assets/selected/`：用户已选、建议优先看的候选，或等待选择的占位
-- `assets/exports/`：可交付候选和交付清单
-- `assets/archive/`：历史过程资料
+```bash
+open out/workspace/index.html
+```
 
-维护资料在 `internal/` 和 `debug/`。新手不用打开。
+`prepare` 未传 `--prompts-file` 时，会根据 `task_spec.json` 自动生成 `debug/prompts.generated.json`。需要精细控制时再传策略和提示词文件：
 
-## 维护说明
+```bash
+node scripts/daoge.js prepare \
+  --task-spec task_spec.json \
+  --strategy-file prompt_strategy.json \
+  --prompts-file prompts.json \
+  --output-dir out
+```
 
-v2 架构、契约和调试分层见：
+执行时未传 `--prompts-file`，会优先读取 `out/debug/prompts.generated.json`。
 
-- `docs/architecture_v2_zh.md`
+## 常用命令
+
+小样或流程测试：
+
+```bash
+node scripts/daoge.js execute --output-dir out --env-file .env --dry-run true --batch-size 1
+```
+
+失败复跑：
+
+```bash
+node scripts/daoge.js rerun \
+  --resume-manifest out/internal/local_execution_raw.json \
+  --failed-only true \
+  --env-file .env \
+  --output-dir out_rerun
+```
+
+宿主原生结果回填：
+
+```bash
+node scripts/daoge.js ingest \
+  --prompt-pack-file host_native_prompt_pack.json \
+  --results-file host_results.json \
+  --output-dir out
+```
+
+## 用户输出
+
+- `workspace/`：用户页面，只包含 `index.html`、`prepare.html`、`results.html`、`issues.html`、`record.html`
+- `assets/`：输入、参考、遮罩、结果、复核、问题、已选、交付、归档
+- `internal/`：机器状态和页面视图模型
+- `debug/`：维护诊断和生成的提示词
+
+普通用户打开 `workspace/index.html`，页面会显示当前任务、当前阶段、下一步、可回复内容和问题处理入口。
+
+## 代码结构
+
+- `src/cli/`：单一命令入口
+- `src/contracts/`：任务、结果、问题、资产、状态、页面视图契约
+- `src/domain/`：准备、执行、计划、问题、资产库、工作台状态
+- `src/providers/`：OpenAI Images 和宿主原生结果适配
+- `src/renderers/`：HTML 工作台渲染
+- `src/shared/`：路径、JSON、参数、环境变量等通用能力
+- `scripts/`：`daoge.js` 和 smoke 测试
+
+## 契约源
+
+- `internal/workspace_state.json` 是唯一工作台状态源
+- `internal/view_models/*.json` 是页面唯一输入
+- 关键 JSON 写入使用临时文件加 rename
+- provider 接口统一为 `generate(request)`、`edit(request)`、`capabilities()`
+
+## 测试
+
+```bash
+npm test
+```

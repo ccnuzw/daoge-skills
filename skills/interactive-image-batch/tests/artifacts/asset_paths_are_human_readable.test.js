@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { buildAssetLibrary } = require('../../scripts/build_asset_library');
-const { buildExecutionManifest } = require('../../scripts/build_execution_manifest');
+const { buildAssetLibrary } = require('../../src/domain/asset_library');
+const { buildExecutionManifest } = require('../../src/domain/execution_manifest');
 const { makeTempDir, writeJson, writeTinyPng } = require('../helpers/workspace_v2_test_utils');
 
 test('asset paths use user-readable result names instead of batch folders', () => {

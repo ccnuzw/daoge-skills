@@ -9,7 +9,7 @@
   - `oral-storyboard-board`
 - 让 example 可进入：
   - `examples.catalog.json`
-  - `run_example_catalog_prepare.js`
+  - `scripts/daoge.js prepare`
   - `render_example_catalog_board.js`
   - `references/examples/README.md`
   - `README.md`

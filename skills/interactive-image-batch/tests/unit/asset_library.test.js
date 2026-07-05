@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { buildAssetLibrary } = require('../../scripts/build_asset_library');
+const { buildAssetLibrary } = require('../../src/domain/asset_library');
 const { makeTempDir, writeJson, writeTinyPng } = require('../helpers/workspace_v2_test_utils');
 
 test('asset library creates human readable result, review and issue assets', () => {
@@ -153,6 +153,32 @@ test('asset library recommends selected candidates without copying every success
   });
 });
 
+test('asset library recommends later available images when early success files are missing', () => {
+  const outputDir = makeTempDir();
+  const sourceImage = path.join(outputDir, 'source.png');
+  writeTinyPng(sourceImage);
+  writeJson(path.join(outputDir, 'internal', 'run_plan.json'), {
+    task: { title: '人物主视觉' },
+  });
+  writeJson(path.join(outputDir, 'internal', 'execution_manifest.json'), {
+    results: [
+      { id: 'result_001', index: 1, status: 'success', output: 'missing-1.png' },
+      { id: 'result_002', index: 2, status: 'success', output: 'missing-2.png' },
+      { id: 'result_003', index: 3, status: 'success', output: 'missing-3.png' },
+      { id: 'result_004', index: 4, status: 'success', sourceOutput: sourceImage },
+      { id: 'result_005', index: 5, status: 'success', sourceOutput: sourceImage },
+    ],
+  });
+  const library = buildAssetLibrary({ outputDir });
+  const results = library.assets.filter((asset) => asset.kind === 'image_result');
+  const selected = library.assets.filter((asset) => asset.kind === 'selected_result');
+  const exports = library.assets.filter((asset) => asset.kind === 'export_image');
+  assert.equal(results.length, 2);
+  assert.equal(selected.length, 2);
+  assert.equal(exports.length, 2);
+  assert.deepEqual(selected.map((asset) => asset.relationships.sourceResultId), ['result_004', 'result_005']);
+});
+
 test('asset library recommendation uses fallback result ids when source ids are missing', () => {
   const outputDir = makeTempDir();
   const sourceImage = path.join(outputDir, 'source.png');
@@ -206,4 +232,20 @@ test('asset library exposes user lifecycle fields and traceable review issue exp
   assert.equal(library.assets.find((asset) => asset.group === '建议复核').lifecycleStatus, 'needs_review');
   assert.equal(library.assets.find((asset) => asset.group === '问题相关').lifecycleStatus, 'needs_attention');
   assert.equal(library.assets.find((asset) => asset.kind === 'export_image').relationships.derivedFromAssetId.startsWith('selected_'), true);
+});
+
+test('asset library stores failed result records under issues as canonical path', () => {
+  const outputDir = makeTempDir();
+  writeJson(path.join(outputDir, 'internal', 'run_plan.json'), {
+    task: { title: '人物主视觉' },
+  });
+  writeJson(path.join(outputDir, 'internal', 'execution_manifest.json'), {
+    results: [
+      { id: 'result_001', index: 1, status: 'failed', error: 'timeout' },
+    ],
+  });
+  const library = buildAssetLibrary({ outputDir });
+  const issue = library.assets.find((asset) => asset.kind === 'issue_record');
+  assert.match(issue.path, /^assets\/issues\//);
+  assert.equal(fs.existsSync(path.join(outputDir, issue.path)), true);
 });

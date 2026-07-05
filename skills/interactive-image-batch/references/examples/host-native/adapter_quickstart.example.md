@@ -6,33 +6,27 @@
 
 ---
 
-## 1. 先确认当前模式
+## 1. 先准备工作台和提示词
 
 ```bash
-node scripts/detect_runtime_mode.js
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
+  --output-dir /abs/path/output_dir
 ```
 
 目标：
 
-- 确认当前应走 `host-native-image-tool`
+- 拿到 `debug/prompts.generated.json`
+- 拿到 `workspace/index.html`
 
 ---
 
-## 2. 先产出 prompt 交接包
-
-```bash
-node scripts/build_host_native_prompt_pack.js \
-  --prompts-file /abs/path/prompts.generated.json \
-  --task-spec /abs/path/task_spec.normalized.json \
-  --strategy-file /abs/path/prompt_strategy.normalized.json \
-  --runtime-mode-file /abs/path/runtime_mode.json \
-  --output-dir /abs/path/output_dir
-```
+## 2. 把提示词交给宿主
 
 你至少要拿到：
 
-- `host_native_prompt_pack.json`
-- `host_native_summary.md`
+- `/abs/path/output_dir/debug/prompts.generated.json`
+- 可选宿主侧交接包
 
 ---
 
@@ -42,7 +36,7 @@ node scripts/build_host_native_prompt_pack.js \
 
 ### A. 内置图像工具型宿主
 
-- 把 prompt 包里的最终 prompt 交给宿主工具
+- 把提示词清单里的最终 prompt 交给宿主工具
 - 手动记录输出图片路径
 - 手动整理 `host_native_results.json`
 
@@ -54,7 +48,7 @@ node scripts/build_host_native_prompt_pack.js \
 
 ### C. 自建脚本批量宿主
 
-- 直接消费 `host_native_prompt_pack.json`
+- 直接消费 `debug/prompts.generated.json`
 - 自动生成 `host_native_results.json`
 
 ---
@@ -96,16 +90,10 @@ node scripts/build_host_native_prompt_pack.js \
 
 ---
 
-## 5. 先校验，再导入
+## 5. 导入
 
 ```bash
-node scripts/validate_host_native_results.js \
-  --results-file /abs/path/host_native_results.json
-```
-
-```bash
-node scripts/ingest_host_native_results.js \
-  --prompt-pack-file /abs/path/host_native_prompt_pack.json \
+node scripts/daoge.js ingest \
   --results-file /abs/path/host_native_results.json \
   --output-dir /abs/path/output_dir
 ```
@@ -116,19 +104,13 @@ node scripts/ingest_host_native_results.js \
 
 至少应有：
 
-- `manifest.json`
-- `success.json`
-- `failed.json`
-- `needs_review.json`
-- `workspace/workspace_home.html`
-- `workspace/result_workspace.html`
-- `workspace/exception_workspace.html`
-- `workspace/run_record.html`
-
-如果显式开启结果深看模式，再检查：
-
-- `review_board.html`
-- `completion_board.html`
+- `internal/execution_manifest.json`
+- `internal/issue_queue.json`
+- `assets/results/` 或 `assets/issues/`
+- `workspace/index.html`
+- `workspace/results.html`
+- `workspace/issues.html`
+- `workspace/record.html`
 
 ---
 

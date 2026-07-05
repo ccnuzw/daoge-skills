@@ -11,10 +11,10 @@
 
 本次试用严格限制使用路径：
 
-- `START_HERE_中文.md`
+- `README.md`
 - `references/template_map_zh.md`
-- `node scripts/run_example_catalog_prepare.js --starter true`
-- `node scripts/run_example_catalog_prepare.js --intent <name>`
+- `node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --starter true`
+- `node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent <name>`
 
 不允许先读：
 
@@ -36,10 +36,10 @@
 执行命令：
 
 ```bash
-node skills/interactive-image-batch/scripts/run_example_catalog_prepare.js --intent portrait --output-dir /tmp/daoge-trial-zh-portrait
-node skills/interactive-image-batch/scripts/run_example_catalog_prepare.js --intent packaging --output-dir /tmp/daoge-trial-zh-packaging
-node skills/interactive-image-batch/scripts/run_example_catalog_prepare.js --intent oralboard --output-dir /tmp/daoge-trial-zh-oralboard
-node skills/interactive-image-batch/scripts/run_example_catalog_prepare.js --intent ecommerce --output-dir /tmp/daoge-trial-zh-ecommerce
+node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent portrait --output-dir /tmp/daoge-trial-zh-portrait
+node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent packaging --output-dir /tmp/daoge-trial-zh-packaging
+node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent oralboard --output-dir /tmp/daoge-trial-zh-oralboard
+node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent ecommerce --output-dir /tmp/daoge-trial-zh-ecommerce
 ```
 
 ## 三、试用结果
@@ -70,7 +70,7 @@ node skills/interactive-image-batch/scripts/run_example_catalog_prepare.js --int
 
 优点：
 
-- `START_HERE_中文.md` 先回答“从哪开始、看什么结果”
+- `README.md` 先回答“从哪开始、看什么结果”
 - `template_map_zh.md` 能把中文任务和内部模板名对应起来
 - `README.md` 和 `examples/README.md` 已经不再强迫新手一上来理解工程实现
 

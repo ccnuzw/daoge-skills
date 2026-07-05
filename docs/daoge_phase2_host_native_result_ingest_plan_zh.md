@@ -59,11 +59,11 @@
 
 ## 任务拆解
 
-### Task 1. 新增 host-native 结果导入脚本
+### Task 1. host-native 结果导入入口
 
-新增脚本：
+当前实现已合并到单入口：
 
-- `skills/interactive-image-batch/scripts/ingest_host_native_results.js`
+- `skills/interactive-image-batch/scripts/daoge.js ingest`
 
 职责：
 
@@ -145,7 +145,7 @@
 按以下顺序落地：
 
 1. 新增本计划文档
-2. 实现 `ingest_host_native_results.js`
+2. 实现 `scripts/daoge.js ingest`
 3. 补 smoke test
 4. 更新 `README.md`
 5. 更新 `references/trigger_modes_zh.md`
@@ -157,7 +157,7 @@
 
 本批完成时，至少满足：
 
-1. 存在可执行的 `ingest_host_native_results.js`
+1. 存在可执行的 `scripts/daoge.js ingest`
 2. 能把宿主结果清单转成 DAOGE 最小结果链
 3. 能生成 `result_hub / review_board / completion_board` 等结果入口
 4. smoke test 有对应覆盖
@@ -187,7 +187,7 @@
 预期新增或修改：
 
 - `docs/daoge_phase2_host_native_result_ingest_plan_zh.md`
-- `skills/interactive-image-batch/scripts/ingest_host_native_results.js`
+- `skills/interactive-image-batch/scripts/daoge.js`
 - `skills/interactive-image-batch/tests/smoke.test.js`
 - `skills/interactive-image-batch/scripts/run_smoke_tests.sh`
 - `skills/interactive-image-batch/README.md`

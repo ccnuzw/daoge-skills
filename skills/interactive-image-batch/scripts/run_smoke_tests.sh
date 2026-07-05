@@ -4,67 +4,77 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "[smoke] syntax check"
+echo "[smoke] syntax"
+find "$SKILL_ROOT/src" -name '*.js' -print0 | xargs -0 -I{} node --check '{}'
 find "$SKILL_ROOT/scripts" -maxdepth 1 -name '*.js' -print0 | xargs -0 -I{} node --check '{}'
 
-echo "[smoke] v2 workspace refresh"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
-cat > "$tmp_dir/manifest.json" <<'JSON'
-{
-  "runtimeMode": "prepare-only",
-  "selectedCount": 0,
-  "batchCount": 0,
-  "defaultSize": "1024x1024"
-}
-JSON
-node "$SKILL_ROOT/scripts/refresh_workspace_v2.js" \
-  --output-dir "$tmp_dir" \
-  --manifest-file "$tmp_dir/manifest.json" > /dev/null
 
-test -f "$tmp_dir/workspace/index.html"
-test -f "$tmp_dir/workspace/prepare.html"
-test -f "$tmp_dir/workspace/results.html"
-test -f "$tmp_dir/workspace/issues.html"
-test -f "$tmp_dir/workspace/record.html"
-test -f "$tmp_dir/internal/workspace_state.json"
-test -f "$tmp_dir/internal/view_models/index.json"
-test -f "$tmp_dir/debug/compat/manifest.json"
-! test -f "$tmp_dir/manifest.json"
-
-if grep -R -E "template|variant|manifest|registry|runtime|artifact|slot" "$tmp_dir/workspace" >/dev/null; then
-  echo "[smoke] user-facing internal term leak" >&2
-  exit 1
-fi
-
-echo "[smoke] done"
-
-echo "[smoke] prepare -> execute workspace chain"
-chain_dir="$tmp_dir/chain"
 cat > "$tmp_dir/.env" <<'ENV'
 OPENAI_BASE_URL=https://example.com/v1
 OPENAI_API_KEY=test-key
 OPENAI_MODEL=gpt-image-2
 ENV
-node "$SKILL_ROOT/scripts/daoge_prepare_run.js" \
+
+echo "[smoke] prepare"
+prepare_dir="$tmp_dir/prepare"
+node "$SKILL_ROOT/scripts/daoge.js" prepare \
   --task-spec "$SKILL_ROOT/tests/fixtures/task_spec.minimal.json" \
-  --strategy-file "$SKILL_ROOT/tests/fixtures/prompt_strategy.minimal.json" \
-  --prompts-file "$SKILL_ROOT/tests/fixtures/prompts.minimal.json" \
-  --output-dir "$chain_dir" \
+  --output-dir "$prepare_dir" \
   --batch-size 1 > /dev/null
-node "$SKILL_ROOT/scripts/run_batch.js" \
-  --prompts-file "$SKILL_ROOT/tests/fixtures/prompts.minimal.json" \
+test -f "$prepare_dir/workspace/index.html"
+test -f "$prepare_dir/internal/workspace_state.json"
+test -f "$prepare_dir/internal/view_models/prepare.json"
+test -f "$prepare_dir/debug/prompts.generated.json"
+! test -f "$prepare_dir/manifest.json"
+
+echo "[smoke] execute dry-run after prepare"
+node "$SKILL_ROOT/scripts/daoge.js" execute \
   --env-file "$tmp_dir/.env" \
   --dry-run true \
-  --output-dir "$chain_dir" \
+  --output-dir "$prepare_dir" \
   --batch-size 1 \
   --concurrency 1 > /dev/null
-test -f "$chain_dir/workspace/index.html"
-test -f "$chain_dir/internal/run_plan.json"
-test -f "$chain_dir/internal/asset_library.json"
-test -f "$chain_dir/assets/exports/report.html"
+test -f "$prepare_dir/workspace/results.html"
+test -f "$prepare_dir/internal/local_execution_raw.json"
+test -f "$prepare_dir/assets/exports/report.html"
 
-echo "[smoke] host-native ingest workspace chain"
+echo "[smoke] relative reference and mask"
+prompt_dir="$tmp_dir/prompt_pack"
+mkdir -p "$prompt_dir/refs" "$prompt_dir/masks"
+node -e "require('fs').writeFileSync('$prompt_dir/refs/base.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pS3FoAAAAAASUVORK5CYII=', 'base64')); require('fs').writeFileSync('$prompt_dir/masks/mask.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pS3FoAAAAAASUVORK5CYII=', 'base64'))"
+cat > "$prompt_dir/prompts.json" <<JSON
+[
+  { "index": 1, "title": "相对参考图", "generation_prompt": "reference assisted image", "reference_images": ["refs/base.png"] },
+  { "index": 2, "title": "相对遮罩", "generation_prompt": "masked edit image", "reference_images": ["refs/base.png"], "edit_mask": "masks/mask.png" }
+]
+JSON
+relative_dir="$tmp_dir/relative"
+(cd "$tmp_dir" && node "$SKILL_ROOT/scripts/daoge.js" execute \
+  --prompts-file "$prompt_dir/prompts.json" \
+  --env-file "$tmp_dir/.env" \
+  --dry-run true \
+  --output-dir "$relative_dir" \
+  --batch-size 1 > /dev/null)
+node -e "const m=require('$relative_dir/internal/local_execution_raw.json'); if(m.failed!==0||m.skipped!==2) process.exit(1)"
+
+echo "[smoke] missing material issue"
+missing_dir="$tmp_dir/missing"
+cat > "$prompt_dir/missing_prompts.json" <<JSON
+[
+  { "index": 1, "title": "缺参考图", "generation_prompt": "reference assisted image", "reference_images": ["refs/missing.png"] }
+]
+JSON
+node "$SKILL_ROOT/scripts/daoge.js" execute \
+  --prompts-file "$prompt_dir/missing_prompts.json" \
+  --env-file "$tmp_dir/.env" \
+  --dry-run true \
+  --output-dir "$missing_dir" \
+  --batch-size 1 > /dev/null
+node -e "const q=require('$missing_dir/internal/issue_queue.json'); if(!q.items.some(i=>i.type==='hard_failure')) process.exit(1)"
+
+echo "[smoke] host ingest"
 host_dir="$tmp_dir/host"
 node -e "require('fs').writeFileSync('$tmp_dir/host.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pS3FoAAAAAASUVORK5CYII=', 'base64'))"
 cat > "$tmp_dir/host_pack.json" <<JSON
@@ -74,22 +84,25 @@ cat > "$tmp_dir/host_pack.json" <<JSON
   "task_summary": { "content_brief": "人物主视觉", "batch_size": 1, "width": 1024, "height": 1024 }
 }
 JSON
-cat > "$tmp_dir/host_results.json" <<JSON
+host_source_dir="$tmp_dir/host_source"
+mkdir -p "$host_source_dir"
+cp "$tmp_dir/host.png" "$host_source_dir/host.png"
+cat > "$host_source_dir/host_results.json" <<JSON
 [
-  { "index": "001", "title": "人物主视觉", "requestMode": "prompt-only", "output": "$tmp_dir/host.png", "status": "success" }
+  { "index": "001", "title": "人物主视觉", "requestMode": "prompt-only", "output": "host.png", "status": "success" }
 ]
 JSON
-node "$SKILL_ROOT/scripts/ingest_host_native_results.js" \
+node "$SKILL_ROOT/scripts/daoge.js" ingest \
   --prompt-pack-file "$tmp_dir/host_pack.json" \
-  --results-file "$tmp_dir/host_results.json" \
+  --results-file "$host_source_dir/host_results.json" \
   --output-dir "$host_dir" > /dev/null
 test -f "$host_dir/workspace/results.html"
 test -f "$host_dir/internal/execution_manifest.json"
 test "$(find "$host_dir/assets/selected" -type f | wc -l | tr -d ' ')" -ge 1
 
-echo "[smoke] exception and rerun candidate chain"
+echo "[smoke] issue page"
 issue_dir="$tmp_dir/issues"
-cat > "$issue_dir.manifest.json" <<JSON
+cat > "$tmp_dir/issue_manifest.json" <<JSON
 {
   "runtimeMode": "local-batch-runner",
   "selectedCount": 1,
@@ -102,36 +115,30 @@ cat > "$issue_dir.manifest.json" <<JSON
   ]
 }
 JSON
-node "$SKILL_ROOT/scripts/refresh_workspace_v2.js" \
+node "$SKILL_ROOT/scripts/daoge.js" refresh \
   --output-dir "$issue_dir" \
-  --manifest-file "$issue_dir.manifest.json" > /dev/null
+  --manifest-file "$tmp_dir/issue_manifest.json" > /dev/null
 test -f "$issue_dir/workspace/issues.html"
 node -e "const q=require('$issue_dir/internal/issue_queue.json'); if(!q.items.some(i=>i.type==='rerun_candidate')) process.exit(1)"
 
-for dir in "$tmp_dir" "$chain_dir" "$host_dir" "$issue_dir"; do
-  for file in workspace_home.html prepare_workspace.html result_workspace.html exception_workspace.html run_record.html completion_board.html rerun_board.html review_board.html prompt_preview.html preflight_board.html assets_board.html storyboard_board.html; do
-    if test -f "$dir/$file"; then
-      echo "[smoke] legacy root page still generated: $dir/$file" >&2
+if grep -R -E "template|variant|manifest|registry|runtime|artifact|slot" "$prepare_dir/workspace" "$host_dir/workspace" "$issue_dir/workspace" >/dev/null; then
+  echo "[smoke] user-facing internal term leak" >&2
+  exit 1
+fi
+
+legacy_files="workspace_home.html prepare_workspace.html result_workspace.html exception_workspace.html run_record.html review_board.html completion_board.html run_overview.html rerun_board.html preflight_board.html prompt_preview.html"
+for dir in "$prepare_dir" "$host_dir" "$issue_dir"; do
+  for file in $legacy_files; do
+    if test -f "$dir/$file" || test -f "$dir/workspace/$file"; then
+      echo "[smoke] retired workspace page generated: $dir/$file" >&2
       exit 1
     fi
   done
 done
 
-legacy_entry_pattern="workspace_home\\.html|prepare_workspace\\.html|result_workspace\\.html|exception_workspace\\.html|run_record\\.html"
-for file in \
-  "$tmp_dir/task_center.html" \
-  "$tmp_dir/task_center_state.json" \
-  "$tmp_dir/daoge_run_index.md" \
-  "$chain_dir/entry_state.json" \
-  "$chain_dir/selection_board.md" \
-  "$host_dir/entry_state.json" \
-  "$host_dir/selection_board.md" \
-  "$issue_dir/entry_state.json" \
-  "$issue_dir/selection_board.md"; do
-  if test -f "$file" && grep -E "$legacy_entry_pattern" "$file" >/dev/null; then
-    echo "[smoke] retired workspace page leaked into user next step: $file" >&2
-    exit 1
-  fi
-done
+if grep -R -E "workspace_home\.html|prepare_workspace\.html|result_workspace\.html|exception_workspace\.html|run_record\.html" "$prepare_dir/workspace" "$host_dir/workspace" "$issue_dir/workspace" >/dev/null; then
+  echo "[smoke] retired workspace page leaked into user page" >&2
+  exit 1
+fi
 
 echo "[smoke] done"

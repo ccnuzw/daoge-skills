@@ -10,19 +10,18 @@
 
 ## 一句话理解
 
-DAOGE 的 `host-native` 路径现在分成四层：
+DAOGE 的 `host-native` 路径现在分成三层：
 
-1. 运行模式探测
-2. prompt 交接包
-3. 结果文件契约
-4. 结果回填与工作台主链
+1. 准备阶段生成提示词和工作台
+2. 宿主侧按提示词完成出图
+3. 结果文件回填到工作台主链
 
 接入一个新宿主时，你的工作基本就是：
 
 1. 决定它属于哪类宿主
-2. 让它吃下 `host_native_prompt_pack.json`
+2. 让它吃下 `debug/prompts.generated.json` 或等价提示词清单
 3. 让它吐出 `host_native_results.json`
-4. 用校验和导入脚本接回 DAOGE
+4. 用 `scripts/daoge.js ingest` 接回 DAOGE
 
 ---
 
@@ -30,54 +29,45 @@ DAOGE 的 `host-native` 路径现在分成四层：
 
 推荐按这个顺序走：
 
-1. 先探测当前模式
+1. 先准备 DAOGE 工作台和提示词
 
 ```bash
-node scripts/detect_runtime_mode.js
-```
-
-2. 生成 prompt 交接包
-
-```bash
-node scripts/build_host_native_prompt_pack.js \
-  --prompts-file /abs/path/prompts.generated.json \
-  --task-spec /abs/path/task_spec.normalized.json \
-  --strategy-file /abs/path/prompt_strategy.normalized.json \
-  --runtime-mode-file /abs/path/runtime_mode.json \
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
   --output-dir /abs/path/output_dir
 ```
+
+2. 在宿主侧读取提示词
+
+- `/abs/path/output_dir/debug/prompts.generated.json`
 
 3. 在宿主侧完成出图
 
 4. 组织 `host_native_results.json`
 
-5. 先校验结果文件
+5. 导入回 DAOGE 结果链
 
 ```bash
-node scripts/validate_host_native_results.js \
-  --results-file /abs/path/host_native_results.json
+node scripts/daoge.js ingest \
+  --results-file /abs/path/host_native_results.json \
+  --output-dir /abs/path/output_dir
 ```
 
-6. 再导入回 DAOGE 结果链
+如果宿主侧另有交接包，也可以一并传入：
 
 ```bash
-node scripts/ingest_host_native_results.js \
+node scripts/daoge.js ingest \
   --prompt-pack-file /abs/path/host_native_prompt_pack.json \
   --results-file /abs/path/host_native_results.json \
   --output-dir /abs/path/output_dir
 ```
 
-7. 进入工作台主链审阅入口
+6. 进入工作台主链审阅入口
 
-- `workspace/workspace_home.html`
-- `workspace/result_workspace.html`
-- `workspace/exception_workspace.html`
-- `workspace/run_record.html`
-
-如果显式开启结果深看模式，再检查：
-
-- `review_board.html`
-- `completion_board.html`
+- `workspace/index.html`
+- `workspace/results.html`
+- `workspace/issues.html`
+- `workspace/record.html`
 
 ---
 
@@ -128,10 +118,8 @@ node scripts/ingest_host_native_results.js \
 
 宿主侧接入时，优先关注这几个文件：
 
-- `prompts.generated.json`
-- `host_native_prompt_pack.json`
-- `host_native_summary.md`
-- `host_native_summary.html`
+- `debug/prompts.generated.json`
+- 可选宿主侧交接包
 
 最低要求：
 
@@ -178,17 +166,20 @@ node scripts/ingest_host_native_results.js \
 
 ## 校验与导入
 
-不要直接把宿主结果文件丢给导入脚本。
+不要绕过 DAOGE 的导入入口手工写结果链。
 
-推荐固定顺序：
+推荐固定入口：
 
-1. 先跑 `validate_host_native_results.js`
-2. 再跑 `ingest_host_native_results.js`
+```bash
+node scripts/daoge.js ingest \
+  --results-file /abs/path/host_native_results.json \
+  --output-dir /abs/path/output_dir
+```
 
 原因很简单：
 
-- 校验负责挡住契约错误
-- 导入负责生成结果链和工作台主链
+- `ingest` 会先校验宿主结果契约
+- 合法结果再进入结果链和工作台主链
 
 这样出问题时更容易定位到底是“宿主结果文件错了”，还是“导入逻辑坏了”。
 
@@ -210,7 +201,7 @@ node scripts/ingest_host_native_results.js \
 
 现象：
 
-- 校验脚本直接拦截
+- `ingest` 内置校验直接拦截
 
 处理：
 

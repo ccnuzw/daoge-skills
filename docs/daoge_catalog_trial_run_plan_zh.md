@@ -58,7 +58,7 @@
 每个入口都走同一条路径：
 
 1. 从 catalog 入口选择 example id
-2. 执行 `run_example_catalog_prepare.js`
+2. 执行 `scripts/daoge.js prepare`
 3. 检查是否成功生成：
    - `task_spec.quickstart.json`
    - `prompt_strategy.quickstart.json`

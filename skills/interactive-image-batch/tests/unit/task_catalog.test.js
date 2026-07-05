@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const { readJson, skillRoot } = require('../helpers/workspace_v2_test_utils');
+const { resolveTask } = require('../../src/shared/workspace');
 
 test('task_catalog_zh exposes six user-first starter tasks', () => {
   const catalog = readJson(path.join(skillRoot, 'references', 'task_catalog_zh.json'));
@@ -22,4 +23,13 @@ test('task_catalog_zh exposes six user-first starter tasks', () => {
   ['template', 'variant', 'manifest', 'registry', 'runtime', 'artifact', 'slot'].forEach((term) => {
     assert.equal(text.includes(term), false, `found ${term}`);
   });
+});
+
+test('resolveTask loads catalog from skill root by default', () => {
+  const catalog = readJson(path.join(skillRoot, 'references', 'task_catalog_zh.json'));
+  const expected = catalog.tasks.find((item) => item.id === 'ecommerce');
+  const task = resolveTask({ intent: 'ecommerce' });
+  assert.equal(task.id, 'ecommerce');
+  assert.equal(task.title, expected.name);
+  assert.equal(task.summary, expected.plainSummary);
 });

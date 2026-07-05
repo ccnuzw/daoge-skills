@@ -1,5 +1,7 @@
 # DAOGE 可视化工作台重构正式蓝图
 
+> 归档说明：本文记录旧工作台重构阶段的设计草案，不代表当前发布入口。当前入口以 `skills/interactive-image-batch/README.md` 为准：`node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out`，然后打开 `out/workspace/index.html`。
+
 ## 0. 终版执行结论
 
 当前重构的终极目标已经明确为：
@@ -8,13 +10,13 @@
 
 终版用户主链只有一条：
 
-1. `references/examples/examples_catalog.html`
-2. `task_center.html`
-3. `workspace/workspace_home.html`
-4. `workspace/prepare_workspace.html`
-5. `workspace/result_workspace.html`
-6. `workspace/exception_workspace.html`
-7. `workspace/run_record.html`
+1. `node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out`
+2. `node scripts/daoge.js execute --output-dir out --env-file .env`
+3. `workspace/index.html`
+4. `workspace/prepare.html`
+5. `workspace/results.html`
+6. `workspace/issues.html`
+7. `workspace/record.html`
 
 终版状态协议：
 
@@ -287,10 +289,10 @@ storyboard 的核心不是“多几张图”，而是：
 
 代表物：
 
-- `START_HERE_中文.md`
+- `README.md`
 - `references/template_map_zh.md`
 - `references/examples/examples_catalog.html`
-- `run_example_catalog_prepare.js`
+- `scripts/daoge.js prepare`
 
 这层不是附属说明，而是系统前场的一部分。
 
@@ -972,10 +974,10 @@ storyboard 的核心不是多图数量，而是：
 
 当前脚本链主要是：
 
-- `daoge_prepare_run.js`
-- `run_batch.js`
-- `run_batch_artifacts.js`
-- `ingest_host_native_results.js`
+- `daoge.js prepare`
+- `daoge.js execute`
+- `internal asset builder`
+- `scripts/daoge.js ingest`
 - 各类 `render_*` 脚本
 
 当前模式是：
@@ -1043,7 +1045,7 @@ storyboard 的核心不是多图数量，而是：
 2. 新增 `workspace_state.json`
 3. 新增 `workspace_assets.json`
 4. 新增 `workspace_timeline.json`
-5. 在 `run_example_catalog_prepare.js`、`run_batch_artifacts.js` 和 `ingest_host_native_results.js` 中接入状态聚合
+5. 在 `scripts/daoge.js prepare`、`internal asset builder` 和 `scripts/daoge.js ingest` 中接入状态聚合
 6. 保持现有 smoke 测试通过
 
 验收标准：

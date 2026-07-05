@@ -72,28 +72,17 @@ node scripts/detect_runtime_mode.js
 推荐入口：
 
 ```bash
-node scripts/build_host_native_prompt_pack.js \
-  --prompts-file /abs/path/prompts.generated.json \
-  --task-spec /abs/path/task_spec.normalized.json \
-  --strategy-file /abs/path/prompt_strategy.normalized.json \
-  --runtime-mode-file /abs/path/runtime_mode.json \
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
   --output-dir /abs/path/output_dir
 ```
 
 宿主结果回填入口：
 
 ```bash
-node scripts/ingest_host_native_results.js \
-  --prompt-pack-file /abs/path/host_native_prompt_pack.json \
+node scripts/daoge.js ingest \
   --results-file /abs/path/host_native_results.json \
   --output-dir /abs/path/output_dir
-```
-
-推荐先独立校验结果文件：
-
-```bash
-node scripts/validate_host_native_results.js \
-  --results-file /abs/path/host_native_results.json
 ```
 
 相关契约文件：
@@ -115,7 +104,7 @@ node scripts/validate_host_native_results.js \
 
 这条路径仍然依赖本地 runner 语义，因为它本质上依赖：
 
-- `manifest.json`
+- `internal/local_execution_raw.json`
 - `resume-manifest`
 - 旧输出复用
 - slot 绑定安全
@@ -152,7 +141,7 @@ node scripts/validate_host_native_results.js \
 推荐入口：
 
 ```bash
-node scripts/daoge_prepare_run.js \
+node scripts/daoge.js prepare \
   --task-spec /abs/path/task_spec.json \
   --strategy-file /abs/path/prompt_strategy.json \
   --prompts-file /abs/path/prompts.generated.json \
@@ -165,17 +154,15 @@ node scripts/daoge_prepare_run.js \
 - 如果运行模式是 `host-native-image-tool`，可以只完成到 prompt planning / preview 层
 - 不要求为了“流程完整”而硬生成本地 execute 产物
 - 但至少应留下：
-  - `prompts.generated.json`
-  - `host_native_prompt_pack.json`
-  - `host_native_summary.md`
+  - `debug/prompts.generated.json`
+  - `workspace/index.html`
 - 如果宿主侧已经出图，则建议继续生成：
-  - `manifest.json`
-  - `success.json`
-  - `needs_review.json`
-  - `workspace/workspace_home.html`
-  - `workspace/result_workspace.html`
-  - `workspace/exception_workspace.html`
-  - `workspace/run_record.html`
+  - `internal/execution_manifest.json`
+  - `internal/issue_queue.json`
+  - `workspace/index.html`
+  - `workspace/results.html`
+  - `workspace/issues.html`
+  - `workspace/record.html`
 
 ## 何时触发 execute
 
@@ -201,7 +188,7 @@ node scripts/daoge_prepare_run.js \
 推荐入口：
 
 ```bash
-node scripts/run_batch.js \
+node scripts/daoge.js execute \
   --prompts-file /abs/path/prompts.generated.json \
   --sample-size 20 \
   --stage-size 200 \

@@ -98,7 +98,7 @@
 4. 在 smoke 中增加：
    - catalog list 能看到这些 id
    - catalog html 能看到这些 id
-   - 至少 1 个新变体走通 `run_example_catalog_prepare`
+   - 至少 1 个新变体走通 `scripts/daoge.js prepare`
 
 ## 命名建议
 

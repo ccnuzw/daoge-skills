@@ -27,7 +27,7 @@
 
 ## 验证要求
 
-- 新入口可通过 `run_example_catalog_prepare.js --example-id ...` 走到 `prepare`
+- 新入口可通过 `scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir out` 走到 `prepare`
 - 真实抽查至少 2 条，确认：
   - `duplicatePromptCount: 0`
   - `qualityGates.ok: true`

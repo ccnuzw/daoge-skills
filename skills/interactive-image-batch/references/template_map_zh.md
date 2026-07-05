@@ -77,7 +77,7 @@
 如果你完全不知道怎么选，先用：
 
 ```bash
-node scripts/run_example_catalog_prepare.js --starter true
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir out
 ```
 
 默认第一屏只保留 6 个最常用起步入口：
@@ -229,25 +229,25 @@ node scripts/run_example_catalog_prepare.js --starter true
 
 ### 新手顺序
 
-1. 先看 [../../START_HERE_中文.md](../START_HERE_中文.md)
+1. 先看 [../../README.md](../README.md)
 2. 再看这份中文任务地图
 3. 然后运行：
 
 ```bash
-node scripts/run_example_catalog_prepare.js --starter true
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --starter true
 ```
 
 4. 或直接按任务意图运行：
 
 ```bash
-node scripts/run_example_catalog_prepare.js --intent portrait
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent portrait --output-dir out
 ```
 
 5. 看工作台主链：
-   - `workspace/workspace_home.html`
-   - `workspace/prepare_workspace.html`
-   - `workspace/result_workspace.html`
-   - `workspace/exception_workspace.html`（有失败、待复核或补跑候选时再看）
+   - `workspace/index.html`
+   - `workspace/prepare.html`
+   - `workspace/results.html`
+   - `workspace/issues.html`（有失败、待复核或补跑候选时再看）
 
 ### 进阶顺序
 

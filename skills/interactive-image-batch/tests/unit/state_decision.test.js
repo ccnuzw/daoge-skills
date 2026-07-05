@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { decideStage, decideAction } = require('../../scripts/build_workspace_state_v2');
-const { buildUserJourneyDecision } = require('../../scripts/build_user_journey_decision');
+const { decideStage, decideAction } = require('../../src/domain/workspace_state');
+const { buildUserJourneyDecision } = require('../../src/domain/user_journey');
 
 test('state decision chooses prepare action when run plan is ready', () => {
   const runPlan = { readiness: { canRun: true } };

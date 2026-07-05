@@ -12,7 +12,7 @@
 - 产物可以直接喂给现有的：
   - `validate_task_spec.js`
   - `validate_prompt_strategy.js`
-  - 后续也可以接 `daoge_prepare_run.js`
+  - 后续也可以接 `daoge.js prepare`
 
 ## 为什么现在做
 

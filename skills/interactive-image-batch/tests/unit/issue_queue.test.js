@@ -1,15 +1,21 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { buildIssueQueue } = require('../../scripts/build_issue_queue');
-const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
+const { buildIssueQueue } = require('../../src/domain/issue_queue');
+const { makeTempDir, writeJson, writeTinyPng } = require('../helpers/workspace_v2_test_utils');
 
 function queueFor(results, counts = {}) {
   const outputDir = makeTempDir();
   const executionPath = path.join(outputDir, 'internal', 'execution_manifest.json');
+  const normalizedResults = results.map((item, index) => {
+    if (item.output || item.sourceOutput || !['success', 'needs_review'].includes(item.status)) return item;
+    const sourceOutput = path.join(outputDir, 'source', `${item.id || `result_${index + 1}`}.png`);
+    writeTinyPng(sourceOutput);
+    return { ...item, sourceOutput };
+  });
   writeJson(executionPath, {
-    counts: { total: results.length, success: results.filter((item) => item.status === 'success').length, ...counts },
-    results,
+    counts: { total: normalizedResults.length, success: normalizedResults.filter((item) => item.status === 'success').length, ...counts },
+    results: normalizedResults,
   });
   return buildIssueQueue({ outputDir, executionManifestFile: executionPath });
 }
@@ -62,13 +68,17 @@ test('issue queue supports ignored, resolved and empty states', () => {
 
 test('issue queue exposes action loop for blocking review rerun ignored and resolved', () => {
   const outputDir = makeTempDir();
+  const reviewImage = path.join(outputDir, 'source', 'review.png');
+  const successImage = path.join(outputDir, 'source', 'success.png');
+  writeTinyPng(reviewImage);
+  writeTinyPng(successImage);
   const executionPath = path.join(outputDir, 'internal', 'execution_manifest.json');
   writeJson(executionPath, {
     counts: { total: 3, success: 1 },
     results: [
       { id: 'result_001', status: 'failed', worthRerun: true, rerunReason: '关键镜头失败' },
-      { id: 'result_002', status: 'needs_review' },
-      { id: 'result_003', status: 'success' },
+      { id: 'result_002', status: 'needs_review', sourceOutput: reviewImage },
+      { id: 'result_003', status: 'success', sourceOutput: successImage },
     ],
   });
   const queue = buildIssueQueue({
@@ -93,4 +103,35 @@ test('issue queue exposes action loop for blocking review rerun ignored and reso
   assert.equal(queue.items.find((item) => item.type === 'rerun_candidate').availableActions.some((action) => action.id === 'rerun_candidate'), true);
   assert.equal(queue.items.find((item) => item.type === 'ignored').resolutionState, 'ignored');
   assert.equal(queue.items.find((item) => item.type === 'resolved').resolutionState, 'resolved');
+});
+
+test('issue queue uses resolutionState as source of truth for grouping', () => {
+  const outputDir = makeTempDir();
+  const executionPath = path.join(outputDir, 'internal', 'execution_manifest.json');
+  writeJson(executionPath, { results: [] });
+  const queue = buildIssueQueue({
+    outputDir,
+    executionManifestFile: executionPath,
+    extraItems: [
+      { id: 'ignored_rerun', type: 'rerun_candidate', status: 'open', resolutionState: 'ignored' },
+    ],
+  });
+  assert.equal(queue.summary.rerunCandidates, 0);
+  assert.equal(queue.summary.ignored, 1);
+  assert.equal(queue.groups.find((group) => group.id === 'worth_rerun').itemIds.includes('ignored_rerun'), false);
+  assert.equal(queue.groups.find((group) => group.id === 'can_ignore').itemIds.includes('ignored_rerun'), true);
+});
+
+test('issue queue turns declared missing output into blocking issue', () => {
+  const outputDir = makeTempDir();
+  const executionPath = path.join(outputDir, 'internal', 'execution_manifest.json');
+  writeJson(executionPath, {
+    results: [
+      { id: 'result_001', index: 1, status: 'success', output: 'missing.png' },
+    ],
+  });
+  const queue = buildIssueQueue({ outputDir, executionManifestFile: executionPath });
+  assert.equal(queue.summary.blocking, 1);
+  assert.equal(queue.summary.rerunCandidates, 1);
+  assert.equal(queue.items.some((item) => item.type === 'hard_failure' && /文件缺失/.test(item.title)), true);
 });

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildRunPlan } = require('../../scripts/build_run_plan');
+const { buildRunPlan } = require('../../src/domain/run_plan');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 const path = require('path');
 

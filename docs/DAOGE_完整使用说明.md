@@ -13,21 +13,17 @@
 
 现在使用 DAOGE，只从 workspace-first 主链开始。普通用户只记这一条主链：
 
-1. `references/examples/examples_catalog.html`
-2. `task_center.html`
-3. `workspace/workspace_home.html`
-4. `workspace/prepare_workspace.html`
-5. `workspace/result_workspace.html`
-6. `workspace/exception_workspace.html`
-7. `workspace/run_record.html`
+1. `node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out`
+2. `node scripts/daoge.js execute --output-dir out --env-file .env`
+3. `workspace/index.html`
+4. `workspace/prepare.html`
+5. `workspace/results.html`
+6. `workspace/issues.html`
+7. `workspace/record.html`
 
 `daoge_portal.html` 与 `result_hub.html` 不属于新 DAOGE 架构，相关渲染器已移除，不会由默认、深看或完整展开模式生成。
 
-高级页只在需要深看时出现：
-
-- 准备深看：`preflight_board.html`、`prompt_preview.html`、`assets_board.html`
-- 结果深看：`review_board.html`、`completion_board.html`、`run_overview.html`、`rerun_board.html`
-- 条件深看：`storyboard_board.html`
+维护诊断只进入 `internal/` 和 `debug/`，普通用户不需要打开。
 
 如果你只想知道“现在到哪一步、下一步做什么、结果在哪里”，优先看工作台，不要先翻 JSON、Markdown 或内部诊断说明。
 
@@ -832,7 +828,7 @@ DAOGE 在正式执行前会先跑预检。
 
 ### 12.1 最重要的入口文件
 
-#### `workspace/workspace_home.html`
+#### `workspace/index.html`
 
 本轮最应该先看的文件。
 
@@ -842,11 +838,11 @@ DAOGE 在正式执行前会先跑预检。
 - 执行状态
 - 下一步建议
 
-#### `workspace/result_workspace.html`
+#### `workspace/results.html`
 
 结果筛看、可用成果、复核与补跑判断都从这里进入。
 
-#### `workspace/run_record.html`
+#### `workspace/record.html`
 
 任务档案只负责回看本轮发生了什么，不作为第二套导航。
 
@@ -907,7 +903,7 @@ DAOGE 在正式执行前会先跑预检。
 命令示例：
 
 ```bash
-node "${CODEX_HOME:-$HOME/.codex}/skills/interactive-image-batch/scripts/run_batch.js" \
+node "${CODEX_HOME:-$HOME/.codex}/skills/interactive-image-batch/scripts/daoge.js" execute \
   --prompts-file /path/to/prompts.generated.json \
   --resume-manifest /path/to/manifest.json \
   --failed-only true
@@ -924,7 +920,7 @@ node "${CODEX_HOME:-$HOME/.codex}/skills/interactive-image-batch/scripts/run_bat
 命令示例：
 
 ```bash
-node "${CODEX_HOME:-$HOME/.codex}/skills/interactive-image-batch/scripts/run_batch.js" \
+node "${CODEX_HOME:-$HOME/.codex}/skills/interactive-image-batch/scripts/daoge.js" execute \
   --prompts-file /path/to/prompts.generated.json \
   --output-dir /path/to/output_dir \
   --skip-existing true
@@ -1235,7 +1231,7 @@ DAOGE 本来就是为这种交互式情况设计的。
 3. 让 DAOGE 先做 Prompt 预览
 4. 看红黄绿预检
 5. 再正式开跑
-6. 跑完优先看 `workspace/workspace_home.html` 和 `workspace/result_workspace.html`
+6. 跑完优先看 `workspace/index.html` 和 `workspace/results.html`
 7. 大批量任务一定使用样本阶段、分阶段和自动暂停保护
 
 DAOGE 最重要的价值不是“能生成图片”，而是：

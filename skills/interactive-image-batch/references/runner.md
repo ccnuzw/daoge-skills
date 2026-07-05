@@ -123,13 +123,13 @@ The preview file should be treated as the human review surface. It should summar
 
 When both versions exist:
 
-- prefer `workspace/prepare_workspace.html` for the primary user-facing preparation flow
-- use `prompt_preview.html` only when prepare detail mode is explicitly enabled
-- keep `prompt_preview.md` as the archival / debug companion surface
+- prefer `workspace/index.html` for the primary user-facing flow
+- use `workspace/prepare.html` for preparation detail
+- keep generated prompt and diagnostic files under `debug/`
 
 ## Runner flags
 
-`--prompts-file <abs-or-rel-path>` required
+`--prompts-file <abs-or-rel-path>` optional. If omitted, `prepare` generates `debug/prompts.generated.json`, and `execute` reads that file from `--output-dir`.
 
 When running from a normalized DAOGE task spec, map fields directly:
 
@@ -164,7 +164,7 @@ Optional flags:
 - `--limit <number>` default all remaining prompts
 - `--contact-sheet <true|false>` default `true`
 - `--run-label <value>` optional output label
-- `--resume-manifest <path>` rerun prompts referenced by a previous root `manifest.json`
+- `--resume-manifest <path>` rerun prompts referenced by a previous `internal/local_execution_raw.json`
 - `--failed-only <true|false>` default `true` when `--resume-manifest` is present
 - `--select-indexes <csv>` rerun only specific prompt indexes, e.g. `3,5,9`
 - `--select-slot-ids <csv>` rerun only specific storyboard slots, e.g. `shot_3,kv`
@@ -210,7 +210,7 @@ Chinese intent mapping:
 Example: rerun only `shot_3` and use the previous output as the edit base:
 
 ```bash
-node scripts/run_batch.js \
+node scripts/daoge.js execute \
   --prompts-file /abs/path/prompts.generated.json \
   --resume-manifest /abs/path/manifest.json \
   --select-slot-ids shot_3 \
@@ -222,7 +222,7 @@ node scripts/run_batch.js \
 Example: rerun only `shot_3`, reuse the previous output, and force masked local edit:
 
 ```bash
-node scripts/run_batch.js \
+node scripts/daoge.js execute \
   --prompts-file /abs/path/prompts.generated.json \
   --resume-manifest /abs/path/manifest.json \
   --select-slot-ids shot_3 \
@@ -276,7 +276,7 @@ Optional:
 - To rerun only failed images from a previous run:
 
 ```bash
-node scripts/run_batch.js \
+node scripts/daoge.js execute \
   --prompts-file /abs/path/original/prompts.generated.json \
   --resume-manifest /abs/path/original/manifest.json \
   --failed-only true \
@@ -287,7 +287,7 @@ node scripts/run_batch.js \
 To continue a partially completed same-directory run:
 
 ```bash
-node scripts/run_batch.js \
+node scripts/daoge.js execute \
   --prompts-file /abs/path/original/prompts.generated.json \
   --output-dir /abs/path/original/output_dir \
   --skip-existing true \
@@ -298,7 +298,7 @@ node scripts/run_batch.js \
 For 300-1000 image production runs, prefer staged execution:
 
 ```bash
-node scripts/run_batch.js \
+node scripts/daoge.js execute \
   --prompts-file /abs/path/prompts.generated.json \
   --sample-size 20 \
   --stop-after-sample true \
@@ -312,7 +312,7 @@ node scripts/run_batch.js \
 After reviewing the sample, continue in the same directory:
 
 ```bash
-node scripts/run_batch.js \
+node scripts/daoge.js execute \
   --prompts-file /abs/path/prompts.generated.json \
   --output-dir /abs/path/output_dir \
   --skip-existing true \
@@ -339,8 +339,8 @@ This runs:
 
 Current smoke coverage includes:
 
-- `run_batch.js --dry-run`
-- `daoge_prepare_run.js` minimal preflight pipeline
+- `daoge.js execute --dry-run`
+- `daoge.js prepare` minimal preflight pipeline
 - mock-provider `prompt-only` execution
 - mock-provider `reference-assisted` execution
 - `render_review_board.js` HTML 审阅看板
@@ -348,4 +348,4 @@ Current smoke coverage includes:
 
 Recommended rule:
 
-- if you modify `run_batch.js`, `run_batch_*`, `render_*`, `validate_*`, or `daoge_prepare_run.js`, run smoke tests before claiming the skill still works
+- if you modify `daoge.js execute`, `run_batch_*`, `render_*`, `validate_*`, or `daoge.js prepare`, run smoke tests before claiming the skill still works

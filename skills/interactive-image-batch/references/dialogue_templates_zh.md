@@ -99,7 +99,7 @@ DAOGE 状态：需要补充信息
 适用原则：
 
 - 首次唤醒的新手用户，默认可以在欢迎页第三层顺带给出这个入口
-- 当用户说“我不知道选哪个模板”时，优先把它和 `START_HERE_中文.md`、`template_map_zh.md` 一起给出
+- 当用户说“我不知道选哪个模板”时，优先把它和 `README.md`、`template_map_zh.md` 一起给出
 - 当用户已经明确说要按 `intent` 或 `example-id` 走时，不要强插展示板
 
 ## 运行模式优先分流
@@ -195,7 +195,7 @@ DAOGE 状态：等待选择模板
 如果你现在还不确定走哪个入口，不用硬记模板名。
 
 你有三种最稳的看法：
-- 先看新手入口说明：START_HERE_中文.md
+- 先看新手入口说明：README.md
 - 先看中文任务地图：references/template_map_zh.md
 - 先看中文模板展示板：references/examples/examples_catalog.html
 

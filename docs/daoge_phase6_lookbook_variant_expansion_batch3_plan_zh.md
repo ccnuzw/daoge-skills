@@ -56,7 +56,7 @@
 
 两条新入口都必须满足：
 
-- `run_example_catalog_prepare.js --example-id ...` 跑通到 `prepare`
+- `scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir out` 跑通到 `prepare`
 - `prompt_validation_report.json`
   - `duplicatePromptCount: 0`
   - `qualityGates.ok: true`
