@@ -22,10 +22,12 @@
 
 则不必强行进入完整本地 `prepare -> execute` 路线。
 
-推荐先运行：
+推荐先准备工作台，让 DAOGE 根据任务和本地环境生成可审阅产物：
 
 ```bash
-node scripts/detect_runtime_mode.js
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
+  --output-dir /abs/path/output_dir
 ```
 
 然后再决定走哪条路径。
@@ -55,11 +57,7 @@ node scripts/detect_runtime_mode.js
 - 做 DAOGE intake
 - 做模板选择
 - 做 prompt structuring
-- 如果需要，产出 `prompts.generated.json` 或等价 prompt 摘要
-- 推荐补一份稳定交付物：
-  - `host_native_prompt_pack.json`
-  - `host_native_summary.md`
-  - `host_native_summary.html`
+- 产出 `debug/prompts.generated.json`
 - 把真正的出图动作交给宿主原生图像工具
 - 当宿主侧出图完成后，再把结果回填回 DAOGE 结果链
 
@@ -67,7 +65,7 @@ node scripts/detect_runtime_mode.js
 
 - 保留 DAOGE 的“规划能力”
 - 不伪造本地 runner 的执行产物
-- 让宿主侧接手时仍然有一份结构化交接包
+- 让宿主侧接手时仍然有一份结构化提示词清单
 
 推荐入口：
 

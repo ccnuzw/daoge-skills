@@ -1,3 +1,5 @@
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+
 # DAOGE 第六阶段：Portrait Fashion 家族第二批正式变体扩展计划
 
 ## 目标

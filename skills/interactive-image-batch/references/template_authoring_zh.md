@@ -169,10 +169,10 @@
 
 位置：
 
-- `detect_daoge_mode.js`
-- `scaffold_prompt_bundle.js`
-- `materialize_prompt_drafts.js`
-- `validate_prompt_bundle.js`
+- `scripts/daoge.js prepare`
+- `src/domain/prompt_builder.js`
+- `src/domain/material_resolver.js`
+- `src/contracts/index.js`
 
 职责：
 

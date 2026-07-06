@@ -28,68 +28,62 @@ node scripts/daoge.js <command> [options]
 - `execute`：执行任务，支持文生图、图生图、mask 编辑、批量、干跑
 - `rerun`：基于上次结果只复跑失败项
 - `ingest`：回填宿主原生图像工具结果
-- `refresh`：从已有结果刷新工作台
+- `review`：从已有结果刷新工作台并进入复核视图
 
 ## 常用路径
 
-准备任务：
+Dry-run 验流程：
 
 ```bash
-node scripts/daoge.js prepare \
-  --task-spec /abs/path/task_spec.json \
-  --strategy-file /abs/path/prompt_strategy.json \
-  --prompts-file /abs/path/prompts.generated.json \
-  --output-dir /abs/path/output
+node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
+node scripts/daoge.js execute --output-dir out --dry-run true --batch-size 1
+open out/workspace/index.html
 ```
 
-执行任务：
+真实 provider 小样本：
 
 ```bash
-node scripts/daoge.js execute \
-  --prompts-file /abs/path/prompts.generated.json \
-  --task-spec /abs/path/task_spec.json \
-  --env-file /abs/path/.env \
-  --output-dir /abs/path/output
-```
-
-小样测试：
-
-```bash
-node scripts/daoge.js execute \
-  --prompts-file /abs/path/prompts.generated.json \
-  --task-spec /abs/path/task_spec.json \
-  --env-file /abs/path/.env \
-  --dry-run true \
-  --batch-size 1 \
-  --output-dir /abs/path/output
-```
-
-失败复跑：
-
-```bash
-node scripts/daoge.js rerun \
-  --prompts-file /abs/path/prompts.generated.json \
-  --resume-manifest /abs/path/output/internal/local_execution_raw.json \
-  --failed-only true \
-  --env-file /abs/path/.env \
-  --output-dir /abs/path/rerun_output
+node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
+node scripts/daoge.js execute --output-dir out --env-file .env --batch-size 1 --concurrency 1
+open out/workspace/results.html
 ```
 
 宿主结果回填：
 
 ```bash
+node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
+node scripts/daoge.js ingest --results-file host_native_results.json --output-dir out
+open out/workspace/index.html
+```
+
+如宿主侧另有交接包，可额外传：
+
+```bash
 node scripts/daoge.js ingest \
-  --prompt-pack-file /abs/path/host_native_prompt_pack.json \
-  --results-file /abs/path/host_results.json \
-  --output-dir /abs/path/output
+  --results-file host_native_results.json \
+  --output-dir out \
+  --prompt-pack-file host_native_prompt_pack.json
+```
+
+### 维护者高级用法
+
+命令行复跑需要上次执行记录。普通用户优先从 `workspace/issues.html` 查看下一步。
+
+```bash
+node scripts/daoge.js rerun \
+  --prompts-file /abs/path/out/debug/prompts.generated.json \
+  --resume-manifest /abs/path/out/internal/local_execution_raw.json \
+  --failed-only true \
+  --env-file /abs/path/.env \
+  --output-dir /abs/path/out_rerun
 ```
 
 ## 输出结构
 
-- `workspace/`：用户页面
+- `workspace/`：用户页面，只稳定暴露 `index.html`、`prepare.html`、`results.html`、`issues.html`、`record.html`
 - `assets/`：用户资产
 - `internal/`：机器状态和页面视图模型
-- `debug/`：维护诊断
+- `debug/`：维护诊断；对用户稳定的是 `debug/prompts.generated.json`，其他文件可随实现调整
 
 `internal/workspace_state.json` 是唯一工作台状态源。页面只读 `internal/view_models/*.json`。
 

@@ -1,0 +1,23 @@
+[
+  {
+    "index": "001",
+    "title": "宿主成功结果",
+    "requestMode": "prompt-only",
+    "status": "success",
+    "output": "host_outputs/success.png"
+  },
+  {
+    "index": "002",
+    "title": "宿主待复核结果",
+    "requestMode": "reference-assisted",
+    "status": "needs_review",
+    "output": "host_outputs/review.png"
+  },
+  {
+    "index": "003",
+    "title": "宿主失败结果",
+    "requestMode": "prompt-only",
+    "status": "failed",
+    "error": "宿主侧生成失败"
+  }
+]

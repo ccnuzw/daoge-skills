@@ -1,3 +1,5 @@
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+
 # DAOGE Catalog 试运行回归报告
 
 ## 本轮范围
@@ -20,8 +22,8 @@
 
 - `task_spec.quickstart.json`
 - `prompt_strategy.quickstart.json`
-- `prepare/preflight_board.html`
-- `prepare/prompt_preview.html`
+- `prepare/workspace/index.html`
+- `prepare/workspace/prepare.html`
 
 说明：
 
@@ -104,6 +106,6 @@
 
 下一轮不建议再扩模板数量，优先做一轮“摘要与默认池语义贴脸化”：
 
-1. 让 `render_prompt_preview.js` / `render_preflight_dashboard.js` / `run_summary` 按模板家族显示不同摘要字段
+1. 让 `scripts/daoge.js prepare` 产出的工作台摘要按模板家族显示不同字段
 2. 让 `build_example_quickstart.js` 的默认池按模板类型更贴脸
 3. 再抽 3 到 5 个入口做第二轮试运行复核

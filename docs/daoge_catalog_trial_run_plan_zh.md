@@ -1,3 +1,5 @@
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+
 # DAOGE Catalog 试运行回归计划
 
 ## 目标
@@ -62,8 +64,8 @@
 3. 检查是否成功生成：
    - `task_spec.quickstart.json`
    - `prompt_strategy.quickstart.json`
-   - `prepare/preflight_board.html`
-   - `prepare/prompt_preview.html`
+   - `prepare/workspace/prepare.html`
+   - `prepare/workspace/prepare.html`
 4. 审查：
    - 入口命名是否清楚
    - 预检文案是否像真实任务

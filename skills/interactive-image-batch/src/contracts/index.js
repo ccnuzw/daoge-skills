@@ -1,6 +1,9 @@
 const {
   toArray,
   normalizeText,
+  STABLE_CLI_COMMANDS,
+  STABLE_USER_WORKSPACE_PATHS,
+  STABLE_DEBUG_PATHS,
   ISSUE_TYPES,
   RESULT_STATUSES,
   ASSET_KINDS,
@@ -35,7 +38,28 @@ const CONTRACTS = {
     file: 'internal/view_models/*.json',
     required: ['schemaVersion', 'pageId', 'title', 'task', 'primaryAction', 'sections'],
   },
+  hostNativeResults: {
+    file: 'host_native_results.json',
+    required: [],
+  },
 };
+const HOST_NATIVE_REQUEST_MODES = ['prompt-only', 'reference-assisted', 'masked-edit'];
+const HOST_NATIVE_STATUSES = ['success', 'needs_review', 'failed'];
+const HOST_NATIVE_RESULT_FIELDS = [
+  'index',
+  'title',
+  'requestMode',
+  'status',
+  'output',
+  'slotId',
+  'shotLabel',
+  'scene',
+  'composition',
+  'textPolicy',
+  'error',
+  'styleFamily',
+  'slotRole',
+];
 
 function validateObject(name, value, required = []) {
   const errors = [];
@@ -149,9 +173,66 @@ function validatePromptList(prompts = []) {
   return { ok: errors.length === 0, errors, warnings: [] };
 }
 
+function validateHostNativeResults(results) {
+  const errors = [];
+  if (!Array.isArray(results)) {
+    errors.push('host_native_results 必须是数组');
+    return { ok: false, errors, warnings: [] };
+  }
+  results.forEach((item, index) => {
+    const label = `host_native_results[${index}]`;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      errors.push(`${label} 必须是对象`);
+      return;
+    }
+    Object.keys(item).forEach((key) => {
+      if (!HOST_NATIVE_RESULT_FIELDS.includes(key)) errors.push(`${label} 不支持字段: ${key}`);
+    });
+    ['index', 'title', 'requestMode', 'status'].forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(item, key)) errors.push(`${label} 缺少字段: ${key}`);
+    });
+    if (Object.prototype.hasOwnProperty.call(item, 'index') && typeof item.index !== 'string' && typeof item.index !== 'number') {
+      errors.push(`${label}.index 必须是字符串或数字`);
+    }
+    if (Object.prototype.hasOwnProperty.call(item, 'title')) expectType(errors, `${label}.title`, item.title, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'requestMode')) {
+      expectType(errors, `${label}.requestMode`, item.requestMode, 'string');
+      if (typeof item.requestMode === 'string') expectEnum(errors, `${label}.requestMode`, item.requestMode, HOST_NATIVE_REQUEST_MODES);
+    }
+    if (Object.prototype.hasOwnProperty.call(item, 'output')) expectType(errors, `${label}.output`, item.output, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'error')) expectType(errors, `${label}.error`, item.error, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'shotLabel')) expectType(errors, `${label}.shotLabel`, item.shotLabel, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'slotId')) expectType(errors, `${label}.slotId`, item.slotId, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'scene')) expectType(errors, `${label}.scene`, item.scene, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'composition')) expectType(errors, `${label}.composition`, item.composition, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'textPolicy')) expectType(errors, `${label}.textPolicy`, item.textPolicy, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'styleFamily')) expectType(errors, `${label}.styleFamily`, item.styleFamily, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'slotRole')) expectType(errors, `${label}.slotRole`, item.slotRole, 'string');
+    if (Object.prototype.hasOwnProperty.call(item, 'request_mode')) {
+      errors.push(`${label} 使用旧字段 request_mode，应使用 requestMode`);
+    }
+    if (Object.prototype.hasOwnProperty.call(item, 'hostNativeStatus')) {
+      errors.push(`${label} 使用内部字段 hostNativeStatus，应使用 status`);
+    }
+    if (Object.prototype.hasOwnProperty.call(item, 'status')) {
+      expectType(errors, `${label}.status`, item.status, 'string');
+      if (typeof item.status === 'string') expectEnum(errors, `${label}.status`, item.status, HOST_NATIVE_STATUSES);
+    }
+    if (['success', 'needs_review'].includes(item.status) && !normalizeText(item.output)) {
+      errors.push(`${label}.output 在 ${item.status} 状态下必填`);
+    }
+  });
+  return { ok: errors.length === 0, errors, warnings: [] };
+}
+
 function assertContract(name, value) {
   const contract = CONTRACTS[name];
   if (!contract) throw new Error(`未知契约: ${name}`);
+  if (name === 'hostNativeResults') {
+    const report = validateHostNativeResults(value);
+    if (!report.ok) throw new Error(report.errors.join('; '));
+    return true;
+  }
   const errors = validateObject(name, value, contract.required);
   if (!errors.length) {
     if (name === 'runPlan') errors.push(...validateRunPlan(value));
@@ -319,9 +400,16 @@ function validateViewModel(model = {}) {
 
 module.exports = {
   CONTRACTS,
+  STABLE_CLI_COMMANDS,
+  STABLE_USER_WORKSPACE_PATHS,
+  STABLE_DEBUG_PATHS,
   validateAction,
   validateTaskSpec,
   validatePromptStrategy,
   validatePromptList,
+  validateHostNativeResults,
+  HOST_NATIVE_RESULT_FIELDS,
+  HOST_NATIVE_REQUEST_MODES,
+  HOST_NATIVE_STATUSES,
   assertContract,
 };

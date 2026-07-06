@@ -1,3 +1,5 @@
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+
 # DAOGE 第七阶段中文 Catalog 单页试用回归报告
 
 日期：2026-05-19  
@@ -71,8 +73,8 @@ node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/pa
 - 结果：
   - `task_spec.quickstart.json`
   - `prompt_strategy.quickstart.json`
-  - `prepare/preflight_board.html`
-  - `prepare/prompt_preview.html`
+  - `prepare/workspace/prepare.html`
+  - `prepare/workspace/prepare.html`
 
 ### 2. 电商主图
 
@@ -80,8 +82,8 @@ node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/pa
 - 结果：
   - `task_spec.quickstart.json`
   - `prompt_strategy.quickstart.json`
-  - `prepare/preflight_board.html`
-  - `prepare/prompt_preview.html`
+  - `prepare/workspace/prepare.html`
+  - `prepare/workspace/prepare.html`
 
 ### 3. 口播分镜整板
 
@@ -89,8 +91,8 @@ node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/pa
 - 结果：
   - `task_spec.quickstart.json`
   - `prompt_strategy.quickstart.json`
-  - `prepare/preflight_board.html`
-  - `prepare/prompt_preview.html`
+  - `prepare/workspace/prepare.html`
+  - `prepare/workspace/prepare.html`
   - `storyboard_bundle.validation.quickstart.json`
 
 ## 五、当前判断

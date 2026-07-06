@@ -1,0 +1,17 @@
+{
+  "content_brief": "真实 provider 小样本验收任务",
+  "output_mode": "single photoreal image",
+  "style_requirements": ["clean composition", "single sample"],
+  "source_files": [],
+  "total_count": 1,
+  "batch_size": 1,
+  "concurrency": 1,
+  "retry_count": 0,
+  "timeout_seconds": 60,
+  "width": 512,
+  "height": 512,
+  "variation_requirements": ["one provider smoke sample"],
+  "text_policy": "no readable text",
+  "preview_count": 1,
+  "require_confirmation": false
+}

@@ -55,7 +55,7 @@ test('execute success-only outputs results, selected and exports', () => {
   assert.equal(fs.existsSync(path.join(outputDir, 'assets', 'exports', 'report.html')), true);
 });
 
-test('full refresh routes missing success output to issues without fake selected exports', () => {
+test('review command routes missing success output to issues without fake selected exports', () => {
   const outputDir = refreshWithManifest({
     runtimeMode: 'local-batch-runner',
     selectedCount: 1,

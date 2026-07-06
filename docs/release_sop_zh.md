@@ -27,12 +27,19 @@ git status --short
 git log --oneline -3
 ```
 
-如有脚本改动，至少做语法检查：
+发布前必须跑契约测试和全量测试：
 
 ```bash
-node --check skills/interactive-image-batch/scripts/daoge.js execute
-node --check skills/interactive-image-batch/scripts/render_completion_report.js
-node --check skills/interactive-image-batch/scripts/render_result_hub.js
+npm --prefix skills/interactive-image-batch run test:contracts
+npm --prefix skills/interactive-image-batch test
+```
+
+如有脚本改动，可额外做语法检查：
+
+```bash
+node --check skills/interactive-image-batch/scripts/daoge.js
+node --check skills/interactive-image-batch/src/cli/daoge.js
+node --check skills/interactive-image-batch/src/renderers/workspace_page.js
 ```
 
 如有 zip 包分发，建议额外检查：

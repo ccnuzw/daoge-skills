@@ -43,6 +43,8 @@ node scripts/daoge.js prepare \
 
 - `host_native_results.json`
 
+如果结果里的 `output` 是相对路径，它必须相对 `host_native_results.json` 所在目录。
+
 优先参考：
 
 - `references/host_native_results.schema.json`

@@ -1,3 +1,5 @@
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+
 # DAOGE 第三轮意图入口试用回归报告
 
 ## 本轮范围
@@ -21,8 +23,8 @@
 - `task_spec.quickstart.json`
 - `prompt_strategy.quickstart.json`
 - `prompts.generated.quickstart.json`
-- `prepare/preflight_board.html`
-- `prepare/prompt_preview.html`
+- `prepare/workspace/prepare.html`
+- `prepare/workspace/prepare.html`
 
 这说明：
 

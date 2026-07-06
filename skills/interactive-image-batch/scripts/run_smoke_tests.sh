@@ -9,7 +9,15 @@ find "$SKILL_ROOT/src" -name '*.js' -print0 | xargs -0 -I{} node --check '{}'
 find "$SKILL_ROOT/scripts" -maxdepth 1 -name '*.js' -print0 | xargs -0 -I{} node --check '{}'
 
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
+mock_pid=""
+cleanup() {
+  if test -n "${mock_pid:-}"; then
+    kill "$mock_pid" 2>/dev/null || true
+    wait "$mock_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
 
 cat > "$tmp_dir/.env" <<'ENV'
 OPENAI_BASE_URL=https://example.com/v1
@@ -39,6 +47,63 @@ node "$SKILL_ROOT/scripts/daoge.js" execute \
 test -f "$prepare_dir/workspace/results.html"
 test -f "$prepare_dir/internal/local_execution_raw.json"
 test -f "$prepare_dir/assets/exports/report.html"
+
+echo "[smoke] execute mock provider after prepare"
+mock_port_file="$tmp_dir/mock_provider.port"
+node - "$mock_port_file" <<'NODE' &
+const fs = require('fs');
+const http = require('http');
+const portFile = process.argv[2];
+const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pS3FoAAAAAASUVORK5CYII=';
+const server = http.createServer((req, res) => {
+  req.on('data', () => {});
+  req.on('end', () => {
+    if (req.method !== 'POST' || !req.url.includes('/images/generations')) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'not found' } }));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      data: [{ b64_json: tinyPng, revised_prompt: 'mock revised prompt' }],
+      model: 'gpt-image-2'
+    }));
+  });
+});
+server.listen(0, '127.0.0.1', () => {
+  fs.writeFileSync(portFile, String(server.address().port));
+});
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+NODE
+mock_pid="$!"
+for _ in $(seq 1 50); do
+  test -s "$mock_port_file" && break
+  sleep 0.1
+done
+test -s "$mock_port_file"
+mock_port="$(cat "$mock_port_file")"
+mock_env="$tmp_dir/mock.env"
+cat > "$mock_env" <<ENV
+OPENAI_BASE_URL=http://127.0.0.1:${mock_port}/v1
+OPENAI_API_KEY=test-key
+OPENAI_MODEL=gpt-image-2
+ENV
+mock_dir="$tmp_dir/mock_provider"
+node "$SKILL_ROOT/scripts/daoge.js" prepare \
+  --task-spec "$SKILL_ROOT/tests/fixtures/task_spec.provider_small.json" \
+  --output-dir "$mock_dir" \
+  --batch-size 1 > /dev/null
+node "$SKILL_ROOT/scripts/daoge.js" execute \
+  --env-file "$mock_env" \
+  --output-dir "$mock_dir" \
+  --batch-size 1 \
+  --concurrency 1 \
+  --width 32 \
+  --height 32 \
+  --retry-count 0 > /dev/null
+test -f "$mock_dir/workspace/results.html"
+node -e "const m=require('$mock_dir/internal/local_execution_raw.json'); if(m.dryRun!==false||m.success!==1) process.exit(1)"
+test "$(find "$mock_dir/assets/results" -type f | wc -l | tr -d ' ')" -ge 1
 
 echo "[smoke] relative reference and mask"
 prompt_dir="$tmp_dir/prompt_pack"
@@ -76,29 +141,19 @@ node -e "const q=require('$missing_dir/internal/issue_queue.json'); if(!q.items.
 
 echo "[smoke] host ingest"
 host_dir="$tmp_dir/host"
-node -e "require('fs').writeFileSync('$tmp_dir/host.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pS3FoAAAAAASUVORK5CYII=', 'base64'))"
-cat > "$tmp_dir/host_pack.json" <<JSON
-{
-  "runtime_mode": "host-native-image-tool",
-  "prompt_count": 1,
-  "task_summary": { "content_brief": "人物主视觉", "batch_size": 1, "width": 1024, "height": 1024 }
-}
-JSON
-host_source_dir="$tmp_dir/host_source"
-mkdir -p "$host_source_dir"
-cp "$tmp_dir/host.png" "$host_source_dir/host.png"
-cat > "$host_source_dir/host_results.json" <<JSON
-[
-  { "index": "001", "title": "人物主视觉", "requestMode": "prompt-only", "output": "host.png", "status": "success" }
-]
-JSON
+node "$SKILL_ROOT/scripts/daoge.js" prepare \
+  --task-spec "$SKILL_ROOT/tests/fixtures/task_spec.minimal.json" \
+  --output-dir "$host_dir" \
+  --batch-size 1 > /dev/null
 node "$SKILL_ROOT/scripts/daoge.js" ingest \
-  --prompt-pack-file "$tmp_dir/host_pack.json" \
-  --results-file "$host_source_dir/host_results.json" \
+  --prompt-pack-file "$SKILL_ROOT/tests/fixtures/host_native_prompt_pack.json" \
+  --results-file "$SKILL_ROOT/tests/fixtures/host_native_results.mixed.json" \
   --output-dir "$host_dir" > /dev/null
 test -f "$host_dir/workspace/results.html"
 test -f "$host_dir/internal/execution_manifest.json"
 test "$(find "$host_dir/assets/selected" -type f | wc -l | tr -d ' ')" -ge 1
+test "$(find "$host_dir/assets/review" -type f | wc -l | tr -d ' ')" -ge 1
+test "$(find "$host_dir/assets/issues" -type f | wc -l | tr -d ' ')" -ge 1
 
 echo "[smoke] issue page"
 issue_dir="$tmp_dir/issues"
@@ -115,7 +170,7 @@ cat > "$tmp_dir/issue_manifest.json" <<JSON
   ]
 }
 JSON
-node "$SKILL_ROOT/scripts/daoge.js" refresh \
+node "$SKILL_ROOT/scripts/daoge.js" review \
   --output-dir "$issue_dir" \
   --manifest-file "$tmp_dir/issue_manifest.json" > /dev/null
 test -f "$issue_dir/workspace/issues.html"

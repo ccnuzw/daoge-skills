@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const path = require('path');
-const { parseArgs } = require('../shared/workspace');
+const { parseArgs, STABLE_CLI_COMMANDS } = require('../shared/workspace');
 const { prepareTask } = require('../domain/prepare_service');
 const { executeTask } = require('../domain/execution_service');
 const { ingestHostNativeResults } = require('../providers/host_native');
@@ -13,7 +13,12 @@ function printResult(result) {
 function commandFrom(argv) {
   const [command, ...rest] = argv;
   if (command && !command.startsWith('--')) return { command, rest };
-  return { command: 'prepare', rest: argv };
+  return { command: null, rest: argv };
+}
+
+function unknownCommandError(command) {
+  const name = command || '缺少命令';
+  return new Error(`未知命令：${name}. 支持命令：${STABLE_CLI_COMMANDS.join(', ')}`);
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -76,7 +81,7 @@ async function main(argv = process.argv.slice(2)) {
       outputDir: args['output-dir'],
     });
   }
-  if (command === 'refresh') {
+  if (command === 'review') {
     return refreshWorkspace({
       outputDir: path.resolve(args['output-dir'] || process.cwd()),
       taskSpecFile: args['task-spec'],
@@ -85,7 +90,7 @@ async function main(argv = process.argv.slice(2)) {
       resultsFile: args['results-file'],
     });
   }
-  throw new Error(`未知命令：${command}`);
+  throw unknownCommandError(command);
 }
 
 if (require.main === module) {
@@ -97,4 +102,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { main };
+module.exports = { main, commandFrom, STABLE_CLI_COMMANDS };

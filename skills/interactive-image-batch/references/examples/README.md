@@ -74,80 +74,65 @@
 
 ## Quickstart
 
-如果你想把某个 example 直接转成最小 `task_spec` 和 `prompt_strategy`，可以运行：
+如果你是第一次使用，先打开已提交的中文任务展示板：
 
 ```bash
-node scripts/build_example_quickstart.js \
-  --example-file references/examples/ui-mockups/ui_mockup_board.example.json \
-  --output-dir /tmp/daoge-example-quickstart
+open references/examples/examples_catalog.html
 ```
 
-输出：
-
-- `task_spec.quickstart.json`
-- `prompt_strategy.quickstart.json`
-
-这两个文件可以继续交给：
-
-- `scripts/validate_task_spec.js`
-- `scripts/validate_prompt_strategy.js`
-- 后续也可以接 `scripts/daoge.js prepare`
-
-如果你想直接从 example 跑到完整预检面板，可以运行：
+这个页面用于浏览任务类型和示例边界。真正开跑时，请把选中的 example 内容整理成最小 `task_spec.json`，再进入统一入口：
 
 ```bash
-node scripts/run_example_quickstart_prepare.js \
-  --example-file references/examples/ui-mockups/ui_mockup_board.example.json \
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
   --output-dir /tmp/daoge-example-prepare
 ```
 
-它会自动生成 quickstart 输入、通过校验、补齐最小 prompt draft，并产出：
-
-- `prepare/preflight_board.html`
-- `prepare/prompt_preview.html`
-- `prepare/daoge_preflight_dashboard.md`
-
-如果你不想手写路径，可以先列出 catalog：
+如果还要接真实 provider 小样本：
 
 ```bash
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --list true
+node scripts/daoge.js execute \
+  --output-dir /tmp/daoge-example-prepare \
+  --env-file /abs/path/.env \
+  --batch-size 1 \
+  --concurrency 1
 ```
 
-如果你是第一次使用，建议先看推荐起步入口：
+如果只想验流程、不消耗额度：
 
 ```bash
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --starter true
+node scripts/daoge.js execute \
+  --output-dir /tmp/daoge-example-prepare \
+  --dry-run true \
+  --batch-size 1
 ```
 
-如果你已经知道自己要做什么类型的任务，也可以直接按任务意图进入：
+产物入口：
+
+- `/tmp/daoge-example-prepare/workspace/index.html`
+- `/tmp/daoge-example-prepare/workspace/prepare.html`
+- `/tmp/daoge-example-prepare/workspace/results.html`
+- `/tmp/daoge-example-prepare/workspace/issues.html`
+- `/tmp/daoge-example-prepare/workspace/record.html`
+
+可选意图入口：
 
 ```bash
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent ui
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent academic
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent packaging
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent map
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent typography
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent cinematic
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent oralboard
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent financeboard
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent hostboard
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent productboard
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent eduboard
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent expertboard
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent testimonialboard
+node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir /tmp/daoge-example-prepare --intent ecommerce
 ```
 
-如果你想先打开一个可点击的中文任务展示板，可以运行：
+当前 `--intent` 用于辅助工作台文案和推荐动作，不替代 `task_spec.json`。
 
-```bash
-node scripts/render_example_catalog_board.js
-```
+常用起步类型：
 
-默认会生成：
+- `portrait`
+- `studio`
+- `ecommerce`
+- `packaging`
+- `cinematic`
+- `oralboard`
 
-- `references/examples/examples_catalog.html`
-
-这份 `examples_catalog.html` 就是当前 skill 的中文任务展示板，适合普通用户先浏览任务类型和入口，再决定是否继续看命令或内部字段。第一次使用优先只看 `portrait`、`studio`、`ecommerce`、`packaging`、`cinematic`、`oralboard` 这 6 个起步入口。
+第一次使用优先只看这 6 个起步入口。
 
 当前 catalog 已包含：
 

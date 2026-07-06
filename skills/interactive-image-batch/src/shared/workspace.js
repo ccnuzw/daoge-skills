@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const VIEW_IDS = ['index', 'prepare', 'results', 'issues', 'record'];
+const STABLE_CLI_COMMANDS = ['prepare', 'execute', 'ingest', 'rerun', 'review'];
 const V2_WORKSPACE_PAGE_FILES = {
   index: 'index.html',
   prepare: 'prepare.html',
@@ -9,6 +10,14 @@ const V2_WORKSPACE_PAGE_FILES = {
   issues: 'issues.html',
   record: 'record.html',
 };
+const STABLE_USER_WORKSPACE_PATHS = [
+  'workspace/index.html',
+  'workspace/prepare.html',
+  'workspace/results.html',
+  'workspace/issues.html',
+  'workspace/record.html',
+];
+const STABLE_DEBUG_PATHS = ['debug/prompts.generated.json'];
 const RETIRED_WORKSPACE_PAGE_REPLACEMENTS = {
   'workspace_home.html': 'workspace/index.html',
   'prepare_workspace.html': 'workspace/prepare.html',
@@ -381,7 +390,10 @@ function assertNoUserFacingInternalTerms(text, label = '用户页面') {
 
 module.exports = {
   VIEW_IDS,
+  STABLE_CLI_COMMANDS,
   V2_WORKSPACE_PAGE_FILES,
+  STABLE_USER_WORKSPACE_PATHS,
+  STABLE_DEBUG_PATHS,
   RETIRED_WORKSPACE_PAGE_REPLACEMENTS,
   ISSUE_TYPES,
   RESULT_STATUSES,

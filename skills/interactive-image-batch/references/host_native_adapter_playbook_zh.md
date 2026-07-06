@@ -160,6 +160,7 @@ node scripts/daoge.js ingest \
 原则：
 
 - 成功或待复核项要带 `output`
+- 相对 `output` 路径按 `host_native_results.json` 所在目录解析
 - 失败项尽量带 `error`
 
 ---
@@ -196,6 +197,7 @@ node scripts/daoge.js ingest \
 处理：
 
 - 检查宿主是否导出了真实图片路径
+- 如果写相对路径，确认它是相对 `host_native_results.json` 所在目录，而不是相对 DAOGE 输出目录
 
 ### 2. `status` 写成宿主私有值
 
@@ -229,6 +231,7 @@ node scripts/daoge.js ingest \
 处理：
 
 - 补 `scene / composition / textPolicy / slotId`
+- 如有分镜名，可补 `shotLabel`
 
 ---
 

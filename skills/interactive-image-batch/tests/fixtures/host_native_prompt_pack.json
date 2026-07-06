@@ -1,0 +1,10 @@
+{
+  "runtime_mode": "host-native-image-tool",
+  "prompt_count": 3,
+  "task_summary": {
+    "content_brief": "宿主原生验收任务",
+    "batch_size": 3,
+    "width": 512,
+    "height": 512
+  }
+}

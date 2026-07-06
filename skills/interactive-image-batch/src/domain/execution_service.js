@@ -120,6 +120,12 @@ function promptSourceFromRunPlan(outputDir) {
   return candidates.find((candidate) => fs.existsSync(path.resolve(candidate))) || null;
 }
 
+function materialBaseDirFromRunPlan(outputDir) {
+  const runPlan = readJsonIfExists(path.join(outputDir, 'internal', 'run_plan.json')) || {};
+  const baseDir = runPlan.materials?.baseDir;
+  return baseDir && fs.existsSync(path.resolve(baseDir)) ? path.resolve(baseDir) : null;
+}
+
 function resolvePromptsFile(options = {}, outputDir) {
   if (options.promptsFile) return path.resolve(options.promptsFile);
   const generated = path.join(outputDir, 'debug', 'prompts.generated.json');
@@ -257,7 +263,7 @@ async function executeTask(options = {}) {
     taskSpecFile,
     promptsFile: promptCopy,
     manifestFile: manifestPath,
-    materialBaseDir: taskSpecFile ? path.dirname(path.resolve(taskSpecFile)) : null,
+    materialBaseDir: materialBaseDirFromRunPlan(outputDir) || (taskSpecFile ? path.dirname(path.resolve(taskSpecFile)) : null),
     materialsFile: taskSpecFile,
   });
 
@@ -276,4 +282,5 @@ module.exports = {
   buildExecutionPlan,
   selectFailedPrompts,
   dryRunResults,
+  materialBaseDirFromRunPlan,
 };

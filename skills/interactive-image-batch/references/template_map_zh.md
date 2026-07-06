@@ -231,10 +231,10 @@ node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir 
 
 1. 先看 [../../README.md](../README.md)
 2. 再看这份中文任务地图
-3. 然后运行：
+3. 然后打开中文任务展示板：
 
 ```bash
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --starter true
+open references/examples/examples_catalog.html
 ```
 
 4. 或直接按任务意图运行：

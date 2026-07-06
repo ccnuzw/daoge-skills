@@ -25,7 +25,7 @@
    - 支持一图多格、一格多图、部分格子无图
    - 也支持“哪张图是某个分镜的遮罩图”
    - 让上传的图片和分镜对应关系独立于正文内容
-   - 如果素材来自桌面端上传、聊天附件或临时下载目录，建议先用 `scripts/import_reference_assets.js` 把它们复制到当前 run 目录，再自动生成 `reference_bindings.imported.json`
+   - 如果素材来自桌面端上传、聊天附件或临时下载目录，先把路径写入 `task_spec.json` / `content_manifest.json`，再用 `scripts/daoge.js prepare` 做解析和预检
 
 ## 设计原则
 
@@ -41,9 +41,9 @@
 
 - 已支持：
   - `task_spec.storyboard_plan`
-  - layout/content/render 三个 manifest 的校验
-- `reference_bindings.json`
-- `import_reference_assets.js` 的素材导入、落盘、重命名和绑定生成
+  - layout/content/render 三个 manifest 的结构化描述
+  - `reference_bindings.json`
+  - 通过 `task_spec.json` / prompt item 中的 `reference_images` 和 `mask_image` 解析素材路径
 - 生成 slot blueprint
 - 把 per-slot 的参考图、镜头备注、连续性备注带入 prompt slot 元数据
 - 支持通过 `mask_asset_ids` 把上传的遮罩图绑定到某个分镜
@@ -108,7 +108,7 @@
 
 - 普通参考图：放进 `asset_ids`
 - 遮罩图：放进 `mask_asset_ids`
-- 如果用户说“这些图是刚从桌面端上传的，你先帮我整理”，优先先走导入脚本，再生成 binding，而不是要求用户自己手动改绝对路径
+- 如果用户说“这些图是刚从桌面端上传的，你先帮我整理”，优先把素材路径写进当前任务说明或 prompt item，再运行 `scripts/daoge.js prepare` 预检
 - 如果用户说“我补一张遮罩图，只改分镜3右下角礼盒”，推荐写成：
 
 ```json
@@ -121,65 +121,33 @@
 }
 ```
 
-素材接入脚本示例：
+素材接入示例：
 
-```bash
-node scripts/import_reference_assets.js \
-  --task-spec /abs/path/task_spec.storyboard.json \
-  --output-dir /abs/path/run_output \
-  --references /abs/path/ref_01.png,/abs/path/ref_02.png \
-  --masks /abs/path/mask_01.png \
-  --slot-order shot_1,shot_2,shot_3
+```json
+{
+  "storyboard_plan": {
+    "slots": [
+      {
+        "slot_id": "shot_1",
+        "reference_images": ["/abs/path/ref_01.png"]
+      },
+      {
+        "slot_id": "shot_2",
+        "reference_images": ["/abs/path/ref_02.png"],
+        "mask_image": "/abs/path/mask_01.png"
+      }
+    ]
+  }
+}
 ```
 
-规则分析默认会尝试：
-
-- 从文件名中识别 `shot_1`、`shot_2`、`kv`
-- 从 `mask` / `遮罩` / `alpha` 识别遮罩图
-- 没有显式 slot 时按顺序绑定
-
-视觉分析可选开启：
+然后运行：
 
 ```bash
-node scripts/import_reference_assets.js \
+node scripts/daoge.js prepare \
   --task-spec /abs/path/task_spec.storyboard.json \
-  --output-dir /abs/path/run_output \
-  --references /abs/path/desktop_upload_01.png \
-  --enable-vision-analysis true \
-  --env-file /abs/path/.env
+  --output-dir /abs/path/run_output
 ```
-
-开启后会额外生成：
-
-- `reference_asset_analysis.json`
-
-里面会记录：
-
-- 规则推断结果
-- 视觉推荐结果
-- 最终采用的 slot 绑定
-
-自然语言绑定入口示例：
-
-```bash
-node scripts/import_reference_assets.js \
-  --task-spec /abs/path/task_spec.storyboard.json \
-  --output-dir /abs/path/run_output \
-  --references /abs/path/1.png,/abs/path/2.png,/abs/path/3.png \
-  --slot-order shot_1,shot_2 \
-  --binding-text "前两张按上传顺序对应 shot_1、shot_2，最后一张是 shot_2 的遮罩图"
-```
-
-当前优先支持：
-
-- `按上传顺序对应 ...`
-- `第一张 / 第二张 / 最后一张`
-- `... 是 shot_2 的遮罩图`
-
-如果你希望先由 LLM 理解复杂说明，再由系统整理成正式绑定，也可以走两段式：
-
-- `binding_intent_draft.json`
-- `binding_plan.json`
 
 推荐入口：
 

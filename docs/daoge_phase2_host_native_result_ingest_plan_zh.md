@@ -1,3 +1,5 @@
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+
 # DAOGE 第二阶段第四批优化计划
 
 ## 目标
@@ -18,13 +20,15 @@
 
 当前本地 runner 主线已经具备完整结果链：
 
-- `manifest.json`
-- `success.json`
-- `failed.json`
-- `needs_review.json`
-- `review_board.html`
-- `completion_board.html`
-- `result_hub.html`
+- `internal/execution_manifest.json`
+- `internal/issue_queue.json`
+- `internal/asset_library.json`
+- `internal/workspace_state.json`
+- `workspace/index.html`
+- `workspace/prepare.html`
+- `workspace/results.html`
+- `workspace/issues.html`
+- `workspace/record.html`
 
 但 `host-native` 路径仍然缺一个问题：
 
@@ -70,7 +74,7 @@
 - 读取 `host_native_prompt_pack.json`
 - 读取宿主侧结果清单
 - 生成最小 DAOGE 结果文件
-- 调用现有 HTML / Markdown 看板脚本
+- 调用现有工作台刷新链路
 
 建议输入：
 
@@ -80,19 +84,19 @@
 
 建议输出：
 
-- `manifest.json`
-- `success.json`
-- `failed.json`
-- `needs_review.json`
-- `rerun_candidates.json`
-- `operations_report.json`
-- `operations_report.md`
-- `daoge_result_hub.md`
-- `result_hub.html`
-- `review_board.html`
-- `completion_board.html`
-- `run_overview.html`
-- `rerun_board.html`
+- `internal/host_native_execution.json`
+- `internal/execution_manifest.json`
+- `internal/issue_queue.json`
+- `internal/asset_library.json`
+- `internal/workspace_state.json`
+- `debug/host_native_task_spec.json`
+- `workspace/index.html`
+- `workspace/prepare.html`
+- `workspace/results.html`
+- `workspace/issues.html`
+- `workspace/record.html`
+
+说明：`internal/` 和 `debug/` 是机器状态与诊断区，不作为普通用户稳定入口；普通用户稳定入口只看 `workspace/*.html`。
 
 ### Task 2. 定义最小结果清单格式
 
@@ -111,21 +115,20 @@
 
 其中：
 
-- `status=success` 进入 `success.json`
-- `status=failed` 进入 `failed.json`
-- `status=needs_review` 进入 `needs_review.json`
+- `status=success` 进入 `internal/execution_manifest.json`，资产落到 `assets/results/`，用户从 `workspace/results.html` 查看
+- `status=failed` 进入 `internal/issue_queue.json`，资产落到 `assets/issues/`，用户从 `workspace/issues.html` 处理
+- `status=needs_review` 进入 `internal/issue_queue.json` 和 `internal/asset_library.json`，资产落到 `assets/review/`，用户从 `workspace/results.html` 复核
+
+旧的 `success.json`、`failed.json`、`needs_review.json` 不再作为稳定输出。
 
 ### Task 3. 复用现有结果链路
 
 这批不新造结果门户，而是尽量复用现有：
 
-- `render_result_hub.js`
-- `render_result_hub_board.js`
-- `render_review_board.js`
-- `render_completion_report.js`
-- `render_completion_board.js`
-- `render_run_overview.js`
-- `render_rerun_board.js`
+- `src/renderers/workspace_page.js`
+- `src/domain/workspace_service.js`
+- `src/domain/asset_library.js`
+- `src/domain/issue_queue.js`
 
 目标是让 `host-native` 结果回填后，也能和本地 runner 一样进入统一浏览路径。
 
@@ -159,7 +162,7 @@
 
 1. 存在可执行的 `scripts/daoge.js ingest`
 2. 能把宿主结果清单转成 DAOGE 最小结果链
-3. 能生成 `result_hub / review_board / completion_board` 等结果入口
+3. 能生成 `workspace/index.html`、`workspace/prepare.html`、`workspace/results.html`、`workspace/issues.html`、`workspace/record.html`
 4. smoke test 有对应覆盖
 5. 统一 smoke 全绿
 

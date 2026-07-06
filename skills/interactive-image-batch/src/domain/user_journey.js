@@ -130,7 +130,7 @@ function decidePrimaryAction(stage, runPlan = {}, executionManifest = {}, issueQ
     return action({
       id: 'open_record',
       label: '看任务记录',
-      intent: 'review_run_record',
+      intent: 'review_record',
       targetPage: 'record.html',
       reply: '打开任务记录',
       reason: '本轮已经进入归档回看。',

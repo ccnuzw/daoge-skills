@@ -1,39 +1,49 @@
 const path = require('path');
 const {
-  ensureV2Layout,
   readJson,
   writeJson,
   toArray,
   normalizeText,
+  ensureV2Layout,
 } = require('../shared/workspace');
 const { refreshWorkspace } = require('../domain/workspace_service');
 const { resolveOutputPathFromFile } = require('../domain/material_resolver');
+const { assertContract } = require('../contracts');
 
 function normalizeHostResult(item = {}, index = 0, resultsFile = null) {
-  const statusText = normalizeText(item.status || item.hostNativeStatus, 'success').toLowerCase();
-  const failed = ['failed', 'error', 'timeout'].includes(statusText);
-  const needsReview = ['needs_review', 'review', 'manual_review'].includes(statusText);
+  const statusText = normalizeText(item.status).toLowerCase();
+  if (!['success', 'needs_review', 'failed'].includes(statusText)) {
+    throw new Error(`host_native_results[${index}].status 不支持: ${item.status}`);
+  }
+  const failed = statusText === 'failed';
+  const needsReview = statusText === 'needs_review';
   const output = resultsFile ? resolveOutputPathFromFile(item.output, resultsFile) : (item.output ? path.resolve(item.output) : null);
   return {
     ok: !failed,
     index: item.index ?? index + 1,
-    title: item.title || item.slug || `宿主结果 ${index + 1}`,
+    title: item.title || `宿主结果 ${index + 1}`,
     output,
-    requestMode: item.requestMode || item.request_mode || 'prompt-only',
-    hostNativeStatus: needsReview ? 'needs_review' : (failed ? 'failed' : 'success'),
+    requestMode: item.requestMode,
+    status: needsReview ? 'needs_review' : (failed ? 'failed' : 'success'),
     error: failed ? (item.error || '宿主侧生成失败') : null,
-    shotLabel: item.shotLabel || item.shot_label || null,
-    slotId: item.slotId || item.slot_id || null,
+    shotLabel: item.shotLabel || null,
+    slotId: item.slotId || null,
     scene: item.scene || null,
+    composition: item.composition || null,
+    textPolicy: item.textPolicy || null,
+    styleFamily: item.styleFamily || null,
+    slotRole: item.slotRole || null,
   };
 }
 
 function ingestHostNativeResults(options = {}) {
   if (!options.resultsFile) throw new Error('缺少 --results-file');
-  const outputDir = ensureV2Layout(options.outputDir || process.cwd());
   const promptPack = options.promptPackFile ? readJson(options.promptPackFile) : {};
   const resultsFile = path.resolve(options.resultsFile);
-  const results = toArray(readJson(resultsFile)).map((item, index) => normalizeHostResult(item, index, resultsFile));
+  const rawResults = readJson(resultsFile);
+  assertContract('hostNativeResults', rawResults);
+  const outputDir = ensureV2Layout(options.outputDir || process.cwd());
+  const results = toArray(rawResults).map((item, index) => normalizeHostResult(item, index, resultsFile));
   const manifest = {
     runtimeMode: 'host-native-image-tool',
     dryRun: false,
@@ -45,14 +55,14 @@ function ingestHostNativeResults(options = {}) {
     defaultSize: promptPack.task_summary?.width && promptPack.task_summary?.height
       ? `${promptPack.task_summary.width}x${promptPack.task_summary.height}`
       : null,
-    success: results.filter((item) => item.hostNativeStatus === 'success').length,
-    failed: results.filter((item) => item.hostNativeStatus === 'failed').length,
+    success: results.filter((item) => item.status === 'success').length,
+    failed: results.filter((item) => item.status === 'failed').length,
     skipped: 0,
     batches: [{
       batchNumber: 1,
       totalBatches: 1,
-      success: results.filter((item) => item.hostNativeStatus === 'success').length,
-      failed: results.filter((item) => item.hostNativeStatus === 'failed').length,
+      success: results.filter((item) => item.status === 'success').length,
+      failed: results.filter((item) => item.status === 'failed').length,
       skipped: 0,
       results,
     }],

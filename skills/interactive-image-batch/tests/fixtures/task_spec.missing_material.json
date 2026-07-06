@@ -1,0 +1,18 @@
+{
+  "content_brief": "缺素材验收任务",
+  "output_mode": "reference assisted product visual",
+  "style_requirements": ["keep product shape"],
+  "reference_images": ["materials/missing-reference.png"],
+  "source_files": ["materials/missing-reference.png"],
+  "total_count": 1,
+  "batch_size": 1,
+  "concurrency": 1,
+  "retry_count": 0,
+  "timeout_seconds": 60,
+  "width": 512,
+  "height": 512,
+  "variation_requirements": ["single blocked sample"],
+  "text_policy": "no readable text",
+  "preview_count": 1,
+  "require_confirmation": false
+}

@@ -38,7 +38,7 @@
   - 已验证 / 未验证
 - 结果回填：
   - 已验证 / 未验证
-- `result_hub / review_board / completion_board`：
+- `workspace/index.html / workspace/results.html / workspace/issues.html`：
   - 已验证 / 未验证
 
 ---

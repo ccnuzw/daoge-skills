@@ -119,8 +119,8 @@ When the task is a storyboard board instead of a single image set:
 Recommended path:
 
 1. put `storyboard_plan` into `task_spec.json`
-2. run `scripts/validate_storyboard_bundle.js --task-spec /abs/path/task_spec.normalized.json`
-3. pass the resulting storyboard bundle into `scaffold_prompt_bundle.js`
+2. run `scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir /abs/path/out`
+3. inspect `workspace/prepare.html` and `debug/prompt_validation_report.json`
 
 See `references/storyboard_board_mode.md` and `references/examples/storyboard/`.
 

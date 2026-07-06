@@ -71,47 +71,34 @@ Example:
 
 ## Preview flow
 
-Recommended preflight sequence:
+Recommended preflight sequence starts with the single DAOGE entrypoint:
 
 ```bash
-node scripts/scaffold_prompt_bundle.js \
-  --strategy-file /abs/path/prompt_strategy.normalized.json \
-  --output-file /abs/path/prompt_slots.json
-
-node scripts/materialize_prompt_drafts.js \
-  --slots-file /abs/path/prompt_slots.json \
-  --output-file /abs/path/prompt_draft_bundle.json
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
+  --batch-size 30 \
+  --output-dir /abs/path/out
 ```
 
-Then revise `prompt_draft_bundle.json` into `prompts.generated.json`, validate it, and render the preview.
-
-Use `scripts/render_prompt_preview.js` to create:
-
-- `prompt_preview.md`
-- `batch_plan.json`
-
-Use `scripts/render_prompt_preview_board.js` to create:
-
-- `prompt_preview.html`
-
-Use `scripts/validate_prompt_bundle.js` to create:
-
-- `prompt_validation_report.json`
-
-Typical usage:
+If you already have a curated prompt list, pass it directly:
 
 ```bash
-node scripts/validate_prompt_bundle.js \
-  --prompts-file /abs/path/prompts.generated.json \
-  --task-spec /abs/path/task_spec.normalized.json
-
-node scripts/render_prompt_preview.js \
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
   --prompts-file /abs/path/prompts.generated.json \
   --batch-size 30 \
-  --preview-count 12
+  --output-dir /abs/path/out
 ```
 
-The preview file should be treated as the human review surface. It should summarize:
+`prepare` validates inputs and creates:
+
+- `debug/prompts.generated.json`
+- `debug/prompt_validation_report.json`
+- `internal/batch_plan.json`
+- `workspace/index.html`
+- `workspace/prepare.html`
+
+The workspace pages should be treated as the human review surface. They should summarize:
 
 - style-family distribution
 - grade/intensity distribution when present
@@ -180,9 +167,9 @@ Optional flags:
 
 For storyboard board workflows:
 
-- validate `task_spec.storyboard_plan` first
-- run `scripts/validate_storyboard_bundle.js`
-- pass `--storyboard-file /abs/path/storyboard_bundle.validation.json` into `scripts/scaffold_prompt_bundle.js`
+- keep storyboard planning fields in `task_spec.json`
+- run `scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir /abs/path/out`
+- inspect `workspace/prepare.html` and `debug/prompt_validation_report.json` before real execution
 - slots may mix `reference-assisted` and `prompt-only` modes
 - missing `reference_images` / `mask_image` for `reference-assisted` or `masked-edit` slots should block preflight, because execution would fail later
 - slots with `reference_images` now route to `images/edits`
@@ -212,7 +199,7 @@ Example: rerun only `shot_3` and use the previous output as the edit base:
 ```bash
 node scripts/daoge.js execute \
   --prompts-file /abs/path/prompts.generated.json \
-  --resume-manifest /abs/path/manifest.json \
+  --resume-manifest /abs/path/internal/local_execution_raw.json \
   --select-slot-ids shot_3 \
   --reuse-output-as-reference true \
   --batch-size 1 \
@@ -224,7 +211,7 @@ Example: rerun only `shot_3`, reuse the previous output, and force masked local 
 ```bash
 node scripts/daoge.js execute \
   --prompts-file /abs/path/prompts.generated.json \
-  --resume-manifest /abs/path/manifest.json \
+  --resume-manifest /abs/path/internal/local_execution_raw.json \
   --select-slot-ids shot_3 \
   --reuse-output-as-reference true \
   --batch-size 1 \
@@ -253,18 +240,14 @@ Optional:
 ## Notes
 
 - The runner uses native size generation and writes exactly one final image per prompt.
-- The runner writes a root `manifest.json` plus one `batch_###/manifest.json` per batch.
-- The runner writes operational artifacts after each run:
-  - `success.json`
-  - `failed.json`
-  - `skipped.json`
-  - `needs_review.json`
-  - `rerun_candidates.json`
-- `selection_board.md`
-- `review_board.html`
-- `operations_report.json`
-- `operations_report.md`
-  - `contact_sheet_index.md`
+- The runner writes raw execution detail under `internal/local_execution_raw.json` and debug batch folders.
+- The workspace refresh writes stable internal contracts:
+  - `internal/execution_manifest.json`
+  - `internal/issue_queue.json`
+  - `internal/asset_library.json`
+  - `internal/workspace_state.json`
+- User review starts from `workspace/index.html` and routes to `workspace/results.html` or `workspace/issues.html`.
+- Additional recovery/debug artifacts may include:
   - `job_state.json`
   - `checkpoint.json`
   - `checkpoints/checkpoint_batch_###.json`
@@ -278,7 +261,7 @@ Optional:
 ```bash
 node scripts/daoge.js execute \
   --prompts-file /abs/path/original/prompts.generated.json \
-  --resume-manifest /abs/path/original/manifest.json \
+  --resume-manifest /abs/path/original/internal/local_execution_raw.json \
   --failed-only true \
   --batch-size 10 \
   --concurrency 6
@@ -343,9 +326,9 @@ Current smoke coverage includes:
 - `daoge.js prepare` minimal preflight pipeline
 - mock-provider `prompt-only` execution
 - mock-provider `reference-assisted` execution
-- `render_review_board.js` HTML 审阅看板
+- `src/renderers/workspace_page.js` HTML 审阅看板
   - includes lightweight risk tags and heuristic review scores for keep / review / rerun decisions
 
 Recommended rule:
 
-- if you modify `daoge.js execute`, `run_batch_*`, `render_*`, `validate_*`, or `daoge.js prepare`, run smoke tests before claiming the skill still works
+- if you modify `scripts/daoge.js`, `src/domain/batch_executor.js`, `src/renderers/`, `src/contracts/`, or prepare/execute services, run smoke tests before claiming the skill still works

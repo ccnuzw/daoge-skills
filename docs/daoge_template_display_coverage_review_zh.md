@@ -12,9 +12,9 @@
 这里的“展示贴脸化”特指：
 
 - `prompt_preview.md`
-- `prompt_preview.html`
+- `workspace/prepare.html`
 - `daoge_preflight_dashboard.md`
-- `preflight_board.html`
+- `workspace/prepare.html`
 
 这 4 个用户可见页面会根据模板家族切换摘要字段，而不是统一显示 `主场景 / 主服装 / 主构图`。
 

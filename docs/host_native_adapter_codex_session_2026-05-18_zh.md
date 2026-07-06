@@ -31,7 +31,7 @@
   - 已验证
 - 结果回填：
   - 已验证
-- `result_hub / review_board / completion_board`：
+- `workspace/index.html / workspace/results.html / workspace/issues.html`：
   - 已验证
 
 ---
@@ -95,8 +95,8 @@ bash skills/interactive-image-batch/scripts/run_smoke_tests.sh
 
 - 关键输出文件是否生成：
   - 是
-  - 已生成 `manifest.json`、`success.json`、`failed.json`、`needs_review.json`
-  - 已生成 `daoge_result_hub.md`、`result_hub.html`、`review_board.html`、`completion_board.html`
+  - 已生成 `internal/host_native_execution.json`、`internal/execution_manifest.json`、`internal/issue_queue.json`、`internal/asset_library.json`
+  - 已生成 `workspace/index.html`、`workspace/results.html`、`workspace/issues.html`、`workspace/record.html`
 - smoke 是否通过：
   - 是
   - `run_smoke_tests.sh` 全绿
@@ -144,6 +144,6 @@ bash skills/interactive-image-batch/scripts/run_smoke_tests.sh
 补充说明：
 
 - 本次演练过程中发现并修复了一个真实问题：
-  - `scripts/daoge.js ingest` 原来先渲染 `result_hub`，后渲染 `review_board`
-  - 这会导致结果总入口第一次生成时看不到审阅入口
-  - 现已调整顺序，先产出 `review_board` / `rerun_board`，再产出 `result_hub`
+  - `scripts/daoge.js ingest` 原来先渲染 `workspace/index.html`，后补齐结果与问题数据
+  - 这会导致总入口第一次生成时看不到审阅入口
+  - 现已调整顺序，先产出 `workspace/results.html` / `workspace/issues.html`，再产出 `workspace/index.html`
