@@ -1,22 +1,34 @@
-# DAOGE v2.0.1 真实任务验收报告
+# DAOGE v2 真实任务验收报告
 
 ## 1. 测试时间和版本
 
 - 测试时间：2026-07-06 16:20-16:52 CST
-- 仓库：`/Users/apple/Progame/daoge/daoge-skills`
+- 报告性质：主体为 `v2.0.1` 本地预发布验收快照；修复、测试和原验收记录已随 `v2.0.2` 发布；当前修订版为发布后补充复核信息。
+- 仓库：`daoge-skills`
 - 主 skill：`skills/interactive-image-batch`
 - 包版本：`interactive-image-batch@2.0.1`，测试对象为当前工作区源码和本地 pack 产物，不是已发布远端包。
 - 基线 commit：`575a36a82982c5e6ca74ffc25f8cbe3cea4b77c2`
-- 工作区状态：dirty，包含本轮修复和验收文档；未提交。本报告的“已修复”和“建议发布”结论，只有在下列代码和测试变更与报告进入同一变更集时才可复现；若只提交报告文件，则只能视为本地未提交工作区验证记录。
+- 预发布工作区状态：dirty，包含本轮修复和验收文档；当时未提交。
+- 发布后状态：修复、测试和原验收记录已进入 `v2.0.2` 变更集；当前修订版不属于已固定的 `v2.0.2` tag。
 - 本轮代码变更：
   - `skills/interactive-image-batch/src/shared/workspace.js`
   - `skills/interactive-image-batch/tests/unit/task_catalog.test.js`
-- 隔离测试目录：`/Users/apple/Progame/daoge/daoge-goal45-real-validation`
-- `.env` 文件：`/Users/apple/Progame/daoge/.env`
+- 隔离测试目录：仓库上级目录中的 `daoge-goal45-real-validation/`，本机实际路径已验证但不入库。
+- `.env` 文件：仓库上级目录中的 `.env`，本机实际路径已验证但不入库。
+
+## 1.1 v2.0.2 发布后复核
+
+- 发布版本：`v2.0.2`
+- 发布 commit：`0d5cfdffe1ca2ce7abff5d951e9c4bf7cbd378b6`
+- Git tag：`v2.0.2`
+- Release：`https://github.com/ccnuzw/daoge-skills/releases/tag/v2.0.2`
+- Release 包：`interactive-image-batch.zip`
+- Release 包 SHA256：`c80f1d7da0e28cd9fa6f95dc4b8ea237bd2671f0cbd3f752883b83847d561c7c`
+- 发布后验证：`npm --prefix skills/interactive-image-batch test`、`node --check`、`unzip -t interactive-image-batch.zip` 均通过。
 
 ## 2. 环境配置
 
-- `.env` 路径：`/Users/apple/Progame/daoge/.env`
+- `.env` 路径：仓库上级目录 `.env`，具体本机绝对路径不入库。
 - 已验证字段存在：`OPENAI_BASE_URL`、`OPENAI_API_KEY`
 - 未打印、未记录任何 key 值。
 
@@ -31,12 +43,12 @@
 
 | 编号 | 路径 | 命令摘要 | 输出目录 | 结果 |
 | --- | --- | --- | --- | --- |
-| T01 | 纯文本方图 | `prepare` + `execute --env-file /Users/apple/Progame/daoge/.env` | `/Users/apple/Progame/daoge/daoge-goal45-real-validation/out/t01_square` | 成功 2 |
-| T02 | 纯文本竖图 | `prepare` + `execute --env-file /Users/apple/Progame/daoge/.env` | `/Users/apple/Progame/daoge/daoge-goal45-real-validation/out/t02_portrait` | 成功 2 |
-| T03 | 纯文本横图 | `prepare` + `execute --env-file /Users/apple/Progame/daoge/.env` | `/Users/apple/Progame/daoge/daoge-goal45-real-validation/out/t03_landscape` | 成功 2 |
-| T04 | 参考图生图 | `prepare` + `execute --env-file /Users/apple/Progame/daoge/.env` | `/Users/apple/Progame/daoge/daoge-goal45-real-validation/out/t04_reference` | 成功 1 |
-| T05 | 遮罩局部修改 | `prepare` + `execute --env-file /Users/apple/Progame/daoge/.env` | `/Users/apple/Progame/daoge/daoge-goal45-real-validation/out/t05_mask_edit` | 成功 1 |
-| T06 | storyboard 分镜板 | `prepare --prompts-file ...` + `execute --env-file /Users/apple/Progame/daoge/.env` | `/Users/apple/Progame/daoge/daoge-goal45-real-validation/out/t06_storyboard` | 成功 4 |
+| T01 | 纯文本方图 | `prepare` + `execute --env-file ../.env` | `../daoge-goal45-real-validation/out/t01_square` | 成功 2 |
+| T02 | 纯文本竖图 | `prepare` + `execute --env-file ../.env` | `../daoge-goal45-real-validation/out/t02_portrait` | 成功 2 |
+| T03 | 纯文本横图 | `prepare` + `execute --env-file ../.env` | `../daoge-goal45-real-validation/out/t03_landscape` | 成功 2 |
+| T04 | 参考图生图 | `prepare` + `execute --env-file ../.env` | `../daoge-goal45-real-validation/out/t04_reference` | 成功 1 |
+| T05 | 遮罩局部修改 | `prepare` + `execute --env-file ../.env` | `../daoge-goal45-real-validation/out/t05_mask_edit` | 成功 1 |
+| T06 | storyboard 分镜板 | `prepare --prompts-file ...` + `execute --env-file ../.env` | `../daoge-goal45-real-validation/out/t06_storyboard` | 成功 4 |
 | T07 | host-native 成功+复核 | `ingest --prompt-pack-file ... --results-file ...` | `out/t07_host_success_review_after_fix` | 成功 1，复核 1 |
 | T08 | host-native 失败 | `ingest --prompt-pack-file ... --results-file ...` | `out/t08_host_failed` | 失败 1，进入 issues |
 | T09 | 缺失素材问题队列 | `prepare` + `execute --retry-count 0` | `out/t09_missing_material_after_fix` | 失败 1，进入 issues |
@@ -85,13 +97,13 @@
 
 - 真实 provider 只覆盖小样本 12 张，不能代表高并发、大批量、长时间重试稳定性。
 - provider 结果质量未做主观审美评分，本轮重点是执行链路和产物契约。
-- 发布包版本号仍为 `2.0.1`，本地 pack 含未发布修复；若发布修复应升版。
+- 本报告主体记录的是 `v2.0.1` 预发布验收；当前修订版补充发布后复核，见“1.1 v2.0.2 发布后复核”。
 
-## 10. 是否建议发布 v2.0.2
+## 10. v2.0.2 发布结论
 
-建议在提交本轮 P1 修复、单测和验收文档后，发布 `v2.0.2`。
+已在提交本轮 P1 修复、单测和原验收记录后发布 `v2.0.2`。
 
-理由：本轮发现并修复了 P1 用户可见标题/文件名错误；真实 provider 12 张核心路径成功，host-native、缺失素材、rerun、发布包 smoke 和全量测试均通过。当前包版本仍显示 `2.0.1`，且测试对象包含未提交修复；发布前必须提交这些变更并升版到 `2.0.2`。如果最终变更集只包含文档，不建议据此发布。
+理由：本轮发现并修复了 P1 用户可见标题/文件名错误；真实 provider 12 张核心路径成功，host-native、缺失素材、rerun、发布包 smoke 和全量测试均通过。修复、测试和原验收记录已随 `v2.0.2` 发布；当前修订版在发布后补充 tag、release 附件和包 SHA 复核信息。
 
 ## 11. 验证命令
 
@@ -101,4 +113,4 @@ npm --prefix skills/interactive-image-batch run test:integration
 npm --prefix skills/interactive-image-batch test
 ```
 
-本地执行结果：通过。原始终端日志未纳入版本库文档，复核时应在包含上述代码和测试变更的工作区重新执行这些命令。
+本地执行结果：通过。原始终端日志未纳入版本库文档；复核 `v2.0.2` 时应基于 `v2.0.2` tag 或 release 包重新执行这些命令，复核当前修订版时只需确认文档补充信息与发布记录一致。
