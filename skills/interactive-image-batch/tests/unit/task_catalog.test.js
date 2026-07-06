@@ -33,3 +33,12 @@ test('resolveTask loads catalog from skill root by default', () => {
   assert.equal(task.title, expected.name);
   assert.equal(task.summary, expected.plainSummary);
 });
+
+test('resolveTask uses user brief as task title when no explicit title is provided', () => {
+  const task = resolveTask({
+    contentBrief: '宿主侧成功和复核导入验证',
+    outputMode: 'host native validation',
+  });
+  assert.equal(task.title, '宿主侧成功和复核导入验证');
+  assert.equal(task.summary, '宿主侧成功和复核导入验证');
+});

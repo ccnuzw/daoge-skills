@@ -1,6 +1,6 @@
 {
   "name": "interactive-image-batch",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "DAOGE interactive image batch workspace.",
   "main": "src/cli/daoge.js",
   "bin": {

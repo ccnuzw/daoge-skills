@@ -256,11 +256,12 @@ function resolveTask(input = {}) {
   const tasks = loadTaskCatalog();
   const taskId = inferTaskId(input);
   const catalogTask = tasks.find((item) => item.id === taskId) || tasks[0] || {};
+  const userTitle = normalizeText(input.title || input.contentBrief || input.summary);
   return {
     id: catalogTask.id || taskId,
-    title: normalizeText(input.title, catalogTask.name || '生图任务'),
+    title: normalizeText(userTitle, catalogTask.name || '生图任务'),
     summary: normalizeText(input.summary || input.contentBrief, catalogTask.plainSummary || '生成一组可筛选的视觉结果'),
-    name: catalogTask.name || normalizeText(input.title, '生图任务'),
+    name: catalogTask.name || normalizeText(userTitle, '生图任务'),
     plainSummary: catalogTask.plainSummary || '',
     bestFor: toArray(catalogTask.bestFor),
     userNeeds: toArray(catalogTask.userNeeds),
