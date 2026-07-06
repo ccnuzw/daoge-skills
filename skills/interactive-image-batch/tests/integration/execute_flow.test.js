@@ -58,3 +58,41 @@ test('execute after simple prepare finds generated prompts and task spec automat
   assert.equal(manifest.promptSourceOriginal, path.join(outputDir, 'debug', 'prompts.generated.json'));
   assert.equal(manifest.skipped, 2);
 });
+
+test('execute inherits runtime defaults from prepared task spec', () => {
+  const tempDir = makeTempDir();
+  const outputDir = path.join(tempDir, 'out');
+  const envFile = path.join(tempDir, '.env');
+  const taskSpecFile = path.join(tempDir, 'task_spec.json');
+  writeEnv(envFile);
+  fs.writeFileSync(taskSpecFile, `${JSON.stringify({
+    content_brief: '方图商业海报',
+    output_mode: 'single square poster',
+    style_requirements: ['clean product composition'],
+    source_files: [],
+    total_count: 2,
+    batch_size: 1,
+    concurrency: 1,
+    retry_count: 0,
+    timeout_seconds: 120,
+    width: 512,
+    height: 512,
+    variation_requirements: ['two simple variations'],
+    text_policy: 'no readable text',
+    preview_count: 2,
+    require_confirmation: false,
+  }, null, 2)}\n`);
+  runScript('daoge.js', ['prepare',
+    '--task-spec', taskSpecFile,
+    '--output-dir', outputDir,
+  ]);
+  runScript('daoge.js', ['execute',
+    '--env-file', envFile,
+    '--dry-run', 'true',
+    '--output-dir', outputDir,
+  ]);
+  const manifest = readJson(path.join(outputDir, 'internal', 'local_execution_raw.json'));
+  assert.equal(manifest.defaultSize, '512x512');
+  assert.equal(manifest.batchSize, 1);
+  assert.equal(manifest.batchCount, 2);
+});

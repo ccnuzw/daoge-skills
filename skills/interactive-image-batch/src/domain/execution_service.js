@@ -146,10 +146,32 @@ function resolveTaskSpecFile(options = {}, outputDir) {
   return fs.existsSync(generated) ? generated : null;
 }
 
+function hasUsableOption(options, key) {
+  return hasOwn(options, key) && options[key] !== undefined && options[key] !== null && options[key] !== '';
+}
+
+function executionOptionsWithTaskDefaults(options = {}, taskSpec = {}) {
+  const mappings = [
+    ['batchSize', 'batch_size'],
+    ['concurrency', 'concurrency'],
+    ['retryCount', 'retry_count'],
+    ['timeoutSeconds', 'timeout_seconds'],
+    ['width', 'width'],
+    ['height', 'height'],
+    ['outputFormat', 'output_format'],
+  ];
+  return mappings.reduce((resolved, [optionKey, taskKey]) => {
+    if (hasUsableOption(resolved, optionKey) || !hasUsableOption(taskSpec, taskKey)) return resolved;
+    return { ...resolved, [optionKey]: taskSpec[taskKey] };
+  }, { ...options });
+}
+
 async function executeTask(options = {}) {
   const outputDir = ensureV2Layout(options.outputDir || process.cwd());
   const promptsFile = resolvePromptsFile(options, outputDir);
   const taskSpecFile = resolveTaskSpecFile(options, outputDir);
+  const taskSpec = taskSpecFile ? (readJsonIfExists(taskSpecFile) || {}) : {};
+  const effectiveOptions = executionOptionsWithTaskDefaults(options, taskSpec);
   const resolvedPrompts = normalizePromptMaterials(readJson(promptsFile), { promptsFile });
   const allPrompts = resolvedPrompts.prompts;
   const resumeManifest = readJsonIfExists(options.resumeManifestFile);
@@ -160,7 +182,7 @@ async function executeTask(options = {}) {
   const materialSplit = splitMaterialIssuePrompts(selectedPrompts);
   const runnablePrompts = options.dryRun ? selectedPrompts : materialSplit.runnable.map((entry) => entry.item);
   const envInfo = options.dryRun || !runnablePrompts.length ? { envFile: null, env: {} } : loadImageEnv(options.envFile);
-  const plan = buildExecutionPlan(runnablePrompts, options);
+  const plan = buildExecutionPlan(runnablePrompts, effectiveOptions);
   const debugDir = path.join(outputDir, 'debug');
   const batchRoot = path.join(debugDir, 'batches');
   const promptCopy = path.join(debugDir, 'prompts.generated.json');
@@ -168,12 +190,12 @@ async function executeTask(options = {}) {
   writeJson(promptCopy, selectedPrompts);
   writeJson(stagePlanPath, plan);
 
-  const width = Math.max(16, Math.floor(parseNumber(options.width, 1440)));
-  const height = Math.max(16, Math.floor(parseNumber(options.height, 2560)));
-  const outputFormat = options.outputFormat || 'png';
-  const timeoutSeconds = Math.max(1, parseNumber(options.timeoutSeconds, 450));
-  const retryCount = Math.max(0, Math.floor(parseNumber(options.retryCount, 1)));
-  const concurrency = clampNumber(Math.floor(parseNumber(options.concurrency, 3)), 1, 12);
+  const width = Math.max(16, Math.floor(parseNumber(effectiveOptions.width, 1440)));
+  const height = Math.max(16, Math.floor(parseNumber(effectiveOptions.height, 2560)));
+  const outputFormat = effectiveOptions.outputFormat || 'png';
+  const timeoutSeconds = Math.max(1, parseNumber(effectiveOptions.timeoutSeconds, 450));
+  const retryCount = Math.max(0, Math.floor(parseNumber(effectiveOptions.retryCount, 1)));
+  const concurrency = clampNumber(Math.floor(parseNumber(effectiveOptions.concurrency, 3)), 1, 12);
   const allResults = [];
   const batchManifests = [];
 
