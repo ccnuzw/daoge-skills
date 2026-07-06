@@ -163,6 +163,30 @@ test('host-native schema document matches accepted metadata fields', () => {
   assert.doesNotMatch(schema.field_notes.output, /repo-relative/);
 });
 
+test('example catalog entries point to preparable task specs and no retired workspace entry', () => {
+  const catalog = readJson(path.join(skillRoot, 'references', 'examples', 'examples.catalog.json'));
+  const retiredText = [
+    'workspace_home.html',
+    'prepare_workspace.html',
+    'result_workspace.html',
+    'exception_workspace.html',
+    'run_record.html',
+    'result_hub.html',
+    'daoge_portal.html',
+  ];
+  const catalogText = JSON.stringify(catalog);
+  retiredText.forEach((term) => {
+    assert.equal(catalogText.includes(term), false, `retired entry leaked: ${term}`);
+  });
+  catalog.examples.slice(0, 40).forEach((entry) => {
+    const examplePath = path.join(skillRoot, entry.example_file);
+    assert.equal(fs.existsSync(examplePath), true, entry.example_file);
+    const example = readJson(examplePath);
+    assert.equal(typeof example.content_brief, 'string', entry.example_file);
+    assert.ok(example.content_brief.trim().length > 0, entry.example_file);
+  });
+});
+
 test('host-native ingest preserves accepted metadata fields', () => {
   const tempDir = makeTempDir();
   const outputDir = path.join(tempDir, 'out');
@@ -237,5 +261,7 @@ test('success, needs-review, failed, and missing-output states land in correct u
   const issues = readJson(path.join(outputDir, 'internal', 'issue_queue.json'));
   assert.equal(issues.summary.blocking, 2);
   assert.equal(issues.summary.attention, 1);
-  assert.equal(issues.summary.rerunCandidates, 1);
+  assert.equal(issues.summary.rerunCandidates, 2);
+  assert.equal(issues.items.some((item) => item.reason === 'provider_timeout' && item.rerunnable === true), true);
+  assert.equal(issues.items.some((item) => item.reason === 'missing_output' && item.rerunnable === true), true);
 });

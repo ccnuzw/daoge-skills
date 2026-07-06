@@ -65,21 +65,33 @@ function renderIssueActions(actions) {
   return `<div class="issue-actions">${values.map((item) => renderAction(item, 'mini-action')).join('')}</div>`;
 }
 
-function renderIssueGroups(groups) {
+function renderIssueSummary(summary = {}) {
+  const items = [
+    `${Number(summary.mustHandle || 0)} 个必须处理`,
+    `${Number(summary.worthRerun || 0)} 个可补跑`,
+    `${Number(summary.needsMaterial || 0)} 个要先补素材`,
+    `${Number(summary.needsConfirmation || 0)} 个只需复核`,
+    `${Number(summary.safeToIgnore || 0)} 个可按缺口忽略`,
+  ];
+  return `<section class="panel"><h2>问题概览</h2><div class="metrics">${items.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div></section>`;
+}
+
+function renderIssueGroups(groups, summary = {}) {
   if (!groups.length) return '<p class="muted">当前没有需要处理的问题。</p>';
-  return groups.map((group) => `
+  return `${renderIssueSummary(summary)}${groups.map((group) => `
     <section class="panel">
       <h2>${escapeHtml(group.title)}</h2>
       ${group.items.length ? group.items.map((item) => `
         <article class="issue-card">
-          <h3>${escapeHtml(item.title)}</h3>
-          <p>${escapeHtml(item.userImpact || item.impact)}</p>
-          <strong>${escapeHtml(item.recommendedAction)}</strong>
+          <h3>${escapeHtml(item.userTitle || item.title)}</h3>
+          <p>${escapeHtml(item.userMessage || item.userImpact || item.impact)}</p>
+          <p class="muted">${escapeHtml(item.rerunnable ? `可补跑：${item.rerunReason || '适合只补这一张'}` : (item.safeToIgnore ? '可忽略：不影响关键交付时可以接受缺口。' : '不可直接补跑：需要先处理原因。'))}</p>
+          <strong>${escapeHtml(item.userAction || item.recommendedAction)}</strong>
           ${renderIssueActions(item.availableActions)}
         </article>
       `).join('') : '<p class="muted">暂无。</p>'}
     </section>
-  `).join('');
+  `).join('')}`;
 }
 
 function renderPageBody(vm) {
@@ -104,7 +116,7 @@ function renderPageBody(vm) {
     `;
   }
   if (vm.pageId === 'issues') {
-    return renderIssueGroups(vm.issueGroups);
+    return renderIssueGroups(vm.issueGroups, vm.issueSummary);
   }
   if (vm.pageId === 'record') {
     return `

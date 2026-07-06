@@ -1,0 +1,9 @@
+{
+  "content_brief": "高端时尚竖版海报，主体清楚，顶部和底部留标题安全区",
+  "output_mode": "photoreal campaign poster",
+  "style_requirements": ["full-body", "9:16 poster", "quiet luxury"],
+  "total_count": 2,
+  "batch_size": 1,
+  "width": 1440,
+  "height": 2560
+}

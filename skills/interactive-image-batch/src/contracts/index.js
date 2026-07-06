@@ -329,8 +329,13 @@ function validateIssueQueue(queue = {}) {
     if (!item) return;
     expectEnum(errors, `issueQueue.items[${index}].type`, item.type, ISSUE_TYPES);
     expectEnum(errors, `issueQueue.items[${index}].resolutionState`, item.resolutionState, RESOLUTION_STATES);
-    ['id', 'severity', 'title', 'impact', 'userImpact', 'recommendedAction', 'userNextStep'].forEach((key) => expectType(errors, `issueQueue.items[${index}].${key}`, item[key], 'string'));
-    ['blocking', 'worthRerun'].forEach((key) => expectType(errors, `issueQueue.items[${index}].${key}`, item[key], 'boolean'));
+    if (item.group) expectEnum(errors, `issueQueue.items[${index}].group`, item.group, ISSUE_GROUP_IDS);
+    ['id', 'severity', 'title', 'userTitle', 'impact', 'userImpact', 'userMessage', 'userAction', 'reason', 'recommendedAction', 'rerunReason', 'targetPage', 'href', 'userNextStep'].forEach((key) => expectType(errors, `issueQueue.items[${index}].${key}`, item[key], 'string'));
+    ['blocking', 'worthRerun', 'rerunnable', 'safeToIgnore'].forEach((key) => expectType(errors, `issueQueue.items[${index}].${key}`, item[key], 'boolean'));
+    if (item.sourceResultId !== null) expectType(errors, `issueQueue.items[${index}].sourceResultId`, item.sourceResultId, 'string');
+    if (item.sourcePromptIndex !== null && typeof item.sourcePromptIndex !== 'string' && typeof item.sourcePromptIndex !== 'number') {
+      errors.push(`issueQueue.items[${index}].sourcePromptIndex 必须是字符串或数字`);
+    }
     expectType(errors, `issueQueue.items[${index}].relatedAssetIds`, item.relatedAssetIds, 'array');
     expectType(errors, `issueQueue.items[${index}].availableActions`, item.availableActions, 'array');
     toArray(item.availableActions).forEach((action, actionIndex) => {

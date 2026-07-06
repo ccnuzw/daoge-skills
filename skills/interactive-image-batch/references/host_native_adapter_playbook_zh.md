@@ -69,6 +69,12 @@ node scripts/daoge.js ingest \
 - `workspace/issues.html`
 - `workspace/record.html`
 
+如果失败，先看：
+
+- `workspace/issues.html`
+- `internal/issue_queue.json`
+- `internal/execution_manifest.json`
+
 ---
 
 ## 宿主类型分类
@@ -199,6 +205,12 @@ node scripts/daoge.js ingest \
 - 检查宿主是否导出了真实图片路径
 - 如果写相对路径，确认它是相对 `host_native_results.json` 所在目录，而不是相对 DAOGE 输出目录
 
+排查文件：
+
+- `host_native_results.json`
+- `internal/execution_manifest.json`
+- `internal/issue_queue.json`
+
 ### 2. `status` 写成宿主私有值
 
 现象：
@@ -212,6 +224,11 @@ node scripts/daoge.js ingest \
   - `needs_review`
   - `failed`
 
+排查文件：
+
+- `host_native_results.json`
+- `references/host_native_results.schema.json`
+
 ### 3. 失败项没有 `error`
 
 现象：
@@ -221,6 +238,7 @@ node scripts/daoge.js ingest \
 处理：
 
 - 让宿主导出最短错误原因
+- 导入后检查 `workspace/issues.html` 是否能给用户下一步
 
 ### 4. 结果文件能导入，但 review 看板信息太空
 
@@ -232,6 +250,26 @@ node scripts/daoge.js ingest \
 
 - 补 `scene / composition / textPolicy / slotId`
 - 如有分镜名，可补 `shotLabel`
+
+### 5. 工作台没有结果
+
+现象：
+
+- `workspace/index.html` 能打开，但 `results.html` 没有可看结果
+
+处理：
+
+- 检查 `host_native_results.json` 是否为空
+- 检查 `success` / `needs_review` 是否有真实 `output`
+- 检查相对 `output` 是否按结果文件所在目录解析
+- 重跑 `node scripts/daoge.js ingest --results-file /abs/path/host_native_results.json --output-dir /abs/path/output_dir`
+
+排查文件：
+
+- `internal/execution_manifest.json`
+- `internal/issue_queue.json`
+- `workspace/results.html`
+- `workspace/issues.html`
 
 ---
 

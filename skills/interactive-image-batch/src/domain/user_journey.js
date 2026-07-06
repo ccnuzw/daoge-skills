@@ -111,7 +111,7 @@ function decidePrimaryAction(stage, runPlan = {}, executionManifest = {}, issueQ
       intent: 'confirm_execution',
       targetPage: 'results.html',
       reply: '继续，开始执行',
-      reason: '准备项已经齐全，现在确认执行范围。',
+      reason: '准备项已经齐全；当前还没有生成图片。',
       riskLevel: 'medium',
     });
   }
@@ -150,12 +150,12 @@ function decidePrimaryAction(stage, runPlan = {}, executionManifest = {}, issueQ
   }
   return action({
     id: 'review_results',
-    label: '先筛结果',
+    label: counts.needsReview > 0 ? '先确认结果' : '先筛结果',
     intent: counts.needsReview > 0 ? 'review_results_with_attention' : 'review_ready_results',
     targetPage: 'results.html',
-    reply: '先让我筛结果',
+    reply: counts.needsReview > 0 ? '先让我确认结果' : '先让我筛结果',
     reason: counts.needsReview > 0
-      ? '已有可用结果，同时有少量内容建议复核。'
+      ? '已有可用结果，同时有内容需要先人工确认。'
       : '当前结果可以进入筛选。',
     riskLevel: 'low',
   });

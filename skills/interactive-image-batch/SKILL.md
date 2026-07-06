@@ -13,6 +13,7 @@ description: Interactive batch image generation for DAOGE / 刀哥. Use when the
 - 普通用户入口始终是输出目录的 `workspace/index.html`。
 - 用户页面不解释工程概念，不展示内部文件名，不要求用户理解程序状态。
 - 有问题时先说明影响和建议动作，再给补跑或忽略选项。
+- 不从自然语言 brief 直接执行。先把 brief 写成 `task_spec.json`，再 `prepare`。
 
 ## 唯一命令入口
 
@@ -32,6 +33,25 @@ node scripts/daoge.js <command> [options]
 
 ## 常用路径
 
+### 新手最小路径
+
+适用：第一次使用，只准备任务和工作台。
+
+```bash
+node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
+open out/workspace/index.html
+```
+
+期望文件：
+
+- `workspace/index.html`
+- `debug/task_spec.normalized.json`
+- `debug/prompts.generated.json`
+- `internal/execution_manifest.json`
+- `internal/issue_queue.json`
+
+### 本地执行路径
+
 Dry-run 验流程：
 
 ```bash
@@ -48,6 +68,8 @@ node scripts/daoge.js execute --output-dir out --env-file .env --batch-size 1 --
 open out/workspace/results.html
 ```
 
+### 宿主接入路径
+
 宿主结果回填：
 
 ```bash
@@ -63,6 +85,27 @@ node scripts/daoge.js ingest \
   --results-file host_native_results.json \
   --output-dir out \
   --prompt-pack-file host_native_prompt_pack.json
+```
+
+### 失败恢复路径
+
+先看用户页面：
+
+```bash
+open out/workspace/issues.html
+```
+
+再看诊断文件：
+
+- `internal/issue_queue.json`
+- `internal/execution_manifest.json`
+- `debug/prompts.generated.json`
+- `debug/task_spec.normalized.json`
+
+如果只是刷新工作台：
+
+```bash
+node scripts/daoge.js review --output-dir out
 ```
 
 ### 维护者高级用法
@@ -83,9 +126,19 @@ node scripts/daoge.js rerun \
 - `workspace/`：用户页面，只稳定暴露 `index.html`、`prepare.html`、`results.html`、`issues.html`、`record.html`
 - `assets/`：用户资产
 - `internal/`：机器状态和页面视图模型
-- `debug/`：维护诊断；对用户稳定的是 `debug/prompts.generated.json`，其他文件可随实现调整
+- `debug/`：维护诊断；用户排查常看 `debug/task_spec.normalized.json` 和 `debug/prompts.generated.json`
 
 `internal/workspace_state.json` 是唯一工作台状态源。页面只读 `internal/view_models/*.json`。
+
+## 故障排查
+
+- API key / `.env`：检查 `.env` 是否有 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY`。
+- provider 执行失败：看 `internal/issue_queue.json` 和 `internal/execution_manifest.json`。
+- 素材路径失败：看 `debug/prompts.generated.json` 和 `debug/task_spec.normalized.json`。
+- reference bindings 缺失：确认提示词里引用的参考图、遮罩、输入图存在。
+- host-native schema 错误：修 `host_native_results.json`，参考 `references/host_native_results.schema.json`。
+- workspace 输出为空：跑 `node scripts/daoge.js review --output-dir out`，再看 `workspace/index.html`。
+- prompt 不符合预期：改 `task_spec.json` 后重新 `prepare`。
 
 ## provider 契约
 

@@ -135,3 +135,40 @@ test('issue queue turns declared missing output into blocking issue', () => {
   assert.equal(queue.summary.rerunCandidates, 1);
   assert.equal(queue.items.some((item) => item.type === 'hard_failure' && /文件缺失/.test(item.title)), true);
 });
+
+test('issue queue marks missing material as must-handle and not directly rerunnable', () => {
+  const queue = queueFor([
+    {
+      id: 'result_001',
+      index: 1,
+      status: 'failed',
+      reason: 'missing_material',
+      error: '缺少参考图 refs/missing.png',
+      rerunnable: false,
+      rerunReason: '先补齐素材后再执行',
+    },
+  ], { total: 1, success: 0 });
+  const issue = queue.items.find((item) => item.type === 'hard_failure');
+  assert.equal(issue.group, 'must_handle');
+  assert.equal(issue.reason, 'missing_material');
+  assert.equal(issue.rerunnable, false);
+  assert.equal(issue.worthRerun, false);
+  assert.equal(issue.safeToIgnore, false);
+  assert.match(issue.userAction, /补齐素材/);
+  assert.equal(queue.summary.rerunCandidates, 0);
+});
+
+test('issue queue auto-promotes provider timeout and api failures to rerun candidates', () => {
+  const queue = queueFor([
+    { id: 'result_001', index: 1, status: 'failed', error: 'fetch failed for https://example.test: timeout' },
+    { id: 'result_002', index: 2, status: 'failed', error: 'http 500: missing image payload' },
+  ], { total: 2, success: 0 });
+  const reasons = queue.items.filter((item) => item.type === 'hard_failure').map((item) => item.reason).sort();
+  assert.deepEqual(reasons, ['provider_api_error', 'provider_timeout']);
+  assert.equal(queue.summary.rerunCandidates, 2);
+  queue.items.filter((item) => item.type === 'rerun_candidate').forEach((item) => {
+    assert.equal(item.rerunnable, true);
+    assert.equal(item.group, 'worth_rerun');
+    assert.equal(item.targetPage, 'issues.html');
+  });
+});

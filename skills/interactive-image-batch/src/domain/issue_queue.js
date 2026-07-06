@@ -119,28 +119,131 @@ function issueIsOpen(item) {
   return normalizeEnumValue('issue.resolutionState', item.resolutionState || item.status, RESOLUTION_STATES, 'open') === 'open';
 }
 
+function groupForIssueType(type) {
+  if (type === 'hard_failure') return 'must_handle';
+  if (type === 'rerun_candidate') return 'worth_rerun';
+  if (type === 'needs_review') return 'needs_confirmation';
+  if (type === 'ignored') return 'can_ignore';
+  if (type === 'resolved') return 'resolved';
+  return 'needs_confirmation';
+}
+
+function textIncludes(value, patterns) {
+  const text = String(value || '').toLowerCase();
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function classifyIssueReason(result = {}, availability = {}) {
+  const message = [
+    result.error,
+    result.reason,
+    result.rerunReason,
+    availability.missingOutput ? 'missing output' : '',
+  ].filter(Boolean).join(' ');
+  if (textIncludes(message, [/素材/, /参考图/, /遮罩/, /material/, /reference file not found/, /missing reference/])) {
+    return {
+      reason: 'missing_material',
+      title: '缺少素材，不能直接补跑',
+      userMessage: '这张需要的参考图、遮罩或输入素材不可用，直接补跑还会失败。',
+      userAction: '先补齐素材，再重新执行这一张',
+      rerunnable: false,
+      rerunReason: '先补齐素材后再执行',
+      safeToIgnore: false,
+    };
+  }
+  if (result.rerunnable === false) {
+    return {
+      reason: normalizeText(result.reason, 'not_rerunnable'),
+      title: '这一张需要先处理原因',
+      userMessage: result.error || '当前失败原因不能靠直接补跑解决。',
+      userAction: result.rerunReason || '先处理失败原因，再决定是否重新执行',
+      rerunnable: false,
+      rerunReason: result.rerunReason || '当前不能直接补跑',
+      safeToIgnore: false,
+    };
+  }
+  if (availability.missingOutput || result.missingOutput) {
+    return {
+      reason: 'missing_output',
+      title: '这一张结果文件缺失',
+      userMessage: '结果记录存在，但图片文件不可用；本轮少一张可查看图片。',
+      userAction: '补跑这一张，或重新导入图片后刷新任务页',
+      rerunnable: true,
+      rerunReason: result.rerunReason || '结果文件缺失',
+      safeToIgnore: true,
+    };
+  }
+  if (textIncludes(message, [/timeout/, /timed out/, /abort/, /deadline/, /超时/])) {
+    return {
+      reason: 'provider_timeout',
+      title: '生成服务超时',
+      userMessage: '生成请求已发出，但服务在限定时间内没有返回图片。',
+      userAction: '可以只补跑这张；如果多次超时，再降低并发或延长超时',
+      rerunnable: true,
+      rerunReason: result.rerunReason || '生成服务超时',
+      safeToIgnore: true,
+    };
+  }
+  if (textIncludes(message, [/http\s*\d+/, /fetch failed/, /non-json response/, /missing image payload/, /api/, /接口/, /服务/])) {
+    return {
+      reason: 'provider_api_error',
+      title: '生成服务返回失败',
+      userMessage: '生成服务返回错误或没有返回图片，本轮少一张可筛选结果。',
+      userAction: '可以只补跑这张；如果反复失败，再检查服务配置',
+      rerunnable: true,
+      rerunReason: result.rerunReason || '生成服务失败',
+      safeToIgnore: true,
+    };
+  }
+  return {
+    reason: 'generation_failed',
+    title: '这一张没有生成成功',
+    userMessage: result.error || '本轮少一张可筛选结果；如果这是关键画面，交付会有缺口。',
+    userAction: result.worthRerun ? '可以只补跑这张' : '先确认是否必须保留这一张',
+    rerunnable: Boolean(result.worthRerun || result.rerunReason),
+    rerunReason: result.rerunReason || (result.worthRerun ? '关键结果失败' : '没有明确补跑原因'),
+    safeToIgnore: true,
+  };
+}
+
 function issueFromResult(result, type, index) {
   const issueType = normalizeEnumValue('issue.type', type, ISSUE_TYPES, 'needs_review');
   const resolutionState = issueType === 'ignored' ? 'ignored' : (issueType === 'resolved' ? 'resolved' : 'open');
+  const reasonInfo = classifyIssueReason(result, {
+    missingOutput: Boolean(result.missingOutput),
+  });
+  const group = groupForIssueType(issueType);
   const base = {
     id: `issue_${String(index).padStart(3, '0')}`,
     type: issueType,
+    group,
     status: 'open',
     resolutionState,
     relatedAssetIds: [result.id].filter(Boolean),
+    sourceResultId: result.id || null,
+    sourcePromptIndex: result.index ?? null,
+    targetPage: issueType === 'needs_review' ? 'results.html' : 'issues.html',
+    href: issueType === 'needs_review' ? 'results.html' : 'issues.html',
   };
   if (issueType === 'hard_failure') {
     return {
       ...base,
       severity: 'blocking',
-      title: result.missingOutput ? '这一张结果文件缺失' : '这一张没有生成成功',
-      impact: result.missingOutput ? '结果记录存在，但图片文件不可用' : (result.error || '会影响本轮完整性'),
-      userImpact: result.missingOutput ? '本轮少一张可查看图片；需要补跑、重新导入或接受缺口。' : '本轮少一张可筛选结果；如果这是关键画面，交付会缺口。',
-      recommendedAction: result.worthRerun ? '先确认失败原因，再决定是否补跑' : '先确认是否必须保留这一张',
+      title: reasonInfo.title,
+      userTitle: reasonInfo.title,
+      impact: reasonInfo.userMessage,
+      userImpact: reasonInfo.userMessage,
+      userMessage: reasonInfo.userMessage,
+      userAction: reasonInfo.userAction,
+      reason: reasonInfo.reason,
+      recommendedAction: reasonInfo.userAction,
       availableActions: actionsForIssue(type, result, resolutionState),
       blocking: true,
-      worthRerun: Boolean(result.worthRerun),
-      userNextStep: result.worthRerun ? '进入问题页确认补跑范围' : '进入问题页确认是否接受缺口',
+      worthRerun: reasonInfo.rerunnable,
+      rerunnable: reasonInfo.rerunnable,
+      rerunReason: reasonInfo.rerunReason,
+      safeToIgnore: reasonInfo.safeToIgnore,
+      userNextStep: reasonInfo.userAction,
     };
   }
   if (issueType === 'needs_review') {
@@ -148,31 +251,51 @@ function issueFromResult(result, type, index) {
       ...base,
       severity: 'attention',
       title: '这一张需要人工看一眼',
+      userTitle: '这一张需要人工看一眼',
       impact: '可能能用，但需要确认主体和画面是否稳定',
       userImpact: '它不阻塞任务，但可能影响最终质量。',
+      userMessage: '它不阻塞任务，但可能影响最终质量。',
+      userAction: '回结果页放大确认主体、构图和文字区域',
+      reason: 'needs_review',
       recommendedAction: '回结果页复核',
       availableActions: actionsForIssue(type, result, resolutionState),
       blocking: false,
       worthRerun: false,
+      rerunnable: false,
+      rerunReason: '人工复核不是失败，不需要直接补跑',
+      safeToIgnore: true,
       userNextStep: '回结果页筛选',
     };
   }
   return {
     ...base,
     type: 'rerun_candidate',
+    group: groupForIssueType('rerun_candidate'),
     severity: 'attention',
     title: '这一张值得补跑',
+    userTitle: '这一张值得补跑',
     impact: result.rerunReason || '补跑后本轮结果会更完整',
     userImpact: result.rerunReason || '补跑有明确用户价值，可能提高交付完整度。',
+    userMessage: result.rerunReason || '补跑有明确用户价值，可能提高交付完整度。',
+    userAction: '确认后只补跑这一张',
+    reason: reasonInfo.reason,
     recommendedAction: '只补这一张',
     availableActions: actionsForIssue('rerun_candidate', result, resolutionState),
     blocking: false,
     worthRerun: true,
+    rerunnable: true,
+    rerunReason: result.rerunReason || reasonInfo.rerunReason || '值得补跑',
+    safeToIgnore: true,
     userNextStep: '确认后只补这一张',
   };
 }
 
-function inferWorthRerun(result, executionManifest) {
+function inferWorthRerun(result, executionManifest, availability = {}) {
+  const reasonInfo = classifyIssueReason(result, availability);
+  if (!reasonInfo.rerunnable) return '';
+  if (reasonInfo.reason === 'provider_timeout' || reasonInfo.reason === 'provider_api_error' || reasonInfo.reason === 'missing_output') {
+    return reasonInfo.rerunReason;
+  }
   if (result.worthRerun) return result.rerunReason || '关键结果失败';
   const total = Number(executionManifest.counts?.total || 0);
   const success = Number(executionManifest.counts?.success || 0);
@@ -193,7 +316,7 @@ function buildIssueQueue(options = {}) {
   results.forEach((item) => {
     const availability = classifyResultAvailability(outputDir, item);
     if (availability.failed) {
-      const rerunReason = inferWorthRerun(item, executionManifest);
+      const rerunReason = inferWorthRerun(item, executionManifest, availability);
       const enriched = {
         ...item,
         worthRerun: Boolean(rerunReason),
@@ -234,10 +357,15 @@ function buildIssueQueue(options = {}) {
     items.push({
       id: normalizeText(item.id, `issue_${String(counter).padStart(3, '0')}`),
       type,
+      group: normalizeText(item.group, groupForIssueType(type)),
       severity: normalizeText(item.severity, type === 'hard_failure' ? 'blocking' : 'attention'),
       title: normalizeText(item.title, '需要确认的问题'),
+      userTitle: normalizeText(item.userTitle || item.title, '需要确认的问题'),
       impact: normalizeText(item.impact, '可能影响本轮判断'),
       userImpact: normalizeText(item.userImpact || item.impact, '可能影响本轮判断'),
+      userMessage: normalizeText(item.userMessage || item.userImpact || item.impact, '可能影响本轮判断'),
+      userAction: normalizeText(item.userAction || item.recommendedAction, '建议确认'),
+      reason: normalizeText(item.reason, type === 'hard_failure' ? 'generation_failed' : type),
       recommendedAction: normalizeText(item.recommendedAction, '建议确认'),
       availableActions: toArray(item.availableActions).length ? toArray(item.availableActions).map(issueAction) : actionsForIssue(type, item, resolutionState),
       status: resolutionState,
@@ -245,6 +373,13 @@ function buildIssueQueue(options = {}) {
       relatedAssetIds: toArray(item.relatedAssetIds),
       blocking: Boolean(item.blocking ?? type === 'hard_failure'),
       worthRerun: Boolean(item.worthRerun ?? type === 'rerun_candidate'),
+      rerunnable: Boolean(item.rerunnable ?? item.worthRerun ?? type === 'rerun_candidate'),
+      rerunReason: normalizeText(item.rerunReason, item.worthRerun || type === 'rerun_candidate' ? '值得补跑' : '不需要补跑'),
+      safeToIgnore: Boolean(item.safeToIgnore ?? type !== 'hard_failure'),
+      sourceResultId: item.sourceResultId || null,
+      sourcePromptIndex: item.sourcePromptIndex ?? null,
+      targetPage: item.targetPage || (type === 'needs_review' ? 'results.html' : 'issues.html'),
+      href: item.href || item.targetPage || (type === 'needs_review' ? 'results.html' : 'issues.html'),
       userNextStep: normalizeText(item.userNextStep, type === 'hard_failure' ? '进入问题页处理' : '回结果页确认'),
     });
     counter += 1;

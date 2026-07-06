@@ -92,7 +92,11 @@ test('missing prompt material becomes issue instead of silent success', () => {
   assert.equal(manifest.batches[0].skipped, 0);
   const issues = readJson(path.join(outputDir, 'internal', 'issue_queue.json'));
   assert.equal(issues.summary.blocking >= 1, true);
+  assert.equal(issues.summary.rerunCandidates, 0);
+  assert.equal(issues.items.some((item) => item.reason === 'missing_material' && item.rerunnable === false), true);
   assert.match(issues.items[0].impact, /素材文件缺失|参考图/);
+  const issuesHtml = fs.readFileSync(path.join(outputDir, 'workspace', 'issues.html'), 'utf8');
+  assert.match(issuesHtml, /先补素材|补齐素材/);
 });
 
 test('real execute does not send missing-material prompts to provider', () => {
@@ -117,6 +121,7 @@ test('real execute does not send missing-material prompts to provider', () => {
   assert.equal(fs.existsSync(path.join(outputDir, 'debug', 'batches')), false);
   const issues = readJson(path.join(outputDir, 'internal', 'issue_queue.json'));
   assert.equal(issues.summary.blocking >= 1, true);
+  assert.equal(issues.summary.rerunCandidates, 0);
 });
 
 test('real execute preserves original indexes when blocked prompts are filtered out', async () => {
@@ -184,7 +189,7 @@ test('failed-only resume matches padded numeric indexes from prior manifest', as
     batches: [{
       results: [
         { index: '001', ok: true },
-        { index: '002', ok: false },
+        { index: '002', ok: false, error: 'timeout' },
       ],
     }],
   });

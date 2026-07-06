@@ -35,15 +35,42 @@ function indexKeys(value) {
   return Array.from(keys);
 }
 
+function isMissingMaterialFailure(item = {}) {
+  const text = [
+    item.reason,
+    item.error,
+    item.rerunReason,
+    item.rerun_reason,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /素材|参考图|遮罩|material|reference file not found|missing reference/.test(text);
+}
+
+function isRerunnableFailure(item = {}) {
+  if (item.rerunnable === false) return false;
+  if (isMissingMaterialFailure(item)) return false;
+  if (item.status === 'skipped' || item.skipped) return false;
+  if (item.missingOutput || item.reason === 'missing_output') return true;
+  if (item.rerunnable === true || item.worthRerun || item.worth_rerun) return true;
+  const text = [
+    item.reason,
+    item.error,
+    item.rerunReason,
+    item.rerun_reason,
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (/timeout|timed out|abort|deadline|超时/.test(text)) return true;
+  if (/http\s*\d+|fetch failed|non-json response|missing image payload|api|接口|服务/.test(text)) return true;
+  return false;
+}
+
 function selectFailedPrompts(prompts, resumeManifest) {
   if (!resumeManifest) return prompts;
   const failed = new Set();
   toArray(resumeManifest.results).forEach((item) => {
-    if (item.status === 'failed' || item.ok === false) indexKeys(item.index).forEach((key) => failed.add(key));
+    if (isRerunnableFailure(item)) indexKeys(item.index).forEach((key) => failed.add(key));
   });
   toArray(resumeManifest.batches).forEach((batch) => {
     toArray(batch.results).forEach((item) => {
-      if (item.status === 'failed' || item.ok === false) indexKeys(item.index).forEach((key) => failed.add(key));
+      if (isRerunnableFailure(item)) indexKeys(item.index).forEach((key) => failed.add(key));
     });
   });
   if (!failed.size) return [];
@@ -78,7 +105,9 @@ function dryRunResults(prompts, offsetBase = 0) {
       || (toArray(item.reference_images).length || toArray(item.referenceImages).length ? 'reference-assisted' : 'prompt-only'),
     output: null,
     error: toArray(item.materialIssues).map((issue) => issue.message).join('；') || null,
-    worthRerun: Boolean(toArray(item.materialIssues).length),
+    worthRerun: false,
+    rerunnable: false,
+    reason: toArray(item.materialIssues).length ? 'missing_material' : null,
     rerunReason: toArray(item.materialIssues).length ? '素材文件缺失' : null,
   }));
 }
@@ -95,8 +124,10 @@ function materialIssueResult(item, index, offsetBase = 0) {
       || (toArray(item.reference_images).length || toArray(item.referenceImages).length ? 'reference-assisted' : 'prompt-only'),
     output: null,
     error: issues.map((issue) => issue.message).join('；') || '素材文件缺失',
-    worthRerun: true,
-    rerunReason: '素材文件缺失',
+    worthRerun: false,
+    rerunnable: false,
+    reason: 'missing_material',
+    rerunReason: '先补齐素材后再执行',
   };
 }
 
@@ -177,7 +208,11 @@ async function executeTask(options = {}) {
   const resumeManifest = readJsonIfExists(options.resumeManifestFile);
   const failedOnly = parseBoolean(options.failedOnly, Boolean(resumeManifest));
   const selectedPrompts = stablePromptIndexes(failedOnly ? selectFailedPrompts(allPrompts, resumeManifest) : allPrompts);
-  if (!selectedPrompts.length) throw new Error('没有可执行项目');
+  if (!selectedPrompts.length) {
+    throw new Error(failedOnly
+      ? '没有可直接补跑项目；缺素材类失败需要先补齐素材。'
+      : '没有可执行项目');
+  }
 
   const materialSplit = splitMaterialIssuePrompts(selectedPrompts);
   const runnablePrompts = options.dryRun ? selectedPrompts : materialSplit.runnable.map((entry) => entry.item);
@@ -272,6 +307,12 @@ async function executeTask(options = {}) {
     generatedAt: new Date().toISOString(),
     resumeManifest: options.resumeManifestFile || null,
     failedOnly,
+    rerun: options.resumeManifestFile ? {
+      source: options.resumeManifestFile,
+      failedOnly,
+      selectedIndexes: selectedPrompts.map((item) => item.index),
+      selectedTitles: selectedPrompts.map((item) => item.title || null),
+    } : null,
     success: allResults.filter((item) => item.ok && !item.skipped).length,
     skipped: allResults.filter((item) => item.skipped).length,
     failed: allResults.filter((item) => !item.ok).length,

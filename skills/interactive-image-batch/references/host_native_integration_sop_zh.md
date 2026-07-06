@@ -34,6 +34,7 @@ node scripts/daoge.js prepare \
 
 - `debug/prompts.generated.json`
 - `workspace/index.html`
+- `debug/task_spec.normalized.json`
 
 ---
 
@@ -76,8 +77,18 @@ node scripts/daoge.js ingest \
 - `workspace/results.html`
 - `workspace/issues.html`
 - `workspace/record.html`
+- `internal/execution_manifest.json`
+- `internal/issue_queue.json`
 
 如果这些主链入口都没出来，不要宣称接入完成。
+
+如果 `workspace/results.html` 为空，先看：
+
+- `host_native_results.json`
+- `internal/execution_manifest.json`
+- `internal/issue_queue.json`
+
+如果 `ingest` 直接失败，先按 `references/host_native_results.schema.json` 修 `host_native_results.json`。
 
 ---
 

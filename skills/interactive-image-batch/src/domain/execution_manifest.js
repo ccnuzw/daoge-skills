@@ -40,6 +40,8 @@ function normalizeExecutionResult(item = {}, index = 0, outputDir) {
     requestKind: normalizeText(item.requestMode || item.request_mode, 'prompt-only'),
     error: status === 'failed' ? normalizeText(item.error, '生成失败') : null,
     worthRerun: Boolean(item.worthRerun || item.worth_rerun || item.critical || item.required),
+    rerunnable: item.rerunnable === undefined ? null : Boolean(item.rerunnable),
+    reason: normalizeText(item.reason || item.failureReason || item.failure_reason),
     rerunReason: normalizeText(item.rerunReason || item.rerun_reason),
     retryCount: Number(item.retryCount || item.retry_count || 0),
     durationMs: Number(item.durationMs || item.duration_ms || 0) || null,

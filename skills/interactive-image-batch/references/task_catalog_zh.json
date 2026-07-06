@@ -7,6 +7,7 @@
       "plainSummary": "适合头像、人物海报、品牌人物封面。",
       "bestFor": ["人物封面", "品牌主视觉", "社媒头像"],
       "userNeeds": ["主题人物", "用途", "风格方向", "是否有参考图"],
+      "intentKeywords": ["人像", "肖像", "半身", "portrait", "近景", "人物封面"],
       "startCommand": "--intent portrait",
       "defaultStart": "prepare"
     },
@@ -16,6 +17,7 @@
       "plainSummary": "适合产品、人物或道具的干净棚拍视觉。",
       "bestFor": ["棚拍主图", "质感图", "产品氛围图"],
       "userNeeds": ["拍摄对象", "背景偏好", "光线方向", "成片用途"],
+      "intentKeywords": ["棚拍", "摄影棚", "棚内", "studio", "质感"],
       "startCommand": "--intent studio",
       "defaultStart": "prepare"
     },
@@ -25,6 +27,7 @@
       "plainSummary": "适合商品主图、详情页素材和货架转化图。",
       "bestFor": ["商品主图", "详情页", "卖点图"],
       "userNeeds": ["商品信息", "卖点", "目标平台", "参考图"],
+      "intentKeywords": ["电商", "商品", "产品主图", "商品主图", "详情页", "卖点", "白底", "平台安全区"],
       "startCommand": "--intent ecommerce",
       "defaultStart": "prepare"
     },
@@ -34,6 +37,7 @@
       "plainSummary": "适合包装概念、瓶盒展示和品牌资产板。",
       "bestFor": ["包装概念", "礼盒展示", "品牌周边"],
       "userNeeds": ["品牌信息", "包装类型", "使用场景", "风格方向"],
+      "intentKeywords": ["包装", "礼盒", "外盒", "内盒", "瓶盒", "纸袋", "标签", "套组"],
       "startCommand": "--intent packaging",
       "defaultStart": "prepare"
     },
@@ -43,6 +47,7 @@
       "plainSummary": "适合短片、广告和叙事镜头序列。",
       "bestFor": ["短片分镜", "广告镜头", "剧情画面"],
       "userNeeds": ["故事主题", "镜头数量", "角色或产品", "情绪节奏"],
+      "intentKeywords": ["storyboard", "分镜", "镜头", "短片", "剧情", "四格"],
       "startCommand": "--intent cinematic",
       "defaultStart": "prepare"
     },
@@ -52,7 +57,108 @@
       "plainSummary": "适合知识讲解、专家口播和产品说明分镜。",
       "bestFor": ["口播脚本", "专家讲解", "产品说明"],
       "userNeeds": ["讲述主题", "人物设定", "镜头段落", "画面风格"],
+      "intentKeywords": ["口播", "讲解", "演播厅", "主持人", "主理人"],
       "startCommand": "--intent oralboard",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "campaign-poster",
+      "name": "品牌海报",
+      "plainSummary": "适合 campaign、横图 banner、竖版封面和品牌主视觉。",
+      "bestFor": ["新品海报", "横图 banner", "竖版短视频封面"],
+      "userNeeds": ["主视觉", "标题区", "行动区", "投放比例"],
+      "intentKeywords": ["海报", "campaign", "poster", "kv", "banner", "短视频封面", "cta", "标题安全区"],
+      "startCommand": "--intent campaign-poster",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "social-grid",
+      "name": "社媒九宫格",
+      "plainSummary": "适合小红书、Instagram、品牌 feed 和九宫格内容视觉。",
+      "bestFor": ["小红书九宫格", "社媒 feed", "品牌内容矩阵"],
+      "userNeeds": ["主题", "每格内容", "统一风格", "发布平台"],
+      "intentKeywords": ["九宫格", "社媒", "小红书", "instagram", "feed", "社交媒体"],
+      "startCommand": "--intent social-grid",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "avatar-profile-pack",
+      "name": "头像资产包",
+      "plainSummary": "适合头像、profile、贴纸和角色头像组图。",
+      "bestFor": ["个人头像", "角色头像", "播客 profile"],
+      "userNeeds": ["身份设定", "裁切范围", "背景深度", "使用场景"],
+      "intentKeywords": ["头像", "profile", "avatar", "圆形裁切", "贴纸", "角色头像"],
+      "startCommand": "--intent avatar-profile-pack",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "technical-diagram",
+      "name": "技术图解",
+      "plainSummary": "适合流程图、架构图、拓扑图和节点关系说明。",
+      "bestFor": ["技术流程图", "系统架构图", "节点关系图"],
+      "userNeeds": ["节点", "方向", "层级", "可读性"],
+      "intentKeywords": ["技术流程图", "架构图", "流程图", "节点", "箭头", "拓扑图", "状态机"],
+      "startCommand": "--intent technical-diagram",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "infographic-board",
+      "name": "信息图板",
+      "plainSummary": "适合对比图、步骤图、数据看板和知识信息图。",
+      "bestFor": ["信息图", "对比图", "步骤说明"],
+      "userNeeds": ["信息层级", "阅读路径", "重点数据", "图文比例"],
+      "intentKeywords": ["信息图", "对比图", "步骤图", "数据看板", "图例", "kpi"],
+      "startCommand": "--intent infographic-board",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "map-route-board",
+      "name": "地图路线板",
+      "plainSummary": "适合城市导览、旅行路线、门店分布和手绘地图。",
+      "bestFor": ["旅行路线地图", "城市导览图", "门店分布图"],
+      "userNeeds": ["地点", "路线逻辑", "标注密度", "视觉风格"],
+      "intentKeywords": ["地图", "路线", "导览图", "旅行路线", "城市地图", "门店分布"],
+      "startCommand": "--intent map-route-board",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "ui-mockup-board",
+      "name": "界面视觉稿",
+      "plainSummary": "适合 App、网页、dashboard 和直播界面视觉稿。",
+      "bestFor": ["App 界面", "网页视觉稿", "dashboard"],
+      "userNeeds": ["设备", "界面类型", "关键模块", "真实层级"],
+      "intentKeywords": ["ui", "界面", "mockup", "app", "dashboard", "底部导航", "组件"],
+      "startCommand": "--intent ui-mockup-board",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "academic-figure-board",
+      "name": "学术图板",
+      "plainSummary": "适合 graphical abstract、机制图、论文概览和科研海报。",
+      "bestFor": ["论文图", "机制图", "科研概览"],
+      "userNeeds": ["研究主题", "图形类型", "比较关系", "标注密度"],
+      "intentKeywords": ["学术图", "论文图", "graphical abstract", "机制图", "research poster", "scientific schematic"],
+      "startCommand": "--intent academic-figure-board",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "type-layout-poster",
+      "name": "排版海报",
+      "plainSummary": "适合文字海报、双语排版和强标题区视觉。",
+      "bestFor": ["字体排版海报", "双语海报", "标题区主视觉"],
+      "userNeeds": ["标题角色", "语言模式", "图文关系", "留白区域"],
+      "intentKeywords": ["排版海报", "字体", "双语排版", "文字海报", "typography poster", "type layout"],
+      "startCommand": "--intent type-layout-poster",
+      "defaultStart": "prepare"
+    },
+    {
+      "id": "image-edit",
+      "name": "图像编辑",
+      "plainSummary": "适合局部修改、换背景、风格迁移和参考图一致性调整。",
+      "bestFor": ["局部修改", "风格迁移", "背景替换"],
+      "userNeeds": ["保留内容", "修改区域", "参考图", "一致性要求"],
+      "intentKeywords": ["局部修改", "风格迁移", "修图", "改图", "换背景", "保留构图"],
+      "startCommand": "--intent image-edit",
       "defaultStart": "prepare"
     }
   ]

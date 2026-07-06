@@ -23,6 +23,16 @@ function issueGroups(issueQueue = {}) {
       title: item.title,
       impact: item.impact,
       userImpact: item.userImpact || item.impact,
+      userTitle: item.userTitle || item.title,
+      userMessage: item.userMessage || item.userImpact || item.impact,
+      userAction: item.userAction || item.recommendedAction,
+      reason: item.reason || '',
+      rerunnable: Boolean(item.rerunnable ?? item.worthRerun),
+      rerunReason: item.rerunReason || '',
+      safeToIgnore: Boolean(item.safeToIgnore),
+      sourcePromptIndex: item.sourcePromptIndex || null,
+      targetPage: item.targetPage || null,
+      href: item.href || null,
       recommendedAction: item.recommendedAction,
       availableActions: item.availableActions || [],
       resolutionState: item.resolutionState || item.status,
@@ -73,6 +83,13 @@ function buildViewModels(options = {}) {
   const issueAssets = pickAssets(assetLibrary, (item) => item.kind === 'issue_record' && item.usage?.hasIssue);
   const selectedAssets = pickAssets(assetLibrary, (item) => item.kind === 'selected_result');
   const exportAssets = pickAssets(assetLibrary, (item) => item.kind === 'export_image');
+  const issueItems = toArray(issueQueue.items);
+  const openIssues = issueItems.filter((item) => (item.resolutionState || item.status || 'open') === 'open');
+  const countUniqueIssues = (items) => new Set(items.map((item) => item.sourceResultId || item.sourcePromptIndex || item.id)).size;
+  const missingMaterialCount = openIssues.filter((item) => item.reason === 'missing_material').length;
+  const rerunnableCount = Number(issueQueue.summary?.rerunCandidates || 0);
+  const reviewIssueCount = openIssues.filter((item) => item.type === 'needs_review').length;
+  const ignorableCount = countUniqueIssues(openIssues.filter((item) => item.safeToIgnore));
 
   const models = {
     index: {
@@ -124,6 +141,13 @@ function buildViewModels(options = {}) {
         { title: '必须处理', body: `${Number(issueQueue.summary?.blocking || 0)} 个` },
         { title: '建议确认', body: `${Number(issueQueue.summary?.attention || 0)} 个` },
       ],
+      issueSummary: {
+        mustHandle: Number(issueQueue.summary?.blocking || 0),
+        needsConfirmation: reviewIssueCount,
+        worthRerun: rerunnableCount,
+        needsMaterial: missingMaterialCount,
+        safeToIgnore: ignorableCount,
+      },
       issueGroups: issueGroups(issueQueue),
       returnTarget: workspaceState.primaryAction?.targetPage || 'results.html',
     },

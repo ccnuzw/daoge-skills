@@ -74,6 +74,57 @@ open out/workspace/index.html
 
 验收结论：通过。ingest 前会校验 `host_native_results.json`，无效结果不会进入工作台。
 
+## Goal 8 追加验收：失败恢复
+
+命令：
+
+```bash
+open out/workspace/issues.html
+cat out/internal/issue_queue.json
+cat out/internal/execution_manifest.json
+node scripts/daoge.js review --output-dir out
+```
+
+如 provider 失败且队列标记可补跑：
+
+```bash
+node scripts/daoge.js rerun \
+  --prompts-file out/debug/prompts.generated.json \
+  --resume-manifest out/internal/local_execution_raw.json \
+  --failed-only true \
+  --env-file .env \
+  --output-dir out_rerun
+```
+
+用户可见产物：
+
+- `workspace/issues.html`
+- `internal/issue_queue.json`
+- `internal/execution_manifest.json`
+- `debug/prompts.generated.json`
+- `debug/task_spec.normalized.json`
+
+用户下一步：按 `issue_queue.json` 的 `userAction` 修 `.env`、provider 参数、素材路径、宿主结果 schema 或 prompt 输入，再从 `execute`、`rerun`、`ingest` 或 `prepare` 重进。
+
+验收结论：通过。失败恢复路径已在 README、完整手册、SKILL、宿主接入文档中统一指向实际文件。
+
+## Goal 8 追加验收：示例库入口
+
+最小可跑命令：
+
+```bash
+node scripts/daoge.js prepare --task-spec references/examples/task_spec.minimal.json --output-dir out
+open out/workspace/index.html
+```
+
+示例索引：
+
+- `references/examples/task_spec.minimal.json`
+- `references/examples/README.md`
+- `references/examples/examples_catalog.html`
+
+验收结论：通过。`examples_catalog.html` 已移除当前不可用的旧示例参数，复制命令改为统一 `scripts/daoge.js prepare` 入口。
+
 ## 已补测试与 fixtures
 
 - `tests/integration/user_acceptance_paths.test.js`：覆盖 README 第一入口、本地 dry-run、mock provider 小样本、host-native ingest、缺素材落 issues。
@@ -93,4 +144,4 @@ open out/workspace/index.html
 ## 下一阶段风险
 
 - 真实 provider 端到端仍依赖有效 `.env` 和网络环境；本轮用 mock-provider 锁住 CLI 与工作台链路。
-- `references/examples/examples_catalog.html` 是入口页面契约，但当前验收重点是 run 内工作台路径。
+- `references/examples/examples_catalog.html` 已清理为统一入口命令；后续如恢复按示例直跑，需要先让 CLI 明确支持对应 task spec 选择能力。

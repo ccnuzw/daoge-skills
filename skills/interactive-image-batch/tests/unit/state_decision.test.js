@@ -24,6 +24,8 @@ test('state decision routes executed results without blocking issues to results 
   const action = decideAction(stage, {}, { counts: { needsReview: 1 } }, { summary: { blocking: 0 } }, {});
   assert.equal(stage.id, 'results');
   assert.equal(action.targetPage, 'results.html');
+  assert.match(action.label, /确认/);
+  assert.match(action.reason, /人工确认/);
 });
 
 test('state decision can route explicit record phase to record page', () => {

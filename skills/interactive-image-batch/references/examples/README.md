@@ -1,417 +1,79 @@
 # Examples Index
 
-如果你是第一次使用，不要先从这个文件开始。
+以下命令默认在 `skills/interactive-image-batch` 目录执行。
 
-请先读：
-
-- [../../README.md](../../README.md)
-
-这个目录用于存放 `interactive-image-batch` 的示例输入和示例结构。
-
-约束：
-
-- `examples` 只承担“示例”和“上手参考”职责
-- 它不是模板契约来源
-- 模板规则的事实来源仍然是：
-  - `references/template_registry_zh.json`
-  - `references/templates/*`
-  - `references/template_authoring_zh.md`
-
-## 当前示例目录
-
-- `examples.catalog.json`
-  - 可运行 example 的目录索引
-- `storyboard/`
-  - 通用分镜结构示例
-- `finance-storyboard/`
-  - 财经口播分镜示例
-- `host-native/`
-  - host-native 结果契约和 quickstart 示例
-- `ui-mockups/`
-  - UI 界面视觉稿最小示例
-- `infographics/`
-  - 信息图最小示例
-- `technical-diagrams/`
-  - 技术图解最小示例
-- `avatars-and-profile/`
-  - 头像资产包最小示例
-- `slides-and-visual-docs/`
-  - 幻灯页 / 视觉文档页最小示例
-- `academic-figures/`
-  - 学术图 / 论文图 / 研究概览图最小示例
-- `branding-and-packaging/`
-  - 品牌包装板 / 包装系统板最小示例
-- `scenes-and-illustrations/`
-  - 插画场景 / 绘本场景最小示例
-- `maps/`
-  - 地图路线板最小示例
-- `typography-and-text-layout/`
-  - 排版海报最小示例
-- `assets-and-props/`
-  - 资产道具板最小示例
-- `product-visuals/`
-  - 电商主图 / 详情页组图最小示例
-- `social-campaigns/`
-  - 社媒九宫格最小示例
-- `performance-creatives/`
-  - 广告 A/B 测试组最小示例
-- `editing-workflows/`
-  - 图像编辑最小示例
-- `poster-and-campaigns/`
-  - 品牌海报 / 联名主视觉最小示例
-- `grids-and-collages/`
-  - 系列 Lookbook 最小示例
-- `portraits-and-characters/`
-  - 肖像主视觉 / 棚拍大片最小示例
-- `cinematic-sequences/`
-  - 电影分镜组 / 口播分镜整板最小示例
-
-## 使用建议
-
-- 想看模板边界：先读 `references/templates/*`
-- 想看最小可用输入：再读这里的 `*.example.json`
-- 想做新模板：先读 `references/template_authoring_zh.md`
-
-## Quickstart
-
-如果你是第一次使用，先打开已提交的中文任务展示板：
-
-```bash
-open references/examples/examples_catalog.html
-```
-
-这个页面用于浏览任务类型和示例边界。真正开跑时，请把选中的 example 内容整理成最小 `task_spec.json`，再进入统一入口：
+第一次使用不要从全量 catalog 开始。先跑最小 task spec：
 
 ```bash
 node scripts/daoge.js prepare \
-  --task-spec /abs/path/task_spec.json \
-  --output-dir /tmp/daoge-example-prepare
+  --task-spec references/examples/task_spec.minimal.json \
+  --output-dir /tmp/daoge-minimal
+open /tmp/daoge-minimal/workspace/index.html
 ```
 
-如果还要接真实 provider 小样本：
+如果只想验流程：
 
 ```bash
 node scripts/daoge.js execute \
-  --output-dir /tmp/daoge-example-prepare \
-  --env-file /abs/path/.env \
-  --batch-size 1 \
-  --concurrency 1
-```
-
-如果只想验流程、不消耗额度：
-
-```bash
-node scripts/daoge.js execute \
-  --output-dir /tmp/daoge-example-prepare \
+  --output-dir /tmp/daoge-minimal \
   --dry-run true \
   --batch-size 1
 ```
 
-产物入口：
-
-- `/tmp/daoge-example-prepare/workspace/index.html`
-- `/tmp/daoge-example-prepare/workspace/prepare.html`
-- `/tmp/daoge-example-prepare/workspace/results.html`
-- `/tmp/daoge-example-prepare/workspace/issues.html`
-- `/tmp/daoge-example-prepare/workspace/record.html`
-
-可选意图入口：
-
-```bash
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir /tmp/daoge-example-prepare --intent ecommerce
-```
-
-当前 `--intent` 用于辅助工作台文案和推荐动作，不替代 `task_spec.json`。
-
-常用起步类型：
-
-- `portrait`
-- `studio`
-- `ecommerce`
-- `packaging`
-- `cinematic`
-- `oralboard`
-
-第一次使用优先只看这 6 个起步入口。
-
-当前 catalog 已包含：
-
-- `ui-mockup-board`
-- `ui-mockup-board-social-interface-mockup`
-- `ui-mockup-board-live-commerce-ui`
-- `ui-mockup-board-chat-interface-scene`
-- `ui-mockup-board-product-card-overlay`
-- `ui-mockup-board-short-video-cover-ui`
-- `infographic-board`
-- `technical-diagram`
-- `academic-figure-board`
-- `brand-packaging-board`
-- `illustrated-scene-set`
-- `map-route-board`
-- `type-layout-poster`
-- `asset-prop-sheet`
-- `avatar-profile-pack`
-- `visual-doc-slide`
-- `visual-doc-slide-data-summary-slide`
-- `visual-doc-slide-before-after-explainer-slide`
-- `ecommerce-clean`
-- `ecommerce-clean-soft-scene-commerce`
-- `ecommerce-clean-material-focus-commerce`
-- `ecommerce-clean-flatlay-commerce`
-- `ecommerce-clean-platform-safe-packshot`
-- `detail-page-set`
-- `social-grid`
-- `ab-ad-test`
-- `image-edit`
-- `image-edit-localized-fix`
-- `image-edit-style-alignment-edit`
-- `image-edit-material-replacement-edit`
-- `image-edit-lighting-consistency-fix`
-- `campaign-poster`
-- `lookbook`
-- `portrait-kv`
-- `studio-editorial`
-- `cinematic-storyboard`
-- `oral-storyboard-board`
-- `finance-oral-storyboard-board`
-- `oral-storyboard-board-host-led`
-- `oral-storyboard-board-product-led`
-- `oral-storyboard-board-educational-explainer`
-- `oral-storyboard-board-expert-led`
-- `oral-storyboard-board-testimonial-led`
-
-第一批变体级入口还包括：
-
-- `academic-figure-board-mechanism-diagram`
-- `brand-packaging-board-cosmetic-packaging`
-- `illustrated-scene-set-picture-book-scene`
-- `map-route-board-store-distribution-map`
-- `type-layout-poster-title-safe-poster`
-- `type-layout-poster-editorial-phrase-block`
-- `type-layout-poster-image-type-balance-poster`
-- `asset-prop-sheet-game-screenshot-mockup`
-- `asset-prop-sheet-prop-lineup-board`
-- `asset-prop-sheet-collectible-item-sheet`
-
-第二批变体级入口新增：
-
-- `academic-figure-board-multi-condition-comparison`
-- `brand-packaging-board-beverage-label-design`
-- `map-route-board-illustrated-city-map`
-- `illustrated-scene-set-concept-scene`
-- `illustrated-scene-set-minimalist-mood-scene`
-- `cinematic-storyboard-micro-film`
-- `cinematic-storyboard-vertical-short`
-- `cinematic-storyboard-mood-sequence`
-- `cinematic-storyboard-demo-explainer-sequence`
-- `cinematic-storyboard-product-reveal-sequence`
-- `infographic-board-step-by-step-infographic`
-- `technical-diagram-sequence-diagram`
-- `brand-packaging-board-mascot-brand-kit`
-- `avatar-profile-pack-style-transfer-selfie`
-
-第三批静态子类入口新增：
-
-- `infographic-board-legend-heavy-infographic`
-- `technical-diagram-network-topology`
-- `brand-packaging-board-character-merch-board`
-- `avatar-profile-pack-themed-3d-icon`
-
-第二十五批 Brand Packaging 第二波入口新增：
-
-- `brand-packaging-board-gift-box-campaign-packaging`
-- `brand-packaging-board-seasonal-limited-packaging`
-
-第四批说明型 / 电商型 / 投放型入口新增：
-
-- `visual-doc-slide-policy-style-slide`
-- `detail-page-set-fit-and-material`
-- `social-grid-brand-feed-system`
-- `ab-ad-test-benefit-stack`
-
-第五批说明页 / 详情页 / 社媒 / 海报入口新增：
-
-- `visual-doc-slide-educational-diagram-slide`
-- `detail-page-set-lifestyle-proof`
-- `social-grid-ugc-polished`
-- `campaign-poster-product-hero`
-
-第六批高密度解释 / 主图细节 / 上新九宫格 / 人物海报入口新增：
-
-- `visual-doc-slide-dense-explainer-slides`
-- `detail-page-set-hero-plus-details`
-- `social-grid-nine-grid-launch`
-- `campaign-poster-people-hero`
-
-第二十四批 Visual Doc Slide 第二波入口新增：
-
-- `visual-doc-slide-data-summary-slide`
-- `visual-doc-slide-before-after-explainer-slide`
-
-第二十一批 Detail Page 第二波入口新增：
-
-- `detail-page-set-comparison-proof-detail`
-- `detail-page-set-feature-stack-page`
-
-第二十二批 Social Grid 第二波入口新增：
-
-- `social-grid-countdown-campaign-grid`
-- `social-grid-benefit-carousel-grid`
-
-第七批技术图 / 信息图说明型入口新增：
-
-- `technical-diagram-flowchart-decision`
-- `technical-diagram-state-machine`
-- `infographic-board-comparison-infographic`
-- `infographic-board-bento-grid-infographic`
-
-第八批技术图 / 信息图尾项入口新增：
-
-- `technical-diagram-er-diagram`
-- `technical-diagram-mind-map-tech`
-- `infographic-board-hand-drawn-infographic`
-
-第九批 UI mockup 高频变体入口新增：
-
-- `ui-mockup-board-social-interface-mockup`
-- `ui-mockup-board-live-commerce-ui`
-- `ui-mockup-board-chat-interface-scene`
-
-第十批 UI mockup 尾项入口新增：
-
-- `ui-mockup-board-product-card-overlay`
-- `ui-mockup-board-short-video-cover-ui`
-
-第十一批投放测试 / Campaign 延展入口新增：
-
-- `ab-ad-test-audience-angle`
-- `ab-ad-test-layout-test`
-- `campaign-poster-campaign-extension`
-
-第二十三批 A/B Ad Test 第二波入口新增：
-
-- `ab-ad-test-hook-contrast-test`
-- `ab-ad-test-cta-emphasis-test`
-
-第二十批 Campaign Poster 第二波入口新增：
-
-- `campaign-poster-headline-safe-kv`
-- `campaign-poster-people-product-dual-hero`
-
-第十二批头像资产补齐入口新增：
-
-- `avatar-profile-pack-character-grid-portrait`
-- `avatar-profile-pack-cultural-portrait-series`
-
-第十三批学术图补齐入口新增：
-
-- `academic-figure-board-method-pipeline-overview`
-- `academic-figure-board-research-overview-poster`
-
-第十五批叙事与插画尾项补齐入口新增：
-
-- `cinematic-storyboard-mood-sequence`
-- `illustrated-scene-set-minimalist-mood-scene`
-
-同时修正：
-
-- `oral-storyboard-board` 基准入口的 `template_variant` 已统一为 `horizontal-board`
-
-第十六批肖像与棚拍家族化入口新增：
-
-- `portrait-kv-editorial-closeup`
-- `portrait-kv-soft-character-focus`
-- `studio-editorial-high-contrast-studio`
-- `studio-editorial-soft-beauty-studio`
-
-第十八批肖像与棚拍第二波入口新增：
-
-- `portrait-kv-dramatic-gaze-kv`
-- `portrait-kv-beauty-crop-kv`
-- `studio-editorial-mono-backdrop-editorial`
-- `studio-editorial-motion-pose-studio`
-
-第二十一批肖像与棚拍第三波入口新增：
-
-- `portrait-kv-emotion-contrast-kv`
-- `portrait-kv-product-linked-portrait-kv`
-- `studio-editorial-couture-minimal-studio`
-- `studio-editorial-gesture-sequence-studio`
-
-第十七批 Lookbook 家族化入口新增：
-
-- `lookbook-chapter-lookbook`
-- `lookbook-cover-and-range`
-
-第十九批 Lookbook 第二波入口新增：
-
-- `lookbook-chapter-scene-progressive`
-- `lookbook-multi-outfit-commercial`
-
-第十四批地图路线补齐入口新增：
-
-- `map-route-board-itinerary-day-trip-map`
-- `map-route-board-food-map`
-
-推荐第一次上手优先从这些入口开始：
-
-- `ui-mockup-board`
-- `academic-figure-board`
-- `brand-packaging-board`
-- `brand-packaging-board-gift-box-campaign-packaging`
-- `brand-packaging-board-seasonal-limited-packaging`
-- `map-route-board`
-- `type-layout-poster`
-- `ecommerce-clean`
-- `detail-page-set`
-- `social-grid`
-- `ab-ad-test`
-- `ab-ad-test-hook-contrast-test`
-- `ab-ad-test-cta-emphasis-test`
-- `campaign-poster`
-- `campaign-poster-headline-safe-kv`
-- `lookbook`
-- `lookbook-chapter-lookbook`
-- `lookbook-cover-and-range`
-- `lookbook-chapter-scene-progressive`
-- `lookbook-multi-outfit-commercial`
-- `lookbook-editorial-pairing-lookbook`
-- `lookbook-detail-mix`
-- `detail-page-set-comparison-proof-detail`
-- `detail-page-set-feature-stack-page`
-- `social-grid-countdown-campaign-grid`
-- `social-grid-benefit-carousel-grid`
-- `portrait-kv`
-- `studio-editorial`
-- `portrait-kv-editorial-closeup`
-- `portrait-kv-soft-character-focus`
-- `portrait-kv-dramatic-gaze-kv`
-- `portrait-kv-beauty-crop-kv`
-- `portrait-kv-emotion-contrast-kv`
-- `portrait-kv-product-linked-portrait-kv`
-- `portrait-kv-headline-safe-portrait-kv`
-- `portrait-kv-profile-silhouette-kv`
-- `studio-editorial-high-contrast-studio`
-- `studio-editorial-soft-beauty-studio`
-- `studio-editorial-mono-backdrop-editorial`
-- `studio-editorial-motion-pose-studio`
-- `studio-editorial-couture-minimal-studio`
-- `studio-editorial-gesture-sequence-studio`
-- `studio-editorial-sharp-tailoring-studio`
-- `studio-editorial-beauty-detail-studio`
-- `cinematic-storyboard`
-- `oral-storyboard-board`
-- `finance-oral-storyboard-board`
-- `oral-storyboard-board-host-led`
-- `oral-storyboard-board-product-led`
-- `oral-storyboard-board-educational-explainer`
-
-如果要体验某个 example，请先在 `examples_catalog.html` 中查看 example id，再复制对应 example 内容整理成 `task_spec.json`，最后运行统一入口：
-
-```bash
-node scripts/daoge.js prepare \
-  --task-spec /abs/path/task_spec.json \
-  --output-dir /tmp/daoge-example-catalog-demo
-```
-
-当前 CLI 不提供 `--example-id` 自动转换入口；示例目录只作为可读参考和手工整理来源。
+示例目录用途：
+
+- `task_spec.minimal.json`：新手最小可跑 task spec。
+- `examples.catalog.json`：全量示例元数据索引，包含 `category`、`template_id`、`template_variant`、`example_file`。
+- `examples_catalog.html`：可视化浏览页，只用于选型和复制统一入口命令。
+- 各分类目录：任务类型参考示例；表格中的代表文件可直接 `prepare` 做预检，真实任务建议复制后改成自己的 `task_spec.json`。
+
+## 适合谁
+
+| 用途 | 看哪里 | 说明 |
+| --- | --- | --- |
+| 新手 | `task_spec.minimal.json`、`ui-mockups/`、`product-visuals/`、`poster-and-campaigns/` | 最容易理解输入、prepare 和 workspace |
+| 进阶 | `branding-and-packaging/`、`infographics/`、`slides-and-visual-docs/`、`technical-diagrams/` | 适合结构化、商业或信息密度高任务 |
+| 宿主接入 | `host-native/`、`storyboard/`、`finance-storyboard/`、`cinematic-sequences/` | 适合宿主读取 prompts、外部生成、再 ingest |
+| 回归测试 | `examples.catalog.json`、`host-native/host_native_results.example.json`、`storyboard/*` | 适合检查 schema、catalog 和导入链路 |
+
+## 分类索引
+
+| 目录 | 用途 | 适合 | task 类型 | 起步命令 |
+| --- | --- | --- | --- | --- |
+| `ui-mockups/` | UI 界面视觉稿、设备界面、产品页面 | 新手 | `ui-mockup-board` | `node scripts/daoge.js prepare --task-spec references/examples/ui-mockups/ui_mockup_board.example.json --output-dir /tmp/daoge-ui` |
+| `product-visuals/` | 电商主图、详情页组图、商品可读性 | 新手 | `ecommerce-clean`、`detail-page-set` | `node scripts/daoge.js prepare --task-spec references/examples/product-visuals/ecommerce_clean.example.json --output-dir /tmp/daoge-ecommerce` |
+| `poster-and-campaigns/` | 活动海报、品牌主视觉、人物商品海报 | 新手 | `campaign-poster` | `node scripts/daoge.js prepare --task-spec references/examples/poster-and-campaigns/campaign_poster.example.json --output-dir /tmp/daoge-poster` |
+| `portraits-and-characters/` | 肖像主视觉、棚拍大片、角色形象 | 新手 / 进阶 | `portrait-kv`、`studio-editorial` | `node scripts/daoge.js prepare --task-spec references/examples/portraits-and-characters/portrait_kv.example.json --output-dir /tmp/daoge-portrait` |
+| `branding-and-packaging/` | 品牌包装板、标签、礼盒、角色周边 | 进阶 | `brand-packaging-board` | `node scripts/daoge.js prepare --task-spec references/examples/branding-and-packaging/brand_packaging_board.example.json --output-dir /tmp/daoge-packaging` |
+| `infographics/` | 信息图、步骤图、对比图、图文说明 | 进阶 | `infographic-board` | `node scripts/daoge.js prepare --task-spec references/examples/infographics/infographic_board.example.json --output-dir /tmp/daoge-infographic` |
+| `technical-diagrams/` | 架构图、流程图、状态机、ER 图 | 进阶 | `technical-diagram` | `node scripts/daoge.js prepare --task-spec references/examples/technical-diagrams/technical_diagram.example.json --output-dir /tmp/daoge-diagram` |
+| `slides-and-visual-docs/` | 汇报页、解释页、视觉文档页 | 进阶 | `visual-doc-slide` | `node scripts/daoge.js prepare --task-spec references/examples/slides-and-visual-docs/visual_doc_slide.example.json --output-dir /tmp/daoge-slide` |
+| `academic-figures/` | 论文图、研究概览、机制图 | 进阶 | `academic-figure-board` | `node scripts/daoge.js prepare --task-spec references/examples/academic-figures/academic_figure_board.example.json --output-dir /tmp/daoge-academic` |
+| `maps/` | 地图路线板、门店分布、城市导览 | 进阶 | `map-route-board` | `node scripts/daoge.js prepare --task-spec references/examples/maps/map_route_board.example.json --output-dir /tmp/daoge-map` |
+| `typography-and-text-layout/` | 排版海报、标题安全区、短句视觉 | 进阶 | `type-layout-poster` | `node scripts/daoge.js prepare --task-spec references/examples/typography-and-text-layout/type_layout_poster.example.json --output-dir /tmp/daoge-type` |
+| `assets-and-props/` | 道具资产板、游戏截图 mockup、收藏品 | 进阶 | `asset-prop-sheet` | `node scripts/daoge.js prepare --task-spec references/examples/assets-and-props/asset_prop_sheet.example.json --output-dir /tmp/daoge-props` |
+| `avatars-and-profile/` | 头像包、贴纸包、profile 系列资产 | 新手 / 进阶 | `avatar-profile-pack` | `node scripts/daoge.js prepare --task-spec references/examples/avatars-and-profile/avatar_profile_pack.example.json --output-dir /tmp/daoge-avatar` |
+| `social-campaigns/` | 九宫格、倒计时、品牌 feed、轮播图 | 进阶 | `social-grid` | `node scripts/daoge.js prepare --task-spec references/examples/social-campaigns/social_grid.example.json --output-dir /tmp/daoge-social` |
+| `performance-creatives/` | 广告 A/B 测试、投放素材组 | 进阶 | `ab-ad-test` | `node scripts/daoge.js prepare --task-spec references/examples/performance-creatives/ab_ad_test.example.json --output-dir /tmp/daoge-ab` |
+| `editing-workflows/` | 局部修图、风格统一、材质替换 | 进阶 | `image-edit` | `node scripts/daoge.js prepare --task-spec references/examples/editing-workflows/image_edit.example.json --output-dir /tmp/daoge-edit` |
+| `grids-and-collages/` | Lookbook、系列拼贴、章节组图 | 进阶 | `lookbook` | `node scripts/daoge.js prepare --task-spec references/examples/grids-and-collages/lookbook.example.json --output-dir /tmp/daoge-lookbook` |
+| `scenes-and-illustrations/` | 插画场景、绘本场景、概念场景 | 新手 / 进阶 | `illustrated-scene-set` | `node scripts/daoge.js prepare --task-spec references/examples/scenes-and-illustrations/illustrated_scene_set.example.json --output-dir /tmp/daoge-scene` |
+| `cinematic-sequences/` | 电影分镜、口播分镜、短片镜头组 | 宿主接入 / 进阶 | `cinematic-storyboard`、`oral-storyboard-board` | `node scripts/daoge.js prepare --task-spec references/examples/cinematic-sequences/cinematic_storyboard.example.json --output-dir /tmp/daoge-cinematic` |
+| `storyboard/` | 通用分镜结构示例 | 宿主接入 / 回归测试 | storyboard manifests | 先按目录内 manifest 整理 `task_spec.json`，再 `prepare` |
+| `finance-storyboard/` | 财经口播分镜结构示例 | 宿主接入 / 回归测试 | `finance-oral-storyboard-board` | `node scripts/daoge.js prepare --task-spec references/examples/finance-storyboard/finance_oral_storyboard_board.example.json --output-dir /tmp/daoge-finance` |
+| `host-native/` | 宿主结果 schema、quickstart、回填示例 | 宿主接入 / 回归测试 | `host_native_results` | 先 `node scripts/daoge.js prepare --task-spec references/examples/task_spec.minimal.json --output-dir /tmp/daoge-host`；宿主生成自己的 `host_native_results.json` 后再 `ingest`。目录内 example 只作 schema 参考 |
+
+## 使用顺序
+
+1. 先跑 `task_spec.minimal.json`。
+2. 再从上表选接近任务的分类。
+3. 复制对应 `*.example.json` 为自己的 `task_spec.json`。
+4. 跑 `prepare`，打开 `workspace/index.html`。
+5. 要本地出图就跑 `execute`；要宿主出图就让宿主读取 `debug/prompts.generated.json` 后跑 `ingest`。
+
+## 注意
+
+- `examples` 只承担示例和上手参考，不是模板契约来源。
+- 模板事实来源仍是 `references/template_registry_zh.json`、`references/templates/*`、`references/template_authoring_zh.md`。
+- 当前用户文档只推荐 `node scripts/daoge.js`。
+- 不再推荐复制旧示例参数命令。

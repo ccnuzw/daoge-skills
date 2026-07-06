@@ -62,6 +62,7 @@ const ISSUE_ACTION_IDS = [
 ];
 const ISSUE_GROUP_IDS = ['must_handle', 'needs_confirmation', 'worth_rerun', 'can_ignore', 'resolved'];
 const USER_FORBIDDEN_TERMS = ['template', 'variant', 'manifest', 'registry', 'runtime', 'artifact', 'slot'];
+const JSON_FILE_CACHE = new Map();
 
 function ensureDir(dirPath) {
   fs.mkdirSync(path.resolve(dirPath), { recursive: true });
@@ -72,6 +73,19 @@ function readJsonIfExists(filePath) {
   const absolutePath = path.resolve(filePath);
   if (!fs.existsSync(absolutePath)) return null;
   return JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+}
+
+function readJsonIfExistsCached(filePath) {
+  if (!filePath) return null;
+  const absolutePath = path.resolve(filePath);
+  if (JSON_FILE_CACHE.has(absolutePath)) return JSON_FILE_CACHE.get(absolutePath);
+  const value = readJsonIfExists(absolutePath);
+  if (value) JSON_FILE_CACHE.set(absolutePath, value);
+  return value;
+}
+
+function cloneJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
 function readJson(filePath) {
@@ -231,8 +245,71 @@ function resultOutputExists(outputDir, result = {}) {
 
 function loadTaskCatalog(skillRoot = path.resolve(__dirname, '..', '..')) {
   const catalogPath = path.join(skillRoot, 'references', 'task_catalog_zh.json');
-  const catalog = readJsonIfExists(catalogPath) || { tasks: [] };
-  return Array.isArray(catalog.tasks) ? catalog.tasks : [];
+  const catalog = readJsonIfExistsCached(catalogPath) || { tasks: [] };
+  return Array.isArray(catalog.tasks) ? cloneJson(catalog.tasks) : [];
+}
+
+function loadTemplateRegistry(skillRoot = path.resolve(__dirname, '..', '..')) {
+  const registryPath = path.join(skillRoot, 'references', 'template_registry_zh.json');
+  const registry = readJsonIfExistsCached(registryPath) || { templates: [] };
+  return Array.isArray(registry.templates) ? cloneJson(registry.templates) : [];
+}
+
+const TASK_ID_ALIASES = {
+  poster: 'campaign-poster',
+  campaign: 'campaign-poster',
+  banner: 'campaign-poster',
+  ecommerce: 'ecommerce',
+  product: 'ecommerce',
+  packaging: 'packaging',
+  portrait: 'portrait',
+  studio: 'studio',
+  cinematic: 'cinematic',
+  storyboard: 'cinematic',
+  oralboard: 'oralboard',
+  oral: 'oralboard',
+  infographic: 'infographic-board',
+  technical: 'technical-diagram',
+  diagram: 'technical-diagram',
+  map: 'map-route-board',
+  ui: 'ui-mockup-board',
+  academic: 'academic-figure-board',
+  edit: 'image-edit',
+  avatar: 'avatar-profile-pack',
+  social: 'social-grid',
+  typography: 'type-layout-poster',
+};
+
+const TASK_INTENT_RULES = [
+  { id: 'oralboard', weight: 120, keywords: ['口播分镜', '财经口播', '主持人口播', '主理人口播', '演播厅分镜', '口播板'] },
+  { id: 'cinematic', weight: 100, keywords: ['storyboard', '分镜', '镜头序列', '四格', '短片', '剧情画面', '广告镜头'] },
+  { id: 'technical-diagram', weight: 95, keywords: ['技术流程图', '架构图', '流程图', 'flowchart', 'system architecture', 'sequence diagram', '拓扑图', 'er diagram', '状态机', '节点', '箭头方向'] },
+  { id: 'ui-mockup-board', weight: 92, keywords: ['ui mockup', 'dashboard', '界面视觉稿', '界面稿', 'app dashboard', '底部导航', '课程卡片', 'landing page', 'web mockup'] },
+  { id: 'academic-figure-board', weight: 90, keywords: ['graphical abstract', '论文图', '学术图', '机制图', 'research poster', 'scientific schematic', 'publication chart'] },
+  { id: 'infographic-board', weight: 88, keywords: ['信息图', 'infographic', '对比图', '步骤图', '数据看板', '图例', 'kpi'] },
+  { id: 'map-route-board', weight: 86, keywords: ['路线地图', '旅行路线', '导览图', 'city map', 'route map', '地图', 'itinerary map', 'food map'] },
+  { id: 'image-edit', weight: 84, keywords: ['局部修改', '参考图风格迁移', '风格迁移', '修图', '改图', '换背景', '保留人物', '保留商品', 'edit'] },
+  { id: 'type-layout-poster', weight: 82, keywords: ['字体排版海报', '双语排版', '文字海报', 'typography poster', 'type layout', '大标题区'] },
+  { id: 'social-grid', weight: 80, keywords: ['九宫格', '社媒', '小红书', 'instagram', 'feed', '社交媒体'] },
+  { id: 'avatar-profile-pack', weight: 78, keywords: ['头像', 'profile', 'avatar', '圆形裁切', '贴纸', '角色头像'] },
+  { id: 'campaign-poster', weight: 76, keywords: ['campaign', '海报', 'poster', 'kv', '主视觉', 'cta', 'banner', '短视频封面', '标题安全区'] },
+  { id: 'ecommerce', weight: 74, keywords: ['电商', '商品主图', '商品图', '详情页', '卖点图', '白底', '平台安全区', '货架', '转化图'] },
+  { id: 'packaging', weight: 70, keywords: ['包装', '礼盒', '包装概念', '包装板', '纸袋', '标签', '外盒', '内盒', '套组', 'label design'] },
+  { id: 'studio', weight: 55, keywords: ['棚拍', '摄影棚', '棚内', 'studio', '质感图'] },
+  { id: 'portrait', weight: 50, keywords: ['人像', '肖像', '半身', 'portrait', '近景', '创始人介绍'] },
+];
+
+function normalizedTaskId(value) {
+  const raw = normalizeText(value).toLowerCase();
+  return TASK_ID_ALIASES[raw] || raw;
+}
+
+function keywordScore(text, keywords = [], baseWeight = 1) {
+  return keywords.reduce((score, keyword) => {
+    const term = String(keyword || '').trim().toLowerCase();
+    if (!term) return score;
+    return text.includes(term) ? score + baseWeight + Math.min(term.length, 12) : score;
+  }, 0);
 }
 
 function inferTaskId(input = {}) {
@@ -244,24 +321,76 @@ function inferTaskId(input = {}) {
     input.title,
     input.summary,
   ].filter(Boolean).join(' ').toLowerCase();
-  if (/oral|口播|讲解/.test(text)) return 'oralboard';
-  if (/cinematic|storyboard|分镜|镜头|短片/.test(text)) return 'cinematic';
-  if (/packaging|包装|礼盒|瓶|盒/.test(text)) return 'packaging';
-  if (/ecommerce|电商|商品|详情页|主图/.test(text)) return 'ecommerce';
-  if (/studio|棚拍|质感/.test(text)) return 'studio';
+  const catalogIds = loadTaskCatalog().map((item) => item.id);
+  const registryIds = loadTemplateRegistry().map((item) => item.id);
+  const isKnownTaskId = (value) => value && (catalogIds.includes(value) || registryIds.includes(value));
+  const explicitTaskId = normalizedTaskId(input.taskId);
+  const explicitIntentId = normalizedTaskId(input.intent);
+  if (isKnownTaskId(explicitTaskId)) return explicitTaskId;
+  if (isKnownTaskId(explicitIntentId)) return explicitIntentId;
+  if (/(棚拍|摄影棚|棚内)/.test(text) && /(人像|肖像|人物|女性|男性|创始人|模特)/.test(text)) return 'studio';
+  if (/(人物|人像|肖像)/.test(text) && /海报/.test(text) && !/(商品|产品|campaign|cta|新品|banner|短视频|标题区|主标题)/.test(text)) return 'portrait';
+
+  const scores = new Map();
+  const addScore = (id, score) => {
+    if (!id || !score) return;
+    scores.set(id, (scores.get(id) || 0) + score);
+  };
+  TASK_INTENT_RULES.forEach((rule) => addScore(rule.id, keywordScore(text, rule.keywords, rule.weight)));
+  loadTaskCatalog().forEach((task) => {
+    addScore(task.id, keywordScore(text, [
+      task.name,
+      task.plainSummary,
+      ...toArray(task.bestFor),
+      ...toArray(task.userNeeds),
+      ...toArray(task.intentKeywords),
+    ], 30));
+  });
+  loadTemplateRegistry().forEach((template) => {
+    addScore(template.id, keywordScore(text, [
+      template.name,
+      template.description,
+      template.category,
+      ...toArray(template.triggers),
+    ], 18));
+  });
+
+  if (/(商品|产品|主图|详情页|卖点|白底|平台安全区)/.test(text) && !/(包装|礼盒|外盒|内盒|纸袋|标签)/.test(text)) {
+    addScore('ecommerce', 90);
+  }
+  if (/(棚拍|摄影棚|棚内)/.test(text) && /(人像|肖像|人物|女性|男性|创始人|模特)/.test(text)) addScore('studio', 120);
+  if (/(横图|banner|首发|购买按钮)/.test(text)) addScore('campaign-poster', 70);
+  if (/(竖版|短视频封面|封面)/.test(text)) addScore('campaign-poster', 45);
+  if (/(不要人物|无人物)/.test(text)) {
+    scores.delete('portrait');
+    scores.delete('studio');
+  }
+
+  const ranked = [...scores.entries()].filter(([, score]) => score > 0).sort((a, b) => b[1] - a[1]);
+  if (ranked.length) {
+    const id = ranked[0][0];
+    if (id === 'oral-storyboard-board') return 'oralboard';
+    if (id === 'cinematic-storyboard') return 'cinematic';
+    if (id === 'ecommerce-clean' || id === 'detail-page-set') return 'ecommerce';
+    if (id === 'brand-packaging-board') return 'packaging';
+    if (id === 'portrait-kv') return 'portrait';
+    if (id === 'studio-editorial') return 'studio';
+    return id;
+  }
   return 'portrait';
 }
 
 function resolveTask(input = {}) {
   const tasks = loadTaskCatalog();
   const taskId = inferTaskId(input);
-  const catalogTask = tasks.find((item) => item.id === taskId) || tasks[0] || {};
+  const catalogTask = tasks.find((item) => item.id === taskId) || {};
   const userTitle = normalizeText(input.title || input.contentBrief || input.summary);
+  const fallbackTitle = normalizeText(userTitle, '生图任务');
   return {
-    id: catalogTask.id || taskId,
-    title: normalizeText(userTitle, catalogTask.name || '生图任务'),
+    id: taskId,
+    title: normalizeText(userTitle, catalogTask.name || fallbackTitle),
     summary: normalizeText(input.summary || input.contentBrief, catalogTask.plainSummary || '生成一组可筛选的视觉结果'),
-    name: catalogTask.name || normalizeText(userTitle, '生图任务'),
+    name: catalogTask.name || fallbackTitle,
     plainSummary: catalogTask.plainSummary || '',
     bestFor: toArray(catalogTask.bestFor),
     userNeeds: toArray(catalogTask.userNeeds),
