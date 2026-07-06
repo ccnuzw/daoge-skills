@@ -12,6 +12,7 @@ const {
   ensureV2Layout,
   numberedName,
   copyFileIfExists,
+  hardlinkOrCopyFileIfExists,
   relativeToOutput,
   resultDisplayTitle,
   publicAsset,
@@ -192,11 +193,6 @@ function createMissingResultRecord(targetPath, result) {
   }, null, 2)}\n`);
 }
 
-function sourceForResult(outputDir, result) {
-  const availability = classifyResultAvailability(outputDir, result);
-  return availability.outputPath;
-}
-
 function userLifecycleLabel(status) {
   const labels = {
     ready_for_run: '开跑前已整理',
@@ -215,9 +211,12 @@ function userLifecycleLabel(status) {
 
 function writeExportReport(outputDir, assets) {
   const reportPath = path.join(outputDir, 'assets', 'exports', 'report.html');
-  const selected = assets.filter((item) => item.kind === 'selected_result');
-  const deliverables = assets.filter((item) => item.group === '交付成果' && item.kind === 'export_image');
-  const related = assets.filter((item) => ['建议复核', '问题相关'].includes(item.group));
+  const reportGroups = assets.reduce((groups, item) => {
+    if (item.kind === 'selected_result') groups.selected.push(item);
+    if (item.group === '交付成果' && item.kind === 'export_image') groups.deliverables.push(item);
+    if (item.group === '建议复核' || item.group === '问题相关') groups.related.push(item);
+    return groups;
+  }, { selected: [], deliverables: [], related: [] });
   const renderRows = (items, emptyText) => items.length
     ? items.map((item) => `<tr><td><a href="../../${escapeHtml(item.path)}">${escapeHtml(item.userTitle)}</a></td><td>${escapeHtml(item.userPurpose)}</td><td>${escapeHtml(item.userAction)}</td><td>${escapeHtml(userLifecycleLabel(item.lifecycleStatus))}</td></tr>`).join('\n')
     : `<tr><td colspan="4">${escapeHtml(emptyText)}</td></tr>`;
@@ -245,11 +244,11 @@ function writeExportReport(outputDir, assets) {
   <h1>交付清单</h1>
   <p>这里列出建议交付图、推荐优先看的候选，以及仍需复核或处理的项目。</p>
   <h2>建议交付</h2>
-  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(deliverables, '当前还没有建议交付图，先回结果页筛选。')}</tbody></table>
+  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(reportGroups.deliverables, '当前还没有建议交付图，先回结果页筛选。')}</tbody></table>
   <h2>推荐候选</h2>
-  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(selected, '当前还没有推荐候选。')}</tbody></table>
+  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(reportGroups.selected, '当前还没有推荐候选。')}</tbody></table>
   <h2>需要留意</h2>
-  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(related, '当前没有需要留意的项目。')}</tbody></table>
+  <table><thead><tr><th>文件</th><th>这是什么</th><th>建议怎么处理</th><th>状态</th></tr></thead><tbody>${renderRows(reportGroups.related, '当前没有需要留意的项目。')}</tbody></table>
 </main>
 </body>
 </html>
@@ -298,7 +297,7 @@ function buildAssetLibrary(options = {}) {
       createFailureRecord(targetPath, result);
       copied = true;
     } else if (availability.available) {
-      copied = copyFileIfExists(sourceForResult(outputDir, result), targetPath);
+      copied = copyFileIfExists(availability.outputPath, targetPath);
     }
 
     if (availability.missingOutput || (availability.available && !copied)) {
@@ -380,8 +379,8 @@ function buildAssetLibrary(options = {}) {
     if (availability.success && shouldRecommendResult(result, availableSuccessIndex)) {
       const selectedPath = path.join(outputDir, 'assets', 'selected', fileName);
       const exportPath = path.join(outputDir, 'assets', 'exports', 'selected_images', fileName);
-      copyFileIfExists(targetPath, selectedPath);
-      copyFileIfExists(targetPath, exportPath);
+      hardlinkOrCopyFileIfExists(targetPath, selectedPath);
+      hardlinkOrCopyFileIfExists(targetPath, exportPath);
       assets.push(assetRecord({
         id: `selected_${String(index + 1).padStart(3, '0')}`,
         kind: 'selected_result',
@@ -466,15 +465,36 @@ function buildAssetLibrary(options = {}) {
     source: { stage: results.length ? 'execute' : 'prepare' },
   }));
 
+  const groupIds = {
+    inputs: [],
+    references: [],
+    masks: [],
+    ready_results: [],
+    needs_review: [],
+    issues: [],
+    selected: [],
+    exports: [],
+  };
+  assets.forEach((item) => {
+    if (item.group === '用户原始输入') groupIds.inputs.push(item.id);
+    if (['人物参考', '风格参考', '场景参考', '产品参考'].includes(item.group)) groupIds.references.push(item.id);
+    if (item.group === '局部重绘遮罩') groupIds.masks.push(item.id);
+    if (item.kind === 'image_result' && item.usage.canSelect) groupIds.ready_results.push(item.id);
+    if (item.usage.needsReview) groupIds.needs_review.push(item.id);
+    if (item.usage.hasIssue) groupIds.issues.push(item.id);
+    if (item.group === '已选结果') groupIds.selected.push(item.id);
+    if (item.group === '交付成果') groupIds.exports.push(item.id);
+  });
+
   const groups = [
-    { id: 'inputs', title: '用户原始输入', assetIds: assets.filter((item) => item.group === '用户原始输入').map((item) => item.id) },
-    { id: 'references', title: '参考素材', assetIds: assets.filter((item) => ['人物参考', '风格参考', '场景参考', '产品参考'].includes(item.group)).map((item) => item.id) },
-    { id: 'masks', title: '局部重绘遮罩', assetIds: assets.filter((item) => item.group === '局部重绘遮罩').map((item) => item.id) },
-    { id: 'ready_results', title: '可筛选结果', assetIds: assets.filter((item) => item.kind === 'image_result' && item.usage.canSelect).map((item) => item.id) },
-    { id: 'needs_review', title: '建议复核', assetIds: assets.filter((item) => item.usage.needsReview).map((item) => item.id) },
-    { id: 'issues', title: '问题相关', assetIds: assets.filter((item) => item.usage.hasIssue).map((item) => item.id) },
-    { id: 'selected', title: '已选结果', assetIds: assets.filter((item) => item.group === '已选结果').map((item) => item.id) },
-    { id: 'exports', title: '交付成果', assetIds: assets.filter((item) => item.group === '交付成果').map((item) => item.id) },
+    { id: 'inputs', title: '用户原始输入', assetIds: groupIds.inputs },
+    { id: 'references', title: '参考素材', assetIds: groupIds.references },
+    { id: 'masks', title: '局部重绘遮罩', assetIds: groupIds.masks },
+    { id: 'ready_results', title: '可筛选结果', assetIds: groupIds.ready_results },
+    { id: 'needs_review', title: '建议复核', assetIds: groupIds.needs_review },
+    { id: 'issues', title: '问题相关', assetIds: groupIds.issues },
+    { id: 'selected', title: '已选结果', assetIds: groupIds.selected },
+    { id: 'exports', title: '交付成果', assetIds: groupIds.exports },
   ];
 
   const library = {

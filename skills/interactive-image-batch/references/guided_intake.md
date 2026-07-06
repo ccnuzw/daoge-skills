@@ -199,7 +199,6 @@ Rules:
 
 - `preview_count`
 - `output_format`
-- `contact_sheet`
 - `identity_policy`
 - `negative_requirements`
 - `run_label`

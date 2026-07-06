@@ -8,6 +8,8 @@ const {
   assertNoUserFacingInternalTerms,
 } = require('../shared/workspace');
 
+const MAX_RENDERED_ASSET_CARDS = 120;
+
 function renderList(items, emptyText) {
   const values = (Array.isArray(items) ? items : []).filter(Boolean);
   if (!values.length) return `<p class="muted">${escapeHtml(emptyText)}</p>`;
@@ -48,9 +50,15 @@ function renderPrimaryAction(action) {
   return `<a class="primary-action" href="${escapeHtml(href)}">${content}</a>`;
 }
 
-function renderAssets(assets, emptyText) {
+function renderAssets(assets, emptyText, options = {}) {
   if (!assets.length) return `<p class="muted">${escapeHtml(emptyText)}</p>`;
-  return `<div class="asset-grid">${assets.map((asset) => {
+  const visible = assets.slice(0, MAX_RENDERED_ASSET_CARDS);
+  const hiddenCount = assets.length - visible.length;
+  const directoryPath = options.directoryPath || '';
+  const summary = hiddenCount > 0
+    ? `<p class="muted">已显示前 ${visible.length} 个，另有 ${hiddenCount} 个在 <a href="../${escapeHtml(directoryPath)}">${escapeHtml(directoryPath)}</a>。</p>`
+    : '';
+  return `${summary}<div class="asset-grid">${visible.map((asset) => {
     const image = asset.previewPath && !asset.path.endsWith('.json')
       ? `<a class="thumb" href="../${escapeHtml(asset.path)}"><img src="../${escapeHtml(asset.previewPath)}" alt="${escapeHtml(asset.userTitle)}" loading="lazy"></a>`
       : '<div class="thumb empty"></div>';
@@ -108,11 +116,11 @@ function renderPageBody(vm) {
   }
   if (vm.pageId === 'results') {
     return `
-      <section class="panel"><h2>可筛选结果</h2>${renderAssets(vm.assets.ready, '当前还没有可筛选结果。')}</section>
-      <section class="panel"><h2>推荐优先看</h2>${renderAssets(vm.assets.selected, '当前没有推荐候选。')}</section>
-      <section class="panel"><h2>交付候选</h2>${renderAssets(vm.assets.exports, '当前还没有交付候选。')}</section>
-      <section class="panel"><h2>建议复核</h2>${renderAssets(vm.assets.review, '当前没有建议复核的结果。')}</section>
-      <section class="panel"><h2>失败和补跑</h2><p>${escapeHtml(vm.worthRerunCount ? `${vm.worthRerunCount} 个结果值得补跑。` : '当前没有明确补跑压力。')}</p>${renderAssets(vm.assets.issues, '当前没有失败记录。')}</section>
+      <section class="panel"><h2>可筛选结果</h2>${renderAssets(vm.assets.ready, '当前还没有可筛选结果。', { directoryPath: 'assets/results/' })}</section>
+      <section class="panel"><h2>推荐优先看</h2>${renderAssets(vm.assets.selected, '当前没有推荐候选。', { directoryPath: 'assets/selected/' })}</section>
+      <section class="panel"><h2>交付候选</h2>${renderAssets(vm.assets.exports, '当前还没有交付候选。', { directoryPath: 'assets/exports/selected_images/' })}</section>
+      <section class="panel"><h2>建议复核</h2>${renderAssets(vm.assets.review, '当前没有建议复核的结果。', { directoryPath: 'assets/review/' })}</section>
+      <section class="panel"><h2>失败和补跑</h2><p>${escapeHtml(vm.worthRerunCount ? `${vm.worthRerunCount} 个结果值得补跑。` : '当前没有明确补跑压力。')}</p>${renderAssets(vm.assets.issues, '当前没有失败记录。', { directoryPath: 'assets/issues/' })}</section>
     `;
   }
   if (vm.pageId === 'issues') {

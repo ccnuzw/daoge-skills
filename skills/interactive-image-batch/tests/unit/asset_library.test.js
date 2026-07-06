@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { buildAssetLibrary } = require('../../src/domain/asset_library');
+const { hardlinkOrCopyFileIfExists } = require('../../src/shared/workspace');
 const { makeTempDir, writeJson, writeTinyPng } = require('../helpers/workspace_v2_test_utils');
 
 test('asset library creates human readable result, review and issue assets', () => {
@@ -248,4 +249,89 @@ test('asset library stores failed result records under issues as canonical path'
   const issue = library.assets.find((asset) => asset.kind === 'issue_record');
   assert.match(issue.path, /^assets\/issues\//);
   assert.equal(fs.existsSync(path.join(outputDir, issue.path)), true);
+});
+
+test('hardlinkOrCopyFileIfExists prefers hardlink and falls back to copy', () => {
+  const outputDir = makeTempDir();
+  const source = path.join(outputDir, 'source.png');
+  const hardlinkTarget = path.join(outputDir, 'linked', 'target.png');
+  writeTinyPng(source);
+
+  const originalLinkSync = fs.linkSync;
+  let linkAttempted = false;
+  fs.linkSync = function patchedLinkSync(...args) {
+    linkAttempted = true;
+    return originalLinkSync.apply(this, args);
+  };
+  try {
+    assert.equal(hardlinkOrCopyFileIfExists(source, hardlinkTarget), true);
+  } finally {
+    fs.linkSync = originalLinkSync;
+  }
+  assert.equal(linkAttempted, true);
+  assert.deepEqual(fs.readFileSync(hardlinkTarget), fs.readFileSync(source));
+
+  const fallbackTarget = path.join(outputDir, 'copied', 'target.png');
+  fs.linkSync = () => {
+    throw new Error('EXDEV');
+  };
+  try {
+    assert.equal(hardlinkOrCopyFileIfExists(source, fallbackTarget), true);
+  } finally {
+    fs.linkSync = originalLinkSync;
+  }
+  assert.deepEqual(fs.readFileSync(fallbackTarget), fs.readFileSync(source));
+
+  assert.equal(hardlinkOrCopyFileIfExists(source, source), true);
+  assert.deepEqual(fs.readFileSync(source), fs.readFileSync(hardlinkTarget));
+});
+
+test('recommended selected and export assets hardlink to result file when supported', () => {
+  const outputDir = makeTempDir();
+  const sourceImage = path.join(outputDir, 'source.png');
+  writeTinyPng(sourceImage);
+  writeJson(path.join(outputDir, 'internal', 'run_plan.json'), {
+    task: { title: '人物主视觉' },
+  });
+  writeJson(path.join(outputDir, 'internal', 'execution_manifest.json'), {
+    results: [
+      { id: 'result_001', index: 1, status: 'success', sourceOutput: sourceImage },
+    ],
+  });
+  const library = buildAssetLibrary({ outputDir });
+  const result = library.assets.find((asset) => asset.kind === 'image_result');
+  const selected = library.assets.find((asset) => asset.kind === 'selected_result');
+  const exported = library.assets.find((asset) => asset.kind === 'export_image');
+  const resultStat = fs.statSync(path.join(outputDir, result.path));
+  const selectedStat = fs.statSync(path.join(outputDir, selected.path));
+  const exportedStat = fs.statSync(path.join(outputDir, exported.path));
+  if (resultStat.dev === selectedStat.dev && resultStat.dev === exportedStat.dev) {
+    assert.equal(selectedStat.ino, resultStat.ino);
+    assert.equal(exportedStat.ino, resultStat.ino);
+  }
+});
+
+test('asset library refresh stays idempotent when selected and export are hardlinks', () => {
+  const outputDir = makeTempDir();
+  const sourceImage = path.join(outputDir, 'source.png');
+  writeTinyPng(sourceImage);
+  writeJson(path.join(outputDir, 'internal', 'run_plan.json'), {
+    task: { title: '人物主视觉' },
+  });
+  writeJson(path.join(outputDir, 'internal', 'execution_manifest.json'), {
+    results: [
+      { id: 'result_001', index: 1, status: 'success', sourceOutput: sourceImage },
+    ],
+  });
+  buildAssetLibrary({ outputDir });
+  let library = null;
+  assert.doesNotThrow(() => {
+    library = buildAssetLibrary({ outputDir });
+  });
+  const selected = library.assets.find((asset) => asset.kind === 'selected_result');
+  const exported = library.assets.find((asset) => asset.kind === 'export_image');
+  assert.equal(fs.existsSync(path.join(outputDir, selected.path)), true);
+  assert.equal(fs.existsSync(path.join(outputDir, exported.path)), true);
+  assert.equal(fs.readFileSync(path.join(outputDir, selected.path)).length > 0, true);
+  assert.equal(fs.readFileSync(path.join(outputDir, exported.path)).length > 0, true);
 });

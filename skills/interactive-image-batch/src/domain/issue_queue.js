@@ -385,6 +385,48 @@ function buildIssueQueue(options = {}) {
     counter += 1;
   });
 
+  const summary = {
+    blocking: 0,
+    attention: 0,
+    rerunCandidates: 0,
+    ignored: 0,
+    resolved: 0,
+  };
+  const groupItemIds = {
+    must_handle: [],
+    needs_confirmation: [],
+    worth_rerun: [],
+    can_ignore: [],
+    resolved: [],
+  };
+  items.forEach((item) => {
+    const open = issueIsOpen(item);
+    const ignored = item.resolutionState === 'ignored' || item.status === 'ignored' || item.type === 'ignored';
+    const resolved = item.resolutionState === 'resolved' || item.status === 'resolved' || item.type === 'resolved';
+    if (item.blocking && open) {
+      summary.blocking += 1;
+      groupItemIds.must_handle.push(item.id);
+    }
+    if (!item.blocking && open && item.type !== 'rerun_candidate') {
+      summary.attention += 1;
+    }
+    if (item.severity === 'attention' && item.type !== 'rerun_candidate' && open) {
+      groupItemIds.needs_confirmation.push(item.id);
+    }
+    if (item.type === 'rerun_candidate' && open) {
+      summary.rerunCandidates += 1;
+      groupItemIds.worth_rerun.push(item.id);
+    }
+    if (ignored) {
+      summary.ignored += 1;
+      groupItemIds.can_ignore.push(item.id);
+    }
+    if (resolved) {
+      summary.resolved += 1;
+      groupItemIds.resolved.push(item.id);
+    }
+  });
+
   const issueQueue = {
     schemaVersion: 2,
     generatedAt: new Date().toISOString(),
@@ -392,19 +434,13 @@ function buildIssueQueue(options = {}) {
     supportedResolutionStates: RESOLUTION_STATES,
     supportedActionIds: ISSUE_ACTION_IDS,
     supportedGroupIds: ISSUE_GROUP_IDS,
-    summary: {
-      blocking: items.filter((item) => item.blocking && issueIsOpen(item)).length,
-      attention: items.filter((item) => !item.blocking && issueIsOpen(item) && item.type !== 'rerun_candidate').length,
-      rerunCandidates: items.filter((item) => item.type === 'rerun_candidate' && issueIsOpen(item)).length,
-      ignored: items.filter((item) => item.resolutionState === 'ignored' || item.status === 'ignored' || item.type === 'ignored').length,
-      resolved: items.filter((item) => item.resolutionState === 'resolved' || item.status === 'resolved' || item.type === 'resolved').length,
-    },
+    summary,
     groups: [
-      { id: normalizeEnumValue('issue group id', 'must_handle', ISSUE_GROUP_IDS, 'must_handle'), title: '必须处理', itemIds: items.filter((item) => item.blocking && issueIsOpen(item)).map((item) => item.id) },
-      { id: normalizeEnumValue('issue group id', 'needs_confirmation', ISSUE_GROUP_IDS, 'needs_confirmation'), title: '建议确认', itemIds: items.filter((item) => item.severity === 'attention' && item.type !== 'rerun_candidate' && issueIsOpen(item)).map((item) => item.id) },
-      { id: normalizeEnumValue('issue group id', 'worth_rerun', ISSUE_GROUP_IDS, 'worth_rerun'), title: '值得补跑', itemIds: items.filter((item) => item.type === 'rerun_candidate' && issueIsOpen(item)).map((item) => item.id) },
-      { id: normalizeEnumValue('issue group id', 'can_ignore', ISSUE_GROUP_IDS, 'can_ignore'), title: '已忽略', itemIds: items.filter((item) => item.resolutionState === 'ignored' || item.status === 'ignored' || item.type === 'ignored').map((item) => item.id) },
-      { id: normalizeEnumValue('issue group id', 'resolved', ISSUE_GROUP_IDS, 'resolved'), title: '已处理', itemIds: items.filter((item) => item.resolutionState === 'resolved' || item.status === 'resolved' || item.type === 'resolved').map((item) => item.id) },
+      { id: normalizeEnumValue('issue group id', 'must_handle', ISSUE_GROUP_IDS, 'must_handle'), title: '必须处理', itemIds: groupItemIds.must_handle },
+      { id: normalizeEnumValue('issue group id', 'needs_confirmation', ISSUE_GROUP_IDS, 'needs_confirmation'), title: '建议确认', itemIds: groupItemIds.needs_confirmation },
+      { id: normalizeEnumValue('issue group id', 'worth_rerun', ISSUE_GROUP_IDS, 'worth_rerun'), title: '值得补跑', itemIds: groupItemIds.worth_rerun },
+      { id: normalizeEnumValue('issue group id', 'can_ignore', ISSUE_GROUP_IDS, 'can_ignore'), title: '已忽略', itemIds: groupItemIds.can_ignore },
+      { id: normalizeEnumValue('issue group id', 'resolved', ISSUE_GROUP_IDS, 'resolved'), title: '已处理', itemIds: groupItemIds.resolved },
     ],
     items,
   };

@@ -34,7 +34,6 @@ Use a task spec as the normalized conversation contract before prompt generation
   "text_policy": "leave top and bottom clean for later typography",
   "output_format": "png",
   "preview_count": 12,
-  "contact_sheet": true,
   "require_confirmation": true,
   "storyboard_plan": {
     "enabled": true,

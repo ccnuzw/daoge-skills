@@ -180,7 +180,6 @@ node scripts/daoge.js prepare \
 - 按 batch 正式生图
 - 写出 `manifest.json`
 - 写出每批 `manifest.json`
-- 生成 `contact_sheet.png`（若条件满足）
 - 生成 `daoge_completion_report.md`
 
 推荐入口：

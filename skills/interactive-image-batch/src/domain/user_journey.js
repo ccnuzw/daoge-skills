@@ -55,12 +55,13 @@ function buildDecision(stage, runPlan = {}, executionManifest = {}, issueQueue =
     };
   }
   if (Number(issueQueue.summary?.blocking || 0) > 0) {
+    const issuesById = new Map(toArray(issueQueue.items).map((item) => [item.id, item]));
     return {
       headline: '先处理关键问题',
       summary: `当前有 ${issueQueue.summary.blocking} 个必须处理的问题，建议先收口后再筛图。`,
       whyNow: '关键问题会影响交付完整度，先处理能避免后面反复筛选。',
       blockingItems: toArray(issueQueue.groups?.find?.((item) => item.id === 'must_handle')?.itemIds).map((id) => {
-        const issue = toArray(issueQueue.items).find((item) => item.id === id);
+        const issue = issuesById.get(id);
         return issue?.title || '必须处理的问题';
       }),
       attentionItems: [`可筛选结果 ${counts.success} 个`, `建议复核 ${counts.needsReview} 个`],

@@ -53,15 +53,23 @@ function buildExecutionManifest(options = {}) {
   const manifest = readJsonIfExists(options.manifestFile || path.join(outputDir, 'manifest.json')) || {};
   const explicitResults = toArray(readJsonIfExists(options.resultsFile));
   const sourceResults = explicitResults.length ? explicitResults : flattenManifestResults(manifest);
-  const results = sourceResults.map((item, index) => normalizeExecutionResult(item, index, outputDir));
+  const countsFromResults = { success: 0, failed: 0, needsReview: 0, skipped: 0 };
+  const results = sourceResults.map((item, index) => {
+    const result = normalizeExecutionResult(item, index, outputDir);
+    if (result.status === 'success') countsFromResults.success += 1;
+    else if (result.status === 'failed') countsFromResults.failed += 1;
+    else if (result.status === 'needs_review') countsFromResults.needsReview += 1;
+    else if (result.status === 'skipped') countsFromResults.skipped += 1;
+    return result;
+  });
   const isPrepareOnly = normalizeText(manifest.runtimeMode).toLowerCase() === 'prepare-only';
   const hasResultRows = results.length > 0;
   const counts = {
     total: isPrepareOnly ? 0 : (results.length || Number(manifest.selectedCount || 0)),
-    success: hasResultRows ? results.filter((item) => item.status === 'success').length : Number(manifest.success || 0),
-    failed: hasResultRows ? results.filter((item) => item.status === 'failed').length : Number(manifest.failed || 0),
-    needsReview: hasResultRows ? results.filter((item) => item.status === 'needs_review').length : Number(manifest.needsReview || 0),
-    skipped: hasResultRows ? results.filter((item) => item.status === 'skipped').length : Number(manifest.skipped || 0),
+    success: hasResultRows ? countsFromResults.success : Number(manifest.success || 0),
+    failed: hasResultRows ? countsFromResults.failed : Number(manifest.failed || 0),
+    needsReview: hasResultRows ? countsFromResults.needsReview : Number(manifest.needsReview || 0),
+    skipped: hasResultRows ? countsFromResults.skipped : Number(manifest.skipped || 0),
   };
 
   const executionManifest = {

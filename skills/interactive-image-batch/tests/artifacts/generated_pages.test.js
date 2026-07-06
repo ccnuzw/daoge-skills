@@ -78,3 +78,46 @@ test('disabled primary action renders as non-clickable with disabled reason', ()
   assert.doesNotMatch(html, /<a class="primary-action" href="prepare\.html">/);
   assert.match(html, /<span class="primary-action disabled">/);
 });
+
+test('results page caps rendered asset cards and keeps directory path', () => {
+  const readyAssets = Array.from({ length: 150 }, (_, index) => ({
+    id: `result_${String(index + 1).padStart(3, '0')}`,
+    userTitle: `结果 ${index + 1}`,
+    userStatus: '可筛选',
+    userPurpose: '本轮生成的可筛选图片',
+    sourceReason: '生成成功',
+    userAction: '筛选',
+    path: `assets/results/${String(index + 1).padStart(3, '0')}.png`,
+    previewPath: `assets/results/${String(index + 1).padStart(3, '0')}.png`,
+  }));
+  const html = renderWorkspacePage({
+    pageId: 'results',
+    title: '结果筛选',
+    task: { title: '人物主视觉', summary: '生成人物主视觉' },
+    stage: { name: '结果筛选' },
+    decision: { headline: '查看结果' },
+    primaryAction: {
+      label: '查看结果',
+      href: 'results.html',
+      targetPage: 'results.html',
+      reply: '查看结果',
+      reason: '结果已生成',
+      enabled: true,
+    },
+    secondaryActions: [],
+    replySuggestions: ['查看结果'],
+    nav: [],
+    worthRerunCount: 0,
+    assets: {
+      ready: readyAssets,
+      selected: [],
+      exports: [],
+      review: [],
+      issues: [],
+    },
+  });
+  assert.equal((html.match(/class="asset-card"/g) || []).length, 120);
+  assert.match(html, /已显示前 120 个，另有 30 个/);
+  assert.match(html, /assets\/results\//);
+  assert.doesNotMatch(html, /结果 121/);
+});

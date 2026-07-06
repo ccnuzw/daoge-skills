@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { buildViewModels } = require('../../src/domain/view_models');
+const { buildViewModels, issueGroups } = require('../../src/domain/view_models');
 const { makeTempDir, writeJson } = require('../helpers/workspace_v2_test_utils');
 
 test('view models are generated for five pages and each has one primaryAction', () => {
@@ -75,4 +75,19 @@ test('view models are generated for five pages and each has one primaryAction', 
   assert.deepEqual(models.results.assets.selected.map((asset) => asset.id), ['selected_001']);
   assert.equal(Object.prototype.hasOwnProperty.call(models.results.assets, 'exports'), true);
   assert.equal(Array.isArray(models.issues.issueGroups), true);
+});
+
+test('issueGroups resolves grouped items without repeated Array.find scans', () => {
+  const items = [
+    { id: 'issue_001', title: '问题 1', impact: '影响 1', status: 'open' },
+    { id: 'issue_002', title: '问题 2', impact: '影响 2', status: 'open' },
+  ];
+  items.find = () => {
+    throw new Error('Array.find should not be used');
+  };
+  const groups = issueGroups({
+    groups: [{ id: 'must_handle', title: '必须处理', itemIds: ['issue_002', 'missing', 'issue_001'] }],
+    items,
+  });
+  assert.deepEqual(groups[0].items.map((item) => item.id), ['issue_002', 'issue_001']);
 });

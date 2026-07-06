@@ -232,6 +232,41 @@ function copyFileIfExists(source, target) {
   return true;
 }
 
+function hardlinkOrCopyFileIfExists(source, target) {
+  if (!source) return false;
+  const absoluteSource = path.resolve(source);
+  let sourceStat;
+  try {
+    sourceStat = fs.statSync(absoluteSource);
+  } catch {
+    return false;
+  }
+  if (!sourceStat.isFile()) return false;
+  ensureDir(path.dirname(target));
+  try {
+    fs.linkSync(absoluteSource, target);
+  } catch {
+    let targetStat = null;
+    try {
+      targetStat = fs.statSync(target);
+    } catch {
+      targetStat = null;
+    }
+    if (targetStat && sourceStat.dev === targetStat.dev && sourceStat.ino === targetStat.ino) {
+      return true;
+    }
+    try {
+      if (targetStat) fs.unlinkSync(target);
+      fs.linkSync(absoluteSource, target);
+      return true;
+    } catch {
+      // 跨设备硬链接或删除失败时，仍回退到复制以保持兼容。
+    }
+    fs.copyFileSync(absoluteSource, target);
+  }
+  return true;
+}
+
 function resultOutputPath(outputDir, result = {}) {
   const source = result.sourceOutput || result.output;
   if (!source) return null;
@@ -492,12 +527,25 @@ function summarizeCounts(executionManifest = {}, issueQueue = {}, assetLibrary =
   const hasAssetLibrary = assets.length > 0;
   const hasIssueQueue = issueItems.length > 0;
   const isOpen = (item) => normalizeText(item.resolutionState || item.status, 'open') === 'open';
+  const assetCounts = assets.reduce((acc, item) => {
+    if (item.kind === 'image_result') {
+      acc.total += 1;
+      if (item.usage?.canSelect) acc.success += 1;
+    }
+    return acc;
+  }, { total: 0, success: 0 });
+  const issueCounts = issueItems.reduce((acc, item) => {
+    if (item.type === 'hard_failure') acc.failed += 1;
+    if (item.type === 'needs_review') acc.needsReview += 1;
+    if (item.type === 'rerun_candidate' && isOpen(item)) acc.rerunCandidates += 1;
+    return acc;
+  }, { failed: 0, needsReview: 0, rerunCandidates: 0 });
   return {
-    total: Number(counts.total || assets.filter((item) => item.kind === 'image_result').length || 0),
-    success: Number(hasAssetLibrary ? assets.filter((item) => item.kind === 'image_result' && item.usage?.canSelect).length : (counts.success || 0)),
-    failed: Number(hasIssueQueue ? issueItems.filter((item) => item.type === 'hard_failure').length : (counts.failed || 0)),
-    needsReview: Number(hasIssueQueue ? issueItems.filter((item) => item.type === 'needs_review').length : (counts.needsReview || 0)),
-    rerunCandidates: issueItems.filter((item) => item.type === 'rerun_candidate' && isOpen(item)).length,
+    total: Number(counts.total || assetCounts.total || 0),
+    success: Number(hasAssetLibrary ? assetCounts.success : (counts.success || 0)),
+    failed: Number(hasIssueQueue ? issueCounts.failed : (counts.failed || 0)),
+    needsReview: Number(hasIssueQueue ? issueCounts.needsReview : (counts.needsReview || 0)),
+    rerunCandidates: issueCounts.rerunCandidates,
   };
 }
 
@@ -551,6 +599,7 @@ module.exports = {
   userFilePart,
   numberedName,
   copyFileIfExists,
+  hardlinkOrCopyFileIfExists,
   resultOutputPath,
   resultOutputExists,
   loadTaskCatalog,

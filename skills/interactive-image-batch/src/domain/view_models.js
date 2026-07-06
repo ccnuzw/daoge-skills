@@ -9,37 +9,75 @@ const {
   publicAsset,
 } = require('../shared/workspace');
 
-function pickAssets(assetLibrary, predicate) {
-  return toArray(assetLibrary.assets).filter(predicate).map(publicAsset);
+function publicIssueItem(item) {
+  return {
+    id: item.id,
+    title: item.title,
+    impact: item.impact,
+    userImpact: item.userImpact || item.impact,
+    userTitle: item.userTitle || item.title,
+    userMessage: item.userMessage || item.userImpact || item.impact,
+    userAction: item.userAction || item.recommendedAction,
+    reason: item.reason || '',
+    rerunnable: Boolean(item.rerunnable ?? item.worthRerun),
+    rerunReason: item.rerunReason || '',
+    safeToIgnore: Boolean(item.safeToIgnore),
+    sourcePromptIndex: item.sourcePromptIndex || null,
+    targetPage: item.targetPage || null,
+    href: item.href || null,
+    recommendedAction: item.recommendedAction,
+    availableActions: item.availableActions || [],
+    resolutionState: item.resolutionState || item.status,
+    status: item.status,
+    relatedAssetIds: item.relatedAssetIds || [],
+  };
 }
 
 function issueGroups(issueQueue = {}) {
   const items = toArray(issueQueue.items);
+  const itemsById = new Map(items.map((item) => [item.id, item]));
   return toArray(issueQueue.groups).map((group) => ({
     id: group.id,
     title: group.title,
-    items: toArray(group.itemIds).map((id) => items.find((item) => item.id === id)).filter(Boolean).map((item) => ({
-      id: item.id,
-      title: item.title,
-      impact: item.impact,
-      userImpact: item.userImpact || item.impact,
-      userTitle: item.userTitle || item.title,
-      userMessage: item.userMessage || item.userImpact || item.impact,
-      userAction: item.userAction || item.recommendedAction,
-      reason: item.reason || '',
-      rerunnable: Boolean(item.rerunnable ?? item.worthRerun),
-      rerunReason: item.rerunReason || '',
-      safeToIgnore: Boolean(item.safeToIgnore),
-      sourcePromptIndex: item.sourcePromptIndex || null,
-      targetPage: item.targetPage || null,
-      href: item.href || null,
-      recommendedAction: item.recommendedAction,
-      availableActions: item.availableActions || [],
-      resolutionState: item.resolutionState || item.status,
-      status: item.status,
-      relatedAssetIds: item.relatedAssetIds || [],
-    })),
+    items: toArray(group.itemIds).map((id) => itemsById.get(id)).filter(Boolean).map(publicIssueItem),
   }));
+}
+
+function assetBuckets(assetLibrary) {
+  const buckets = {
+    ready: [],
+    review: [],
+    issues: [],
+    selected: [],
+    exports: [],
+  };
+  toArray(assetLibrary.assets).forEach((item) => {
+    const asset = publicAsset(item);
+    if (item.kind === 'image_result' && item.usage?.canSelect) buckets.ready.push(asset);
+    if (item.kind === 'image_result' && item.usage?.needsReview) buckets.review.push(asset);
+    if (item.kind === 'issue_record' && item.usage?.hasIssue) buckets.issues.push(asset);
+    if (item.kind === 'selected_result') buckets.selected.push(asset);
+    if (item.kind === 'export_image') buckets.exports.push(asset);
+  });
+  return buckets;
+}
+
+function issueSummary(issueQueue) {
+  const uniqueIgnorable = new Set();
+  const summary = {
+    missingMaterialCount: 0,
+    rerunnableCount: Number(issueQueue.summary?.rerunCandidates || 0),
+    reviewIssueCount: 0,
+    ignorableCount: 0,
+  };
+  toArray(issueQueue.items).forEach((item) => {
+    if ((item.resolutionState || item.status || 'open') !== 'open') return;
+    if (item.reason === 'missing_material') summary.missingMaterialCount += 1;
+    if (item.type === 'needs_review') summary.reviewIssueCount += 1;
+    if (item.safeToIgnore) uniqueIgnorable.add(item.sourceResultId || item.sourcePromptIndex || item.id);
+  });
+  summary.ignorableCount = uniqueIgnorable.size;
+  return summary;
 }
 
 function baseView(pageId, workspaceState) {
@@ -78,18 +116,8 @@ function buildViewModels(options = {}) {
   const runPlan = readJsonIfExists(options.runPlanFile || path.join(outputDir, 'internal', 'run_plan.json')) || {};
   const issueQueue = readJsonIfExists(options.issueQueueFile || path.join(outputDir, 'internal', 'issue_queue.json')) || {};
   const assetLibrary = readJsonIfExists(options.assetLibraryFile || path.join(outputDir, 'internal', 'asset_library.json')) || {};
-  const readyAssets = pickAssets(assetLibrary, (item) => item.kind === 'image_result' && item.usage?.canSelect);
-  const reviewAssets = pickAssets(assetLibrary, (item) => item.kind === 'image_result' && item.usage?.needsReview);
-  const issueAssets = pickAssets(assetLibrary, (item) => item.kind === 'issue_record' && item.usage?.hasIssue);
-  const selectedAssets = pickAssets(assetLibrary, (item) => item.kind === 'selected_result');
-  const exportAssets = pickAssets(assetLibrary, (item) => item.kind === 'export_image');
-  const issueItems = toArray(issueQueue.items);
-  const openIssues = issueItems.filter((item) => (item.resolutionState || item.status || 'open') === 'open');
-  const countUniqueIssues = (items) => new Set(items.map((item) => item.sourceResultId || item.sourcePromptIndex || item.id)).size;
-  const missingMaterialCount = openIssues.filter((item) => item.reason === 'missing_material').length;
-  const rerunnableCount = Number(issueQueue.summary?.rerunCandidates || 0);
-  const reviewIssueCount = openIssues.filter((item) => item.type === 'needs_review').length;
-  const ignorableCount = countUniqueIssues(openIssues.filter((item) => item.safeToIgnore));
+  const assets = assetBuckets(assetLibrary);
+  const issues = issueSummary(issueQueue);
 
   const models = {
     index: {
@@ -122,16 +150,10 @@ function buildViewModels(options = {}) {
       ...baseView('results', workspaceState),
       answerFocus: ['哪些结果可用', '哪些建议复核', '哪些失败', '是否值得补跑', '主动作'],
       sections: [
-        { title: '可筛选结果', body: `${readyAssets.length} 个` },
-        { title: '需要留意', body: `${reviewAssets.length + issueAssets.length} 个` },
+        { title: '可筛选结果', body: `${assets.ready.length} 个` },
+        { title: '需要留意', body: `${assets.review.length + assets.issues.length} 个` },
       ],
-      assets: {
-        ready: readyAssets,
-        review: reviewAssets,
-        issues: issueAssets,
-        selected: selectedAssets,
-        exports: exportAssets,
-      },
+      assets,
       worthRerunCount: Number(issueQueue.summary?.rerunCandidates || 0),
     },
     issues: {
@@ -143,10 +165,10 @@ function buildViewModels(options = {}) {
       ],
       issueSummary: {
         mustHandle: Number(issueQueue.summary?.blocking || 0),
-        needsConfirmation: reviewIssueCount,
-        worthRerun: rerunnableCount,
-        needsMaterial: missingMaterialCount,
-        safeToIgnore: ignorableCount,
+        needsConfirmation: issues.reviewIssueCount,
+        worthRerun: issues.rerunnableCount,
+        needsMaterial: issues.missingMaterialCount,
+        safeToIgnore: issues.ignorableCount,
       },
       issueGroups: issueGroups(issueQueue),
       returnTarget: workspaceState.primaryAction?.targetPage || 'results.html',
@@ -200,4 +222,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { buildViewModels };
+module.exports = { buildViewModels, issueGroups };

@@ -127,7 +127,6 @@ When running from a normalized DAOGE task spec, map fields directly:
 - `retry_count` -> `--retry-count`
 - `concurrency` -> `--concurrency`
 - `batch_size` -> `--batch-size`
-- `contact_sheet` -> `--contact-sheet`
 - `sample_size` -> `--sample-size`
 - `stage_size` -> `--stage-size`
 - `stop_after_sample` -> `--stop-after-sample`
@@ -149,7 +148,6 @@ Optional flags:
 - `--batch-size <number>` default all selected prompts in one batch
 - `--offset <number>` default `0`
 - `--limit <number>` default all remaining prompts
-- `--contact-sheet <true|false>` default `true`
 - `--run-label <value>` optional output label
 - `--resume-manifest <path>` rerun prompts referenced by a previous `internal/local_execution_raw.json`
 - `--failed-only <true|false>` default `true` when `--resume-manifest` is present

@@ -6,6 +6,18 @@
   "bin": {
     "daoge": "scripts/daoge.js"
   },
+  "files": [
+    "src/",
+    "scripts/",
+    "references/",
+    "agents/",
+    "README.md",
+    "SKILL.md",
+    "!references/examples/examples_catalog.html",
+    "!references/template_registry_report.html",
+    "!references/template_registry_report.md",
+    "!references/template_registry_validation_report.json"
+  ],
   "directories": {
     "test": "tests"
   },
