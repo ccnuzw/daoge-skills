@@ -44,10 +44,10 @@
   - layout/content/render 三个 manifest 的结构化描述
   - `reference_bindings.json`
   - 通过 `task_spec.json` / prompt item 中的 `reference_images` 和 `mask_image` 解析素材路径
-- 生成 slot blueprint
-- 把 per-slot 的参考图、镜头备注、连续性备注带入 prompt slot 元数据
-- 支持通过 `mask_asset_ids` 把上传的遮罩图绑定到某个分镜
-- runner 按 slot 自动分流：
+  - 生成 slot blueprint
+  - 把 per-slot 的参考图、镜头备注、连续性备注带入 prompt slot 元数据
+  - 支持通过 `mask_asset_ids` 把上传的遮罩图绑定到某个分镜
+  - runner 按 slot 自动分流：
     - `prompt-only` -> `images/generations`
     - `reference-assisted` -> `images/edits`
     - `masked-edit` -> `images/edits + mask`
@@ -149,39 +149,17 @@ node scripts/daoge.js prepare \
   --output-dir /abs/path/run_output
 ```
 
-推荐入口：
+如果已有人工整理好的 `prompt_strategy.json` 和 `prompts.generated.json`，仍然只走统一入口：
 
 ```bash
 node scripts/daoge.js prepare \
   --task-spec /abs/path/task_spec.storyboard.json \
   --strategy-file /abs/path/prompt_strategy.json \
   --prompts-file /abs/path/prompts.generated.json \
-  --output-dir /abs/path/run_output \
-  --import-reference-assets true \
-  --use-llm-binding-planner true \
-  --references /abs/path/1.png,/abs/path/2.png \
-  --slot-order shot_1,shot_2 \
-  --binding-text "第一张给 shot_1，最后一张是 shot_2 的遮罩图" \
-  --env-file /abs/path/.env
+  --output-dir /abs/path/run_output
 ```
 
-执行这条链路后，除了 `binding_intent_draft.json`、`binding_plan.json`、`reference_bindings.imported.json`，还会额外生成：
-
-- `binding_confirmation.md`
-
-它的作用不是替代结构化文件，而是给人类一个可快速确认的绑定摘要。
-
-或者：
-
-```bash
-node scripts/daoge.js prepare \
-  --task-spec /abs/path/task_spec.storyboard.json \
-  --strategy-file /abs/path/prompt_strategy.json \
-  --prompts-file /abs/path/prompts.generated.json \
-  --output-dir /abs/path/run_output \
-  --import-reference-assets true \
-  --assets-manifest /abs/path/assets_manifest.json
-```
+素材绑定、遮罩和分镜对应关系必须先写入 `task_spec.json`、`content_manifest.json`、`reference_bindings.json` 或 prompt item 字段；`prepare` 只负责解析、校验和生成工作台预检。
 
 ## 典型 render_config
 

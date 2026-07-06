@@ -406,26 +406,12 @@ node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --output-dir 
 - `oral-storyboard-board-product-led`
 - `oral-storyboard-board-educational-explainer`
 
-再按 example id 一键生成预检面板：
+如果要体验某个 example，请先在 `examples_catalog.html` 中查看 example id，再复制对应 example 内容整理成 `task_spec.json`，最后运行统一入口：
 
 ```bash
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json \
-  --example-id ui-mockup-board \
+node scripts/daoge.js prepare \
+  --task-spec /abs/path/task_spec.json \
   --output-dir /tmp/daoge-example-catalog-demo
 ```
 
-如果你想直接体验 UI mockup 的高频子类，也可以运行：
-
-```bash
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json \
-  --example-id ui-mockup-board-social-interface-mockup \
-  --output-dir /tmp/daoge-ui-social-mockup-demo
-```
-
-也可以直接体验剩余两个 UI 高频尾项：
-
-```bash
-node scripts/daoge.js prepare --task-spec /abs/path/task_spec.json \
-  --example-id ui-mockup-board-product-card-overlay \
-  --output-dir /tmp/daoge-ui-product-card-demo
-```
+当前 CLI 不提供 `--example-id` 自动转换入口；示例目录只作为可读参考和手工整理来源。
