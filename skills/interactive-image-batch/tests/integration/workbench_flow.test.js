@@ -411,6 +411,49 @@ test('workbench sidebar activity polling pauses when inactive or hidden', () => 
   assert.equal(result.resumedTimers, 1);
 });
 
+test('workbench sidebar activity polling retries after a transient refresh error', async () => {
+  const { context } = createWorkbenchDomHarness();
+  const result = await vm.runInContext(`
+    (async () => {
+      const calls = [];
+      let toastCount = 0;
+      const originalToast = toast;
+      toast = (title, message) => {
+        toastCount += 1;
+        originalToast(title, message);
+      };
+      fetch = async (path) => {
+        calls.push(path);
+        throw new Error('temporary outage');
+      };
+      state.loading = false;
+      state.jobs.items = [{ id: 'job_retry', kind: 'rerun', status: 'running' }];
+      state.events.items = [];
+      render();
+      const firstTimer = __timers.find((timer) => !timer.cleared && timer.delay === 4000);
+      await firstTimer.handler();
+      const firstRetryTimers = __timers.filter((timer) => !timer.cleared && timer.delay === 4000).length;
+      const retryTimer = __timers.find((timer) => !timer.cleared && timer.delay === 4000);
+      await retryTimer.handler();
+      return {
+        calls,
+        toastCount,
+        firstTimerCleared: firstTimer.cleared,
+        firstRetryTimers,
+        retryTimers: __timers.filter((timer) => !timer.cleared && timer.delay === 4000).length,
+        toastTimers: __timers.filter((timer) => !timer.cleared && timer.delay === 3600).length,
+      };
+    })();
+  `, context);
+
+  assert.equal(result.calls.length >= 4, true);
+  assert.equal(result.toastCount, 1);
+  assert.equal(result.firstTimerCleared, true);
+  assert.equal(result.firstRetryTimers, 1);
+  assert.equal(result.retryTimers, 1);
+  assert.equal(result.toastTimers, 1);
+});
+
 test('workbench drawer state is scoped to the active page and cleared by workflow changes', async () => {
   if (!sqliteAvailable()) return;
   const outputDir = path.join(makeTempDir(), 'out');

@@ -83,6 +83,7 @@ let drawerReturnFocus = null;
 let drawerReturnFocusSelector = null;
 let shouldFocusDrawerClose = false;
 let activityPollTimer = null;
+let activityPollErrorShown = false;
 
 const ACTIVITY_POLL_INTERVAL_MS = 4000;
 const ACTIVITY_POLL_STATUSES = new Set(['queued', 'running']);
@@ -1225,9 +1226,14 @@ async function refreshActivity() {
       loadPaged('jobs', '/api/jobs', {}, true),
     ]);
     renderEvents();
+    activityPollErrorShown = false;
   } catch (error) {
     stopActivityPoll();
-    toast('队列刷新失败', error.message);
+    if (!activityPollErrorShown) {
+      toast('队列刷新失败', error.message);
+      activityPollErrorShown = true;
+    }
+    scheduleActivityPoll();
     return;
   }
   scheduleActivityPoll();
