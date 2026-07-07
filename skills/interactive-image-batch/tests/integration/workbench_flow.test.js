@@ -372,7 +372,7 @@ test('workbench drawer behavior clears stale details when page or search context
   assert.doesNotMatch(searchChange.html, /旧资产详情/);
 
   const focusRestore = vm.runInContext(`
-    const directTarget = { focused: false, focus() { this.focused = true; } };
+    const directTarget = { isConnected: true, focused: false, focus() { this.focused = true; } };
     const selectorTarget = { focused: false, focus() { this.focused = true; } };
     document.selectorElements.set('[data-open-summary]', selectorTarget);
     state.page = 'assets';
@@ -385,6 +385,21 @@ test('workbench drawer behavior clears stale details when page or search context
   assert.equal(focusRestore.drawerOpen, false);
   assert.equal(focusRestore.directFocused, true);
   assert.equal(focusRestore.selectorFocused, false);
+
+  const detachedFocusRestore = vm.runInContext(`
+    const detachedTarget = { isConnected: false, focused: false, focus() { this.focused = true; } };
+    const rebuiltTarget = { focused: false, focus() { this.focused = true; } };
+    document.selectorElements.set('[data-open-summary]', rebuiltTarget);
+    state.page = 'assets';
+    state.drawer = { open: true, page: 'assets', type: 'overview', id: null, data: null, detail: null, mode: 'summary' };
+    drawerReturnFocus = detachedTarget;
+    drawerReturnFocusSelector = '[data-open-summary]';
+    closeDrawer();
+    ({ drawerOpen: state.drawer.open, directFocused: detachedTarget.focused, selectorFocused: rebuiltTarget.focused });
+  `, context);
+  assert.equal(detachedFocusRestore.drawerOpen, false);
+  assert.equal(detachedFocusRestore.directFocused, false);
+  assert.equal(detachedFocusRestore.selectorFocused, true);
 
   const escapeClose = vm.runInContext(`
     state.page = 'assets';

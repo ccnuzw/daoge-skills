@@ -123,13 +123,19 @@ function closeDrawer() {
   render();
   const nextTarget = selector ? document.querySelector(selector) : null;
   const fallback = document.querySelector('[data-open-summary]') || $('refreshButton');
-  if (target && typeof target.focus === 'function') {
+  if (canRestoreFocusToTarget(target)) {
     target.focus();
   } else if (nextTarget && typeof nextTarget.focus === 'function') {
     nextTarget.focus();
   } else if (fallback && typeof fallback.focus === 'function') {
     fallback.focus();
   }
+}
+
+function canRestoreFocusToTarget(target) {
+  if (!target || typeof target.focus !== 'function') return false;
+  if (target.isConnected === true) return true;
+  return typeof document.contains === 'function' && document.contains(target);
 }
 
 function syncDrawerToPage() {
