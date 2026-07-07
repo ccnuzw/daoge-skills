@@ -1,2 +1,6 @@
 .DS_Store
 .bytro
+daoge.db
+daoge.db-*
+/snapshots/
+skills/interactive-image-batch/.docker-workspace/

@@ -18,10 +18,11 @@ const {
   createJob,
 } = require('../../src/db/repository');
 const { startWorkbenchServer, ensureWorkbenchDatabase } = require('../../src/server/server');
+const { loadSqlite } = require('../../src/db/connection');
 
 function sqliteAvailable() {
   try {
-    require('node:sqlite');
+    loadSqlite();
     return true;
   } catch {
     return false;

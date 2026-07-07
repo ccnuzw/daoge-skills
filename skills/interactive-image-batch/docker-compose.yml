@@ -1,0 +1,14 @@
+services:
+  daoge-workbench:
+    build:
+      context: .
+    image: daoge-interactive-image-batch:local
+    container_name: daoge-workbench
+    ports:
+      - "7860:7860"
+    environment:
+      DAOGE_OUTPUT_DIR: /workspace
+      PORT: "7860"
+    volumes:
+      - ./.docker-workspace:/workspace
+    restart: unless-stopped

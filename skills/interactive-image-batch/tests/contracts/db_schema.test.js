@@ -16,16 +16,19 @@ const {
   upsertIssue,
   appendEvent,
 } = require('../../src/db/repository');
-const { projectDbPath } = require('../../src/db/connection');
+const { projectDbPath, loadSqlite } = require('../../src/db/connection');
 const { writeTinyPng } = require('../helpers/workspace_v2_test_utils');
 
-function sqliteAvailable() {
+function sqliteModule() {
   try {
-    require('node:sqlite');
-    return true;
+    return loadSqlite();
   } catch {
-    return false;
+    return null;
   }
+}
+
+function sqliteAvailable() {
+  return sqliteModule() !== null;
 }
 
 test('db schema can create, migrate and read key records', () => {
@@ -65,7 +68,7 @@ test('db migrates v2 core tables to schema v3', () => {
   if (!sqliteAvailable()) return;
   const outputDir = path.join(makeTempDir(), 'out');
   fs.mkdirSync(outputDir, { recursive: true });
-  const { DatabaseSync } = require('node:sqlite');
+  const { DatabaseSync } = sqliteModule();
   const db = new DatabaseSync(projectDbPath(outputDir));
   db.exec(`
     CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER NOT NULL UNIQUE, name TEXT NOT NULL, applied_at TEXT NOT NULL);
