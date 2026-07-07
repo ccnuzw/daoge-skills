@@ -128,6 +128,56 @@ test('open server exposes health, APIs and fixed UI files', async () => {
   }
 });
 
+test('workbench fixed UI exposes product shell and avoids old event capsule layout', async () => {
+  if (!sqliteAvailable()) return;
+  const outputDir = path.join(makeTempDir(), 'out');
+  runScript('daoge.js', ['prepare',
+    '--task-spec', path.join(skillRoot, 'references', 'examples', 'task_spec.minimal.json'),
+    '--output-dir', outputDir,
+  ]);
+  const started = await startWorkbenchServer({ outputDir, port: 0 });
+  try {
+    const [html, css, js] = await Promise.all([
+      fetch(started.url).then((res) => res.text()),
+      fetch(`${started.url}styles/workbench.css`).then((res) => res.text()),
+      fetch(`${started.url}src/workbench.js`).then((res) => res.text()),
+    ]);
+    assert.match(html, /class="app-shell"/);
+    assert.match(html, /class="sidebar"/);
+    assert.match(html, /class="commandbar"/);
+    assert.match(html, /class="workspace"/);
+    assert.match(html, /class="inspector"/);
+    assert.match(html, /class="activity-strip"/);
+    assert.match(html, /class="toast-stack"/);
+    assert.match(html, /data-shell/);
+    assert.match(html, /id="pageEyebrow"/);
+    assert.match(html, /id="pageControls"/);
+    assert.match(html, /id="sideAssetCount"/);
+    assert.match(html, /id="sideIssueCount"/);
+    assert.match(html, /id="healthDot"/);
+    assert.match(html, /id="healthText"/);
+    assert.match(html, /id="menuButton"/);
+    assert.match(html, /id="jobSummary"/);
+    assert.match(html, /id="eventLog"/);
+    assert.match(css, /--background:/);
+    assert.match(css, /--surface:/);
+    assert.match(css, /--primary:/);
+    assert.match(css, /\.asset-card/);
+    assert.match(css, /\.issues-board/);
+    assert.match(css, /\.prompt-lab/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce/);
+    assert.match(js, /renderDashboard/);
+    assert.match(js, /renderAssetInspector/);
+    assert.match(js, /selectionBadge/);
+    assert.match(js, /data-bulk-action/);
+    assert.match(js, /exportBusy/);
+    assert.match(js, /toast\(/);
+    assert.doesNotMatch(html + css + js, /event-pill|jobbar|statusFilters/);
+  } finally {
+    started.server.close();
+  }
+});
+
 test('asset file API blocks path traversal outside workspace', async () => {
   if (!sqliteAvailable()) return;
   const outputDir = path.join(makeTempDir(), 'out');
@@ -288,6 +338,18 @@ test('assets API paginates and filters 1000+ assets', async () => {
     const second = await fetch(`${started.url}api/assets?limit=100&cursor=${encodeURIComponent(first.data.nextCursor)}`).then((res) => res.json());
     assert.equal(second.data.items.length, 100);
     assert.notEqual(second.data.items[0].id, first.data.items[0].id);
+    assert.equal(second.data.total, 1005);
+
+    const filteredFirst = await fetch(`${started.url}api/assets?status=ready_for_selection&limit=40`).then((res) => res.json());
+    assert.equal(filteredFirst.ok, true);
+    assert.equal(filteredFirst.data.items.length, 40);
+    assert.equal(filteredFirst.data.total, 670);
+    assert.equal(Boolean(filteredFirst.data.nextCursor), true);
+
+    const filteredSecond = await fetch(`${started.url}api/assets?status=ready_for_selection&limit=40&cursor=${encodeURIComponent(filteredFirst.data.nextCursor)}`).then((res) => res.json());
+    assert.equal(filteredSecond.ok, true);
+    assert.equal(filteredSecond.data.items.length, 40);
+    assert.equal(filteredSecond.data.total, 670);
 
     const searched = await fetch(`${started.url}api/assets?q=asset-1000&kind=reference`).then((res) => res.json());
     assert.equal(searched.data.items.length, 1);
@@ -295,6 +357,14 @@ test('assets API paginates and filters 1000+ assets', async () => {
 
     const selected = await fetch(`${started.url}api/assets?selected=true`).then((res) => res.json());
     assert.deepEqual(selected.data.items.map((item) => item.id), ['asset_5']);
+    assert.equal(selected.data.items[0].selection_state, 'selected');
+    assert.equal(selected.data.items[0].selection_id, 'selection_asset_5');
+    assert.equal(selected.data.items[0].selected_at, ts);
+
+    const detail = await fetch(`${started.url}api/assets/asset_5`).then((res) => res.json());
+    assert.equal(detail.ok, true);
+    assert.equal(detail.data.asset.selection_state, 'selected');
+    assert.equal(detail.data.asset.selection_id, 'selection_asset_5');
   } finally {
     started.server.close();
   }

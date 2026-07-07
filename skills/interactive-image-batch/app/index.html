@@ -7,53 +7,81 @@
   <link rel="stylesheet" href="/styles/workbench.css">
 </head>
 <body>
-  <div class="shell">
-    <aside class="sidebar" aria-label="主导航">
+  <div class="app-shell" data-shell>
+    <button class="sidebar-scrim" type="button" data-close-sidebar aria-label="关闭导航"></button>
+
+    <aside class="sidebar" id="sidebar" aria-label="主导航">
       <div class="brand">
-        <div class="brand-mark">D</div>
-        <div>
+        <div class="brand-mark" aria-hidden="true">D</div>
+        <div class="brand-copy">
           <div class="brand-name">DAOGE</div>
-          <div class="brand-subtitle">批量生图资产台</div>
+          <div class="brand-subtitle">本地批量生图资产工作台</div>
         </div>
       </div>
-      <nav class="nav" id="nav"></nav>
+
+      <nav class="nav" id="nav" aria-label="工作区导航"></nav>
+
+      <section class="sidebar-panel" aria-label="项目状态">
+        <div class="panel-kicker">项目状态</div>
+        <div class="sidebar-stat">
+          <span>资产</span>
+          <strong id="sideAssetCount">-</strong>
+        </div>
+        <div class="sidebar-stat">
+          <span>未处理</span>
+          <strong id="sideIssueCount">-</strong>
+        </div>
+        <div class="status-line">
+          <span class="status-dot" id="healthDot" aria-hidden="true"></span>
+          <span id="healthText">连接中</span>
+        </div>
+      </section>
+
+      <section class="sidebar-panel quick-panel" aria-label="快速入口">
+        <div class="panel-kicker">快速入口</div>
+        <button class="quick-link" type="button" data-page="assets">筛选资产</button>
+        <button class="quick-link" type="button" data-page="issues">处理问题</button>
+        <button class="quick-link" type="button" data-page="exports">准备交付</button>
+      </section>
     </aside>
 
-    <main class="main">
-      <header class="topbar">
-        <div class="search-wrap">
-          <span class="search-icon">⌕</span>
-          <input id="globalSearch" type="search" placeholder="搜索资产、提示词、问题" autocomplete="off">
+    <main class="main" id="main">
+      <header class="commandbar">
+        <button class="icon-button mobile-menu" id="menuButton" type="button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <div class="command-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="globalSearch" type="search" placeholder="搜索资产、提示词、问题" autocomplete="off" aria-label="全局搜索">
         </div>
-        <div class="top-actions">
-          <span class="status-dot" id="healthDot"></span>
-          <button class="ghost-button" id="rerunButton" type="button">创建补跑</button>
-          <button class="primary-button" id="exportButton" type="button">导出报告</button>
+        <div class="command-actions" aria-label="全局操作">
+          <button class="secondary-button" id="refreshButton" type="button">刷新</button>
+          <button class="secondary-button" id="rerunButton" type="button">补跑</button>
+          <button class="primary-button" id="exportButton" type="button">导出</button>
         </div>
       </header>
 
       <section class="content">
-        <section class="workspace">
+        <section class="workspace" aria-live="polite">
           <div class="page-head">
-            <div>
+            <div class="title-block">
+              <div class="eyebrow" id="pageEyebrow">Workbench</div>
               <h1 id="pageTitle">总览</h1>
               <p id="pageSubtitle">读取项目状态中</p>
             </div>
-            <div class="segment" id="statusFilters" aria-label="状态筛选"></div>
+            <div class="page-controls" id="pageControls"></div>
           </div>
           <div id="view" class="view"></div>
         </section>
 
-        <aside class="inspector" id="inspector">
-          <div class="inspector-empty">选择资产、任务或问题后查看详情。</div>
-        </aside>
+        <aside class="inspector" id="inspector" aria-label="详情检查器"></aside>
       </section>
 
-      <footer class="jobbar">
-        <div id="jobSummary">队列空闲</div>
-        <div id="eventLog" class="event-log"></div>
-      </footer>
+      <section class="activity-strip" aria-label="任务队列与事件">
+        <div class="job-summary" id="jobSummary">队列空闲</div>
+        <div class="activity-feed" id="eventLog"></div>
+      </section>
     </main>
+
+    <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
   </div>
   <script src="/src/workbench.js"></script>
 </body>

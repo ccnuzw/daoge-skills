@@ -1,14 +1,39 @@
 const NAV_ITEMS = [
-  ['dashboard', '项目'],
-  ['runs', '任务'],
-  ['assets', '资产'],
-  ['issues', '问题'],
-  ['prompts', '提示词'],
-  ['compare', '对比'],
-  ['exports', '导出'],
+  { id: 'dashboard', label: '总览', desc: '生产状态与资产速览', icon: '⌂' },
+  { id: 'runs', label: '任务', desc: '批次、阶段、成功失败', icon: '↻' },
+  { id: 'assets', label: '资产', desc: '图库、筛选、选择', icon: '▧' },
+  { id: 'issues', label: '问题', desc: '阻塞、复核、补跑', icon: '!' },
+  { id: 'prompts', label: '提示词', desc: 'Prompt Lab', icon: '¶' },
+  { id: 'compare', label: '对比', desc: '多图评审', icon: '⇄' },
+  { id: 'exports', label: '导出', desc: '交付包与报告', icon: '⇩' },
 ];
 
-const pageState = () => ({ items: [], nextCursor: null, total: 0, loading: false });
+const STATUS_LABELS = {
+  all: '全部',
+  ready: '就绪',
+  ready_for_selection: '可筛选',
+  needs_attention: '需处理',
+  needs_review: '待复核',
+  open: '未处理',
+  resolved: '已处理',
+  queued: '排队',
+  running: '运行中',
+  succeeded: '成功',
+  failed: '失败',
+  cancelled: '已取消',
+  selected: '已选择',
+  rejected: '不采用',
+};
+
+const KIND_LABELS = {
+  all: '全部',
+  result: '结果图',
+  reference: '参考图',
+  input: '输入素材',
+  export: '导出文件',
+  issue: '问题记录',
+  mask: '遮罩',
+};
 
 const state = {
   page: 'dashboard',
@@ -17,8 +42,11 @@ const state = {
   kind: 'all',
   selectedFilter: 'all',
   density: 'comfortable',
+  assetView: 'grid',
   runFilter: 'all',
+  loading: true,
   project: null,
+  health: null,
   runs: pageState(),
   assets: pageState(),
   issues: pageState(),
@@ -26,9 +54,22 @@ const state = {
   jobs: pageState(),
   prompts: pageState(),
   exports: [],
+  exportsError: null,
+  exportBusy: null,
+  exportResult: null,
   selected: null,
   compareIds: [],
+  bulkMode: false,
+  bulkAssetIds: [],
+  promptFocusId: null,
+  expandedPrompt: false,
+  copiedPromptId: null,
+  sidebarOpen: false,
 };
+
+function pageState() {
+  return { items: [], nextCursor: null, total: 0, loading: false, error: null };
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -54,8 +95,7 @@ async function api(path, options = {}) {
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
     const text = await res.text().catch(() => '');
-    const detail = text ? `：${text.slice(0, 160)}` : '';
-    throw new Error(`请求失败 ${res.status}${detail}`);
+    throw new Error(`请求失败 ${res.status}${text ? `：${text.slice(0, 140)}` : ''}`);
   }
   let data;
   try {
@@ -63,8 +103,7 @@ async function api(path, options = {}) {
   } catch {
     throw new Error(`请求失败 ${res.status}：响应不是有效 JSON`);
   }
-  if (!res.ok) throw new Error(data.error?.message || `请求失败 ${res.status}`);
-  if (!data.ok) throw new Error(data.error?.message || '请求失败');
+  if (!res.ok || !data.ok) throw new Error(data.error?.message || `请求失败 ${res.status}`);
   return data.data;
 }
 
@@ -72,6 +111,7 @@ async function loadPaged(name, path, params = {}, reset = true) {
   const bucket = state[name];
   if (bucket.loading) return bucket;
   bucket.loading = true;
+  bucket.error = null;
   try {
     const cursor = reset ? null : bucket.nextCursor;
     const query = qs({ limit: 60, cursor, ...params });
@@ -80,88 +120,318 @@ async function loadPaged(name, path, params = {}, reset = true) {
     bucket.nextCursor = data.nextCursor || null;
     bucket.total = data.total ?? bucket.items.length;
     return bucket;
+  } catch (error) {
+    bucket.error = error;
+    throw error;
   } finally {
     bucket.loading = false;
   }
 }
 
-function setHead(title, subtitle, filters = []) {
-  $('pageTitle').textContent = title;
-  $('pageSubtitle').textContent = subtitle;
-  $('statusFilters').innerHTML = filters.map(([id, label]) => (
-    `<button type="button" data-filter="${escapeHtml(id)}" class="${state.status === id ? 'active' : ''}">${escapeHtml(label)}</button>`
-  )).join('');
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString('zh-CN');
 }
 
-function renderNav() {
-  $('nav').innerHTML = NAV_ITEMS.map(([id, label]) => (
-    `<button type="button" data-page="${id}" class="${state.page === id ? 'active' : ''}">${escapeHtml(label)}</button>`
-  )).join('');
+function formatTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).replace('T', ' ').slice(0, 19);
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }
 
-function metric(label, value) {
-  return `<div class="metric"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`;
+function statusText(value) {
+  return STATUS_LABELS[value] || value || '-';
+}
+
+function kindText(value) {
+  return KIND_LABELS[value] || value || '-';
+}
+
+function badge(value, variant = badgeVariant(value)) {
+  return `<span class="badge ${variant}">${escapeHtml(statusText(value))}</span>`;
+}
+
+function kindBadge(value) {
+  return `<span class="badge info">${escapeHtml(kindText(value))}</span>`;
+}
+
+function normalizeSelectionState(value) {
+  return ['selected', 'rejected', 'needs_review'].includes(value) ? value : 'pending';
+}
+
+function selectionState(asset) {
+  return normalizeSelectionState(asset?.selection_state || asset?.selectionState);
+}
+
+function selectionText(value) {
+  if (value === 'selected') return '已选';
+  if (value === 'rejected') return '不采用';
+  if (value === 'needs_review') return '待复核';
+  return '待选择';
+}
+
+function selectionBadge(asset) {
+  const value = selectionState(asset);
+  const variant = value === 'selected' ? 'success' : value === 'rejected' ? 'danger' : 'accent';
+  return `<span class="badge selection-badge ${variant}" data-selection-state="${escapeHtml(value)}">${escapeHtml(selectionText(value))}</span>`;
+}
+
+function deliverableBadge(asset) {
+  const ready = ['ready', 'ready_for_selection'].includes(asset?.status) && asset?.path;
+  return `<span class="badge ${ready ? 'success' : 'warning'}">${ready ? '可交付' : '需检查'}</span>`;
+}
+
+function assetStatusBadge(asset) {
+  return badge(asset.user_status || asset.status);
+}
+
+function badgeVariant(value) {
+  if (['ready', 'ready_for_selection', 'succeeded', 'selected', 'resolved'].includes(value)) return 'success';
+  if (['needs_review', 'queued', 'running'].includes(value)) return 'warning';
+  if (['needs_attention', 'failed', 'open', 'blocking', 'rejected'].includes(value)) return 'danger';
+  if (['result', 'reference', 'input', 'export'].includes(value)) return 'info';
+  return 'accent';
+}
+
+function metric(label, value, hint) {
+  return `
+    <article class="metric">
+      <div class="label">${escapeHtml(label)}</div>
+      <div class="value">${escapeHtml(formatNumber(value))}</div>
+      <div class="hint">${escapeHtml(hint)}</div>
+    </article>
+  `;
+}
+
+function skeletonCards(count = 8) {
+  return Array.from({ length: count }, () => `
+    <article class="asset-card">
+      <div class="thumb skeleton"></div>
+      <div class="asset-body">
+        <div class="skeleton" style="height:14px;border-radius:5px;margin-bottom:8px"></div>
+        <div class="skeleton" style="height:11px;width:70%;border-radius:5px"></div>
+      </div>
+    </article>
+  `).join('');
+}
+
+function emptyState(title, action = '') {
+  return `<div class="empty"><strong>${escapeHtml(title)}</strong>${escapeHtml(action)}</div>`;
+}
+
+function bucketNotice(bucket) {
+  if (bucket?.loading) return emptyState('加载中', '同步本地数据库状态。');
+  if (bucket?.error) return emptyState('加载失败，显示上次数据', bucket.error.message);
+  return '';
+}
+
+function errorNotice(error) {
+  return error ? emptyState('加载失败，显示上次数据', error.message) : '';
 }
 
 function moreButton(bucket, key) {
   return bucket.nextCursor ? `<button class="load-more" data-more="${key}" type="button">加载更多</button>` : '';
 }
 
-function renderDashboard() {
-  const counts = state.project?.counts || {};
-  setHead('总览', state.project?.project?.name || '本地项目', []);
-  const recentRuns = state.runs.items.slice(0, 6);
-  $('view').innerHTML = `
-    <div class="metric-grid">
-      ${metric('任务批次', counts.runs || 0)}
-      ${metric('提示词', counts.prompts || 0)}
-      ${metric('资产', counts.assets || 0)}
-      ${metric('未处理问题', counts.open_issues || 0)}
-      ${metric('已选资产', counts.selections || 0)}
+function updateAssetSelection(assetId, selection) {
+  const nextState = selection?.state || null;
+  const patch = !nextState || nextState === 'removed'
+    ? { selection_id: null, selection_state: null, selection_reason: null, selected_at: null }
+    : {
+      selection_id: selection?.id || null,
+      selection_state: nextState,
+      selection_reason: selection?.reason || null,
+      selected_at: selection?.selected_at || new Date().toISOString(),
+    };
+  state.assets.items = state.assets.items.map((item) => item.id === assetId ? { ...item, ...patch } : item);
+  if (state.selected?.type === 'asset' && state.selected.id === assetId) {
+    state.selected.data = { ...state.selected.data, ...patch };
+  }
+}
+
+function toggleBulkAsset(assetId) {
+  state.bulkAssetIds = state.bulkAssetIds.includes(assetId)
+    ? state.bulkAssetIds.filter((id) => id !== assetId)
+    : [...state.bulkAssetIds, assetId];
+}
+
+function setHead(eyebrow, title, subtitle, controls = '') {
+  $('pageEyebrow').textContent = eyebrow;
+  $('pageTitle').textContent = title;
+  $('pageSubtitle').textContent = subtitle;
+  $('pageControls').innerHTML = controls;
+}
+
+function segmented(name, current, items) {
+  return `
+    <div class="segmented" role="tablist" aria-label="${escapeHtml(name)}">
+      ${items.map(([id, label]) => `
+        <button type="button" data-filter="${escapeHtml(id)}" class="${current === id ? 'active' : ''}" aria-pressed="${current === id ? 'true' : 'false'}">${escapeHtml(label)}</button>
+      `).join('')}
     </div>
-    <table class="table">
-      <thead><tr><th>最近任务</th><th>阶段</th><th>状态</th><th>成功</th><th>失败</th><th>时间</th></tr></thead>
-      <tbody>
-        ${recentRuns.length ? recentRuns.map((run) => `
-          <tr data-run="${escapeHtml(run.id)}">
-            <td>${escapeHtml(run.title || run.id)}</td>
-            <td>${escapeHtml(run.phase)}</td>
-            <td>${escapeHtml(run.status)}</td>
-            <td>${escapeHtml(run.success_count)}</td>
-            <td>${escapeHtml(run.failed_count)}</td>
-            <td>${escapeHtml(run.updated_at)}</td>
-          </tr>
-        `).join('') : '<tr><td colspan="6">还没有任务记录。</td></tr>'}
-      </tbody>
-    </table>
   `;
+}
+
+function renderNav() {
+  $('nav').innerHTML = NAV_ITEMS.map((item) => `
+    <button type="button" data-page="${escapeHtml(item.id)}" class="${state.page === item.id ? 'active' : ''}">
+      <span class="nav-icon" aria-hidden="true">${escapeHtml(item.icon)}</span>
+      <span class="nav-copy">
+        <span class="nav-label">${escapeHtml(item.label)}</span>
+        <span class="nav-desc">${escapeHtml(item.desc)}</span>
+      </span>
+    </button>
+  `).join('');
+}
+
+function updateShell() {
+  const counts = state.project?.counts || {};
+  $('sideAssetCount').textContent = formatNumber(counts.assets || state.assets.total || 0);
+  $('sideIssueCount').textContent = formatNumber(counts.open_issues || 0);
+  $('healthDot').classList.toggle('ok', state.health?.status === 'ok');
+  $('healthText').textContent = state.health?.status === 'ok' ? '本地服务在线' : '连接异常';
+  $('menuButton').setAttribute('aria-expanded', state.sidebarOpen ? 'true' : 'false');
+  $('exportButton').disabled = Boolean(state.exportBusy);
+  $('exportButton').textContent = state.exportBusy === 'report' ? '导出中' : '导出';
+  document.querySelector('[data-shell]').classList.toggle('sidebar-open', state.sidebarOpen);
 }
 
 function assetThumb(asset) {
   if (String(asset.mime || '').startsWith('image/') && asset.thumb_status === 'ready') {
-    return `<img src="/api/assets/${encodeURIComponent(asset.id)}/thumb" alt="" loading="lazy">`;
+    return `<img src="/api/assets/${encodeURIComponent(asset.id)}/thumb" alt="${escapeHtml(asset.title || '资产缩略图')}" loading="lazy" decoding="async">`;
   }
-  return `<span>${escapeHtml(asset.thumb_status === 'missing' ? '无缩略图' : asset.kind)}</span>`;
+  const label = asset.thumb_status === 'missing' ? '无缩略图' : kindText(asset.kind);
+  return `<div class="thumb-fallback"><strong>${escapeHtml((kindText(asset.kind) || '?').slice(0, 1))}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function assetCard(asset, compact = false) {
+  const inCompare = state.compareIds.includes(asset.id);
+  const active = state.selected?.type === 'asset' && state.selected.id === asset.id;
+  const bulkChecked = state.bulkAssetIds.includes(asset.id);
+  const selectState = selectionState(asset);
+  return `
+    <article class="asset-card ${inCompare ? 'in-compare' : ''} ${active ? 'active' : ''} selection-${escapeHtml(selectState)} ${bulkChecked ? 'bulk-active' : ''}" data-asset="${escapeHtml(asset.id)}" tabindex="0">
+      ${state.bulkMode ? `
+        <label class="bulk-check" aria-label="选择资产 ${escapeHtml(asset.title || asset.id)}">
+          <input type="checkbox" data-bulk-asset="${escapeHtml(asset.id)}" ${bulkChecked ? 'checked' : ''}>
+          <span></span>
+        </label>
+      ` : ''}
+      <button class="compare-toggle" data-compare-toggle="${escapeHtml(asset.id)}" type="button" aria-label="${inCompare ? '移出对比' : '加入对比'}">${inCompare ? '✓' : '+'}</button>
+      <div class="thumb">${assetThumb(asset)}</div>
+      <div class="asset-body">
+        <div class="asset-title">${escapeHtml(asset.title || asset.id)}</div>
+        <div class="asset-meta">
+          ${kindBadge(asset.kind)}
+          ${assetStatusBadge(asset)}
+          ${selectionBadge(asset)}
+          ${deliverableBadge(asset)}
+          ${compact ? '' : `<span>${escapeHtml(formatTime(asset.updated_at))}</span>`}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderDashboard() {
+  const counts = state.project?.counts || {};
+  const recentRuns = state.runs.items.slice(0, 6);
+  const recentAssets = state.assets.items.slice(0, 8);
+  const openIssues = state.issues.items.filter((issue) => issue.status === 'open').slice(0, 4);
+  setHead(
+    'Local asset OS',
+    '生产总览',
+    state.project?.project?.name || '本地批量生图项目',
+    ''
+  );
+  $('view').innerHTML = `
+    <section class="metric-grid" aria-label="关键指标">
+      ${metric('任务批次', counts.runs || state.runs.total, '最近生产运行')}
+      ${metric('提示词', counts.prompts || state.prompts.total, '可复用生成输入')}
+      ${metric('资产', counts.assets || state.assets.total, '本地文件资产')}
+      ${metric('未处理问题', counts.open_issues || 0, '影响交付项')}
+      ${metric('已选资产', counts.selections || 0, '进入交付候选')}
+    </section>
+
+    <section class="dashboard-grid">
+      <div class="surface-card">
+        <div class="section-head">
+          <div><h2>Production runs</h2><p>最近批次、状态、成功失败统计。</p></div>
+          <button class="small-button" data-page="runs" type="button">查看全部</button>
+        </div>
+        ${recentRuns.length ? renderRunsList(recentRuns) : emptyState('还没有任务记录', '准备或执行后会出现生产批次。')}
+      </div>
+
+      <div class="surface-card">
+        <div class="section-head">
+          <div><h2>资产预览</h2><p>最近入库图片和交付候选。</p></div>
+          <button class="small-button" data-page="assets" type="button">打开资产库</button>
+        </div>
+        <div class="asset-preview-row">
+          ${recentAssets.length ? recentAssets.map((asset) => `
+            <button class="mini-asset" data-asset="${escapeHtml(asset.id)}" type="button">
+              <div class="thumb">${assetThumb(asset)}</div>
+              <div class="mini-title">${escapeHtml(asset.title || asset.id)}</div>
+            </button>
+          `).join('') : (state.assets.loading ? skeletonCards(4) : emptyState('还没有资产', '执行或导入后会显示最近图片。'))}
+        </div>
+      </div>
+
+      <div class="surface-card">
+        <div class="section-head">
+          <div><h2>下一步动作</h2><p>按当前项目状态给出短路径。</p></div>
+        </div>
+        <div class="next-actions">
+          ${actionRow('筛选可用资产', `${formatNumber(counts.assets || 0)} 个资产`, '资产库', 'assets')}
+          ${actionRow('处理未关闭问题', `${formatNumber(counts.open_issues || 0)} 个未处理`, '问题中心', 'issues')}
+          ${actionRow('生成交付报告', '导出 JSON 报告或资产包清单', '导出', 'exports')}
+        </div>
+      </div>
+
+      <div class="surface-card">
+        <div class="section-head">
+          <div><h2>问题信号</h2><p>阻塞、需复核、可补跑集中处理。</p></div>
+          <button class="small-button" data-page="issues" type="button">处理</button>
+        </div>
+        ${openIssues.length ? openIssues.map(issueCard).join('') : emptyState('没有未处理问题', '当前交付风险低。')}
+      </div>
+    </section>
+  `;
+}
+
+function actionRow(title, meta, label, page) {
+  return `
+    <div class="action-row">
+      <div>
+        <div class="action-title">${escapeHtml(title)}</div>
+        <div class="action-meta">${escapeHtml(meta)}</div>
+      </div>
+      <button class="small-button" data-page="${escapeHtml(page)}" type="button">${escapeHtml(label)}</button>
+    </div>
+  `;
 }
 
 function filterPanel() {
   return `
-    <aside class="filter-panel">
-      <label>类型
+    <aside class="filter-panel" aria-label="资产筛选">
+      <label class="field">类型
         <select data-asset-filter="kind">
-          ${[
-            ['all', '全部'], ['result', '结果图'], ['reference', '参考图'], ['input', '输入素材'], ['export', '导出文件'], ['issue', '问题记录'],
-          ].map(([value, label]) => `<option value="${value}" ${state.kind === value ? 'selected' : ''}>${label}</option>`).join('')}
+          ${Object.entries(KIND_LABELS).map(([value, label]) => `<option value="${value}" ${state.kind === value ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
       </label>
-      <label>选择状态
+      <label class="field">选择状态
         <select data-asset-filter="selectedFilter">
           <option value="all" ${state.selectedFilter === 'all' ? 'selected' : ''}>全部</option>
-          <option value="true" ${state.selectedFilter === 'true' ? 'selected' : ''}>已选择</option>
-          <option value="false" ${state.selectedFilter === 'false' ? 'selected' : ''}>未选择</option>
+          <option value="true" ${state.selectedFilter === 'true' ? 'selected' : ''}>已选</option>
+          <option value="false" ${state.selectedFilter === 'false' ? 'selected' : ''}>未选中</option>
         </select>
       </label>
-      <label>网格密度
+      <label class="field">网格密度
         <select data-asset-filter="density">
           <option value="comfortable" ${state.density === 'comfortable' ? 'selected' : ''}>舒适</option>
           <option value="compact" ${state.density === 'compact' ? 'selected' : ''}>紧凑</option>
@@ -172,152 +442,261 @@ function filterPanel() {
 }
 
 function renderAssets() {
-  const filters = [['all', '全部'], ['ready_for_selection', '可筛选'], ['needs_attention', '需处理'], ['needs_review', '待复核']];
-  setHead('资产库', `服务端筛选，已加载 ${state.assets.items.length}/${state.assets.total || state.assets.items.length}`, filters);
-  const cards = state.assets.items.map((asset) => {
-    const inCompare = state.compareIds.includes(asset.id);
-    return `
-      <article class="asset-card ${inCompare ? 'selected' : ''}" data-asset="${escapeHtml(asset.id)}">
-        <button class="compare-toggle" data-compare-toggle="${escapeHtml(asset.id)}" type="button">${inCompare ? '✓' : '+'}</button>
-        <div class="thumb">${assetThumb(asset)}</div>
-        <div class="asset-body">
-          <div class="asset-title">${escapeHtml(asset.title)}</div>
-          <div class="asset-meta"><span>${escapeHtml(asset.kind)}</span><span>${escapeHtml(asset.user_status || asset.status)}</span></div>
-        </div>
-      </article>
-    `;
-  }).join('');
+  const filters = [['all', '全部'], ['ready_for_selection', '可筛选'], ['needs_attention', '需处理'], ['needs_review', '待复核'], ['ready', '就绪']];
+  const controls = `
+    ${segmented('资产状态', state.status, filters)}
+    <div class="segmented" aria-label="视图模式">
+      <button type="button" data-asset-view="grid" class="${state.assetView === 'grid' ? 'active' : ''}">网格</button>
+      <button type="button" data-asset-view="list" class="${state.assetView === 'list' ? 'active' : ''}">列表</button>
+    </div>
+    <button class="secondary-button" data-bulk-mode type="button" aria-pressed="${state.bulkMode ? 'true' : 'false'}">${state.bulkMode ? '退出批量' : '批量选择'}</button>
+  `;
+  setHead('Asset library', '资产库', `已加载 ${formatNumber(state.assets.items.length)}/${formatNumber(state.assets.total || state.assets.items.length)}，按本地数据库筛选。`, controls);
+  const content = state.assets.loading
+    ? `<div class="grid">${skeletonCards(10)}</div>`
+    : state.assetView === 'list'
+      ? renderAssetTable()
+      : `<div class="grid ${state.density === 'compact' ? 'compact' : ''}">${state.assets.items.map((asset) => assetCard(asset, state.density === 'compact')).join('') || emptyState('没有符合条件的资产', '换个状态或搜索词。')}</div>`;
   $('view').innerHTML = `
     <div class="asset-layout">
       ${filterPanel()}
       <section class="asset-results">
         <div class="asset-toolbar">
-          <span>${state.compareIds.length} 张进入对比</span>
-          <button class="small-button" data-page="compare" type="button">打开对比</button>
+          <div>${badge(`${state.compareIds.length} 张对比`, 'accent')} ${badge(`已载 ${state.assets.items.length}`, 'info')} ${state.bulkMode ? badge(`批量 ${state.bulkAssetIds.length}`, 'warning') : ''}</div>
+          <div class="toolbar-actions">
+            ${state.bulkMode ? `
+              <button class="small-button" data-bulk-action="compare" type="button" ${state.bulkAssetIds.length ? '' : 'disabled'}>加入对比</button>
+              <button class="small-button" data-bulk-action="selected" type="button" ${state.bulkAssetIds.length ? '' : 'disabled'}>标记已选</button>
+              <button class="small-button" data-bulk-action="rejected" type="button" ${state.bulkAssetIds.length ? '' : 'disabled'}>不采用</button>
+              <button class="small-button" data-bulk-action="clear" type="button" ${state.bulkAssetIds.length ? '' : 'disabled'}>清空</button>
+            ` : ''}
+            <button class="small-button" data-page="compare" type="button">打开对比</button>
+          </div>
         </div>
-        <div class="grid ${state.density === 'compact' ? 'compact' : ''}">${cards || '<div class="empty">没有符合条件的资产。</div>'}</div>
+        ${bucketNotice(state.assets)}
+        ${content}
         ${moreButton(state.assets, 'assets')}
       </section>
     </div>
   `;
 }
 
-function renderRuns() {
-  setHead('任务记录', `已加载 ${state.runs.items.length}/${state.runs.total || state.runs.items.length}`, []);
-  $('view').innerHTML = `
+function renderAssetTable() {
+  return `
     <table class="table">
-      <thead><tr><th>任务</th><th>阶段</th><th>状态</th><th>服务</th><th>成功/失败/跳过</th><th>时间</th></tr></thead>
-      <tbody>${state.runs.items.map((run) => `
-        <tr data-run="${escapeHtml(run.id)}">
-          <td>${escapeHtml(run.title || run.id)}</td>
-          <td>${escapeHtml(run.phase)}</td>
-          <td>${escapeHtml(run.status)}</td>
-          <td>${escapeHtml(run.provider || '-')}</td>
-          <td>${run.success_count}/${run.failed_count}/${run.skipped_count}</td>
-          <td>${escapeHtml(run.updated_at)}</td>
-        </tr>
-      `).join('') || '<tr><td colspan="6">还没有任务记录。</td></tr>'}</tbody>
+      <thead><tr><th>资产</th><th>类型</th><th>状态</th><th>选择</th><th>尺寸</th><th>更新时间</th></tr></thead>
+      <tbody>
+        ${state.assets.items.map((asset) => `
+          <tr data-asset="${escapeHtml(asset.id)}" tabindex="0">
+            <td><strong>${escapeHtml(asset.title || asset.id)}</strong><br><span class="detail-value">${escapeHtml(asset.path || '-')}</span></td>
+            <td>${kindBadge(asset.kind)}</td>
+            <td>${assetStatusBadge(asset)} ${deliverableBadge(asset)}</td>
+            <td>${selectionBadge(asset)}</td>
+            <td>${asset.width && asset.height ? `${escapeHtml(asset.width)}×${escapeHtml(asset.height)}` : '-'}</td>
+            <td>${escapeHtml(formatTime(asset.updated_at))}</td>
+          </tr>
+        `).join('') || '<tr><td colspan="6">没有符合条件的资产。</td></tr>'}
+      </tbody>
     </table>
+  `;
+}
+
+function renderRuns() {
+  setHead('Production', '任务记录', `已加载 ${formatNumber(state.runs.items.length)}/${formatNumber(state.runs.total || state.runs.items.length)} 个运行批次。`, '');
+  $('view').innerHTML = `
+    ${bucketNotice(state.runs)}
+    ${state.runs.items.length ? renderRunsList(state.runs.items) : emptyState('还没有任务记录', '准备或执行后会同步到这里。')}
     ${moreButton(state.runs, 'runs')}
+  `;
+}
+
+function renderRunsList(runs) {
+  return `
+    <div class="runs-list">
+      ${runs.map((run) => `
+        <article class="run-card" data-run="${escapeHtml(run.id)}" tabindex="0">
+          <div class="run-body">
+            <div class="run-title">${escapeHtml(run.title || run.id)}</div>
+            <div class="run-meta">
+              ${badge(run.status)}
+              <span class="badge info">${escapeHtml(run.phase || '-')}</span>
+              <span>${escapeHtml(run.provider || 'local')}</span>
+              <span>${escapeHtml(formatTime(run.updated_at))}</span>
+            </div>
+          </div>
+          <div class="run-stats" aria-label="运行统计">
+            <div class="stat-pill"><strong>${formatNumber(run.success_count)}</strong><span>成功</span></div>
+            <div class="stat-pill"><strong>${formatNumber(run.failed_count)}</strong><span>失败</span></div>
+            <div class="stat-pill"><strong>${formatNumber(run.skipped_count)}</strong><span>跳过</span></div>
+          </div>
+        </article>
+      `).join('')}
+    </div>
   `;
 }
 
 function issueGroup(issue) {
   if (issue.status === 'resolved') return '已处理';
+  if (issue.severity === 'blocking' || issue.blocking) return '阻塞';
   if (issue.rerunnable) return '可补跑';
-  if (issue.severity === 'blocking' || issue.blocking) return '必须处理';
-  return '待复核';
+  return '需复核';
+}
+
+function issueCard(issue) {
+  return `
+    <article class="issue-card" data-issue="${escapeHtml(issue.id)}" tabindex="0">
+      <div class="asset-meta">
+        ${badge(issue.status)}
+        ${badge(issue.severity || issue.type, badgeVariant(issue.severity || issue.type))}
+      </div>
+      <div class="asset-title">${escapeHtml(issue.title || issue.id)}</div>
+      <p>${escapeHtml(issue.message || issue.recommended_action || '等待处理。')}</p>
+      <div class="card-actions">
+        ${issue.status !== 'resolved' ? `<button class="small-button" data-resolve="${escapeHtml(issue.id)}" type="button">标记解决</button>` : ''}
+        ${issue.rerunnable ? `<button class="small-button" data-rerun-issue="${escapeHtml(issue.id)}" type="button">创建补跑</button>` : ''}
+        <button class="small-button" type="button" disabled title="当前后端没有忽略接口">稍后处理</button>
+      </div>
+    </article>
+  `;
 }
 
 function renderIssues() {
   const filters = [['all', '全部'], ['open', '未处理'], ['resolved', '已处理']];
-  setHead('问题中心', `按处理方式分组，已加载 ${state.issues.items.length}/${state.issues.total || state.issues.items.length}`, filters);
-  const groups = ['必须处理', '可补跑', '待复核', '已处理'].map((name) => {
+  setHead('Recovery', '问题中心', `按处理方式分组，已加载 ${formatNumber(state.issues.items.length)}/${formatNumber(state.issues.total || state.issues.items.length)}。`, segmented('问题状态', state.status, filters));
+  const groups = ['阻塞', '需复核', '可补跑', '已处理'].map((name) => {
     const items = state.issues.items.filter((issue) => issueGroup(issue) === name);
     return `
       <section class="issue-group">
-        <h2>${name}<span>${items.length}</span></h2>
-        <table class="table">
-          <tbody>${items.map((issue) => `
-            <tr data-issue="${escapeHtml(issue.id)}">
-              <td>${escapeHtml(issue.title)}</td>
-              <td>${escapeHtml(issue.message || '-')}</td>
-              <td>${escapeHtml(issue.recommended_action || '-')}</td>
-              <td>${escapeHtml(issue.status)}</td>
-              <td class="row-action"><button class="small-button" data-resolve="${escapeHtml(issue.id)}">标记处理</button></td>
-            </tr>
-          `).join('') || '<tr><td>暂无</td></tr>'}</tbody>
-        </table>
+        <h2>${escapeHtml(name)} <span class="badge ${items.length ? 'warning' : ''}">${formatNumber(items.length)}</span></h2>
+        ${items.length ? items.map(issueCard).join('') : emptyState('暂无', '')}
       </section>
     `;
   }).join('');
-  $('view').innerHTML = `${groups}${moreButton(state.issues, 'issues')}`;
+  $('view').innerHTML = `${bucketNotice(state.issues)}<div class="issues-board">${groups}</div>${moreButton(state.issues, 'issues')}`;
 }
 
 function renderPrompts() {
-  setHead('提示词实验室', `按任务查看、复制、派生补跑，已加载 ${state.prompts.items.length}/${state.prompts.total || state.prompts.items.length}`, []);
+  if (!state.promptFocusId && state.prompts.items.length) state.promptFocusId = state.prompts.items[0].id;
+  const active = state.prompts.items.find((prompt) => prompt.id === state.promptFocusId) || state.prompts.items[0];
   const runOptions = state.runs.items.map((run) => `<option value="${escapeHtml(run.id)}" ${state.runFilter === run.id ? 'selected' : ''}>${escapeHtml(run.title || run.id)}</option>`).join('');
+  const promptText = active?.prompt_text || '暂无提示词。';
+  const shouldClamp = promptText.length > 900 && !state.expandedPrompt;
+  setHead('Prompt Lab', '提示词实验室', `搜索、复制、派生补跑，已加载 ${formatNumber(state.prompts.items.length)}/${formatNumber(state.prompts.total || state.prompts.items.length)}。`, `
+    <label class="field" style="min-width:220px">任务
+      <select data-run-filter>
+        <option value="all" ${state.runFilter === 'all' ? 'selected' : ''}>全部任务</option>
+        ${runOptions}
+      </select>
+    </label>
+  `);
   $('view').innerHTML = `
-    <div class="prompt-tools">
-      <label>任务
-        <select data-run-filter>
-          <option value="all" ${state.runFilter === 'all' ? 'selected' : ''}>全部任务</option>
-          ${runOptions}
-        </select>
-      </label>
-    </div>
-    <table class="table">
-      <thead><tr><th>编号</th><th>标题</th><th>提示词</th><th></th></tr></thead>
-      <tbody>${state.prompts.items.map((prompt) => `
-        <tr data-prompt="${escapeHtml(prompt.id)}">
-          <td>${escapeHtml(prompt.prompt_index)}</td>
-          <td>${escapeHtml(prompt.title)}</td>
-          <td>${escapeHtml(prompt.prompt_text).slice(0, 220)}</td>
-          <td class="row-action">
-            <button class="small-button" data-copy="${escapeHtml(prompt.id)}">复制</button>
-            <button class="small-button" data-rerun-prompt="${escapeHtml(prompt.id)}">补跑</button>
-          </td>
-        </tr>
-      `).join('') || '<tr><td colspan="4">还没有提示词。</td></tr>'}</tbody>
-    </table>
-    ${moreButton(state.prompts, 'prompts')}
+    ${bucketNotice(state.prompts)}
+    <section class="prompt-lab">
+      <div class="prompt-list">
+        ${state.prompts.items.map((prompt) => `
+          <button class="prompt-card ${active?.id === prompt.id ? 'active' : ''}" data-prompt="${escapeHtml(prompt.id)}" type="button">
+            <div class="prompt-title">${escapeHtml(prompt.title || `Prompt ${prompt.prompt_index || ''}`)}</div>
+            <div class="prompt-meta"><span>${escapeHtml(prompt.prompt_index || '-')}</span><span>${escapeHtml(formatTime(prompt.updated_at))}</span></div>
+          </button>
+        `).join('') || emptyState('还没有提示词', '准备阶段会写入提示词。')}
+        ${moreButton(state.prompts, 'prompts')}
+      </div>
+      <div class="prompt-preview surface-card">
+        <div class="section-head">
+          <div><h2>${escapeHtml(active?.title || '提示词预览')}</h2><p>${escapeHtml(active?.id || '-')}</p></div>
+          <div class="toolbar-actions">
+            <button class="small-button" data-copy="${escapeHtml(active?.id || '')}" type="button" ${active ? '' : 'disabled'}>${state.copiedPromptId === active?.id ? '已复制' : '复制'}</button>
+            <button class="small-button" data-toggle-prompt type="button" ${active ? '' : 'disabled'}>${state.expandedPrompt ? '收起' : '展开'}</button>
+            <button class="small-button" data-rerun-prompt="${escapeHtml(active?.id || '')}" type="button" ${active ? '' : 'disabled'}>补跑</button>
+          </div>
+        </div>
+        <div class="prompt-text ${shouldClamp ? 'is-clamped' : ''}">${highlightQuery(promptText)}</div>
+      </div>
+      <aside class="prompt-side surface-card">
+        <div class="section-head"><div><h2>参数与关联</h2><p>运行输入摘要。</p></div></div>
+        <div class="detail">
+          ${detailRows(active || {}, [['run_id', '任务'], ['prompt_index', '编号'], ['negative_prompt', '负向提示词'], ['source_path', '来源路径']])}
+          <div class="detail-row"><div class="detail-label">参数</div><div class="detail-value">${escapeHtml(JSON.stringify(active?.params || {}, null, 2))}</div></div>
+        </div>
+      </aside>
+    </section>
   `;
 }
 
+function highlightQuery(text) {
+  const escaped = escapeHtml(text);
+  const query = state.query.trim();
+  if (!query) return escaped;
+  const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return escaped.replace(new RegExp(safe, 'gi'), (match) => `<mark>${match}</mark>`);
+}
+
 function renderCompare() {
-  setHead('对比视图', '支持 2、4、9 张图一起看，选出赢家', []);
+  setHead('Review', '对比视图', '支持 2、4、9 张图一起看，固定画幅避免跳动。', '');
   const assets = state.compareIds.map((id) => state.assets.items.find((asset) => asset.id === id)).filter(Boolean).slice(0, 9);
   $('view').innerHTML = assets.length ? `
     <div class="compare-grid count-${Math.min(assets.length, 9)}">
       ${assets.map((asset) => `
-        <article class="compare-card" data-asset="${escapeHtml(asset.id)}">
+        <article class="compare-card" data-asset="${escapeHtml(asset.id)}" tabindex="0">
           <div class="thumb">${assetThumb(asset)}</div>
-          <div class="asset-title">${escapeHtml(asset.title)}</div>
-          <button class="primary-button" data-select-current="${escapeHtml(asset.id)}" type="button">选为赢家</button>
+          <div class="asset-title">${escapeHtml(asset.title || asset.id)}</div>
+          <div class="compare-meta">${assetStatusBadge(asset)} ${selectionBadge(asset)} <span>${escapeHtml(asset.width && asset.height ? `${asset.width}×${asset.height}` : '尺寸未知')}</span></div>
+          <textarea class="notes-area" aria-label="差异备注" placeholder="差异备注"></textarea>
+          <div class="card-actions">
+            <button class="primary-button" data-select-current="${escapeHtml(asset.id)}" type="button">选为赢家</button>
+            <button class="small-button" data-compare-toggle="${escapeHtml(asset.id)}" type="button">移除</button>
+          </div>
         </article>
       `).join('')}
     </div>
-  ` : '<div class="empty">在资产库点 + 加入对比。</div>';
+  ` : emptyState('未选择对比资产', '在资产库点击 + 加入对比。');
 }
 
 function renderExports() {
-  setHead('导出中心', '生成报告和已选资产包清单', []);
+  setHead('Delivery', '导出中心', '交付包、报告、已选资产与导出历史。', '');
+  const selected = state.project?.counts?.selections || 0;
+  const openIssues = state.project?.counts?.open_issues || 0;
+  const lastExport = state.exports[0];
+  const packReady = state.exports.some((item) => item.kind === 'pack' && item.status === 'ready');
   $('view').innerHTML = `
-    <div class="export-actions">
-      <button class="primary-button" id="packButton" type="button">生成已选资产包</button>
-    </div>
-    <table class="table">
-      <thead><tr><th>名称</th><th>类型</th><th>状态</th><th>路径</th><th>时间</th></tr></thead>
-      <tbody>${state.exports.map((item) => `
-        <tr>
-          <td>${escapeHtml(item.title)}</td>
-          <td>${escapeHtml(item.kind)}</td>
-          <td>${escapeHtml(item.status)}</td>
-          <td>${escapeHtml(item.path || '-')}</td>
-          <td>${escapeHtml(item.updated_at)}</td>
-        </tr>
-      `).join('') || '<tr><td colspan="5">还没有导出记录。</td></tr>'}</tbody>
-    </table>
+    ${errorNotice(state.exportsError)}
+    <section class="export-grid">
+      <div class="export-card">
+        <div class="section-head"><div><h2>交付前检查</h2><p>${formatNumber(selected)} 个已选资产，${formatNumber(openIssues)} 个未处理问题。</p></div></div>
+        <div class="delivery-checklist">
+          <div><span>已选资产</span><strong>${formatNumber(selected)}</strong></div>
+          <div><span>未处理问题</span><strong>${formatNumber(openIssues)}</strong></div>
+          <div><span>最近导出</span><strong>${escapeHtml(lastExport ? formatTime(lastExport.updated_at || lastExport.created_at) : '无')}</strong></div>
+          <div><span>资产包状态</span><strong>${packReady ? '已生成' : '待生成'}</strong></div>
+        </div>
+        ${state.exportResult?.path ? `<div class="export-result"><strong>完成</strong><span>${escapeHtml(state.exportResult.path)}</span></div>` : ''}
+        <div class="next-actions">
+          <div class="action-row">
+            <div><div class="action-title">已选资产包</div><div class="action-meta">写入 selected_pack_manifest.json</div></div>
+            <button class="primary-button" id="packButton" type="button" ${state.exportBusy ? 'disabled' : ''}>${state.exportBusy === 'pack' ? '生成中' : '生成'}</button>
+          </div>
+          <div class="action-row">
+            <div><div class="action-title">工作台报告</div><div class="action-meta">写入 workbench_report.json</div></div>
+            <button class="secondary-button" data-export-report type="button" ${state.exportBusy ? 'disabled' : ''}>${state.exportBusy === 'report' ? '生成中' : '生成'}</button>
+          </div>
+        </div>
+      </div>
+      <div class="export-card">
+        <div class="section-head"><div><h2>最近导出</h2><p>报告、资产包清单、交付记录。</p></div></div>
+        <table class="table">
+          <thead><tr><th>名称</th><th>类型</th><th>状态</th><th>路径</th><th>时间</th></tr></thead>
+          <tbody>${state.exports.map((item) => `
+            <tr>
+              <td>${escapeHtml(item.title || item.id)}</td>
+              <td>${kindBadge(item.kind)}</td>
+              <td>${badge(item.status)}</td>
+              <td>${escapeHtml(item.path || '-')}</td>
+              <td>${escapeHtml(formatTime(item.updated_at || item.created_at))}</td>
+            </tr>
+          `).join('') || '<tr><td colspan="5">还没有导出记录。</td></tr>'}</tbody>
+        </table>
+      </div>
+    </section>
   `;
 }
 
@@ -325,68 +704,113 @@ function detailRows(item, keys) {
   return keys.map(([key, label]) => `
     <div class="detail-row">
       <div class="detail-label">${escapeHtml(label)}</div>
-      <div class="detail-value">${escapeHtml(typeof item?.[key] === 'object' ? JSON.stringify(item[key], null, 2) : item?.[key] || '-')}</div>
+      <div class="detail-value">${escapeHtml(formatDetailValue(item?.[key]))}</div>
     </div>
   `).join('');
 }
 
+function formatDetailValue(value) {
+  if (value === undefined || value === null || value === '') return '-';
+  if (typeof value === 'object') return JSON.stringify(value, null, 2);
+  return value;
+}
+
 function renderAssetInspector(detail) {
   const asset = detail.asset;
-  state.selected = asset;
+  state.selected = { type: 'asset', id: asset.id, data: asset };
   const tags = detail.tags?.map((tag) => tag.name).join('、') || '无';
   const run = detail.runs?.[0];
   $('inspector').innerHTML = `
     <h2>${escapeHtml(asset.title || asset.id)}</h2>
-    <div class="inspector-preview">${assetThumb(asset)}</div>
+    <div class="asset-meta">${kindBadge(asset.kind)} ${assetStatusBadge(asset)} ${selectionBadge(asset)} ${deliverableBadge(asset)} <span>${escapeHtml(formatTime(asset.updated_at))}</span></div>
+    <div class="inspector-preview"><div class="thumb">${assetThumb(asset)}</div></div>
     <div class="detail-actions">
-      <button class="primary-button" data-select-current="${escapeHtml(asset.id)}">选择</button>
-      <button class="ghost-button" data-reject-current="${escapeHtml(asset.id)}">不采用</button>
+      <button class="primary-button" data-select-current="${escapeHtml(asset.id)}" type="button">设为已选</button>
+      <button class="ghost-button" data-reject-current="${escapeHtml(asset.id)}" type="button">不采用</button>
+      <button class="small-button" data-clear-selection="${escapeHtml(asset.id)}" type="button">移除选择</button>
+      <button class="small-button" data-compare-toggle="${escapeHtml(asset.id)}" type="button">对比</button>
     </div>
     <form class="tag-form" data-tag-form="${escapeHtml(asset.id)}">
-      <input name="tag" placeholder="添加标签">
+      <input name="tag" placeholder="添加标签" aria-label="添加标签">
       <button class="small-button" type="submit">添加</button>
     </form>
     <div class="detail">
-      ${detailRows(asset, [['path', '文件路径'], ['status', '状态'], ['kind', '类型'], ['width', '宽度'], ['height', '高度'], ['sha256', '文件指纹'], ['notes', '备注']])}
+      ${detailRows(asset, [['path', '文件路径'], ['status', '资产状态'], ['selection_state', '选择状态'], ['selected_at', '选择时间'], ['user_status', '资产标签状态'], ['width', '宽度'], ['height', '高度'], ['size_bytes', '文件大小'], ['sha256', '文件指纹'], ['notes', '备注']])}
       <div class="detail-row"><div class="detail-label">标签</div><div class="detail-value">${escapeHtml(tags)}</div></div>
       <div class="detail-row"><div class="detail-label">来源任务</div><div class="detail-value">${escapeHtml(run ? `${run.run_title || run.run_id} / ${run.run_phase}` : '-')}</div></div>
-      <div class="detail-row"><div class="detail-label">提示词</div><div class="detail-value">${escapeHtml(detail.prompt?.prompt_text || '-')}</div></div>
-      <div class="detail-row"><div class="detail-label">生成参数</div><div class="detail-value">${escapeHtml(JSON.stringify(detail.prompt?.params || detail.runItem?.raw || {}, null, 2))}</div></div>
-      <div class="detail-row"><div class="detail-label">血缘</div><div class="detail-value">${escapeHtml((detail.links || []).map((link) => `${link.source_type}:${link.source_id} → ${link.target_type}:${link.target_id}（${link.relation}）`).join('\n') || '-')}</div></div>
+      <div class="detail-row"><div class="detail-label">提示词</div><div class="detail-value code-block">${escapeHtml(detail.prompt?.prompt_text || '-')}</div></div>
+      <div class="detail-row"><div class="detail-label">生成参数</div><div class="detail-value code-block">${escapeHtml(JSON.stringify(detail.prompt?.params || detail.runItem?.raw || {}, null, 2))}</div></div>
+    </div>
+  `;
+  render();
+}
+
+function renderDefaultInspector() {
+  const counts = state.project?.counts || {};
+  const activeJob = state.jobs.items.find((job) => ['queued', 'running', 'failed'].includes(job.status));
+  const lastEvent = state.events.items[0];
+  $('inspector').innerHTML = `
+    <div class="inspector-empty">
+      <strong>项目检查器</strong>
+      选择资产、任务、问题或提示词后显示详情。
+    </div>
+    <div class="detail" style="margin-top:16px">
+      <div class="detail-row"><div class="detail-label">项目</div><div class="detail-value">${escapeHtml(state.project?.project?.name || '本地项目')}</div></div>
+      <div class="detail-row"><div class="detail-label">资产</div><div class="detail-value">${formatNumber(counts.assets || 0)}</div></div>
+      <div class="detail-row"><div class="detail-label">未处理问题</div><div class="detail-value">${formatNumber(counts.open_issues || 0)}</div></div>
+      <div class="detail-row"><div class="detail-label">当前队列</div><div class="detail-value">${escapeHtml(activeJob ? `${activeJob.kind} / ${statusText(activeJob.status)}` : '空闲')}</div></div>
+      <div class="detail-row"><div class="detail-label">最近事件</div><div class="detail-value">${escapeHtml(lastEvent?.message || lastEvent?.event_type || '-')}</div></div>
+    </div>
+    <div class="detail-actions" style="margin-top:16px">
+      <button class="secondary-button" data-page="assets" type="button">资产库</button>
+      <button class="secondary-button" data-page="issues" type="button">问题中心</button>
     </div>
   `;
 }
 
 function renderInspector(item, type) {
-  state.selected = item;
   if (!item) {
-    $('inspector').innerHTML = '<div class="inspector-empty">选择资产、任务或问题后查看详情。</div>';
+    renderDefaultInspector();
     return;
   }
+  state.selected = { type, id: item.id, data: item };
+  const title = item.title || item.name || item.kind || item.id;
   const rows = Object.entries(item)
-    .filter(([key]) => !['metadata', 'raw', 'params'].includes(key))
+    .filter(([key]) => !['metadata', 'raw', 'params', 'payload', 'result'].includes(key))
     .slice(0, 18)
     .map(([key, value]) => `
       <div class="detail-row">
         <div class="detail-label">${escapeHtml(key)}</div>
-        <div class="detail-value">${escapeHtml(typeof value === 'object' ? JSON.stringify(value, null, 2) : value)}</div>
+        <div class="detail-value">${escapeHtml(formatDetailValue(value))}</div>
       </div>
     `).join('');
-  $('inspector').innerHTML = `<h2>${escapeHtml(item.title || item.name || item.id)}</h2><div class="detail">${rows}</div>`;
+  $('inspector').innerHTML = `<h2>${escapeHtml(title)}</h2><div class="detail" style="margin-top:12px">${rows}</div>`;
+  render();
 }
 
 function renderEvents() {
-  $('eventLog').innerHTML = state.events.items.slice(0, 8).map((event) => (
-    `<div class="event-pill">${escapeHtml(event.message || event.event_type)}</div>`
-  )).join('');
   const active = state.jobs.items.find((job) => ['queued', 'running', 'failed'].includes(job.status));
   $('jobSummary').innerHTML = active
-    ? `<button class="job-button" data-job="${escapeHtml(active.id)}">${escapeHtml(active.kind)}：${escapeHtml(active.status)}${active.error ? `，${escapeHtml(active.error)}` : ''}</button>`
+    ? `<button class="job-button job-${escapeHtml(active.status)}" data-job="${escapeHtml(active.id)}" type="button"><span>${escapeHtml(active.kind)} · ${escapeHtml(statusText(active.status))}</span><small>${escapeHtml(formatTime(active.updated_at || active.created_at))}</small>${active.error ? `<em>${escapeHtml(active.error)}</em>` : ''}</button>`
     : '队列空闲';
+  $('eventLog').innerHTML = state.events.items.slice(0, 6).map((event) => `
+    <button class="activity-item" data-event="${escapeHtml(event.id)}" type="button">
+      <strong>${escapeHtml(event.message || event.event_type)}</strong>
+      <span>${escapeHtml(formatTime(event.updated_at || event.created_at))}</span>
+    </button>
+  `).join('') || '<div class="activity-item"><strong>暂无事件</strong><span>等待本地任务写入</span></div>';
 }
 
 function render() {
   renderNav();
+  updateShell();
+  if (!state.selected) renderDefaultInspector();
+  if (state.loading) {
+    setHead('Local asset OS', '生产总览', '读取本地数据库状态中。', '');
+    $('view').innerHTML = `<section class="metric-grid">${skeletonCards(5)}</section><div class="grid">${skeletonCards(8)}</div>`;
+    renderEvents();
+    return;
+  }
   if (state.page === 'dashboard') renderDashboard();
   if (state.page === 'assets') renderAssets();
   if (state.page === 'runs') renderRuns();
@@ -412,128 +836,329 @@ async function loadCurrent(reset = true) {
   } else if (state.page === 'prompts') {
     await loadPaged('prompts', '/api/prompts', { q: state.query, run_id: state.runFilter }, reset);
   } else if (state.page === 'exports') {
-    state.exports = await api('/api/exports');
+    state.exportsError = null;
+    try {
+      state.exports = await api('/api/exports');
+    } catch (error) {
+      state.exportsError = error;
+      throw error;
+    }
   }
 }
 
 async function refreshAll() {
-  const [health, project] = await Promise.all([api('/api/health'), api('/api/project')]);
-  state.project = project;
-  await Promise.all([
-    loadPaged('runs', '/api/runs', {}, true),
-    loadPaged('assets', '/api/assets', {}, true),
-    loadPaged('issues', '/api/issues', {}, true),
-    loadPaged('events', '/api/events', { limit: 20 }, true),
-    loadPaged('jobs', '/api/jobs', {}, true),
-    loadPaged('prompts', '/api/prompts', {}, true),
-    api('/api/exports').then((items) => { state.exports = items; }),
-  ]);
-  $('healthDot').classList.toggle('ok', health.status === 'ok');
+  state.loading = true;
   render();
-}
-
-async function reloadAndRender(reset = true) {
-  await loadCurrent(reset);
-  if (['assets', 'issues', 'prompts'].includes(state.page)) {
-    await loadPaged('events', '/api/events', { limit: 20 }, true);
-    await loadPaged('jobs', '/api/jobs', {}, true);
+  try {
+    const [health, project] = await Promise.all([api('/api/health'), api('/api/project')]);
+    state.health = health;
+    state.project = project;
+    const failures = [];
+    const optional = (label, promise) => promise.catch((error) => {
+      failures.push(`${label}：${error.message}`);
+    });
+    await Promise.all([
+      optional('任务', loadPaged('runs', '/api/runs', {}, true)),
+      optional('资产', loadPaged('assets', '/api/assets', {}, true)),
+      optional('问题', loadPaged('issues', '/api/issues', {}, true)),
+      optional('事件', loadPaged('events', '/api/events', { limit: 20 }, true)),
+      optional('队列', loadPaged('jobs', '/api/jobs', {}, true)),
+      optional('提示词', loadPaged('prompts', '/api/prompts', {}, true)),
+      optional('导出', api('/api/exports').then((items) => {
+        state.exports = items;
+        state.exportsError = null;
+      }).catch((error) => {
+        state.exportsError = error;
+        throw error;
+      })),
+    ]);
+    await optional('当前页', loadCurrent(true));
+    if (failures.length) toast('部分数据加载失败', failures[0]);
+  } finally {
+    state.loading = false;
   }
   render();
 }
 
+async function reloadAndRender(reset = true) {
+  const failures = [];
+  const optional = (label, promise) => promise.catch((error) => {
+    failures.push(`${label}：${error.message}`);
+  });
+  await optional('当前页', loadCurrent(reset));
+  await Promise.all([
+    optional('事件', loadPaged('events', '/api/events', { limit: 20 }, true)),
+    optional('队列', loadPaged('jobs', '/api/jobs', {}, true)),
+  ]);
+  if (failures.length) toast('部分数据加载失败', failures[0]);
+  render();
+}
+
+function toast(title, message = '') {
+  const node = document.createElement('div');
+  node.className = 'toast';
+  node.innerHTML = `<strong>${escapeHtml(title)}</strong>${message ? `<span>${escapeHtml(message)}</span>` : ''}`;
+  $('toastStack').appendChild(node);
+  window.setTimeout(() => node.remove(), 3600);
+}
+
+function showError(error) {
+  state.health = { status: 'error' };
+  updateShell();
+  toast('操作失败', error.message);
+  $('view').innerHTML = `<div class="empty"><strong>请求失败</strong>${escapeHtml(error.message)}</div>`;
+}
+
 function handleAsync(fn) {
-  return (event) => {
-    Promise.resolve(fn(event)).catch(showError);
-  };
+  return (event) => Promise.resolve(fn(event)).catch(showError);
+}
+
+async function fetchOpenIssueIds() {
+  const ids = [];
+  let cursor = null;
+  do {
+    const query = qs({ status: 'open', limit: 100, cursor });
+    const data = await api(`/api/issues?${query}`);
+    ids.push(...data.items.map((item) => item.id));
+    cursor = data.nextCursor || null;
+  } while (cursor);
+  return ids;
+}
+
+async function selectPage(page) {
+  state.page = page;
+  state.status = 'all';
+  state.sidebarOpen = false;
+  if (page === 'compare' && !state.assets.items.length) await loadPaged('assets', '/api/assets', {}, true);
+  await reloadAndRender(true);
+}
+
+async function markAssetSelection(assetId, nextState) {
+  const selection = await api('/api/selections', {
+    method: 'POST',
+    body: JSON.stringify({ asset_id: assetId, state: nextState }),
+  });
+  updateAssetSelection(assetId, selection);
+  return selection;
+}
+
+async function runExport(kind) {
+  if (state.exportBusy) return;
+  state.exportBusy = kind;
+  state.exportResult = null;
+  render();
+  try {
+    const result = await api(kind === 'pack' ? '/api/exports/pack' : '/api/exports/report', { method: 'POST' });
+    state.exportResult = { kind, path: result.path, selected: result.selected };
+    toast(kind === 'pack' ? '资产包清单已生成' : '工作台报告已生成', result.path || '');
+    await refreshAll();
+  } finally {
+    state.exportBusy = null;
+    render();
+  }
 }
 
 document.addEventListener('click', handleAsync(async (event) => {
   const page = event.target.closest('[data-page]')?.dataset.page;
   if (page) {
-    state.page = page;
-    state.status = 'all';
-    await reloadAndRender(true);
+    await selectPage(page);
     return;
   }
+
+  if (event.target.closest('[data-close-sidebar]')) {
+    state.sidebarOpen = false;
+    render();
+    return;
+  }
+
   const filter = event.target.closest('[data-filter]')?.dataset.filter;
   if (filter) {
     state.status = filter;
     await reloadAndRender(true);
     return;
   }
-  const more = event.target.closest('[data-more]')?.dataset.more;
-  if (more) {
-    await loadCurrent(false);
+
+  const viewMode = event.target.closest('[data-asset-view]')?.dataset.assetView;
+  if (viewMode) {
+    state.assetView = viewMode;
     render();
     return;
   }
+
+  if (event.target.closest('[data-bulk-mode]')) {
+    state.bulkMode = !state.bulkMode;
+    if (!state.bulkMode) state.bulkAssetIds = [];
+    render();
+    return;
+  }
+
+  const bulkAssetId = event.target.closest('[data-bulk-asset]')?.dataset.bulkAsset;
+  if (bulkAssetId) {
+    toggleBulkAsset(bulkAssetId);
+    render();
+    return;
+  }
+
+  const bulkAction = event.target.closest('[data-bulk-action]')?.dataset.bulkAction;
+  if (bulkAction) {
+    const ids = [...state.bulkAssetIds];
+    if (bulkAction === 'clear') {
+      state.bulkAssetIds = [];
+      render();
+      return;
+    }
+    if (bulkAction === 'compare') {
+      state.compareIds = [...new Set([...state.compareIds, ...ids])].slice(0, 9);
+      toast('已加入对比', `${ids.length} 个资产`);
+      render();
+      return;
+    }
+    await Promise.all(ids.map((id) => markAssetSelection(id, bulkAction)));
+    toast(bulkAction === 'selected' ? '已批量标记已选' : '已批量标记不采用', `${ids.length} 个资产`);
+    await reloadAndRender(true);
+    return;
+  }
+
+  const more = event.target.closest('[data-more]')?.dataset.more;
+  if (more) {
+    await reloadAndRender(false);
+    return;
+  }
+
   const compareId = event.target.closest('[data-compare-toggle]')?.dataset.compareToggle;
   if (compareId) {
     state.compareIds = state.compareIds.includes(compareId)
       ? state.compareIds.filter((id) => id !== compareId)
       : [...state.compareIds, compareId].slice(0, 9);
+    toast(state.compareIds.includes(compareId) ? '已加入对比' : '已移出对比');
     render();
     return;
   }
+
   const resolveId = event.target.closest('[data-resolve]')?.dataset.resolve;
   if (resolveId) {
     await api(`/api/issues/${encodeURIComponent(resolveId)}/resolve`, { method: 'POST' });
+    state.issues.items = state.issues.items.map((issue) => issue.id === resolveId ? { ...issue, status: 'resolved', resolved_at: new Date().toISOString() } : issue);
+    toast('问题已处理');
+    render();
+    await reloadAndRender(true);
+    return;
+  }
+
+  const rerunIssue = event.target.closest('[data-rerun-issue]')?.dataset.rerunIssue;
+  if (rerunIssue) {
+    await api('/api/jobs/rerun', { method: 'POST', body: JSON.stringify({ source: 'issue', issue_ids: [rerunIssue] }) });
+    toast('补跑任务已创建');
     await refreshAll();
     return;
   }
+
   const selectId = event.target.closest('[data-select-current]')?.dataset.selectCurrent;
   if (selectId) {
-    await api('/api/selections', { method: 'POST', body: JSON.stringify({ asset_id: selectId, state: 'selected' }) });
+    await markAssetSelection(selectId, 'selected');
+    toast('资产已选择');
     await refreshAll();
+    renderAssetInspector(await api(`/api/assets/${encodeURIComponent(selectId)}`));
     return;
   }
+
   const rejectId = event.target.closest('[data-reject-current]')?.dataset.rejectCurrent;
   if (rejectId) {
-    await api('/api/selections', { method: 'POST', body: JSON.stringify({ asset_id: rejectId, state: 'rejected' }) });
+    await markAssetSelection(rejectId, 'rejected');
+    toast('资产已标记不采用');
     await refreshAll();
+    renderAssetInspector(await api(`/api/assets/${encodeURIComponent(rejectId)}`));
     return;
   }
+
+  const clearSelectionId = event.target.closest('[data-clear-selection]')?.dataset.clearSelection;
+  if (clearSelectionId) {
+    const selection = await api(`/api/selections/${encodeURIComponent(clearSelectionId)}`, { method: 'DELETE' });
+    updateAssetSelection(clearSelectionId, selection);
+    toast('资产已恢复待选择');
+    await refreshAll();
+    renderAssetInspector(await api(`/api/assets/${encodeURIComponent(clearSelectionId)}`));
+    return;
+  }
+
   const copyId = event.target.closest('[data-copy]')?.dataset.copy;
   if (copyId) {
     const prompt = state.prompts.items.find((item) => item.id === copyId);
     await navigator.clipboard.writeText(prompt?.prompt_text || '');
+    state.copiedPromptId = copyId;
+    toast('提示词已复制');
+    render();
     return;
   }
+
+  if (event.target.closest('[data-toggle-prompt]')) {
+    state.expandedPrompt = !state.expandedPrompt;
+    render();
+    return;
+  }
+
   const rerunPrompt = event.target.closest('[data-rerun-prompt]')?.dataset.rerunPrompt;
   if (rerunPrompt) {
     await api('/api/jobs/rerun', { method: 'POST', body: JSON.stringify({ source: 'prompt', prompt_ids: [rerunPrompt] }) });
+    toast('补跑任务已创建');
     await refreshAll();
     return;
   }
+
   if (event.target.id === 'packButton') {
-    await api('/api/exports/pack', { method: 'POST' });
-    await refreshAll();
+    await runExport('pack');
     return;
   }
+
+  if (event.target.closest('[data-export-report]')) {
+    await runExport('report');
+    return;
+  }
+
   const assetId = event.target.closest('[data-asset]')?.dataset.asset;
   if (assetId) {
     renderAssetInspector(await api(`/api/assets/${encodeURIComponent(assetId)}`));
     return;
   }
+
   const runId = event.target.closest('[data-run]')?.dataset.run;
   if (runId) {
     renderInspector(state.runs.items.find((run) => run.id === runId), 'run');
     return;
   }
+
   const issueId = event.target.closest('[data-issue]')?.dataset.issue;
   if (issueId) {
     renderInspector(state.issues.items.find((issue) => issue.id === issueId), 'issue');
     return;
   }
+
   const promptId = event.target.closest('[data-prompt]')?.dataset.prompt;
   if (promptId) {
+    state.promptFocusId = promptId;
+    state.expandedPrompt = false;
     renderInspector(state.prompts.items.find((prompt) => prompt.id === promptId), 'prompt');
     return;
   }
+
   const jobId = event.target.closest('[data-job]')?.dataset.job;
   if (jobId) {
     renderInspector(await api(`/api/jobs/${encodeURIComponent(jobId)}`), 'job');
+    return;
   }
+
+  const eventId = event.target.closest('[data-event]')?.dataset.event;
+  if (eventId) {
+    renderInspector(state.events.items.find((item) => item.id === eventId), 'event');
+  }
+}));
+
+document.addEventListener('keydown', handleAsync(async (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const actionable = event.target.closest('[data-asset], [data-run], [data-issue]');
+  if (!actionable || event.target.closest('button, input, textarea, select')) return;
+  event.preventDefault();
+  actionable.click();
 }));
 
 document.addEventListener('submit', handleAsync(async (event) => {
@@ -544,6 +1169,7 @@ document.addEventListener('submit', handleAsync(async (event) => {
   const tag = new FormData(form).get('tag');
   await api(`/api/assets/${encodeURIComponent(assetId)}/tags`, { method: 'POST', body: JSON.stringify({ name: tag }) });
   form.reset();
+  toast('标签已添加');
   renderAssetInspector(await api(`/api/assets/${encodeURIComponent(assetId)}`));
 }));
 
@@ -556,6 +1182,7 @@ document.addEventListener('change', handleAsync(async (event) => {
   }
   if (event.target.closest('[data-run-filter]')) {
     state.runFilter = event.target.value;
+    state.promptFocusId = null;
     await reloadAndRender(true);
   }
 }));
@@ -567,23 +1194,31 @@ $('globalSearch').addEventListener('input', (event) => {
   searchTimer = window.setTimeout(() => reloadAndRender(true).catch(showError), 220);
 });
 
+$('menuButton').addEventListener('click', () => {
+  state.sidebarOpen = !state.sidebarOpen;
+  updateShell();
+});
+
+$('refreshButton').addEventListener('click', handleAsync(async () => {
+  await refreshAll();
+  toast('已刷新');
+}));
+
 $('rerunButton').addEventListener('click', handleAsync(async () => {
-  await api('/api/jobs/rerun', {
-    method: 'POST',
-    body: JSON.stringify({ source: 'workbench', issue_ids: state.issues.items.filter((item) => item.status === 'open').map((item) => item.id) }),
-  });
+  const issueIds = await fetchOpenIssueIds();
+  if (!issueIds.length) {
+    toast('没有可补跑问题', '当前没有未处理问题。');
+    return;
+  }
+  await api('/api/jobs/rerun', { method: 'POST', body: JSON.stringify({ source: 'workbench', issue_ids: issueIds }) });
+  toast('补跑任务已创建', `${issueIds.length} 个问题进入队列`);
   await refreshAll();
 }));
 
 $('exportButton').addEventListener('click', handleAsync(async () => {
-  await api('/api/exports/report', { method: 'POST' });
   state.page = 'exports';
-  await refreshAll();
+  await runExport('report');
 }));
 
-function showError(error) {
-  $('healthDot').classList.remove('ok');
-  $('view').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
-}
-
+render();
 refreshAll().catch(showError);

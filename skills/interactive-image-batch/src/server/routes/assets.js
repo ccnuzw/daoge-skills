@@ -102,17 +102,44 @@ function buildAssetWhere(ctx) {
     )`);
     params.push(ctx.projectId);
   }
+  const filterWhere = clauses.join(' AND ');
+  const filterParams = [...params];
   addCursorClause(clauses, params, q.get('cursor'), 'assets');
-  return { where: clauses.join(' AND '), params };
+  return { where: clauses.join(' AND '), params, filterWhere, filterParams };
+}
+
+function assetSelectionSelect() {
+  return `
+    assets.*,
+    selections.id AS selection_id,
+    selections.state AS selection_state,
+    selections.reason AS selection_reason,
+    selections.updated_at AS selected_at
+  `;
+}
+
+function assetSelectionJoin() {
+  return `
+    LEFT JOIN selections
+      ON selections.project_id = assets.project_id
+      AND selections.asset_id = assets.id
+  `;
 }
 
 async function routeAssets(ctx, req, res) {
   if (req.method === 'GET' && ctx.pathname === '/api/assets') {
-    const { where, params } = buildAssetWhere(ctx);
+    const { where, params, filterWhere, filterParams } = buildAssetWhere(ctx);
     const limit = clampLimit(ctx.url.searchParams.get('limit'), 50, 100);
-    const rows = all(ctx.db, `SELECT assets.* FROM assets WHERE ${where} ORDER BY assets.updated_at DESC, assets.id DESC LIMIT ?`, [...params, limit + 1]);
+    const rows = all(ctx.db, `
+      SELECT ${assetSelectionSelect()}
+      FROM assets
+      ${assetSelectionJoin()}
+      WHERE ${where}
+      ORDER BY assets.updated_at DESC, assets.id DESC
+      LIMIT ?
+    `, [...params, limit + 1]);
     const items = rows.slice(0, limit);
-    const total = get(ctx.db, `SELECT count(*) AS total FROM assets WHERE ${where}`, params)?.total || 0;
+    const total = get(ctx.db, `SELECT count(*) AS total FROM assets WHERE ${filterWhere}`, filterParams)?.total || 0;
     ok(res, { items: rowsToObjects(items), nextCursor: rows.length > limit ? encodeCursor(items[items.length - 1]) : null, total });
     return true;
   }
@@ -145,7 +172,12 @@ async function routeAssets(ctx, req, res) {
   }
   const match = ctx.pathname.match(/^\/api\/assets\/([^/]+)$/);
   if (req.method === 'GET' && match) {
-    const asset = get(ctx.db, 'SELECT * FROM assets WHERE project_id = ? AND id = ?', [ctx.projectId, match[1]]);
+    const asset = get(ctx.db, `
+      SELECT ${assetSelectionSelect()}
+      FROM assets
+      ${assetSelectionJoin()}
+      WHERE assets.project_id = ? AND assets.id = ?
+    `, [ctx.projectId, match[1]]);
     if (!asset) {
       fail(res, 404, 'ASSET_NOT_FOUND', '没有找到这个资产。', '请刷新资产列表后重试');
       return true;
