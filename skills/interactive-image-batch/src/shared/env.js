@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { buildProviderConfig } = require('../providers/registry');
 
 function parseEnvFile(filePath) {
   const out = {};
@@ -23,13 +24,14 @@ function parseEnvFile(filePath) {
   return out;
 }
 
-function loadImageEnv(filePath) {
+function loadImageEnv(filePath, options = {}) {
   const envFile = path.resolve(filePath || path.join(process.cwd(), '.env'));
   const env = parseEnvFile(envFile);
-  if (!env.OPENAI_BASE_URL || !env.OPENAI_API_KEY) {
-    throw new Error(`环境配置缺少 OPENAI_BASE_URL 或 OPENAI_API_KEY：${envFile}\n下一步：补齐这两个值后重跑 node scripts/daoge.js execute --output-dir out --env-file ${envFile}`);
-  }
-  return { envFile, env };
+  const providerConfig = buildProviderConfig(env, {
+    envFile,
+    providerId: options.providerId,
+  });
+  return { envFile, env, providerConfig };
 }
 
 module.exports = { parseEnvFile, loadImageEnv };

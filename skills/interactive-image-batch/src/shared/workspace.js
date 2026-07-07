@@ -603,6 +603,7 @@ module.exports = {
   resultOutputPath,
   resultOutputExists,
   loadTaskCatalog,
+  loadTemplateRegistry,
   inferTaskId,
   resolveTask,
   normalizeResultStatus,

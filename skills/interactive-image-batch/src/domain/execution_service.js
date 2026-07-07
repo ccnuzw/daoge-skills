@@ -216,7 +216,9 @@ async function executeTask(options = {}) {
 
   const materialSplit = splitMaterialIssuePrompts(selectedPrompts);
   const runnablePrompts = options.dryRun ? selectedPrompts : materialSplit.runnable.map((entry) => entry.item);
-  const envInfo = options.dryRun || !runnablePrompts.length ? { envFile: null, env: {} } : loadImageEnv(options.envFile);
+  const envInfo = options.dryRun || !runnablePrompts.length ? { envFile: null, env: {}, providerConfig: null } : loadImageEnv(options.envFile, {
+    providerId: options.provider,
+  });
   const plan = buildExecutionPlan(runnablePrompts, effectiveOptions);
   const debugDir = path.join(outputDir, 'debug');
   const batchRoot = path.join(debugDir, 'batches');
@@ -270,12 +272,12 @@ async function executeTask(options = {}) {
         batchNumber: batch.batchNumber,
         totalBatches: batch.totalBatches,
         concurrency,
-        baseUrl: envInfo.env.OPENAI_BASE_URL,
-        apiKey: envInfo.env.OPENAI_API_KEY,
-        model: envInfo.env.OPENAI_MODEL || 'gpt-image-2',
-        responsesModel: envInfo.env.OPENAI_RESPONSES_MODEL || 'gpt-5.4',
-        generatePath: options.generatePath || envInfo.env.OPENAI_IMAGE_GENERATE_PATH || '',
-        editPath: options.editPath || envInfo.env.OPENAI_IMAGE_EDIT_PATH || '',
+        provider: envInfo.providerConfig.provider,
+        providerConfig: {
+          ...envInfo.providerConfig,
+          generatePath: options.generatePath || envInfo.providerConfig.generatePath || '',
+          editPath: options.editPath || envInfo.providerConfig.editPath || '',
+        },
         width,
         height,
         outputFormat,
@@ -298,11 +300,12 @@ async function executeTask(options = {}) {
     selectedCount: selectedPrompts.length,
     batchSize: plan.batchSize,
     batchCount: plan.batchCount + (materialSplit.blocked.length && !options.dryRun ? 1 : 0),
-    model: envInfo.env.OPENAI_MODEL || 'gpt-image-2',
+    providerId: envInfo.providerConfig?.providerId || (options.provider || 'openai-images'),
+    model: envInfo.providerConfig?.model || 'gpt-image-2',
     defaultSize: `${width}x${height}`,
     outputFormat,
-    generatePath: options.generatePath || envInfo.env.OPENAI_IMAGE_GENERATE_PATH || '',
-    editPath: options.editPath || envInfo.env.OPENAI_IMAGE_EDIT_PATH || '',
+    generatePath: options.generatePath || envInfo.providerConfig?.generatePath || '',
+    editPath: options.editPath || envInfo.providerConfig?.editPath || '',
     skipExisting: parseBoolean(options.skipExisting, false),
     generatedAt: new Date().toISOString(),
     resumeManifest: options.resumeManifestFile || null,

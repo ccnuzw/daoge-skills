@@ -67,3 +67,136 @@ test('runBatch writes image, meta and manifest from provider result', async () =
     if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true });
   }
 });
+
+test('runBatch skipExisting reruns when provider or model metadata changes', async () => {
+  const { runBatch } = require('../../src/domain/batch_executor');
+  const outputDir = makeTempDir();
+  let calls = 0;
+  const provider = {
+    generate: async () => {
+      calls += 1;
+      return {
+        b64: Buffer.from(`image-bytes-${calls}`).toString('base64'),
+        responseSize: '1024x1024',
+        responseModel: `mock-image-${calls}`,
+        revisedPrompt: null,
+      };
+    },
+    edit: async () => {
+      throw new Error('edit should not run');
+    },
+  };
+  const baseContext = {
+    rootOutputDir: outputDir,
+    batchNumber: 1,
+    totalBatches: 1,
+    concurrency: 1,
+    provider,
+    providerConfig: {
+      providerId: 'openai-images',
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'test',
+      model: 'model-a',
+      referenceImagesEnabled: true,
+    },
+    width: 1024,
+    height: 1024,
+    outputFormat: 'png',
+    timeoutSeconds: 1,
+    retryCount: 0,
+    offsetBase: 0,
+    readJson,
+  };
+  const items = [{ index: 1, title: '测试图片', prompt: '生成测试图片' }];
+
+  try {
+    await runBatch(items, { ...baseContext, skipExisting: false });
+    assert.equal(calls, 1);
+
+    const same = await runBatch(items, { ...baseContext, skipExisting: true });
+    assert.equal(calls, 1);
+    assert.equal(same.manifest.skipped, 1);
+
+    await runBatch(items, {
+      ...baseContext,
+      skipExisting: true,
+      providerConfig: { ...baseContext.providerConfig, providerId: 'gemini-image' },
+    });
+    assert.equal(calls, 2);
+
+    await runBatch(items, {
+      ...baseContext,
+      skipExisting: true,
+      providerConfig: { ...baseContext.providerConfig, providerId: 'gemini-image', model: 'model-b' },
+    });
+    assert.equal(calls, 3);
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
+});
+
+test('runBatch names output with provider returned image format', async () => {
+  const { runBatch } = require('../../src/domain/batch_executor');
+  const outputDir = makeTempDir();
+  let calls = 0;
+  const provider = {
+    generate: async () => {
+      calls += 1;
+      return {
+        b64: Buffer.from('jpeg-bytes').toString('base64'),
+        responseSize: 'jpeg',
+        outputFormat: 'jpeg',
+        outputMimeType: 'image/jpeg',
+        responseModel: 'gemini-test-image',
+        revisedPrompt: null,
+      };
+    },
+    edit: async () => {
+      throw new Error('edit should not run');
+    },
+  };
+  const context = {
+    rootOutputDir: outputDir,
+    batchNumber: 1,
+    totalBatches: 1,
+    concurrency: 1,
+    provider,
+    providerConfig: {
+      providerId: 'gemini-image',
+      baseUrl: 'https://example.com',
+      apiKey: 'test',
+      model: 'gemini-test-image',
+      referenceImagesEnabled: false,
+    },
+    width: 1024,
+    height: 1024,
+    outputFormat: 'png',
+    timeoutSeconds: 1,
+    retryCount: 0,
+    offsetBase: 0,
+    readJson,
+  };
+
+  try {
+    const first = await runBatch([{ index: 1, title: '测试图片', prompt: '生成测试图片' }], {
+      ...context,
+      skipExisting: false,
+    });
+    const imagePath = path.join(first.batchDir, '001_image_1024x1024.jpeg');
+    const meta = readJson(path.join(first.batchDir, '001_image.json'));
+    assert.equal(fs.readFileSync(imagePath, 'utf8'), 'jpeg-bytes');
+    assert.equal(meta.requestedOutputFormat, 'png');
+    assert.equal(meta.outputFormat, 'jpeg');
+    assert.equal(meta.outputMimeType, 'image/jpeg');
+
+    const second = await runBatch([{ index: 1, title: '测试图片', prompt: '生成测试图片' }], {
+      ...context,
+      skipExisting: true,
+    });
+    assert.equal(calls, 1);
+    assert.equal(second.manifest.skipped, 1);
+    assert.equal(second.manifest.results[0].output, imagePath);
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
+});

@@ -11,6 +11,7 @@
     "scripts/",
     "references/",
     "agents/",
+    ".env.example",
     "README.md",
     "SKILL.md",
     "!references/examples/examples_catalog.html",

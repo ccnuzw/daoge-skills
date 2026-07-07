@@ -5,6 +5,9 @@ const { prepareTask } = require('../domain/prepare_service');
 const { executeTask } = require('../domain/execution_service');
 const { ingestHostNativeResults } = require('../providers/host_native');
 const { refreshWorkspace } = require('../domain/workspace_service');
+const { searchTemplateDirectory } = require('../domain/template_catalog');
+
+const SUPPORTED_CLI_COMMANDS = [...STABLE_CLI_COMMANDS, 'catalog'];
 
 function printResult(result) {
   console.log(JSON.stringify(result, null, 2));
@@ -18,7 +21,7 @@ function commandFrom(argv) {
 
 function unknownCommandError(command) {
   const name = command || '缺少命令';
-  return new Error(`未知命令：${name}. 支持命令：${STABLE_CLI_COMMANDS.join(', ')}`);
+  return new Error(`未知命令：${name}. 支持命令：${SUPPORTED_CLI_COMMANDS.join(', ')}`);
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -49,6 +52,7 @@ async function main(argv = process.argv.slice(2)) {
       outputFormat: args['output-format'],
       dryRun: args['dry-run'] === 'true' || args['dry-run'] === '1',
       skipExisting: args['skip-existing'],
+      provider: args.provider,
       generatePath: args['generate-path'],
       editPath: args['edit-path'],
     });
@@ -68,6 +72,7 @@ async function main(argv = process.argv.slice(2)) {
       outputFormat: args['output-format'],
       dryRun: args['dry-run'] === 'true' || args['dry-run'] === '1',
       skipExisting: args['skip-existing'],
+      provider: args.provider,
       generatePath: args['generate-path'],
       editPath: args['edit-path'],
       resumeManifestFile: args['resume-manifest'],
@@ -88,6 +93,13 @@ async function main(argv = process.argv.slice(2)) {
       promptsFile: args['prompts-file'],
       manifestFile: args['manifest-file'],
       resultsFile: args['results-file'],
+    });
+  }
+  if (command === 'catalog') {
+    return searchTemplateDirectory({
+      category: args.category,
+      keyword: args.keyword || args.query,
+      recommendedOnly: args.recommended === 'true' || args.recommended === '1',
     });
   }
   throw unknownCommandError(command);

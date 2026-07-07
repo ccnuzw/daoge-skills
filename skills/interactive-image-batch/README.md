@@ -42,6 +42,7 @@ node scripts/daoge.js execute
 node scripts/daoge.js ingest
 node scripts/daoge.js rerun
 node scripts/daoge.js review
+node scripts/daoge.js catalog
 ```
 
 旧多脚本入口不作为当前用户入口。带 `phase`、`plan`、`trial` 的文档只作历史记录。
@@ -105,18 +106,79 @@ open out/workspace/index.html
 真实 provider 小样本：
 
 ```bash
+cp .env.example .env
 node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
 node scripts/daoge.js execute --output-dir out --env-file .env --batch-size 1 --concurrency 1
 open out/workspace/results.html
 ```
 
-`.env` 最少需要：
+`.env.example` 提供完整模板；复制成 `.env` 后只填写要用的 provider。OpenAI Images 最少需要：
 
 ```env
+IMAGE_PROVIDER=openai-images
 OPENAI_BASE_URL=
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-image-2
 ```
+
+Gemini 图片 provider 使用独立配置，不按 OpenAI Images API 兼容处理：
+
+```env
+IMAGE_PROVIDER=gemini-image
+GEMINI_IMAGE_BASE_URL=
+GEMINI_IMAGE_API_KEY=
+GEMINI_IMAGE_MODEL=
+GEMINI_IMAGE_AUTH_MODE=x-goog-api-key
+```
+
+Gemini OpenAI-compatible provider 走 `/images/generations` 风格：
+
+```env
+IMAGE_PROVIDER=gemini-openai-compatible
+GEMINI_OPENAI_BASE_URL=
+GEMINI_OPENAI_API_KEY=
+GEMINI_OPENAI_MODEL=
+GEMINI_OPENAI_IMAGE_GENERATE_PATH=
+```
+
+xAI/Grok 图片 provider：
+
+```env
+IMAGE_PROVIDER=xai-grok-image
+XAI_IMAGE_BASE_URL=https://api.x.ai/v1
+XAI_IMAGE_API_KEY=
+XAI_IMAGE_MODEL=grok-imagine-image-quality
+XAI_IMAGE_RESPONSE_FORMAT=
+```
+
+CLI `--provider` 高于 `.env` 里的 `IMAGE_PROVIDER`：
+
+```bash
+node scripts/daoge.js execute --provider openai-images --output-dir out --env-file .env --dry-run true
+node scripts/daoge.js execute --provider gemini-image --output-dir out --env-file .env --batch-size 1 --concurrency 1
+node scripts/daoge.js execute --provider gemini-openai-compatible --output-dir out --env-file .env --batch-size 1 --concurrency 1
+node scripts/daoge.js execute --provider xai-grok-image --output-dir out --env-file .env --batch-size 1 --concurrency 1
+```
+
+运行真实 provider 测试前必须显式开启：
+
+```bash
+RUN_PROVIDER_INTEGRATION=1 npm run test:integration
+```
+
+Gemini 测试会从当前目录到上三级自动查找 `.env`，但没有 `RUN_PROVIDER_INTEGRATION=1` 时默认跳过真实网络。xAI/Grok 真实测试使用独立开关：
+
+```bash
+RUN_XAI_PROVIDER_INTEGRATION=1 npm run test:integration
+```
+
+Gemini OpenAI-compatible 用户代理探测：
+
+```bash
+RUN_PROVIDER_INTEGRATION=1 node scripts/probe_gemini_openai_provider.js .env
+```
+
+探测脚本只输出 endpoint path、auth mode、状态码和响应字段摘要；不输出密钥、真实 baseurl、响应原文或图片内容。
 
 期望输出：
 
@@ -246,6 +308,24 @@ node scripts/daoge.js rerun \
 - 最小可跑任务：[`references/examples/task_spec.minimal.json`](references/examples/task_spec.minimal.json)
 - 示例索引：[`references/examples/README.md`](references/examples/README.md)
 - 示例浏览页：[`references/examples/examples_catalog.html`](references/examples/examples_catalog.html)
+- 仓库补充文档：`docs/template_selection_guide_zh.md`、`docs/provider_configuration_zh.md`（不随 npm 包发布）
+
+## 模板目录
+
+查常用模板：
+
+```bash
+node scripts/daoge.js catalog --recommended true
+```
+
+按类别或关键词筛选：
+
+```bash
+node scripts/daoge.js catalog --category product-visuals
+node scripts/daoge.js catalog --keyword 电商
+```
+
+返回内容包含类别、标签、适用场景、简短说明、变体、预览规则和示例参数。
 
 ## 故障排查速查
 

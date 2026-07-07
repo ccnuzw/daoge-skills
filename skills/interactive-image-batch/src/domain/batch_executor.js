@@ -9,10 +9,7 @@ const {
   resolveMaskImage,
   buildOperationMode,
 } = require('./run_item');
-const {
-  generate,
-  edit,
-} = require('../providers/openai_images');
+const { getProvider } = require('../providers/registry');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -40,22 +37,56 @@ function buildRequestConfig(item, ctx) {
   };
 }
 
+function buildProviderRequest(ctx, req, prompt, fileBase, operation) {
+  return {
+    id: fileBase,
+    baseUrl: ctx.providerConfig.baseUrl,
+    apiKey: ctx.providerConfig.apiKey,
+    model: req.model,
+    responsesModel: ctx.providerConfig.responsesModel,
+    prompt,
+    size: req.size,
+    outputFormat: req.outputFormat,
+    timeoutMs: req.timeoutMs,
+    generatePath: ctx.providerConfig.generatePath,
+    editPath: ctx.providerConfig.editPath,
+    authMode: ctx.providerConfig.authMode,
+    responseFormat: ctx.providerConfig.responseFormat,
+    referenceImagesEnabled: ctx.providerConfig.referenceImagesEnabled,
+    maxResponseBytes: ctx.providerConfig.maxResponseBytes,
+    maxDownloadBytes: ctx.providerConfig.maxDownloadBytes,
+    referenceImages: operation.referenceImages,
+    maskImage: operation.maskImage,
+  };
+}
+
 function buildFileParts(item, ordinal) {
   const index = String(item.index ?? ordinal).padStart(3, '0');
   const slug = slugify(item.slug || item.title || `image-${index}`);
   return { index, slug, fileBase: `${index}_${slug}` };
 }
 
+function normalizeOutputFormat(value, fallback = 'png') {
+  const normalized = String(value || fallback || 'png').trim().toLowerCase().replace(/^\./, '');
+  if (normalized === 'jpg') return 'jpeg';
+  return /^[a-z0-9]+$/.test(normalized) ? normalized : String(fallback || 'png').toLowerCase();
+}
+
 function findExistingResult(item, ctx) {
   const { index, slug, fileBase } = buildFileParts(item, ctx.ordinal);
   const req = buildRequestConfig(item, ctx);
-  const outputPath = path.join(ctx.outDir, `${fileBase}_${req.size}.${req.outputFormat}`);
+  const expectedOutputPath = path.join(ctx.outDir, `${fileBase}_${req.size}.${normalizeOutputFormat(req.outputFormat)}`);
   const metaPath = path.join(ctx.outDir, `${fileBase}.json`);
-  if (!fs.existsSync(outputPath) || !fs.existsSync(metaPath)) return null;
+  if (!fs.existsSync(metaPath)) return null;
   try {
     const meta = ctx.readJson(metaPath);
-    if (meta.output && path.resolve(meta.output) !== path.resolve(outputPath)) return null;
+    const outputPath = meta.output || expectedOutputPath;
+    if (!fs.existsSync(outputPath)) return null;
     if (meta.requestedSize && String(meta.requestedSize) !== req.size) return null;
+    if (String(meta.providerId || '') !== String(ctx.providerConfig.providerId || '')) return null;
+    if (String(meta.requestModel || '') !== String(req.model || '')) return null;
+    const requestedOutputFormat = meta.requestedOutputFormat || meta.outputFormat;
+    if (requestedOutputFormat && String(requestedOutputFormat) !== String(req.outputFormat)) return null;
     return {
       ok: true,
       skipped: true,
@@ -84,7 +115,6 @@ async function generateOne(item, ctx) {
 
   const req = buildRequestConfig(item, ctx);
   const operation = buildOperationMode(item);
-  const outputPath = path.join(ctx.outDir, `${fileBase}_${req.size}.${req.outputFormat}`);
   const metaPath = path.join(ctx.outDir, `${fileBase}.json`);
 
   for (let attempt = 1; attempt <= ctx.maxAttempts; attempt += 1) {
@@ -92,36 +122,15 @@ async function generateOne(item, ctx) {
     const startedAt = new Date().toISOString();
     try {
       let result;
+      const providerRequest = buildProviderRequest(ctx, req, prompt, fileBase, operation);
       if (operation.mode === 'prompt-only') {
-        result = await generate({
-          id: fileBase,
-          baseUrl: ctx.baseUrl,
-          apiKey: ctx.apiKey,
-          model: req.model,
-          responsesModel: ctx.responsesModel,
-          prompt,
-          size: req.size,
-          outputFormat: req.outputFormat,
-          timeoutMs: req.timeoutMs,
-          generatePath: ctx.generatePath,
-        });
+        result = await ctx.provider.generate(providerRequest);
       } else {
-        result = await edit({
-          id: fileBase,
-          baseUrl: ctx.baseUrl,
-          apiKey: ctx.apiKey,
-          model: req.model,
-          responsesModel: ctx.responsesModel,
-          prompt,
-          size: req.size,
-          outputFormat: req.outputFormat,
-          timeoutMs: req.timeoutMs,
-          referenceImages: operation.referenceImages,
-          maskImage: operation.maskImage,
-          editPath: ctx.editPath,
-        });
+        result = await ctx.provider.edit(providerRequest);
       }
 
+      const actualOutputFormat = normalizeOutputFormat(result.outputFormat || req.outputFormat, req.outputFormat);
+      const outputPath = path.join(ctx.outDir, `${fileBase}_${req.size}.${actualOutputFormat}`);
       await fsp.writeFile(outputPath, Buffer.from(result.b64, 'base64'));
       const meta = {
         index,
@@ -132,9 +141,13 @@ async function generateOne(item, ctx) {
         finishedAt: new Date().toISOString(),
         output: outputPath,
         requestedSize: req.size,
+        requestedOutputFormat: req.outputFormat,
+        outputFormat: actualOutputFormat,
+        outputMimeType: result.outputMimeType || null,
         responseSize: result.responseSize,
         requestModel: req.model,
         responseModel: result.responseModel,
+        providerId: ctx.providerConfig.providerId,
         requestMode: operation.mode,
         prompt,
         negativePrompt: item.negative_prompt || null,
@@ -185,7 +198,10 @@ async function generateOne(item, ctx) {
         finishedAt: new Date().toISOString(),
         output: null,
         requestedSize: req.size,
+        requestedOutputFormat: req.outputFormat,
+        outputFormat: req.outputFormat,
         requestModel: req.model,
+        providerId: ctx.providerConfig.providerId,
         requestMode: operation.mode,
         prompt,
         negativePrompt: item.negative_prompt || null,
@@ -283,14 +299,22 @@ async function runBatch(batchItems, batchContext) {
   await fsp.writeFile(path.join(batchDir, 'prompts.generated.json'), JSON.stringify(batchItems, null, 2));
 
   console.log(`[batch] ${batchContext.batchNumber}/${batchContext.totalBatches} -> ${batchDir}`);
-  const results = await runPool(batchItems, batchContext.concurrency, (item, index) => generateOne(item, {
-    outDir: batchDir,
+  const providerConfig = batchContext.providerConfig || {
+    providerId: 'openai-images',
     baseUrl: batchContext.baseUrl,
     apiKey: batchContext.apiKey,
     model: batchContext.model,
     responsesModel: batchContext.responsesModel,
-    generatePath: batchContext.generatePath,
-    editPath: batchContext.editPath,
+    generatePath: batchContext.generatePath || '',
+    editPath: batchContext.editPath || '',
+    referenceImagesEnabled: true,
+  };
+  const provider = batchContext.provider || providerConfig.provider || getProvider(providerConfig.providerId);
+  const results = await runPool(batchItems, batchContext.concurrency, (item, index) => generateOne(item, {
+    outDir: batchDir,
+    provider,
+    providerConfig,
+    model: providerConfig.model,
     width: batchContext.width,
     height: batchContext.height,
     outputFormat: batchContext.outputFormat,
