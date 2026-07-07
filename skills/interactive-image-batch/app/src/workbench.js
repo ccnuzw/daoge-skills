@@ -76,11 +76,16 @@ const state = {
   expandedPrompt: false,
   copiedPromptId: null,
   sidebarOpen: false,
+  activityExpanded: false,
 };
 
 let drawerReturnFocus = null;
 let drawerReturnFocusSelector = null;
 let shouldFocusDrawerClose = false;
+let activityPollTimer = null;
+
+const ACTIVITY_POLL_INTERVAL_MS = 4000;
+const ACTIVITY_POLL_STATUSES = new Set(['queued', 'running']);
 
 function pageState() {
   return { items: [], nextCursor: null, total: 0, loading: false, error: null };
@@ -968,7 +973,7 @@ function renderDefaultDrawer() {
         ['运行中', formatNumber(state.runs.items.filter((item) => item.status === 'running').length)],
         ['失败', formatNumber(state.runs.items.filter((item) => item.status === 'failed').length)],
       ],
-      actions: [['刷新任务', 'runs'], ['处理问题', 'issues']],
+      actions: [['刷新任务', 'runs'], ['问题中心', 'issues']],
     },
     assets: {
       title: '资产筛选摘要',
@@ -1153,16 +1158,79 @@ function renderInspector(item, type) {
 }
 
 function renderEvents() {
-  const active = state.jobs.items.find((job) => ['queued', 'running', 'failed'].includes(job.status));
-  $('jobSummary').innerHTML = active
-    ? `<button class="job-button job-${escapeHtml(active.status)}" data-job="${escapeHtml(active.id)}" type="button"><span>${escapeHtml(active.kind)} · ${escapeHtml(statusText(active.status))}</span><small>${escapeHtml(formatTime(active.updated_at || active.created_at))}</small>${active.error ? `<em>${escapeHtml(active.error)}</em>` : ''}</button>`
-    : '队列空闲';
-  $('eventLog').innerHTML = state.events.items.slice(0, 4).map((event) => `
-    <button class="activity-item" data-event="${escapeHtml(event.id)}" type="button">
-      <strong>${escapeHtml(event.message || event.event_type)}</strong>
-      <span>${escapeHtml(formatTime(event.updated_at || event.created_at))}</span>
-    </button>
-  `).join('') || '<div class="activity-item"><strong>暂无事件</strong><span>等待本地任务写入</span></div>';
+  const active = state.jobs.items.find((job) => ['running', 'queued', 'failed'].includes(job.status));
+  const latest = state.events.items[0];
+  const totalEvents = state.events.total || state.events.items.length;
+  const activityState = active ? statusText(active.status) : '空闲';
+  const latestText = latest
+    ? `${latest.message || latest.event_type} · ${formatTime(latest.updated_at || latest.created_at)}`
+    : '暂无事件 · 等待任务写入';
+
+  $('activityPanel').classList.toggle('expanded', state.activityExpanded);
+  $('activityToggle').setAttribute('aria-expanded', state.activityExpanded ? 'true' : 'false');
+  $('activityState').textContent = activityState;
+  $('activityMeta').textContent = totalEvents ? formatNumber(totalEvents) : '0';
+  $('activityCompact').textContent = latestText;
+  $('activityDetails').innerHTML = `
+    <div class="job-summary">
+      <div class="job-summary-label">当前任务</div>
+      ${active ? `
+        <button class="job-button job-${escapeHtml(active.status)}" data-job="${escapeHtml(active.id)}" type="button">
+          <span>${escapeHtml(active.kind)} · ${escapeHtml(statusText(active.status))}</span>
+          <small>${escapeHtml(formatTime(active.updated_at || active.created_at))}</small>
+          ${active.error ? `<em>${escapeHtml(active.error)}</em>` : ''}
+        </button>
+      ` : '<div class="activity-item"><strong>队列空闲</strong><span>没有运行中任务</span></div>'}
+    </div>
+    <div class="job-summary">
+      <div class="job-summary-label">最近事件</div>
+      ${state.events.items.slice(0, 5).map((event) => `
+        <button class="activity-item" data-event="${escapeHtml(event.id)}" type="button">
+          <strong>${escapeHtml(event.message || event.event_type)}</strong>
+          <span>${escapeHtml(formatTime(event.updated_at || event.created_at))}</span>
+        </button>
+      `).join('') || '<div class="activity-item"><strong>暂无事件</strong><span>等待本地任务写入</span></div>'}
+    </div>
+  `;
+}
+
+function hasActiveJobs() {
+  return state.jobs.items.some((job) => ACTIVITY_POLL_STATUSES.has(job.status));
+}
+
+function stopActivityPoll() {
+  if (!activityPollTimer) return;
+  window.clearTimeout(activityPollTimer);
+  activityPollTimer = null;
+}
+
+function shouldPollActivity() {
+  return !state.loading && !document.hidden && hasActiveJobs();
+}
+
+function scheduleActivityPoll() {
+  stopActivityPoll();
+  if (!shouldPollActivity()) return;
+  activityPollTimer = window.setTimeout(() => refreshActivity(), ACTIVITY_POLL_INTERVAL_MS);
+}
+
+async function refreshActivity() {
+  if (document.hidden) {
+    stopActivityPoll();
+    return;
+  }
+  try {
+    await Promise.all([
+      loadPaged('events', '/api/events', { limit: 20 }, true),
+      loadPaged('jobs', '/api/jobs', {}, true),
+    ]);
+    renderEvents();
+  } catch (error) {
+    stopActivityPoll();
+    toast('队列刷新失败', error.message);
+    return;
+  }
+  scheduleActivityPoll();
 }
 
 function render() {
@@ -1184,6 +1252,7 @@ function render() {
   if (state.page === 'exports') renderExports();
   renderEvents();
   renderCurrentDrawer();
+  scheduleActivityPoll();
 }
 
 async function loadCurrent(reset = true) {
@@ -1217,6 +1286,7 @@ async function refreshProject() {
 }
 
 async function refreshAll() {
+  stopActivityPoll();
   state.loading = true;
   render();
   try {
@@ -1349,6 +1419,12 @@ document.addEventListener('click', handleAsync(async (event) => {
   const page = event.target.closest('[data-page]')?.dataset.page;
   if (page) {
     await selectPage(page);
+    return;
+  }
+
+  if (event.target.closest('[data-activity-toggle]')) {
+    state.activityExpanded = !state.activityExpanded;
+    render();
     return;
   }
 
@@ -1657,6 +1733,11 @@ $('exportButton').addEventListener('click', handleAsync(async () => {
   resetDrawer('command_export');
   await runExport('report');
 }));
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopActivityPoll();
+  else scheduleActivityPoll();
+});
 
 render();
 refreshAll().catch(showError);

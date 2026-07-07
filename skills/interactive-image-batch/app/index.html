@@ -37,11 +37,16 @@
         </div>
       </section>
 
-      <section class="sidebar-panel quick-panel" aria-label="快速入口">
-        <div class="panel-kicker">快速入口</div>
-        <button class="quick-link" type="button" data-page="assets">筛选资产</button>
-        <button class="quick-link" type="button" data-page="issues">处理问题</button>
-        <button class="quick-link" type="button" data-page="exports">准备交付</button>
+      <section class="sidebar-panel activity-panel" id="activityPanel" aria-label="队列与活动">
+        <button class="activity-panel-toggle" id="activityToggle" type="button" data-activity-toggle aria-expanded="false" aria-controls="activityDetails">
+          <span>
+            <span class="panel-kicker">队列与活动</span>
+            <strong id="activityState">空闲</strong>
+          </span>
+          <span class="activity-count" id="activityMeta">0</span>
+        </button>
+        <div class="activity-compact" id="activityCompact">暂无事件</div>
+        <div class="activity-details" id="activityDetails"></div>
       </section>
     </aside>
 
@@ -73,10 +78,6 @@
         </section>
       </section>
 
-      <section class="activity-strip" aria-label="任务队列与事件">
-        <div class="job-summary" id="jobSummary">队列空闲</div>
-        <div class="activity-feed" id="eventLog"></div>
-      </section>
     </main>
 
     <div class="drawer-layer" id="drawerLayer" aria-hidden="true">

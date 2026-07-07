@@ -37,6 +37,8 @@ function count(outputDir, table) {
 
 function createWorkbenchDomHarness() {
   const elements = new Map();
+  let timerId = 0;
+  const timers = [];
   function makeElement(id = '') {
     const element = {
       id,
@@ -93,8 +95,12 @@ function createWorkbenchDomHarness() {
     'drawerBody',
     'drawerTitle',
     'drawerEyebrow',
-    'jobSummary',
-    'eventLog',
+    'activityPanel',
+    'activityToggle',
+    'activityState',
+    'activityMeta',
+    'activityCompact',
+    'activityDetails',
     'toastStack',
     'globalSearch',
     'refreshButton',
@@ -123,10 +129,18 @@ function createWorkbenchDomHarness() {
   };
   const context = {
     document,
+    __timers: timers,
     navigator: { clipboard: { writeText: async () => {} } },
     window: {
-      setTimeout: () => 0,
-      clearTimeout: () => {},
+      setTimeout: (handler, delay) => {
+        const timer = { id: ++timerId, handler, delay, cleared: false };
+        timers.push(timer);
+        return timer.id;
+      },
+      clearTimeout: (id) => {
+        const timer = timers.find((item) => item.id === id);
+        if (timer) timer.cleared = true;
+      },
     },
     fetch: async () => ({ headers: { get: () => 'application/json' }, ok: true, json: async () => ({ ok: true, data: {} }) }),
     console,
@@ -257,7 +271,7 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
     assert.match(html, /class="context-drawer"/);
     assert.match(html, /id="drawerBody"/);
     assert.match(html, /id="drawerClose"/);
-    assert.match(html, /class="activity-strip"/);
+    assert.match(html, /class="sidebar-panel activity-panel"/);
     assert.match(html, /class="toast-stack"/);
     assert.match(html, /data-shell/);
     assert.match(html, /id="pageEyebrow"/);
@@ -267,8 +281,10 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
     assert.match(html, /id="healthDot"/);
     assert.match(html, /id="healthText"/);
     assert.match(html, /id="menuButton"/);
-    assert.match(html, /id="jobSummary"/);
-    assert.match(html, /id="eventLog"/);
+    assert.match(html, /id="activityState"/);
+    assert.match(html, /id="activityDetails"/);
+    assert.doesNotMatch(html, /class="activity-strip"/);
+    assert.doesNotMatch(html, /快速入口|筛选资产|处理问题|准备交付/);
     assert.match(css, /--background:/);
     assert.match(css, /--surface:/);
     assert.match(css, /--primary:/);
@@ -280,6 +296,10 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
     assert.match(css, /\.export-table/);
     assert.match(css, /\.export-cards/);
     assert.match(css, /\.export-path[\s\S]*overflow-wrap:\s*anywhere/);
+    assert.match(css, /\.activity-panel/);
+    assert.match(css, /\.activity-panel\.expanded\s*\{[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\)/);
+    assert.match(css, /\.activity-details\s*\{[\s\S]*overflow:\s*auto/);
+    assert.doesNotMatch(css, /\.activity-strip/);
     assert.match(css, /\.drawer-layer/);
     assert.match(css, /\.context-drawer/);
     assert.match(css, /prefers-reduced-motion:\s*reduce/);
@@ -295,6 +315,12 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
     assert.match(js, /state\.drawer/);
     assert.match(js, /compareAssetsById/);
     assert.match(js, /syncPromptFocus/);
+    assert.match(js, /activityExpanded:\s*false/);
+    assert.match(js, /data-activity-toggle/);
+    assert.match(js, /ACTIVITY_POLL_INTERVAL_MS\s*=\s*4000/);
+    assert.match(js, /function refreshActivity\(\)/);
+    assert.match(js, /document\.addEventListener\('visibilitychange'/);
+    assert.doesNotMatch(js, /jobSummary|eventLog/);
     assert.doesNotMatch(js, /state\.selected(?!Filter)/);
     assert.match(css, /height:\s*100dvh/);
     assert.match(css, /\.content\s*\{[\s\S]*overflow:\s*hidden/);
@@ -303,6 +329,86 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
   } finally {
     started.server.close();
   }
+});
+
+test('workbench sidebar activity polls while queue is active without rerendering the workspace', async () => {
+  const { context } = createWorkbenchDomHarness();
+  const result = await vm.runInContext(`
+    (async () => {
+      const calls = [];
+      let renderCount = 0;
+      const originalRender = render;
+      render = () => {
+        renderCount += 1;
+        originalRender();
+      };
+      fetch = async (path) => {
+        calls.push(path);
+        const isJobs = path.startsWith('/api/jobs');
+        return {
+          headers: { get: () => 'application/json' },
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: isJobs
+              ? { items: [{ id: 'job_1', kind: 'rerun', status: 'running', updated_at: '2026-01-01T00:00:00.000Z' }], total: 1 }
+              : { items: [{ id: 'event_1', event_type: 'job_progress', message: '队列更新', updated_at: '2026-01-01T00:00:00.000Z' }], total: 1 },
+          }),
+        };
+      };
+      state.loading = false;
+      state.jobs.items = [{ id: 'job_1', kind: 'rerun', status: 'running', updated_at: '2026-01-01T00:00:00.000Z' }];
+      state.events.items = [];
+      render();
+      const firstTimer = __timers.find((timer) => !timer.cleared);
+      await firstTimer.handler();
+      return {
+        firstDelay: firstTimer.delay,
+        calls,
+        renderCount,
+        activityState: $('activityState').textContent,
+        activityHtml: $('activityDetails').innerHTML,
+        activeTimers: __timers.filter((timer) => !timer.cleared).length,
+      };
+    })();
+  `, context);
+
+  assert.equal(result.firstDelay, 4000);
+  assert.equal(result.renderCount, 1);
+  assert.equal(result.activityState, '运行中');
+  assert.match(result.activityHtml, /队列更新/);
+  assert.equal(result.calls.some((path) => path.startsWith('/api/events')), true);
+  assert.equal(result.calls.some((path) => path.startsWith('/api/jobs')), true);
+  assert.equal(result.activeTimers, 1);
+});
+
+test('workbench sidebar activity polling pauses when inactive or hidden', () => {
+  const { context } = createWorkbenchDomHarness();
+  const result = vm.runInContext(`
+    state.loading = false;
+    state.jobs.items = [{ id: 'job_done', kind: 'rerun', status: 'succeeded' }];
+    render();
+    const idleTimers = __timers.filter((timer) => !timer.cleared).length;
+    state.jobs.items = [{ id: 'job_running', kind: 'rerun', status: 'running' }];
+    render();
+    const activeTimers = __timers.filter((timer) => !timer.cleared).length;
+    document.hidden = true;
+    document.listeners.visibilitychange();
+    const hiddenTimers = __timers.filter((timer) => !timer.cleared).length;
+    document.hidden = false;
+    document.listeners.visibilitychange();
+    ({
+      idleTimers,
+      activeTimers,
+      hiddenTimers,
+      resumedTimers: __timers.filter((timer) => !timer.cleared).length,
+    });
+  `, context);
+
+  assert.equal(result.idleTimers, 0);
+  assert.equal(result.activeTimers, 1);
+  assert.equal(result.hiddenTimers, 0);
+  assert.equal(result.resumedTimers, 1);
 });
 
 test('workbench drawer state is scoped to the active page and cleared by workflow changes', async () => {
@@ -556,6 +662,7 @@ test('workbench CSS uses fixed shell scroll regions for sidebar, main and drawer
     assert.match(css, /\.app-shell\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
     assert.match(css, /\.sidebar\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*auto/);
     assert.match(css, /\.main\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
+    assert.match(css, /\.main\s*\{[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\)/);
     assert.match(css, /\.drawer-layer\s*\{[\s\S]*position:\s*fixed/);
     assert.match(css, /\.context-drawer\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
     assert.match(css, /\.drawer-body\s*\{[\s\S]*overflow:\s*auto/);
