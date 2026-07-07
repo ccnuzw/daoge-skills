@@ -35,6 +35,16 @@ const KIND_LABELS = {
   mask: '遮罩',
 };
 
+const INSPECTOR_TYPES_BY_PAGE = {
+  dashboard: ['asset', 'run', 'issue', 'prompt', 'job', 'event'],
+  runs: ['run', 'job', 'event'],
+  assets: ['asset'],
+  issues: ['issue'],
+  prompts: ['prompt'],
+  compare: ['asset'],
+  exports: ['export', 'job', 'event'],
+};
+
 const state = {
   page: 'dashboard',
   query: '',
@@ -57,7 +67,7 @@ const state = {
   exportsError: null,
   exportBusy: null,
   exportResult: null,
-  selected: null,
+  inspector: { page: 'dashboard', type: 'overview', id: null, data: null, detail: null, mode: 'overview' },
   compareIds: [],
   bulkMode: false,
   bulkAssetIds: [],
@@ -72,6 +82,33 @@ function pageState() {
 }
 
 const $ = (id) => document.getElementById(id);
+
+function inspectorTypesForPage(page = state.page) {
+  return INSPECTOR_TYPES_BY_PAGE[page] || [];
+}
+
+function isInspectorAllowed(type, page = state.page) {
+  return type === 'overview' || inspectorTypesForPage(page).includes(type);
+}
+
+function resetInspector(mode = 'overview') {
+  state.inspector = { page: state.page, type: 'overview', id: null, data: null, detail: null, mode };
+}
+
+function setInspector(type, id, data, detail = null) {
+  if (!isInspectorAllowed(type, state.page)) {
+    resetInspector('context_reset');
+    return;
+  }
+  state.inspector = { page: state.page, type, id, data, detail, mode: 'detail' };
+}
+
+function syncInspectorToPage() {
+  const inspector = state.inspector;
+  if (!inspector || inspector.page !== state.page || !isInspectorAllowed(inspector.type, state.page)) {
+    resetInspector('page_summary');
+  }
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -221,7 +258,7 @@ function skeletonCards(count = 8) {
 }
 
 function emptyState(title, action = '') {
-  return `<div class="empty"><strong>${escapeHtml(title)}</strong>${escapeHtml(action)}</div>`;
+  return `<div class="empty"><strong>${escapeHtml(title)}</strong>${action ? `<span>${escapeHtml(action)}</span>` : ''}</div>`;
 }
 
 function bucketNotice(bucket) {
@@ -249,8 +286,14 @@ function updateAssetSelection(assetId, selection) {
       selected_at: selection?.selected_at || new Date().toISOString(),
     };
   state.assets.items = state.assets.items.map((item) => item.id === assetId ? { ...item, ...patch } : item);
-  if (state.selected?.type === 'asset' && state.selected.id === assetId) {
-    state.selected.data = { ...state.selected.data, ...patch };
+  if (state.inspector?.type === 'asset' && state.inspector.id === assetId) {
+    state.inspector.data = { ...state.inspector.data, ...patch };
+    if (state.inspector.detail?.asset) {
+      state.inspector.detail = {
+        ...state.inspector.detail,
+        asset: { ...state.inspector.detail.asset, ...patch },
+      };
+    }
   }
 }
 
@@ -297,7 +340,7 @@ function updateShell() {
   $('healthText').textContent = state.health?.status === 'ok' ? '本地服务在线' : '连接异常';
   $('menuButton').setAttribute('aria-expanded', state.sidebarOpen ? 'true' : 'false');
   $('exportButton').disabled = Boolean(state.exportBusy);
-  $('exportButton').textContent = state.exportBusy === 'report' ? '导出中' : '导出';
+  $('exportButton').textContent = state.exportBusy ? '导出中' : '导出';
   document.querySelector('[data-shell]').classList.toggle('sidebar-open', state.sidebarOpen);
 }
 
@@ -311,7 +354,7 @@ function assetThumb(asset) {
 
 function assetCard(asset, compact = false) {
   const inCompare = state.compareIds.includes(asset.id);
-  const active = state.selected?.type === 'asset' && state.selected.id === asset.id;
+  const active = state.inspector?.page === state.page && state.inspector?.type === 'asset' && state.inspector.id === asset.id;
   const bulkChecked = state.bulkAssetIds.includes(asset.id);
   const selectState = selectionState(asset);
   return `
@@ -717,11 +760,17 @@ function formatDetailValue(value) {
 
 function renderAssetInspector(detail) {
   const asset = detail.asset;
-  state.selected = { type: 'asset', id: asset.id, data: asset };
+  setInspector('asset', asset.id, asset, detail);
+  render();
+}
+
+function assetInspectorHtml(detail) {
+  const asset = detail.asset;
   const tags = detail.tags?.map((tag) => tag.name).join('、') || '无';
   const run = detail.runs?.[0];
-  $('inspector').innerHTML = `
+  return `
     <h2>${escapeHtml(asset.title || asset.id)}</h2>
+    <p class="inspector-subtitle">资产详情 · ${escapeHtml(state.page === 'compare' ? '对比评审' : '资产库')}</p>
     <div class="asset-meta">${kindBadge(asset.kind)} ${assetStatusBadge(asset)} ${selectionBadge(asset)} ${deliverableBadge(asset)} <span>${escapeHtml(formatTime(asset.updated_at))}</span></div>
     <div class="inspector-preview"><div class="thumb">${assetThumb(asset)}</div></div>
     <div class="detail-actions">
@@ -742,39 +791,127 @@ function renderAssetInspector(detail) {
       <div class="detail-row"><div class="detail-label">生成参数</div><div class="detail-value code-block">${escapeHtml(JSON.stringify(detail.prompt?.params || detail.runItem?.raw || {}, null, 2))}</div></div>
     </div>
   `;
-  render();
 }
 
 function renderDefaultInspector() {
   const counts = state.project?.counts || {};
   const activeJob = state.jobs.items.find((job) => ['queued', 'running', 'failed'].includes(job.status));
   const lastEvent = state.events.items[0];
+  const defaults = {
+    dashboard: {
+      title: '项目检查器',
+      subtitle: '当前项目概览和下一步动作。',
+      rows: [
+        ['项目', state.project?.project?.name || '本地项目'],
+        ['资产', formatNumber(counts.assets || 0)],
+        ['未处理问题', formatNumber(counts.open_issues || 0)],
+        ['当前队列', activeJob ? `${activeJob.kind} / ${statusText(activeJob.status)}` : '空闲'],
+        ['最近事件', lastEvent?.message || lastEvent?.event_type || '-'],
+      ],
+      actions: [
+        ['资产库', 'assets'],
+        ['问题中心', 'issues'],
+        ['导出', 'exports'],
+      ],
+    },
+    runs: {
+      title: '任务检查器',
+      subtitle: '选择任务查看阶段、provider 和成功失败统计。',
+      rows: [
+        ['任务筛选', statusText(state.status)],
+        ['已加载', `${formatNumber(state.runs.items.length)} / ${formatNumber(state.runs.total || state.runs.items.length)}`],
+        ['运行中', formatNumber(state.runs.items.filter((item) => item.status === 'running').length)],
+        ['失败', formatNumber(state.runs.items.filter((item) => item.status === 'failed').length)],
+      ],
+      actions: [['刷新任务', 'runs'], ['处理问题', 'issues']],
+    },
+    assets: {
+      title: '资产筛选摘要',
+      subtitle: '选择资产后显示文件、选择状态和交付动作。',
+      rows: [
+        ['搜索', state.query || '未输入'],
+        ['状态', statusText(state.status)],
+        ['类型', kindText(state.kind)],
+        ['选择筛选', state.selectedFilter === 'true' ? '已选' : state.selectedFilter === 'false' ? '未选中' : '全部'],
+        ['已加载', `${formatNumber(state.assets.items.length)} / ${formatNumber(state.assets.total || state.assets.items.length)}`],
+        ['批量模式', state.bulkMode ? `已开启，选中 ${formatNumber(state.bulkAssetIds.length)}` : '未开启'],
+        ['对比篮', `${formatNumber(state.compareIds.length)} / 9`],
+      ],
+      actions: [['打开对比', 'compare'], ['导出中心', 'exports']],
+    },
+    issues: {
+      title: '问题处理建议',
+      subtitle: '选择问题后显示原因、严重级别和处理动作。',
+      rows: [
+        ['搜索', state.query || '未输入'],
+        ['状态', statusText(state.status)],
+        ['未处理', formatNumber(state.issues.items.filter((item) => item.status === 'open').length)],
+        ['可补跑', formatNumber(state.issues.items.filter((item) => item.rerunnable).length)],
+        ['已加载', `${formatNumber(state.issues.items.length)} / ${formatNumber(state.issues.total || state.issues.items.length)}`],
+      ],
+      actions: [['补跑未处理', 'runs'], ['资产库', 'assets']],
+    },
+    prompts: {
+      title: '提示词摘要',
+      subtitle: '选择提示词后显示来源、参数、复制和补跑操作。',
+      rows: [
+        ['搜索', state.query || '未输入'],
+        ['任务', state.runFilter === 'all' ? '全部任务' : state.runFilter],
+        ['已加载', `${formatNumber(state.prompts.items.length)} / ${formatNumber(state.prompts.total || state.prompts.items.length)}`],
+        ['当前预览', state.promptFocusId || state.prompts.items[0]?.id || '-'],
+      ],
+      actions: [['任务记录', 'runs'], ['问题中心', 'issues']],
+    },
+    compare: {
+      title: '对比篮',
+      subtitle: '选择图卡查看资产详情，标记赢家或移出对比。',
+      rows: [
+        ['已加入', `${formatNumber(state.compareIds.length)} / 9`],
+        ['已选资产', formatNumber(counts.selections || 0)],
+        ['建议', state.compareIds.length < 2 ? '至少加入 2 张图后评审' : '记录选择理由并标记赢家'],
+      ],
+      actions: [['回到资产库', 'assets'], ['导出中心', 'exports']],
+    },
+    exports: {
+      title: '交付检查器',
+      subtitle: '导出完成后这里显示最新检查摘要。',
+      rows: [
+        ['已选资产', formatNumber(counts.selections || 0)],
+        ['未处理问题', formatNumber(counts.open_issues || 0)],
+        ['导出状态', state.exportBusy ? '生成中' : state.exportResult?.path ? '已完成' : '待生成'],
+        ['结果路径', state.exportResult?.path || '-'],
+        ['历史记录', formatNumber(state.exports.length)],
+      ],
+      actions: [['资产库', 'assets'], ['问题中心', 'issues']],
+    },
+  };
+  const model = defaults[state.page] || defaults.dashboard;
   $('inspector').innerHTML = `
     <div class="inspector-empty">
-      <strong>项目检查器</strong>
-      选择资产、任务、问题或提示词后显示详情。
+      <strong>${escapeHtml(model.title)}</strong>
+      ${escapeHtml(model.subtitle)}
     </div>
-    <div class="detail" style="margin-top:16px">
-      <div class="detail-row"><div class="detail-label">项目</div><div class="detail-value">${escapeHtml(state.project?.project?.name || '本地项目')}</div></div>
-      <div class="detail-row"><div class="detail-label">资产</div><div class="detail-value">${formatNumber(counts.assets || 0)}</div></div>
-      <div class="detail-row"><div class="detail-label">未处理问题</div><div class="detail-value">${formatNumber(counts.open_issues || 0)}</div></div>
-      <div class="detail-row"><div class="detail-label">当前队列</div><div class="detail-value">${escapeHtml(activeJob ? `${activeJob.kind} / ${statusText(activeJob.status)}` : '空闲')}</div></div>
-      <div class="detail-row"><div class="detail-label">最近事件</div><div class="detail-value">${escapeHtml(lastEvent?.message || lastEvent?.event_type || '-')}</div></div>
+    <div class="detail inspector-summary">
+      ${model.rows.map(([label, value]) => `
+        <div class="detail-row"><div class="detail-label">${escapeHtml(label)}</div><div class="detail-value">${escapeHtml(value)}</div></div>
+      `).join('')}
     </div>
-    <div class="detail-actions" style="margin-top:16px">
-      <button class="secondary-button" data-page="assets" type="button">资产库</button>
-      <button class="secondary-button" data-page="issues" type="button">问题中心</button>
+    <div class="detail-actions inspector-actions">
+      ${model.actions.map(([label, page]) => `<button class="secondary-button" data-page="${escapeHtml(page)}" type="button">${escapeHtml(label)}</button>`).join('')}
     </div>
   `;
 }
 
-function renderInspector(item, type) {
-  if (!item) {
-    renderDefaultInspector();
-    return;
-  }
-  state.selected = { type, id: item.id, data: item };
+function genericInspectorHtml(item, type) {
   const title = item.title || item.name || item.kind || item.id;
+  const typeLabel = {
+    run: '任务详情',
+    issue: '问题详情',
+    prompt: '提示词详情',
+    job: '队列详情',
+    event: '事件详情',
+    export: '导出详情',
+  }[type] || '详情';
   const rows = Object.entries(item)
     .filter(([key]) => !['metadata', 'raw', 'params', 'payload', 'result'].includes(key))
     .slice(0, 18)
@@ -784,8 +921,45 @@ function renderInspector(item, type) {
         <div class="detail-value">${escapeHtml(formatDetailValue(value))}</div>
       </div>
     `).join('');
-  $('inspector').innerHTML = `<h2>${escapeHtml(title)}</h2><div class="detail" style="margin-top:12px">${rows}</div>`;
+  const issueActions = type === 'issue' && item.status !== 'resolved'
+    ? `<button class="primary-button" data-resolve="${escapeHtml(item.id)}" type="button">标记解决</button>${item.rerunnable ? `<button class="secondary-button" data-rerun-issue="${escapeHtml(item.id)}" type="button">创建补跑</button>` : ''}`
+    : '';
+  const promptActions = type === 'prompt'
+    ? `<button class="secondary-button" data-copy="${escapeHtml(item.id)}" type="button">${state.copiedPromptId === item.id ? '已复制' : '复制'}</button><button class="secondary-button" data-rerun-prompt="${escapeHtml(item.id)}" type="button">补跑</button>`
+    : '';
+  return `
+    <h2>${escapeHtml(title)}</h2>
+    <p class="inspector-subtitle">${escapeHtml(typeLabel)} · ${escapeHtml(NAV_ITEMS.find((item) => item.id === state.page)?.label || state.page)}</p>
+    ${(issueActions || promptActions) ? `<div class="detail-actions inspector-actions">${issueActions}${promptActions}</div>` : ''}
+    <div class="detail inspector-summary">${rows}</div>
+  `;
+}
+
+function renderCurrentInspector() {
+  syncInspectorToPage();
+  if (state.inspector.type === 'asset' && state.inspector.detail?.asset) {
+    $('inspector').innerHTML = assetInspectorHtml(state.inspector.detail);
+    return;
+  }
+  if (state.inspector.type !== 'overview' && state.inspector.data) {
+    $('inspector').innerHTML = genericInspectorHtml(state.inspector.data, state.inspector.type);
+    return;
+  }
+  renderDefaultInspector();
+}
+
+function setGenericInspector(item, type) {
+  if (!item) {
+    resetInspector('empty_selection');
+    render();
+    return;
+  }
+  setInspector(type, item.id, item);
   render();
+}
+
+function renderInspector(item, type) {
+  setGenericInspector(item, type);
 }
 
 function renderEvents() {
@@ -793,7 +967,7 @@ function renderEvents() {
   $('jobSummary').innerHTML = active
     ? `<button class="job-button job-${escapeHtml(active.status)}" data-job="${escapeHtml(active.id)}" type="button"><span>${escapeHtml(active.kind)} · ${escapeHtml(statusText(active.status))}</span><small>${escapeHtml(formatTime(active.updated_at || active.created_at))}</small>${active.error ? `<em>${escapeHtml(active.error)}</em>` : ''}</button>`
     : '队列空闲';
-  $('eventLog').innerHTML = state.events.items.slice(0, 6).map((event) => `
+  $('eventLog').innerHTML = state.events.items.slice(0, 4).map((event) => `
     <button class="activity-item" data-event="${escapeHtml(event.id)}" type="button">
       <strong>${escapeHtml(event.message || event.event_type)}</strong>
       <span>${escapeHtml(formatTime(event.updated_at || event.created_at))}</span>
@@ -804,11 +978,11 @@ function renderEvents() {
 function render() {
   renderNav();
   updateShell();
-  if (!state.selected) renderDefaultInspector();
   if (state.loading) {
     setHead('Local asset OS', '生产总览', '读取本地数据库状态中。', '');
     $('view').innerHTML = `<section class="metric-grid">${skeletonCards(5)}</section><div class="grid">${skeletonCards(8)}</div>`;
     renderEvents();
+    renderCurrentInspector();
     return;
   }
   if (state.page === 'dashboard') renderDashboard();
@@ -819,6 +993,7 @@ function render() {
   if (state.page === 'compare') renderCompare();
   if (state.page === 'exports') renderExports();
   renderEvents();
+  renderCurrentInspector();
 }
 
 async function loadCurrent(reset = true) {
@@ -844,6 +1019,10 @@ async function loadCurrent(reset = true) {
       throw error;
     }
   }
+}
+
+async function refreshProject() {
+  state.project = await api('/api/project');
 }
 
 async function refreshAll() {
@@ -929,6 +1108,7 @@ async function selectPage(page) {
   state.page = page;
   state.status = 'all';
   state.sidebarOpen = false;
+  resetInspector('page_change');
   if (page === 'compare' && !state.assets.items.length) await loadPaged('assets', '/api/assets', {}, true);
   await reloadAndRender(true);
 }
@@ -944,6 +1124,7 @@ async function markAssetSelection(assetId, nextState) {
 
 async function runExport(kind) {
   if (state.exportBusy) return;
+  resetInspector('export_busy');
   state.exportBusy = kind;
   state.exportResult = null;
   render();
@@ -952,6 +1133,7 @@ async function runExport(kind) {
     state.exportResult = { kind, path: result.path, selected: result.selected };
     toast(kind === 'pack' ? '资产包清单已生成' : '工作台报告已生成', result.path || '');
     await refreshAll();
+    resetInspector('export_done');
   } finally {
     state.exportBusy = null;
     render();
@@ -974,6 +1156,7 @@ document.addEventListener('click', handleAsync(async (event) => {
   const filter = event.target.closest('[data-filter]')?.dataset.filter;
   if (filter) {
     state.status = filter;
+    resetInspector('filter_change');
     await reloadAndRender(true);
     return;
   }
@@ -981,6 +1164,7 @@ document.addEventListener('click', handleAsync(async (event) => {
   const viewMode = event.target.closest('[data-asset-view]')?.dataset.assetView;
   if (viewMode) {
     state.assetView = viewMode;
+    resetInspector('view_change');
     render();
     return;
   }
@@ -988,6 +1172,7 @@ document.addEventListener('click', handleAsync(async (event) => {
   if (event.target.closest('[data-bulk-mode]')) {
     state.bulkMode = !state.bulkMode;
     if (!state.bulkMode) state.bulkAssetIds = [];
+    resetInspector(state.bulkMode ? 'bulk_mode' : 'bulk_exit');
     render();
     return;
   }
@@ -1004,6 +1189,7 @@ document.addEventListener('click', handleAsync(async (event) => {
     const ids = [...state.bulkAssetIds];
     if (bulkAction === 'clear') {
       state.bulkAssetIds = [];
+      resetInspector('bulk_clear');
       render();
       return;
     }
@@ -1015,6 +1201,7 @@ document.addEventListener('click', handleAsync(async (event) => {
     }
     await Promise.all(ids.map((id) => markAssetSelection(id, bulkAction)));
     toast(bulkAction === 'selected' ? '已批量标记已选' : '已批量标记不采用', `${ids.length} 个资产`);
+    resetInspector('bulk_done');
     await reloadAndRender(true);
     return;
   }
@@ -1039,6 +1226,8 @@ document.addEventListener('click', handleAsync(async (event) => {
   if (resolveId) {
     await api(`/api/issues/${encodeURIComponent(resolveId)}/resolve`, { method: 'POST' });
     state.issues.items = state.issues.items.map((issue) => issue.id === resolveId ? { ...issue, status: 'resolved', resolved_at: new Date().toISOString() } : issue);
+    if (state.inspector?.type === 'issue' && state.inspector.id === resolveId) resetInspector('issue_resolved');
+    await refreshProject();
     toast('问题已处理');
     render();
     await reloadAndRender(true);
@@ -1177,12 +1366,14 @@ document.addEventListener('change', handleAsync(async (event) => {
   const assetField = event.target.closest('[data-asset-filter]')?.dataset.assetFilter;
   if (assetField) {
     state[assetField] = event.target.value;
+    resetInspector('asset_filter_change');
     await reloadAndRender(true);
     return;
   }
   if (event.target.closest('[data-run-filter]')) {
     state.runFilter = event.target.value;
     state.promptFocusId = null;
+    resetInspector('prompt_filter_change');
     await reloadAndRender(true);
   }
 }));
@@ -1190,6 +1381,7 @@ document.addEventListener('change', handleAsync(async (event) => {
 let searchTimer = null;
 $('globalSearch').addEventListener('input', (event) => {
   state.query = event.target.value;
+  resetInspector('search');
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => reloadAndRender(true).catch(showError), 220);
 });
@@ -1200,6 +1392,7 @@ $('menuButton').addEventListener('click', () => {
 });
 
 $('refreshButton').addEventListener('click', handleAsync(async () => {
+  resetInspector('refresh');
   await refreshAll();
   toast('已刷新');
 }));
@@ -1217,6 +1410,7 @@ $('rerunButton').addEventListener('click', handleAsync(async () => {
 
 $('exportButton').addEventListener('click', handleAsync(async () => {
   state.page = 'exports';
+  resetInspector('command_export');
   await runExport('report');
 }));
 

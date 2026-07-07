@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const {
   skillRoot,
   makeTempDir,
@@ -32,6 +33,100 @@ function sqliteAvailable() {
 function count(outputDir, table) {
   const db = openProjectDatabase(outputDir);
   return all(db, `SELECT count(*) AS c FROM ${table}`, [])[0].c;
+}
+
+function createWorkbenchDomHarness() {
+  const elements = new Map();
+  function makeElement(id = '') {
+    const element = {
+      id,
+      innerHTML: '',
+      textContent: '',
+      value: '',
+      disabled: false,
+      dataset: {},
+      listeners: {},
+      classList: {
+        toggle() {},
+        add() {},
+        remove() {},
+      },
+      setAttribute(name, value) {
+        this[name] = value;
+      },
+      addEventListener(type, handler) {
+        this.listeners[type] = handler;
+      },
+      appendChild(child) {
+        this.lastChild = child;
+      },
+      remove() {},
+      closest() {
+        return null;
+      },
+      querySelector() {
+        return null;
+      },
+    };
+    return element;
+  }
+  const requiredIds = [
+    'pageEyebrow',
+    'pageTitle',
+    'pageSubtitle',
+    'pageControls',
+    'nav',
+    'sideAssetCount',
+    'sideIssueCount',
+    'healthDot',
+    'healthText',
+    'menuButton',
+    'exportButton',
+    'view',
+    'inspector',
+    'jobSummary',
+    'eventLog',
+    'toastStack',
+    'globalSearch',
+    'refreshButton',
+    'rerunButton',
+  ];
+  requiredIds.forEach((id) => elements.set(id, makeElement(id)));
+  const shell = makeElement('shell');
+  const document = {
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, makeElement(id));
+      return elements.get(id);
+    },
+    querySelector(selector) {
+      if (selector === '[data-shell]') return shell;
+      return null;
+    },
+    addEventListener(type, handler) {
+      this.listeners[type] = handler;
+    },
+    createElement(tagName) {
+      return makeElement(tagName);
+    },
+    listeners: {},
+  };
+  const context = {
+    document,
+    navigator: { clipboard: { writeText: async () => {} } },
+    window: {
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+    },
+    fetch: async () => ({ headers: { get: () => 'application/json' }, ok: true, json: async () => ({ ok: true, data: {} }) }),
+    console,
+    URLSearchParams,
+    Intl,
+  };
+  vm.createContext(context);
+  const scriptPath = path.join(skillRoot, 'app', 'src', 'workbench.js');
+  const source = fs.readFileSync(scriptPath, 'utf8').replace(/\nrender\(\);\nrefreshAll\(\)\.catch\(showError\);\s*$/, '\n');
+  vm.runInContext(source, context, { filename: scriptPath });
+  return { context, elements };
 }
 
 test('prepare writes project, run, prompts and events into daoge.db', () => {
@@ -171,8 +266,100 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
     assert.match(js, /selectionBadge/);
     assert.match(js, /data-bulk-action/);
     assert.match(js, /exportBusy/);
+    assert.match(js, /if \(state\.exportBusy\) return;/);
+    assert.match(js, /state\.exportBusy \? '导出中' : '导出'/);
     assert.match(js, /toast\(/);
+    assert.match(js, /INSPECTOR_TYPES_BY_PAGE/);
+    assert.match(js, /state\.inspector/);
+    assert.doesNotMatch(js, /state\.selected(?!Filter)/);
+    assert.match(css, /height:\s*100dvh/);
+    assert.match(css, /\.content\s*\{[\s\S]*overflow:\s*hidden/);
+    assert.match(css, /\.workspace\s*\{[\s\S]*overflow:\s*auto/);
     assert.doesNotMatch(html + css + js, /event-pill|jobbar|statusFilters/);
+  } finally {
+    started.server.close();
+  }
+});
+
+test('workbench inspector state is scoped to the active page and cleared by workflow changes', async () => {
+  if (!sqliteAvailable()) return;
+  const outputDir = path.join(makeTempDir(), 'out');
+  runScript('daoge.js', ['prepare',
+    '--task-spec', path.join(skillRoot, 'references', 'examples', 'task_spec.minimal.json'),
+    '--output-dir', outputDir,
+  ]);
+  const started = await startWorkbenchServer({ outputDir, port: 0 });
+  try {
+    const js = await fetch(`${started.url}src/workbench.js`).then((res) => res.text());
+    assert.match(js, /inspector:\s*\{\s*page:\s*'dashboard'/);
+    assert.match(js, /function syncInspectorToPage\(\)/);
+    assert.match(js, /inspector\.page !== state\.page/);
+    assert.match(js, /isInspectorAllowed\(inspector\.type,\s*state\.page\)/);
+    assert.match(js, /resetInspector\('page_change'\)/);
+    assert.match(js, /resetInspector\('filter_change'\)/);
+    assert.match(js, /resetInspector\('asset_filter_change'\)/);
+    assert.match(js, /resetInspector\('search'\)/);
+    assert.match(js, /resetInspector\('refresh'\)/);
+    assert.match(js, /resetInspector\('export_done'\)/);
+    assert.match(js, /state\.inspector\?\.page === state\.page/);
+    assert.match(js, /renderCurrentInspector\(\);/);
+  } finally {
+    started.server.close();
+  }
+});
+
+test('workbench inspector behavior clears stale details when page or search context changes', () => {
+  const { context } = createWorkbenchDomHarness();
+  const pageChange = vm.runInContext(`
+    state.project = { project: { name: 'VM 项目' }, counts: { assets: 3, open_issues: 2, selections: 1 } };
+    state.assets.items = [{ id: 'asset_1', title: '旧资产详情', kind: 'result', status: 'ready', thumb_status: 'missing', updated_at: '2026-01-01T00:00:00.000Z' }];
+    state.assets.total = 1;
+    state.runs.items = [];
+    state.jobs.items = [];
+    state.events.items = [];
+    state.page = 'assets';
+    setInspector('asset', 'asset_1', state.assets.items[0], { asset: state.assets.items[0], tags: [], runs: [], prompt: null, runItem: null });
+    renderCurrentInspector();
+    const assetHtml = $('inspector').innerHTML;
+    state.page = 'runs';
+    renderCurrentInspector();
+    ({ assetHtml, runHtml: $('inspector').innerHTML, inspector: state.inspector });
+  `, context);
+  assert.match(pageChange.assetHtml, /旧资产详情/);
+  assert.match(pageChange.runHtml, /任务检查器/);
+  assert.doesNotMatch(pageChange.runHtml, /旧资产详情/);
+  assert.equal(pageChange.inspector.page, 'runs');
+  assert.equal(pageChange.inspector.type, 'overview');
+
+  const searchChange = vm.runInContext(`
+    state.page = 'assets';
+    setInspector('asset', 'asset_1', state.assets.items[0], { asset: state.assets.items[0], tags: [], runs: [], prompt: null, runItem: null });
+    $('globalSearch').listeners.input({ target: { value: '蓝色瓶身' } });
+    renderCurrentInspector();
+    ({ html: $('inspector').innerHTML, inspector: state.inspector, query: state.query });
+  `, context);
+  assert.equal(searchChange.query, '蓝色瓶身');
+  assert.equal(searchChange.inspector.page, 'assets');
+  assert.equal(searchChange.inspector.type, 'overview');
+  assert.match(searchChange.html, /资产筛选摘要/);
+  assert.doesNotMatch(searchChange.html, /旧资产详情/);
+});
+
+test('workbench CSS uses fixed shell scroll regions for sidebar, main and inspector', async () => {
+  if (!sqliteAvailable()) return;
+  const outputDir = path.join(makeTempDir(), 'out');
+  initializeProject(outputDir, { name: 'Shell CSS' });
+  const started = await startWorkbenchServer({ outputDir, port: 0 });
+  try {
+    const css = await fetch(`${started.url}styles/workbench.css`).then((res) => res.text());
+    assert.match(css, /html,\s*body\s*\{[\s\S]*height:\s*100%/);
+    assert.match(css, /\.app-shell\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
+    assert.match(css, /\.sidebar\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*auto/);
+    assert.match(css, /\.main\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
+    assert.match(css, /\.inspector\s*\{[\s\S]*overflow:\s*auto/);
+    assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.content\s*\{[\s\S]*display:\s*block[\s\S]*overflow:\s*auto/);
+    assert.match(css, /\.primary-button,[\s\S]*\.chip-button\s*\{[\s\S]*min-height:\s*44px/);
+    assert.match(css, /\.segmented button\s*\{[\s\S]*min-height:\s*44px/);
   } finally {
     started.server.close();
   }
@@ -393,6 +580,43 @@ test('issues API supports server-side search and status filtering', async () => 
     assert.equal(searched.ok, true);
     assert.deepEqual(searched.data.items.map((item) => item.id), ['issue_key']);
     assert.equal(searched.data.total, 1);
+  } finally {
+    started.server.close();
+  }
+});
+
+test('issue resolve keeps issue list and project counts in sync', async () => {
+  if (!sqliteAvailable()) return;
+  const outputDir = path.join(makeTempDir(), 'out');
+  const project = initializeProject(outputDir, { name: 'Issue sync' });
+  const db = project.db;
+  const runId = 'run_issue_sync';
+  run(db, `
+    INSERT INTO runs (id, project_id, phase, status, created_at, updated_at)
+    VALUES (?, ?, 'execute', 'needs_attention', datetime('now'), datetime('now'))
+  `, [runId, project.projectId]);
+  run(db, `
+    INSERT INTO issues (
+      id, project_id, run_id, type, severity, status, title, message, recommended_action, rerunnable, created_at, updated_at
+    ) VALUES
+      ('issue_sync_a', ?, ?, 'needs_review', 'attention', 'open', '待处理 A', '需要复核', '复核', 0, datetime('now'), datetime('now')),
+      ('issue_sync_b', ?, ?, 'needs_review', 'attention', 'open', '待处理 B', '需要补跑', '补跑', 1, datetime('now'), datetime('now'))
+  `, [project.projectId, runId, project.projectId, runId]);
+  const started = await startWorkbenchServer({ outputDir, port: 0 });
+  try {
+    const before = await fetch(`${started.url}api/project`).then((res) => res.json());
+    assert.equal(before.data.counts.open_issues, 2);
+
+    const resolved = await fetch(`${started.url}api/issues/issue_sync_a/resolve`, { method: 'POST' }).then((res) => res.json());
+    assert.equal(resolved.ok, true);
+    assert.equal(resolved.data.status, 'resolved');
+
+    const open = await fetch(`${started.url}api/issues?status=open`).then((res) => res.json());
+    assert.deepEqual(open.data.items.map((item) => item.id), ['issue_sync_b']);
+    assert.equal(open.data.total, 1);
+
+    const after = await fetch(`${started.url}api/project`).then((res) => res.json());
+    assert.equal(after.data.counts.open_issues, 1);
   } finally {
     started.server.close();
   }
