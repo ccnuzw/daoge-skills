@@ -71,8 +71,6 @@
           </div>
           <div id="view" class="view"></div>
         </section>
-
-        <aside class="inspector" id="inspector" aria-label="详情检查器"></aside>
       </section>
 
       <section class="activity-strip" aria-label="任务队列与事件">
@@ -80,6 +78,20 @@
         <div class="activity-feed" id="eventLog"></div>
       </section>
     </main>
+
+    <div class="drawer-layer" id="drawerLayer" aria-hidden="true">
+      <button class="drawer-scrim" id="drawerScrim" type="button" data-close-drawer aria-label="关闭检查器"></button>
+      <aside class="context-drawer" id="inspector" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <div class="drawer-head">
+          <div>
+            <div class="eyebrow" id="drawerEyebrow">Inspector</div>
+            <h2 id="drawerTitle">项目检查器</h2>
+          </div>
+          <button class="icon-button" id="drawerClose" type="button" data-close-drawer aria-label="关闭检查器">×</button>
+        </div>
+        <div class="drawer-body" id="drawerBody"></div>
+      </aside>
+    </div>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
   </div>

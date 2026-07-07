@@ -61,6 +61,9 @@ function createWorkbenchDomHarness() {
         this.lastChild = child;
       },
       remove() {},
+      focus() {
+        this.focused = true;
+      },
       closest() {
         return null;
       },
@@ -84,6 +87,12 @@ function createWorkbenchDomHarness() {
     'exportButton',
     'view',
     'inspector',
+    'drawerLayer',
+    'drawerScrim',
+    'drawerClose',
+    'drawerBody',
+    'drawerTitle',
+    'drawerEyebrow',
     'jobSummary',
     'eventLog',
     'toastStack',
@@ -100,6 +109,7 @@ function createWorkbenchDomHarness() {
     },
     querySelector(selector) {
       if (selector === '[data-shell]') return shell;
+      if (this.selectorElements?.has(selector)) return this.selectorElements.get(selector);
       return null;
     },
     addEventListener(type, handler) {
@@ -108,6 +118,7 @@ function createWorkbenchDomHarness() {
     createElement(tagName) {
       return makeElement(tagName);
     },
+    selectorElements: new Map(),
     listeners: {},
   };
   const context = {
@@ -241,7 +252,11 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
     assert.match(html, /class="sidebar"/);
     assert.match(html, /class="commandbar"/);
     assert.match(html, /class="workspace"/);
-    assert.match(html, /class="inspector"/);
+    assert.match(html, /class="drawer-layer"/);
+    assert.match(html, /class="drawer-scrim"/);
+    assert.match(html, /class="context-drawer"/);
+    assert.match(html, /id="drawerBody"/);
+    assert.match(html, /id="drawerClose"/);
     assert.match(html, /class="activity-strip"/);
     assert.match(html, /class="toast-stack"/);
     assert.match(html, /data-shell/);
@@ -260,17 +275,26 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
     assert.match(css, /\.asset-card/);
     assert.match(css, /\.issues-board/);
     assert.match(css, /\.prompt-lab/);
+    assert.match(css, /\.prompt-list-panel/);
+    assert.match(css, /\.prompt-meta-panel/);
+    assert.match(css, /\.export-table/);
+    assert.match(css, /\.export-cards/);
+    assert.match(css, /\.export-path[\s\S]*overflow-wrap:\s*anywhere/);
+    assert.match(css, /\.drawer-layer/);
+    assert.match(css, /\.context-drawer/);
     assert.match(css, /prefers-reduced-motion:\s*reduce/);
     assert.match(js, /renderDashboard/);
-    assert.match(js, /renderAssetInspector/);
+    assert.match(js, /renderAssetDrawer/);
     assert.match(js, /selectionBadge/);
     assert.match(js, /data-bulk-action/);
     assert.match(js, /exportBusy/);
     assert.match(js, /if \(state\.exportBusy\) return;/);
     assert.match(js, /state\.exportBusy \? '导出中' : '导出'/);
     assert.match(js, /toast\(/);
-    assert.match(js, /INSPECTOR_TYPES_BY_PAGE/);
-    assert.match(js, /state\.inspector/);
+    assert.match(js, /DRAWER_TYPES_BY_PAGE/);
+    assert.match(js, /state\.drawer/);
+    assert.match(js, /compareAssetsById/);
+    assert.match(js, /syncPromptFocus/);
     assert.doesNotMatch(js, /state\.selected(?!Filter)/);
     assert.match(css, /height:\s*100dvh/);
     assert.match(css, /\.content\s*\{[\s\S]*overflow:\s*hidden/);
@@ -281,7 +305,7 @@ test('workbench fixed UI exposes product shell and avoids old event capsule layo
   }
 });
 
-test('workbench inspector state is scoped to the active page and cleared by workflow changes', async () => {
+test('workbench drawer state is scoped to the active page and cleared by workflow changes', async () => {
   if (!sqliteAvailable()) return;
   const outputDir = path.join(makeTempDir(), 'out');
   runScript('daoge.js', ['prepare',
@@ -291,24 +315,25 @@ test('workbench inspector state is scoped to the active page and cleared by work
   const started = await startWorkbenchServer({ outputDir, port: 0 });
   try {
     const js = await fetch(`${started.url}src/workbench.js`).then((res) => res.text());
-    assert.match(js, /inspector:\s*\{\s*page:\s*'dashboard'/);
-    assert.match(js, /function syncInspectorToPage\(\)/);
-    assert.match(js, /inspector\.page !== state\.page/);
-    assert.match(js, /isInspectorAllowed\(inspector\.type,\s*state\.page\)/);
-    assert.match(js, /resetInspector\('page_change'\)/);
-    assert.match(js, /resetInspector\('filter_change'\)/);
-    assert.match(js, /resetInspector\('asset_filter_change'\)/);
-    assert.match(js, /resetInspector\('search'\)/);
-    assert.match(js, /resetInspector\('refresh'\)/);
-    assert.match(js, /resetInspector\('export_done'\)/);
-    assert.match(js, /state\.inspector\?\.page === state\.page/);
-    assert.match(js, /renderCurrentInspector\(\);/);
+    assert.match(js, /drawer:\s*\{\s*open:\s*false,\s*page:\s*'dashboard'/);
+    assert.match(js, /function syncDrawerToPage\(\)/);
+    assert.match(js, /drawer\.page !== state\.page/);
+    assert.match(js, /isDrawerAllowed\(drawer\.type,\s*state\.page\)/);
+    assert.match(js, /resetDrawer\('page_change'\)/);
+    assert.match(js, /resetDrawer\('filter_change'\)/);
+    assert.match(js, /resetDrawer\('asset_filter_change'\)/);
+    assert.match(js, /resetDrawer\('search'\)/);
+    assert.match(js, /resetDrawer\('refresh'\)/);
+    assert.match(js, /resetDrawer\('export_done'\)/);
+    assert.match(js, /state\.drawer\?\.page === state\.page/);
+    assert.match(js, /renderCurrentDrawer\(\);/);
+    assert.match(js, /event\.key === 'Escape' && state\.drawer\.open/);
   } finally {
     started.server.close();
   }
 });
 
-test('workbench inspector behavior clears stale details when page or search context changes', () => {
+test('workbench drawer behavior clears stale details when page or search context changes', () => {
   const { context } = createWorkbenchDomHarness();
   const pageChange = vm.runInContext(`
     state.project = { project: { name: 'VM 项目' }, counts: { assets: 3, open_issues: 2, selections: 1 } };
@@ -318,34 +343,194 @@ test('workbench inspector behavior clears stale details when page or search cont
     state.jobs.items = [];
     state.events.items = [];
     state.page = 'assets';
-    setInspector('asset', 'asset_1', state.assets.items[0], { asset: state.assets.items[0], tags: [], runs: [], prompt: null, runItem: null });
-    renderCurrentInspector();
-    const assetHtml = $('inspector').innerHTML;
+    setDrawer('asset', 'asset_1', state.assets.items[0], { asset: state.assets.items[0], tags: [], runs: [], prompt: null, runItem: null });
+    renderCurrentDrawer();
+    const assetHtml = $('drawerBody').innerHTML;
     state.page = 'runs';
-    renderCurrentInspector();
-    ({ assetHtml, runHtml: $('inspector').innerHTML, inspector: state.inspector });
+    openSummaryDrawer();
+    renderCurrentDrawer();
+    ({ assetHtml, runHtml: $('drawerBody').innerHTML, drawer: state.drawer });
   `, context);
   assert.match(pageChange.assetHtml, /旧资产详情/);
   assert.match(pageChange.runHtml, /任务检查器/);
   assert.doesNotMatch(pageChange.runHtml, /旧资产详情/);
-  assert.equal(pageChange.inspector.page, 'runs');
-  assert.equal(pageChange.inspector.type, 'overview');
+  assert.equal(pageChange.drawer.page, 'runs');
+  assert.equal(pageChange.drawer.type, 'overview');
 
   const searchChange = vm.runInContext(`
     state.page = 'assets';
-    setInspector('asset', 'asset_1', state.assets.items[0], { asset: state.assets.items[0], tags: [], runs: [], prompt: null, runItem: null });
+    setDrawer('asset', 'asset_1', state.assets.items[0], { asset: state.assets.items[0], tags: [], runs: [], prompt: null, runItem: null });
     $('globalSearch').listeners.input({ target: { value: '蓝色瓶身' } });
-    renderCurrentInspector();
-    ({ html: $('inspector').innerHTML, inspector: state.inspector, query: state.query });
+    openSummaryDrawer();
+    renderCurrentDrawer();
+    ({ html: $('drawerBody').innerHTML, drawer: state.drawer, query: state.query });
   `, context);
   assert.equal(searchChange.query, '蓝色瓶身');
-  assert.equal(searchChange.inspector.page, 'assets');
-  assert.equal(searchChange.inspector.type, 'overview');
+  assert.equal(searchChange.drawer.page, 'assets');
+  assert.equal(searchChange.drawer.type, 'overview');
   assert.match(searchChange.html, /资产筛选摘要/);
   assert.doesNotMatch(searchChange.html, /旧资产详情/);
+
+  const focusRestore = vm.runInContext(`
+    const directTarget = { focused: false, focus() { this.focused = true; } };
+    const selectorTarget = { focused: false, focus() { this.focused = true; } };
+    document.selectorElements.set('[data-open-summary]', selectorTarget);
+    state.page = 'assets';
+    state.drawer = { open: true, page: 'assets', type: 'overview', id: null, data: null, detail: null, mode: 'summary' };
+    drawerReturnFocus = directTarget;
+    drawerReturnFocusSelector = '[data-open-summary]';
+    closeDrawer();
+    ({ drawerOpen: state.drawer.open, directFocused: directTarget.focused, selectorFocused: selectorTarget.focused });
+  `, context);
+  assert.equal(focusRestore.drawerOpen, false);
+  assert.equal(focusRestore.directFocused, true);
+  assert.equal(focusRestore.selectorFocused, false);
+
+  const escapeClose = vm.runInContext(`
+    state.page = 'assets';
+    state.drawer = { open: true, page: 'assets', type: 'overview', id: null, data: null, detail: null, mode: 'summary' };
+    let prevented = false;
+    document.listeners.keydown({ key: 'Escape', preventDefault() { prevented = true; }, target: { closest() { return null; } } });
+    ({ drawerOpen: state.drawer.open, prevented });
+  `, context);
+  assert.equal(escapeClose.drawerOpen, false);
+  assert.equal(escapeClose.prevented, true);
 });
 
-test('workbench CSS uses fixed shell scroll regions for sidebar, main and inspector', async () => {
+test('workbench export records open delivery drawer from table or card targets', async () => {
+  const { context } = createWorkbenchDomHarness();
+  const result = await vm.runInContext(`
+    state.loading = false;
+    state.page = 'exports';
+    state.project = { project: { name: 'VM 项目' }, counts: { selections: 1, open_issues: 0 } };
+    state.exports = [
+      { id: 'export_report', title: '工作台报告', kind: 'report', status: 'ready', path: 'assets/exports/workbench_report.json', updated_at: '2026-01-01T00:00:00.000Z' },
+    ];
+    renderExports();
+    const beforeHtml = $('view').innerHTML;
+    const exportTarget = {
+      dataset: { export: 'export_report' },
+      focused: false,
+      focus() { this.focused = true; },
+      closest(selector) {
+        return selector.includes('[data-export]') ? this : null;
+      },
+    };
+    document.listeners.click({ target: exportTarget }).then(() => {
+      renderCurrentDrawer();
+      return {
+        beforeHtml,
+        drawerOpen: state.drawer.open,
+        drawerType: state.drawer.type,
+        drawerId: state.drawer.id,
+        drawerHtml: $('drawerBody').innerHTML,
+      };
+    });
+  `, context);
+  assert.match(result.beforeHtml, /export-table/);
+  assert.match(result.beforeHtml, /export-cards/);
+  assert.match(result.beforeHtml, /assets\/exports\/workbench_report\.json/);
+  assert.equal(result.drawerOpen, true);
+  assert.equal(result.drawerType, 'export');
+  assert.equal(result.drawerId, 'export_report');
+  assert.match(result.drawerHtml, /工作台报告/);
+  assert.match(result.drawerHtml, /assets\/exports\/workbench_report\.json/);
+});
+
+test('workbench compare basket keeps asset snapshots after asset filters change', () => {
+  const { context } = createWorkbenchDomHarness();
+  const result = vm.runInContext(`
+    state.loading = false;
+    state.page = 'compare';
+    state.project = { project: { name: 'VM 项目' }, counts: {} };
+    state.assets.items = [
+      { id: 'asset_1', title: '已加入资产', kind: 'result', status: 'ready', thumb_status: 'missing', width: 1024, height: 1024 },
+      { id: 'asset_2', title: '筛选后资产', kind: 'result', status: 'ready', thumb_status: 'missing' },
+    ];
+    const addResult = addCompareIds(['asset_1']);
+    state.assets.items = [state.assets.items[1]];
+    renderCompare();
+    const htmlAfterFilter = $('view').innerHTML;
+    state.assets.items = Array.from({ length: 10 }, (_, index) => ({
+      id: 'asset_' + (index + 10),
+      title: '资产 ' + index,
+      kind: 'result',
+      status: 'ready',
+      thumb_status: 'missing',
+    }));
+    const limitResult = addCompareIds(state.assets.items.map((asset) => asset.id));
+    ({ addResult, htmlAfterFilter, compareIds: state.compareIds, limitResult });
+  `, context);
+  assert.equal(result.addResult.added.length, 1);
+  assert.equal(result.addResult.added[0], 'asset_1');
+  assert.match(result.htmlAfterFilter, /已加入资产/);
+  assert.doesNotMatch(result.htmlAfterFilter, /未选择对比资产/);
+  assert.equal(result.compareIds.length, 9);
+  assert.equal(result.limitResult.capacitySkipped, 2);
+});
+
+test('workbench prompt focus resets to first filtered prompt and uses stable lab layout', () => {
+  const { context } = createWorkbenchDomHarness();
+  const result = vm.runInContext(`
+    state.loading = false;
+    state.page = 'prompts';
+    state.project = { project: { name: 'VM 项目' }, counts: {} };
+    state.prompts.items = [
+      { id: 'prompt_old', title: '旧提示词', prompt_text: '旧正文', prompt_index: '001', params: { seed: 1 } },
+    ];
+    state.promptFocusId = 'prompt_old';
+    setDrawer('prompt', 'prompt_old', state.prompts.items[0]);
+    state.prompts.items = [
+      { id: 'prompt_new', title: '新提示词', prompt_text: '新正文', prompt_index: '002', params: { seed: 2 } },
+    ];
+    renderPrompts();
+    ({
+      promptFocusId: state.promptFocusId,
+      drawerOpen: state.drawer.open,
+      viewHtml: $('view').innerHTML,
+    });
+  `, context);
+  assert.equal(result.promptFocusId, 'prompt_new');
+  assert.equal(result.drawerOpen, false);
+  assert.match(result.viewHtml, /prompt-list-panel/);
+  assert.match(result.viewHtml, /prompt-meta-panel/);
+  assert.match(result.viewHtml, /prompt-params/);
+  assert.match(result.viewHtml, /新正文/);
+  assert.match(result.viewHtml, /&quot;seed&quot;: 2/);
+  assert.doesNotMatch(result.viewHtml, /旧正文/);
+});
+
+test('workbench prompt drawer follows refreshed active prompt data with the same id', () => {
+  const { context } = createWorkbenchDomHarness();
+  const result = vm.runInContext(`
+    state.loading = false;
+    state.page = 'prompts';
+    state.project = { project: { name: 'VM 项目' }, counts: {} };
+    state.prompts.items = [
+      { id: 'prompt_same', title: '同一提示词', prompt_text: '旧正文', prompt_index: '001', params: { seed: 1 } },
+    ];
+    state.promptFocusId = 'prompt_same';
+    setDrawer('prompt', 'prompt_same', state.prompts.items[0]);
+    state.prompts.items = [
+      { id: 'prompt_same', title: '同一提示词', prompt_text: '新正文', prompt_index: '001', params: { seed: 2 } },
+    ];
+    renderPrompts();
+    renderCurrentDrawer();
+    ({
+      promptFocusId: state.promptFocusId,
+      drawerOpen: state.drawer.open,
+      drawerSeed: state.drawer.data.params.seed,
+      drawerHtml: $('drawerBody').innerHTML,
+    });
+  `, context);
+  assert.equal(result.promptFocusId, 'prompt_same');
+  assert.equal(result.drawerOpen, true);
+  assert.equal(result.drawerSeed, 2);
+  assert.match(result.drawerHtml, /新正文/);
+  assert.doesNotMatch(result.drawerHtml, /旧正文/);
+});
+
+test('workbench CSS uses fixed shell scroll regions for sidebar, main and drawer overlay', async () => {
   if (!sqliteAvailable()) return;
   const outputDir = path.join(makeTempDir(), 'out');
   initializeProject(outputDir, { name: 'Shell CSS' });
@@ -356,8 +541,10 @@ test('workbench CSS uses fixed shell scroll regions for sidebar, main and inspec
     assert.match(css, /\.app-shell\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
     assert.match(css, /\.sidebar\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*auto/);
     assert.match(css, /\.main\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
-    assert.match(css, /\.inspector\s*\{[\s\S]*overflow:\s*auto/);
-    assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.content\s*\{[\s\S]*display:\s*block[\s\S]*overflow:\s*auto/);
+    assert.match(css, /\.drawer-layer\s*\{[\s\S]*position:\s*fixed/);
+    assert.match(css, /\.context-drawer\s*\{[\s\S]*height:\s*100dvh[\s\S]*overflow:\s*hidden/);
+    assert.match(css, /\.drawer-body\s*\{[\s\S]*overflow:\s*auto/);
+    assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.context-drawer\s*\{[\s\S]*bottom:\s*0/);
     assert.match(css, /\.primary-button,[\s\S]*\.chip-button\s*\{[\s\S]*min-height:\s*44px/);
     assert.match(css, /\.segmented button\s*\{[\s\S]*min-height:\s*44px/);
   } finally {

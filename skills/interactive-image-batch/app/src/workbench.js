@@ -35,13 +35,13 @@ const KIND_LABELS = {
   mask: '遮罩',
 };
 
-const INSPECTOR_TYPES_BY_PAGE = {
+const DRAWER_TYPES_BY_PAGE = {
   dashboard: ['asset', 'run', 'issue', 'prompt', 'job', 'event'],
   runs: ['run', 'job', 'event'],
-  assets: ['asset'],
-  issues: ['issue'],
-  prompts: ['prompt'],
-  compare: ['asset'],
+  assets: ['asset', 'job', 'event'],
+  issues: ['issue', 'job', 'event'],
+  prompts: ['prompt', 'job', 'event'],
+  compare: ['asset', 'job', 'event'],
   exports: ['export', 'job', 'event'],
 };
 
@@ -67,8 +67,9 @@ const state = {
   exportsError: null,
   exportBusy: null,
   exportResult: null,
-  inspector: { page: 'dashboard', type: 'overview', id: null, data: null, detail: null, mode: 'overview' },
+  drawer: { open: false, page: 'dashboard', type: 'overview', id: null, data: null, detail: null, mode: 'overview' },
   compareIds: [],
+  compareAssetsById: {},
   bulkMode: false,
   bulkAssetIds: [],
   promptFocusId: null,
@@ -77,36 +78,64 @@ const state = {
   sidebarOpen: false,
 };
 
+let drawerReturnFocus = null;
+let drawerReturnFocusSelector = null;
+let shouldFocusDrawerClose = false;
+
 function pageState() {
   return { items: [], nextCursor: null, total: 0, loading: false, error: null };
 }
 
 const $ = (id) => document.getElementById(id);
 
-function inspectorTypesForPage(page = state.page) {
-  return INSPECTOR_TYPES_BY_PAGE[page] || [];
+function drawerTypesForPage(page = state.page) {
+  return DRAWER_TYPES_BY_PAGE[page] || [];
 }
 
-function isInspectorAllowed(type, page = state.page) {
-  return type === 'overview' || inspectorTypesForPage(page).includes(type);
+function isDrawerAllowed(type, page = state.page) {
+  return type === 'overview' || drawerTypesForPage(page).includes(type);
 }
 
-function resetInspector(mode = 'overview') {
-  state.inspector = { page: state.page, type: 'overview', id: null, data: null, detail: null, mode };
+function resetDrawer(mode = 'overview') {
+  state.drawer = { open: false, page: state.page, type: 'overview', id: null, data: null, detail: null, mode };
 }
 
-function setInspector(type, id, data, detail = null) {
-  if (!isInspectorAllowed(type, state.page)) {
-    resetInspector('context_reset');
+function setDrawer(type, id, data, detail = null) {
+  if (!isDrawerAllowed(type, state.page)) {
+    resetDrawer('context_reset');
     return;
   }
-  state.inspector = { page: state.page, type, id, data, detail, mode: 'detail' };
+  state.drawer = { open: true, page: state.page, type, id, data, detail, mode: 'detail' };
+  shouldFocusDrawerClose = true;
 }
 
-function syncInspectorToPage() {
-  const inspector = state.inspector;
-  if (!inspector || inspector.page !== state.page || !isInspectorAllowed(inspector.type, state.page)) {
-    resetInspector('page_summary');
+function openSummaryDrawer() {
+  state.drawer = { open: true, page: state.page, type: 'overview', id: null, data: null, detail: null, mode: 'summary' };
+  shouldFocusDrawerClose = true;
+}
+
+function closeDrawer() {
+  state.drawer = { ...state.drawer, open: false };
+  const target = drawerReturnFocus;
+  const selector = drawerReturnFocusSelector;
+  drawerReturnFocus = null;
+  drawerReturnFocusSelector = null;
+  render();
+  const nextTarget = selector ? document.querySelector(selector) : null;
+  const fallback = document.querySelector('[data-open-summary]') || $('refreshButton');
+  if (target && typeof target.focus === 'function') {
+    target.focus();
+  } else if (nextTarget && typeof nextTarget.focus === 'function') {
+    nextTarget.focus();
+  } else if (fallback && typeof fallback.focus === 'function') {
+    fallback.focus();
+  }
+}
+
+function syncDrawerToPage() {
+  const drawer = state.drawer;
+  if (!drawer || drawer.page !== state.page || !isDrawerAllowed(drawer.type, state.page)) {
+    resetDrawer('page_summary');
   }
 }
 
@@ -154,6 +183,9 @@ async function loadPaged(name, path, params = {}, reset = true) {
     const query = qs({ limit: 60, cursor, ...params });
     const data = await api(`${path}${query ? `?${query}` : ''}`);
     bucket.items = reset ? data.items : [...bucket.items, ...data.items];
+    if (name === 'assets') bucket.items.forEach((asset) => {
+      if (state.compareIds.includes(asset.id)) cacheCompareAsset(asset);
+    });
     bucket.nextCursor = data.nextCursor || null;
     bucket.total = data.total ?? bucket.items.length;
     return bucket;
@@ -286,15 +318,67 @@ function updateAssetSelection(assetId, selection) {
       selected_at: selection?.selected_at || new Date().toISOString(),
     };
   state.assets.items = state.assets.items.map((item) => item.id === assetId ? { ...item, ...patch } : item);
-  if (state.inspector?.type === 'asset' && state.inspector.id === assetId) {
-    state.inspector.data = { ...state.inspector.data, ...patch };
-    if (state.inspector.detail?.asset) {
-      state.inspector.detail = {
-        ...state.inspector.detail,
-        asset: { ...state.inspector.detail.asset, ...patch },
+  if (state.compareAssetsById[assetId]) {
+    state.compareAssetsById[assetId] = { ...state.compareAssetsById[assetId], ...patch };
+  }
+  if (state.drawer?.type === 'asset' && state.drawer.id === assetId) {
+    state.drawer.data = { ...state.drawer.data, ...patch };
+    if (state.drawer.detail?.asset) {
+      state.drawer.detail = {
+        ...state.drawer.detail,
+        asset: { ...state.drawer.detail.asset, ...patch },
       };
     }
   }
+}
+
+function cacheCompareAsset(asset) {
+  if (!asset?.id) return;
+  state.compareAssetsById[asset.id] = { ...state.compareAssetsById[asset.id], ...asset };
+}
+
+function assetSnapshotById(id) {
+  return state.assets.items.find((asset) => asset.id === id) || state.compareAssetsById[id] || null;
+}
+
+function selectorValue(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function drawerFocusSelector(trigger) {
+  if (!trigger?.dataset) return null;
+  if (trigger.dataset.openSummary !== undefined) return '[data-open-summary]';
+  const map = [
+    ['asset', 'data-asset'],
+    ['run', 'data-run'],
+    ['issue', 'data-issue'],
+    ['prompt', 'data-prompt'],
+    ['job', 'data-job'],
+    ['event', 'data-event'],
+    ['export', 'data-export'],
+  ];
+  const match = map.find(([key]) => trigger.dataset[key] !== undefined);
+  return match ? `[${match[1]}="${selectorValue(trigger.dataset[match[0]])}"]` : null;
+}
+
+function syncPromptFocus() {
+  if (!state.prompts.items.length) {
+    state.promptFocusId = null;
+    state.expandedPrompt = false;
+    if (state.drawer.open && state.drawer.type === 'prompt') resetDrawer('prompt_empty');
+    return null;
+  }
+  const current = state.prompts.items.find((prompt) => prompt.id === state.promptFocusId);
+  if (current) {
+    if (state.drawer.open && state.drawer.type === 'prompt' && state.drawer.id === current.id) {
+      state.drawer.data = current;
+    }
+    return current;
+  }
+  state.promptFocusId = state.prompts.items[0].id;
+  state.expandedPrompt = false;
+  if (state.drawer.open && state.drawer.type === 'prompt') resetDrawer('prompt_focus_reset');
+  return state.prompts.items[0];
 }
 
 function toggleBulkAsset(assetId) {
@@ -303,11 +387,40 @@ function toggleBulkAsset(assetId) {
     : [...state.bulkAssetIds, assetId];
 }
 
+function addCompareIds(ids) {
+  const added = [];
+  let duplicateSkipped = 0;
+  let capacitySkipped = 0;
+  for (const id of ids) {
+    if (state.compareIds.includes(id) || added.includes(id)) {
+      duplicateSkipped += 1;
+      continue;
+    }
+    if (state.compareIds.length + added.length >= 9) {
+      capacitySkipped += 1;
+      continue;
+    }
+    cacheCompareAsset(assetSnapshotById(id));
+    added.push(id);
+  }
+  state.compareIds = [...state.compareIds, ...added];
+  return {
+    added,
+    skipped: duplicateSkipped + capacitySkipped,
+    duplicateSkipped,
+    capacitySkipped,
+    full: state.compareIds.length >= 9,
+  };
+}
+
 function setHead(eyebrow, title, subtitle, controls = '') {
   $('pageEyebrow').textContent = eyebrow;
   $('pageTitle').textContent = title;
   $('pageSubtitle').textContent = subtitle;
-  $('pageControls').innerHTML = controls;
+  $('pageControls').innerHTML = `
+    ${controls}
+    <button class="secondary-button inspector-button" data-open-summary type="button" aria-haspopup="dialog">检查器</button>
+  `;
 }
 
 function segmented(name, current, items) {
@@ -354,7 +467,7 @@ function assetThumb(asset) {
 
 function assetCard(asset, compact = false) {
   const inCompare = state.compareIds.includes(asset.id);
-  const active = state.inspector?.page === state.page && state.inspector?.type === 'asset' && state.inspector.id === asset.id;
+  const active = state.drawer?.page === state.page && state.drawer?.type === 'asset' && state.drawer.id === asset.id;
   const bulkChecked = state.bulkAssetIds.includes(asset.id);
   const selectState = selectionState(asset);
   return `
@@ -619,13 +732,12 @@ function renderIssues() {
 }
 
 function renderPrompts() {
-  if (!state.promptFocusId && state.prompts.items.length) state.promptFocusId = state.prompts.items[0].id;
-  const active = state.prompts.items.find((prompt) => prompt.id === state.promptFocusId) || state.prompts.items[0];
+  const active = syncPromptFocus();
   const runOptions = state.runs.items.map((run) => `<option value="${escapeHtml(run.id)}" ${state.runFilter === run.id ? 'selected' : ''}>${escapeHtml(run.title || run.id)}</option>`).join('');
   const promptText = active?.prompt_text || '暂无提示词。';
   const shouldClamp = promptText.length > 900 && !state.expandedPrompt;
   setHead('Prompt Lab', '提示词实验室', `搜索、复制、派生补跑，已加载 ${formatNumber(state.prompts.items.length)}/${formatNumber(state.prompts.total || state.prompts.items.length)}。`, `
-    <label class="field" style="min-width:220px">任务
+    <label class="field prompt-run-filter">任务
       <select data-run-filter>
         <option value="all" ${state.runFilter === 'all' ? 'selected' : ''}>全部任务</option>
         ${runOptions}
@@ -635,33 +747,43 @@ function renderPrompts() {
   $('view').innerHTML = `
     ${bucketNotice(state.prompts)}
     <section class="prompt-lab">
-      <div class="prompt-list">
-        ${state.prompts.items.map((prompt) => `
-          <button class="prompt-card ${active?.id === prompt.id ? 'active' : ''}" data-prompt="${escapeHtml(prompt.id)}" type="button">
-            <div class="prompt-title">${escapeHtml(prompt.title || `Prompt ${prompt.prompt_index || ''}`)}</div>
-            <div class="prompt-meta"><span>${escapeHtml(prompt.prompt_index || '-')}</span><span>${escapeHtml(formatTime(prompt.updated_at))}</span></div>
-          </button>
-        `).join('') || emptyState('还没有提示词', '准备阶段会写入提示词。')}
-        ${moreButton(state.prompts, 'prompts')}
-      </div>
-      <div class="prompt-preview surface-card">
+      <aside class="prompt-list-panel surface-card">
         <div class="section-head">
-          <div><h2>${escapeHtml(active?.title || '提示词预览')}</h2><p>${escapeHtml(active?.id || '-')}</p></div>
+          <div><h2>提示词列表</h2><p>${formatNumber(state.prompts.items.length)} 条已载入。</p></div>
+        </div>
+        <div class="prompt-list">
+          ${state.prompts.items.map((prompt) => `
+            <button class="prompt-card ${active?.id === prompt.id ? 'active' : ''}" data-prompt="${escapeHtml(prompt.id)}" type="button" aria-pressed="${active?.id === prompt.id ? 'true' : 'false'}">
+              <div class="prompt-title">${escapeHtml(prompt.title || `Prompt ${prompt.prompt_index || ''}`)}</div>
+              <div class="prompt-meta"><span>${escapeHtml(prompt.prompt_index || '-')}</span><span>${escapeHtml(formatTime(prompt.updated_at))}</span></div>
+            </button>
+          `).join('') || emptyState('还没有提示词', '准备阶段会写入提示词。')}
+          ${moreButton(state.prompts, 'prompts')}
+        </div>
+      </aside>
+      <div class="prompt-workspace">
+        <div class="prompt-toolbar surface-card">
+          <div class="prompt-current">
+            <h2>${escapeHtml(active?.title || '提示词预览')}</h2>
+            <p>${escapeHtml(active?.id || '-')}</p>
+          </div>
           <div class="toolbar-actions">
             <button class="small-button" data-copy="${escapeHtml(active?.id || '')}" type="button" ${active ? '' : 'disabled'}>${state.copiedPromptId === active?.id ? '已复制' : '复制'}</button>
             <button class="small-button" data-toggle-prompt type="button" ${active ? '' : 'disabled'}>${state.expandedPrompt ? '收起' : '展开'}</button>
             <button class="small-button" data-rerun-prompt="${escapeHtml(active?.id || '')}" type="button" ${active ? '' : 'disabled'}>补跑</button>
           </div>
         </div>
-        <div class="prompt-text ${shouldClamp ? 'is-clamped' : ''}">${highlightQuery(promptText)}</div>
-      </div>
-      <aside class="prompt-side surface-card">
-        <div class="section-head"><div><h2>参数与关联</h2><p>运行输入摘要。</p></div></div>
-        <div class="detail">
-          ${detailRows(active || {}, [['run_id', '任务'], ['prompt_index', '编号'], ['negative_prompt', '负向提示词'], ['source_path', '来源路径']])}
-          <div class="detail-row"><div class="detail-label">参数</div><div class="detail-value">${escapeHtml(JSON.stringify(active?.params || {}, null, 2))}</div></div>
+        <div class="prompt-preview surface-card">
+          <div class="prompt-text ${shouldClamp ? 'is-clamped' : ''}">${highlightQuery(promptText)}</div>
         </div>
-      </aside>
+        <section class="prompt-meta-panel surface-card">
+          <div class="section-head"><div><h2>参数与关联</h2><p>运行输入摘要。</p></div></div>
+          <div class="prompt-meta-grid">
+            ${detailRows(active || {}, [['run_id', '任务'], ['prompt_index', '编号'], ['negative_prompt', '负向提示词'], ['source_path', '来源路径']])}
+          </div>
+          <pre class="code-block prompt-params">${escapeHtml(JSON.stringify(active?.params || {}, null, 2))}</pre>
+        </section>
+      </div>
     </section>
   `;
 }
@@ -676,7 +798,7 @@ function highlightQuery(text) {
 
 function renderCompare() {
   setHead('Review', '对比视图', '支持 2、4、9 张图一起看，固定画幅避免跳动。', '');
-  const assets = state.compareIds.map((id) => state.assets.items.find((asset) => asset.id === id)).filter(Boolean).slice(0, 9);
+  const assets = state.compareIds.map((id) => assetSnapshotById(id)).filter(Boolean).slice(0, 9);
   $('view').innerHTML = assets.length ? `
     <div class="compare-grid count-${Math.min(assets.length, 9)}">
       ${assets.map((asset) => `
@@ -703,7 +825,7 @@ function renderExports() {
   const packReady = state.exports.some((item) => item.kind === 'pack' && item.status === 'ready');
   $('view').innerHTML = `
     ${errorNotice(state.exportsError)}
-    <section class="export-grid">
+    <section class="export-layout">
       <div class="export-card">
         <div class="section-head"><div><h2>交付前检查</h2><p>${formatNumber(selected)} 个已选资产，${formatNumber(openIssues)} 个未处理问题。</p></div></div>
         <div class="delivery-checklist">
@@ -724,20 +846,36 @@ function renderExports() {
           </div>
         </div>
       </div>
-      <div class="export-card">
+      <div class="export-card export-history">
         <div class="section-head"><div><h2>最近导出</h2><p>报告、资产包清单、交付记录。</p></div></div>
-        <table class="table">
-          <thead><tr><th>名称</th><th>类型</th><th>状态</th><th>路径</th><th>时间</th></tr></thead>
+        <table class="table export-table">
+          <thead><tr><th>名称</th><th>类型</th><th>状态</th><th>路径</th><th>时间</th><th>操作</th></tr></thead>
           <tbody>${state.exports.map((item) => `
-            <tr>
-              <td>${escapeHtml(item.title || item.id)}</td>
+            <tr data-export="${escapeHtml(item.id)}" tabindex="0">
+              <td class="export-name">${escapeHtml(item.title || item.id)}</td>
               <td>${kindBadge(item.kind)}</td>
               <td>${badge(item.status)}</td>
-              <td>${escapeHtml(item.path || '-')}</td>
+              <td><code class="export-path">${escapeHtml(item.path || '-')}</code></td>
               <td>${escapeHtml(formatTime(item.updated_at || item.created_at))}</td>
+              <td><button class="small-button" data-export="${escapeHtml(item.id)}" type="button">详情</button></td>
             </tr>
-          `).join('') || '<tr><td colspan="5">还没有导出记录。</td></tr>'}</tbody>
+          `).join('') || '<tr><td colspan="6">还没有导出记录。</td></tr>'}</tbody>
         </table>
+        <div class="export-cards">
+          ${state.exports.map((item) => `
+            <article class="export-record-card" data-export="${escapeHtml(item.id)}" tabindex="0">
+              <div class="export-record-head">
+                <strong>${escapeHtml(item.title || item.id)}</strong>
+                <span>${kindBadge(item.kind)} ${badge(item.status)}</span>
+              </div>
+              <code class="export-path">${escapeHtml(item.path || '-')}</code>
+              <div class="export-record-actions">
+                <span>${escapeHtml(formatTime(item.updated_at || item.created_at))}</span>
+                <button class="small-button" data-export="${escapeHtml(item.id)}" type="button">详情</button>
+              </div>
+            </article>
+          `).join('') || emptyState('还没有导出记录', '生成报告或资产包后显示。')}
+        </div>
       </div>
     </section>
   `;
@@ -758,9 +896,10 @@ function formatDetailValue(value) {
   return value;
 }
 
-function renderAssetInspector(detail) {
+function renderAssetDrawer(detail) {
   const asset = detail.asset;
-  setInspector('asset', asset.id, asset, detail);
+  cacheCompareAsset(asset);
+  setDrawer('asset', asset.id, asset, detail);
   render();
 }
 
@@ -793,7 +932,7 @@ function assetInspectorHtml(detail) {
   `;
 }
 
-function renderDefaultInspector() {
+function renderDefaultDrawer() {
   const counts = state.project?.counts || {};
   const activeJob = state.jobs.items.find((job) => ['queued', 'running', 'failed'].includes(job.status));
   const lastEvent = state.events.items[0];
@@ -886,7 +1025,9 @@ function renderDefaultInspector() {
     },
   };
   const model = defaults[state.page] || defaults.dashboard;
-  $('inspector').innerHTML = `
+  $('drawerTitle').textContent = drawerSummaryTitleForPage(state.page);
+  $('drawerEyebrow').textContent = 'Context';
+  $('drawerBody').innerHTML = `
     <div class="inspector-empty">
       <strong>${escapeHtml(model.title)}</strong>
       ${escapeHtml(model.subtitle)}
@@ -902,7 +1043,44 @@ function renderDefaultInspector() {
   `;
 }
 
-function genericInspectorHtml(item, type) {
+function drawerSummaryTitleForPage(page) {
+  return {
+    dashboard: '项目检查器',
+    runs: '任务检查器',
+    assets: '资产检查器',
+    issues: '问题检查器',
+    prompts: '提示词检查器',
+    compare: '资产检查器',
+    exports: '交付检查器',
+  }[page] || '项目检查器';
+}
+
+function drawerTitleFor(type) {
+  return {
+    overview: '项目检查器',
+    run: '任务检查器',
+    asset: '资产检查器',
+    issue: '问题检查器',
+    prompt: '提示词检查器',
+    export: '交付检查器',
+    job: '任务检查器',
+    event: '事件检查器',
+  }[type] || '项目检查器';
+}
+
+function setDrawerBody(html, type = state.drawer.type) {
+  $('drawerTitle').textContent = drawerTitleFor(type);
+  $('drawerEyebrow').textContent = NAV_ITEMS.find((item) => item.id === state.page)?.label || 'Context';
+  $('drawerBody').innerHTML = html;
+}
+
+function focusDrawerCloseIfNeeded() {
+  if (!shouldFocusDrawerClose) return;
+  shouldFocusDrawerClose = false;
+  window.setTimeout(() => $('drawerClose')?.focus(), 0);
+}
+
+function genericDrawerHtml(item, type) {
   const title = item.title || item.name || item.kind || item.id;
   const typeLabel = {
     run: '任务详情',
@@ -935,31 +1113,37 @@ function genericInspectorHtml(item, type) {
   `;
 }
 
-function renderCurrentInspector() {
-  syncInspectorToPage();
-  if (state.inspector.type === 'asset' && state.inspector.detail?.asset) {
-    $('inspector').innerHTML = assetInspectorHtml(state.inspector.detail);
+function renderCurrentDrawer() {
+  syncDrawerToPage();
+  $('drawerLayer').classList.toggle('open', Boolean(state.drawer.open));
+  $('drawerLayer').setAttribute('aria-hidden', state.drawer.open ? 'false' : 'true');
+  if (!state.drawer.open) return;
+  if (state.drawer.type === 'asset' && state.drawer.detail?.asset) {
+    setDrawerBody(assetInspectorHtml(state.drawer.detail), 'asset');
+    focusDrawerCloseIfNeeded();
     return;
   }
-  if (state.inspector.type !== 'overview' && state.inspector.data) {
-    $('inspector').innerHTML = genericInspectorHtml(state.inspector.data, state.inspector.type);
+  if (state.drawer.type !== 'overview' && state.drawer.data) {
+    setDrawerBody(genericDrawerHtml(state.drawer.data, state.drawer.type), state.drawer.type);
+    focusDrawerCloseIfNeeded();
     return;
   }
-  renderDefaultInspector();
+  renderDefaultDrawer();
+  focusDrawerCloseIfNeeded();
 }
 
-function setGenericInspector(item, type) {
+function setGenericDrawer(item, type) {
   if (!item) {
-    resetInspector('empty_selection');
+    resetDrawer('empty_selection');
     render();
     return;
   }
-  setInspector(type, item.id, item);
+  setDrawer(type, item.id, item);
   render();
 }
 
 function renderInspector(item, type) {
-  setGenericInspector(item, type);
+  setGenericDrawer(item, type);
 }
 
 function renderEvents() {
@@ -982,7 +1166,7 @@ function render() {
     setHead('Local asset OS', '生产总览', '读取本地数据库状态中。', '');
     $('view').innerHTML = `<section class="metric-grid">${skeletonCards(5)}</section><div class="grid">${skeletonCards(8)}</div>`;
     renderEvents();
-    renderCurrentInspector();
+    renderCurrentDrawer();
     return;
   }
   if (state.page === 'dashboard') renderDashboard();
@@ -993,7 +1177,7 @@ function render() {
   if (state.page === 'compare') renderCompare();
   if (state.page === 'exports') renderExports();
   renderEvents();
-  renderCurrentInspector();
+  renderCurrentDrawer();
 }
 
 async function loadCurrent(reset = true) {
@@ -1010,6 +1194,7 @@ async function loadCurrent(reset = true) {
     await loadPaged('issues', '/api/issues', { q: state.query, status: state.status }, reset);
   } else if (state.page === 'prompts') {
     await loadPaged('prompts', '/api/prompts', { q: state.query, run_id: state.runFilter }, reset);
+    syncPromptFocus();
   } else if (state.page === 'exports') {
     state.exportsError = null;
     try {
@@ -1104,12 +1289,20 @@ async function fetchOpenIssueIds() {
   return ids;
 }
 
+async function ensureCompareAssets() {
+  const missing = state.compareIds.filter((id) => !assetSnapshotById(id));
+  await Promise.all(missing.map((id) => api(`/api/assets/${encodeURIComponent(id)}`).then((detail) => {
+    cacheCompareAsset(detail.asset);
+  }).catch(() => null)));
+}
+
 async function selectPage(page) {
   state.page = page;
   state.status = 'all';
   state.sidebarOpen = false;
-  resetInspector('page_change');
+  resetDrawer('page_change');
   if (page === 'compare' && !state.assets.items.length) await loadPaged('assets', '/api/assets', {}, true);
+  if (page === 'compare') await ensureCompareAssets();
   await reloadAndRender(true);
 }
 
@@ -1124,7 +1317,7 @@ async function markAssetSelection(assetId, nextState) {
 
 async function runExport(kind) {
   if (state.exportBusy) return;
-  resetInspector('export_busy');
+  resetDrawer('export_busy');
   state.exportBusy = kind;
   state.exportResult = null;
   render();
@@ -1133,7 +1326,7 @@ async function runExport(kind) {
     state.exportResult = { kind, path: result.path, selected: result.selected };
     toast(kind === 'pack' ? '资产包清单已生成' : '工作台报告已生成', result.path || '');
     await refreshAll();
-    resetInspector('export_done');
+    resetDrawer('export_done');
   } finally {
     state.exportBusy = null;
     render();
@@ -1141,9 +1334,26 @@ async function runExport(kind) {
 }
 
 document.addEventListener('click', handleAsync(async (event) => {
+  const drawerTrigger = event.target.closest('[data-open-summary], [data-asset], [data-run], [data-issue], [data-prompt], [data-job], [data-event], [data-export]');
+  if (drawerTrigger && typeof drawerTrigger.focus === 'function') {
+    drawerReturnFocus = drawerTrigger;
+    drawerReturnFocusSelector = drawerFocusSelector(drawerTrigger);
+  }
+
   const page = event.target.closest('[data-page]')?.dataset.page;
   if (page) {
     await selectPage(page);
+    return;
+  }
+
+  if (event.target.closest('[data-close-drawer]')) {
+    closeDrawer();
+    return;
+  }
+
+  if (event.target.closest('[data-open-summary]')) {
+    openSummaryDrawer();
+    render();
     return;
   }
 
@@ -1156,7 +1366,7 @@ document.addEventListener('click', handleAsync(async (event) => {
   const filter = event.target.closest('[data-filter]')?.dataset.filter;
   if (filter) {
     state.status = filter;
-    resetInspector('filter_change');
+    resetDrawer('filter_change');
     await reloadAndRender(true);
     return;
   }
@@ -1164,7 +1374,7 @@ document.addEventListener('click', handleAsync(async (event) => {
   const viewMode = event.target.closest('[data-asset-view]')?.dataset.assetView;
   if (viewMode) {
     state.assetView = viewMode;
-    resetInspector('view_change');
+    resetDrawer('view_change');
     render();
     return;
   }
@@ -1172,7 +1382,7 @@ document.addEventListener('click', handleAsync(async (event) => {
   if (event.target.closest('[data-bulk-mode]')) {
     state.bulkMode = !state.bulkMode;
     if (!state.bulkMode) state.bulkAssetIds = [];
-    resetInspector(state.bulkMode ? 'bulk_mode' : 'bulk_exit');
+    resetDrawer(state.bulkMode ? 'bulk_mode' : 'bulk_exit');
     render();
     return;
   }
@@ -1189,19 +1399,28 @@ document.addEventListener('click', handleAsync(async (event) => {
     const ids = [...state.bulkAssetIds];
     if (bulkAction === 'clear') {
       state.bulkAssetIds = [];
-      resetInspector('bulk_clear');
+      resetDrawer('bulk_clear');
       render();
       return;
     }
     if (bulkAction === 'compare') {
-      state.compareIds = [...new Set([...state.compareIds, ...ids])].slice(0, 9);
-      toast('已加入对比', `${ids.length} 个资产`);
+      const result = addCompareIds(ids);
+      if (!result.added.length) {
+        toast(
+          result.capacitySkipped ? '最多对比 9 张' : '未新增对比资产',
+          result.capacitySkipped ? '请先移除一张再加入。' : `${result.duplicateSkipped} 个资产已在对比中。`
+        );
+      } else if (result.skipped) {
+        toast('已部分加入对比', `新增 ${result.added.length} 个，已跳过 ${result.skipped} 个。`);
+      } else {
+        toast('已加入对比', `${result.added.length} 个资产`);
+      }
       render();
       return;
     }
     await Promise.all(ids.map((id) => markAssetSelection(id, bulkAction)));
     toast(bulkAction === 'selected' ? '已批量标记已选' : '已批量标记不采用', `${ids.length} 个资产`);
-    resetInspector('bulk_done');
+    resetDrawer('bulk_done');
     await reloadAndRender(true);
     return;
   }
@@ -1214,10 +1433,18 @@ document.addEventListener('click', handleAsync(async (event) => {
 
   const compareId = event.target.closest('[data-compare-toggle]')?.dataset.compareToggle;
   if (compareId) {
-    state.compareIds = state.compareIds.includes(compareId)
-      ? state.compareIds.filter((id) => id !== compareId)
-      : [...state.compareIds, compareId].slice(0, 9);
-    toast(state.compareIds.includes(compareId) ? '已加入对比' : '已移出对比');
+    if (state.compareIds.includes(compareId)) {
+      state.compareIds = state.compareIds.filter((id) => id !== compareId);
+      toast('已移出对比');
+      render();
+      return;
+    }
+    if (state.compareIds.length >= 9) {
+      toast('最多对比 9 张', '请先移除一张再加入。');
+      return;
+    }
+    addCompareIds([compareId]);
+    toast('已加入对比');
     render();
     return;
   }
@@ -1226,7 +1453,7 @@ document.addEventListener('click', handleAsync(async (event) => {
   if (resolveId) {
     await api(`/api/issues/${encodeURIComponent(resolveId)}/resolve`, { method: 'POST' });
     state.issues.items = state.issues.items.map((issue) => issue.id === resolveId ? { ...issue, status: 'resolved', resolved_at: new Date().toISOString() } : issue);
-    if (state.inspector?.type === 'issue' && state.inspector.id === resolveId) resetInspector('issue_resolved');
+    if (state.drawer?.type === 'issue' && state.drawer.id === resolveId) resetDrawer('issue_resolved');
     await refreshProject();
     toast('问题已处理');
     render();
@@ -1247,7 +1474,7 @@ document.addEventListener('click', handleAsync(async (event) => {
     await markAssetSelection(selectId, 'selected');
     toast('资产已选择');
     await refreshAll();
-    renderAssetInspector(await api(`/api/assets/${encodeURIComponent(selectId)}`));
+    renderAssetDrawer(await api(`/api/assets/${encodeURIComponent(selectId)}`));
     return;
   }
 
@@ -1256,7 +1483,7 @@ document.addEventListener('click', handleAsync(async (event) => {
     await markAssetSelection(rejectId, 'rejected');
     toast('资产已标记不采用');
     await refreshAll();
-    renderAssetInspector(await api(`/api/assets/${encodeURIComponent(rejectId)}`));
+    renderAssetDrawer(await api(`/api/assets/${encodeURIComponent(rejectId)}`));
     return;
   }
 
@@ -1266,7 +1493,7 @@ document.addEventListener('click', handleAsync(async (event) => {
     updateAssetSelection(clearSelectionId, selection);
     toast('资产已恢复待选择');
     await refreshAll();
-    renderAssetInspector(await api(`/api/assets/${encodeURIComponent(clearSelectionId)}`));
+    renderAssetDrawer(await api(`/api/assets/${encodeURIComponent(clearSelectionId)}`));
     return;
   }
 
@@ -1306,7 +1533,7 @@ document.addEventListener('click', handleAsync(async (event) => {
 
   const assetId = event.target.closest('[data-asset]')?.dataset.asset;
   if (assetId) {
-    renderAssetInspector(await api(`/api/assets/${encodeURIComponent(assetId)}`));
+    renderAssetDrawer(await api(`/api/assets/${encodeURIComponent(assetId)}`));
     return;
   }
 
@@ -1339,12 +1566,23 @@ document.addEventListener('click', handleAsync(async (event) => {
   const eventId = event.target.closest('[data-event]')?.dataset.event;
   if (eventId) {
     renderInspector(state.events.items.find((item) => item.id === eventId), 'event');
+    return;
+  }
+
+  const exportId = event.target.closest('[data-export]')?.dataset.export;
+  if (exportId) {
+    renderInspector(state.exports.find((item) => item.id === exportId), 'export');
   }
 }));
 
 document.addEventListener('keydown', handleAsync(async (event) => {
+  if (event.key === 'Escape' && state.drawer.open) {
+    event.preventDefault();
+    closeDrawer();
+    return;
+  }
   if (event.key !== 'Enter' && event.key !== ' ') return;
-  const actionable = event.target.closest('[data-asset], [data-run], [data-issue]');
+  const actionable = event.target.closest('[data-asset], [data-run], [data-issue], [data-prompt], [data-export]');
   if (!actionable || event.target.closest('button, input, textarea, select')) return;
   event.preventDefault();
   actionable.click();
@@ -1359,21 +1597,21 @@ document.addEventListener('submit', handleAsync(async (event) => {
   await api(`/api/assets/${encodeURIComponent(assetId)}/tags`, { method: 'POST', body: JSON.stringify({ name: tag }) });
   form.reset();
   toast('标签已添加');
-  renderAssetInspector(await api(`/api/assets/${encodeURIComponent(assetId)}`));
+  renderAssetDrawer(await api(`/api/assets/${encodeURIComponent(assetId)}`));
 }));
 
 document.addEventListener('change', handleAsync(async (event) => {
   const assetField = event.target.closest('[data-asset-filter]')?.dataset.assetFilter;
   if (assetField) {
     state[assetField] = event.target.value;
-    resetInspector('asset_filter_change');
+    resetDrawer('asset_filter_change');
     await reloadAndRender(true);
     return;
   }
   if (event.target.closest('[data-run-filter]')) {
     state.runFilter = event.target.value;
     state.promptFocusId = null;
-    resetInspector('prompt_filter_change');
+    resetDrawer('prompt_filter_change');
     await reloadAndRender(true);
   }
 }));
@@ -1381,7 +1619,7 @@ document.addEventListener('change', handleAsync(async (event) => {
 let searchTimer = null;
 $('globalSearch').addEventListener('input', (event) => {
   state.query = event.target.value;
-  resetInspector('search');
+  resetDrawer('search');
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => reloadAndRender(true).catch(showError), 220);
 });
@@ -1392,7 +1630,7 @@ $('menuButton').addEventListener('click', () => {
 });
 
 $('refreshButton').addEventListener('click', handleAsync(async () => {
-  resetInspector('refresh');
+  resetDrawer('refresh');
   await refreshAll();
   toast('已刷新');
 }));
@@ -1410,7 +1648,7 @@ $('rerunButton').addEventListener('click', handleAsync(async () => {
 
 $('exportButton').addEventListener('click', handleAsync(async () => {
   state.page = 'exports';
-  resetInspector('command_export');
+  resetDrawer('command_export');
   await runExport('report');
 }));
 
