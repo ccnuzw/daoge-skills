@@ -8,6 +8,94 @@ const {
   fileToDataUrl,
 } = require('../domain/run_item');
 
+const MAX_RESPONSE_TEXT_BYTES = 128 * 1024 * 1024;
+const MAX_REFERENCE_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_REFERENCE_TOTAL_BYTES = 200 * 1024 * 1024;
+const MAX_RESPONSES_REFERENCE_TOTAL_BYTES = 32 * 1024 * 1024;
+
+function byteLimitLabel(bytes) {
+  if (bytes < 1024 * 1024) return `${bytes}B`;
+  return `${Math.round(bytes / 1024 / 1024)}MB`;
+}
+
+function getContentLength(res) {
+  const raw = res.headers?.get?.('content-length');
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+async function readResponseText(res, label, maxBytes = MAX_RESPONSE_TEXT_BYTES) {
+  const contentLength = getContentLength(res);
+  if (contentLength !== null && contentLength > maxBytes) {
+    throw new Error(`${label} response too large: ${byteLimitLabel(contentLength)} exceeds ${byteLimitLabel(maxBytes)}. Use smaller output or provider streaming path.`);
+  }
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    const text = await res.text();
+    const bytes = Buffer.byteLength(text);
+    if (bytes > maxBytes) {
+      throw new Error(`${label} response too large: ${byteLimitLabel(bytes)} exceeds ${byteLimitLabel(maxBytes)}. Use smaller output or provider streaming path.`);
+    }
+    return text;
+  }
+
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = value instanceof Uint8Array ? value : Buffer.from(value);
+    totalBytes += chunk.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel?.();
+      throw new Error(`${label} response too large: ${byteLimitLabel(totalBytes)} exceeds ${byteLimitLabel(maxBytes)}. Use smaller output or provider streaming path.`);
+    }
+    text += decoder.decode(chunk, { stream: true });
+  }
+  text += decoder.decode();
+  return text;
+}
+
+function assertImageFileWithinLimit(filePath, label = 'reference image') {
+  const absolutePath = path.resolve(filePath);
+  let stat;
+  try {
+    stat = fs.statSync(absolutePath);
+  } catch {
+    throw new Error(`reference file not found: ${absolutePath}`);
+  }
+  if (!stat.isFile()) throw new Error(`reference file not found: ${absolutePath}`);
+  if (stat.size > MAX_REFERENCE_FILE_BYTES) {
+    throw new Error(`${label} too large: ${absolutePath} is ${byteLimitLabel(stat.size)}, max ${byteLimitLabel(MAX_REFERENCE_FILE_BYTES)}`);
+  }
+  return { absolutePath, size: stat.size };
+}
+
+function assertReferenceImagesWithinLimit(referenceImages = [], maskImage = null) {
+  let total = 0;
+  referenceImages.forEach((imagePath) => {
+    total += assertImageFileWithinLimit(imagePath, 'reference image').size;
+  });
+  if (maskImage) {
+    total += assertImageFileWithinLimit(maskImage, 'mask image').size;
+  }
+  if (total > MAX_REFERENCE_TOTAL_BYTES) {
+    throw new Error(`reference files too large: total ${byteLimitLabel(total)} exceeds ${byteLimitLabel(MAX_REFERENCE_TOTAL_BYTES)}`);
+  }
+}
+
+function assertResponsesReferenceImagesWithinLimit(referenceImages = []) {
+  let total = 0;
+  referenceImages.forEach((imagePath) => {
+    total += assertImageFileWithinLimit(imagePath, 'reference image').size;
+  });
+  if (total > MAX_RESPONSES_REFERENCE_TOTAL_BYTES) {
+    throw new Error(`responses reference files too large: total ${byteLimitLabel(total)} exceeds ${byteLimitLabel(MAX_RESPONSES_REFERENCE_TOTAL_BYTES)}`);
+  }
+}
+
 function supportsResponsesReferenceMode(pathOverride, operationMode) {
   if (operationMode === 'masked-edit') return false;
   return /\/responses(?:\/|$)/i.test(String(pathOverride || '').trim());
@@ -135,8 +223,7 @@ function extractImagePayload(json) {
 }
 
 function appendFileToForm(form, fieldName, filePath) {
-  const absolutePath = path.resolve(filePath);
-  if (!fs.existsSync(absolutePath)) throw new Error(`reference file not found: ${absolutePath}`);
+  const { absolutePath } = assertImageFileWithinLimit(filePath);
   const buffer = fs.readFileSync(absolutePath);
   const blob = new Blob([buffer], { type: detectMimeType(absolutePath) });
   form.append(fieldName, blob, path.basename(absolutePath));
@@ -171,7 +258,7 @@ async function requestImage({ baseUrl, apiKey, model, prompt, size, outputFormat
     throw new Error(`fetch failed for ${endpoint}: ${sanitize(error?.message || error)}`);
   }
 
-  const text = await res.text();
+  const text = await readResponseText(res, 'image generation');
   let json;
   try {
     json = JSON.parse(text);
@@ -240,7 +327,7 @@ async function requestResponsesImageGenerate({ baseUrl, apiKey, toolModel, respo
     throw new Error(`fetch failed for ${endpoint}: ${sanitize(error?.message || error)}`);
   }
 
-  const text = await res.text();
+  const text = await readResponseText(res, 'responses image generation');
   const payload = extractResponsesImagePayload(text);
   if (!res.ok) {
     throw new Error(`http ${res.status}: ${sanitize(payload.errorMessage || text.slice(0, 300) || 'responses image generation failed')}`);
@@ -258,6 +345,7 @@ async function requestResponsesImageGenerate({ baseUrl, apiKey, toolModel, respo
 }
 
 async function requestImageEdit({ baseUrl, apiKey, model, prompt, size, outputFormat, timeoutMs, referenceImages, maskImage, editPath }) {
+  assertReferenceImagesWithinLimit(referenceImages, maskImage);
   const endpoint = buildApiEndpoint(baseUrl, 'edits', {
     overridePath: resolveProviderPathOverride({
       baseUrl,
@@ -288,7 +376,7 @@ async function requestImageEdit({ baseUrl, apiKey, model, prompt, size, outputFo
     throw new Error(`fetch failed for ${endpoint}: ${sanitize(error?.message || error)}`);
   }
 
-  const text = await res.text();
+  const text = await readResponseText(res, 'image edit');
   let json;
   try {
     json = JSON.parse(text);
@@ -310,6 +398,7 @@ async function requestImageEdit({ baseUrl, apiKey, model, prompt, size, outputFo
 }
 
 async function requestResponsesImageEdit({ baseUrl, apiKey, toolModel, responsesModel, prompt, size, outputFormat, timeoutMs, referenceImages, editPath }) {
+  assertResponsesReferenceImagesWithinLimit(referenceImages);
   const endpoint = buildApiEndpoint(baseUrl, 'edits', {
     overridePath: resolveProviderPathOverride({
       baseUrl,
@@ -328,6 +417,7 @@ async function requestResponsesImageEdit({ baseUrl, apiKey, toolModel, responses
           { type: 'input_text', text: prompt },
           ...referenceImages.map((imagePath) => ({
             type: 'input_image',
+            // Responses 参考模式当前会在内存里构造 data URL，大批量场景需要后续流式重构。
             image_url: fileToDataUrl(imagePath),
           })),
         ],
@@ -361,7 +451,7 @@ async function requestResponsesImageEdit({ baseUrl, apiKey, toolModel, responses
     throw new Error(`fetch failed for ${endpoint}: ${sanitize(error?.message || error)}`);
   }
 
-  const text = await res.text();
+  const text = await readResponseText(res, 'responses image edit');
   const payload = extractResponsesImagePayload(text);
   if (!res.ok) {
     throw new Error(`http ${res.status}: ${sanitize(payload.errorMessage || text.slice(0, 300) || 'responses image edit failed')}`);
@@ -483,4 +573,7 @@ module.exports = {
   requestImageEdit,
   requestResponsesImageEdit,
   requestWithFallback,
+  readResponseText,
+  assertReferenceImagesWithinLimit,
+  assertResponsesReferenceImagesWithinLimit,
 };

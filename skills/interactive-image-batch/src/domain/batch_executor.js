@@ -1,4 +1,5 @@
 const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const {
@@ -121,7 +122,7 @@ async function generateOne(item, ctx) {
         });
       }
 
-      fs.writeFileSync(outputPath, Buffer.from(result.b64, 'base64'));
+      await fsp.writeFile(outputPath, Buffer.from(result.b64, 'base64'));
       const meta = {
         index,
         slug,
@@ -166,7 +167,7 @@ async function generateOne(item, ctx) {
         notes: item.notes || null,
         revisedPrompt: result.revisedPrompt,
       };
-      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+      await fsp.writeFile(metaPath, JSON.stringify(meta, null, 2));
       console.log(`[ok] ${fileBase} -> ${path.basename(outputPath)}`);
       return { ok: true, ...meta };
     } catch (error) {
@@ -217,7 +218,7 @@ async function generateOne(item, ctx) {
         notes: item.notes || null,
         error: message,
       };
-      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+      await fsp.writeFile(metaPath, JSON.stringify(meta, null, 2));
       return { ok: false, ...meta };
     }
   }
@@ -279,7 +280,7 @@ function buildContactSheet(outDir, successfulFiles) {
 async function runBatch(batchItems, batchContext) {
   const batchDir = path.join(batchContext.rootOutputDir, `batch_${String(batchContext.batchNumber).padStart(3, '0')}`);
   fs.mkdirSync(batchDir, { recursive: true });
-  fs.writeFileSync(path.join(batchDir, 'prompts.generated.json'), JSON.stringify(batchItems, null, 2));
+  await fsp.writeFile(path.join(batchDir, 'prompts.generated.json'), JSON.stringify(batchItems, null, 2));
 
   console.log(`[batch] ${batchContext.batchNumber}/${batchContext.totalBatches} -> ${batchDir}`);
   const results = await runPool(batchItems, batchContext.concurrency, (item, index) => generateOne(item, {
@@ -310,7 +311,7 @@ async function runBatch(batchItems, batchContext) {
     skipped: results.filter((item) => item.skipped).length,
     results,
   };
-  fs.writeFileSync(path.join(batchDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  await fsp.writeFile(path.join(batchDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   return { batchDir, manifest };
 }
 
