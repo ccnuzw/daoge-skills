@@ -13,6 +13,7 @@ test('npm package publishes runtime files and excludes tests, reports and catalo
   const [pack] = JSON.parse(output);
   const files = pack.files.map((item) => item.path);
   assert.equal(files.includes('src/cli/daoge.js'), true);
+  assert.equal(files.includes('app/index.html'), true);
   assert.equal(files.includes('scripts/daoge.js'), true);
   assert.equal(files.includes('.env.example'), true);
   assert.equal(files.includes('README.md'), true);

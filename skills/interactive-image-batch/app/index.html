@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAOGE 工作台</title>
+  <link rel="stylesheet" href="/styles/workbench.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <div class="brand-mark">D</div>
+        <div>
+          <div class="brand-name">DAOGE</div>
+          <div class="brand-subtitle">批量生图资产台</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav"></nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span>
+          <input id="globalSearch" type="search" placeholder="搜索资产、提示词、问题" autocomplete="off">
+        </div>
+        <div class="top-actions">
+          <span class="status-dot" id="healthDot"></span>
+          <button class="ghost-button" id="rerunButton" type="button">创建补跑</button>
+          <button class="primary-button" id="exportButton" type="button">导出报告</button>
+        </div>
+      </header>
+
+      <section class="content">
+        <section class="workspace">
+          <div class="page-head">
+            <div>
+              <h1 id="pageTitle">总览</h1>
+              <p id="pageSubtitle">读取项目状态中</p>
+            </div>
+            <div class="segment" id="statusFilters" aria-label="状态筛选"></div>
+          </div>
+          <div id="view" class="view"></div>
+        </section>
+
+        <aside class="inspector" id="inspector">
+          <div class="inspector-empty">选择资产、任务或问题后查看详情。</div>
+        </aside>
+      </section>
+
+      <footer class="jobbar">
+        <div id="jobSummary">队列空闲</div>
+        <div id="eventLog" class="event-log"></div>
+      </footer>
+    </main>
+  </div>
+  <script src="/src/workbench.js"></script>
+</body>
+</html>

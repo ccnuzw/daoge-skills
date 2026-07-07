@@ -13,6 +13,7 @@ const {
 const { refreshWorkspace } = require('./workspace_service');
 const { buildGeneratedPrompts } = require('./prompt_builder');
 const { normalizePromptMaterials } = require('./material_resolver');
+const { syncWorkspaceToDbIfAvailable } = require('../db/sync');
 
 function buildBatchPlan(prompts, batchSize) {
   const size = Math.max(1, Number(batchSize || prompts.length || 1));
@@ -97,10 +98,17 @@ function prepareTask(options = {}) {
     materialsFile: options.taskSpecFile,
     intent: options.intent,
   });
+  const dbSync = syncWorkspaceToDbIfAvailable(outputDir, {
+    snapshotPrefix: 'run_prepare',
+    manifestFile: manifestPath,
+    phase: 'prepare',
+  });
 
   return {
     outputDir,
     workspaceIndex: workspace.workspaceIndex,
+    database: dbSync.dbPath || null,
+    dbWarning: dbSync.dbWarning || null,
     validation: validationReport,
     batchPlan: batchPlanPath,
     promptsFile: promptCopy,

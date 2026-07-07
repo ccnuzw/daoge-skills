@@ -12,6 +12,7 @@ const { loadImageEnv } = require('../shared/env');
 const { runBatch } = require('./batch_executor');
 const { refreshWorkspace } = require('./workspace_service');
 const { normalizePromptMaterials } = require('./material_resolver');
+const { syncWorkspaceToDbIfAvailable } = require('../db/sync');
 
 function chunk(items, size) {
   const out = [];
@@ -332,10 +333,17 @@ async function executeTask(options = {}) {
     materialBaseDir: materialBaseDirFromRunPlan(outputDir) || (taskSpecFile ? path.dirname(path.resolve(taskSpecFile)) : null),
     materialsFile: taskSpecFile,
   });
+  const dbSync = syncWorkspaceToDbIfAvailable(outputDir, {
+    snapshotPrefix: options.resumeManifestFile ? 'run_rerun' : 'run_execute',
+    manifestFile: manifestPath,
+    phase: options.resumeManifestFile ? 'rerun' : 'execute',
+  });
 
   return {
     outputDir,
     workspaceIndex: workspace.workspaceIndex,
+    database: dbSync.dbPath || null,
+    dbWarning: dbSync.dbWarning || null,
     success: manifest.success,
     failed: manifest.failed,
     skipped: manifest.skipped,

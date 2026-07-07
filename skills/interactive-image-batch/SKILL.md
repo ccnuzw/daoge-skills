@@ -5,12 +5,12 @@ description: Interactive batch image generation for DAOGE / 刀哥. Use when the
 
 # Interactive image batch
 
-用户可见沟通默认使用中文。DAOGE 的职责是把对话里的生图需求变成可执行任务，并把结果整理成用户能理解的工作台。
+用户可见沟通默认使用中文。DAOGE 的职责是把对话里的生图需求变成可执行任务，并把结果整理进本地 Workbench。新主入口是 `node scripts/daoge.js open --output-dir out`，旧 `workspace/index.html` 只作为兼容静态页面和导出报告入口。
 
 ## 用户原则
 
 - 普通用户只需要知道：任务、当前阶段、下一步、结果、问题处理。
-- 普通用户入口始终是输出目录的 `workspace/index.html`。
+- 普通用户入口始终是 `node scripts/daoge.js open --output-dir out`。
 - 用户页面不解释工程概念，不展示内部文件名，不要求用户理解程序状态。
 - 有问题时先说明影响和建议动作，再给补跑或忽略选项。
 - 不从自然语言 brief 直接执行。先把 brief 写成 `task_spec.json`，再 `prepare`。
@@ -30,6 +30,10 @@ node scripts/daoge.js <command> [options]
 - `rerun`：基于上次结果只复跑失败项
 - `ingest`：回填宿主原生图像工具结果
 - `review`：从已有结果刷新工作台并进入复核视图
+- `init`：初始化本地项目目录、`daoge.db`、`assets/` 和 `snapshots/`
+- `open`：启动固定本地 Workbench UI 和 HTTP API
+- `projects` / `library`：登记和查看最近项目
+- `export report` / `export pack`：导出报告或已选资产清单
 - `catalog`：查询模板目录、类别、推荐模板和示例参数
 
 ## 常用路径
@@ -40,12 +44,14 @@ node scripts/daoge.js <command> [options]
 
 ```bash
 node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
-open out/workspace/index.html
+node scripts/daoge.js open --output-dir out
 ```
 
 期望文件：
 
 - `workspace/index.html`
+- `daoge.db`
+- `snapshots/run_*.json`
 - `debug/task_spec.normalized.json`
 - `debug/prompts.generated.json`
 - `internal/execution_manifest.json`
@@ -58,7 +64,7 @@ Dry-run 验流程：
 ```bash
 node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
 node scripts/daoge.js execute --output-dir out --dry-run true --batch-size 1
-open out/workspace/index.html
+node scripts/daoge.js open --output-dir out
 ```
 
 真实 provider 小样本：
@@ -66,7 +72,7 @@ open out/workspace/index.html
 ```bash
 node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
 node scripts/daoge.js execute --output-dir out --env-file .env --batch-size 1 --concurrency 1
-open out/workspace/results.html
+node scripts/daoge.js open --output-dir out
 ```
 
 ### 宿主接入路径
@@ -76,7 +82,7 @@ open out/workspace/results.html
 ```bash
 node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out
 node scripts/daoge.js ingest --results-file host_native_results.json --output-dir out
-open out/workspace/index.html
+node scripts/daoge.js open --output-dir out
 ```
 
 如宿主侧另有交接包，可额外传：
@@ -90,10 +96,10 @@ node scripts/daoge.js ingest \
 
 ### 失败恢复路径
 
-先看用户页面：
+先打开 Workbench：
 
 ```bash
-open out/workspace/issues.html
+node scripts/daoge.js open --output-dir out
 ```
 
 再看诊断文件：
@@ -124,12 +130,14 @@ node scripts/daoge.js rerun \
 
 ## 输出结构
 
-- `workspace/`：用户页面，只稳定暴露 `index.html`、`prepare.html`、`results.html`、`issues.html`、`record.html`
-- `assets/`：用户资产
+- `daoge.db`：主状态源，只存状态、索引、关系、事件和元数据
+- `assets/`：用户资产，图片二进制只存在文件系统
+- `snapshots/`：可审计 JSON 快照
+- `workspace/`：兼容静态页面，只稳定暴露 `index.html`、`prepare.html`、`results.html`、`issues.html`、`record.html`
 - `internal/`：机器状态和页面视图模型
 - `debug/`：维护诊断；用户排查常看 `debug/task_spec.normalized.json` 和 `debug/prompts.generated.json`
 
-`internal/workspace_state.json` 是唯一工作台状态源。页面只读 `internal/view_models/*.json`。
+`daoge.db` 是新 Workbench 主状态源。`internal/workspace_state.json` 和 `internal/view_models/*.json` 继续生成，用于兼容静态页面和排查。
 
 ## 故障排查
 
@@ -138,7 +146,7 @@ node scripts/daoge.js rerun \
 - 素材路径失败：看 `debug/prompts.generated.json` 和 `debug/task_spec.normalized.json`。
 - reference bindings 缺失：确认提示词里引用的参考图、遮罩、输入图存在。
 - host-native schema 错误：修 `host_native_results.json`，参考 `references/host_native_results.schema.json`。
-- workspace 输出为空：跑 `node scripts/daoge.js review --output-dir out`，再看 `workspace/index.html`。
+- Workbench 输出为空：跑 `node scripts/daoge.js review --output-dir out`，再跑 `node scripts/daoge.js open --output-dir out`。
 - prompt 不符合预期：改 `task_spec.json` 后重新 `prepare`。
 
 ## provider 契约
@@ -170,4 +178,4 @@ provider 只暴露：
 - 需要真实调用接口时，确认 `.env` 已按目标 provider 填好；OpenAI 用 `OPENAI_*`，Gemini 原生用 `GEMINI_IMAGE_*`，Gemini OpenAI-compatible 用 `GEMINI_OPENAI_*`，xAI/Grok 用 `XAI_IMAGE_*`。
 - 大批量建议先 `--dry-run true` 或小批量确认。
 - 失败复跑基于上次执行记录，不手工重建提示词子集。
-- 执行完成后先打开 `workspace/index.html`，再按页面主动作走。
+- 执行完成后先运行 `node scripts/daoge.js open --output-dir out`，再按 Workbench 主动作走。

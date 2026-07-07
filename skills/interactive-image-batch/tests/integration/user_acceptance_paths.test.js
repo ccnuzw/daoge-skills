@@ -131,13 +131,14 @@ function runScriptAsync(scriptName, args, options = {}) {
   });
 }
 
-test('README leads a new user to the first run command and workspace entry', () => {
+test('README leads a new user to the first run command and workbench entry', () => {
   const readme = fs.readFileSync(path.join(skillRoot, 'README.md'), 'utf8');
   assert.match(readme, /node scripts\/daoge\.js prepare --task-spec task_spec\.json --output-dir out/);
   assert.match(readme, /node scripts\/daoge\.js execute --output-dir out --env-file \.env/);
   assert.match(readme, /node scripts\/daoge\.js ingest --results-file host_native_results\.json --output-dir out/);
-  assert.match(readme, /open out\/workspace\/index\.html/);
-  assert.match(readme, /普通用户只需要记住一个页面入口/);
+  assert.match(readme, /node scripts\/daoge\.js open --output-dir out/);
+  assert.match(readme, /普通用户只需要记住一个命令入口/);
+  assert.match(readme, /out\/workspace\/index\.html`：兼容静态页面/);
   assert.match(readme, /如果宿主侧另有交接包，可以额外传/);
 });
 

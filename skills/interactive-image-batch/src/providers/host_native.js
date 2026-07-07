@@ -9,6 +9,7 @@ const {
 const { refreshWorkspace } = require('../domain/workspace_service');
 const { resolveOutputPathFromFile } = require('../domain/material_resolver');
 const { assertContract } = require('../contracts');
+const { syncWorkspaceToDbIfAvailable } = require('../db/sync');
 
 function normalizeHostResult(item = {}, index = 0, resultsFile = null) {
   const statusText = normalizeText(item.status).toLowerCase();
@@ -83,9 +84,16 @@ function ingestHostNativeResults(options = {}) {
     taskSpecFile: taskSpecPath,
     manifestFile: manifestPath,
   });
+  const dbSync = syncWorkspaceToDbIfAvailable(outputDir, {
+    snapshotPrefix: 'run_ingest',
+    manifestFile: manifestPath,
+    phase: 'ingest',
+  });
   return {
     outputDir,
     workspaceIndex: workspace.workspaceIndex,
+    database: dbSync.dbPath || null,
+    dbWarning: dbSync.dbWarning || null,
     success: manifest.success,
     failed: manifest.failed,
   };

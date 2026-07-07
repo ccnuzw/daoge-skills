@@ -146,6 +146,7 @@ function ensureV2Layout(outputDir) {
     'workspace',
     'assets/inputs',
     'assets/results',
+    'assets/thumbs',
     'assets/selected',
     'assets/review',
     'assets/issues',
@@ -162,6 +163,7 @@ function ensureV2Layout(outputDir) {
     'assets/archive',
     'internal/view_models',
     'debug',
+    'snapshots',
   ];
   dirs.forEach((dir) => ensureDir(path.join(root, dir)));
   return root;
