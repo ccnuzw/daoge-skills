@@ -6,17 +6,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import socket
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.error import URLError
-from urllib.parse import quote
-from urllib.request import urlopen
 
 
 SCRIPT = Path(__file__).with_name("daoge_docs.py")
@@ -795,64 +790,9 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertIn('href="${escapeHtml(readerHref(target.path, target.fragment))}"', browser_html)
         self.assertIn('target="_blank" rel="noopener">打开 Markdown 原文</a>', browser_html)
         self.assertIn('download>下载 Markdown</a>', browser_html)
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        process = subprocess.Popen(
-            [
-                PYTHON,
-                str(self.root / ".daoge-docs/daoge_docs.py"),
-                "serve",
-                "--root",
-                ".",
-                "--port",
-                str(port),
-            ],
-            cwd=self.root,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        url = f"http://127.0.0.1:{port}/docs/{quote('01-项目概览/项目说明.md')}"
-        try:
-            deadline = time.monotonic() + 15
-            last_error: Exception | None = None
-            while True:
-                try:
-                    with urlopen(url, timeout=2) as response:
-                        content_type = response.headers.get_content_type()
-                        charset = response.headers.get_content_charset()
-                        body = response.read().decode(charset or "ascii")
-                    break
-                except URLError as exc:
-                    last_error = exc
-                    if process.poll() is not None or time.monotonic() >= deadline:
-                        if process.poll() is None:
-                            process.terminate()
-                        try:
-                            stdout, stderr = process.communicate(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            stdout, stderr = process.communicate(timeout=3)
-                        self.fail(f"UTF-8 文档服务启动失败：{last_error}\nstdout:\n{stdout}\nstderr:\n{stderr}")
-                    time.sleep(0.1)
-            self.assertEqual("text/markdown", content_type)
-            self.assertEqual("utf-8", charset)
-            self.assertIn("确定性订单平台 项目说明", body)
-            self.assertIn("# 确定性订单平台 项目说明", body)
-        finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=3)
-            if process.stdout:
-                process.stdout.close()
-            if process.stderr:
-                process.stderr.close()
+        report = json.loads(self.run_cli("browser-check", "--root", ".", "--json", vendored=True).stdout)
+        self.assertTrue(report["通过"], report)
+        self.assertTrue(any(path.endswith(".md") for path in report["资源"]))
 
     def test_reader_renderer_preserves_extended_markdown_semantics(self) -> None:
         self.init()

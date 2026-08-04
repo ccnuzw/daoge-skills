@@ -2,6 +2,12 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-docs 3.13.3 - 2026-08-04
+
+### 修复
+
+- 将 UTF-8 原文服务回归统一收敛到 `browser-check` 的真实 HTTP Smoke，避免 macOS CI 中独立测试子进程偶发无法连接，同时保留 Markdown MIME、UTF-8 charset 与中文正文可读性校验。
+
 ## daoge-docs 3.13.2 - 2026-08-04
 
 ### 修复
