@@ -1,0 +1,23 @@
+name: 缺陷报告
+description: 报告可复现的 DAOGE Docs 或其他 Skill 缺陷。
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: 问题与预期
+      description: 说明实际结果与预期结果。
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 复现步骤
+      description: 请勿包含密钥、Token 或真实用户数据。
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 环境
+      description: 操作系统、Python、Git、Skill 版本和技术栈。
+    validations:
+      required: true

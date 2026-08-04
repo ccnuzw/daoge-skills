@@ -7,6 +7,7 @@ import json
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -18,6 +19,7 @@ from urllib.request import urlopen
 
 
 SCRIPT = Path(__file__).with_name("daoge_docs.py")
+PYTHON = sys.executable
 
 
 class DaogeDocsTests(unittest.TestCase):
@@ -31,7 +33,7 @@ class DaogeDocsTests(unittest.TestCase):
     def run_cli(self, *args: str, expected: int = 0, vendored: bool = False) -> subprocess.CompletedProcess[str]:
         script = self.root / ".daoge-docs" / "daoge_docs.py" if vendored else SCRIPT
         result = subprocess.run(
-            ["python3", str(script), *args],
+            [PYTHON, str(script), *args],
             cwd=self.root,
             text=True,
             capture_output=True,
@@ -161,7 +163,7 @@ class DaogeDocsTests(unittest.TestCase):
         text = feature.read_text(encoding="utf-8")
         text = re.sub(
             r"^\| AC01 \|.*$",
-            "| AC01 | 用户已登录 | 提交合法订单 | 订单持久化并返回稳定 ID | Integration | tests/orders/test_create_order.py | python3 -m unittest tests.orders.test_create_order | docs/evidence/passed.json |",
+            f"| AC01 | 用户已登录 | 提交合法订单 | 订单持久化并返回稳定 ID | Integration | tests/orders/test_create_order.py | \"{PYTHON}\" -m unittest tests.orders.test_create_order | docs/evidence/passed.json |",
             text,
             count=1,
             flags=re.MULTILINE,
@@ -466,7 +468,7 @@ class DaogeDocsTests(unittest.TestCase):
         for target, profile in [(lean_root, "lean"), (strict_root, "strict")]:
             result = subprocess.run(
                 [
-                    "python3",
+                    PYTHON,
                     str(SCRIPT),
                     "init",
                     "--root",
@@ -491,7 +493,7 @@ class DaogeDocsTests(unittest.TestCase):
         (merge_root / "docs/README.md").write_text(custom, encoding="utf-8")
         result = subprocess.run(
             [
-                "python3",
+                PYTHON,
                 str(SCRIPT),
                 "init",
                 "--root",
@@ -510,6 +512,64 @@ class DaogeDocsTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(custom, (merge_root / "docs/README.md").read_text(encoding="utf-8"))
+
+    def test_doctor_reports_runtime_and_stack_candidates_without_execution(self) -> None:
+        (self.root / "package.json").write_text('{"scripts":{"test":"exit 99"}}\n', encoding="utf-8")
+        (self.root / "pnpm-workspace.yaml").write_text("packages:\n  - packages/*\n", encoding="utf-8")
+        (self.root / "pyproject.toml").write_text("[project]\nname = 'example'\n", encoding="utf-8")
+        report = json.loads(self.run_cli("doctor", "--root", ".", "--json").stdout)
+        self.assertTrue(report["通过"], report)
+        self.assertFalse(report["项目"]["initialized"])
+        adapters = {item["id"]: item for item in report["技术栈候选"]}
+        self.assertEqual(["package.json", "pnpm-workspace.yaml"], adapters["node"]["evidence"])
+        self.assertIn("python", adapters)
+        self.assertIn("monorepo", adapters)
+        self.assertIn("pnpm test", adapters["node"]["suggested_commands"])
+        self.init()
+        initialized = json.loads(self.run_cli("doctor", "--root", ".", "--json", vendored=True).stdout)
+        self.assertTrue(initialized["项目"]["initialized"])
+        self.assertEqual("docs", initialized["项目"]["docs_root"])
+
+    def test_doctor_recognizes_linked_git_worktree(self) -> None:
+        self.git("init", "-q")
+        self.git("config", "user.name", "DAOGE Docs Test")
+        self.git("config", "user.email", "daoge-docs@example.invalid")
+        (self.root / "README.md").write_text("# 基线\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-qm", "baseline")
+        linked = self.root.parent / f"{self.root.name}-linked"
+        self.git("worktree", "add", "-q", str(linked), "-b", "linked")
+        try:
+            report = json.loads(self.run_cli("doctor", "--root", str(linked), "--json").stdout)
+            self.assertTrue(report["项目"]["git_worktree"])
+        finally:
+            self.git("worktree", "remove", "--force", str(linked))
+
+    def test_stack_adapter_contract_covers_supported_fixture_markers(self) -> None:
+        markers = {
+            "go.mod": "go",
+            "Cargo.toml": "rust",
+            "pom.xml": "java-maven",
+            "build.gradle.kts": "java-gradle",
+            "sample.sln": "dotnet",
+            "Gemfile": "ruby",
+            "composer.json": "php",
+            "nx.json": "monorepo",
+        }
+        for filename, expected_adapter in markers.items():
+            path = self.root / filename
+            path.write_text("fixture\n", encoding="utf-8")
+            adapters = {item["id"]: item for item in json.loads(self.run_cli("doctor", "--root", ".", "--json").stdout)["技术栈候选"]}
+            self.assertIn(expected_adapter, adapters, filename)
+            self.assertEqual(1, adapters[expected_adapter]["contract_version"])
+
+    def test_ci_check_regenerates_and_checks_initialized_project(self) -> None:
+        self.init()
+        report = json.loads(self.run_cli("ci-check", "--root", ".", "--json", vendored=True).stdout)
+        self.assertTrue(report["通过"], report)
+        self.assertTrue(report["派生文件"])
+        self.assertTrue(report["工作台 Smoke 资源"])
+        self.assertTrue(report["警告"])
 
     def test_reference_depth_generators_and_section_enforcement(self) -> None:
         self.init()
@@ -719,7 +779,7 @@ class DaogeDocsTests(unittest.TestCase):
             port = probe.getsockname()[1]
         process = subprocess.Popen(
             [
-                "python3",
+                PYTHON,
                 str(self.root / ".daoge-docs/daoge_docs.py"),
                 "serve",
                 "--root",
@@ -870,7 +930,7 @@ class DaogeDocsTests(unittest.TestCase):
         feature_text = feature.read_text(encoding="utf-8")
         feature_text = re.sub(
             r"^\| AC01 \|.*$",
-            "| AC01 | 用户已登录 | 提交合法订单 | 订单持久化并返回稳定 ID | Integration | tests/orders/test_create_order.py | python3 -m unittest tests.orders.test_create_order | docs/evidence/passed.json |",
+            f"| AC01 | 用户已登录 | 提交合法订单 | 订单持久化并返回稳定 ID | Integration | tests/orders/test_create_order.py | \"{PYTHON}\" -m unittest tests.orders.test_create_order | docs/evidence/passed.json |",
             feature_text,
             count=1,
             flags=re.MULTILINE,

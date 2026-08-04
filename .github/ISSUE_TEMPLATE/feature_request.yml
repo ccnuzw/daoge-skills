@@ -1,0 +1,16 @@
+name: 功能建议
+description: 提出可验证的新能力或技术栈适配需求。
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: 问题与目标
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 建议方案与验收条件
+      description: 请说明平台、技术栈、边界和可验证结果。
+    validations:
+      required: true

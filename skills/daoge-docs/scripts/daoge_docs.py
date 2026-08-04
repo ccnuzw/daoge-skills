@@ -10,6 +10,7 @@ import html
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -30,7 +31,8 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.12.2"
+TOOL_VERSION = "3.13.0"
+MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
 # 只从功能正文提取常见工程落点；docs/ 等文档目录不会进入 Goal 授权。
@@ -56,6 +58,10 @@ RISKS = {"standard", "high"}
 PROFILES = {"lean", "standard", "strict"}
 EVIDENCE_TYPES = {"development", "e2e", "performance", "release"}
 REQUIREMENT_TYPES = {"NFR", "RG"}
+
+# 技术栈发现只读取仓库特征，不执行用户项目的构建、安装或测试命令。
+# 输出的是待开发者确认的候选验证方式，权威命令仍必须写入功能规格的 AC。
+STACK_ADAPTER_CONTRACT_VERSION = 1
 
 FEATURE_HEADINGS = [
     "## 功能卡",
@@ -300,6 +306,168 @@ def docs_root(root: Path, config: dict) -> Path:
     return root / configured
 
 
+def executable_version(command: list[str]) -> dict:
+    """读取可执行文件版本；诊断失败不能阻断不依赖该工具的文档能力。"""
+    executable = shutil.which(command[0])
+    if not executable:
+        return {"available": False, "path": "", "version": ""}
+    try:
+        result = subprocess.run(command, text=True, capture_output=True, check=False, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"available": True, "path": executable, "version": ""}
+    output = (result.stdout or result.stderr).strip().splitlines()
+    return {
+        "available": result.returncode == 0,
+        "path": executable,
+        "version": output[0] if output else "",
+    }
+
+
+def runtime_shell() -> str | None:
+    """返回可供 Goal 验证使用的 shell，优先遵循当前平台的原生能力。"""
+    if os.name == "nt":
+        return None
+    for candidate in [os.environ.get("SHELL", ""), "/bin/sh"]:
+        if candidate and Path(candidate).exists():
+            return candidate
+    return None
+
+
+def windows_shell() -> str | None:
+    if os.name != "nt":
+        return None
+    return next((candidate for candidate in ["pwsh", "powershell"] if command_exists(candidate)), None)
+
+
+def command_exists(name: str) -> bool:
+    return shutil.which(name) is not None
+
+
+def is_git_worktree(root: Path) -> bool:
+    """兼容普通仓库、linked worktree 与 CI checkout 的 Git 工作树判断。"""
+    if not command_exists("git"):
+        return False
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0 and result.stdout.strip().lower() == "true"
+
+
+def detect_stack_adapters(root: Path) -> list[dict]:
+    """从通用工程文件派生候选技术栈与验证建议，不猜测项目业务语义。"""
+    adapters: list[dict] = []
+
+    def add(identifier: str, label: str, evidence: list[str], commands: list[str], limitations: list[str]) -> None:
+        adapters.append(
+            {
+                "id": identifier,
+                "name": label,
+                "evidence": evidence,
+                "suggested_commands": commands,
+                "limitations": limitations,
+                "contract_version": STACK_ADAPTER_CONTRACT_VERSION,
+            }
+        )
+
+    if (root / "package.json").is_file():
+        lockfiles = [name for name in ["pnpm-lock.yaml", "yarn.lock", "package-lock.json", "bun.lockb"] if (root / name).exists()]
+        package_manager = "pnpm" if "pnpm-lock.yaml" in lockfiles or (root / "pnpm-workspace.yaml").is_file() else "yarn" if "yarn.lock" in lockfiles else "npm"
+        evidence = ["package.json", *lockfiles]
+        if (root / "pnpm-workspace.yaml").is_file():
+            evidence.append("pnpm-workspace.yaml")
+        add(
+            "node",
+            "Node.js / TypeScript",
+            evidence,
+            [f"{package_manager} run lint", f"{package_manager} test", f"{package_manager} run build"],
+            ["必须先读取 package.json scripts；建议命令不是项目已确认的验收命令。"],
+        )
+    if (root / "pyproject.toml").is_file() or (root / "requirements.txt").is_file() or (root / "setup.py").is_file():
+        evidence = [name for name in ["pyproject.toml", "requirements.txt", "setup.py"] if (root / name).is_file()]
+        add(
+            "python",
+            "Python",
+            evidence,
+            ["python -m pytest", "python -m unittest discover", "python -m ruff check ."],
+            ["必须从 pyproject.toml、tox.ini 或现有 CI 确认实际测试与静态检查入口。"],
+        )
+    if (root / "go.mod").is_file():
+        add("go", "Go", ["go.mod"], ["go test ./...", "go vet ./...", "go build ./..."], ["需结合 workspace、生成代码和私有模块配置确认。"])
+    if (root / "Cargo.toml").is_file():
+        add("rust", "Rust", ["Cargo.toml"], ["cargo fmt --check", "cargo clippy -- -D warnings", "cargo test"], ["需结合 Cargo workspace 与 feature flags 确认。"])
+    if (root / "pom.xml").is_file():
+        add("java-maven", "Java / Maven", ["pom.xml"], ["mvn test", "mvn verify"], ["需结合 Maven profile、JDK 与集成测试配置确认。"])
+    if (root / "build.gradle").is_file() or (root / "build.gradle.kts").is_file():
+        evidence = [name for name in ["build.gradle", "build.gradle.kts", "gradlew"] if (root / name).is_file()]
+        executable = "./gradlew" if (root / "gradlew").is_file() else "gradle"
+        add("java-gradle", "Java / Kotlin / Gradle", evidence, [f"{executable} test", f"{executable} check"], ["Windows 必须使用 gradlew.bat 或平台对应命令。"])
+    if (root / "Gemfile").is_file():
+        add("ruby", "Ruby", ["Gemfile"], ["bundle exec rake test", "bundle exec rubocop"], ["需结合 Rakefile 与测试框架确认。"])
+    if (root / "composer.json").is_file():
+        add("php", "PHP / Composer", ["composer.json"], ["composer test", "composer lint"], ["需从 composer scripts 确认命令。"])
+    if any(root.glob("*.sln")) or any(root.glob("*.csproj")):
+        evidence = [path.name for path in sorted([*root.glob("*.sln"), *root.glob("*.csproj")])]
+        add("dotnet", ".NET", evidence, ["dotnet test", "dotnet build"], ["需结合 solution、Target Framework 与本地 SDK 确认。"])
+    if (root / "pnpm-workspace.yaml").is_file() or (root / "turbo.json").is_file() or (root / "nx.json").is_file() or (root / "lerna.json").is_file():
+        evidence = [name for name in ["pnpm-workspace.yaml", "turbo.json", "nx.json", "lerna.json"] if (root / name).is_file()]
+        add("monorepo", "Monorepo", evidence, ["先读取 workspace 配置，再按受影响包执行验证"], ["Goal 的 allowed_paths 与验证命令必须精确到包/服务，不能用根目录全量猜测。"])
+    return adapters
+
+
+def docs_doctor(root: Path, config: dict | None = None) -> dict:
+    """输出面向安装与升级的只读环境诊断。"""
+    python_ok = sys.version_info >= MIN_PYTHON_VERSION
+    git_info = executable_version(["git", "--version"])
+    node_info = executable_version(["node", "--version"])
+    npm_info = executable_version(["npm", "--version"])
+    shell = runtime_shell()
+    findings: list[dict] = []
+
+    def finding(code: str, level: str, message: str, fix: str) -> None:
+        findings.append({"code": code, "level": level, "message": message, "fix": fix})
+
+    if not python_ok:
+        finding("PYTHON_VERSION", "error", f"当前 Python {platform.python_version()} 低于最低要求 3.10。", "安装 Python 3.10 或更高版本，并用该解释器运行 daoge_docs.py。")
+    if not git_info["available"]:
+        finding("GIT_MISSING", "warning", "未发现 Git；文档初始化和检查可用，但 Goal、检查点与提交绑定不可用。", "安装 Git 并确保 git 在 PATH 中。")
+    windows_goal_shell = windows_shell()
+    if os.name == "nt" and not command_exists("py"):
+        finding("WINDOWS_PYTHON_LAUNCHER", "warning", "Windows 未发现 py 启动器。", "确认 python 或 py 命令在 PATH 中；文档中的命令请使用实际可用的启动器。")
+    if os.name != "nt" and not shell:
+        finding("SHELL_MISSING", "warning", "未发现可用于 Goal 验证的 POSIX shell。", "安装并配置 POSIX shell，或在功能 AC 中使用可跨平台的验证方式。")
+    git_worktree = is_git_worktree(root)
+    if not git_worktree:
+        finding("GIT_REPOSITORY", "warning", "当前目录不是 Git 工作树；Goal 的确定性检查点不可用。", "先初始化 Git 并创建基线提交，再执行 prepare-goal。")
+    if config is None:
+        finding("NOT_INITIALIZED", "info", "当前项目尚未初始化 DAOGE Docs。", "运行 init，或在已有 docs 项目中使用 init --merge。")
+    if os.name == "nt" and not windows_goal_shell:
+        finding("WINDOWS_SHELL", "error", "未发现 PowerShell 或 pwsh，无法执行 Goal 验证命令。", "安装 PowerShell 并确保 powershell 或 pwsh 在 PATH 中。")
+    elif os.name == "nt":
+        finding("WINDOWS_SHELL", "info", "Windows 上 Goal 验证通过 PowerShell 执行；功能规格中的验证命令应使用 PowerShell 或跨平台命令。", "避免在 AC 中写仅适用于 Bash 的语法。")
+
+    return {
+        "诊断": "daoge-docs-doctor",
+        "通过": not any(item["level"] == "error" for item in findings),
+        "工具版本": TOOL_VERSION,
+        "系统": {"name": platform.system(), "release": platform.release(), "machine": platform.machine(), "os_name": os.name},
+        "运行时": {
+            "python": {"version": platform.python_version(), "minimum": ".".join(map(str, MIN_PYTHON_VERSION)), "compatible": python_ok, "executable": sys.executable},
+            "git": git_info,
+            "node": node_info,
+            "npm": npm_info,
+            "goal_shell": windows_goal_shell or (shell or ""),
+        },
+        "项目": {"root": str(root), "initialized": config is not None, "git_worktree": git_worktree, "docs_root": str(config.get("docs_root", "")) if config else ""},
+        "技术栈候选": detect_stack_adapters(root),
+        "发现": findings,
+        "边界": "技术栈候选来自仓库文件，不会执行安装、构建或测试。实际 AC 验证命令必须由项目规格冻结。",
+    }
+
+
 def values_for(config: dict, version: str | None = None) -> dict[str, str]:
     return {
         "PROJECT_NAME": str(config["project_name"]),
@@ -307,6 +475,18 @@ def values_for(config: dict, version: str | None = None) -> dict[str, str]:
         "VERSION": version or str(config["current_version"]),
         "DATE": today(),
     }
+
+
+def project_python_command() -> str:
+    """生成写入派生文档的跨平台 Python 命令模板。"""
+    return "python3" if os.name != "nt" else "py -3"
+
+
+def chain_project_commands(left: str, right: str) -> str:
+    """为当前平台生成在首个命令失败时停止的串行命令。"""
+    if os.name == "nt":
+        return f"{left}; if ($LASTEXITCODE -eq 0) {{ {right} }}"
+    return f"{left} && {right}"
 
 
 def rendered_profile_path(item: dict, values: dict[str, str]) -> Path:
@@ -345,6 +525,7 @@ def render_profile_document(item: dict, config: dict, version: str, index: int) 
             "AUTHORITY": render(str(item["authority"]), values),
             "PURPOSE": render(str(item["purpose"]), values),
             "SECTIONS": render_sections(item.get("sections", [])),
+            "PYTHON_COMMAND": project_python_command(),
         }
     )
     if item.get("source"):
@@ -1325,6 +1506,7 @@ def browser_findings(
 ) -> list[dict]:
     """Return itemized, deterministic findings shared by all workbench views."""
     findings: list[dict] = []
+    python_command = project_python_command()
     for gate in governance.get("gates", []):
         for signal in gate.get("blocking_signals", []):
             findings.append(
@@ -1339,7 +1521,7 @@ def browser_findings(
                     source_path=str(gate.get("path", "")),
                     source_section="门禁输入",
                     recovery_action=f"打开 {gate['label']} 门禁入口，逐项补齐缺失文档、状态或追踪关系。",
-                    verification_command=f"python3 .daoge-docs/daoge_docs.py gate --root . --stage {gate['id']}",
+                    verification_command=f"{python_command} .daoge-docs/daoge_docs.py gate --root . --stage {gate['id']}",
                     owner="门禁负责人",
                     authority_digest_value=authority_digest_value,
                 )
@@ -1358,7 +1540,10 @@ def browser_findings(
                     source_path=str(evidence.get("path", "")),
                     source_section="提交/构建绑定",
                     recovery_action="重新执行该证据类型并绑定当前提交、构建和 authority_digest。",
-                    verification_command="python3 .daoge-docs/daoge_docs.py index --root . && python3 .daoge-docs/daoge_docs.py gate --root . --stage release",
+                    verification_command=chain_project_commands(
+                        f"{python_command} .daoge-docs/daoge_docs.py index --root .",
+                        f"{python_command} .daoge-docs/daoge_docs.py gate --root . --stage release",
+                    ),
                     evidence_type=str(evidence.get("type", "")),
                     authority_digest_value=authority_digest_value,
                 )
@@ -1381,7 +1566,7 @@ def browser_findings(
                     source_path=source_path,
                     source_section="功能卡",
                     recovery_action="补齐功能范围、契约、验收与验证记录，并将状态推进到 ready 或后续已验证状态。",
-                    verification_command=f"python3 .daoge-docs/daoge_docs.py gate --root . --stage feature-ready --feature {feature_id}",
+                    verification_command=f"{python_command} .daoge-docs/daoge_docs.py gate --root . --stage feature-ready --feature {feature_id}",
                     owner=str(feature.get("owner", "未声明")),
                     authority_digest_value=authority_digest_value,
                 )
@@ -1399,7 +1584,7 @@ def browser_findings(
                     source_path=source_path,
                     source_section="技术设计",
                     recovery_action="补齐设计章节和稳定分支追踪；高风险功能同时补齐独立技术设计。",
-                    verification_command=f"python3 .daoge-docs/daoge_docs.py check --root . --json",
+                    verification_command=f"{python_command} .daoge-docs/daoge_docs.py check --root . --json",
                     owner=str(feature.get("owner", "未声明")),
                     authority_digest_value=authority_digest_value,
                 )
@@ -1417,7 +1602,7 @@ def browser_findings(
                     source_path=source_path,
                     source_section="正文",
                     recovery_action="将未知项写成明确的待确认事实，补充负责人和截止条件后重新运行 check。",
-                    verification_command="python3 .daoge-docs/daoge_docs.py check --root . --json",
+                    verification_command=f"{python_command} .daoge-docs/daoge_docs.py check --root . --json",
                     owner=str(feature.get("owner", "未声明")),
                     authority_digest_value=authority_digest_value,
                 )
@@ -1435,7 +1620,7 @@ def browser_findings(
                     source_path=source_path,
                     source_section="风险分级",
                     recovery_action="创建并完成独立高风险技术设计，再重新运行 index 和 feature-ready gate。",
-                    verification_command=f"python3 .daoge-docs/daoge_docs.py gate --root . --stage feature-ready --feature {feature_id}",
+                    verification_command=f"{python_command} .daoge-docs/daoge_docs.py gate --root . --stage feature-ready --feature {feature_id}",
                     owner=str(feature.get("owner", "未声明")),
                     authority_digest_value=authority_digest_value,
                 )
@@ -1454,7 +1639,7 @@ def browser_findings(
                     source_path=str(directory["path"]),
                     source_section="目录结构",
                     recovery_action="在目录内创建 README.md 或索引文档，并声明职责、权威分工和阅读路径。",
-                    verification_command="python3 .daoge-docs/daoge_docs.py check --root . --json",
+                    verification_command=f"{python_command} .daoge-docs/daoge_docs.py check --root . --json",
                     authority_digest_value=authority_digest_value,
                 )
             )
@@ -3146,6 +3331,7 @@ def render_browser_html(config: dict) -> str:
             "PROJECT_NAME": html.escape(str(config["project_name"])),
             "PROJECT_CODE": html.escape(str(config["project_code"])),
             "VERSION": html.escape(str(config["current_version"])),
+            "PYTHON_COMMAND": project_python_command(),
         },
     )
 
@@ -4970,6 +5156,71 @@ def command_index(args: argparse.Namespace) -> dict:
     return {"状态": "已重新生成派生文档", "文件": [str(path.relative_to(root)) for path in generated]}
 
 
+def command_doctor(args: argparse.Namespace) -> int:
+    root = project_root(args.root)
+    config = load_config(root) if (root / CONFIG_NAME).exists() else None
+    report = docs_doctor(root, config)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(f"DAOGE Docs 环境诊断：{'通过' if report['通过'] else '失败'}")
+        runtime = report["运行时"]
+        print(f"系统：{report['系统']['name']} {report['系统']['release']} ({report['系统']['machine']})")
+        print(f"Python：{runtime['python']['version']}（最低 {runtime['python']['minimum']}）")
+        print(f"Git：{runtime['git']['version'] or ('未找到' if not runtime['git']['available'] else '可用')}")
+        stack_names = "、".join(item['name'] for item in report['技术栈候选']) or "未识别"
+        print(f"技术栈候选：{stack_names}")
+        for item in report["发现"]:
+            print(f"{item['level'].upper()} {item['code']}：{item['message']} 修复：{item['fix']}")
+    return 0 if report["通过"] else 1
+
+
+def command_ci_check(args: argparse.Namespace) -> int:
+    """以固定顺序运行可在 CI 中复现的文档与 Goal 基线检查。"""
+    root = project_root(args.root)
+    config = load_config(root)
+    index_result = command_index(argparse.Namespace(root=str(root)))
+    errors, warnings = collect_checks(root, config)
+    browser_errors, browser_resources = browser_smoke(root, config)
+    errors.extend(browser_errors)
+    goals: list[dict] = []
+    goals_root = root / ".daoge-docs" / "goals"
+    if goals_root.is_dir():
+        for directory in sorted(goals_root.iterdir()):
+            manifest = directory / "goal-manifest.json"
+            if not manifest.is_file():
+                continue
+            try:
+                status = command_goal_status(
+                    argparse.Namespace(goal=directory.name, read_only=True, fail_on_stale=False, root=str(root))
+                )
+                if isinstance(status, dict):
+                    goals.append(status)
+                    if status.get("状态") == "stale":
+                        errors.append(f"Goal 已过期：{directory.name}：{'；'.join(status.get('过期原因', []))}")
+            except DocsError as exc:
+                errors.append(f"Goal 基线无效：{directory.name}：{exc}")
+    payload = {
+        "检查": "daoge-docs-ci",
+        "通过": not errors,
+        "工具版本": TOOL_VERSION,
+        "派生文件": index_result["文件"],
+        "工作台 Smoke 资源": browser_resources,
+        "Goal": goals,
+        "错误": sorted(set(errors)),
+        "警告": sorted(set(warnings)),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"daoge-docs-ci：{'通过' if payload['通过'] else '失败'}")
+        for error in payload["错误"]:
+            print(f"错误：{error}")
+        for warning in payload["警告"]:
+            print(f"警告：{warning}")
+    return 0 if payload["通过"] else 1
+
+
 def command_serve(args: argparse.Namespace) -> dict:
     root = project_root(args.root)
     config = load_config(root)
@@ -5383,16 +5634,28 @@ def run_goal_verification(
     started_at = now_iso()
     timed_out = False
     try:
+        shell = runtime_shell()
+        if os.name == "nt":
+            shell_name = windows_shell()
+            if not shell_name:
+                raise DocsError("当前 Windows 环境没有 PowerShell；请先运行 doctor 排查。")
+            invocation: object = [shell_name, "-NoProfile", "-NonInteractive", "-Command", command_text]
+            run_options = {"shell": False}
+        elif shell:
+            invocation = command_text
+            run_options = {"shell": True, "executable": shell}
+            shell_name = shell
+        else:
+            raise DocsError("当前环境没有可用于 Goal 验证的 shell；请先运行 doctor 排查。")
         result = subprocess.run(
-            command_text,
+            invocation,
             cwd=cwd,
-            shell=True,
-            executable="/bin/sh",
             text=True,
             capture_output=True,
             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
             timeout=timeout_seconds,
             check=False,
+            **run_options,
         )
         exit_code: int | None = result.returncode
         stdout = result.stdout
@@ -5416,6 +5679,7 @@ def run_goal_verification(
         "exit_code": exit_code,
         "result": "passed" if passed else ("timed_out" if timed_out else "failed"),
         "environment": "local",
+        "shell": shell_name,
         "python_version": sys.version.split()[0],
         "commit": commit,
         "authority_digest": manifest["authority_digest"],
@@ -5824,7 +6088,7 @@ def command_goal_resume_context(args: argparse.Namespace) -> dict:
         "task": next_task,
         "remaining_task_ids": [item.get("task_id") for item in tasks if item.get("status") != "completed"],
         "goal_stop_conditions": manifest.get("stop_conditions", []),
-        "checkpoint_command": f"python3 .daoge-docs/daoge_docs.py goal-checkpoint --root . --goal {goal_id} --task {next_task.get('task_id')}",
+        "checkpoint_command": f"{project_python_command()} .daoge-docs/daoge_docs.py goal-checkpoint --root . --goal {goal_id} --task {next_task.get('task_id')}",
         "generated_at": now_iso(),
     }
 
@@ -6387,6 +6651,16 @@ def build_parser() -> argparse.ArgumentParser:
     index = subparsers.add_parser("index", help="重新生成全部索引、矩阵和状态视图")
     index.add_argument("--root", default=".")
     index.set_defaults(handler=command_index)
+
+    doctor = subparsers.add_parser("doctor", help="只读检查运行环境、Git 状态和技术栈候选")
+    doctor.add_argument("--root", default=".")
+    doctor.add_argument("--json", action="store_true")
+    doctor.set_defaults(handler=command_doctor)
+
+    ci_check = subparsers.add_parser("ci-check", help="重建派生文档并检查 docs、工作台与 Goal 基线")
+    ci_check.add_argument("--root", default=".")
+    ci_check.add_argument("--json", action="store_true")
+    ci_check.set_defaults(handler=command_ci_check)
 
     serve = subparsers.add_parser("serve", help="启动仅绑定本机且显式使用 UTF-8 的只读文档服务")
     serve.add_argument("--root", default=".")

@@ -1,0 +1,51 @@
+name: DAOGE Docs
+
+on:
+  pull_request:
+    paths:
+      - "skills/daoge-docs/**"
+      - ".github/workflows/daoge-docs.yml"
+      - ".github/scripts/validate_daoge_docs_skill.py"
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
+      - "LICENSE"
+      - "SECURITY.md"
+  push:
+    branches: [main]
+    paths:
+      - "skills/daoge-docs/**"
+      - ".github/workflows/daoge-docs.yml"
+      - ".github/scripts/validate_daoge_docs_skill.py"
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
+      - "LICENSE"
+      - "SECURITY.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 检查运行环境与技术栈发现
+        run: python skills/daoge-docs/scripts/daoge_docs.py doctor --root . --json
+      - name: 运行隔离回归测试
+        run: python -m unittest discover -s skills/daoge-docs/scripts -p "test_*.py" -v
+      - name: 校验 Skill 元数据
+        run: python .github/scripts/validate_daoge_docs_skill.py

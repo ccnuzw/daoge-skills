@@ -29,6 +29,8 @@ description: 为软件项目建立和治理中文文档驱动开发体系。用�
 - 开发执行工作台产品：读取 [references/developer-workbench-prd.md](references/developer-workbench-prd.md)。
 - 工作台数据契约：读取 [references/developer-workbench-data-contract.md](references/developer-workbench-data-contract.md)。
 - 准备、执行或恢复大型 Goal：读取 [references/agent-goal-execution-contract.md](references/agent-goal-execution-contract.md)。
+- 安装、升级、跨平台或兼容性问题：读取 [references/compatibility.md](references/compatibility.md)。
+- 识别技术栈、monorepo 或冻结构建测试命令：读取 [references/stack-adapters.md](references/stack-adapters.md)。
 
 ## Profile 选择
 
@@ -43,8 +45,9 @@ description: 为软件项目建立和治理中文文档驱动开发体系。用�
 ## 初始化项目
 
 1. 读取仓库规则和现有材料，建立“已证实事实、合理推断、未知项”三栏调研结果。
-2. 从证据确定项目名称、稳定项目代码、当前版本、用户、目标、领域、外部依赖和风险；只有影响方向且无法发现的信息才询问用户。
-3. 运行：
+2. 先运行 `doctor --root <project-root> --json`；它只读检查运行环境、Git、项目状态和技术栈候选，不执行项目命令。
+3. 从证据确定项目名称、稳定项目代码、当前版本、用户、目标、领域、外部依赖和风险；技术栈候选只能作为调研输入，不能代替项目验证命令；只有影响方向且无法发现的信息才询问用户。
+4. 运行：
 
 ```sh
 python3 <skill-dir>/scripts/daoge_docs.py init \
@@ -55,10 +58,10 @@ python3 <skill-dir>/scripts/daoge_docs.py init \
   --profile strict
 ```
 
-4. 已有 `docs/` 时先审计冲突，再加 `--merge`；工具只能补文件，不能覆盖项目事实。
-5. 初始化后使用项目内固定版本命令：`python3 .daoge-docs/daoge_docs.py ...`。
-6. 先完成 `项目调研与事实清单`，再按产品、版本、功能、架构、测试、决策的权威顺序消除占位。
-7. 依次运行 `index`、`check`、`gate --stage discovery`、`gate --stage version-ready`。门禁失败是待办事实，不得通过伪造内容绕过。
+5. 已有 `docs/` 时先审计冲突，再加 `--merge`；工具只能补文件，不能覆盖项目事实。
+6. 初始化后使用项目内固定版本命令：macOS/Linux 使用 `python3 .daoge-docs/daoge_docs.py ...`；Windows 优先使用 `py -3 .daoge-docs/daoge_docs.py ...`。
+7. 先完成 `项目调研与事实清单`，再按产品、版本、功能、架构、测试、决策的权威顺序消除占位。
+8. 依次运行 `index`、`check`、`gate --stage discovery`、`gate --stage version-ready`。门禁失败是待办事实，不得通过伪造内容绕过。
 
 ## 创建版本与领域
 
@@ -253,6 +256,8 @@ python3 .daoge-docs/daoge_docs.py audit --root . --json
 
 `audit` 会复用 `browser-check` 的本地 HTTP Smoke；因此审计通过同时意味着工作台资源可读取、Markdown 原文声明 UTF-8，且派生来源能够闭合。
 
+CI 或干净环境验收使用 `ci-check`：它固定运行 `index`、`check`、工作台 Smoke 和现有 Goal 基线检查。它不会执行项目业务构建、迁移、部署或功能 AC 命令。
+
 项目内工具落后时运行：
 
 ```sh
@@ -267,6 +272,8 @@ python3 <skill-dir>/scripts/daoge_docs.py upgrade --root <project-root> --profil
 init              初始化 lean/standard/strict 文档体系，默认 strict
 upgrade           更新项目内工具并补齐 Profile 文件
 install-integrations 安装不覆盖现有配置的 CI、PR、IDE 与智能体入口
+doctor            只读检查 Python、Git、shell、项目状态与技术栈候选
+ci-check          重建派生文档并检查 docs、工作台与 Goal 基线
 new-version       创建并可选激活版本空间
 new-future-version 创建不激活的后续版本规划
 new-domain        创建领域边界和功能目录

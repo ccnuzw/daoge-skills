@@ -1,5 +1,7 @@
 # DAOGE Skills
 
+开源许可证：[MIT](./LICENSE)。贡献与安全报告见 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [SECURITY.md](./SECURITY.md)。版本变更见 [CHANGELOG.md](./CHANGELOG.md)。
+
 DAOGE Skills 提供两项可独立安装的中文工作流能力：
 
 - [`skills/interactive-image-batch`](./skills/interactive-image-batch/README.md)
@@ -96,3 +98,7 @@ OPENAI_RESPONSES_MODEL=gpt-5.4
 ```
 
 完整使用说明见 [`skills/interactive-image-batch/README.md`](./skills/interactive-image-batch/README.md) 和 [`skills/daoge-docs/README.md`](./skills/daoge-docs/README.md)。
+
+## 发布策略
+
+两个 Skill 独立发布与打标签。`daoge-docs` 使用 `daoge-docs-vX.Y.Z`；生图 Skill 保持自己的版本标签。对外发布前，DAOGE Docs 必须通过 macOS、Linux、Windows 与 Python 3.10/3.12 的 CI 矩阵，具体兼容范围见 [`skills/daoge-docs/references/compatibility.md`](./skills/daoge-docs/references/compatibility.md)。
