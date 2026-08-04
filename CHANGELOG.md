@@ -2,6 +2,12 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-docs 3.13.1 - 2026-08-04
+
+### 修复
+
+- Windows 默认代码页为非 UTF-8 时，强制 CLI 标准输出与错误输出使用 UTF-8，避免 `doctor --json` 和中文诊断输出失败。
+
 ## daoge-docs 3.13.0 - 2026-08-04
 
 ### 新增

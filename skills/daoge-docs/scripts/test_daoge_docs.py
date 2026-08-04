@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import subprocess
@@ -529,6 +530,20 @@ class DaogeDocsTests(unittest.TestCase):
         initialized = json.loads(self.run_cli("doctor", "--root", ".", "--json", vendored=True).stdout)
         self.assertTrue(initialized["项目"]["initialized"])
         self.assertEqual("docs", initialized["项目"]["docs_root"])
+
+    def test_cli_forces_utf8_when_parent_default_encoding_is_not_unicode_safe(self) -> None:
+        environment = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+        result = subprocess.run(
+            [PYTHON, str(SCRIPT), "doctor", "--root", ".", "--json"],
+            cwd=self.root,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            env=environment,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("daoge-docs-doctor", json.loads(result.stdout)["诊断"])
 
     def test_doctor_recognizes_linked_git_worktree(self) -> None:
         self.git("init", "-q")

@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.13.0"
+TOOL_VERSION = "3.13.1"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -198,6 +198,16 @@ class ChineseArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         self.print_usage(sys.stderr)
         self.exit(2, f"参数错误：{message}\n")
+
+
+def configure_utf8_stdio() -> None:
+    """保证 Windows 默认代码页不会破坏中文 JSON、错误信息和证据输出。"""
+    for stream in [sys.stdout, sys.stderr]:
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            # 嵌入式解释器或替换过的流可能没有 reconfigure；保留其原有行为。
+            continue
 
 
 def today() -> str:
@@ -6733,6 +6743,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args()
     try:
