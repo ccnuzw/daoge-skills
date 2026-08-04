@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daoge-docs.local/schemas/evidence-report.schema.json",
+  "title": "DAOGE Docs 机器可读证据报告",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "type",
+    "version",
+    "environment",
+    "commit",
+    "build_id",
+    "executed_at",
+    "result",
+    "commands",
+    "checks",
+    "artifacts",
+    "residual_risks",
+    "approval",
+    "details"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "type": {"enum": ["development", "e2e", "performance", "release"]},
+    "version": {"type": "string", "minLength": 1},
+    "environment": {"type": "string", "minLength": 1},
+    "commit": {"type": "string", "minLength": 7},
+    "build_id": {"type": "string", "minLength": 1},
+    "executed_at": {"type": "string", "format": "date-time"},
+    "result": {"enum": ["not_run", "passed", "failed", "blocked"]},
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "exit_code"],
+        "properties": {
+          "command": {"type": "string", "minLength": 1},
+          "exit_code": {"type": "integer"},
+          "output_digest": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "result"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "result": {"enum": ["passed", "failed", "skipped"]},
+          "expected": {},
+          "actual": {},
+          "unit": {"type": "string"},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "artifacts": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "residual_risks": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposal_id", "confirmed_by", "confirmed_at", "authority_digest"],
+      "properties": {
+        "proposal_id": {"type": ["string", "null"]},
+        "confirmed_by": {"type": ["string", "null"]},
+        "confirmed_at": {"type": ["string", "null"], "format": "date-time"},
+        "authority_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-fA-F]{64}$"}
+      }
+    },
+    "details": {"type": "object"}
+  },
+  "$defs": {
+    "evidenceStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence", "reason"],
+      "properties": {
+        "status": {"enum": ["not_run", "passed", "failed", "blocked", "not_applicable"]},
+        "evidence": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "passed"}}},
+          "then": {"properties": {"evidence": {"type": "string", "minLength": 1}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "not_applicable"}}},
+          "then": {"properties": {"reason": {"type": "string", "minLength": 1}}}
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"type": {"const": "development"}}},
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["clean_checkout", "dependency_mode", "services", "required_checks"],
+            "properties": {
+              "clean_checkout": {"type": "boolean"},
+              "dependency_mode": {"type": "string", "minLength": 1},
+              "services": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+              "required_checks": {
+                "type": "array",
+                "items": {"enum": ["build", "static", "unit", "integration"]},
+                "minItems": 4,
+                "maxItems": 4,
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "e2e"}}},
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["dependency_mode", "required_case_ids", "cases"],
+            "properties": {
+              "dependency_mode": {"type": "string", "minLength": 1},
+              "required_case_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+              "cases": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "result", "evidence"],
+                  "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "result": {"enum": ["passed", "failed", "skipped"]},
+                    "evidence": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "performance"}}},
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["load_profile_id", "load_profile_digest", "approved_by", "approved_at", "scenarios"],
+            "properties": {
+              "load_profile_id": {"type": "string", "minLength": 1},
+              "load_profile_digest": {"type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$"},
+              "approved_by": {"type": ["string", "null"]},
+              "approved_at": {"type": ["string", "null"], "format": "date-time"},
+              "scenarios": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "metric", "operator", "threshold", "actual", "unit", "result", "evidence"],
+                  "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "metric": {"type": "string", "minLength": 1},
+                    "operator": {"enum": ["lte", "gte", "lt", "gt", "eq"]},
+                    "threshold": {"type": "number"},
+                    "actual": {"type": "number"},
+                    "unit": {"type": "string", "minLength": 1},
+                    "result": {"enum": ["passed", "failed"]},
+                    "evidence": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "release"}}},
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "artifact_digest",
+              "e2e_report",
+              "performance_report",
+              "migration",
+              "backup",
+              "recovery",
+              "security",
+              "smoke",
+              "observation",
+              "rollback"
+            ],
+            "properties": {
+              "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$"},
+              "e2e_report": {"type": "string", "minLength": 1},
+              "performance_report": {"type": "string", "minLength": 1},
+              "migration": {"$ref": "#/$defs/evidenceStatus"},
+              "backup": {"$ref": "#/$defs/evidenceStatus"},
+              "recovery": {"$ref": "#/$defs/evidenceStatus"},
+              "security": {"$ref": "#/$defs/evidenceStatus"},
+              "smoke": {"$ref": "#/$defs/evidenceStatus"},
+              "observation": {"$ref": "#/$defs/evidenceStatus"},
+              "rollback": {"$ref": "#/$defs/evidenceStatus"}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

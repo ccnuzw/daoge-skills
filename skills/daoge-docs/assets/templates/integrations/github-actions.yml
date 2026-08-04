@@ -1,0 +1,32 @@
+name: DAOGE Docs
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 生成本次检查使用的派生文档
+        run: python3 .daoge-docs/daoge_docs.py index --root .
+      - name: 验证文档治理
+        run: python3 .daoge-docs/daoge_docs.py check --root . --json
+      - name: 验证 Goal 基线
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for manifest in .daoge-docs/goals/GOAL-*/goal-manifest.json; do
+            goal_id="$(basename "$(dirname "$manifest")")"
+            python3 .daoge-docs/daoge_docs.py goal-status \
+              --root . --goal "$goal_id" --read-only --fail-on-stale
+          done

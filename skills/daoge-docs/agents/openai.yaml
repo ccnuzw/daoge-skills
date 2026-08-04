@@ -1,0 +1,4 @@
+interface:
+  display_name: "DAOGE Docs"
+  short_description: "建立中文文档门禁、开发工作台与可恢复 Goal 执行闭环"
+  default_prompt: "使用 $daoge-docs 审计当前仓库，建立 strict 中文文档体系、六视图开发工作台和可检查点恢复、可复验完成的确定性 Goal 执行闭环。"

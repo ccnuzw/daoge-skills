@@ -1,0 +1,64 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "DAOGE Docs: 重建索引",
+      "type": "shell",
+      "command": "python3 .daoge-docs/daoge_docs.py index --root .",
+      "problemMatcher": []
+    },
+    {
+      "label": "DAOGE Docs: 文档检查",
+      "type": "shell",
+      "command": "python3 .daoge-docs/daoge_docs.py check --root . --json",
+      "problemMatcher": []
+    },
+    {
+      "label": "DAOGE Docs: Feature Ready",
+      "type": "shell",
+      "command": "python3 .daoge-docs/daoge_docs.py gate --root . --stage feature-ready --feature ${input:featureId} --json",
+      "problemMatcher": []
+    },
+    {
+      "label": "DAOGE Docs: Goal 状态",
+      "type": "shell",
+      "command": "python3 .daoge-docs/daoge_docs.py goal-status --root . --goal ${input:goalId} --read-only",
+      "problemMatcher": []
+    },
+    {
+      "label": "DAOGE Docs: Goal 恢复上下文",
+      "type": "shell",
+      "command": "python3 .daoge-docs/daoge_docs.py goal-resume-context --root . --goal ${input:goalId}",
+      "problemMatcher": []
+    },
+    {
+      "label": "DAOGE Docs: Goal 检查点",
+      "type": "shell",
+      "command": "python3 .daoge-docs/daoge_docs.py goal-checkpoint --root . --goal ${input:goalId} --task ${input:taskId}",
+      "problemMatcher": []
+    },
+    {
+      "label": "DAOGE Docs: Goal 完成",
+      "type": "shell",
+      "command": "python3 .daoge-docs/daoge_docs.py goal-complete --root . --goal ${input:goalId}",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "featureId",
+      "type": "promptString",
+      "description": "功能 ID，例如 {{PROJECT_CODE}}-FR-001"
+    },
+    {
+      "id": "goalId",
+      "type": "promptString",
+      "description": "Goal ID，例如 GOAL-{{VERSION}}-001"
+    },
+    {
+      "id": "taskId",
+      "type": "promptString",
+      "description": "任务 ID，例如 TASK-{{PROJECT_CODE}}-FR-001"
+    }
+  ]
+}
