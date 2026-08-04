@@ -91,6 +91,12 @@ class DaogeDocsTests(unittest.TestCase):
             f"```text\nfunction execute(input):\n    REQUIRE validate(input)  // {branch}\n    RETURN persisted_result\n```",
         )
 
+    def python_module_command(self, module: str) -> str:
+        """生成会被 Goal 在当前平台 shell 中实际执行的 Python 命令。"""
+        if os.name == "nt":
+            return f'& "{PYTHON}" -m {module}'
+        return f'"{PYTHON}" -m {module}'
+
     def complete_for_release(self) -> None:
         self.run_cli("new-domain", "--root", ".", "--name", "订单", vendored=True)
         self.run_cli(
@@ -162,9 +168,10 @@ class DaogeDocsTests(unittest.TestCase):
         self.complete_for_release()
         feature = self.root / "docs/03-功能规格/V1/订单/01-创建订单.md"
         text = feature.read_text(encoding="utf-8")
+        verification_command = self.python_module_command("unittest tests.orders.test_create_order")
         text = re.sub(
             r"^\| AC01 \|.*$",
-            f"| AC01 | 用户已登录 | 提交合法订单 | 订单持久化并返回稳定 ID | Integration | tests/orders/test_create_order.py | \"{PYTHON}\" -m unittest tests.orders.test_create_order | docs/evidence/passed.json |",
+            lambda _: f"| AC01 | 用户已登录 | 提交合法订单 | 订单持久化并返回稳定 ID | Integration | tests/orders/test_create_order.py | {verification_command} | docs/evidence/passed.json |",
             text,
             count=1,
             flags=re.MULTILINE,
@@ -809,19 +816,27 @@ class DaogeDocsTests(unittest.TestCase):
         )
         url = f"http://127.0.0.1:{port}/docs/{quote('01-项目概览/项目说明.md')}"
         try:
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 15
+            last_error: Exception | None = None
             while True:
                 try:
-                    with urlopen(url, timeout=1) as response:
+                    with urlopen(url, timeout=2) as response:
                         content_type = response.headers.get_content_type()
                         charset = response.headers.get_content_charset()
                         body = response.read().decode(charset or "ascii")
                     break
-                except URLError:
+                except URLError as exc:
+                    last_error = exc
                     if process.poll() is not None or time.monotonic() >= deadline:
-                        stdout, stderr = process.communicate(timeout=1)
-                        self.fail(f"UTF-8 文档服务启动失败\nstdout:\n{stdout}\nstderr:\n{stderr}")
-                    time.sleep(0.05)
+                        if process.poll() is None:
+                            process.terminate()
+                        try:
+                            stdout, stderr = process.communicate(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            stdout, stderr = process.communicate(timeout=3)
+                        self.fail(f"UTF-8 文档服务启动失败：{last_error}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+                    time.sleep(0.1)
             self.assertEqual("text/markdown", content_type)
             self.assertEqual("utf-8", charset)
             self.assertIn("确定性订单平台 项目说明", body)
@@ -943,9 +958,10 @@ class DaogeDocsTests(unittest.TestCase):
         )
         feature = self.root / "docs/03-功能规格/V1/订单/01-创建订单.md"
         feature_text = feature.read_text(encoding="utf-8")
+        verification_command = self.python_module_command("unittest tests.orders.test_create_order")
         feature_text = re.sub(
             r"^\| AC01 \|.*$",
-            f"| AC01 | 用户已登录 | 提交合法订单 | 订单持久化并返回稳定 ID | Integration | tests/orders/test_create_order.py | \"{PYTHON}\" -m unittest tests.orders.test_create_order | docs/evidence/passed.json |",
+            lambda _: f"| AC01 | 用户已登录 | 提交合法订单 | 订单持久化并返回稳定 ID | Integration | tests/orders/test_create_order.py | {verification_command} | docs/evidence/passed.json |",
             feature_text,
             count=1,
             flags=re.MULTILINE,

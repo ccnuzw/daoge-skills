@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.13.1"
+TOOL_VERSION = "3.13.2"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -3501,13 +3501,13 @@ def command_install_integrations(args: argparse.Namespace) -> dict:
         for template_name, relative in targets[target]:
             destination = root / relative
             if destination.exists():
-                skipped.append(str(relative))
+                skipped.append(relative.as_posix())
                 continue
             source = INTEGRATION_TEMPLATES / template_name
             if not source.exists():
                 raise DocsError(f"缺少集成模板：{source}")
             write_new(destination, render(source.read_text(encoding="utf-8"), values_for(config)))
-            created.append(str(relative))
+            created.append(relative.as_posix())
     return {
         "状态": "开发集成已安装",
         "目标": requested,
