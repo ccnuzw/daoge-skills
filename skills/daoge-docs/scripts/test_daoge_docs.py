@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -16,6 +17,16 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("daoge_docs.py")
 PYTHON = sys.executable
+
+
+def load_cli_module():
+    """按绝对路径加载被测 CLI，避免不同 unittest 启动方式依赖 sys.path。"""
+    spec = importlib.util.spec_from_file_location("daoge_docs_under_test", SCRIPT)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("无法加载 daoge_docs.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class DaogeDocsTests(unittest.TestCase):
@@ -1047,6 +1058,7 @@ class DaogeDocsTests(unittest.TestCase):
             self.assertTrue(manifest["ordered_tasks"][0]["acceptance_ids"])
             self.assertTrue(manifest["ordered_tasks"][0]["branch_ids"])
             self.assertTrue(manifest["ordered_tasks"][0]["verification_commands"])
+            self.assertTrue(all("\\" not in path for path in manifest["ignored_generated_paths"]))
         task_projection = lambda manifest: [
             (item["task_id"], item["sequence"], item["dependencies"], item["allowed_paths"])
             for item in manifest["ordered_tasks"]
@@ -1422,6 +1434,18 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertTrue(result["通过"], result)
         browser_js = (self.root / "docs/90-参考资料/产品文档浏览器-文档数据.js").read_text(encoding="utf-8")
         self.assertNotIn(str(self.root), browser_js)
+
+    def test_goal_managed_paths_normalize_windows_separators(self) -> None:
+        manifest = {
+            "goal_id": "GOAL-V1-001",
+            "ignored_generated_paths": ["docs\\90-参考资料\\产品文档浏览器-文档数据.js"],
+        }
+        self.assertTrue(
+            load_cli_module().goal_managed_git_path(
+                manifest,
+                "docs/90-参考资料/产品文档浏览器-文档数据.js",
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ authority: 开发执行工作台派生数据契约
 
 ## 1. 契约目的
 
-本文定义产品文档浏览器、开发执行工作台和 Goal 执行器共享的派生数据。`daoge-docs 3.12.2` 当前输出 `schema_version: 7`；`schema_version: 5` 与 `6` 只作为兼容输入。
+本文定义产品文档浏览器、开发执行工作台和 Goal 执行器共享的派生数据。`daoge-docs 3.13.4` 当前输出 `schema_version: 7`；`schema_version: 5` 与 `6` 只作为兼容输入。
 
 数据由权威 Markdown、JSON、YAML、OpenAPI、迁移、代码事实和机器证据生成。派生数据不是新的业务事实来源。
 
@@ -29,7 +29,7 @@ authority: 开发执行工作台派生数据契约
 {
   "schema_version": 7,
   "generated_at": "2026-08-03T00:00:00Z",
-  "tool_version": "3.12.2",
+  "tool_version": "3.13.4",
   "source_commit": "",
   "authority_digest": "sha256:...",
   "project": {},

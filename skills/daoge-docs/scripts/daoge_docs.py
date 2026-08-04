@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.13.3"
+TOOL_VERSION = "3.13.4"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -630,8 +630,13 @@ def list_field(value: str) -> list[str]:
 
 def normalize_goal_paths(value: str) -> list[str]:
     """解析功能声明的工程路径，统一分隔符并保持稳定排序。"""
-    paths = {Path(item).as_posix().rstrip("/") for item in list_field(value)}
+    paths = {normalize_repo_path(item) for item in list_field(value)}
     return sorted(path for path in paths if path)
+
+
+def normalize_repo_path(value: object) -> str:
+    """将 Git、Goal 与文档中使用的项目相对路径统一为 POSIX 形式。"""
+    return str(value or "").strip().replace("\\", "/").rstrip("/")
 
 
 def normalize_doc_source(root: Path, config: dict, value: object) -> tuple[str, str]:
@@ -5361,7 +5366,7 @@ def command_authority_digest(args: argparse.Namespace) -> dict:
 
 
 def goal_generated_paths(root: Path, config: dict) -> set[str]:
-    return {str(path.relative_to(root)) for path in generated_documents(root, config)}
+    return {path.relative_to(root).as_posix() for path in generated_documents(root, config)}
 
 
 def git_dirty_paths(root: Path, ignored_paths: Iterable[str] = ()) -> list[str]:
@@ -5374,11 +5379,11 @@ def git_dirty_paths(root: Path, ignored_paths: Iterable[str] = ()) -> list[str]:
     )
     if result.returncode != 0:
         return []
-    ignored = set(ignored_paths)
+    ignored = {normalize_repo_path(path) for path in ignored_paths}
     paths: list[str] = []
     for line in result.stdout.splitlines():
         raw = line[3:].strip() if len(line) > 3 else ""
-        path = raw.split(" -> ", 1)[-1]
+        path = normalize_repo_path(raw.split(" -> ", 1)[-1])
         if path and not path.startswith(".daoge-docs/goals/") and path not in ignored:
             paths.append(path)
     return sorted(set(paths))
@@ -5572,12 +5577,14 @@ def git_changed_paths(root: Path, base: str, head: str) -> list[str]:
     )
     if result.returncode != 0:
         raise DocsError("无法计算 Goal 检查点的提交差异")
-    return sorted({item.decode("utf-8") for item in result.stdout.split(b"\0") if item})
+    return sorted({normalize_repo_path(item.decode("utf-8")) for item in result.stdout.split(b"\0") if item})
 
 
 def goal_managed_git_path(manifest: dict, path: str) -> bool:
     goal_prefix = f".daoge-docs/goals/{manifest.get('goal_id', '')}/"
-    return path.startswith(goal_prefix) or path in set(manifest.get("ignored_generated_paths", []))
+    normalized_path = normalize_repo_path(path)
+    managed_paths = {normalize_repo_path(item) for item in manifest.get("ignored_generated_paths", [])}
+    return normalized_path.startswith(goal_prefix) or normalized_path in managed_paths
 
 
 def goal_commit_matches_expected(root: Path, manifest: dict, expected: str, current: str) -> bool:
