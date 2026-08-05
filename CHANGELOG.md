@@ -1,6 +1,13 @@
 # 变更记录
 
-本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
+本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
+
+## daoge-pic 4.0.0 - 2026-08-05
+
+### 变更
+
+- 将批量生图 Skill 统一命名为 `daoge-pic`：仓库目录、Skill 元数据、安装参数、GitHub 子目录、npm 包、Docker 镜像、用户手册、参考资料与历史文档均使用新名称。
+- 保持 `node scripts/daoge.js` 作为既有 CLI 入口，任务规格、输出目录与本地工作台数据格式不变。
 
 ## daoge-docs 3.13.4 - 2026-08-04
 

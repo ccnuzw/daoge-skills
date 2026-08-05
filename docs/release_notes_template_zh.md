@@ -6,7 +6,7 @@
 
 适用对象：
 
-- `interactive-image-batch`
+- `daoge-pic`
 
 ## Patch 版本模板
 
@@ -29,20 +29,20 @@
 
 ## 影响范围
 
-- `interactive-image-batch`
+- `daoge-pic`
 
 ## 安装
 
 项目级安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch
+npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic
 ```
 
 全局安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
+npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
 ```
 
 ## 升级建议
@@ -80,8 +80,8 @@ npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
 
 ## 兼容性说明
 
-- 项目级安装：`.agents/skills/interactive-image-batch/`
-- 全局安装：`~/.codex/skills/interactive-image-batch/`
+- 项目级安装：`.agents/skills/daoge-pic/`
+- 全局安装：`~/.codex/skills/daoge-pic/`
 - 运行仍依赖项目根目录 `.env`
 
 ## 安装
@@ -89,13 +89,13 @@ npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
 项目级安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch
+npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic
 ```
 
 全局安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
+npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
 ```
 
 ## 升级建议
@@ -136,13 +136,13 @@ npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
 项目级安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch
+npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic
 ```
 
 全局安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
+npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
 ```
 
 ## 升级前建议

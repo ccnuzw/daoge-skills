@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 第二阶段第五批优化计划
 
@@ -68,7 +68,7 @@
 
 新增文件：
 
-- `skills/interactive-image-batch/references/host_native_results.schema.json`
+- `skills/daoge-pic/references/host_native_results.schema.json`
 
 目标：
 
@@ -94,7 +94,7 @@
 
 新增文件：
 
-- `skills/interactive-image-batch/references/examples/host-native/host_native_results.example.json`
+- `skills/daoge-pic/references/examples/host-native/host_native_results.example.json`
 
 目标：
 
@@ -105,7 +105,7 @@
 
 当前结果校验与回填已合并到单入口：
 
-- `skills/interactive-image-batch/scripts/daoge.js ingest`
+- `skills/daoge-pic/scripts/daoge.js ingest`
 
 职责：
 
@@ -183,10 +183,10 @@
 预期新增或修改：
 
 - `docs/daoge_phase2_host_native_results_schema_plan_zh.md`
-- `skills/interactive-image-batch/references/host_native_results.schema.json`
-- `skills/interactive-image-batch/references/examples/host-native/host_native_results.example.json`
-- `skills/interactive-image-batch/scripts/daoge.js`
-- `skills/interactive-image-batch/tests/smoke.test.js`
-- `skills/interactive-image-batch/scripts/run_smoke_tests.sh`
-- `skills/interactive-image-batch/README.md`
-- `skills/interactive-image-batch/references/trigger_modes_zh.md`
+- `skills/daoge-pic/references/host_native_results.schema.json`
+- `skills/daoge-pic/references/examples/host-native/host_native_results.example.json`
+- `skills/daoge-pic/scripts/daoge.js`
+- `skills/daoge-pic/tests/smoke.test.js`
+- `skills/daoge-pic/scripts/run_smoke_tests.sh`
+- `skills/daoge-pic/README.md`
+- `skills/daoge-pic/references/trigger_modes_zh.md`

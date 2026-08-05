@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE Phase3 第二批模板扩容计划
 
@@ -104,10 +104,10 @@
 
 完成后必须跑：
 
-1. `node skills/interactive-image-batch/scripts/validate_template_registry.js`
-2. `node skills/interactive-image-batch/scripts/render_template_registry_report.js --report-file skills/interactive-image-batch/references/template_registry_validation_report.json`
-3. `node --test skills/interactive-image-batch/tests/smoke.test.js`
-4. `bash skills/interactive-image-batch/scripts/run_smoke_tests.sh`
+1. `node skills/daoge-pic/scripts/validate_template_registry.js`
+2. `node skills/daoge-pic/scripts/render_template_registry_report.js --report-file skills/daoge-pic/references/template_registry_validation_report.json`
+3. `node --test skills/daoge-pic/tests/smoke.test.js`
+4. `bash skills/daoge-pic/scripts/run_smoke_tests.sh`
 5. 目录检查命令
 
 ## 完成标准

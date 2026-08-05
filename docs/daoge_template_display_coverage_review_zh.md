@@ -20,7 +20,7 @@
 
 ## 已覆盖模板
 
-当前已在 [`template_display_profile.js`](../skills/interactive-image-batch/scripts/template_display_profile.js) 中显式覆盖的主链模板共 10 个：
+当前已在 [`template_display_profile.js`](../skills/daoge-pic/scripts/template_display_profile.js) 中显式覆盖的主链模板共 10 个：
 
 1. `ui-mockup-board`
 2. `infographic-board`

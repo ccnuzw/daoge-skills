@@ -6,14 +6,14 @@
 
 | Skill | 解决的问题 | 主要使用者 | 独立说明 |
 | --- | --- | --- | --- |
-| [`interactive-image-batch`](./skills/interactive-image-batch/README.md) | 将批量生图需求整理为可审阅任务，执行或回填结果，并在本地工作台完成筛选、问题处理与导出 | 内容团队、设计师、运营人员、图像工作流开发者 | [进入生图 Skill](./skills/interactive-image-batch/README.md) |
+| [`daoge-pic`](./skills/daoge-pic/README.md) | 将批量生图需求整理为可审阅任务，执行或回填结果，并在本地工作台完成筛选、问题处理与导出 | 内容团队、设计师、运营人员、图像工作流开发者 | [进入生图 Skill](./skills/daoge-pic/README.md) |
 | [`daoge-docs`](./skills/daoge-docs/README.md) | 建立中文文档驱动开发体系，生成开发执行工作台和受控 Goal 输入 | 产品、研发、架构与使用编程智能体的团队 | [进入文档 Skill](./skills/daoge-docs/README.md) |
 
 ## 选择 Skill
 
 如果你的目标是“规划和交付一个软件项目”，选择 `daoge-docs`：它负责产品蓝图、版本 PRD、功能规格、架构、测试、门禁、证据、开发者工作台与 Goal 输入。
 
-如果你的目标是“批量生成、管理或回填图片资产”，选择 `interactive-image-batch`：它负责把 brief 整理为 `task_spec.json`、提示词、批次计划、问题队列和本地资产工作台。
+如果你的目标是“批量生成、管理或回填图片资产”，选择 `daoge-pic`：它负责把 brief 整理为 `task_spec.json`、提示词、批次计划、问题队列和本地资产工作台。
 
 两者可以在同一产品中共同使用，但不互相依赖：
 
@@ -21,11 +21,11 @@
 daoge-docs
   定义软件产品、版本、功能与开发任务边界
 
-interactive-image-batch
+daoge-pic
   管理项目中需要批量生成或审阅的图像资产
 ```
 
-例如，产品团队可以用 `daoge-docs` 规划一个电商内容系统，再用 `interactive-image-batch` 为其中的营销素材、商品图或活动海报建立批量生图工作区。二者的文档、数据、运行环境和发布节奏仍然独立。
+例如，产品团队可以用 `daoge-docs` 规划一个电商内容系统，再用 `daoge-pic` 为其中的营销素材、商品图或活动海报建立批量生图工作区。二者的文档、数据、运行环境和发布节奏仍然独立。
 
 ## 安装
 
@@ -37,24 +37,24 @@ interactive-image-batch
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
 ```
 
-安装 `interactive-image-batch`：
+安装 `daoge-pic`：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch
+npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic
 ```
 
 需要全局安装时，加 `-g`：
 
 ```bash
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs -g
-npx skills add ccnuzw/daoge-skills -a codex -s interactive-image-batch -g
+npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
 ```
 
 也可以直接从单个 Skill 的 GitHub 路径安装：
 
 ```bash
 npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-docs -a codex
-npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/interactive-image-batch -a codex
+npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic -a codex
 ```
 
 安装后重启 Codex，使新增 Skill 被重新发现。安装一个 Skill 不会自动安装仓库中的另一个 Skill。
@@ -75,7 +75,7 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/interacti
 
 ### 批量生图与资产管理
 
-在 `interactive-image-batch` 目录准备一个任务说明后，先生成可审阅工作区：
+在 `daoge-pic` 目录准备一个任务说明后，先生成可审阅工作区：
 
 ```bash
 node scripts/daoge.js prepare \
@@ -84,7 +84,7 @@ node scripts/daoge.js prepare \
 node scripts/daoge.js open --output-dir out
 ```
 
-`prepare` 不调用图片 provider；先在本地工作台检查任务、提示词和素材，再决定使用本地 provider 执行，或让其他宿主工具生成图片后再回填结果。完整流程见 [Interactive Image Batch README](./skills/interactive-image-batch/README.md)。
+`prepare` 不调用图片 provider；先在本地工作台检查任务、提示词和素材，再决定使用本地 provider 执行，或让其他宿主工具生成图片后再回填结果。完整流程见 [DAOGE Pic README](./skills/daoge-pic/README.md)。
 
 ## 系列原则
 
@@ -111,7 +111,7 @@ node scripts/daoge.js open --output-dir out
     │   ├── scripts/daoge_docs.py
     │   ├── assets/
     │   └── references/
-    └── interactive-image-batch/
+    └── daoge-pic/
         ├── README.md                 # 生图工作流使用手册
         ├── SKILL.md                  # Codex 执行规范
         ├── scripts/daoge.js

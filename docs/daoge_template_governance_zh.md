@@ -2,7 +2,7 @@
 
 ## 目的
 
-这份文档用于沉淀 `skills/interactive-image-batch` 模板体系的治理结果，方便后续维护者快速理解：
+这份文档用于沉淀 `skills/daoge-pic` 模板体系的治理结果，方便后续维护者快速理解：
 
 1. 模板系统为什么改造成现在这样
 2. 哪些文件是主链
@@ -134,7 +134,7 @@
 2. 跑：
 
 ```bash
-cd skills/interactive-image-batch
+cd skills/daoge-pic
 node scripts/validate_template_registry.js
 node scripts/render_template_registry_report.js \
   --report-file references/template_registry_validation_report.json
@@ -143,7 +143,7 @@ node scripts/render_template_registry_report.js \
 3. 再跑：
 
 ```bash
-skills/interactive-image-batch/scripts/run_smoke_tests.sh
+skills/daoge-pic/scripts/run_smoke_tests.sh
 ```
 
 如果统一 smoke 没跑绿，不要宣称模板治理完成。
@@ -167,7 +167,7 @@ skills/interactive-image-batch/scripts/run_smoke_tests.sh
 - 模板主链数量：11
 - 主链校验：0 error / 0 warning
 - smoke tests：30/30 通过
-- 统一维护入口：`skills/interactive-image-batch/scripts/run_smoke_tests.sh`
+- 统一维护入口：`skills/daoge-pic/scripts/run_smoke_tests.sh`
 
 如果以后状态变差，优先回看：
 

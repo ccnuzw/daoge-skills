@@ -76,17 +76,17 @@
 
 ```bash
 # prepare prompt list and workspace
-node skills/interactive-image-batch/scripts/daoge.js prepare \
+node skills/daoge-pic/scripts/daoge.js prepare \
   --task-spec /tmp/daoge-host-native-demo.z0FzP4/task_spec.json \
   --output-dir /tmp/daoge-host-native-demo.z0FzP4/out
 
 # ingest host-native results
-node skills/interactive-image-batch/scripts/daoge.js ingest \
+node skills/daoge-pic/scripts/daoge.js ingest \
   --results-file /tmp/daoge-host-native-demo.z0FzP4/host_native_results.json \
   --output-dir /tmp/daoge-host-native-demo.z0FzP4/out/ingested
 
 # run smoke
-bash skills/interactive-image-batch/scripts/run_smoke_tests.sh
+bash skills/daoge-pic/scripts/run_smoke_tests.sh
 ```
 
 ---

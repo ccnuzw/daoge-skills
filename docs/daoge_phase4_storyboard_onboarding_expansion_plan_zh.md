@@ -1,8 +1,8 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 第四阶段分镜模板接入计划
 
-本批目标：把 `cinematic-storyboard` 和 `oral-storyboard-board` 按统一标准接入 `interactive-image-batch` 的 onboarding 主链，而不是只补模板文档。
+本批目标：把 `cinematic-storyboard` 和 `oral-storyboard-board` 按统一标准接入 `daoge-pic` 的 onboarding 主链，而不是只补模板文档。
 
 ## 本批范围
 

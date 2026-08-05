@@ -1,10 +1,10 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE Phase3 模板扩容计划
 
 ## 目标
 
-回到 `interactive-image-batch` skill 本体，补齐当前相对 `gpt-image-2` 明显缺失的结构型模板大类，同时保持现有模板治理原则不被破坏：
+回到 `daoge-pic` skill 本体，补齐当前相对 `gpt-image-2` 明显缺失的结构型模板大类，同时保持现有模板治理原则不被破坏：
 
 - 不追求把对方所有 markdown 文件逐个照搬
 - 不让主链模板数量无节制膨胀
@@ -13,7 +13,7 @@
 
 ## 当前缺口
 
-对照 `gpt-image-2` 的 references 分类，`interactive-image-batch` 目前已经具备：
+对照 `gpt-image-2` 的 references 分类，`daoge-pic` 目前已经具备：
 
 - `poster-and-campaigns`
 - `portraits-and-characters`
@@ -141,10 +141,10 @@
 
 本批次完成后，必须跑以下校验：
 
-1. `node skills/interactive-image-batch/scripts/validate_template_registry.js`
-2. `node skills/interactive-image-batch/scripts/render_template_registry_report.js`
-3. `node --test skills/interactive-image-batch/tests/smoke.test.js`
-4. `bash skills/interactive-image-batch/scripts/run_smoke_tests.sh`
+1. `node skills/daoge-pic/scripts/validate_template_registry.js`
+2. `node skills/daoge-pic/scripts/render_template_registry_report.js`
+3. `node --test skills/daoge-pic/tests/smoke.test.js`
+4. `bash skills/daoge-pic/scripts/run_smoke_tests.sh`
 5. 目录检查命令
 
 ## 完成标准

@@ -2,7 +2,7 @@
 
 日期：2026-07-06
 
-范围：`skills/interactive-image-batch` 的自然语言 brief 识别、默认 prompt 生成、工作台命名、尺寸语义和用户可见文本。
+范围：`skills/daoge-pic` 的自然语言 brief 识别、默认 prompt 生成、工作台命名、尺寸语义和用户可见文本。
 
 验证方式：仅运行 `prepare`，不调用真实 provider。验证产物放在仓库上级隔离目录：
 

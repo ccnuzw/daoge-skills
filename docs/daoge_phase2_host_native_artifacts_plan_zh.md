@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 第二阶段第三批优化计划
 
@@ -23,7 +23,7 @@
 
 ## 背景判断
 
-当前 `interactive-image-batch` 已经具备完整本地 runner 主线：
+当前 `daoge-pic` 已经具备完整本地 runner 主线：
 
 - `task_spec`
 - `prompt_strategy`
@@ -70,7 +70,7 @@
 
 当前提示词准备已合并到单入口：
 
-- `skills/interactive-image-batch/scripts/daoge.js prepare`
+- `skills/daoge-pic/scripts/daoge.js prepare`
 
 职责：
 
@@ -124,7 +124,7 @@
 
 统一入口：
 
-- `skills/interactive-image-batch/scripts/run_smoke_tests.sh`
+- `skills/daoge-pic/scripts/run_smoke_tests.sh`
 
 需要把统一 `prepare` 最小产物链纳入最小回归闭环。
 
@@ -179,9 +179,9 @@
 预期新增或修改：
 
 - `docs/daoge_phase2_host_native_artifacts_plan_zh.md`
-- `skills/interactive-image-batch/scripts/daoge.js`
-- `skills/interactive-image-batch/tests/smoke.test.js`
-- `skills/interactive-image-batch/scripts/run_smoke_tests.sh`
-- `skills/interactive-image-batch/SKILL.md`
-- `skills/interactive-image-batch/references/trigger_modes_zh.md`
-- `skills/interactive-image-batch/README.md`
+- `skills/daoge-pic/scripts/daoge.js`
+- `skills/daoge-pic/tests/smoke.test.js`
+- `skills/daoge-pic/scripts/run_smoke_tests.sh`
+- `skills/daoge-pic/SKILL.md`
+- `skills/daoge-pic/references/trigger_modes_zh.md`
+- `skills/daoge-pic/README.md`

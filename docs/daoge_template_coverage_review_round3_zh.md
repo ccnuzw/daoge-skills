@@ -12,8 +12,8 @@
 
 重新对以下两份主链文件做了一轮按 `template_id + template_variant` 的覆盖度复盘：
 
-- `skills/interactive-image-batch/references/template_registry_zh.json`
-- `skills/interactive-image-batch/references/examples/examples.catalog.json`
+- `skills/daoge-pic/references/template_registry_zh.json`
+- `skills/daoge-pic/references/examples/examples.catalog.json`
 
 本轮复盘的目标不是继续机械扫尾，而是判断：
 
@@ -230,7 +230,7 @@
 
 第三轮覆盖度复盘后，可以明确给出结论：
 
-当前 `interactive-image-batch` 的模板谱系已经进入：
+当前 `daoge-pic` 的模板谱系已经进入：
 
 - **显式变体全覆盖**
 - **主链目录稳定期**

@@ -2,8 +2,8 @@
 
 ## 基本信息
 
-- 验收目标：验证 `skills/interactive-image-batch` 在真实用户路径中的准备、执行、回填、问题队列、补跑、工作台和发布包完整性。
-- 当前包版本：`interactive-image-batch@2.0.1`
+- 验收目标：验证 `skills/daoge-pic` 在真实用户路径中的准备、执行、回填、问题队列、补跑、工作台和发布包完整性。
+- 当前包版本：`daoge-pic@2.0.1`
 - 仓库路径：`/Users/apple/Progame/daoge/daoge-skills`
 - 隔离测试目录：`/Users/apple/Progame/daoge/daoge-goal45-real-validation`
 - `.env` 路径：`/Users/apple/Progame/daoge/.env`，只验证存在和必需字段，不记录 key。
@@ -69,12 +69,12 @@
 固定验证命令：
 
 ```bash
-npm --prefix skills/interactive-image-batch run test:contracts
-npm --prefix skills/interactive-image-batch run test:integration
+npm --prefix skills/daoge-pic run test:contracts
+npm --prefix skills/daoge-pic run test:integration
 ```
 
 若修改核心执行链路，再跑：
 
 ```bash
-npm --prefix skills/interactive-image-batch test
+npm --prefix skills/daoge-pic test
 ```

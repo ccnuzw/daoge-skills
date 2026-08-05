@@ -1,11 +1,11 @@
-# DAOGE 完整使用说明
+# DAOGE Pic 完整使用说明
 
 本文是 DAOGE v2 用户手册。当前用户只需要记住：一个 CLI、一个工作台入口、四条常用路径。
 
 本文所有命令默认从 skill 目录执行：
 
 ```bash
-cd skills/interactive-image-batch
+cd skills/daoge-pic
 ```
 
 ```bash
@@ -319,21 +319,21 @@ node scripts/daoge.js rerun \
 
 用户入口：
 
-- `skills/interactive-image-batch/README.md`
+- `skills/daoge-pic/README.md`
 - 本文档
 
 示例：
 
-- `skills/interactive-image-batch/references/examples/README.md`
+- `skills/daoge-pic/references/examples/README.md`
 
 宿主接入：
 
-- `skills/interactive-image-batch/references/host_native_adapter_playbook_zh.md`
-- `skills/interactive-image-batch/references/host_native_integration_sop_zh.md`
+- `skills/daoge-pic/references/host_native_adapter_playbook_zh.md`
+- `skills/daoge-pic/references/host_native_integration_sop_zh.md`
 
 发布契约：
 
-- `skills/interactive-image-batch/docs/release_contract_zh.md`
+- `skills/daoge-pic/docs/release_contract_zh.md`
 
 历史规划：
 

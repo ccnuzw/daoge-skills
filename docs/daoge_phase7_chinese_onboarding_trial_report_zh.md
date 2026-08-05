@@ -1,9 +1,9 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 第七阶段中文入口试用回归报告
 
 日期：2026-05-19  
-范围：`skills/interactive-image-batch` 中文入口、中文任务地图、中文 catalog 首页
+范围：`skills/daoge-pic` 中文入口、中文任务地图、中文 catalog 首页
 
 ## 一、回归目标
 
@@ -38,10 +38,10 @@
 执行命令：
 
 ```bash
-node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent portrait --output-dir /tmp/daoge-trial-zh-portrait
-node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent packaging --output-dir /tmp/daoge-trial-zh-packaging
-node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent oralboard --output-dir /tmp/daoge-trial-zh-oralboard
-node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent ecommerce --output-dir /tmp/daoge-trial-zh-ecommerce
+node skills/daoge-pic/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent portrait --output-dir /tmp/daoge-trial-zh-portrait
+node skills/daoge-pic/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent packaging --output-dir /tmp/daoge-trial-zh-packaging
+node skills/daoge-pic/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent oralboard --output-dir /tmp/daoge-trial-zh-oralboard
+node skills/daoge-pic/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent ecommerce --output-dir /tmp/daoge-trial-zh-ecommerce
 ```
 
 ## 三、试用结果

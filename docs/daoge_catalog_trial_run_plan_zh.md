@@ -1,10 +1,10 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE Catalog 试运行回归计划
 
 ## 目标
 
-当前 `interactive-image-batch` 已经完成：
+当前 `daoge-pic` 已经完成：
 
 - 主链模板体系
 - 变体级 example 体系

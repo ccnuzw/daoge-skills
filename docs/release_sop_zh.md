@@ -6,7 +6,7 @@
 
 适用 skill：
 
-- `interactive-image-batch`
+- `daoge-pic`
 
 ## 1. 发布前检查
 
@@ -30,22 +30,22 @@ git log --oneline -3
 发布前必须跑契约测试和全量测试：
 
 ```bash
-npm --prefix skills/interactive-image-batch run test:contracts
-npm --prefix skills/interactive-image-batch test
+npm --prefix skills/daoge-pic run test:contracts
+npm --prefix skills/daoge-pic test
 ```
 
 如有脚本改动，可额外做语法检查：
 
 ```bash
-node --check skills/interactive-image-batch/scripts/daoge.js
-node --check skills/interactive-image-batch/src/cli/daoge.js
-node --check skills/interactive-image-batch/src/renderers/workspace_page.js
+node --check skills/daoge-pic/scripts/daoge.js
+node --check skills/daoge-pic/src/cli/daoge.js
+node --check skills/daoge-pic/src/renderers/workspace_page.js
 ```
 
 如有 zip 包分发，建议额外检查：
 
 ```bash
-unzip -t interactive-image-batch.zip
+unzip -t daoge-pic.zip
 ```
 
 ## 3. 版本号规则
@@ -98,7 +98,7 @@ git push origin main
 示例：
 
 ```bash
-gh release create v1.0.1 interactive-image-batch.zip#interactive-image-batch.zip \
+gh release create v1.0.1 daoge-pic.zip#daoge-pic.zip \
   --repo ccnuzw/daoge-skills \
   --title "DAOGE Skills v1.0.1" \
   --notes "这里填写整理后的 release notes"
@@ -161,7 +161,7 @@ git tag -l
 - README 负责用户安装和使用入口
 - `docs/release_notes_template_zh.md` 负责 release notes 模板
 - `docs/release_sop_zh.md` 负责维护者发版流程
-- `interactive-image-batch.zip` 可作为 release 附件
+- `daoge-pic.zip` 可作为 release 附件
 
 ## 11. 最小发版示例
 

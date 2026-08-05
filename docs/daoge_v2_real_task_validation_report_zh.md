@@ -5,14 +5,14 @@
 - 测试时间：2026-07-06 16:20-16:52 CST
 - 报告性质：主体为 `v2.0.1` 本地预发布验收快照；修复、测试和原验收记录已随 `v2.0.2` 发布；当前修订版为发布后补充复核信息。
 - 仓库：`daoge-skills`
-- 主 skill：`skills/interactive-image-batch`
-- 包版本：`interactive-image-batch@2.0.1`，测试对象为当前工作区源码和本地 pack 产物，不是已发布远端包。
+- 主 skill：`skills/daoge-pic`
+- 包版本：`daoge-pic@2.0.1`，测试对象为当前工作区源码和本地 pack 产物，不是已发布远端包。
 - 基线 commit：`575a36a82982c5e6ca74ffc25f8cbe3cea4b77c2`
 - 预发布工作区状态：dirty，包含本轮修复和验收文档；当时未提交。
 - 发布后状态：修复、测试和原验收记录已进入 `v2.0.2` 变更集；当前修订版不属于已固定的 `v2.0.2` tag。
 - 本轮代码变更：
-  - `skills/interactive-image-batch/src/shared/workspace.js`
-  - `skills/interactive-image-batch/tests/unit/task_catalog.test.js`
+  - `skills/daoge-pic/src/shared/workspace.js`
+  - `skills/daoge-pic/tests/unit/task_catalog.test.js`
 - 隔离测试目录：仓库上级目录中的 `daoge-goal45-real-validation/`，本机实际路径已验证但不入库。
 - `.env` 文件：仓库上级目录中的 `.env`，本机实际路径已验证但不入库。
 
@@ -22,9 +22,9 @@
 - 发布 commit：`0d5cfdffe1ca2ce7abff5d951e9c4bf7cbd378b6`
 - Git tag：`v2.0.2`
 - Release：`https://github.com/ccnuzw/daoge-skills/releases/tag/v2.0.2`
-- Release 包：`interactive-image-batch.zip`
+- Release 包：`daoge-pic.zip`
 - Release 包 SHA256：`c80f1d7da0e28cd9fa6f95dc4b8ea237bd2671f0cbd3f752883b83847d561c7c`
-- 发布后验证：`npm --prefix skills/interactive-image-batch test`、`node --check`、`unzip -t interactive-image-batch.zip` 均通过。
+- 发布后验证：`npm --prefix skills/daoge-pic test`、`node --check`、`unzip -t daoge-pic.zip` 均通过。
 
 ## 2. 环境配置
 
@@ -81,9 +81,9 @@
 
 ### P1 修复：任务标题优先使用用户 brief
 
-- 修改：`skills/interactive-image-batch/src/shared/workspace.js`
+- 修改：`skills/daoge-pic/src/shared/workspace.js`
 - 行为：`resolveTask()` 在没有显式 `title` 时，使用 `contentBrief` 或 `summary` 作为工作台任务标题；仅在没有用户输入时回落到 catalog 类目名。
-- 测试：`skills/interactive-image-batch/tests/unit/task_catalog.test.js` 新增 `resolveTask uses user brief as task title when no explicit title is provided`。
+- 测试：`skills/daoge-pic/tests/unit/task_catalog.test.js` 新增 `resolveTask uses user brief as task title when no explicit title is provided`。
 - 修后验证：
   - `out/t07_host_success_review_after_fix` 文件名变为 `宿主侧成功和复核导入验证`。
   - `out/t09_missing_material_after_fix` issue 文件名变为 `缺失参考图路径验证，不应假成功`。
@@ -108,9 +108,9 @@
 ## 11. 验证命令
 
 ```bash
-npm --prefix skills/interactive-image-batch run test:contracts
-npm --prefix skills/interactive-image-batch run test:integration
-npm --prefix skills/interactive-image-batch test
+npm --prefix skills/daoge-pic run test:contracts
+npm --prefix skills/daoge-pic run test:integration
+npm --prefix skills/daoge-pic test
 ```
 
 本地执行结果：通过。原始终端日志未纳入版本库文档；复核 `v2.0.2` 时应基于 `v2.0.2` tag 或 release 包重新执行这些命令，复核当前修订版时只需确认文档补充信息与发布记录一致。

@@ -1,8 +1,8 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 可视化工作台重构正式蓝图
 
-> 归档说明：本文记录旧工作台重构阶段的设计草案，不代表当前发布入口。当前入口以 `skills/interactive-image-batch/README.md` 为准：`node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out`，然后打开 `out/workspace/index.html`。
+> 归档说明：本文记录旧工作台重构阶段的设计草案，不代表当前发布入口。当前入口以 `skills/daoge-pic/README.md` 为准：`node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out`，然后打开 `out/workspace/index.html`。
 
 ## 0. 终版执行结论
 
@@ -42,7 +42,7 @@
 
 ## 1. 这次重构真正要解决什么
 
-这次重构不再只是“把几张 HTML 做得更统一”，而是要把 `interactive-image-batch` 从一套偏工程化的产物流水线，升级成一套真正面向个人用户的可视化工作台系统。
+这次重构不再只是“把几张 HTML 做得更统一”，而是要把 `daoge-pic` 从一套偏工程化的产物流水线，升级成一套真正面向个人用户的可视化工作台系统。
 
 目标不是让用户理解：
 

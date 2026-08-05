@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 第七阶段中文 Catalog 单页试用回归报告
 
@@ -58,9 +58,9 @@
 执行命令：
 
 ```bash
-node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent portrait --output-dir /tmp/daoge-trial-catalog-only-portrait
-node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent ecommerce --output-dir /tmp/daoge-trial-catalog-only-ecommerce
-node skills/interactive-image-batch/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent oralboard --output-dir /tmp/daoge-trial-catalog-only-oralboard
+node skills/daoge-pic/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent portrait --output-dir /tmp/daoge-trial-catalog-only-portrait
+node skills/daoge-pic/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent ecommerce --output-dir /tmp/daoge-trial-catalog-only-ecommerce
+node skills/daoge-pic/scripts/daoge.js prepare --task-spec /abs/path/task_spec.json --intent oralboard --output-dir /tmp/daoge-trial-catalog-only-oralboard
 ```
 
 ## 四、试用结果

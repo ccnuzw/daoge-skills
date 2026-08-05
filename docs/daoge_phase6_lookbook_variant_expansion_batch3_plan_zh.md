@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE Phase 6：Lookbook 第三轮正式变体扩展计划
 
@@ -66,6 +66,6 @@
 
 全量验证：
 
-- `node --test skills/interactive-image-batch/tests/smoke.test.js`
-- `bash skills/interactive-image-batch/scripts/run_smoke_tests.sh`
+- `node --test skills/daoge-pic/tests/smoke.test.js`
+- `bash skills/daoge-pic/scripts/run_smoke_tests.sh`
 - 目录检查命令

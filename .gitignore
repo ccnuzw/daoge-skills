@@ -6,4 +6,4 @@ __pycache__/
 daoge.db
 daoge.db-*
 /snapshots/
-skills/interactive-image-batch/.docker-workspace/
+skills/daoge-pic/.docker-workspace/

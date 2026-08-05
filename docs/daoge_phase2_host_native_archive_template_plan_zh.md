@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 第二阶段第八批优化计划
 
@@ -146,5 +146,5 @@
 
 - `docs/daoge_phase2_host_native_archive_template_plan_zh.md`
 - `docs/host_native_adapter_archive_template_zh.md`
-- `skills/interactive-image-batch/README.md`
-- `skills/interactive-image-batch/references/host_native_integration_sop_zh.md`
+- `skills/daoge-pic/README.md`
+- `skills/daoge-pic/references/host_native_integration_sop_zh.md`

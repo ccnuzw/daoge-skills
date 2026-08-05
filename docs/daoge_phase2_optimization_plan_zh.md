@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 第二阶段优化计划
 
@@ -11,7 +11,7 @@
 1. 运行环境适配能力
 2. 轻量使用路径
 
-目标是让 `interactive-image-batch` 从“强运行时系统”升级成：
+目标是让 `daoge-pic` 从“强运行时系统”升级成：
 
 - 强运行时系统
 - 同时具备轻量 host-native 路径

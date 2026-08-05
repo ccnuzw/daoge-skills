@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE 第六阶段：Oral Storyboard 家族正式变体扩展计划
 
@@ -33,5 +33,5 @@
 - `qualityGates.ok: true`
 - `warnings: []`
 - `storyboardValidation.ok: true`
-- `node --test skills/interactive-image-batch/tests/smoke.test.js` 通过
-- `bash skills/interactive-image-batch/scripts/run_smoke_tests.sh` 通过
+- `node --test skills/daoge-pic/tests/smoke.test.js` 通过
+- `bash skills/daoge-pic/scripts/run_smoke_tests.sh` 通过

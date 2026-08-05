@@ -36,11 +36,11 @@ Goal 7 已完成。自然语言 brief 识别、模板匹配、默认 prompt 生�
 
 ```bash
 git diff --check
-npm --prefix skills/interactive-image-batch run test:unit
-npm --prefix skills/interactive-image-batch run test:contracts
-npm --prefix skills/interactive-image-batch run test:integration
-npm --prefix skills/interactive-image-batch run test:artifacts
-npm --prefix skills/interactive-image-batch run test:smoke
+npm --prefix skills/daoge-pic run test:unit
+npm --prefix skills/daoge-pic run test:contracts
+npm --prefix skills/daoge-pic run test:integration
+npm --prefix skills/daoge-pic run test:artifacts
+npm --prefix skills/daoge-pic run test:smoke
 ```
 
 本轮 review 时以上命令均通过。

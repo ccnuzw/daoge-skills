@@ -1,4 +1,4 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/interactive-image-batch/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
 
 # DAOGE Phase 6 提交前收口检查点
 
@@ -6,7 +6,7 @@
 
 ## 当前整体状态
 
-本轮 `interactive-image-batch` 已经从“模板治理与主链搭建”推进到“正式变体体系扩展 + onboarding/catalog 产品化”的稳定阶段。
+本轮 `daoge-pic` 已经从“模板治理与主链搭建”推进到“正式变体体系扩展 + onboarding/catalog 产品化”的稳定阶段。
 
 当前基线：
 
@@ -76,7 +76,7 @@
 
 ### 核心技能目录
 
-- `skills/interactive-image-batch/`
+- `skills/daoge-pic/`
 
 包括：
 
@@ -94,7 +94,7 @@
 说明：
 
 - 这些文档是这轮模板治理、host-native、catalog/onboarding、覆盖盘点的正式沉淀
-- 它们和 `interactive-image-batch` 当前能力是同一轮工作，不建议拆散
+- 它们和 `daoge-pic` 当前能力是同一轮工作，不建议拆散
 
 ## 不建议混进本轮提交的内容
 
@@ -104,7 +104,7 @@
 - `.agents/`
 - `.claude/`
 - `generated_images/`
-- `interactive-image-batch.zip`
+- `daoge-pic.zip`
 - `daoge_exports/`
 - `daoge-github-export/`
 - `tmp_*`
@@ -120,9 +120,9 @@
 
 本轮最新验证基线已经成立：
 
-- `node --test skills/interactive-image-batch/tests/smoke.test.js`
+- `node --test skills/daoge-pic/tests/smoke.test.js`
   - 结果：34/34 通过
-- `bash skills/interactive-image-batch/scripts/run_smoke_tests.sh`
+- `bash skills/daoge-pic/scripts/run_smoke_tests.sh`
   - 结果：`[smoke] done`
 - 目录检查
   - `swarm_reports` 列表输出正常
