@@ -140,7 +140,10 @@
       font-weight: 700;
     }
     .count-badge { min-width: 24px; padding: 1px 6px; border-radius: 10px; background: var(--code); text-align: center; color: var(--muted); font: 11px/18px var(--mono); }
-    .doc-tree { height: calc(100% - 48px); overflow: auto; padding: 8px; }
+    .reader-nav-modes { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 2px; padding: 7px 8px; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
+    .reader-nav-mode { min-height: 28px; padding: 0 4px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .reader-nav-mode:hover, .reader-nav-mode.active { background: var(--surface); color: var(--teal); font-weight: 750; }
+    .doc-tree { height: calc(100% - 88px); overflow: auto; padding: 8px; }
     .tree-group { margin-bottom: 5px; }
     .tree-group-title {
       display: flex;
@@ -556,6 +559,27 @@
     .workbench-selector-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: center; }
     .workbench-selector-actions span { color: var(--faint); font: 10px/1.4 var(--mono); }
     .command.compact { min-height: 30px; padding: 0 8px; font-size: 11px; }
+    .portfolio-scope { display: flex; gap: 4px; overflow-x: auto; padding: 1px 0 10px; border-bottom: 1px solid var(--line); }
+    .portfolio-scope button { flex: 0 0 auto; min-height: 30px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--muted); font-size: 11px; }
+    .portfolio-scope button.active { border-color: var(--teal); background: var(--teal-soft); color: var(--teal); font-weight: 750; }
+    .portfolio-list { display: grid; gap: 1px; border-top: 1px solid var(--line-strong); }
+    .portfolio-row { display: grid; grid-template-columns: minmax(90px,.45fr) minmax(0,1.45fr) minmax(0,.8fr) auto; gap: 12px; align-items: center; min-height: 58px; padding: 9px 2px; border-bottom: 1px solid var(--line); }
+    .portfolio-row h4, .portfolio-row p { margin: 0; }
+    .portfolio-row h4 { font-size: 13px; }
+    .portfolio-row p { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .portfolio-status { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+    .portfolio-features { grid-column: 1 / -1; display: grid; gap: 0; margin-top: 2px; border-top: 1px solid var(--line); }
+    .portfolio-features-head { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0 5px; color: var(--muted); font-size: 10px; font-weight: 750; }
+    .portfolio-feature { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(80px, .35fr) auto minmax(0, auto); gap: 10px; align-items: center; width: 100%; min-height: 42px; padding: 7px 8px; border-top: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; }
+    .portfolio-feature:hover { background: var(--teal-soft); }
+    .portfolio-feature-open { display: flex; min-width: 0; align-items: baseline; gap: 6px; padding: 0; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+    .portfolio-feature-open:hover, .portfolio-feature-open:focus-visible { color: var(--teal); outline: none; }
+    .portfolio-feature-title { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+    .portfolio-feature-title code { color: var(--teal); font: 700 10px/1.35 var(--mono); }
+    .portfolio-feature-title strong { min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+    .portfolio-feature-domain { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+    .portfolio-feature-status { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+    .portfolio-empty { color: var(--muted); font-size: 11px; }
     .decision-strip { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; align-items: center; margin-top: 20px; padding: 20px 22px; border-left: 4px solid var(--amber); background: var(--surface); }
     .decision-strip.ready { border-left-color: var(--green); }
     .decision-strip.blocked { border-left-color: var(--rose); }
@@ -709,6 +733,10 @@
       .progress-strip, .change-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
       .blocker-row, .change-row { grid-template-columns: auto minmax(0,1fr); }
       .blocker-row .command, .change-row > :last-child { grid-column: 2; }
+      .portfolio-row { grid-template-columns: 1fr; gap: 5px; }
+      .portfolio-status { justify-content: flex-start; }
+      .portfolio-feature { grid-template-columns: 1fr; gap: 4px; }
+      .portfolio-feature-status { justify-content: flex-start; }
     }
     @media print {
       body { overflow: visible; background: white; }
@@ -754,6 +782,7 @@
 
     <aside class="sidebar" aria-label="文档目录">
       <div class="side-head"><span>文档目录</span><span class="side-head-actions"><span class="count-badge" id="docCount">0</span><button class="drawer-close" id="closeNav" aria-label="关闭文档目录" title="关闭文档目录">&times;</button></span></div>
+      <div class="reader-nav-modes" id="readerNavModes" aria-label="阅读目录视角"></div>
       <nav class="doc-tree" id="docTree"></nav>
     </aside>
 
@@ -799,6 +828,8 @@
       evolutionTrack: safeGet("daoge-docs.evolutionTrack") || "",
       evolutionStage: safeGet("daoge-docs.evolutionStage") || "",
       evolutionMilestone: safeGet("daoge-docs.evolutionMilestone") || "",
+      workbenchScope: safeGet("daoge-docs.workbenchScope") || "all",
+      readerNavigationMode: safeGet("daoge-docs.readerNavigationMode") || "project",
       query: "",
       collapsed: new Set()
     };
@@ -806,6 +837,7 @@
       content: document.getElementById("content"),
       workspace: document.getElementById("workspace"),
       docTree: document.getElementById("docTree"),
+      readerNavModes: document.getElementById("readerNavModes"),
       docCount: document.getElementById("docCount"),
       loadStatus: document.getElementById("loadStatus"),
       searchInput: document.getElementById("searchInput"),
@@ -837,12 +869,14 @@
       if (hash.track) state.evolutionTrack = hash.track;
       if (hash.stage) state.evolutionStage = hash.stage;
       if (hash.milestone) state.evolutionMilestone = hash.milestone;
+      if (hash.scope) state.workbenchScope = hash.scope;
+      if (hash.readerMode) state.readerNavigationMode = hash.readerMode;
       if (!DATA.documents.some(doc => doc.path === state.activeDoc)) {
         const preferred = DATA.documents.find(doc => doc.path.includes("02-产品与版本/产品蓝图.md")) || DATA.documents[0];
         state.activeDoc = preferred ? preferred.path : "";
       }
-      if (!DATA.features.some(feature => feature.id === state.activeFeature)) {
-        state.activeFeature = DATA.features[0] ? DATA.features[0].id : "";
+      if (!featureCatalog().some(feature => feature.id === state.activeFeature)) {
+        state.activeFeature = featureCatalog()[0] ? featureCatalog()[0].id : "";
       }
       els.docCount.textContent = String(DATA.documents.length);
       els.loadStatus.textContent = `${DATA.project.current_version} · ${DATA.documents.length} 份文档 · 离线数据`;
@@ -898,17 +932,28 @@
       els.overlay.addEventListener("click", closeDrawers);
       window.addEventListener("hashchange", () => {
         const hash = readHash();
-        if (hash.feature && DATA.features.some(feature => feature.id === hash.feature)) state.activeFeature = hash.feature;
+        if (hash.feature && featureCatalog().some(feature => feature.id === hash.feature)) state.activeFeature = hash.feature;
         if (hash.panel) state.panel = hash.panel;
         if (hash.map && (DATA.views && DATA.views.maps || {})[hash.map]) state.mapMode = hash.map;
         if (hash.track) state.evolutionTrack = hash.track;
         if (hash.stage) state.evolutionStage = hash.stage;
         if (hash.milestone) state.evolutionMilestone = hash.milestone;
+        if (hash.scope) state.workbenchScope = hash.scope;
+        if (hash.readerMode) state.readerNavigationMode = hash.readerMode;
         if (hash.doc && DATA.documents.some(doc => doc.path === hash.doc)) {
           openDoc(hash.doc, false, hash.section || "");
         }
         else if (hash.view) setView(hash.view, false);
       });
+    }
+
+    function featureCatalog() {
+      const catalog = (DATA || {}).project_features;
+      return Array.isArray(catalog) && catalog.length ? catalog : (DATA.features || []);
+    }
+
+    function executionFeatureCatalog() {
+      return DATA.features || [];
     }
 
     function setView(view, persist = true) {
@@ -934,6 +979,34 @@
     }
 
     function renderTree() {
+      const navigation = ((DATA.views || {}).reader || {}).navigation || {modes:[]};
+      const modeById = new Map((navigation.modes || []).map(item => [item.id,item]));
+      if (!modeById.has(state.readerNavigationMode)) state.readerNavigationMode = modeById.has("project") ? "project" : "path";
+      els.readerNavModes.innerHTML = (navigation.modes || []).map(mode => `<button class="reader-nav-mode ${mode.id === state.readerNavigationMode ? "active" : ""}" data-reader-nav-mode="${escapeHtml(mode.id)}">${escapeHtml(mode.label)}</button>`).join("");
+      els.readerNavModes.querySelectorAll("[data-reader-nav-mode]").forEach(button => button.addEventListener("click", () => {
+        state.readerNavigationMode = button.dataset.readerNavMode;
+        safeSet("daoge-docs.readerNavigationMode", state.readerNavigationMode);
+        renderTree();
+        updateHash();
+      }));
+      const semanticMode = modeById.get(state.readerNavigationMode);
+      if (semanticMode && semanticMode.id !== "path") {
+        const documentsByPath = new Map(DATA.documents.map(document => [document.path,document]));
+        els.docTree.innerHTML = (semanticMode.groups || []).map(group => {
+          const collapsedId = `semantic:${semanticMode.id}:${group.id}`;
+          const collapsed = state.collapsed.has(collapsedId);
+          const docs = (group.document_paths || []).map(path => documentsByPath.get(path)).filter(Boolean);
+          const buttons = docs.map(doc => `<button class="doc-button ${doc.path === state.activeDoc ? "active" : ""}" data-doc="${escapeHtml(doc.path)}" title="${escapeHtml(doc.path)}"><strong>${escapeHtml(doc.title)}</strong><span>${escapeHtml(doc.status)} · ${doc.line_count} 行</span></button>`).join("");
+          return `<section class="tree-group"><button class="tree-group-title" data-semantic-group="${escapeHtml(collapsedId)}" aria-expanded="${!collapsed}"><span>${escapeHtml(group.label)}</span><span class="count-badge">${docs.length}</span></button><div class="tree-items ${collapsed ? "collapsed" : ""}">${buttons || '<div class="portfolio-empty">没有以明确结构归属到此视角的文档。</div>'}</div></section>`;
+        }).join("");
+        els.docTree.querySelectorAll("[data-semantic-group]").forEach(button => button.addEventListener("click", () => {
+          const group = button.dataset.semanticGroup;
+          if (state.collapsed.has(group)) state.collapsed.delete(group); else state.collapsed.add(group);
+          renderTree();
+        }));
+        els.docTree.querySelectorAll("[data-doc]").forEach(button => button.addEventListener("click", () => openDoc(button.dataset.doc)));
+        return;
+      }
       if (Array.isArray(DATA.directories) && DATA.directories.length) {
         const byId = new Map(DATA.directories.map(item => [item.id, item]));
         const renderDirectory = (directoryId, depth = 0) => {
@@ -981,9 +1054,17 @@
     }
 
     function renderWorkbench() {
-      const feature = DATA.features.find(item => item.id === state.activeFeature) || DATA.features[0] || null;
+      const executionFeatures = executionFeatureCatalog();
+      const feature = executionFeatures.find(item => item.id === state.activeFeature) || executionFeatures[0] || null;
       if (feature) state.activeFeature = feature.id;
-      const findings = (DATA.findings || []).filter(item => item.status === "open" && (!feature || item.object_id === feature.id || item.object_type === "gate"));
+      const workbench = (DATA.views || {}).workbench || DATA.workbench || {};
+      const portfolio = workbench.version_portfolio || {versions:[],browsing_scopes:[{id:"all",label:"全部版本"}]};
+      const scopes = portfolio.browsing_scopes || [{id:"all",label:"全部版本"}];
+      if (!scopes.some(item => item.id === state.workbenchScope)) state.workbenchScope = "all";
+      const visibleVersions = (portfolio.versions || []).filter(item => state.workbenchScope === "all" || item.id === state.workbenchScope);
+      const developmentStages = new Set(["discovery", "version-ready", "feature-ready"]);
+      const allFindings = (DATA.findings || []).filter(item => item.status === "open" && (!feature || item.object_id === feature.id || item.object_type === "gate"));
+      const findings = allFindings.filter(item => developmentStages.has(item.stage));
       const severityOrder = {blocking:0, high:1, medium:2, info:3};
       findings.sort((a,b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9) || String(a.id).localeCompare(String(b.id)));
       const blockers = findings.filter(item => ["blocking","high"].includes(item.severity));
@@ -999,16 +1080,36 @@
         implementation: !feature ? "unknown" : ["planning","draft"].includes(feature.status) ? "not_started" : feature.status === "implementing" ? "implementing" : ["local_verified","staging_verified","released"].includes(feature.status) ? "implemented" : "unknown",
         verification: evidence.result === "passed" && evidence.freshness !== "fresh" ? "stale" : evidence.result || "not_run"
       };
-      const featureOptions = DATA.features.map(item => `<option value="${escapeHtml(item.id)}" ${feature && item.id === feature.id ? "selected" : ""}>${escapeHtml(item.id)} · ${escapeHtml(item.title)}</option>`).join("");
+      const featureOptions = executionFeatures.map(item => `<option value="${escapeHtml(item.id)}" ${feature && item.id === feature.id ? "selected" : ""}>${escapeHtml(item.id)} · ${escapeHtml(item.title)}</option>`).join("");
+      const projectFeatureOptions = featureCatalog().map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.version || "项目全局")} · ${escapeHtml(item.id)} · ${escapeHtml(item.title)}</option>`).join("");
       const mainAction = topBlockers[0]
         ? `<button class="command primary" data-open-finding="${escapeHtml(topBlockers[0].id)}">处理首要阻塞</button>`
         : packet
           ? `<button class="command primary" data-copy-task="${escapeHtml(packet.id)}">复制开发任务包</button>`
           : feature ? `<button class="command primary" data-open-doc="${escapeHtml(feature.path)}">打开功能规格</button>` : "";
+      const portfolioRows = visibleVersions.map(version => {
+        const delivery = version.delivery || {};
+        const source = (version.sources || [])[0] || {};
+        const role = version.role && version.role !== "unknown" ? version.role : "未声明角色";
+        const features = version.features || [];
+        const featureRows = features.map(feature => {
+          const featureSource = (feature.sources || [])[0] || {};
+          const featurePath = feature.path || featureSource.source_path || "";
+          const featureLabel = `${feature.id || "未分配 ID"} · ${feature.title || "未命名功能"}`;
+          return `<div class="portfolio-feature" data-portfolio-feature="${escapeHtml(feature.id || "")}"><button class="portfolio-feature-open" ${featurePath ? `data-open-doc="${escapeHtml(featurePath)}"` : "disabled"} title="${escapeHtml(featurePath ? `阅读功能规格：${featureLabel}` : featureLabel)}"><span class="portfolio-feature-title"><code>${escapeHtml(feature.id || "未分配 ID")}</code><strong>${escapeHtml(feature.title || "未命名功能")}</strong></span></button><span class="portfolio-feature-domain">${escapeHtml(feature.domain || "未分类")}</span><span class="portfolio-feature-status">${chip(feature.specification || "unknown")}${chip(feature.implementation || "unknown")}${chip(feature.verification || "unknown")}</span><span class="view-actions"><button class="command compact" data-copy-feature="${escapeHtml(feature.id || "")}" title="复制功能 ID">复制 ID</button><button class="command compact primary" data-copy-goal-prompt="${escapeHtml(feature.id || "")}" title="复制带目标版本的 Goal 提示">复制 Goal 提示</button></span></div>`;
+        }).join("") || '<div class="portfolio-empty">该版本尚未登记可浏览的功能规格。</div>';
+        return `<article class="portfolio-row"><div><h4>${escapeHtml(version.id)} <span class="status-chip">${escapeHtml(role)}</span></h4><p>${escapeHtml(version.planning_status || "未声明")}</p></div><div><strong>${escapeHtml(version.goal || "版本目标未登记")}</strong><p>前置：${escapeHtml(version.prerequisites || "未登记")} · 退出：${escapeHtml(version.exit_condition || "未登记")}</p></div><div class="portfolio-status">${chip(delivery.specification || "unknown")}${chip(delivery.implementation || "unknown")}${chip(delivery.verification || "unknown")}</div><div class="view-actions">${version.overview_path ? `<button class="command compact" data-open-doc="${escapeHtml(version.overview_path)}">版本文档</button>` : ""}${sourceAttributes(source) ? `<button class="command compact" ${sourceAttributes(source)}>路线图</button>` : ""}</div><div class="portfolio-features"><div class="portfolio-features-head"><span>版本功能</span><span>${features.length} 项 · 点击进入功能规格</span></div>${featureRows}</div></article>`;
+      }).join("") || '<div class="empty">版本路线图尚未提供可浏览的版本记录。</div>';
       els.content.innerHTML = `
         <header class="view-header" id="workbench-top">
-          <div><div class="eyebrow">${escapeHtml(DATA.project.name)} · ${escapeHtml(DATA.project.current_version)}</div><h2>当前开发判断</h2><p>${escapeHtml(feature ? feature.summary || feature.title : "尚未选择开发功能。")}</p></div>
+          <div><div class="eyebrow">${escapeHtml(DATA.project.name)} · 当前执行 ${escapeHtml(workbench.active_execution_version || DATA.project.current_version)}</div><h2>项目全景与当前执行</h2><p>版本选择只改变浏览范围；Gate、Goal、任务包和下一步始终锚定当前执行版本。</p></div>
         </header>
+        <section class="section" id="workbench-portfolio"><div class="section-head"><h3>项目版本全貌</h3><span>规格 / 实现 / 验证独立表达</span></div><div class="portfolio-scope">${scopes.map(scope => `<button class="${scope.id === state.workbenchScope ? "active" : ""}" data-workbench-scope="${escapeHtml(scope.id)}">${escapeHtml(scope.label)}</button>`).join("")}</div><div class="portfolio-list">${portfolioRows}</div></section>
+        <section class="section" id="workbench-execution">
+          <div class="section-head"><h3>当前执行视角</h3><span>${escapeHtml(workbench.active_execution_version || DATA.project.current_version)} · 不随浏览范围改变</span></div>
+        <section class="workbench-selector project-feature-browser" id="workbench-project-features">
+          <label for="workbenchProjectFeature">项目功能浏览</label><select id="workbenchProjectFeature"><option value="">跨版本选择功能</option>${projectFeatureOptions}</select><span>浏览 V1/V2 功能不会改变当前执行版本、Gate、Goal 或任务包。</span>
+        </section>
         <section class="workbench-selector" id="workbench-context">
           <label for="workbenchFeature">当前功能</label><select id="workbenchFeature" aria-label="选择当前功能"><option value="">选择功能</option>${featureOptions}</select><div class="workbench-selector-actions"><span>${escapeHtml(feature ? feature.id : "未选择")} · ${escapeHtml(feature ? feature.domain : DATA.project.profile)}</span>${feature ? `<button class="command compact" data-copy-feature="${escapeHtml(feature.id)}" title="复制当前功能 ID">复制 ID</button><button class="command compact primary" data-copy-goal-prompt="${escapeHtml(feature.id)}" title="复制用于准备该功能 Goal 的提示词">复制 Goal 提示</button>` : ""}</div>
         </section>
@@ -1020,25 +1121,35 @@
         <section class="workbench-details" id="workbench-details">
           <details class="workbench-detail" data-panel="verification" ${state.panel === "verification" ? "open" : ""}><summary>门禁与证据<span>结构、测试、证据和批准分开查看</span></summary><div class="workbench-detail-body">${renderVerificationPanel()}</div></details>
           <details class="workbench-detail" data-panel="task"><summary>开发任务包<span>${packet ? escapeHtml(packet.id) : "未生成"}</span></summary><div class="workbench-detail-body">${packet ? `<div class="task-panel"><p><strong>${escapeHtml(packet.id)}</strong> · ${escapeHtml(packet.feature_id)}</p><pre><code>${escapeHtml(taskPacketText(packet))}</code></pre><div class="view-actions"><button class="command" data-copy-task="${escapeHtml(packet.id)}">复制完整任务包</button><button class="command" data-open-doc="${escapeHtml(feature.path)}">功能正文</button></div><p class="digest">authority_digest：${escapeHtml(packet.authority_digest)}</p></div>` : '<div class="empty">当前功能尚未生成任务包。</div>'}</div></details>
-          <details class="workbench-detail" data-panel="findings"><summary>完整阻塞清单<span>${findings.length} 项开放 finding</span></summary><div class="workbench-detail-body"><div class="blocker-list">${findings.slice(0,12).map(item => `<div class="blocker-row">${chip(item.severity)}<div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.reason)}</span></div><button class="command" data-open-finding="${escapeHtml(item.id)}">查看来源</button></div>`).join("") || '<div class="empty">当前没有开放 finding。</div>'}</div></div></details>
+          <details class="workbench-detail" data-panel="findings"><summary>开发阻塞清单<span>${findings.length} 项开放 finding</span></summary><div class="workbench-detail-body"><div class="blocker-list">${findings.slice(0,12).map(item => `<div class="blocker-row">${chip(item.severity)}<div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.reason)}</span></div><button class="command" data-open-finding="${escapeHtml(item.id)}">查看来源</button></div>`).join("") || '<div class="empty">当前没有开发阶段 finding；发布资格请在门禁与证据中查看。</div>'}</div></div></details>
           <details class="workbench-detail" data-panel="relations"><summary>关系与来源<span>${relations.length} 条稳定 ID 关系</span></summary><div class="workbench-detail-body"><div class="relation-list">${relations.map(item => `<div class="relation-row"><span class="relation-type">${escapeHtml(item.relation)}</span><span class="relation-id"><code>${escapeHtml(item.from === feature.id ? item.to : item.from)}</code></span><span>${escapeHtml(item.source_section)}</span></div>`).join("") || '<div class="empty">当前功能尚未建立关系边，不根据标题相似度推断。</div>'}</div></div></details>
-        </section>`;
+        </section></section>`;
       const selector = document.getElementById("workbenchFeature");
       if (selector) selector.addEventListener("change", event => { state.activeFeature = event.target.value; safeSet("daoge-docs.activeFeature", state.activeFeature); setView("workbench"); });
+      const projectSelector = document.getElementById("workbenchProjectFeature");
+      if (projectSelector) projectSelector.addEventListener("change", event => {
+        const selected = featureCatalog().find(item => item.id === event.target.value);
+        if (!selected) return;
+        state.activeFeature = selected.id;
+        safeSet("daoge-docs.activeFeature", state.activeFeature);
+        setView("timeline");
+      });
+      els.content.querySelectorAll("[data-workbench-scope]").forEach(button => button.addEventListener("click", () => {
+        state.workbenchScope = button.dataset.workbenchScope;
+        safeSet("daoge-docs.workbenchScope", state.workbenchScope);
+        renderWorkbench();
+        updateHash();
+      }));
       bindContentActions();
+      bindCopyActions();
       els.content.querySelectorAll("[data-copy-task]").forEach(button => button.addEventListener("click", () => {
         const selectedPacket = (DATA.task_packets || []).find(item => item.id === button.dataset.copyTask);
         if (selectedPacket) copyText(taskPacketText(selectedPacket), button);
       }));
-      els.content.querySelectorAll("[data-copy-feature]").forEach(button => button.addEventListener("click", () => copyText(button.dataset.copyFeature, button)));
-      els.content.querySelectorAll("[data-copy-goal-prompt]").forEach(button => button.addEventListener("click", () => {
-        const selectedFeature = DATA.features.find(item => item.id === button.dataset.copyGoalPrompt);
-        if (selectedFeature) copyText(goalPreparationPrompt(selectedFeature), button);
-      }));
       els.content.querySelectorAll("[data-copy-command]").forEach(button => button.addEventListener("click", () => copyText(button.dataset.copyCommand, button)));
       els.content.querySelectorAll("[data-open-finding]").forEach(button => button.addEventListener("click", () => openFinding(button.dataset.openFinding)));
       els.content.querySelectorAll("[data-panel]").forEach(detail => detail.addEventListener("toggle", () => { if (detail.open) { state.panel = detail.dataset.panel; updateHash(); } else if (state.panel === detail.dataset.panel) { state.panel = ""; updateHash(); } }));
-      renderOutline([{ id: "workbench-top", title: "当前开发判断", level: 1 }, { id: "workbench-context", title: "当前功能", level: 2 }, { id: "workbench-decision", title: "开发许可", level: 2 }, { id: "workbench-progress", title: "开发进展", level: 2 }, { id: "workbench-blockers", title: "最高优先级阻塞", level: 2 }, { id: "workbench-details", title: "执行明细", level: 2 }]);
+      renderOutline([{ id: "workbench-top", title: "项目全景与当前执行", level: 1 }, { id: "workbench-portfolio", title: "项目版本全貌", level: 2 }, { id: "workbench-execution", title: "当前执行视角", level: 2 }, { id: "workbench-context", title: "当前功能", level: 3 }, { id: "workbench-decision", title: "开发许可", level: 3 }, { id: "workbench-progress", title: "开发进展", level: 3 }, { id: "workbench-blockers", title: "最高优先级阻塞", level: 3 }, { id: "workbench-details", title: "执行明细", level: 3 }]);
     }
 
     const MAP_META = {
@@ -1386,7 +1497,7 @@
     }
 
     function readerContext(doc) {
-      const feature = DATA.features.find(item => item.path === doc.path || item.design_path === doc.path);
+      const feature = featureCatalog().find(item => item.path === doc.path || item.design_path === doc.path);
       if (!feature) return "";
       const openFindings = (DATA.findings || []).filter(item => item.status === "open" && item.object_id === feature.id);
       return `<div class="reader-context"><span>开发上下文</span><strong>${escapeHtml(feature.id)} · ${escapeHtml(feature.title)}</strong><span>${escapeHtml(feature.domain)}</span>${chip(feature.risk)}${openFindings.length ? `<span>${openFindings.length} 项待处理</span>` : ""}<button class="command" data-reader-feature="${escapeHtml(feature.id)}" data-reader-view="workbench">回到工作台</button><button class="command" data-reader-feature="${escapeHtml(feature.id)}" data-reader-view="timeline">功能时间线</button></div>`;
@@ -1504,7 +1615,7 @@
 
     function renderTimeline(filterValue = "") {
       const features = filterFeatures(filterValue);
-      const feature = features.find(item => item.id === state.activeFeature) || features[0] || DATA.features.find(item => item.id === state.activeFeature) || DATA.features[0];
+      const feature = features.find(item => item.id === state.activeFeature) || features[0] || featureCatalog().find(item => item.id === state.activeFeature) || featureCatalog()[0];
       if (!feature) {
         els.content.innerHTML = '<header class="view-header"><div><h2>具体功能时间线</h2></div></header><div class="empty">创建功能规格后将在这里出现时间线。</div>';
         renderOutline([]);
@@ -1514,14 +1625,17 @@
       safeSet("daoge-docs.activeFeature", feature.id);
       const timelineModel = (((DATA.views || {}).timelines) || []).find(item => item.feature_id === feature.id) || {current_gap:"需由代码、测试和机器证据确认当前实现。",current_gate:"unknown",current_implementation:{},milestones:[],sources:[]};
       const implementation = timelineModel.current_implementation || {};
-      const options = (features.length ? features : DATA.features).map(item => `<option value="${escapeHtml(item.id)}" ${item.id===feature.id?"selected":""}>${escapeHtml(item.id)} · ${escapeHtml(item.title)}</option>`).join("");
+      const featureVersion = timelineModel.version || feature.version || DATA.project.current_version;
+      const isExecutionFeature = featureVersion === DATA.project.current_version;
+      const projectVersions = DATA.project_versions || DATA.versions || [];
+      const options = (features.length ? features : featureCatalog()).map(item => `<option value="${escapeHtml(item.id)}" ${item.id===feature.id?"selected":""}>${escapeHtml(item.version || "项目全局")} · ${escapeHtml(item.id)} · ${escapeHtml(item.title)}</option>`).join("");
       els.content.innerHTML = `
         <header class="view-header"><div><div class="eyebrow">Feature Timeline</div><h2>具体功能时间线</h2><p>当前实现来自代码、测试与证据；未来节点只显示结构化演进矩阵中的明确登记。</p></div></header>
         <section class="picker" id="timeline-picker"><div><label for="featureFilter">筛选功能</label><input id="featureFilter" value="${escapeHtml(filterValue)}" placeholder="功能 ID、名称、领域或风险"></div><div><label for="featureSelect">具体功能</label><select id="featureSelect">${options}</select></div></section>
-        <section class="feature-summary" id="timeline-summary"><div><h3>${escapeHtml(feature.id)} · ${escapeHtml(feature.title)}</h3><p>${escapeHtml(feature.summary || "功能目标尚未填写。")}</p></div><div class="feature-tags">${chip(feature.status)}${chip(feature.risk)}${chip(timelineModel.current_gate)}<span class="status-chip">${escapeHtml(feature.domain)}</span></div></section>
+        <section class="feature-summary" id="timeline-summary"><div><h3>${escapeHtml(feature.id)} · ${escapeHtml(feature.title)}</h3><p>${escapeHtml(feature.summary || "功能目标尚未填写。")}</p></div><div class="feature-tags">${chip(feature.status)}${chip(feature.risk)}${chip(timelineModel.current_gate)}<span class="status-chip">${escapeHtml(feature.domain)}</span><button class="command compact" data-copy-feature="${escapeHtml(feature.id)}" title="复制功能 ID">复制 ID</button><button class="command compact primary" data-copy-goal-prompt="${escapeHtml(feature.id)}" title="复制带目标版本的 Goal 提示">复制 Goal 提示</button></div></section>
         <section class="timeline" id="timeline-full">
-          <article class="timeline-item current"><div class="timeline-axis"><strong>${escapeHtml(DATA.project.current_version)}</strong><span>当前功能</span></div><div class="timeline-body"><h4>${escapeHtml(feature.title)}</h4><p>${escapeHtml(timelineModel.current_gap)}</p><div class="timeline-facts"><div><span>后端</span><strong>${escapeHtml(implementation.backend || "unknown")}</strong></div><div><span>前端</span><strong>${escapeHtml(implementation.frontend || "unknown")}</strong></div><div><span>数据/迁移</span><strong>${escapeHtml(implementation.data || "unknown")}</strong></div><div><span>自动化验证</span><strong>${escapeHtml(implementation.automated_verification || "not_run")}</strong></div><div><span>证据新鲜度</span><strong>${escapeHtml(timelineModel.evidence_freshness || "unknown")}</strong></div><div><span>当前门禁</span><strong>${escapeHtml(timelineModel.current_gate || "unknown")}</strong></div></div>${(timelineModel.dependencies||[]).length ? `<p style="margin-top:10px"><strong>上游依赖：</strong>${escapeHtml(timelineModel.dependencies.join("、"))}</p>` : ""}<div class="view-actions" style="margin-top:12px"><button class="command" data-open-doc="${escapeHtml(feature.path)}">阅读功能主文档</button></div></div></article>
-          ${DATA.versions.filter(version => version.id !== DATA.project.current_version).map(version => {
+          <article class="timeline-item current"><div class="timeline-axis"><strong>${escapeHtml(featureVersion)}</strong><span>${isExecutionFeature ? "当前执行功能" : "版本功能浏览"}</span></div><div class="timeline-body"><h4>${escapeHtml(feature.title)}</h4><p>${escapeHtml(timelineModel.current_gap)}</p><div class="timeline-facts"><div><span>后端</span><strong>${escapeHtml(implementation.backend || "unknown")}</strong></div><div><span>前端</span><strong>${escapeHtml(implementation.frontend || "unknown")}</strong></div><div><span>数据/迁移</span><strong>${escapeHtml(implementation.data || "unknown")}</strong></div><div><span>自动化验证</span><strong>${escapeHtml(implementation.automated_verification || "not_run")}</strong></div><div><span>证据新鲜度</span><strong>${escapeHtml(timelineModel.evidence_freshness || "unknown")}</strong></div><div><span>当前门禁</span><strong>${escapeHtml(timelineModel.current_gate || "unknown")}</strong></div></div>${(timelineModel.dependencies||[]).length ? `<p style="margin-top:10px"><strong>上游依赖：</strong>${escapeHtml(timelineModel.dependencies.join("、"))}</p>` : ""}<div class="view-actions" style="margin-top:12px"><button class="command" data-open-doc="${escapeHtml(feature.path)}">阅读功能主文档</button></div></div></article>
+          ${projectVersions.filter(version => version.id !== featureVersion).map(version => {
             const milestone = (timelineModel.milestones || []).find(item => String(item.version).includes(version.id));
             return `<article class="timeline-item"><div class="timeline-axis"><strong>${escapeHtml(version.id)}</strong><span>${milestone ? "明确登记" : "未分配"}</span></div><div class="timeline-body"><h4>${milestone ? escapeHtml(milestone.user_change) : "当前无单独规划"}</h4><p>${milestone ? `依赖与边界：${escapeHtml((milestone.dependencies||[]).join("；") || "无已登记依赖")}<br>完成判定：${escapeHtml(milestone.completion || "未登记")}` : "空白不表示取消；只有结构化演进矩阵明确登记后才形成承诺。"}</p></div></article>`;
           }).join("")}
@@ -1536,6 +1650,7 @@
       });
       document.getElementById("featureSelect").addEventListener("change", event => { state.activeFeature = event.target.value; renderTimeline(filterValue); });
       bindContentActions();
+      bindCopyActions();
       renderOutline([{ id: "timeline-picker", title: "选择具体功能", level: 1 }, { id: "timeline-summary", title: feature.id, level: 2 }, { id: "timeline-full", title: "完整版本时间线", level: 2 }, { id: "timeline-sources", title: "权威来源", level: 2 }]);
     }
 
@@ -1543,7 +1658,7 @@
       const query = state.query.toLowerCase();
       if (!query) { els.searchResults.classList.remove("open"); els.searchResults.innerHTML = ""; return; }
       const parsed = parseStructuredQuery(state.query);
-      const featureResults = DATA.features.filter(item => matchesStructured(item, "feature", parsed)).slice(0, 12);
+      const featureResults = featureCatalog().filter(item => matchesStructured(item, "feature", parsed)).slice(0, 12);
       const docResults = DATA.documents.map(doc => {
         const haystack = `${doc.title}\n${doc.path}\n${doc.authority}\n${doc.stable_id}\n${doc.content}`.toLowerCase();
         const index = parsed.text ? haystack.indexOf(parsed.text.toLowerCase()) : 0;
@@ -1797,6 +1912,14 @@
       els.content.querySelectorAll("[data-jump-view]").forEach(button => button.addEventListener("click", () => setView(button.dataset.jumpView)));
     }
 
+    function bindCopyActions() {
+      els.content.querySelectorAll("[data-copy-feature]").forEach(button => button.addEventListener("click", () => copyText(button.dataset.copyFeature, button)));
+      els.content.querySelectorAll("[data-copy-goal-prompt]").forEach(button => button.addEventListener("click", () => {
+        const selectedFeature = featureCatalog().find(item => item.id === button.dataset.copyGoalPrompt);
+        if (selectedFeature) copyText(goalPreparationPrompt(selectedFeature), button);
+      }));
+    }
+
     function taskPacketText(packet) {
       return [
         `# 开发任务包 ${packet.id}`,
@@ -1838,14 +1961,15 @@
         `请为功能 ${feature.id}（${feature.title}）准备 DAOGE Docs 开发 Goal。`,
         "",
         "在项目根目录严格执行：",
-        `{{PYTHON_COMMAND}} .daoge-docs/daoge_docs.py prepare-goal --root . --feature ${feature.id}`,
+        `{{PYTHON_COMMAND}} .daoge-docs/daoge_docs.py prepare-goal --root . --version ${feature.version || "{{VERSION}}"} --feature ${feature.id}`,
         "",
         "约束：",
         "1. 不要根据对话补充、推断或修改需求；只以当前权威文档和生成的 Goal 清单为准。",
         "2. 若结果为 blocked，停止实现，报告 blocking_findings、权威来源和建议恢复动作。",
         "3. 若结果为 ready，继续运行：",
         "   {{PYTHON_COMMAND}} .daoge-docs/daoge_docs.py goal-resume-context --root . --goal <返回的 Goal ID>",
-        "4. 只报告唯一下一任务及其 inputs、allowed_paths、AC、稳定分支、验证命令和停止条件；开始实现前等待我的确认。",
+        "4. 目标版本只用于准备本功能 Goal，不改变项目当前执行版本、工作台视角或发布判断；这是准备提示，不是执行授权。",
+        "5. 只报告唯一下一任务及其 inputs、allowed_paths、AC、稳定分支、验证命令和停止条件；开始实现前等待我的确认。",
       ].join("\n");
     }
 
@@ -1907,8 +2031,8 @@
     function getActiveDoc() { return DATA.documents.find(doc => doc.path === state.activeDoc) || DATA.documents[0]; }
     function filterFeatures(value) {
       const query = String(value || "").trim().toLowerCase();
-      if (!query) return DATA.features;
-      return DATA.features.filter(item => [item.id,item.title,item.domain,item.status,item.risk,item.summary].some(value => String(value||"").toLowerCase().includes(query)));
+      if (!query) return featureCatalog();
+      return featureCatalog().filter(item => [item.id,item.title,item.domain,item.status,item.risk,item.summary,item.version].some(value => String(value||"").toLowerCase().includes(query)));
     }
     function scoreMatch(doc, query) {
       let score = 1;
@@ -2073,7 +2197,7 @@
       buttons.forEach((button, index) => button.classList.toggle("active", index === next));
       buttons[next].scrollIntoView({ block: "nearest" });
     }
-    function readHash() { const params = new URLSearchParams(location.hash.replace(/^#/,"")); return {view:params.get("view"),doc:params.get("doc"),feature:params.get("feature"),panel:params.get("panel"),section:params.get("section"),map:params.get("map"),track:params.get("track"),stage:params.get("stage"),milestone:params.get("milestone")}; }
+    function readHash() { const params = new URLSearchParams(location.hash.replace(/^#/,"")); return {view:params.get("view"),doc:params.get("doc"),feature:params.get("feature"),panel:params.get("panel"),section:params.get("section"),map:params.get("map"),track:params.get("track"),stage:params.get("stage"),milestone:params.get("milestone"),scope:params.get("scope"),readerMode:params.get("reader_mode")}; }
     function updateHash(replace = true) {
       const params = new URLSearchParams();
       params.set("view", state.view);
@@ -2081,6 +2205,7 @@
         params.set("doc", state.activeDoc);
         if (state.activeSection) params.set("section", state.activeSection);
       }
+      if (state.readerNavigationMode) params.set("reader_mode", state.readerNavigationMode);
       if (state.view === "map") {
         params.set("map", state.mapMode);
         if (state.mapMode === "delivery_trace" && state.activeFeature) params.set("feature", state.activeFeature);
@@ -2091,6 +2216,7 @@
         if (state.evolutionMilestone) params.set("milestone", state.evolutionMilestone);
       }
       if ((state.view === "workbench" || state.view === "timeline") && state.activeFeature) params.set("feature", state.activeFeature);
+      if (state.view === "workbench" && state.workbenchScope) params.set("scope", state.workbenchScope);
       if (((state.view === "workbench" && state.panel === "verification") || (state.view === "evolution" && state.panel === "changes"))) params.set("panel", state.panel);
       const hash = `#${params}`;
       try { (replace ? history.replaceState : history.pushState).call(history, null, "", hash); }

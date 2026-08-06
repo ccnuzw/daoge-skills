@@ -80,6 +80,10 @@ class DaogeDocsTests(unittest.TestCase):
         self.git("add", ".")
         self.git("commit", "-qm", message)
 
+    def browser_payload(self) -> dict:
+        browser_js = (self.root / "docs/90-参考资料/产品文档浏览器-文档数据.js").read_text(encoding="utf-8")
+        return json.loads(browser_js.split("Object.freeze(", 1)[1].rsplit(");", 1)[0])
+
     def set_table_rows(self, relative: str, headers: list[str], rows: list[list[str]]) -> None:
         path = self.root / relative
         text = path.read_text(encoding="utf-8")
@@ -695,7 +699,7 @@ class DaogeDocsTests(unittest.TestCase):
             'data-copy-feature',
             'data-copy-goal-prompt',
             "复制 Goal 提示",
-            "prepare-goal --root . --feature ${feature.id}",
+            "prepare-goal --root . --version",
             "开始实现前等待我的确认",
             "打开 Markdown 原文",
             "download>下载 Markdown",
@@ -710,7 +714,7 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertGreater(browser_html.rfind("\n    init();"), browser_html.find("const MAP_META"))
         browser_js = (self.root / "docs/90-参考资料/产品文档浏览器-文档数据.js").read_text(encoding="utf-8")
         payload = json.loads(browser_js.split("Object.freeze(", 1)[1].rsplit(");", 1)[0])
-        self.assertEqual(7, payload["schema_version"])
+        self.assertEqual(8, payload["schema_version"])
         for key in ["generated_at", "tool_version", "authority_digest", "directories", "entities", "relations", "findings", "task_packets", "snapshots", "views", "change_summary", "goal_readiness", "workbench"]:
             self.assertIn(key, payload)
         self.assertTrue(payload["directories"])
@@ -757,6 +761,8 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertTrue(all(node["sources"] for node in overview["core_flow"]["nodes"]))
         self.assertTrue(all(node["sources"] for node in overview["version_chain"]["nodes"]))
         self.assertLessEqual(len(payload["views"]["workbench"]["top_blockers"]), 3)
+        self.assertEqual("V1", payload["views"]["workbench"]["active_execution_version"])
+        self.assertEqual(["project", "version", "path"], [item["id"] for item in payload["views"]["reader"]["navigation"]["modes"]])
         self.assertFalse(payload["change_summary"]["available"])
 
         blueprint = self.root / "docs/02-产品与版本/产品蓝图.md"
@@ -793,6 +799,207 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertEqual(0, after["counts"]["not_started"])
         self.assertEqual("implementing", after["items"][0]["status"])
         self.assertIn("已存在工程落点", after["items"][0]["basis"])
+
+    def test_workbench_development_readiness_excludes_release_blockers(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        checklist = self.root / "docs/05-测试与发布/发布/检查清单.md"
+        text = checklist.read_text(encoding="utf-8")
+        checklist.write_text(re.sub(r"^status:\s*\S+", "status: ready", text, count=1, flags=re.MULTILINE), encoding="utf-8")
+        self.run_cli("index", "--root", ".", vendored=True)
+        payload = self.browser_payload()
+        release_gate = next(item for item in payload["governance"]["gates"] if item["id"] == "release")
+        self.assertEqual("blocked", release_gate["status"])
+        self.assertTrue(release_gate["blocking_signals"])
+        self.assertEqual("ready", payload["goal_readiness"]["status"])
+        self.assertEqual("ready", payload["workbench"]["decision"]["status"])
+        self.assertEqual("feature-ready", payload["workbench"]["context"]["stage"])
+        self.assertEqual([], payload["workbench"]["top_blockers"])
+
+    def test_audit_accepts_v1_only_future_version_planning_space(self) -> None:
+        self.init()
+        self.complete_for_release()
+        audit = json.loads(self.run_cli("audit", "--root", ".", "--json", expected=1, vendored=True).stdout)
+        self.assertTrue(audit["能力"]["版本演进规划"])
+        self.assertEqual([], [path for path in (self.root / "docs/02-产品与版本/后续版本").glob("*.md") if path.name != "README.md"])
+
+    def test_v2_does_not_treat_frozen_v1_e2e_requirements_as_current(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        self.run_cli("new-version", "--root", ".", "--version", "V2", vendored=True)
+        report = json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)
+        self.assertTrue(report["通过"], report)
+        matrix = (self.root / "docs/05-测试与发布/端到端验收/用例矩阵.md").read_text(encoding="utf-8")
+        self.assertNotIn("E2E-001", matrix)
+        self.assertNotIn("E2E-002", matrix)
+
+    def test_cross_version_portfolio_preserves_active_execution_context(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        self.run_cli("new-version", "--root", ".", "--version", "V2", vendored=True)
+        self.run_cli("new-domain", "--root", ".", "--name", "支付", vendored=True)
+        self.run_cli(
+            "new-feature", "--root", ".", "--number", "2", "--name", "支付订单", "--domain", "支付", vendored=True
+        )
+        self.set_table_rows(
+            "docs/02-产品与版本/版本路线图.md",
+            ["版本 ID", "目标", "状态", "前置版本/能力", "退出条件", "权威文档"],
+            [
+                ["V1", "订单基线", "ready（规格）", "基础仓库", "V1 AC", "当前版本/V1-版本总览.md"],
+                ["V2", "支付扩展", "ready（规格）", "V1 订单语义", "V2 AC", "当前版本/V2-版本总览.md"],
+            ],
+        )
+        self.run_cli("index", "--root", ".", vendored=True)
+        payload = self.browser_payload()
+        workbench = payload["views"]["workbench"]
+        portfolio = workbench["version_portfolio"]
+        self.assertEqual("V2", workbench["active_execution_version"])
+        self.assertEqual("V2", portfolio["active_execution_version"])
+        self.assertEqual(["V1", "V2"], [item["id"] for item in portfolio["versions"]])
+        self.assertEqual(["all", "V1", "V2"], [item["id"] for item in portfolio["browsing_scopes"]])
+        v1 = next(item for item in portfolio["versions"] if item["id"] == "V1")
+        v2 = next(item for item in portfolio["versions"] if item["id"] == "V2")
+        self.assertEqual({"DOP-FR-001"}, {item["id"] for item in v1["features"]})
+        self.assertTrue(all(item["verification"] == "unknown" for item in v1["features"]))
+        self.assertEqual({"DOP-FR-002"}, {item["id"] for item in payload["features"]})
+        self.assertEqual({"DOP-FR-002"}, {item["feature_id"] for item in payload["task_packets"]})
+        self.assertEqual({"DOP-FR-001", "DOP-FR-002"}, {item["id"] for item in payload["project_features"]})
+        self.assertEqual({"DOP-FR-001", "DOP-FR-002"}, {item["feature_id"] for item in payload["views"]["timelines"]})
+        historical_timeline = next(item for item in payload["views"]["timelines"] if item["feature_id"] == "DOP-FR-001")
+        self.assertEqual("V1", historical_timeline["version"])
+        self.assertEqual("unknown", historical_timeline["current_gate"])
+        self.assertEqual("unknown", historical_timeline["evidence_freshness"])
+        self.assertTrue(v2["features"])
+        browser_html = (self.root / "docs/90-参考资料/产品文档浏览器.html").read_text(encoding="utf-8")
+        self.assertIn('data-portfolio-feature', browser_html)
+        self.assertIn('版本功能', browser_html)
+        self.assertIn('workbenchProjectFeature', browser_html)
+        self.assertIn('项目功能浏览', browser_html)
+        self.assertIn('function featureCatalog', browser_html)
+        reader = payload["views"]["reader"]["navigation"]
+        version_mode = next(item for item in reader["modes"] if item["id"] == "version")
+        groups = {item["id"]: item["document_paths"] for item in version_mode["groups"]}
+        self.assertTrue(any("03-功能规格/V1/订单/01-创建订单.md" == path for path in groups["V1"]))
+        self.assertTrue(any("03-功能规格/V2/支付/02-支付订单.md" == path for path in groups["V2"]))
+
+    def test_historical_version_goal_is_explicit_and_does_not_switch_execution_version(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        self.run_cli("new-version", "--root", ".", "--version", "V2", vendored=True)
+        self.run_cli("index", "--root", ".", vendored=True)
+        self.commit_all("freeze active V2 browsing baseline")
+
+        prepared = json.loads(
+            self.run_cli(
+                "prepare-goal",
+                "--root",
+                ".",
+                "--version",
+                "V1",
+                "--feature",
+                "DOP-FR-001",
+                vendored=True,
+            ).stdout
+        )
+        manifest_path = self.root / prepared["文件"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual("V1", manifest["version"])
+        self.assertEqual("V2", manifest["current_execution_version"])
+        self.assertEqual("V1", prepared["目标版本"])
+        self.assertEqual("V2", prepared["当前执行版本"])
+
+        status = json.loads(
+            self.run_cli(
+                "goal-status",
+                "--root",
+                ".",
+                "--goal",
+                manifest["goal_id"],
+                "--read-only",
+                vendored=True,
+            ).stdout
+        )
+        self.assertNotEqual("stale", status["状态"])
+        self.assertEqual("V1", status["目标版本"])
+        self.assertEqual("V2", status["当前执行版本"])
+
+        browser = self.browser_payload()
+        self.assertEqual("V2", browser["project"]["current_version"])
+        self.assertEqual({"DOP-FR-001"}, {item["id"] for item in browser["project_features"] if item["version"] == "V1"})
+        html = (self.root / "docs/90-参考资料/产品文档浏览器.html").read_text(encoding="utf-8")
+        self.assertIn("prepare-goal --root . --version", html)
+        self.assertIn("data-copy-feature", html)
+        self.assertIn("data-copy-goal-prompt", html)
+
+    def test_proposed_feature_adr_blocks_check_gate_and_workbench(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        self.run_cli(
+            "new-adr",
+            "--root",
+            ".",
+            "--title",
+            "订单文件迁移边界",
+            "--requirements",
+            "DOP-FR-001",
+            vendored=True,
+        )
+        feature = self.root / "docs/03-功能规格/V1/订单/01-创建订单.md"
+        feature.write_text(feature.read_text(encoding="utf-8").replace("decisions: none", "decisions: ADR-0001"), encoding="utf-8")
+        self.run_cli("index", "--root", ".", vendored=True)
+
+        report = json.loads(self.run_cli("check", "--root", ".", "--json", expected=1, vendored=True).stdout)
+        self.assertTrue(any("功能依赖的 ADR 尚未接受：DOP-FR-001 -> ADR-0001：proposed" in error for error in report["错误"]), report)
+        gate = json.loads(
+            self.run_cli("gate", "--root", ".", "--stage", "feature-ready", "--feature", "DOP-FR-001", "--json", expected=1, vendored=True).stdout
+        )
+        self.assertTrue(any("ADR 尚未接受" in error for error in gate["错误"]), gate)
+        payload = self.browser_payload()
+        self.assertEqual("blocked", payload["workbench"]["decision"]["status"])
+        self.assertEqual(["WB-F-0001"], payload["workbench"]["top_blockers"])
+        self.assertEqual("blocked", payload["goal_readiness"]["status"])
+        self.assertFalse("`" in payload["task_packets"][0]["verification_commands"][0])
+        self.assertTrue(
+            any("ADR 尚未接受" in finding["reason"] for finding in payload["findings"]),
+            payload["findings"],
+        )
+
+    def test_check_accepts_browser_data_after_committing_only_derived_files(self) -> None:
+        self.init()
+        self.commit_all("record initialized documentation")
+        self.run_cli("index", "--root", ".", vendored=True)
+        generated = [
+            path.relative_to(self.root).as_posix()
+            for path in (self.root / "docs/90-参考资料").glob("产品文档浏览器-文档数据.js")
+        ]
+        self.assertEqual(["docs/90-参考资料/产品文档浏览器-文档数据.js"], generated)
+        self.git("add", *generated)
+        self.git("commit", "-qm", "commit refreshed browser data")
+        result = json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)
+        self.assertTrue(result["通过"], result)
+
+        authority = self.root / "docs/02-产品与版本/产品蓝图.md"
+        authority.write_text(authority.read_text(encoding="utf-8") + "\n权威内容已变更。\n", encoding="utf-8")
+        stale = json.loads(self.run_cli("check", "--root", ".", "--json", expected=1, vendored=True).stdout)
+        self.assertTrue(
+            any("产品文档浏览器-文档数据.js" in error for error in stale["错误"]),
+            stale,
+        )
+
+        authority.write_text(authority.read_text(encoding="utf-8").replace("\n权威内容已变更。\n", "\n"), encoding="utf-8")
+        self.run_cli("index", "--root", ".", vendored=True)
+        self.git("add", "docs/90-参考资料/产品文档浏览器-文档数据.js")
+        self.git("commit", "-qm", "refresh browser data after authority test")
+        code_path = self.root / "src/task_cli.py"
+        code_path.parent.mkdir(parents=True, exist_ok=True)
+        code_path.write_text("def main():\n    return 0\n", encoding="utf-8")
+        self.git("add", "src/task_cli.py")
+        self.git("commit", "-qm", "add product code")
+        code_stale = json.loads(self.run_cli("check", "--root", ".", "--json", expected=1, vendored=True).stdout)
+        self.assertTrue(
+            any("产品文档浏览器-文档数据.js" in error for error in code_stale["错误"]),
+            code_stale,
+        )
 
     def test_utf8_server_and_reader_links_keep_markdown_chinese_readable(self) -> None:
         self.init()
