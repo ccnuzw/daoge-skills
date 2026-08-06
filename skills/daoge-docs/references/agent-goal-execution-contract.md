@@ -2,7 +2,7 @@
 doc_id: DAOGE-GOAL-001
 status: active
 owner: daoge-docs
-updated: 2026-08-03
+updated: 2026-08-06
 authority: 编程智能体大型任务准备、执行、恢复与完成契约
 ---
 
@@ -202,7 +202,7 @@ Goal 进入 `completed` 前必须同时满足：
 
 ## 13. 工具接口与实现状态
 
-`daoge-docs 3.12.2` 已实现完整的开发级 Goal 生命周期。工作台可为一个稳定功能 ID 复制 Goal 准备提示，但该提示不是执行授权：它只能要求智能体调用 `prepare-goal`，在 `blocked` 时停止，并在 `ready` 后读取 `goal-resume-context`；实现必须由开发者明确确认后才开始。
+`daoge-docs 3.14.2` 已实现完整的开发级 Goal 生命周期。功能 front matter 引用的 ADR 必须已处于 `accepted`，否则检查、Ready 门禁和 Goal 都保持 `blocked`；同一缺口必须派生为工作台 finding。验收表中的 Markdown 行内代码会在派生 Goal 前规范化为原始 shell 命令。工作台可为一个稳定功能 ID 复制 Goal 准备提示，但该提示不是执行授权：它只能要求智能体调用 `prepare-goal`，在 `blocked` 时停止，并在 `ready` 后读取 `goal-resume-context`；实现必须由开发者明确确认后才开始。项目功能浏览和时间线可以读取 `project_features[]` 中的历史版本，但 Goal 仍只从 `config.current_version` 的执行 `features[]` 生成，历史功能不得进入任务图、授权路径或 Gate 输入。
 
 ```text
 prepare-goal         已实现：从选定版本和功能生成 Goal 清单

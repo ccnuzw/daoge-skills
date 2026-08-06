@@ -2,7 +2,7 @@
 doc_id: DAOGE-WB-DATA-001
 status: active
 owner: daoge-docs
-updated: 2026-08-03
+updated: 2026-08-06
 authority: 开发执行工作台派生数据契约
 ---
 
@@ -10,7 +10,7 @@ authority: 开发执行工作台派生数据契约
 
 ## 1. 契约目的
 
-本文定义产品文档浏览器、开发执行工作台和 Goal 执行器共享的派生数据。`daoge-docs 3.13.4` 当前输出 `schema_version: 7`；`schema_version: 5` 与 `6` 只作为兼容输入。
+本文定义产品文档浏览器、开发执行工作台和 Goal 执行器共享的派生数据。`daoge-docs 3.14.2` 当前输出 `schema_version: 8`；旧 schema 只作为兼容输入。
 
 数据由权威 Markdown、JSON、YAML、OpenAPI、迁移、代码事实和机器证据生成。派生数据不是新的业务事实来源。
 
@@ -27,9 +27,9 @@ authority: 开发执行工作台派生数据契约
 
 ```json
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "generated_at": "2026-08-03T00:00:00Z",
-  "tool_version": "3.13.4",
+  "tool_version": "3.14.1",
   "source_commit": "",
   "authority_digest": "sha256:...",
   "project": {},
@@ -38,6 +38,7 @@ authority: 开发执行工作台派生数据契约
   "entities": [],
   "relations": [],
   "features": [],
+  "project_features": [],
   "requirements": [],
   "findings": [],
   "task_packets": [],
@@ -48,7 +49,7 @@ authority: 开发执行工作台派生数据契约
 }
 ```
 
-`authority_digest` 变化后，旧任务包、旧证据批准、旧变化摘要和旧 Goal 清单不能继续显示为当前有效。
+`authority_digest` 变化后，旧任务包、旧证据批准、旧变化摘要和旧 Goal 清单不能继续显示为当前有效。`source_commit` 是执行 `index` 时可见的 Git 溯源信息；它和 `generated_at` 仅描述派生运行，不能作为浏览器数据内容新鲜度的唯一判据。仅当该提交到当前 HEAD 的差异全部属于派生文件或项目内工具副本时，检查器才忽略这两个运行元数据；它仍严格比较其余派生语义，并在任何业务代码或权威输入路径变化后要求重新生成。
 
 ## 4. 来源引用
 
@@ -205,9 +206,39 @@ precedes / unlocks / mitigates
 }
 ```
 
+`views.workbench` 还包含跨版本浏览组合层，但它不替换现有执行对象：
+
+```json
+{
+  "active_execution_version": "V2",
+  "version_portfolio": {
+    "active_execution_version": "V2",
+    "browsing_scopes": [{"id": "all", "label": "全部版本"}, {"id": "V1", "label": "V1"}],
+    "versions": [{
+      "id": "V1",
+      "role": "baseline",
+      "goal": "...",
+      "prerequisites": "...",
+      "exit_condition": "...",
+      "features": [],
+      "delivery": {"specification": "ready", "implementation": "not_started", "verification": "unknown"},
+      "sources": []
+    }]
+  }
+}
+```
+
+`active_execution_version` 必须等于项目 `current_version`，且浏览器的 `scope=all|Vn` 只改变组合层的可见范围。无论选择 V1、V2 或全部版本，`features[]`、`governance`、`task_packets`、`goal_readiness`、当前开发判断和 Gate 输入始终只描述活动执行版本。历史或基线版本没有独立且有效的机器证据时，`delivery.verification` 必须为 `unknown` 或 `not_run`；不得从规格状态、路线图顺序或活动版本证据推断 `passed`、已实现或已发布。
+
+`version_portfolio.versions[].features[]` 是每个版本在工作台直接显示的浏览功能清单。每项必须保留 `id`、`title`、`version`、`path`、`specification`、`implementation`、`verification` 与 `sources[]`；浏览器必须将该清单渲染为可进入真实 `path` 的可见项，不能只显示 `feature_count` 或把它留在数据层。
+
 `top_blockers` 最多三项。完整 findings 在次级面板读取。
 
-当前功能选择器从顶层 `features[]` 显示稳定 `id + title`；工作台可以复制该 ID，也可以仅从当前 `feature.id` 与 `feature.title` 派生 Goal 准备提示。提示词不是 Goal 清单，必须要求智能体运行 `prepare-goal` 后读取结果；`blocked` 时停止，`ready` 后只允许读取 `goal-resume-context`，不得由浏览器直接运行或伪造 Goal 状态。
+`decision` 和 `top_blockers` 只允许由 Discovery、Version Ready、Feature Ready 或当前功能的 finding 派生。Release finding 必须在验证面板中保留，但只能表达当前提交或构建的发布资格，不得显示为当前功能的开发禁止。`context.stage` 只允许指向当前开发判断对应的上述三级门禁；Release 是验证面板中的独立阶段。
+
+`features[]` 只包含 `config.current_version` 的执行功能；它是 Gate、Goal、任务包、开发判断、当前功能选择器和当前版本交付进度的唯一输入。`project_features[]` 是按版本汇总的只读浏览目录，每项至少包含 `id`、`title`、`version`、`path`、`status`、`risk`、`domain`、规格/实现/验证状态和来源。它供项目功能浏览、时间线、搜索和阅读上下文使用，不能生成或改写任务包、finding、Gate、Goal 或当前执行判断。历史版本在没有独立机器证据或冻结工程快照时，其实现、验证和时间线门禁必须为 `unknown` 或 `not_run`，不得继承活动版本信号。
+
+当前功能选择器从顶层 `features[]` 显示稳定 `id + title`；工作台的“项目功能浏览”选择器从 `project_features[]` 显示 `version + id + title`，选择后进入对应时间线。工作台可以复制当前执行 ID，也可以仅从当前执行 `feature.id` 与 `feature.title` 派生 Goal 准备提示。提示词不是 Goal 清单，必须要求智能体运行 `prepare-goal` 后读取结果；`blocked` 时停止，`ready` 后只允许读取 `goal-resume-context`，不得由浏览器直接运行或伪造 Goal 状态。
 
 ### 8.2 `views.overview`
 
@@ -240,6 +271,17 @@ precedes / unlocks / mitigates
 ### 8.3 `views.reader`
 
 直接使用 `documents[]` 和 `directories[]`，不创建第二份正文摘要。正文必须完整渲染；章节索引、检索命中、工作台 finding 和图谱来源应优先进入 `sections[]` 的精确章节。浏览器本地恢复仅保存 `doc_path + content_digest + section_id + scroll_ratio`，不保存正文副本或用户业务结论。
+
+`views.reader.navigation` 提供不改变文件物理位置的阅读分组：
+
+```text
+modes[]:
+  project: 项目全局与每个版本的入口文档
+  version: 项目全局，然后按显式文档版本归类
+  path: 使用 directories[] 的原始递归目录
+```
+
+每个 `document_paths[]` 只能引用 `documents[].path` 中的一份真实来源文档。版本归属只允许来自 front matter `version`、路径段 `Vn` 或文件名 `Vn-`；没有结构证据的文件归入“项目全局”，不能根据正文提及推断版本。共享文件只出现一次，不复制正文或业务结论。
 
 ### 8.4 `views.maps`
 
@@ -316,7 +358,7 @@ risk_hotspots
 
 ### 8.6 `views.timelines`
 
-每个功能提供：
+`views.timelines` 必须为 `project_features[]` 中每个功能提供一项：
 
 ```text
 feature_id / title / goal / domain / risk
@@ -410,7 +452,7 @@ Goal 执行目录只包含三类可变运行时产物：
 
 ## 13. 兼容与迁移
 
-- `schema_version: 5` 或 `6` 可进入阅读和基本视图，但显示“旧数据契约”；精确章节定位与内容摘要恢复需要迁移到 `schema_version: 7`。
+- `schema_version: 5`、`6` 或 `7` 可进入阅读和基本视图，但显示“旧数据契约”；跨版本组合层、项目功能浏览和语义阅读导航需要迁移到 `schema_version: 8`。
 - `#view=governance` 重定向到工作台验证面板。
 - `#view=diff` 重定向到功能演进的变化摘要。
 - 缺少 `views.maps` 时不得用通用计数图冒充项目图谱。
@@ -434,6 +476,7 @@ Goal 执行目录只包含三类可变运行时产物：
 - 图谱能切换六类项目关系图，缺失数据时明确降级。
 - 阅读保留完整 Markdown 正文；搜索命中、来源按钮和深链可进入精确章节，内容变化后不恢复旧阅读位置。
 - 功能演进显示依赖与完成判定，时间线显示当前差距和来源。
+- 项目功能浏览、时间线和搜索可同时选择历史与当前版本功能；当前执行选择器、Gate、Goal、任务包和开发判断仍只使用活动版本 `features[]`。
 - 功能演进可横向比较能力与版本，显示前置能力、退出条件以及明确登记的兼容、迁移、废弃和替代关系。
 - 旧 governance/diff 深链仍能到达新位置。
 - 页面不执行外部命令，不依赖 CDN 或在线 API。

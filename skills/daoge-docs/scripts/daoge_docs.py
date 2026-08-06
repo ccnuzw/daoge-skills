@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.13.4"
+TOOL_VERSION = "3.14.2"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -126,6 +126,9 @@ WORKBENCH_TABLE_CONTRACTS = {
         "path": "02-产品与版本/版本路线图.md",
         "section": "版本序列",
         "headers": STRUCTURED_SECTION_SCAFFOLDS["版本序列"],
+        # 版本角色是 3.14.0 新增的可选语义列。保留旧六列输入的
+        # 兼容性，避免把升级前项目的路线图错误地判为结构损坏。
+        "optional_headers": ["版本角色"],
     },
     "data_domains": {
         "path": "04-技术架构/当前版本/{{VERSION}}-数据模型.md",
@@ -708,6 +711,15 @@ def adr_documents(root: Path, config: dict) -> list[dict]:
     return records
 
 
+def adr_statuses(root: Path, config: dict) -> dict[str, str]:
+    """Return ADR lifecycle state by stable ID for feature authorization checks."""
+    return {
+        str(record["meta"].get("id", "")): str(record["meta"].get("status", "proposed"))
+        for record in adr_documents(root, config)
+        if record["meta"].get("id")
+    }
+
+
 def e2e_documents(root: Path, config: dict) -> list[dict]:
     base = docs_root(root, config) / "05-测试与发布" / "端到端验收" / "用例"
     records: list[dict] = []
@@ -720,6 +732,17 @@ def e2e_documents(root: Path, config: dict) -> list[dict]:
         if match:
             records.append({"path": path, "text": text, "meta": meta, "number": int(match.group(1)), "title": markdown_title(text)})
     return records
+
+
+def current_e2e_documents(root: Path, config: dict) -> list[dict]:
+    """Return E2E cases belonging to the active version.
+
+    E2E documents are retained as historical evidence after a version switch, but
+    current requirements and release evidence must never be forced to reference
+    another version's frozen feature IDs.
+    """
+    version = str(config["current_version"])
+    return [record for record in e2e_documents(root, config) if str(record["meta"].get("version", "")) == version]
 
 
 def decisions_path(root: Path, config: dict, version: str | None = None) -> Path:
@@ -837,6 +860,51 @@ def markdown_table_rows(text: str, required_headers: Iterable[str]) -> list[dict
             rows.append(dict(zip(headers, cells)))
         return rows
     return []
+
+
+def markdown_table_rows_with_optional_headers(
+    text: str, required_headers: Iterable[str], optional_headers: Iterable[str] = ()
+) -> tuple[list[dict[str, str]], list[str]]:
+    """Read a structured table while permitting explicitly registered trailing columns.
+
+    The caller still controls the required contract.  Optional columns are never
+    inferred from table prose, which keeps an older authority table compatible
+    without creating a second source of version facts.
+    """
+    headers = [str(item) for item in required_headers]
+    allowed_optional = [str(item) for item in optional_headers]
+    lines = text.splitlines()
+    for index in range(len(lines) - 1):
+        if "|" not in lines[index] or "|" not in lines[index + 1]:
+            continue
+        actual_headers = markdown_row_cells(lines[index])
+        if actual_headers[: len(headers)] != headers:
+            continue
+        optional = actual_headers[len(headers) :]
+        if any(item not in allowed_optional for item in optional):
+            continue
+        separator = markdown_row_cells(lines[index + 1])
+        if len(separator) != len(actual_headers) or not all(
+            re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in separator
+        ):
+            continue
+        rows: list[dict[str, str]] = []
+        for line in lines[index + 2 :]:
+            if not line.strip() or "|" not in line:
+                break
+            cells = markdown_row_cells(line)
+            if len(cells) != len(actual_headers):
+                break
+            rows.append(dict(zip(actual_headers, cells)))
+        return rows, actual_headers
+    return [], []
+
+
+def has_markdown_table_with_optional_headers(
+    text: str, required_headers: Iterable[str], optional_headers: Iterable[str] = ()
+) -> bool:
+    _rows, headers = markdown_table_rows_with_optional_headers(text, required_headers, optional_headers)
+    return bool(headers)
 
 
 def has_markdown_table(text: str, required_headers: Iterable[str]) -> bool:
@@ -1159,7 +1227,7 @@ def render_e2e_matrix(root: Path, config: dict) -> str:
     version = str(config["current_version"])
     base = docs_root(root, config) / "05-测试与发布" / "端到端验收"
     lines = [GENERATED_MARKER, f"# {version} E2E 用例矩阵", "", "| 用例 | 需求 | 环境等级 | 状态 | 证据 |", "| --- | --- | --- | --- | --- |"]
-    for record in e2e_documents(root, config):
+    for record in current_e2e_documents(root, config):
         rel = os.path.relpath(record["path"], base).replace(os.sep, "/")
         meta = record["meta"]
         lines.append(f"| [{record['title']}]({rel}) | {meta.get('requirements', '未填写')} | {meta.get('environment_level', '未填写')} | {meta.get('status', 'draft')} | {meta.get('evidence', 'not_run')} |")
@@ -1337,6 +1405,18 @@ def browser_section_index(path: str, text: str) -> list[dict]:
     return sections
 
 
+def document_version_scope(relative: Path, meta: dict) -> str:
+    """Return a document's explicit structural version scope, never prose inference."""
+    declared = clean_markdown_cell(meta.get("version", "")).strip()
+    if declared:
+        return declared
+    for part in relative.parts:
+        if re.fullmatch(r"V[0-9]+", part, flags=re.IGNORECASE):
+            return part.upper()
+    match = re.match(r"^(V[0-9]+)-", relative.name, flags=re.IGNORECASE)
+    return match.group(1).upper() if match else ""
+
+
 def browser_records(root: Path, config: dict) -> list[dict]:
     docs = docs_root(root, config)
     records: list[dict] = []
@@ -1359,6 +1439,7 @@ def browser_records(root: Path, config: dict) -> list[dict]:
                 "owner": meta.get("owner", "未声明"),
                 "updated": meta.get("updated", "未声明"),
                 "stable_id": meta.get("id") or meta.get("doc_id") or meta.get("spec_id") or "",
+                "version": document_version_scope(relative, meta),
                 "category": relative.parts[0],
                 "directory_id": relative.parent.as_posix() if relative.parent.as_posix() != "." else ".",
                 "kind": path.suffix.lower().lstrip("."),
@@ -1522,8 +1603,14 @@ def browser_findings(
     """Return itemized, deterministic findings shared by all workbench views."""
     findings: list[dict] = []
     python_command = project_python_command()
+    adr_records = {str(record["meta"].get("id", "")): record for record in adr_documents(root, config)}
     for gate in governance.get("gates", []):
         for signal in gate.get("blocking_signals", []):
+            # The feature-level finding below names the exact ADR and recovery path.
+            # Keep the aggregated gate signal on its card, but do not duplicate it in
+            # the selected feature's action list or Goal blockers.
+            if gate.get("id") in {"version-ready", "feature-ready"} and re.fullmatch(r"\d+ 个功能依赖的 ADR 尚未接受", str(signal)):
+                continue
             findings.append(
                 _finding(
                     rule_id=f"GATE-{str(gate['id']).upper()}",
@@ -1568,6 +1655,40 @@ def browser_findings(
         if not feature_id:
             continue
         source_path = str(feature.get("path", ""))
+        for decision_id in feature.get("decisions", []):
+            if not str(decision_id).startswith("ADR-"):
+                continue
+            adr = adr_records.get(str(decision_id))
+            adr_status = str(adr["meta"].get("status", "proposed")) if adr else "missing"
+            adr_source_path = adr["path"].relative_to(docs_root(root, config)).as_posix() if adr else source_path
+            if adr_status == "accepted":
+                continue
+            reason = (
+                f"功能引用未知 ADR：{feature_id} -> {decision_id}"
+                if not adr
+                else f"功能依赖的 ADR 尚未接受：{feature_id} -> {decision_id}：{adr_status}"
+            )
+            findings.append(
+                _finding(
+                    rule_id="FEATURE-ADR-ACCEPTANCE",
+                    stage="feature-ready",
+                    severity="blocking",
+                    object_type="feature",
+                    object_id=feature_id,
+                    title="功能依赖的 ADR 尚未冻结",
+                    reason=reason,
+                    source_path=adr_source_path,
+                    source_section="决策",
+                    recovery_action=(
+                        f"补充并接受 {decision_id}，记录有权确认人和确认时间；随后运行 index、check 和 Feature Ready gate。"
+                        if adr
+                        else f"创建或修正 {decision_id} 的 ADR 引用，然后重新运行 index、check 和 Feature Ready gate。"
+                    ),
+                    verification_command=f"{python_command} .daoge-docs/daoge_docs.py gate --root . --stage feature-ready --feature {feature_id} --json",
+                    owner=str(feature.get("owner", "未声明")),
+                    authority_digest_value=authority_digest_value,
+                )
+            )
         if feature.get("status") not in READY_STATUSES:
             findings.append(
                 _finding(
@@ -1662,6 +1783,25 @@ def browser_findings(
     for index, finding in enumerate(findings, start=1):
         finding["id"] = f"WB-F-{index:04d}"
     return findings
+
+
+DEVELOPMENT_WORKBENCH_STAGES = {"discovery", "version-ready", "feature-ready"}
+
+
+def workbench_development_findings(findings: list[dict], feature_id: str = "") -> list[dict]:
+    """Return findings that can prevent starting work on the selected feature.
+
+    Release is intentionally excluded. A failed Release gate prevents publishing the
+    current build; it must never retroactively withdraw an already-ready development
+    authorization.
+    """
+    relevant: list[dict] = []
+    for item in findings:
+        if item.get("status") != "open" or item.get("stage") not in DEVELOPMENT_WORKBENCH_STAGES:
+            continue
+        if item.get("object_id") == feature_id or item.get("object_type") == "gate":
+            relevant.append(item)
+    return relevant
 
 
 def browser_relations(
@@ -1764,11 +1904,23 @@ def browser_task_packets(
     generated_at: str,
 ) -> list[dict]:
     packets: list[dict] = []
+    version_blockers = [
+        item["id"]
+        for item in findings
+        if item.get("status") == "open"
+        and item.get("object_type") == "gate"
+        and item.get("stage") in {"discovery", "version-ready"}
+        and item.get("severity") in {"blocking", "high"}
+    ]
     for feature in features:
         feature_id = feature.get("id", "")
         if not feature_id:
             continue
-        blockers = [item["id"] for item in findings if item["object_id"] == feature_id and item["severity"] in {"blocking", "high"}]
+        blockers = version_blockers + [
+            item["id"]
+            for item in workbench_development_findings(findings, str(feature_id))
+            if item.get("object_id") == feature_id and item.get("severity") in {"blocking", "high"}
+        ]
         commands: list[str] = []
         acceptance = []
         for item in feature.get("acceptance", []):
@@ -1874,6 +2026,13 @@ def browser_governance(root: Path, config: dict, features: list[dict], current_a
         ("feature-ready", "Feature Ready", set()),
         ("release", "Release", {"release"}),
     ]
+    adr_status_by_id = adr_statuses(root, config)
+    unresolved_feature_adrs = {
+        (str(feature.get("id", "")), str(decision_id))
+        for feature in features
+        for decision_id in feature.get("decisions", [])
+        if str(decision_id).startswith("ADR-") and adr_status_by_id.get(str(decision_id)) != "accepted"
+    }
     gates = []
     for gate_id, label, stages in gate_definitions:
         if gate_id == "feature-ready":
@@ -1887,6 +2046,8 @@ def browser_governance(root: Path, config: dict, features: list[dict], current_a
                 blockers.append(f"{total - ready} 个功能尚未达到结构就绪")
             if placeholders:
                 blockers.append(f"{placeholders} 个功能仍有待决占位")
+            if unresolved_feature_adrs:
+                blockers.append(f"{len(unresolved_feature_adrs)} 个功能依赖的 ADR 尚未接受")
             path = f"03-功能规格/{config['current_version']}/README.md"
         else:
             items = [item for item in profile_documents(str(config["profile"])) if item.get("gate") in stages]
@@ -1916,6 +2077,8 @@ def browser_governance(root: Path, config: dict, features: list[dict], current_a
                 blockers.append(f"{total - ready} 份门禁文档状态未就绪")
             if placeholders:
                 blockers.append(f"{placeholders} 份门禁文档仍有待决占位")
+            if gate_id == "version-ready" and unresolved_feature_adrs:
+                blockers.append(f"{len(unresolved_feature_adrs)} 个功能依赖的 ADR 尚未接受")
             path = records[0]["path"] if records else ""
         status = "not_run" if not total else ("structure_ready" if not blockers else "blocked")
         gates.append(
@@ -2162,25 +2325,29 @@ def browser_structured_table(root: Path, config: dict, key: str) -> dict:
         "source_path": relative,
         "source_section": contract["section"],
         "headers": list(contract["headers"]),
+        "actual_headers": [],
         "finding": "结构化来源未建立",
     }
     if not path.exists():
         result["finding"] = "权威文档不存在"
         return result
     section = markdown_section(path.read_text(encoding="utf-8"), str(contract["section"]))
-    if not section or not has_markdown_table(section, contract["headers"]):
+    rows, actual_headers = markdown_table_rows_with_optional_headers(
+        section, contract["headers"], contract.get("optional_headers", [])
+    )
+    if not section or not actual_headers:
         result["finding"] = "结构化表格缺失或列名不符合契约"
         return result
     row_is_meaningful = meaningful_evolution_relation_row if key == "evolution_relations" else meaningful_structured_row
     rows = [
         {header: clean_markdown_cell(value) for header, value in row.items()}
-        for row in markdown_table_rows(section, contract["headers"])
+        for row in rows
         if row_is_meaningful(row)
     ]
     if not rows:
         result["finding"] = "结构化表格尚无完整数据行"
         return result
-    result.update({"status": "ready", "rows": rows, "finding": ""})
+    result.update({"status": "ready", "rows": rows, "actual_headers": actual_headers, "finding": ""})
     return result
 
 
@@ -2866,11 +3033,7 @@ def browser_workbench_view(
     governance: dict,
 ) -> dict:
     feature_id = str(feature.get("id", "")) if feature else ""
-    relevant = [
-        item
-        for item in findings
-        if item.get("status") == "open" and (item.get("object_id") == feature_id or item.get("object_type") == "gate")
-    ]
+    relevant = workbench_development_findings(findings, feature_id)
     severity_order = {"blocking": 0, "high": 1, "medium": 2, "info": 3}
     relevant.sort(key=lambda item: (severity_order.get(item.get("severity", "info"), 9), item.get("id", "")))
     packet = next((item for item in task_packets if item.get("feature_id") == feature_id), None)
@@ -2902,7 +3065,14 @@ def browser_workbench_view(
     if verification_status == "passed" and development_evidence.get("freshness") != "fresh":
         verification_status = "stale"
     return {
-        "context": {"version": config["current_version"], "feature_id": feature_id, "stage": next((gate["id"] for gate in governance.get("gates", []) if gate.get("status") == "blocked"), "release")},
+        "context": {
+            "version": config["current_version"],
+            "feature_id": feature_id,
+            "stage": next(
+                (item.get("stage") for item in relevant if item.get("stage") in DEVELOPMENT_WORKBENCH_STAGES),
+                "feature-ready" if feature else "discovery",
+            ),
+        },
         "decision": decision,
         "next_action": next_action,
         "top_blockers": [item["id"] for item in blockers[:3]],
@@ -2918,12 +3088,250 @@ def browser_workbench_view(
     }
 
 
+def portfolio_feature_summary(root: Path, config: dict, record: dict, version: str) -> dict:
+    """Build a browsing-only feature summary without entering execution inputs.
+
+    This deliberately does not create task packets, findings, gate conclusions,
+    or Goal data for non-active versions.  Those objects are governed by the
+    active execution version only.
+    """
+    meta = record["meta"]
+    status = str(meta.get("status", "draft"))
+    is_active_version = version == str(config["current_version"])
+    signal = feature_implementation_signal(root, record) if is_active_version else {}
+    points = sum(len(items) for items in (signal.get("paths") or {}).values())
+    existing = sum(len(items) for items in (signal.get("existing_paths") or {}).values())
+    if not is_active_version:
+        implementation = "unknown"
+        implementation_basis = "历史版本未登记独立机器证据或冻结工程快照，当前实现状态待确认。"
+    elif status in {"released", "staging_verified", "local_verified"}:
+        implementation = status
+        implementation_basis = f"功能状态为 {status}；仍需单独查看对应机器证据。"
+    elif status == "implementing" or existing:
+        implementation = "implementing"
+        implementation_basis = f"检测到 {existing} 个已存在工程落点；尚未据此推断验证或发布。"
+    elif status in {"planning", "draft", "ready"} or points:
+        implementation = "not_started"
+        implementation_basis = f"已声明 {points} 个工程落点，当前未检测到实现落点。"
+    else:
+        implementation = "unknown"
+        implementation_basis = "功能状态和工程落点不足以判断实现进度。"
+    return {
+        "id": str(meta.get("id", "")),
+        "number": record["number"],
+        "title": record["title"],
+        "version": version,
+        "status": status,
+        "domain": str(meta.get("domain", "未分类")),
+        "risk": str(meta.get("risk", "standard")),
+        "evolution_track": str(meta.get("evolution_track", "none")),
+        "dependencies": list_field(meta.get("dependencies", "")),
+        "path": record["path"].relative_to(docs_root(root, config)).as_posix(),
+        "summary": browser_excerpt(record["text"], "目标") or browser_excerpt(record["text"]),
+        "specification": "ready" if status in READY_STATUSES and not PLACEHOLDER_RE.search(record["text"]) else "blocked",
+        "implementation": implementation,
+        "implementation_basis": implementation_basis,
+        "implementation_signal": signal,
+        # Cross-version evidence is never inferred from the active evidence
+        # selector.  A project may retain only a historical specification.
+        "verification": "unknown",
+        "sources": [
+            browser_source(
+                record["path"].relative_to(docs_root(root, config)).as_posix(),
+                "功能规格",
+                str(meta.get("id", "")),
+                "功能行为、工程落点与验收",
+            )
+        ],
+    }
+
+
+def browser_project_features(
+    root: Path,
+    config: dict,
+    portfolio: dict,
+    active_features: list[dict],
+) -> list[dict]:
+    """Build the project-wide browsing catalog without widening execution scope.
+
+    ``features`` remains the authoritative active-version execution input.  This
+    catalog is deliberately separate so a reader can choose a historical feature
+    in search or a timeline without introducing its findings, evidence, task
+    packet, or Goal eligibility into the active version.
+    """
+    active_by_id = {str(item.get("id", "")): item for item in active_features if item.get("id")}
+    versions = portfolio.get("versions") or []
+    order_by_version = {str(item.get("id", "")): index for index, item in enumerate(versions)}
+    version_ids = [version for version in order_by_version if version]
+    feature_root = docs_root(root, config) / "03-功能规格"
+    if feature_root.exists():
+        for path in sorted(feature_root.iterdir()):
+            if path.is_dir() and re.fullmatch(r"V\d+", path.name, re.IGNORECASE):
+                version_id = path.name.upper()
+                if version_id not in order_by_version:
+                    order_by_version[version_id] = len(order_by_version)
+                    version_ids.append(version_id)
+
+    catalog: list[dict] = []
+    seen_ids: set[str] = set()
+    for version_id in version_ids:
+        for record in feature_documents(root, config, version_id):
+            summary = portfolio_feature_summary(root, config, record, version_id)
+            feature_id = str(summary.get("id", ""))
+            if not feature_id or feature_id in seen_ids:
+                continue
+            seen_ids.add(feature_id)
+            # Active-version details can enrich browsing, but must not alter the
+            # historical summaries or create execution objects for them.
+            if version_id == str(config["current_version"]) and feature_id in active_by_id:
+                summary = {**summary, **active_by_id[feature_id], "version": version_id}
+            catalog.append(summary)
+    return sorted(
+        catalog,
+        key=lambda item: (
+            order_by_version.get(str(item.get("version", "")), len(order_by_version)),
+            int(item.get("number", 0) or 0),
+            str(item.get("id", "")),
+        ),
+    )
+
+
+def browser_version_portfolio(root: Path, config: dict, documents: list[dict]) -> dict:
+    """Derive the project-wide browsing portfolio from registered version facts."""
+    table = browser_structured_table(root, config, "version_sequence")
+    rows = table["rows"] if table["status"] == "ready" else []
+    cards: list[dict] = []
+    seen: set[str] = set()
+    for order, row in enumerate(rows):
+        version_id = str(row.get("版本 ID", "")).upper()
+        if not version_id or version_id in seen:
+            continue
+        seen.add(version_id)
+        features = [
+            portfolio_feature_summary(root, config, record, version_id)
+            for record in feature_documents(root, config, version_id)
+        ]
+        specification = (
+            "ready" if features and all(item["specification"] == "ready" for item in features)
+            else "blocked" if features
+            else "unknown"
+        )
+        implementation_values = {item["implementation"] for item in features}
+        if not features:
+            implementation = "unknown"
+        elif implementation_values <= {"not_started"}:
+            implementation = "not_started"
+        elif any(value in {"implementing", "local_verified", "staging_verified", "released"} for value in implementation_values):
+            implementation = "implementing"
+        else:
+            implementation = "unknown"
+        overview = next(
+            (
+                document
+                for document in documents
+                if document.get("version") == version_id and document.get("path", "").endswith(f"{version_id}-版本总览.md")
+            ),
+            None,
+        )
+        source = browser_source(
+            table["source_path"], table["source_section"], version_id, "版本目标、先后依赖和退出条件"
+        )
+        sources = [source]
+        if overview:
+            sources.append(browser_source(overview["path"], "版本总览", version_id, overview.get("authority", "版本边界")))
+        cards.append(
+            {
+                "id": version_id,
+                "order": order,
+                "role": str(row.get("版本角色", "unknown")).strip().lower() or "unknown",
+                "goal": row.get("目标", ""),
+                "planning_status": row.get("状态", "unknown"),
+                "prerequisites": row.get("前置版本/能力", ""),
+                "exit_condition": row.get("退出条件", ""),
+                "overview_path": overview.get("path", "") if overview else "",
+                "feature_count": len(features),
+                "features": features,
+                "delivery": {
+                    "specification": specification,
+                    "implementation": implementation,
+                    "verification": "unknown",
+                },
+                "sources": sources,
+            }
+        )
+    if str(config["current_version"]) not in seen:
+        cards.append(
+            {
+                "id": str(config["current_version"]),
+                "order": len(cards),
+                "role": "active",
+                "goal": "",
+                "planning_status": "unknown",
+                "prerequisites": "",
+                "exit_condition": "",
+                "overview_path": "",
+                "feature_count": 0,
+                "features": [],
+                "delivery": {"specification": "unknown", "implementation": "unknown", "verification": "unknown"},
+                "sources": [
+                    browser_source(
+                        table["source_path"],
+                        table["source_section"],
+                        str(config["current_version"]),
+                        "版本注册表尚未形成有效行",
+                    )
+                ],
+            }
+        )
+    return {
+        "status": "ready" if cards and table["status"] == "ready" else "unknown",
+        "active_execution_version": str(config["current_version"]),
+        "browsing_scopes": [{"id": "all", "label": "全部版本"}] + [
+            {"id": item["id"], "label": item["id"]} for item in cards
+        ],
+        "versions": cards,
+        "findings": [] if cards else [{"reason": table["finding"], "source_path": table["source_path"], "source_section": table["source_section"]}],
+    }
+
+
+def browser_reader_navigation(documents: list[dict], portfolio: dict) -> dict:
+    """Provide semantic document groups while retaining the physical directory tree."""
+    version_ids = [str(item.get("id", "")) for item in portfolio.get("versions", []) if item.get("id")]
+    global_docs = sorted(
+        [document["path"] for document in documents if not document.get("version")], key=str
+    )
+    version_groups = [
+        {
+            "id": "global",
+            "label": "项目全局",
+            "document_paths": global_docs,
+        }
+    ]
+    project_groups = [dict(version_groups[0])]
+    for version_id in version_ids:
+        scoped = sorted([document["path"] for document in documents if document.get("version") == version_id], key=str)
+        overview = next((path for path in scoped if path.endswith(f"{version_id}-版本总览.md")), "")
+        version_groups.append({"id": version_id, "label": version_id, "document_paths": scoped})
+        project_groups.append(
+            {"id": f"entry-{version_id}", "label": f"{version_id} 版本入口", "document_paths": [overview] if overview else []}
+        )
+    return {
+        "modes": [
+            {"id": "project", "label": "项目视角", "groups": project_groups},
+            {"id": "version", "label": "按版本", "groups": version_groups},
+            {"id": "path", "label": "原始目录", "groups": []},
+        ]
+    }
+
+
 def browser_goal_readiness(task_packets: list[dict], findings: list[dict], authority_digest_value: str) -> dict:
     blocked = [item for item in task_packets if item.get("status") != "ready"]
     blocking_ids = [
         item["id"]
         for item in findings
-        if item.get("status") == "open" and item.get("severity") in {"blocking", "high"}
+        if item.get("status") == "open"
+        and item.get("stage") in DEVELOPMENT_WORKBENCH_STAGES
+        and item.get("severity") in {"blocking", "high"}
     ]
     return {
         "status": "ready" if task_packets and not blocked else "blocked",
@@ -2941,6 +3349,8 @@ def browser_payload(root: Path, config: dict) -> dict:
     source_commit = git_head(root)
     documents = browser_records(root, config)
     directories = browser_directories(root, config, documents)
+    version_portfolio = browser_version_portfolio(root, config, documents)
+    reader_navigation = browser_reader_navigation(documents, version_portfolio)
     future_versions = []
     for path in future_version_documents(root, config):
         text = path.read_text(encoding="utf-8")
@@ -2974,7 +3384,10 @@ def browser_payload(root: Path, config: dict) -> dict:
                     "then": row[3] if len(row) > 3 else "",
                     "test_layer": row[4] if len(row) > 4 else "",
                     "target_asset": row[5] if len(row) > 5 else "",
-                    "command": row[6] if len(row) > 6 else "",
+                    # The source table is Markdown and commonly wraps commands in
+                    # inline code. Goal verification must receive a shell command,
+                    # not Markdown backticks that become command substitution.
+                    "command": clean_markdown_cell(row[6]) if len(row) > 6 else "",
                     "evidence": row[7] if len(row) > 7 else "",
                     "source_path": record["path"].relative_to(docs).as_posix(),
                     "source_section": "功能验收",
@@ -3081,7 +3494,7 @@ def browser_payload(root: Path, config: dict) -> dict:
             "acceptance": acceptance_ids(item["text"]),
             "path": item["path"].relative_to(docs).as_posix(),
         }
-        for item in e2e_documents(root, config)
+        for item in current_e2e_documents(root, config)
     ]
     decisions = [
         {
@@ -3161,8 +3574,23 @@ def browser_payload(root: Path, config: dict) -> dict:
         relations,
     )
     workbench_view = browser_workbench_view(config, current_feature, findings, task_packets, governance)
+    workbench_view["active_execution_version"] = str(config["current_version"])
+    workbench_view["version_portfolio"] = version_portfolio
+    project_features = browser_project_features(root, config, version_portfolio, features)
+    project_versions = [
+        {
+            "id": item.get("id", ""),
+            "title": item.get("goal", "") or f"{item.get('id', '')} 版本",
+            "status": item.get("planning_status", "unknown"),
+            "role": item.get("role", "unknown"),
+            "goal": item.get("goal", ""),
+            "overview_path": item.get("overview_path", ""),
+            "sources": item.get("sources", []),
+        }
+        for item in version_portfolio.get("versions", [])
+    ]
     timelines = []
-    for feature in features:
+    for feature in project_features:
         feature_findings = [
             item for item in findings if item.get("status") == "open" and item.get("object_id") == feature.get("id")
         ]
@@ -3170,21 +3598,22 @@ def browser_payload(root: Path, config: dict) -> dict:
         milestones = [
             item for item in evolution_view["milestones"] if track_id not in {"", "none"} and item["track_id"] == track_id
         ]
-        implementation = feature.get("implementation_signal", {})
+        is_active_feature = str(feature.get("version", "")) == str(config["current_version"])
+        implementation = feature.get("implementation_signal", {}) if is_active_feature else {}
         development_evidence = next(
             (item for item in governance.get("evidence", []) if item.get("type") == "development"),
             {},
-        )
+        ) if is_active_feature else {}
         automated_verification = implementation.get("automated_verification", "not_run")
-        if development_evidence.get("result") == "passed":
+        if is_active_feature and development_evidence.get("result") == "passed":
             automated_verification = "passed" if development_evidence.get("freshness") == "fresh" else "stale"
-        current_gap = implementation.get("gap", "需由代码、测试和机器证据确认当前实现。")
-        if feature_findings:
+        current_gap = implementation.get("gap", "历史版本没有独立机器证据或冻结工程快照，当前实现状态待确认。")
+        if feature_findings and is_active_feature:
             current_gap = feature_findings[0].get("reason", current_gap)
         feature_packet = next((item for item in task_packets if item.get("feature_id") == feature.get("id")), None)
-        if any(item.get("severity") in {"blocking", "high"} for item in feature_findings):
+        if any(item.get("severity") in {"blocking", "high"} for item in feature_findings) and is_active_feature:
             current_gate = "blocked"
-        elif feature_packet and feature_packet.get("status") == "ready":
+        elif feature_packet and feature_packet.get("status") == "ready" and is_active_feature:
             current_gate = "ready"
         else:
             current_gate = "unknown"
@@ -3192,6 +3621,7 @@ def browser_payload(root: Path, config: dict) -> dict:
             {
                 "feature_id": feature.get("id", ""),
                 "title": feature.get("title", ""),
+                "version": feature.get("version", config["current_version"]),
                 "goal": feature.get("summary", ""),
                 "domain": feature.get("domain", ""),
                 "risk": feature.get("risk", ""),
@@ -3211,11 +3641,15 @@ def browser_payload(root: Path, config: dict) -> dict:
                 "evidence_summary": governance.get("evidence_binding", {}),
                 "sources": [
                     browser_source(feature.get("path", ""), "功能规格", feature.get("id", ""), "功能行为与验收"),
-                    browser_source(
-                        f"02-产品与版本/当前版本/{config['current_version']}-实现状态.md",
-                        "实现状态",
-                        feature.get("id", ""),
-                        "代码、测试和证据派生状态",
+                    *(
+                        [browser_source(
+                            f"02-产品与版本/当前版本/{config['current_version']}-实现状态.md",
+                            "实现状态",
+                            feature.get("id", ""),
+                            "代码、测试和证据派生状态",
+                        )]
+                        if is_active_feature
+                        else []
                     ),
                 ],
             }
@@ -3291,14 +3725,18 @@ def browser_payload(root: Path, config: dict) -> dict:
     views = {
         "workbench": workbench_view,
         "overview": overview_view,
-        "reader": {"document_count": len(documents), "directory_count": len(directories)},
+        "reader": {
+            "document_count": len(documents),
+            "directory_count": len(directories),
+            "navigation": reader_navigation,
+        },
         "maps": maps,
         "evolution": evolution_view,
         "timelines": timelines,
     }
     goal_readiness = browser_goal_readiness(task_packets, findings, authority_digest_value)
     payload = {
-        "schema_version": 7,
+        "schema_version": 8,
         "generated_at": generation_stamp,
         "tool_version": TOOL_VERSION,
         "source_commit": source_commit or "",
@@ -3313,6 +3751,8 @@ def browser_payload(root: Path, config: dict) -> dict:
         "directories": directories,
         "entities": sorted(entity_by_id.values(), key=lambda item: item["id"]),
         "features": features,
+        "project_features": project_features,
+        "project_versions": project_versions,
         "requirements": requirements,
         "relations": relations,
         "findings": findings,
@@ -3336,6 +3776,80 @@ def browser_payload(root: Path, config: dict) -> dict:
 def render_browser_data(root: Path, config: dict) -> str:
     payload = json.dumps(browser_payload(root, config), ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     return f"// generated by daoge-docs; 请修改权威源后运行 index，不要直接编辑\nwindow.DAOGE_DOC_BROWSER_DATA=Object.freeze({payload});\n"
+
+
+def browser_data_payload(content: str) -> dict | None:
+    """Parse the generated browser payload without treating it as authority."""
+    prefix = "window.DAOGE_DOC_BROWSER_DATA=Object.freeze("
+    if prefix not in content or not content.rstrip().endswith(");"):
+        return None
+    try:
+        payload = json.loads(content.split(prefix, 1)[1].rsplit(");", 1)[0])
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def browser_data_semantic_payload(content: str) -> dict | None:
+    """Parse browser data while removing index-run metadata from freshness checks."""
+    payload = browser_data_payload(content)
+    if payload is None:
+        return None
+    payload = json.loads(json.dumps(payload, ensure_ascii=False))
+    # A commit containing only derived artifacts necessarily advances HEAD after index.
+    # These fields describe that index run, not its authoritative inputs.
+    payload.pop("generated_at", None)
+    payload.pop("source_commit", None)
+    for packet in payload.get("task_packets", []):
+        if isinstance(packet, dict):
+            packet.pop("generated_at", None)
+    for key in ["evidence_freshness", "governance"]:
+        value = payload.get(key)
+        if isinstance(value, dict):
+            freshness = value.get("evidence_freshness") if key == "governance" else value
+            if isinstance(freshness, dict):
+                freshness.pop("current_commit", None)
+    return payload
+
+
+def browser_data_commit_advance_is_index_owned(root: Path, config: dict, payload: dict) -> bool:
+    source_commit = str(payload.get("source_commit", ""))
+    current_commit = git_head(root) or ""
+    if not source_commit or not current_commit or source_commit == current_commit:
+        return True
+    result = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "diff", "--name-only", source_commit, current_commit],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    generated = goal_generated_paths(root, config)
+    index_owned_prefixes = (".daoge-docs/assets/",)
+    index_owned_files = {CONFIG_NAME, ".daoge-docs/daoge_docs.py"}
+    changed = [path.strip() for path in result.stdout.splitlines() if path.strip()]
+    return all(
+        path in generated or path in index_owned_files or path.startswith(index_owned_prefixes)
+        for path in changed
+    )
+
+
+def generated_document_is_current(root: Path, config: dict, path: Path, actual: str, expected: str) -> bool:
+    if actual == expected:
+        return True
+    if path.name != "产品文档浏览器-文档数据.js":
+        return False
+    raw_actual_payload = browser_data_payload(actual)
+    actual_payload = browser_data_semantic_payload(actual)
+    expected_payload = browser_data_semantic_payload(expected)
+    return (
+        raw_actual_payload is not None
+        and actual_payload is not None
+        and actual_payload == expected_payload
+        and browser_data_commit_advance_is_index_owned(root, config, raw_actual_payload)
+    )
 
 
 def render_browser_html(config: dict) -> str:
@@ -4301,7 +4815,9 @@ def validate_workbench_table_contracts(root: Path, config: dict) -> list[str]:
             continue
         text = path.read_text(encoding="utf-8")
         section = markdown_section(text, str(contract["section"]))
-        if not section or not has_markdown_table(section, contract["headers"]):
+        if not section or not has_markdown_table_with_optional_headers(
+            section, contract["headers"], contract.get("optional_headers", [])
+        ):
             errors.append(
                 f"开发工作台结构化表格缺失或列名不符：{relative}#{contract['section']}："
                 + " | ".join(contract["headers"])
@@ -4355,8 +4871,8 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
         "delivery_trace",
         "risk_hotspots",
     }
-    if payload.get("schema_version") != 7:
-        errors.append("工作台数据契约 schema_version 必须为 7")
+    if payload.get("schema_version") != 8:
+        errors.append("工作台数据契约 schema_version 必须为 8")
     if set((payload.get("views") or {})) != required_views:
         errors.append("工作台六视图数据不完整：必须包含工作台、总览、阅读、图谱、功能演进和时间线")
     maps = (payload.get("views") or {}).get("maps") or {}
@@ -4413,6 +4929,65 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
     for item in progress_items:
         if item.get("status") not in required_progress_statuses or not item.get("basis") or len(item.get("sources") or []) < 2:
             errors.append(f"总览交付进度缺少状态、依据或双来源：{item.get('feature_id', '')}")
+    workbench = (payload.get("views") or {}).get("workbench") or {}
+    portfolio = workbench.get("version_portfolio") or {}
+    active_execution_version = str(config.get("current_version", ""))
+    if workbench.get("active_execution_version") != active_execution_version:
+        errors.append("工作台执行版本必须等于项目 current_version")
+    if portfolio.get("active_execution_version") != active_execution_version:
+        errors.append("跨版本组合层不得改变当前执行版本")
+    portfolio_ids = [str(item.get("id", "")) for item in portfolio.get("versions") or []]
+    if len(portfolio_ids) != len(set(portfolio_ids)) or not portfolio_ids:
+        errors.append("跨版本组合层缺少稳定且唯一的版本 ID")
+    active_features = {str(item.get("id", "")) for item in payload.get("features", [])}
+    project_features = payload.get("project_features") or []
+    project_feature_ids = [str(item.get("id", "")) for item in project_features]
+    if len(project_feature_ids) != len(set(project_feature_ids)) or any(not item for item in project_feature_ids):
+        errors.append("项目功能浏览目录缺少稳定且唯一的功能 ID")
+    portfolio_feature_ids: set[str] = set()
+    for version in portfolio.get("versions") or []:
+        version_id = str(version.get("id", ""))
+        if not version.get("sources"):
+            errors.append(f"跨版本组合层缺少版本来源：{version_id}")
+        for feature in version.get("features") or []:
+            portfolio_feature_ids.add(str(feature.get("id", "")))
+            if feature.get("version") != version_id or not feature.get("path") or not feature.get("sources"):
+                errors.append(f"跨版本功能摘要缺少版本、路径或来源：{feature.get('id', '')}")
+            if version_id != active_execution_version and feature.get("id") in active_features:
+                errors.append(f"非执行版本功能进入当前执行 features：{feature.get('id', '')}")
+            if feature.get("verification") == "passed":
+                errors.append(f"跨版本功能不能从活动证据推断为已通过：{feature.get('id', '')}")
+    if not portfolio_feature_ids.issubset(set(project_feature_ids)):
+        errors.append("项目功能浏览目录必须覆盖跨版本功能摘要")
+    for feature in project_features:
+        feature_id = str(feature.get("id", ""))
+        version_id = str(feature.get("version", ""))
+        path = str(feature.get("path", ""))
+        if not version_id or not path or not browser_doc_path(docs, path) or not (docs / path).is_file():
+            errors.append(f"项目功能浏览目录缺少版本或真实文档路径：{feature_id}")
+        if version_id != active_execution_version:
+            if feature_id in active_features:
+                errors.append(f"历史功能错误进入当前执行 features：{feature_id}")
+            if feature.get("verification") == "passed" or feature.get("implementation") in {"implemented", "released"}:
+                errors.append(f"历史功能不能继承当前版本实现或证据结论：{feature_id}")
+    reader = (payload.get("views") or {}).get("reader") or {}
+    navigation = reader.get("navigation") or {}
+    modes = navigation.get("modes") or []
+    if [item.get("id") for item in modes] != ["project", "version", "path"]:
+        errors.append("阅读语义导航必须提供项目视角、按版本和原始目录")
+    known_document_paths = {str(item.get("path", "")) for item in payload.get("documents", [])}
+    for mode in modes:
+        if mode.get("id") == "path":
+            continue
+        scoped_paths: list[str] = []
+        for group in mode.get("groups") or []:
+            for path in group.get("document_paths") or []:
+                if not isinstance(path, str) or not path or path not in known_document_paths:
+                    errors.append(f"阅读语义导航包含无效文档路径：{mode.get('id', '')}")
+                else:
+                    scoped_paths.append(path)
+        if len(scoped_paths) != len(set(scoped_paths)):
+            errors.append(f"阅读语义导航重复引用同一文档：{mode.get('id', '')}")
     document_paths = set()
     for document in payload.get("documents", []):
         relative = str(document.get("path", ""))
@@ -4455,10 +5030,23 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
         path = browser_doc_path(docs, source_path)
         if not path or not path.exists():
             errors.append(f"工作台派生对象引用不存在的权威来源：{source_path}")
-    feature_ids = {str(item.get("id", "")) for item in payload.get("features", [])}
+    feature_ids = set(project_feature_ids)
     for timeline in (payload.get("views") or {}).get("timelines", []):
         if str(timeline.get("feature_id", "")) not in feature_ids:
             errors.append(f"功能时间线引用未知功能：{timeline.get('feature_id', '')}")
+    timeline_feature_ids = {str(item.get("feature_id", "")) for item in (payload.get("views") or {}).get("timelines", [])}
+    if timeline_feature_ids != feature_ids:
+        errors.append("功能时间线必须覆盖项目功能浏览目录")
+    for timeline in (payload.get("views") or {}).get("timelines", []):
+        feature_id = str(timeline.get("feature_id", ""))
+        feature = next((item for item in project_features if str(item.get("id", "")) == feature_id), {})
+        if feature and str(timeline.get("version", "")) != str(feature.get("version", "")):
+            errors.append(f"功能时间线版本与项目功能目录不一致：{feature_id}")
+        if feature and str(feature.get("version", "")) != active_execution_version:
+            if timeline.get("current_gate") in {"ready", "blocked"}:
+                errors.append(f"历史功能时间线不能使用当前执行门禁：{feature_id}")
+            if timeline.get("evidence_freshness") not in {"", "unknown", None}:
+                errors.append(f"历史功能时间线不能使用当前版本证据新鲜度：{feature_id}")
     evolution = (payload.get("views") or {}).get("evolution") or {}
     evolution_status = str(evolution.get("status", ""))
     if evolution_status not in {"ready", "blocked", "unknown"}:
@@ -4514,6 +5102,21 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
         "function restoreReaderPosition",
         "function readerPositionKey",
         "function readerContext",
+        "function renderTree",
+        "reader-nav-mode",
+        "data-reader-nav-mode",
+        "function renderWorkbench",
+        "function featureCatalog",
+        "project_features",
+        "version_portfolio",
+        "data-workbench-scope",
+        "data-portfolio-feature",
+        "版本功能",
+        "项目功能浏览",
+        "workbenchProjectFeature",
+        "active_execution_version",
+        "reader_mode",
+        "scope:params.get",
         "function renderSearch",
         "function renderArchitectureOverview",
         "function orderedGraphNodes",
@@ -4607,6 +5210,7 @@ def collect_checks(root: Path, config: dict) -> tuple[list[str], list[str]]:
             errors.append(f"需求权威来源不可定位：{requirement_id or '空值'} -> {item.get('source', '缺失')}")
         known_requirements.add(requirement_id)
 
+    adr_status_by_id = adr_statuses(root, config)
     feature_related: set[Path] = set()
     for record in feature_documents(root, config):
         path = record["path"]
@@ -4633,6 +5237,14 @@ def collect_checks(root: Path, config: dict) -> tuple[list[str], list[str]]:
         for requirement_id in list_field(meta.get("requirements", "")):
             if requirement_id not in known_requirements:
                 errors.append(f"功能引用未知需求：{meta.get('id')} -> {requirement_id}")
+        for decision_id in list_field(meta.get("decisions", "")):
+            if not decision_id.startswith("ADR-"):
+                continue
+            adr_status = adr_status_by_id.get(decision_id)
+            if not adr_status:
+                errors.append(f"功能引用未知 ADR：{meta.get('id')} -> {decision_id}")
+            elif adr_status != "accepted":
+                errors.append(f"功能依赖的 ADR 尚未接受：{meta.get('id')} -> {decision_id}：{adr_status}")
         allowed_paths = implementation_points_from_text(text)
         forbidden_paths = normalize_goal_paths(meta.get("forbidden_paths", ""))
         for forbidden_path in forbidden_paths:
@@ -4655,6 +5267,8 @@ def collect_checks(root: Path, config: dict) -> tuple[list[str], list[str]]:
     for case in e2e_documents(root, config):
         for heading in missing_headings(case["text"], ["验收目标", "前置条件与夹具", "执行步骤", "副作用与清理", "自动化入口与证据"]):
             errors.append(f"E2E 用例缺少章节“{heading}”：{case['path']}")
+        if str(case["meta"].get("version", "")) != str(config["current_version"]):
+            continue
         for requirement_id in list_field(case["meta"].get("requirements", "")):
             if requirement_id not in known_requirements:
                 errors.append(f"E2E 用例引用未知需求：{case['meta'].get('id')} -> {requirement_id}")
@@ -4717,7 +5331,8 @@ def collect_checks(root: Path, config: dict) -> tuple[list[str], list[str]]:
     errors.extend(validate_workbench_table_contracts(root, config))
 
     for path, expected in generated_documents(root, config).items():
-        if not path.exists() or path.read_text(encoding="utf-8") != expected:
+        actual = path.read_text(encoding="utf-8") if path.exists() else ""
+        if not path.exists() or not generated_document_is_current(root, config, path, actual, expected):
             errors.append(f"派生文档缺失或过期，请运行 index：{path}")
     errors.extend(validate_browser_contract(root, config))
     return sorted(set(errors)), sorted(set(warnings))
@@ -4884,7 +5499,7 @@ def validate_e2e_details(root: Path, config: dict, report: dict, path: Path, err
         errors.append(f"E2E 证据环境不是发布级环境：{path}")
     if incomplete(str(details.get("dependency_mode", ""))):
         errors.append(f"E2E 证据缺少依赖运行模式：{path}")
-    expected = {str(item["meta"].get("id")) for item in e2e_documents(root, config)}
+    expected = {str(item["meta"].get("id")) for item in current_e2e_documents(root, config)}
     required = details.get("required_case_ids")
     if not isinstance(required, list) or any(not isinstance(item, str) or incomplete(item) for item in required):
         errors.append(f"E2E 证据 required_case_ids 必须是有效字符串数组：{path}")
@@ -5123,9 +5738,10 @@ def collect_gate(root: Path, config: dict, stage: str, feature_id: str | None) -
     elif normalized == "version-ready":
         errors.extend(validate_stage_documents(root, config, {"discovery", "version-ready"}, READY_STATUSES))
         errors.extend(validate_features_ready(root, config, None))
-        known_e2e_requirements = {req for case in e2e_documents(root, config) for req in list_field(case["meta"].get("requirements", ""))}
+        active_cases = current_e2e_documents(root, config)
+        known_e2e_requirements = {req for case in active_cases for req in list_field(case["meta"].get("requirements", ""))}
         required = {str(item.get("id")) for item in requirement_records(root, config)}
-        if config["profile"] == "strict" and not e2e_documents(root, config):
+        if config["profile"] == "strict" and not active_cases:
             errors.append("strict Profile 在版本进入开发前至少需要一个 E2E 验收用例")
         unmapped = sorted(req for req in required if req not in known_e2e_requirements)
         if config["profile"] == "strict" and unmapped:
@@ -6454,7 +7070,7 @@ def command_audit(args: argparse.Namespace) -> int:
             ".article th, .article td { min-width: 104px; }",
             "catch { if (location.hash !== hash) location.hash = hash; }",
         ]
-    ) and all(marker in browser_data_text for marker in ['"schema_version":7', '"documents":', '"directories":', '"entities":', '"content":', '"content_digest":', '"sections":', '"features":', '"requirements":', '"relations":', '"findings":', '"task_packets":', '"governance":', '"views":', '"change_summary":', '"goal_readiness":', '"design_depth":', '"evidence_binding":'])
+    ) and all(marker in browser_data_text for marker in ['"schema_version":8', '"documents":', '"directories":', '"entities":', '"content":', '"content_digest":', '"sections":', '"features":', '"requirements":', '"relations":', '"findings":', '"task_packets":', '"governance":', '"views":', '"version_portfolio":', '"active_execution_version":', '"navigation":', '"change_summary":', '"goal_readiness":', '"design_depth":', '"evidence_binding":'])
     script_text = SCRIPT_PATH.read_text(encoding="utf-8")
     utf8_delivery_complete = all(
         marker in script_text
@@ -6499,7 +7115,9 @@ def command_audit(args: argparse.Namespace) -> int:
         "性能与容量空间": (docs / "05-测试与发布/性能与容量/负载模型.md").exists(),
         "发布、回滚与恢复": all((docs / path).exists() for path in [Path("05-测试与发布/发布/部署手册.md"), Path("05-测试与发布/发布/回滚手册.md"), Path("05-测试与发布/发布/恢复手册.md")]),
         "决策治理": bool(adr_documents(root, config) or decision_records(root, config)),
-        "版本演进规划": bool(future_version_documents(root, config)),
+        # A V1-only product must preserve a future-version planning space without
+        # inventing V2 business commitments solely to satisfy an audit checkbox.
+        "版本演进规划": (docs / "02-产品与版本" / "后续版本" / "README.md").exists(),
         "可视化与完整文档浏览器": browser_complete and (docs / "02-产品与版本/图表/功能演进-版本主链路.svg").exists(),
         "UTF-8 来源阅读与本地服务": utf8_delivery_complete,
         "Goal 可恢复执行生命周期": goal_commands_complete,
