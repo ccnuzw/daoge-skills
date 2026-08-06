@@ -242,7 +242,9 @@ precedes / unlocks / mitigates
 
 ### 8.2 `views.overview`
 
-包含 `stats`、`product_architecture`、`core_flow`、`version_chain`、`development_progress`、`accepted_decisions` 和 `authority_entries`。前三个关系模型直接复用 `views.maps` 的同一份节点、边和来源，不创建第二份业务事实。
+包含 `scope`、`stats`、`product_architecture`、`core_flow`、`version_chain`、`development_progress`、`accepted_decisions` 和 `authority_entries`。前三个关系模型直接复用 `views.maps` 的同一份节点、边和来源，不创建第二份业务事实。
+
+`scope.label` 固定为 `全版本`，`scope.active_execution_version` 只标识当前执行版本。`stats.versions`、`stats.features`、`stats.requirements` 与 `stats.accepted_decisions` 必须覆盖版本组合层中全部已登记版本，不能因 `current_version` 切换而缩减；它们只用于项目认知，不能作为 Gate、Goal、当前功能或交付状态输入。`development_progress` 仍严格只描述 `current_version`，页面必须明确这一区别。
 
 `development_progress` 不是文档状态计数，而是带来源的交付状态派生：
 

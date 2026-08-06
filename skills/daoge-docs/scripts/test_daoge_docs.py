@@ -745,7 +745,7 @@ class DaogeDocsTests(unittest.TestCase):
         )
         overview = payload["views"]["overview"]
         self.assertEqual(
-            {"stats", "product_architecture", "core_flow", "version_chain", "development_progress", "accepted_decisions", "authority_entries"},
+            {"scope", "stats", "product_architecture", "core_flow", "version_chain", "development_progress", "accepted_decisions", "authority_entries"},
             set(overview),
         )
         progress = overview["development_progress"]
@@ -836,6 +836,18 @@ class DaogeDocsTests(unittest.TestCase):
     def test_cross_version_portfolio_preserves_active_execution_context(self) -> None:
         self.init()
         self.complete_for_goal()
+        self.run_cli(
+            "new-decision",
+            "--root", ".",
+            "--title", "订单数据保留",
+            "--decision", "订单记录保留在本地文件中",
+            "--rationale", "支持离线任务闭环",
+            "--requirements", "DOP-FR-001",
+            "--affected", "订单数据",
+            "--status", "accepted",
+            "--confirmed-by", "产品负责人",
+            vendored=True,
+        )
         self.run_cli("new-version", "--root", ".", "--version", "V2", vendored=True)
         self.run_cli("new-domain", "--root", ".", "--name", "支付", vendored=True)
         self.run_cli(
@@ -865,6 +877,13 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertEqual({"DOP-FR-002"}, {item["feature_id"] for item in payload["task_packets"]})
         self.assertEqual({"DOP-FR-001", "DOP-FR-002"}, {item["id"] for item in payload["project_features"]})
         self.assertEqual({"DOP-FR-001", "DOP-FR-002"}, {item["feature_id"] for item in payload["views"]["timelines"]})
+        overview = payload["views"]["overview"]
+        self.assertEqual({"label": "全版本", "active_execution_version": "V2"}, overview["scope"])
+        self.assertEqual(2, overview["stats"]["versions"])
+        self.assertEqual(2, overview["stats"]["features"])
+        self.assertEqual(2, overview["stats"]["requirements"])
+        self.assertEqual(1, overview["stats"]["accepted_decisions"])
+        self.assertEqual(1, sum(overview["development_progress"]["counts"].values()))
         historical_timeline = next(item for item in payload["views"]["timelines"] if item["feature_id"] == "DOP-FR-001")
         self.assertEqual("V1", historical_timeline["version"])
         self.assertEqual("unknown", historical_timeline["current_gate"])
@@ -1466,6 +1485,11 @@ class DaogeDocsTests(unittest.TestCase):
         second = json.loads(self.run_cli("install-integrations", "--root", ".", vendored=True).stdout)
         self.assertEqual(expected, set(second["保留已有"]))
         self.assertEqual(before, {path: (self.root / path).read_bytes() for path in expected})
+
+    def test_upgrade_is_idempotent_when_run_from_vendored_tool(self) -> None:
+        self.init()
+        result = self.run_cli("upgrade", "--root", ".", "--profile", "strict", vendored=True)
+        self.assertIn("工具与文档清单已升级", result.stdout)
 
     def test_v2_snapshot_is_immutable_and_exposed_to_browser(self) -> None:
         self.init()

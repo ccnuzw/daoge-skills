@@ -594,6 +594,15 @@ def vendor_tooling(root: Path, overwrite: bool = False) -> tuple[list[str], list
         if source.is_file():
             targets.append((source, tooling / "assets" / source.relative_to(ASSETS)))
     for source, destination in targets:
+        # An in-project tool may be asked to upgrade its own checkout. Treat
+        # that source/target pair as already current instead of copying a file
+        # onto itself (which raises shutil.SameFileError on macOS/Linux).
+        try:
+            if destination.exists() and source.resolve() == destination.resolve():
+                skipped.append(str(destination.relative_to(root)))
+                continue
+        except OSError:
+            pass
         if destination.exists() and not overwrite:
             skipped.append(str(destination.relative_to(root)))
             continue
@@ -3589,6 +3598,28 @@ def browser_payload(root: Path, config: dict) -> dict:
         }
         for item in version_portfolio.get("versions", [])
     ]
+    # The overview is the portfolio surface: its identity and summary counters
+    # must describe every registered version.  Keep the active-only collections
+    # below untouched because Gates, Goals, and delivery progress are execution
+    # inputs for config.current_version only.
+    portfolio_requirements: list[dict] = []
+    portfolio_decisions: list[dict] = []
+    seen_requirement_ids: set[str] = set()
+    seen_decision_ids: set[str] = set()
+    for version_card in version_portfolio.get("versions", []):
+        version_id = str(version_card.get("id", ""))
+        if not version_id:
+            continue
+        for item in requirement_records(root, config, version_id):
+            requirement_id = str(item.get("id", ""))
+            if requirement_id and requirement_id not in seen_requirement_ids:
+                seen_requirement_ids.add(requirement_id)
+                portfolio_requirements.append({**item, "version": version_id})
+        for item in decision_records(root, config, version_id):
+            decision_id = str(item.get("id", ""))
+            if decision_id and decision_id not in seen_decision_ids:
+                seen_decision_ids.add(decision_id)
+                portfolio_decisions.append({**item, "version": version_id})
     timelines = []
     for feature in project_features:
         feature_findings = [
@@ -3701,12 +3732,16 @@ def browser_payload(root: Path, config: dict) -> dict:
         )
 
     overview_view = {
+        "scope": {
+            "label": "全版本",
+            "active_execution_version": str(config["current_version"]),
+        },
         "stats": {
             "documents": len(documents),
-            "versions": len(versions),
-            "features": len(features),
-            "requirements": len(requirements),
-            "accepted_decisions": sum(1 for item in decisions if item.get("status") == "accepted"),
+            "versions": len(version_portfolio.get("versions", [])),
+            "features": len(project_features),
+            "requirements": len(portfolio_requirements),
+            "accepted_decisions": sum(1 for item in portfolio_decisions if item.get("status") == "accepted"),
         },
         "product_architecture": maps["product_architecture"],
         "core_flow": maps["core_flow"],
@@ -3715,7 +3750,7 @@ def browser_payload(root: Path, config: dict) -> dict:
             "counts": delivery_progress_counts,
             "items": delivery_progress_items,
         },
-        "accepted_decisions": [item for item in decisions if item.get("status") == "accepted"],
+        "accepted_decisions": [item for item in portfolio_decisions if item.get("status") == "accepted"],
         "authority_entries": [
             {"title": item["title"], "path": item["path"], "authority": item["authority"]}
             for item in documents
@@ -4908,12 +4943,25 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
         if node.get("type") == "risk" and not node.get("severity"):
             errors.append(f"风险热区节点缺少等级：{node.get('id', '')}")
     overview = (payload.get("views") or {}).get("overview") or {}
+    active_execution_version = str(config.get("current_version", ""))
+    workbench = (payload.get("views") or {}).get("workbench") or {}
+    portfolio = workbench.get("version_portfolio") or {}
+    project_features = payload.get("project_features") or []
     required_overview = {
-        "stats", "product_architecture", "core_flow", "version_chain",
+        "scope", "stats", "product_architecture", "core_flow", "version_chain",
         "development_progress", "accepted_decisions", "authority_entries",
     }
     if set(overview) != required_overview:
         errors.append("总览数据不完整：必须包含指标、三类主关系、交付进度、决策和权威入口")
+    overview_scope = overview.get("scope") or {}
+    if overview_scope.get("label") != "全版本" or overview_scope.get("active_execution_version") != active_execution_version:
+        errors.append("总览 scope 必须标识全版本及当前执行版本")
+    overview_stats = overview.get("stats") or {}
+    portfolio_versions = (portfolio.get("versions") or [])
+    if overview_stats.get("versions") != len(portfolio_versions):
+        errors.append("总览版本统计必须覆盖全部版本组合")
+    if overview_stats.get("features") != len(project_features):
+        errors.append("总览功能统计必须覆盖项目功能浏览目录")
     progress = overview.get("development_progress") or {}
     progress_counts = progress.get("counts") or {}
     progress_items = progress.get("items") or []
@@ -4929,9 +4977,6 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
     for item in progress_items:
         if item.get("status") not in required_progress_statuses or not item.get("basis") or len(item.get("sources") or []) < 2:
             errors.append(f"总览交付进度缺少状态、依据或双来源：{item.get('feature_id', '')}")
-    workbench = (payload.get("views") or {}).get("workbench") or {}
-    portfolio = workbench.get("version_portfolio") or {}
-    active_execution_version = str(config.get("current_version", ""))
     if workbench.get("active_execution_version") != active_execution_version:
         errors.append("工作台执行版本必须等于项目 current_version")
     if portfolio.get("active_execution_version") != active_execution_version:
@@ -4940,7 +4985,6 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
     if len(portfolio_ids) != len(set(portfolio_ids)) or not portfolio_ids:
         errors.append("跨版本组合层缺少稳定且唯一的版本 ID")
     active_features = {str(item.get("id", "")) for item in payload.get("features", [])}
-    project_features = payload.get("project_features") or []
     project_feature_ids = [str(item.get("id", "")) for item in project_features]
     if len(project_feature_ids) != len(set(project_feature_ids)) or any(not item for item in project_feature_ids):
         errors.append("项目功能浏览目录缺少稳定且唯一的功能 ID")

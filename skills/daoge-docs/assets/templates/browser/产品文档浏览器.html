@@ -1409,6 +1409,7 @@
 
     function renderOverview() {
       const overview = (DATA.views || {}).overview || {};
+      const scope = overview.scope || {};
       const stats = overview.stats || {};
       const architecture = overview.product_architecture || {status:"unknown",nodes:[],edges:[],findings:[]};
       const progress = overview.development_progress || {counts:{},items:[]};
@@ -1418,9 +1419,9 @@
       const decisions = (overview.accepted_decisions || []).slice(0,6);
       const authorities = (overview.authority_entries || []).slice(0,8);
       els.content.innerHTML = `
-        <header class="view-header" id="overview-top"><div><div class="eyebrow">${escapeHtml(DATA.project.code)} · ${escapeHtml(DATA.project.current_version)}</div><h2>项目全貌</h2><p>项目结构、业务闭环、版本主链和开发进展均从当前权威来源派生。</p></div><div class="view-actions"><button class="command" data-jump-view="map">展开六类图谱</button></div></header>
+        <header class="view-header" id="overview-top"><div><div class="eyebrow">${escapeHtml(DATA.project.code)} · ${escapeHtml(scope.label || "全版本")}</div><h2>项目全貌</h2><p>项目结构、业务闭环与版本主链覆盖全部已登记版本；当前执行 ${escapeHtml(scope.active_execution_version || DATA.project.current_version)} 的交付进度单独列示。</p></div><div class="view-actions"><button class="command" data-jump-view="map">展开六类图谱</button></div></header>
         <section class="stats">
-          ${stat("版本", stats.versions || 0, "当前与后续")}${stat("功能", stats.features || 0, "当前版本")}${stat("需求", stats.requirements || 0, "稳定 ID")}${stat("已确认决策", stats.accepted_decisions || 0, "权威记录")}${stat("文档", stats.documents || 0, "权威与派生")}
+          ${stat("版本", stats.versions || 0, "全版本登记")}${stat("功能", stats.features || 0, "全版本规格")}${stat("需求", stats.requirements || 0, "稳定 ID")}${stat("已确认决策", stats.accepted_decisions || 0, "全版本权威记录")}${stat("文档", stats.documents || 0, "权威与派生")}
         </section>
         <section class="section" id="overview-architecture"><div class="section-head"><h3>产品全景</h3><span>${architecture.status === "ready" ? "用户、领域与系统关系" : "结构化来源未建立"}</span></div>${renderArchitectureOverview(architecture)}</section>
         <div class="overview-flow-grid">
