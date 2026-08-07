@@ -1237,6 +1237,42 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertEqual("blocked", evolution["status"])
         self.assertTrue(any(item["source_section"] == "兼容影响" for item in evolution["findings"]))
 
+    def test_browser_contract_requires_each_feature_track_to_have_a_milestone(self) -> None:
+        """A timeline cannot claim an evolution track that the matrix omits."""
+        self.init()
+        self.run_cli("new-domain", "--root", ".", "--name", "订单", vendored=True)
+        self.run_cli(
+            "new-feature",
+            "--root",
+            ".",
+            "--number",
+            "1",
+            "--name",
+            "创建订单",
+            "--domain",
+            "订单",
+            "--evolution-track",
+            "TRACK-MISSING",
+            vendored=True,
+        )
+        self.run_cli("index", "--root", ".", vendored=True)
+        result = json.loads(
+            self.run_cli("browser-check", "--root", ".", "--json", expected=1, vendored=True).stdout
+        )
+        self.assertTrue(any("功能引用了未登记的能力主线：TRACK-MISSING" in error for error in result["错误"]))
+
+    def test_evolution_status_distinguishes_baseline_and_active_versions(self) -> None:
+        module = load_cli_module()
+        self.assertEqual("baseline", module.evolution_planning_status("baseline；V1 版本总览"))
+        self.assertEqual("active", module.evolution_planning_status("active；V2 版本总览"))
+        self.assertEqual("planning", module.evolution_planning_status("planning；V3 版本总览"))
+        self.assertEqual("planning", module.evolution_planning_status("planning；未完成任务的查询"))
+        self.assertEqual("completed", module.evolution_planning_status("已完成；开发级证据"))
+        html = (SCRIPT.parent / "assets/templates/browser/产品文档浏览器.html").read_text(encoding="utf-8")
+        self.assertIn('baseline:"基线版本"', html)
+        self.assertIn('active:"当前执行"', html)
+        self.assertIn("浏览任意版本功能不会改变当前执行版本", html)
+
     def test_map_readiness_blocks_partial_sources_and_does_not_guess_version_edges(self) -> None:
         self.init()
         self.set_table_rows(

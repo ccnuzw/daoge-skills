@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.15.0"
+TOOL_VERSION = "3.15.1"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -2746,10 +2746,16 @@ def browser_change_summary(snapshots: list[dict]) -> dict:
 
 
 def evolution_planning_status(value: str) -> str:
-    normalized = value.lower()
+    # The status column may cite a source after a semicolon.  Parse only its
+    # leading status token so prose such as "未完成任务" cannot become completed.
+    normalized = re.split(r"[；;，,]", value.lower(), maxsplit=1)[0].strip()
+    if any(word in normalized for word in ["基线", "baseline"]):
+        return "baseline"
+    if any(word in normalized for word in ["当前执行", "active"]):
+        return "active"
     if any(word in normalized for word in ["废弃", "deprecated"]):
         return "deprecated"
-    if any(word in normalized for word in ["完成", "released", "verified"]):
+    if any(word in normalized for word in ["已完成", "已发布", "已验证", "released", "verified"]):
         return "completed"
     if any(word in normalized for word in ["当前", "current", "实现"]):
         return "current"
@@ -5118,6 +5124,13 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
             errors.append(f"功能演进里程碑引用未知能力主线：{milestone.get('id', '')}")
         if not milestone.get("stage_keys") or not milestone.get("planning_status"):
             errors.append(f"功能演进里程碑缺少阶段或规划状态：{milestone.get('id', '')}")
+    feature_track_ids = {
+        str(item.get("evolution_track", "")).strip().upper()
+        for item in project_features
+        if str(item.get("evolution_track", "")).strip().lower() not in {"", "none"}
+    }
+    for track_id in sorted(feature_track_ids - track_ids):
+        errors.append(f"功能引用了未登记的能力主线：{track_id}")
     known_evolution_ids = version_ids | milestone_ids
     allowed_relation_types = {"compatible", "migration", "deprecation", "replacement"}
     for relation in evolution_relations:

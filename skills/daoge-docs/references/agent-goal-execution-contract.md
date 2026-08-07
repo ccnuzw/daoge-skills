@@ -202,6 +202,8 @@ Goal 进入 `completed` 前必须同时满足：
 
 ## 13. 工具接口与实现状态
 
+`daoge-docs 3.15.1` 在既有 Goal 生命周期上补充全项目功能能力主线校验，并将工作台的基线版本、当前执行版本与未来规划状态分别呈现；这一展示语义不改变 Goal 的 Gate 或授权边界。
+
 `daoge-docs 3.15.0` 已实现完整的开发级 Goal 生命周期。功能 front matter 引用的 ADR 必须已处于 `accepted`，否则检查、Ready 门禁和 Goal 都保持 `blocked`；同一缺口必须派生为工作台 finding。验收表中的 Markdown 行内代码会在派生 Goal 前规范化为原始 shell 命令。工作台可为任何已登记版本的稳定功能 ID 复制 Goal 准备提示，但该提示不是执行授权：它只能要求智能体调用带 `--version <目标版本>` 的 `prepare-goal`，在 `blocked` 时停止，并在 `ready` 后读取 `goal-resume-context`；实现必须由开发者明确确认后才开始。默认 Goal 使用 `config.current_version`；显式 `--version` 时工具在内存中创建目标版本配置，独立解析该版本功能、需求、E2E、决策、任务图和 Ready 门禁，不写回 `.daoge-docs.json`，不重建当前工作台为历史版本，也不让历史 Gate、任务包或证据覆盖当前执行判断。Goal 清单绑定目标版本；`goal-status`、`goal-resume-context`、`goal-checkpoint` 和 `goal-complete` 必须从清单恢复该目标版本，而不能因为项目活动版本已前进而把清单标为 stale。
 
 ```text
