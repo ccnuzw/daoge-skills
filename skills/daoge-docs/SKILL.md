@@ -18,6 +18,8 @@ description: 为软件项目建立和治理中文文档驱动开发体系。用�
 7. 重要需求、功能、验收项、设计分支、E2E 用例和 ADR 使用稳定 ID；重命名、移动或废弃后不得复用 ID。
 8. 任何“已验证”结论必须绑定实际命令、退出码、环境、提交、构建、时间和证据路径。
 
+工作台的 `documents[].status` 是阅读目录的输入状态，不是门禁结果：有 front matter 的权威 Markdown 使用其声明状态；索引生成的 Markdown 使用 `generated`（界面显示“已生成”）；JSON/YAML/OpenAPI 使用 `not_applicable`（界面显示“结构化数据”）；普通 Markdown 缺少 front matter 时使用 `unknown`（界面显示“未知”）。这些状态不能推导 `ready`、`passed` 或已发布，门禁仍只读取各自的权威文档、finding 和机器证据。
+
 开始前按任务读取参考文件：
 
 - 新项目适配：读取 [references/adaptation.md](references/adaptation.md)。
