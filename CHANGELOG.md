@@ -2,6 +2,13 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-docs 3.15.3 - 2026-08-07
+
+### 修复
+
+- 区分权威 Markdown、索引生成 Markdown 与 JSON/YAML 结构化数据的浏览状态；不再把所有无 front matter 文件显示为“未声明”。
+- 工作台将派生状态显示为“已生成”、结构化文件显示为“结构化数据”，并明确它们不代表 Gate 已就绪或机器证据已通过。
+
 ## daoge-pic 4.0.0 - 2026-08-05
 
 ### 变更

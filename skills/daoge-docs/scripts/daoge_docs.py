@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.15.2"
+TOOL_VERSION = "3.15.3"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -1435,15 +1435,30 @@ def browser_records(root: Path, config: dict) -> list[dict]:
         if "报告" in relative.parts and path.suffix.lower() == ".json":
             continue
         text = path.read_text(encoding="utf-8")
-        meta = parse_frontmatter(text) if path.suffix.lower() == ".md" else {}
+        is_markdown = path.suffix.lower() == ".md"
+        meta = parse_frontmatter(text) if is_markdown else {}
+        generated = GENERATED_MARKER in text[:200]
+        if not is_markdown:
+            document_status = "not_applicable"
+            status_source = "structured_file"
+        elif meta.get("status"):
+            document_status = meta["status"]
+            status_source = "frontmatter"
+        elif generated:
+            document_status = "generated"
+            status_source = "generated_marker"
+        else:
+            document_status = "unknown"
+            status_source = "missing_frontmatter"
         sections = browser_section_index(relative.as_posix(), text)
         headings = [{"level": item["level"], "title": item["title"], "id": item["id"]} for item in sections]
         records.append(
             {
                 "id": relative.as_posix(),
                 "path": relative.as_posix(),
-                "title": markdown_title(text) if path.suffix.lower() == ".md" else path.name,
-                "status": meta.get("status", "未声明"),
+                "title": markdown_title(text) if is_markdown else path.name,
+                "status": document_status,
+                "status_source": status_source,
                 "authority": meta.get("authority", "未声明"),
                 "owner": meta.get("owner", "未声明"),
                 "updated": meta.get("updated", "未声明"),
@@ -1459,7 +1474,7 @@ def browser_records(root: Path, config: dict) -> list[dict]:
                 "line_count": len(text.splitlines()),
                 "character_count": len(text),
                 "excerpt": browser_excerpt(text),
-                "generated": GENERATED_MARKER in text[:200],
+                "generated": generated,
             }
         )
     return records

@@ -922,6 +922,29 @@ class DaogeDocsTests(unittest.TestCase):
         v2 = next(item for item in payload["views"]["workbench"]["version_portfolio"]["versions"] if item["id"] == "V2")
         self.assertEqual(["DOP-FR-008", "DOP-FR-009", "DOP-FR-010"], [item["id"] for item in v2["features"]])
 
+    def test_browser_document_status_distinguishes_authority_and_derived_inputs(self) -> None:
+        self.init()
+        ordinary = self.root / "docs/01-项目概览/无生命周期声明.md"
+        ordinary.write_text("# 无生命周期声明\n\n这是一份没有 front matter 的普通 Markdown。\n", encoding="utf-8")
+        self.run_cli("index", "--root", ".")
+        payload = self.browser_payload()
+        documents = {item["path"]: item for item in payload["documents"]}
+
+        authority = documents["01-项目概览/项目调研与事实清单.md"]
+        generated = documents["03-功能规格/V1/README.md"]
+        structured = documents["03-功能规格/V1/00-V1需求注册表.json"]
+        unknown = documents["01-项目概览/无生命周期声明.md"]
+
+        self.assertEqual("ready", authority["status"])
+        self.assertEqual("frontmatter", authority["status_source"])
+        self.assertEqual("generated", generated["status"])
+        self.assertEqual("generated_marker", generated["status_source"])
+        self.assertTrue(generated["generated"])
+        self.assertEqual("not_applicable", structured["status"])
+        self.assertEqual("structured_file", structured["status_source"])
+        self.assertEqual("unknown", unknown["status"])
+        self.assertEqual("missing_frontmatter", unknown["status_source"])
+
     def test_historical_version_goal_is_explicit_and_does_not_switch_execution_version(self) -> None:
         self.init()
         self.complete_for_goal()
