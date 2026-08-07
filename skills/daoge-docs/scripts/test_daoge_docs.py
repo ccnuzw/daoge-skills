@@ -901,6 +901,27 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertTrue(any("03-功能规格/V1/订单/01-创建订单.md" == path for path in groups["V1"]))
         self.assertTrue(any("03-功能规格/V2/支付/02-支付订单.md" == path for path in groups["V2"]))
 
+    def test_cross_version_features_are_ordered_by_stable_number(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        self.run_cli("new-version", "--root", ".", "--version", "V2", vendored=True)
+        self.run_cli("new-domain", "--root", ".", "--name", "支付", vendored=True)
+        for number, name in [(10, "统计"), (8, "导出"), (9, "导入")]:
+            self.run_cli(
+                "new-feature", "--root", ".", "--number", str(number), "--name", name,
+                "--domain", "支付", vendored=True,
+            )
+        self.set_table_rows(
+            "docs/02-产品与版本/版本路线图.md",
+            ["版本 ID", "目标", "状态", "前置版本/能力", "退出条件", "权威文档"],
+            [["V1", "订单基线", "ready（规格）", "基础仓库", "V1 AC", "当前版本/V1-版本总览.md"],
+             ["V2", "支付扩展", "ready（规格）", "V1 订单语义", "V2 AC", "当前版本/V2-版本总览.md"]],
+        )
+        self.run_cli("index", "--root", ".", vendored=True)
+        payload = self.browser_payload()
+        v2 = next(item for item in payload["views"]["workbench"]["version_portfolio"]["versions"] if item["id"] == "V2")
+        self.assertEqual(["DOP-FR-008", "DOP-FR-009", "DOP-FR-010"], [item["id"] for item in v2["features"]])
+
     def test_historical_version_goal_is_explicit_and_does_not_switch_execution_version(self) -> None:
         self.init()
         self.complete_for_goal()

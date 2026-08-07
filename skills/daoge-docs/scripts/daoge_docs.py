@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.15.1"
+TOOL_VERSION = "3.15.2"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -701,7 +701,7 @@ def feature_documents(root: Path, config: dict, version: str | None = None) -> l
             records.append(
                 {"path": path, "text": text, "meta": meta, "number": int(match.group(1)), "title": markdown_title(text)}
             )
-    return records
+    return sorted(records, key=lambda record: (record["number"], str(record["meta"].get("id", ""))))
 
 
 def adr_documents(root: Path, config: dict) -> list[dict]:
@@ -1552,7 +1552,10 @@ def browser_directories(root: Path, config: dict, documents: list[dict]) -> list
                 "parent_id": directory.parent.as_posix() if relative != "." else None,
                 "name": "文档根目录" if relative == "." else directory.name,
                 "readme_path": readme.relative_to(docs).as_posix() if readme else "",
-                "kind": "semantic" if readme else "artifact",
+                # Populated directories need a visible navigation entry even
+                # when they do not carry a README; empty artifact folders stay
+                # physical-only.
+                "kind": "semantic" if readme or document_counts.get(relative, 0) or children else "artifact",
                 "authority": "目录导航与阅读入口" if readme else "未声明",
                 "document_count": document_counts.get(relative, 0),
                 "child_count": len(children),

@@ -1645,11 +1645,12 @@
       document.getElementById("featureFilter").addEventListener("input", event => {
         const value = event.target.value;
         renderTimeline(value);
+        updateHash();
         const input = document.getElementById("featureFilter");
         input.focus();
         input.setSelectionRange(value.length, value.length);
       });
-      document.getElementById("featureSelect").addEventListener("change", event => { state.activeFeature = event.target.value; renderTimeline(filterValue); });
+      document.getElementById("featureSelect").addEventListener("change", event => { state.activeFeature = event.target.value; renderTimeline(filterValue); updateHash(); });
       bindContentActions();
       bindCopyActions();
       renderOutline([{ id: "timeline-picker", title: "选择具体功能", level: 1 }, { id: "timeline-summary", title: feature.id, level: 2 }, { id: "timeline-full", title: "完整版本时间线", level: 2 }, { id: "timeline-sources", title: "权威来源", level: 2 }]);
