@@ -868,6 +868,7 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertEqual("V2", workbench["active_execution_version"])
         self.assertEqual("V2", portfolio["active_execution_version"])
         self.assertEqual(["V1", "V2"], [item["id"] for item in portfolio["versions"]])
+        self.assertEqual(["V1", "V2"], [item["id"] for item in payload["versions"]])
         self.assertEqual(["all", "V1", "V2"], [item["id"] for item in portfolio["browsing_scopes"]])
         v1 = next(item for item in portfolio["versions"] if item["id"] == "V1")
         v2 = next(item for item in portfolio["versions"] if item["id"] == "V2")
@@ -935,7 +936,7 @@ class DaogeDocsTests(unittest.TestCase):
         structured = documents["03-功能规格/V1/00-V1需求注册表.json"]
         unknown = documents["01-项目概览/无生命周期声明.md"]
 
-        self.assertEqual("ready", authority["status"])
+        self.assertEqual("draft", authority["status"])
         self.assertEqual("frontmatter", authority["status_source"])
         self.assertEqual("generated", generated["status"])
         self.assertEqual("generated_marker", generated["status_source"])
@@ -1019,7 +1020,12 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertTrue(any("ADR 尚未接受" in error for error in gate["错误"]), gate)
         payload = self.browser_payload()
         self.assertEqual("blocked", payload["workbench"]["decision"]["status"])
-        self.assertEqual(["WB-F-0001"], payload["workbench"]["top_blockers"])
+        adr_finding_ids = [
+            finding["id"]
+            for finding in payload["findings"]
+            if finding.get("object_id") == "DOP-FR-001" and finding.get("rule_id") == "FEATURE-ADR-ACCEPTANCE"
+        ]
+        self.assertEqual(adr_finding_ids, payload["workbench"]["top_blockers"])
         self.assertEqual("blocked", payload["goal_readiness"]["status"])
         self.assertFalse("`" in payload["task_packets"][0]["verification_commands"][0])
         self.assertTrue(
@@ -1312,9 +1318,10 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertEqual("planning", module.evolution_planning_status("planning；V3 版本总览"))
         self.assertEqual("planning", module.evolution_planning_status("planning；未完成任务的查询"))
         self.assertEqual("completed", module.evolution_planning_status("已完成；开发级证据"))
-        html = (SCRIPT.parent / "assets/templates/browser/产品文档浏览器.html").read_text(encoding="utf-8")
+        html = (SCRIPT.parent.parent / "assets/templates/browser/产品文档浏览器.html").read_text(encoding="utf-8")
         self.assertIn('baseline:"基线版本"', html)
         self.assertIn('active:"当前执行"', html)
+        self.assertIn("function displayReason", html)
         self.assertIn("浏览任意版本功能不会改变当前执行版本", html)
 
     def test_map_readiness_blocks_partial_sources_and_does_not_guess_version_edges(self) -> None:

@@ -704,6 +704,29 @@ def feature_documents(root: Path, config: dict, version: str | None = None) -> l
     return sorted(records, key=lambda record: (record["number"], str(record["meta"].get("id", ""))))
 
 
+def all_feature_documents(root: Path, config: dict) -> list[dict]:
+    """Return feature specifications for every registered/versioned feature space.
+
+    Gate and execution data intentionally keep using ``feature_documents`` for the
+    active version.  Portfolio, audit and static diagrams need the complete
+    project slice, including historical and future version directories.
+    """
+    feature_root = docs_root(root, config) / "03-功能规格"
+    if not feature_root.exists():
+        return []
+    version_ids = {path.name.upper() for path in feature_root.iterdir() if path.is_dir() and re.fullmatch(r"V\d+", path.name, re.IGNORECASE)}
+    version_ids.add(str(config["current_version"]).upper())
+    records: list[dict] = []
+    seen: set[str] = set()
+    for version_id in sorted(version_ids, key=lambda value: (int(value[1:]) if value[1:].isdigit() else 9999, value)):
+        for record in feature_documents(root, config, version_id):
+            feature_id = str(record["meta"].get("id", ""))
+            if feature_id and feature_id not in seen:
+                seen.add(feature_id)
+                records.append(record)
+    return sorted(records, key=lambda record: (int(record["meta"].get("version", "V9999")[1:]) if str(record["meta"].get("version", "")).startswith("V") and str(record["meta"].get("version", "V")[1:]).isdigit() else 9999, record["number"], str(record["meta"].get("id", ""))))
+
+
 def adr_documents(root: Path, config: dict) -> list[dict]:
     base = docs_root(root, config) / "06-决策记录" / "ADR"
     records: list[dict] = []
@@ -1314,19 +1337,48 @@ def future_version_documents(root: Path, config: dict) -> list[Path]:
     return [path for path in sorted(base.glob("V*-*.md")) if path.name != "README.md"]
 
 
+def registered_version_rows(root: Path, config: dict) -> list[dict]:
+    """Read the version registry used by all project-wide surfaces."""
+    table = browser_structured_table(root, config, "version_sequence")
+    if table["status"] == "ready":
+        return table["rows"]
+    return []
+
+
+def registered_version_ids(root: Path, config: dict) -> list[str]:
+    """Return stable version IDs from the roadmap, with filesystem fallback."""
+    ids: list[str] = []
+    for row in registered_version_rows(root, config):
+        version_id = str(row.get("版本 ID", "")).strip().upper()
+        if version_id and version_id not in ids:
+            ids.append(version_id)
+    feature_root = docs_root(root, config) / "03-功能规格"
+    if feature_root.exists():
+        discovered = [path.name.upper() for path in feature_root.iterdir() if path.is_dir() and re.fullmatch(r"V\d+", path.name, re.IGNORECASE)]
+        for version_id in sorted(discovered, key=lambda value: (int(value[1:]), value)):
+            if version_id not in ids:
+                ids.append(version_id)
+    current = str(config["current_version"]).upper()
+    if current not in ids:
+        ids.insert(0, current)
+    return ids
+
+
 def render_version_flow_svg(root: Path, config: dict) -> str:
-    labels = [f"{config['current_version']} 当前版本"]
-    labels.extend(markdown_title(path.read_text(encoding="utf-8")) for path in future_version_documents(root, config))
-    return svg_flow("功能演进：版本主链路", labels, "当前版本必须先满足退出条件，后续版本必须独立通过 Version Ready 门禁。")
+    rows = registered_version_rows(root, config)
+    labels = [f"{row.get('版本 ID', '未声明')}：{row.get('目标', '版本目标未登记')}" for row in rows]
+    if not labels:
+        labels = [f"{config['current_version']}：当前版本"]
+    return svg_flow("功能演进：版本主链路", labels, "版本顺序来自版本路线图；当前执行版本与后续规划的门禁、证据分别计算。")
 
 
 def render_capability_heatmap_svg(root: Path, config: dict) -> str:
     counts: dict[str, int] = {}
-    for record in feature_documents(root, config):
+    for record in all_feature_documents(root, config):
         domain = record["meta"].get("domain", "未分类")
         counts[domain] = counts.get(domain, 0) + 1
     labels = [f"{domain}：{count} 个功能" for domain, count in sorted(counts.items())]
-    return svg_flow("功能演进：能力热力图", labels, "能力数量来自当前版本功能主文档；颜色不表达完成状态。")
+    return svg_flow("功能演进：能力热力图", labels, "能力数量覆盖版本路线图登记的全部功能；颜色不表达完成状态。")
 
 
 def render_gate_flow_svg() -> str:
@@ -3557,17 +3609,33 @@ def browser_payload(root: Path, config: dict) -> dict:
         )
         directory["status"] = "阻塞" if directory["finding_count"] else "结构就绪"
     task_packets = browser_task_packets(features, findings, authority_digest_value, str(config["current_version"]), generation_stamp)
-    versions = [
-        {
+    # Keep the legacy top-level version collection aligned with the same
+    # registered portfolio used by 工作台、总览 and project-wide relations.
+    versions = []
+    for card in version_portfolio.get("versions", []):
+        version_id = str(card.get("id", ""))
+        source = (card.get("sources") or [])[0] if card.get("sources") else {}
+        versions.append(
+            {
+                "id": version_id,
+                "title": card.get("goal") or f"{version_id} 版本",
+                "status": "current" if version_id == str(config["current_version"]) else card.get("planning_status", "planning"),
+                "role": card.get("role", "unknown"),
+                "updated": card.get("updated", "未声明"),
+                "path": card.get("overview_path") or source.get("source_path", ""),
+                "summary": card.get("goal") or "版本范围、实现和证据分别以对应权威文档为准。",
+            }
+        )
+    if not versions:
+        versions = [{
             "id": config["current_version"],
             "title": f"{config['current_version']} 当前版本",
             "status": "current",
+            "role": "active",
             "updated": max((item.get("updated", "") for item in features), default="未声明"),
             "path": f"02-产品与版本/当前版本/{config['current_version']}-版本总览.md",
             "summary": "当前活动版本；范围、实现和证据分别以对应权威文档为准。",
-        },
-        *future_versions,
-    ]
+        }]
     relations = browser_relations(documents, directories, features, requirements, decisions, adrs, e2e, versions, task_packets)
     blocked_features = [item for item in features if any(f["object_id"] == item.get("id") and f["severity"] == "blocking" for f in findings)]
     stage = "release"
@@ -3762,6 +3830,7 @@ def browser_payload(root: Path, config: dict) -> dict:
         },
         "stats": {
             "documents": len(documents),
+            "machine_reports": len([path for path in docs.rglob("*.json") if "报告" in path.parts]),
             "versions": len(version_portfolio.get("versions", [])),
             "features": len(project_features),
             "requirements": len(portfolio_requirements),
@@ -7105,7 +7174,14 @@ def command_audit(args: argparse.Namespace) -> int:
     errors.extend(browser_errors)
     docs = docs_root(root, config)
     records = feature_documents(root, config)
-    domain_dirs = {record["path"].parent for record in records}
+    all_records = all_feature_documents(root, config)
+    domain_dirs = {record["path"].parent for record in all_records}
+    portfolio = browser_version_portfolio(root, config, browser_records(root, config))
+    future_cards = [
+        item for item in portfolio.get("versions", [])
+        if str(item.get("id", "")) != str(config["current_version"])
+        and str(item.get("role", "")).lower() in {"future", "planning"}
+    ]
     selector_path = root / ".daoge-docs" / "evidence.json"
     selected_count = 0
     if selector_path.exists():
@@ -7117,12 +7193,15 @@ def command_audit(args: argparse.Namespace) -> int:
         "文档文件数": len([path for path in docs.rglob("*") if path.is_file()]),
         "Markdown 数": len(list(docs.rglob("*.md"))),
         "领域数": len(domain_dirs),
-        "功能数": len(records),
-        "高风险功能数": sum(1 for record in records if record["meta"].get("risk") == "high"),
+        "功能数": len(all_records),
+        "当前版本功能数": len(records),
+        "高风险功能数": sum(1 for record in all_records if record["meta"].get("risk") == "high"),
+        "当前版本高风险功能数": sum(1 for record in records if record["meta"].get("risk") == "high"),
         "E2E 用例数": len(e2e_documents(root, config)),
         "ADR 数": len(adr_documents(root, config)),
         "冻结决策数": len(decision_records(root, config)),
-        "后续版本规划数": len(future_version_documents(root, config)),
+        "后续版本规划数": len(future_cards),
+        "后续版本规划文件数": sum(1 for item in future_cards if item.get("overview_path")),
         "当前证据报告数": selected_count,
         "工作台 Smoke 资源数": len(browser_resources),
         "待决文档数": len({warning.split("：", 1)[-1] for warning in warnings if warning.startswith("仍有待决占位")}),
