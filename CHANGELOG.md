@@ -2,6 +2,32 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-docs 3.18.0 - 2026-08-08
+
+### 新增
+
+- Goal 运行态明确区分 `not_started`、`dependency_blocked`、`executing`、`verification_failed`、`completed`、`stale` 和 `blocked`，工作台、`goal-plan`、恢复上下文与 CI 使用同一阶段/原因语义。
+- 验证失败后允许在任务 `allowed_paths` 内恢复，并为每次验证尝试保留独立的 `verification_attempts[]` 机器证据；失败不会伪造检查点。
+- GitHub Actions、PR 模板、VS Code Tasks 和 `AGENTS.md` 集成覆盖代码、文档和 stale Goal 基线检查，并保持不覆盖已有目标配置。
+
+### 修复
+
+- 修复工作台 Goal 顶层状态与嵌套执行快照不一致的问题。
+- 统一工作台、Goal 契约和开发工作流文档中的当前工具版本为 `3.18.0`。
+
+## daoge-docs 3.16.0 - 2026-08-08
+
+### 新增
+
+- Goal 清单同时绑定项目全貌摘要和所选功能依赖闭包的范围摘要；功能、共享契约、版本架构/测试、相关决策或 E2E 变化会使 Goal 进入 `stale`，不相关版本规划变化不再误伤当前 Goal。
+- `prepare-goal --execution-mode parallel`：在独立非主分支和 linked worktree 中规划无依赖、无工程路径重叠的并行 lane；恢复上下文返回当前所有 runnable tasks，每个 lane 以独立 TASK ID 建立检查点。
+- 文档同步闭环：区分实现/证据同步与需求语义变更；后者必须停止受影响 Goal、更新权威并重新过门禁。
+
+### 兼容性
+
+- Goal schema 保持版本 1；旧清单仍按原全局 `authority_digest` 读取，新清单的 `authority_digest` 是 `scope_digest` 的兼容别名。
+- 默认执行模式仍为 `serial`。未显式使用并行模式的既有流程不改变。
+
 ## daoge-docs 3.15.3 - 2026-08-07
 
 ### 修复

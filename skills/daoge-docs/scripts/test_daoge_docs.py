@@ -1386,6 +1386,10 @@ class DaogeDocsTests(unittest.TestCase):
         stale = json.loads(self.run_cli("goal-status", "--root", ".", "--goal", "GOAL-V1-101", vendored=True).stdout)
         self.assertEqual("stale", stale["状态"])
         self.assertTrue(any("权威文档摘要" in item for item in stale["过期原因"]))
+        self.assertTrue(any("产品蓝图.md" in item for item in stale["过期原因"]))
+        plan_stale = json.loads(self.run_cli("goal-plan", "--root", ".", "--goal", "GOAL-V1-101", vendored=True).stdout)
+        self.assertEqual("stale", plan_stale["状态"])
+        self.assertEqual("stale", plan_stale["执行快照"]["goal_phase"])
         ci_stale = json.loads(
             self.run_cli(
                 "goal-status",
@@ -1415,6 +1419,165 @@ class DaogeDocsTests(unittest.TestCase):
         self.write_json(manifest_path, tampered)
         rejected = self.run_cli("goal-status", "--root", ".", "--goal", "GOAL-V1-102", expected=2, vendored=True)
         self.assertIn("语义内容已被修改", rejected.stderr)
+
+    def test_p0_execution_plan_separates_safe_lanes_and_dependencies(self) -> None:
+        cli = load_cli_module()
+        tasks = [
+            {"task_id": "TASK-A", "sequence": 1, "dependencies": [], "allowed_paths": ["src/a.py"], "forbidden_paths": []},
+            {"task_id": "TASK-B", "sequence": 2, "dependencies": [], "allowed_paths": ["src/b.py"], "forbidden_paths": []},
+            {"task_id": "TASK-C", "sequence": 3, "dependencies": ["TASK-A"], "allowed_paths": ["src/c.py"], "forbidden_paths": []},
+            {"task_id": "TASK-D", "sequence": 4, "dependencies": [], "allowed_paths": ["src/d.py"], "forbidden_paths": ["src/b.py"]},
+        ]
+        plan = cli.plan_goal_execution(tasks)
+        self.assertEqual("parallel_lanes", plan["mode"])
+        parallel = [lane for lane in plan["lanes"] if lane["parallel"]]
+        self.assertTrue(any(set(lane["task_ids"]) == {"TASK-A", "TASK-B"} for lane in parallel))
+        self.assertFalse(tasks[2]["parallel_eligible"])
+        self.assertFalse(tasks[3]["parallel_eligible"])
+        self.assertTrue(tasks[2]["parallel_reason"])
+
+    def test_p0_execution_plan_depth_is_independent_of_task_order(self) -> None:
+        cli = load_cli_module()
+        tasks = [
+            {"task_id": "TASK-C", "sequence": 1, "dependencies": ["TASK-B"], "allowed_paths": ["src/c.py"], "forbidden_paths": []},
+            {"task_id": "TASK-B", "sequence": 2, "dependencies": ["TASK-A"], "allowed_paths": ["src/b.py"], "forbidden_paths": []},
+            {"task_id": "TASK-A", "sequence": 3, "dependencies": [], "allowed_paths": ["src/a.py"], "forbidden_paths": []},
+            {"task_id": "TASK-X", "sequence": 4, "dependencies": [], "allowed_paths": ["src/x.py"], "forbidden_paths": []},
+        ]
+        plan = cli.plan_goal_execution(tasks)
+        lanes = {item["lane_id"]: item for item in plan["lanes"]}
+        self.assertEqual("serial", next(item["mode"] for item in lanes.values() if item["task_ids"] == ["TASK-C"]))
+        self.assertEqual("parallel", next(item["mode"] for item in lanes.values() if set(item["task_ids"]) == {"TASK-A", "TASK-X"}))
+        lane_a = next(item for item in lanes.values() if set(item["task_ids"]) == {"TASK-A", "TASK-X"})
+        lane_b = next(item for item in lanes.values() if item["task_ids"] == ["TASK-B"])
+        lane_c = next(item for item in lanes.values() if item["task_ids"] == ["TASK-C"])
+        self.assertEqual([lane_a["lane_id"]], lane_b["dependencies"])
+        self.assertEqual([lane_b["lane_id"]], lane_c["dependencies"])
+
+    def test_p1_execution_snapshot_exposes_ready_tasks_per_lane(self) -> None:
+        cli = load_cli_module()
+        manifest = {
+            "ordered_tasks": [
+                {"task_id": "TASK-A", "title": "基础", "sequence": 1, "status": "completed", "dependencies": [], "parallel_group": "LANE-001"},
+                {"task_id": "TASK-B", "title": "入口", "sequence": 2, "status": "pending", "dependencies": ["TASK-A"], "parallel_group": "LANE-002"},
+                {"task_id": "TASK-C", "title": "查询", "sequence": 3, "status": "pending", "dependencies": [], "parallel_group": "LANE-002"},
+                {"task_id": "TASK-D", "title": "汇合", "sequence": 4, "status": "pending", "dependencies": ["TASK-B", "TASK-C"], "parallel_group": "LANE-003"},
+            ],
+            "execution_plan": {
+                "lanes": [
+                    {"lane_id": "LANE-001", "task_ids": ["TASK-A"], "mode": "serial"},
+                    {"lane_id": "LANE-002", "task_ids": ["TASK-B", "TASK-C"], "mode": "parallel"},
+                    {"lane_id": "LANE-003", "task_ids": ["TASK-D"], "mode": "serial"},
+                ]
+            },
+        }
+        snapshot = cli.goal_execution_snapshot(manifest)
+        self.assertEqual(["TASK-B", "TASK-C"], snapshot["actionable_task_ids"])
+        self.assertEqual("not_started", snapshot["goal_phase"])
+        lane = next(item for item in snapshot["lanes"] if item["lane_id"] == "LANE-002")
+        self.assertEqual("ready", lane["state"])
+        self.assertEqual("not_started", lane["phase"])
+        self.assertEqual(["TASK-B", "TASK-C"], lane["ready_task_ids"])
+        merge = next(item for item in snapshot["tasks"] if item["task_id"] == "TASK-D")
+        self.assertEqual("blocked", merge["state"])
+        self.assertEqual("dependency_blocked", merge["phase"])
+        self.assertEqual(["TASK-B", "TASK-C"], merge["missing_dependencies"])
+
+    def test_p2_execution_snapshot_distinguishes_running_failed_completed_and_stale(self) -> None:
+        cli = load_cli_module()
+        base = {
+            "ordered_tasks": [
+                {"task_id": "TASK-A", "title": "基础", "sequence": 1, "status": "running", "dependencies": [], "parallel_group": "LANE-001"},
+                {"task_id": "TASK-B", "title": "失败任务", "sequence": 2, "status": "verification_failed", "dependencies": [], "parallel_group": "LANE-002"},
+                {"task_id": "TASK-C", "title": "完成任务", "sequence": 3, "status": "completed", "dependencies": [], "parallel_group": "LANE-003"},
+            ],
+            "execution_plan": {"lanes": [
+                {"lane_id": "LANE-001", "task_ids": ["TASK-A"], "mode": "serial"},
+                {"lane_id": "LANE-002", "task_ids": ["TASK-B"], "mode": "serial"},
+                {"lane_id": "LANE-003", "task_ids": ["TASK-C"], "mode": "serial"},
+            ]},
+            "status": "verification_failed",
+        }
+        snapshot = cli.goal_execution_snapshot(base)
+        phases = {item["task_id"]: item["phase"] for item in snapshot["tasks"]}
+        self.assertEqual({"TASK-A": "executing", "TASK-B": "verification_failed", "TASK-C": "completed"}, phases)
+        self.assertEqual("verification_failed", snapshot["goal_phase"])
+        base["status"] = "stale"
+        stale = cli.goal_execution_snapshot(base)
+        self.assertEqual("stale", stale["goal_phase"])
+        self.assertIn("baseline_changed", stale["goal_reason_code"])
+
+    def test_p1_goal_plan_is_read_only_and_resume_can_select_ready_parallel_task(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        prepared = json.loads(
+            self.run_cli("prepare-goal", "--root", ".", "--feature", "DOP-FR-001", "--goal-id", "GOAL-V1-175", vendored=True).stdout
+        )
+        plan = json.loads(self.run_cli("goal-plan", "--root", ".", "--goal", prepared["Goal ID"], vendored=True).stdout)
+        self.assertEqual("ready", plan["状态"])
+        self.assertIn("TASK-DOP-FR-001", plan["可执行任务"])
+        manifest_path = self.root / ".daoge-docs/goals/GOAL-V1-175/goal-manifest.json"
+        before = manifest_path.read_bytes()
+        self.run_cli("goal-resume-context", "--root", ".", "--goal", prepared["Goal ID"], "--task", "TASK-DOP-FR-001", vendored=True)
+        self.assertNotEqual(before, manifest_path.read_bytes())
+        status = json.loads(self.run_cli("goal-status", "--root", ".", "--goal", prepared["Goal ID"], "--read-only", vendored=True).stdout)
+        self.assertEqual(["TASK-DOP-FR-001"], status["可执行任务"])
+
+    def test_p0_goal_scope_ignores_unrelated_future_version_but_tracks_shared_authority(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        prepared = json.loads(
+            self.run_cli(
+                "prepare-goal", "--root", ".", "--feature", "DOP-FR-001", "--goal-id", "GOAL-V1-150", vendored=True
+            ).stdout
+        )
+        self.assertEqual("ready", prepared["状态"], prepared)
+        manifest_path = self.root / ".daoge-docs/goals/GOAL-V1-150/goal-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(["V1"], manifest["authority_scope"]["versions"])
+        future = self.root / "docs/02-产品与版本/后续版本/V2-并行规划.md"
+        future.parent.mkdir(parents=True, exist_ok=True)
+        future.write_text(
+            "---\nversion: V2\nstatus: planning\nowner: tester\nupdated: 2026-08-08\nauthority: V2 后续规划\n---\n\n# V2 并行规划\n",
+            encoding="utf-8",
+        )
+        status = json.loads(
+            self.run_cli("goal-status", "--root", ".", "--goal", "GOAL-V1-150", "--read-only", vendored=True).stdout
+        )
+        self.assertEqual("ready", status["状态"], status)
+        blueprint = self.root / "docs/02-产品与版本/产品蓝图.md"
+        blueprint.write_text(blueprint.read_text(encoding="utf-8") + "\n当前产品范围变化。\n", encoding="utf-8")
+        stale = json.loads(
+            self.run_cli("goal-status", "--root", ".", "--goal", "GOAL-V1-150", "--read-only", vendored=True).stdout
+        )
+        self.assertEqual("stale", stale["状态"], stale)
+        self.assertTrue(any("产品蓝图.md" in item for item in stale["过期原因"]))
+
+    def test_p0_browser_exposes_execution_plan_and_document_sync_policy(self) -> None:
+        self.init()
+        self.run_cli("index", "--root", ".", vendored=True)
+        payload = self.browser_payload()
+        workbench = payload["views"]["workbench"]
+        self.assertIn("execution_plan", workbench)
+        self.assertIn("lanes", workbench["execution_plan"])
+        self.assertEqual("authority_first", workbench["document_sync_policy"]["mode"])
+        self.assertEqual("authority_first", payload["goal_readiness"]["document_sync_policy"]["mode"])
+        html = (self.root / "docs/90-参考资料/产品文档浏览器.html").read_text(encoding="utf-8")
+        self.assertIn("function renderExecutionPlan", html)
+        self.assertIn("执行编排与文档同步", html)
+        self.assertIn("外部前置任务", html)
+
+    def test_p1_browser_exposes_goal_runtime_and_task_selection_contract(self) -> None:
+        self.init()
+        self.run_cli("index", "--root", ".", vendored=True)
+        payload = self.browser_payload()
+        self.assertIn("goal_runtime", payload)
+        self.assertIn("goal_runtime", payload["views"]["workbench"])
+        html = (self.root / "docs/90-参考资料/产品文档浏览器.html").read_text(encoding="utf-8")
+        self.assertIn("goal-plan --root . --goal", html)
+        self.assertIn("goal-resume-context --task", html)
+        self.assertIn('dependency_blocked:"依赖阻塞"', html)
+        self.assertIn("goal-task-phases", html)
 
     def test_p1_goal_without_git_or_ready_contract_stays_blocked(self) -> None:
         self.init()
@@ -1552,6 +1715,28 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertTrue(evidence_paths)
         evidence = json.loads((self.root / evidence_paths[0]).read_text(encoding="utf-8"))
         self.assertEqual("failed", evidence["result"])
+        self.assertEqual(1, len(manifest["ordered_tasks"][0]["verification_attempts"]))
+
+        test_file.write_text(
+            "import unittest\n\nclass OrderTest(unittest.TestCase):\n    def test_create(self):\n        self.assertTrue(True)\n",
+            encoding="utf-8",
+        )
+        (self.root / "src/orders/service.py").write_text("def create_order():\n    return 'order-002'\n", encoding="utf-8")
+        self.commit_all("repair failed verification")
+        resumed = json.loads(
+            self.run_cli("goal-resume-context", "--root", ".", "--goal", "GOAL-V1-203", vendored=True).stdout
+        )
+        self.assertEqual("running", resumed["status"])
+        checkpoint = json.loads(
+            self.run_cli(
+                "goal-checkpoint", "--root", ".", "--goal", "GOAL-V1-203", "--task", "TASK-DOP-FR-001", vendored=True
+            ).stdout
+        )
+        self.assertEqual("checkpointed", checkpoint["状态"])
+        repaired = json.loads(
+            (self.root / ".daoge-docs/goals/GOAL-V1-203/goal-manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(2, len(repaired["ordered_tasks"][0]["verification_attempts"]))
 
     def test_p2_integrations_are_installable_and_never_overwrite(self) -> None:
         self.init()
@@ -1568,6 +1753,11 @@ class DaogeDocsTests(unittest.TestCase):
         labels = {item["label"] for item in tasks["tasks"]}
         self.assertIn("DAOGE Docs: Goal 恢复上下文", labels)
         self.assertIn("DAOGE Docs: Goal 完成", labels)
+        self.assertIn("DAOGE Docs: CI 基线", labels)
+        workflow = (self.root / ".github/workflows/daoge-docs.yml").read_text(encoding="utf-8")
+        self.assertIn('      - "**"', workflow)
+        pr_template = (self.root / ".github/pull_request_template.md").read_text(encoding="utf-8")
+        self.assertIn("ci-check", pr_template)
         before = {path: (self.root / path).read_bytes() for path in expected}
         second = json.loads(self.run_cli("install-integrations", "--root", ".", vendored=True).stdout)
         self.assertEqual(expected, set(second["保留已有"]))

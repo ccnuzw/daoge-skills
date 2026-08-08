@@ -6,7 +6,7 @@ DAOGE Docs 是一个面向开发团队和编程智能体的 Codex Skill。它以
 
 它解决的不是“多写几份文档”，而是把每个版本的范围、行为、工程落点、验证方式和证据边界固定下来，使多人协作、跨会话恢复和 MVP/V1/V2/V3 的连续迭代都有可检查的依据。
 
-当前工具版本：`3.15.3`（基于上游 `daoge-docs-v3.13.4`，包含本地门禁、索引新鲜度、跨版本 E2E、ADR 开发授权、跨版本工作台组合层、全项目功能浏览目录、显式目标版本 Goal、全版本能力主线校验，以及派生文档状态语义）。
+当前工具版本：`3.18.0`（基于上游 `daoge-docs-v3.13.4`，包含本地门禁、索引新鲜度、跨版本 E2E、ADR 开发授权、跨版本工作台组合层、全项目功能浏览目录、显式目标版本 Goal、并行 Goal 运行态和 stale 基线集成校验）。
 
 ## 开发执行工作台
 
@@ -22,7 +22,7 @@ DAOGE Docs 是一个面向开发团队和编程智能体的 Codex Skill。它以
 
 工作台把“项目浏览版本”和“当前执行版本”明确分开。全局与单版本浏览均会直接列出该版本的功能 ID、名称与规格/实现/验证状态，并可进入功能正文；Gate、Goal、任务包、下一步和发布资格始终只由项目配置中的当前执行版本派生。历史版本没有独立机器证据时会显示 `unknown`，不会因为规格已冻结而显示为已完成。阅读目录同时支持项目视角、按版本和原始目录，语义分组不会改写文件实际位置。
 
-它是 Markdown 的开发者阅读层，不是第二套产品事实库。目录中的权威 Markdown 显示自身 front matter 生命周期；索引生成的 Markdown 显示“已生成”，JSON/YAML 显示“结构化数据”，缺少声明的普通 Markdown 显示“未知”。这些阅读状态不等于 Gate、机器证据或发布结论。开发者从工作台理解全貌和定位来源，修改仍应回到权威 Markdown；编程智能体从 Goal 清单获取受控执行上下文，不能把工作台摘要当成唯一规格。
+它是 Markdown 的开发者阅读层，不是第二套产品事实库。开发者从工作台理解全貌和定位来源，修改仍应回到权威 Markdown；编程智能体从 Goal 清单获取受控执行上下文，不能把工作台摘要当成唯一规格。
 
 ### 打开工作台
 
@@ -56,10 +56,10 @@ python3 .daoge-docs/daoge_docs.py serve --root . --port 8877
 | 2. 先看判断 | 阅读“开发许可”“最高优先级阻塞”“规格/设计/实现/验证”四段进展 | 知道能否开始，而不是只看文档状态猜测 |
 | 3. 追到来源 | 打开功能规格、finding 来源、关系与来源，或进入“阅读” | 获取完整需求、AC、设计分支、工程路径与验证命令 |
 | 4. 交给 AI | 点击“复制 ID”或“复制 Goal 提示” | 得到功能定位 ID，或一段准备 Goal 的受控提示词 |
-| 5. 获取任务边界 | 对已通过 Ready 门禁的功能执行 `prepare-goal`，再运行 `goal-resume-context` | 唯一下一任务、`allowed_paths`、AC、分支、验证命令和停止条件 |
+| 5. 获取任务边界 | 对已通过 Ready 门禁的功能执行 `prepare-goal`，先用 `goal-plan` 查看泳道，再运行 `goal-resume-context` | 依赖已满足的任务、`allowed_paths`、AC、分支、验证命令和停止条件 |
 | 6. 实现后回看 | 完成检查点后重建索引并刷新工作台 | 用同一来源查看实现、证据、门禁和版本演进是否同步 |
 
-“复制 Goal 提示”生成的是**准备** Goal 的提示词。每个已登记版本功能都可复制，提示会显式带上 `--version <目标版本>`。它要求编程智能体先检查 `prepare-goal` 的结果，在 `blocked` 时停止并报告来源，在 `ready` 时再读取唯一下一任务，并在实现前等待你的确认。它不会绕过门禁，也不会授权 AI 直接改代码，更不会切换项目当前执行版本。
+	“复制 Goal 提示”生成的是**准备** Goal 的提示词。每个已登记版本功能都可复制，提示会显式带上 `--version <目标版本>`。它要求编程智能体先检查 `prepare-goal` 的结果，在 `blocked` 时停止并报告来源，在 `ready` 时先用 `goal-plan` 查看泳道，再读取一个依赖已满足的任务，并在实现前等待你的确认。它不会绕过门禁，也不会授权 AI 直接改代码，更不会切换项目当前执行版本。
 
 ### 六个视图，各自只回答一类问题
 
@@ -89,7 +89,7 @@ python3 .daoge-docs/daoge_docs.py serve --root . --port 8877
 ```text
 请为功能 OMS-FR-001 准备 DAOGE Docs 开发 Goal。
 先执行 prepare-goal；若为 blocked，报告阻塞与权威来源；
-若为 ready，执行 goal-resume-context，只返回唯一下一任务的 inputs、allowed_paths、AC、稳定分支、验证命令和停止条件，开始实现前等待确认。
+若为 ready，执行 goal-plan 查看可执行泳道；再执行 goal-resume-context，可用 `--task TASK-*` 选择一个依赖已满足的任务。它只返回该任务的 inputs、allowed_paths、AC、稳定分支、验证命令和停止条件，开始实现前等待确认。
 ```
 
 这比“实现用户注册功能”更可控，因为功能 ID 能定位权威文档，Goal 又会验证版本、门禁、Git 基线和范围授权。
@@ -497,7 +497,7 @@ python3 .daoge-docs/daoge_docs.py goal-complete \
 
 | 状态 | 含义 | 下一步 |
 | --- | --- | --- |
-| `ready` | 前置门禁、基线和任务清单满足执行条件 | 用 `goal-resume-context` 获取唯一下一任务 |
+| `ready` | 前置门禁、基线和任务清单满足执行条件 | 用 `goal-plan` 查看可执行泳道，再用 `goal-resume-context --task TASK-*` 获取任务 |
 | `blocked` | 规格、追踪、门禁或环境前置不完整 | 回到权威文档或环境处理阻塞项 |
 | `verification_failed` | 已执行任务验证失败 | 修复实现或规格，再按协议验证；不可建立通过检查点 |
 | `stale` | 权威摘要、Git 基线、活动版本、工具版本或工作区状态已变化 | 保留旧清单审计，从当前权威重新准备新 Goal |
@@ -661,7 +661,7 @@ python3 .daoge-docs/daoge_docs.py <command> --help
 | 权威性 | `authority-digest` | 计算当前权威集合的稳定 SHA-256 摘要 |
 | Goal | `prepare-goal` | 从通过门禁的功能生成确定性 Goal 清单 |
 | Goal | `goal-status` | 评估 Goal 基线、权威摘要和过期状态 |
-| Goal | `goal-resume-context` | 验证恢复条件并给出唯一下一任务上下文 |
+| Goal | `goal-plan` / `goal-resume-context` | 查看泳道运行态，并在依赖满足时获取指定任务上下文 |
 | Goal | `goal-checkpoint` | 执行任务验证并建立受控 Git 检查点 |
 | Goal | `goal-complete` | 复验任务、命令和门禁，结束开发级 Goal |
 | 门禁 | `gate` | 执行 discovery、version-ready、feature-ready 或 release 门禁 |

@@ -10,7 +10,7 @@ authority: 开发执行工作台派生数据契约
 
 ## 1. 契约目的
 
-本文定义产品文档浏览器、开发执行工作台和 Goal 执行器共享的派生数据。`daoge-docs 3.15.3` 当前输出 `schema_version: 8`；旧 schema 只作为兼容输入。
+本文定义产品文档浏览器、开发执行工作台和 Goal 执行器共享的派生数据。`daoge-docs 3.18.0` 当前输出 `schema_version: 8`；旧 schema 只作为兼容输入。
 
 数据由权威 Markdown、JSON、YAML、OpenAPI、迁移、代码事实和机器证据生成。派生数据不是新的业务事实来源。
 
@@ -68,16 +68,7 @@ authority: 开发执行工作台派生数据契约
 
 ## 5. 文档与目录
 
-`documents[]` 继续提供路径、标题、状态、权威职责、owner、updated、稳定 ID、kind、离线正文、章节、摘要、行数和 generated 标记。文档状态必须按输入类型派生，避免把缺少 front matter 的所有文件混成同一个门禁信号：
-
-| 输入 | `status` | `status_source` | 工作台文案 | 语义 |
-| --- | --- | --- | --- | --- |
-| Markdown 有 front matter `status` | 原值 | `frontmatter` | 按状态映射 | 权威生命周期状态，可参与对应门禁 |
-| 含 `GENERATED_MARKER` 的 Markdown | `generated` | `generated_marker` | 已生成 | 派生阅读入口，不代表权威文档就绪 |
-| JSON/YAML/OpenAPI | `not_applicable` | `structured_file` | 结构化数据 | 结构化输入或注册表，不使用 Markdown 生命周期状态 |
-| 普通 Markdown 无 front matter | `unknown` | `missing_frontmatter` | 未知 | 未声明生命周期，需回到文档确认 |
-
-`status` 不是 Gate 结果；`generated`、`not_applicable` 和 `unknown` 不能被解释为 `ready`、`passed` 或已发布。旧数据中的 `未声明` 仅作为兼容输入，重新 `index` 后必须按以上规则输出。
+`documents[]` 继续提供路径、标题、状态、权威职责、owner、updated、稳定 ID、kind、离线正文、章节、摘要、行数和 generated 标记。
 
 每篇文档还必须提供 `content_digest` 与 `sections[]`。它们只用于阅读定位和本地恢复，不能代替正文，也不能成为第二份文档内容：
 
@@ -435,6 +426,10 @@ dependencies / milestones / evidence_summary / sources
 ```
 
 完整 Goal 清单由独立准备命令生成，遵守 `agent-goal-execution-contract.md`。
+
+`goal_readiness.execution_plan` 与 `views.workbench.execution_plan` 提供并行/串行泳道摘要：泳道包含稳定 `lane_id`、任务 ID、前置泳道、模式、是否可并行和保守判定原因。它只用于人类编排，不改变 Gate、Goal 检查点或授权路径。Goal 的 `authority_scope` 明确目标版本、所选功能、递归依赖版本和共享规则闭包；作用域外的未来版本规划可并行编辑。`document_sync_policy` 明确作用域内权威文件变化后的停止、重索引、重门禁和重建 Goal 动作。
+
+`goal_runtime[]` 是工作台只读的 Goal 运行态摘要。每个 Goal 提供 `status`、`actionable_task_ids`、`execution.tasks[]` 和 `execution.lanes[]`；任务状态由检查点、依赖和验证失败记录派生，不能由浏览器修改。CLI 的 `goal-plan` 返回同一快照；`goal-resume-context --task TASK-*` 只能选择状态为 `ready`、`running` 或 `verification_failed` 且依赖已满足的任务。任务与泳道同时输出 `phase` 和 `reason_code`，分别区分 `not_started`、`dependency_blocked`、`executing`、`verification_failed`、`completed`；Goal 级运行态还区分 `blocked`、`stale`。这些字段是可解释的派生信号，不是可手工写入的状态。
 
 ### 11.1 Goal 运行时产物
 

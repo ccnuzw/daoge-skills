@@ -238,6 +238,10 @@
     .status-chip.high, .status-chip.blocked, .status-chip.blocking, .status-chip.failed { background: var(--rose-soft); color: var(--rose); }
     .status-chip.planning, .status-chip.draft, .status-chip.proposed { background: var(--amber-soft); color: var(--amber); }
     .status-chip.current, .status-chip.implementing, .status-chip.structure_ready { background: var(--indigo-soft); color: var(--indigo); }
+    .status-chip.executing, .status-chip.running { background: var(--indigo-soft); color: var(--indigo); }
+    .status-chip.verification_failed, .status-chip.dependency_blocked { background: var(--rose-soft); color: var(--rose); }
+    .status-chip.not_started { background: var(--amber-soft); color: var(--amber); }
+    .goal-task-phases { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; padding-top: 2px; }
     .status-chip.generated { background: var(--teal-soft); color: var(--teal); }
     .status-chip.not_applicable { background: var(--indigo-soft); color: var(--indigo); }
     .status-chip.fresh { background: var(--green-soft); color: var(--green); }
@@ -1121,6 +1125,7 @@
         <section class="progress-strip" id="workbench-progress">${progressStep("规格",progress.specification)}${progressStep("设计",progress.design)}${progressStep("实现",progress.implementation)}${progressStep("验证",progress.verification)}</section>
         <section class="section" id="workbench-blockers"><div class="section-head"><h3>最高优先级阻塞</h3><span>${blockers.length ? `显示 ${topBlockers.length} / ${blockers.length}` : "当前没有派生阻塞"}</span></div><div class="blocker-list">${topBlockers.map(item => `<div class="blocker-row">${chip(item.severity)}<div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(displayReason(item.reason))}</span></div><button class="command" data-open-finding="${escapeHtml(item.id)}">查看来源</button></div>`).join("") || '<div class="empty">仍需运行正式 gate；结构无阻塞不等于机器验证通过。</div>'}</div></section>
         <section class="workbench-details" id="workbench-details">
+          <details class="workbench-detail" data-panel="execution"><summary>执行编排与文档同步<span>${escapeHtml(statusLabel((workbench.execution_plan || {}).mode || "serial"))}</span></summary><div class="workbench-detail-body">${renderExecutionPlan(workbench.execution_plan || {}, workbench.document_sync_policy || {}, workbench.goal_runtime || [])}</div></details>
           <details class="workbench-detail" data-panel="verification" ${state.panel === "verification" ? "open" : ""}><summary>门禁与证据<span>结构、测试、证据和批准分开查看</span></summary><div class="workbench-detail-body">${renderVerificationPanel()}</div></details>
           <details class="workbench-detail" data-panel="task"><summary>开发任务包<span>${packet ? escapeHtml(packet.id) : "未生成"}</span></summary><div class="workbench-detail-body">${packet ? `<div class="task-panel"><p><strong>${escapeHtml(packet.id)}</strong> · ${escapeHtml(packet.feature_id)}</p><pre><code>${escapeHtml(taskPacketText(packet))}</code></pre><div class="view-actions"><button class="command" data-copy-task="${escapeHtml(packet.id)}">复制完整任务包</button><button class="command" data-open-doc="${escapeHtml(feature.path)}">功能正文</button></div><p class="digest">authority_digest：${escapeHtml(packet.authority_digest)}</p></div>` : '<div class="empty">当前功能尚未生成任务包。</div>'}</div></details>
           <details class="workbench-detail" data-panel="findings"><summary>开发阻塞清单<span>${findings.length} 项开放 finding</span></summary><div class="workbench-detail-body"><div class="blocker-list">${findings.slice(0,12).map(item => `<div class="blocker-row">${chip(item.severity)}<div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(displayReason(item.reason))}</span></div><button class="command" data-open-finding="${escapeHtml(item.id)}">查看来源</button></div>`).join("") || '<div class="empty">当前没有开发阶段 finding；发布资格请在门禁与证据中查看。</div>'}</div></div></details>
@@ -1152,6 +1157,20 @@
       els.content.querySelectorAll("[data-open-finding]").forEach(button => button.addEventListener("click", () => openFinding(button.dataset.openFinding)));
       els.content.querySelectorAll("[data-panel]").forEach(detail => detail.addEventListener("toggle", () => { if (detail.open) { state.panel = detail.dataset.panel; updateHash(); } else if (state.panel === detail.dataset.panel) { state.panel = ""; updateHash(); } }));
       renderOutline([{ id: "workbench-top", title: "项目全景与当前执行", level: 1 }, { id: "workbench-portfolio", title: "项目版本全貌", level: 2 }, { id: "workbench-execution", title: "当前执行视角", level: 2 }, { id: "workbench-context", title: "当前功能", level: 3 }, { id: "workbench-decision", title: "开发许可", level: 3 }, { id: "workbench-progress", title: "开发进展", level: 3 }, { id: "workbench-blockers", title: "最高优先级阻塞", level: 3 }, { id: "workbench-details", title: "执行明细", level: 3 }]);
+    }
+
+    function renderExecutionPlan(plan, sync, runtime) {
+      const lanes = plan.lanes || [];
+      const laneRows = lanes.map(lane => `<div class="relation-row"><span class="relation-type">${escapeHtml(lane.mode || "serial")}</span><code>${escapeHtml(lane.lane_id || "未分配批次")}</code><span>${escapeHtml((lane.task_ids || []).join("、") || "无任务")} · 前置泳道：${escapeHtml((lane.dependencies || []).join("、") || "无")} · 外部前置任务：${escapeHtml((lane.dependency_task_ids || []).join("、") || "无")} · ${escapeHtml(lane.reason || "")}</span></div>`).join("");
+      const runtimeRows = (runtime || []).map(goal => {
+        const execution = goal.execution || {};
+        const laneState = (execution.lanes || []).map(lane => `${lane.lane_id} ${statusLabel(lane.state || "unknown")}：${(lane.ready_task_ids || []).join("、") || "无可执行任务"}`).join("；");
+        const actionable = (goal.actionable_task_ids || []).join("、") || "无";
+        const taskRows = (execution.tasks || []).map(task => `<span class="status-chip ${escapeHtml(task.state || "unknown")}" title="${escapeHtml(task.reason_code || "")}">${escapeHtml(task.task_id || "未分配任务")} · ${escapeHtml(statusLabel(task.phase || task.state || "unknown"))}</span>`).join("");
+        const stale = (goal.stale_reasons || []).join("；");
+        return `<div class="relation-row"><span class="relation-type">${escapeHtml(statusLabel(goal.status || "unknown"))}</span><code>${escapeHtml(goal.goal_id || "未分配 Goal")}</code><span>${escapeHtml(goal.version || "未声明版本")} · 可执行任务：${escapeHtml(actionable)} · ${escapeHtml(laneState || "尚无泳道状态")}${stale ? ` · ${escapeHtml(stale)}` : ""}</span>${taskRows ? `<div class="goal-task-phases">${taskRows}</div>` : ""}</div>`;
+      }).join("");
+      return `<p class="governance-notice">${escapeHtml(plan.notice || "执行计划由 Goal 的依赖、工程落点和禁止边界派生。")}</p><div class="relation-list">${laneRows || '<div class="empty">当前没有可编排任务。</div>'}</div><div class="sync-policy"><strong>Goal 运行态（只读）</strong><div class="relation-list">${runtimeRows || '<div class="empty">当前尚未生成 Goal 清单。</div>'}</div><p>可执行任务由依赖和权威状态派生；使用 <code>goal-plan</code> 查看完整状态，使用 <code>goal-resume-context --task</code> 选择已就绪任务。</p></div><div class="sync-policy"><strong>文档同步策略：${escapeHtml(sync.mode || "authority_first")}</strong><p>触发：${escapeHtml(sync.trigger || "权威文档变化")}</p><p>动作：${escapeHtml(sync.required_action || "停止受影响任务并重新运行 index、check 与相关 gate")}</p></div>`;
     }
 
     const MAP_META = {
@@ -1972,6 +1991,7 @@
         "2. 若结果为 blocked，停止实现，报告 blocking_findings、权威来源和建议恢复动作。",
         "3. 若结果为 ready，继续运行：",
         "   {{PYTHON_COMMAND}} .daoge-docs/daoge_docs.py goal-resume-context --root . --goal <返回的 Goal ID>",
+        "   如需选择并行泳道中已满足依赖的任务，可改用：goal-plan --root . --goal <Goal ID>，再使用 goal-resume-context --task <TASK-ID>。",
         "4. 目标版本只用于准备本功能 Goal，不改变项目当前执行版本、工作台视角或发布判断；这是准备提示，不是执行授权。",
         "5. 只报告唯一下一任务及其 inputs、allowed_paths、AC、稳定分支、验证命令和停止条件；开始实现前等待我的确认。",
       ].join("\n");
@@ -2070,7 +2090,7 @@
     }
     function statusLabel(value) {
       const raw = String(value == null ? "未声明" : value).trim() || "未声明";
-      const labels = {current:"当前执行",active:"当前执行",baseline:"基线版本",future:"后续规划",planning:"规划中",draft:"草稿",ready:"已就绪",implementing:"实现中",implemented:"已实现",not_started:"未开始",completed:"已完成",local_verified:"本地已验证",staging_verified:"预发已验证",released:"已发布",blocked:"阻塞",blocking:"阻塞",not_run:"未执行",not_applicable:"结构化数据",evidence_linked:"已登记证据入口",passed:"已通过",failed:"失败",invalid:"无效",structure_ready:"结构就绪",generated:"已生成",deprecated:"已废弃",accepted:"已确认",proposed:"待确认",high:"高风险",standard:"标准风险",medium:"中风险",info:"提示",unknown:"未知",fresh:"新鲜",stale:"已过期",added:"新增",changed:"变化",removed:"删除"};
+      const labels = {current:"当前执行",active:"当前执行",baseline:"基线版本",future:"后续规划",planning:"规划中",draft:"草稿",ready:"已就绪",implementing:"实现中",implemented:"已实现",not_started:"未开始",dependency_blocked:"依赖阻塞",executing:"执行中",verification_failed:"验证失败",completed:"已完成",local_verified:"本地已验证",staging_verified:"预发已验证",released:"已发布",blocked:"阻塞",blocking:"阻塞",not_run:"未执行",not_applicable:"结构化数据",evidence_linked:"已登记证据入口",passed:"已通过",failed:"失败",invalid:"无效",structure_ready:"结构就绪",generated:"已生成",deprecated:"已废弃",accepted:"已确认",proposed:"待确认",high:"高风险",standard:"标准风险",medium:"中风险",info:"提示",unknown:"未知",fresh:"新鲜",stale:"已过期",added:"新增",changed:"变化",removed:"删除"};
       if (labels[raw]) return labels[raw];
       const match = raw.match(/^([a-z][a-z0-9_]*)(.*)$/i);
       if (!match || !labels[match[1].toLowerCase()]) return raw;

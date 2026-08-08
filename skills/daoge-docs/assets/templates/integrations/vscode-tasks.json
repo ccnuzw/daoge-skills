@@ -40,9 +40,21 @@
       "problemMatcher": []
     },
     {
+      "label": "DAOGE Docs: CI 基线",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} .daoge-docs/daoge_docs.py ci-check --root . --json",
+      "problemMatcher": []
+    },
+    {
       "label": "DAOGE Docs: Goal 恢复上下文",
       "type": "shell",
       "command": "${command:python.interpreterPath} .daoge-docs/daoge_docs.py goal-resume-context --root . --goal ${input:goalId}",
+      "problemMatcher": []
+    },
+    {
+      "label": "DAOGE Docs: Goal 计划",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} .daoge-docs/daoge_docs.py goal-plan --root . --goal ${input:goalId}",
       "problemMatcher": []
     },
     {

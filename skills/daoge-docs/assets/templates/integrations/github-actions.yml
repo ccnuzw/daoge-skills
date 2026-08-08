@@ -3,14 +3,12 @@ name: DAOGE Docs Project Gate
 on:
   pull_request:
     paths:
-      - "docs/**"
-      - ".daoge-docs/**"
+      - "**"
       - ".github/workflows/daoge-docs.yml"
   push:
     branches: [main]
     paths:
-      - "docs/**"
-      - ".daoge-docs/**"
+      - "**"
       - ".github/workflows/daoge-docs.yml"
   workflow_dispatch:
 

@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.15.3"
+TOOL_VERSION = "3.18.0"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -2038,6 +2038,32 @@ def browser_task_packets(
     return packets
 
 
+def browser_execution_plan(task_packets: list[dict]) -> dict:
+    """Expose the same conservative lane plan used by ``prepare-goal``."""
+    tasks = []
+    for sequence, packet in enumerate(task_packets, start=1):
+        feature_id = str(packet.get("feature_id", ""))
+        tasks.append(
+            {
+                "task_id": f"TASK-{feature_id}",
+                "sequence": sequence,
+                "dependencies": [f"TASK-{item}" for item in packet.get("dependencies", [])],
+                "allowed_paths": [item for item in packet.get("implementation_points", []) if valid_goal_path(str(item))],
+                "forbidden_paths": list(packet.get("forbidden_paths", [])),
+            }
+        )
+    plan = plan_goal_execution(tasks)
+    packet_by_task = {f"TASK-{item.get('feature_id', '')}": item for item in task_packets}
+    for lane in plan.get("lanes", []):
+        for task_id in lane.get("task_ids", []):
+            packet = packet_by_task.get(task_id)
+            if packet is not None:
+                packet["parallel_group"] = lane["lane_id"]
+                packet["parallel_eligible"] = lane["parallel"]
+                packet["parallel_reason"] = lane["reason"]
+    return plan
+
+
 def browser_evidence(root: Path, config: dict, current_authority_digest: str | None = None) -> list[dict]:
     current_digest = current_authority_digest or authority_digest(root, config)[0]
     current_commit = git_head(root) or ""
@@ -3427,6 +3453,74 @@ def browser_goal_readiness(task_packets: list[dict], findings: list[dict], autho
     }
 
 
+def browser_goal_runtime(root: Path, config: dict) -> list[dict]:
+    """Expose read-only runtime summaries for Goals in the developer workbench."""
+    goals_root = root / ".daoge-docs" / "goals"
+    if not goals_root.is_dir():
+        return []
+    summaries: list[dict] = []
+    for directory in sorted(goals_root.iterdir(), key=lambda path: path.name):
+        manifest_path = directory / "goal-manifest.json"
+        if not manifest_path.is_file():
+            continue
+        goal_id = directory.name
+        try:
+            _, manifest = load_goal_manifest(root, goal_id)
+            target_config = goal_target_config(config, str(manifest.get("version", "")))
+            records, expected_commit = validate_goal_checkpoint_chain(root, manifest)
+            completion = validate_goal_completion(root, manifest)
+            reasons = []
+            freshness = []
+            authority_scope = manifest.get("authority_scope") if isinstance(manifest.get("authority_scope"), dict) else {}
+            current_digest = (
+                goal_authority_digest(root, target_config, authority_scope)[0]
+                if authority_scope
+                else authority_digest(root, target_config)[0]
+            )
+            if completion:
+                status = "completed"
+                if manifest.get("authority_digest") != current_digest:
+                    freshness.append("当前权威已变化，完成记录作为历史证据保留")
+            else:
+                reasons = goal_execution_reasons(root, config, manifest, expected_commit)
+                status = "stale" if reasons else ("blocked" if manifest.get("blocking_findings") else str(manifest.get("status", "ready")))
+            runtime_manifest = dict(manifest)
+            runtime_manifest["status"] = status
+            execution = goal_execution_snapshot(runtime_manifest)
+            summaries.append({
+                "goal_id": goal_id,
+                "status": status,
+                "version": manifest.get("version", ""),
+                "feature_ids": manifest.get("feature_ids", []),
+                "current_execution_version": config.get("current_version", ""),
+                "actionable_task_ids": execution["actionable_task_ids"] if status in {"ready", "running", "verification_failed"} else [],
+                "execution": execution,
+                "checkpoint_count": len(records),
+                "stale_reasons": reasons,
+                "historical_reasons": freshness,
+                "source_commit": manifest.get("source_commit", ""),
+                "authority_digest": manifest.get("authority_digest", ""),
+                "path": str(manifest_path.relative_to(root)),
+            })
+        except (DocsError, OSError, ValueError) as exc:
+            summaries.append({
+                "goal_id": goal_id,
+                "status": "unknown",
+                "version": "",
+                "feature_ids": [],
+                "current_execution_version": config.get("current_version", ""),
+                "actionable_task_ids": [],
+                "execution": {"task_count": 0, "tasks": [], "lanes": [], "notice": "Goal 清单无法验证。"},
+                "checkpoint_count": 0,
+                "stale_reasons": [f"Goal 清单无法验证：{exc}"],
+                "historical_reasons": [],
+                "source_commit": "",
+                "authority_digest": "",
+                "path": str(manifest_path.relative_to(root)),
+            })
+    return summaries
+
+
 def browser_payload(root: Path, config: dict) -> dict:
     docs = docs_root(root, config)
     generation_stamp = f"{today()}T00:00:00Z"
@@ -3609,6 +3703,7 @@ def browser_payload(root: Path, config: dict) -> dict:
         )
         directory["status"] = "阻塞" if directory["finding_count"] else "结构就绪"
     task_packets = browser_task_packets(features, findings, authority_digest_value, str(config["current_version"]), generation_stamp)
+    execution_plan = browser_execution_plan(task_packets)
     # Keep the legacy top-level version collection aligned with the same
     # registered portfolio used by 工作台、总览 and project-wide relations.
     versions = []
@@ -3863,6 +3958,16 @@ def browser_payload(root: Path, config: dict) -> dict:
         "timelines": timelines,
     }
     goal_readiness = browser_goal_readiness(task_packets, findings, authority_digest_value)
+    goal_runtime = browser_goal_runtime(root, config)
+    goal_readiness["execution_plan"] = execution_plan
+    goal_readiness["document_sync_policy"] = {
+        "mode": "authority_first",
+        "trigger": "权威文档、ADR、AC、实现落点或验证命令变化",
+        "required_action": "停止受影响任务，更新权威来源并重新运行 index、check、相关 gate 和 prepare-goal",
+    }
+    workbench_view["execution_plan"] = execution_plan
+    workbench_view["document_sync_policy"] = goal_readiness["document_sync_policy"]
+    workbench_view["goal_runtime"] = goal_runtime
     payload = {
         "schema_version": 8,
         "generated_at": generation_stamp,
@@ -3895,6 +4000,7 @@ def browser_payload(root: Path, config: dict) -> dict:
         "views": views,
         "change_summary": change_summary,
         "goal_readiness": goal_readiness,
+        "goal_runtime": goal_runtime,
         "workbench": workbench_view,
     }
     enrich_browser_source_sections(payload, documents)
@@ -5250,6 +5356,9 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
         "reader-nav-mode",
         "data-reader-nav-mode",
         "function renderWorkbench",
+        "function renderExecutionPlan",
+        "execution_plan",
+        "document_sync_policy",
         "function featureCatalog",
         "project_features",
         "version_portfolio",
@@ -5591,6 +5700,109 @@ def authority_digest(root: Path, config: dict) -> tuple[str, int]:
         digest.update(path.read_bytes())
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}", len(files)
+
+
+def authority_file_snapshot(root: Path, config: dict) -> dict[str, str]:
+    """Return per-file authority digests for document/development sync checks."""
+    docs = docs_root(root, config)
+    return {
+        path.relative_to(docs).as_posix(): canonical_digest(path.read_bytes().decode("utf-8"))
+        for path in authority_files(root, config)
+    }
+
+
+def goal_authority_scope(root: Path, config: dict, feature_ids: Iterable[str]) -> dict:
+    """Resolve the version and decision closure that can change a Goal's behavior."""
+    records = {str(item["meta"].get("id", "")): item for item in all_feature_documents(root, config)}
+    selected = {str(item).strip().upper() for item in feature_ids if str(item).strip()}
+    pending = sorted(selected)
+    scoped_features: set[str] = set()
+    scoped_versions = {str(config["current_version"])}
+    decision_ids: set[str] = set()
+    source_paths: set[str] = set()
+    docs = docs_root(root, config)
+    while pending:
+        feature_id = pending.pop(0)
+        if feature_id in scoped_features:
+            continue
+        scoped_features.add(feature_id)
+        record = records.get(feature_id)
+        if not record:
+            continue
+        meta = record["meta"]
+        version = str(meta.get("version", "")).strip().upper()
+        if version:
+            scoped_versions.add(version)
+        source_paths.add(record["path"].relative_to(docs).as_posix())
+        design = record["path"].with_name(record["path"].stem + "-技术设计.md")
+        if design.exists():
+            source_paths.add(design.relative_to(docs).as_posix())
+        decision_ids.update(list_field(str(meta.get("decisions", ""))))
+        for dependency in list_field(str(meta.get("dependencies", ""))):
+            if dependency in records and dependency not in scoped_features:
+                pending.append(dependency)
+        pending.sort()
+    return {
+        "target_version": str(config["current_version"]),
+        "requested_feature_ids": sorted(selected),
+        "feature_ids": sorted(scoped_features),
+        "versions": sorted(scoped_versions, key=lambda value: (int(value[1:]) if re.fullmatch(r"V\d+", value) else 9999, value)),
+        "decision_ids": sorted(decision_ids),
+        "source_paths": sorted(source_paths),
+    }
+
+
+def goal_authority_files(root: Path, config: dict, scope: dict) -> list[Path]:
+    """Return current-Goal authority while excluding unrelated version planning."""
+    docs = docs_root(root, config)
+    versions = {str(item) for item in scope.get("versions", [])}
+    source_paths = {str(item) for item in scope.get("source_paths", [])}
+    decision_ids = {str(item) for item in scope.get("decision_ids", [])}
+    shared_paths = {
+        "02-产品与版本/产品蓝图.md",
+        "02-产品与版本/全版本产品与交互约束.md",
+        "02-产品与版本/版本进入开发门禁.md",
+        "03-功能规格/功能开发流程.md",
+        "03-功能规格/功能文档规范.md",
+    }
+    selected: list[Path] = []
+    for path in authority_files(root, config):
+        relative = path.relative_to(docs)
+        relative_text = relative.as_posix()
+        text = path.read_text(encoding="utf-8")
+        meta = parse_frontmatter(text) if path.suffix.lower() == ".md" else {}
+        version = document_version_scope(relative, meta)
+        adr_id = str(meta.get("id", "")) if relative.parts[:2] == ("06-决策记录", "ADR") else ""
+        shared_execution = (
+            relative.parts[0] == "01-项目概览"
+            or (relative.parts[0] in {"04-技术架构", "05-测试与发布"} and not version)
+            or relative_text in shared_paths
+        )
+        if relative_text in source_paths or version in versions or adr_id in decision_ids or shared_execution:
+            selected.append(path)
+    return sorted(set(selected))
+
+
+def goal_authority_file_snapshot(root: Path, config: dict, scope: dict) -> dict[str, str]:
+    docs = docs_root(root, config)
+    return {
+        path.relative_to(docs).as_posix(): canonical_digest(path.read_text(encoding="utf-8"))
+        for path in goal_authority_files(root, config, scope)
+    }
+
+
+def goal_authority_digest(root: Path, config: dict, scope: dict) -> tuple[str, dict[str, str]]:
+    snapshot = goal_authority_file_snapshot(root, config, scope)
+    return canonical_digest(snapshot), snapshot
+
+
+def authority_change_paths(root: Path, config: dict, baseline: dict[str, str], scope: dict | None = None) -> list[str]:
+    current = goal_authority_file_snapshot(root, config, scope) if scope else authority_file_snapshot(root, config)
+    return sorted(
+        path
+        for path in set(current) | set(baseline)
+        if current.get(path) != baseline.get(path)
+    )
 
 
 def parse_evidence_time(value: object, field: str, path: Path, errors: list[str]) -> datetime | None:
@@ -6167,6 +6379,131 @@ def goal_manifest_digest(manifest: dict) -> str:
     return canonical_digest(goal_semantic_payload(manifest))
 
 
+def goal_execution_snapshot(manifest: dict) -> dict:
+    """Derive lane/task readiness without changing the Goal manifest.
+
+    The snapshot is deliberately read-only.  It lets a developer choose any
+    dependency-ready task in a parallel plan while the checkpoint chain still
+    serializes commits for auditability.
+    """
+    tasks = manifest.get("ordered_tasks", [])
+    by_id = {str(item.get("task_id", "")): item for item in tasks}
+    completed = {str(item.get("task_id", "")) for item in tasks if item.get("status") == "completed"}
+    task_states: list[dict] = []
+    for task in sorted(tasks, key=lambda item: (int(item.get("sequence", 0)), str(item.get("task_id", "")))):
+        task_id = str(task.get("task_id", ""))
+        dependencies = [str(item) for item in task.get("dependencies", [])]
+        missing = sorted(item for item in dependencies if item not in completed)
+        status = str(task.get("status", "pending"))
+        if status == "completed":
+            state = "completed"
+            phase = "completed"
+            reason_code = "checkpointed"
+        elif status == "verification_failed":
+            state = "verification_failed"
+            phase = "verification_failed"
+            reason_code = "last_verification_failed"
+        elif status == "running":
+            state = "running"
+            phase = "executing"
+            reason_code = "resumed"
+        elif missing:
+            state = "blocked"
+            phase = "dependency_blocked"
+            reason_code = "dependencies_incomplete"
+        else:
+            state = "ready"
+            phase = "not_started"
+            reason_code = "dependencies_satisfied"
+        task_states.append({
+            "task_id": task_id,
+            "title": task.get("title", task_id),
+            "sequence": task.get("sequence", 0),
+            "lane_id": task.get("parallel_group", ""),
+            "state": state,
+            "phase": phase,
+            "reason_code": reason_code,
+            "dependencies": dependencies,
+            "missing_dependencies": missing,
+            "allowed_paths": list(task.get("allowed_paths", [])),
+        })
+
+    lanes: list[dict] = []
+    for lane in manifest.get("execution_plan", {}).get("lanes", []):
+        lane_tasks = [item for item in task_states if item["task_id"] in set(lane.get("task_ids", []))]
+        ready_ids = [item["task_id"] for item in lane_tasks if item["state"] == "ready"]
+        running_ids = [item["task_id"] for item in lane_tasks if item["state"] == "running"]
+        completed_ids = [item["task_id"] for item in lane_tasks if item["state"] == "completed"]
+        blocked_ids = [item["task_id"] for item in lane_tasks if item["state"] == "blocked"]
+        failed_ids = [item["task_id"] for item in lane_tasks if item["state"] == "verification_failed"]
+        if completed_ids and len(completed_ids) == len(lane_tasks):
+            state = "completed"
+            phase = "completed"
+            reason_code = "all_tasks_checkpointed"
+        elif failed_ids:
+            state = "verification_failed"
+            phase = "verification_failed"
+            reason_code = "task_verification_failed"
+        elif running_ids:
+            state = "running"
+            phase = "executing"
+            reason_code = "task_in_progress"
+        elif ready_ids:
+            state = "ready"
+            phase = "not_started"
+            reason_code = "task_dependencies_satisfied"
+        else:
+            state = "blocked"
+            phase = "dependency_blocked"
+            reason_code = "lane_dependencies_incomplete"
+        lanes.append({
+            **lane,
+            "state": state,
+            "phase": phase,
+            "reason_code": reason_code,
+            "ready_task_ids": ready_ids,
+            "running_task_ids": running_ids,
+            "completed_task_ids": completed_ids,
+            "blocked_task_ids": blocked_ids,
+            "verification_failed_task_ids": failed_ids,
+        })
+    actionable = [item for item in task_states if item["state"] in {"running", "verification_failed"}]
+    actionable.extend(item for item in task_states if item["state"] == "ready")
+    manifest_status = str(manifest.get("status", "ready"))
+    goal_phase = {
+        "blocked": "blocked",
+        "stale": "stale",
+        "running": "executing",
+        "verification_failed": "verification_failed",
+        "completed": "completed",
+    }.get(manifest_status, "not_started")
+    return {
+        "task_count": len(tasks),
+        "goal_phase": goal_phase,
+        "goal_reason_code": {
+            "blocked": "goal_prerequisite_blocked",
+            "stale": "baseline_changed",
+            "running": "task_in_progress",
+            "verification_failed": "task_verification_failed",
+            "completed": "all_tasks_checkpointed",
+        }.get(manifest_status, "awaiting_first_task"),
+        "phase_definitions": {
+            "not_started": "任务尚未进入执行态，但其依赖已经满足。",
+            "dependency_blocked": "任务存在尚未完成的前置任务。",
+            "executing": "任务已通过恢复上下文进入执行态。",
+            "verification_failed": "最近一次声明验证未通过，不能建立检查点。",
+            "completed": "任务已建立通过验证的检查点。",
+            "stale": "权威摘要、工具版本或 Git 基线变化，必须重新准备 Goal。",
+            "blocked": "Goal 前置门禁、范围或环境条件尚未满足。",
+        },
+        "completed_task_ids": sorted(completed),
+        "actionable_task_ids": [item["task_id"] for item in actionable],
+        "tasks": task_states,
+        "lanes": lanes,
+        "notice": "可并行任务仍须逐任务提交、验证和登记检查点；Git 检查点链保证审计顺序。",
+    }
+
+
 def record_digest(value: dict, field: str) -> str:
     payload = json.loads(json.dumps(value, ensure_ascii=False))
     payload.pop(field, None)
@@ -6222,6 +6559,9 @@ def validate_goal_checkpoint_chain(root: Path, manifest: dict) -> tuple[list[dic
     expected_parent = str(manifest.get("source_commit", ""))
     records: list[dict] = []
     tasks = manifest.get("ordered_tasks", [])
+    completed_task_ids: set[str] = set()
+    seen_task_ids: set[str] = set()
+    task_by_id = {str(item.get("task_id", "")): item for item in tasks}
     for index, summary in enumerate(manifest.get("checkpoints", []), start=1):
         checkpoint_id = f"CP-{index:03d}"
         if summary.get("checkpoint_id") != checkpoint_id:
@@ -6242,9 +6582,14 @@ def validate_goal_checkpoint_chain(root: Path, manifest: dict) -> tuple[list[dic
         if record.get("authority_digest") != manifest.get("authority_digest"):
             raise DocsError(f"Goal 检查点权威摘要不匹配：{checkpoint_id}")
         task_id = str(record.get("task_id", ""))
-        if index > len(tasks) or task_id != tasks[index - 1].get("task_id"):
-            raise DocsError(f"Goal 检查点任务顺序不匹配：{checkpoint_id}")
-        if tasks[index - 1].get("status") != "completed":
+        task = task_by_id.get(task_id)
+        if task is None:
+            raise DocsError(f"Goal 检查点任务不存在：{checkpoint_id}/{task_id}")
+        if task_id in seen_task_ids:
+            raise DocsError(f"Goal 检查点任务重复：{checkpoint_id}/{task_id}")
+        if any(str(dependency) not in completed_task_ids for dependency in task.get("dependencies", [])):
+            raise DocsError(f"Goal 检查点前置任务未完成：{checkpoint_id}/{task_id}")
+        if task.get("status") != "completed":
             raise DocsError(f"Goal 检查点对应任务未完成：{task_id}")
         commit = str(record.get("commit", ""))
         if not commit or commit == expected_parent:
@@ -6254,11 +6599,10 @@ def validate_goal_checkpoint_chain(root: Path, manifest: dict) -> tuple[list[dic
         if git_merge_commits(root, expected_parent, commit):
             raise DocsError(f"Goal 检查点包含未允许的 merge commit：{checkpoint_id}")
         actual_all_paths = git_changed_paths(root, expected_parent, commit)
-        actual_managed_paths = [path for path in actual_all_paths if goal_managed_git_path(manifest, path)]
+        actual_managed_paths = [path for path in actual_all_paths if goal_managed_git_path(root, manifest, path)]
         actual_changed_paths = [path for path in actual_all_paths if path not in actual_managed_paths]
         if record.get("changed_paths") != actual_changed_paths or record.get("managed_paths", []) != actual_managed_paths:
             raise DocsError(f"Goal 检查点变更路径与 Git 不一致：{checkpoint_id}")
-        task = tasks[index - 1]
         if any(not goal_path_matches(path, task.get("allowed_paths", [])) for path in actual_changed_paths):
             raise DocsError(f"Goal 检查点包含授权范围外路径：{checkpoint_id}")
         if any(goal_path_matches(path, task.get("forbidden_paths", [])) for path in actual_changed_paths):
@@ -6282,6 +6626,8 @@ def validate_goal_checkpoint_chain(root: Path, manifest: dict) -> tuple[list[dic
             if report.get("evidence_digest") != command_summary.get("evidence_digest"):
                 raise DocsError(f"Goal 检查点命令证据摘要不匹配：{checkpoint_id}/{command_id}")
         records.append(record)
+        seen_task_ids.add(task_id)
+        completed_task_ids.add(task_id)
         expected_parent = commit
     return records, expected_parent
 
@@ -6347,11 +6693,41 @@ def git_changed_paths(root: Path, base: str, head: str) -> list[str]:
     return sorted({normalize_repo_path(item.decode("utf-8")) for item in result.stdout.split(b"\0") if item})
 
 
-def goal_managed_git_path(manifest: dict, path: str) -> bool:
+def goal_managed_git_path(root: Path | dict, manifest: dict | str, path: str | None = None) -> bool:
+    """Return paths that may coexist without becoming task implementation evidence."""
+    # Keep the historical two-argument helper contract for integrations/tests.
+    if path is None:
+        path = str(manifest)
+        manifest = root
+        root = None
+    assert isinstance(manifest, dict)
     goal_prefix = f".daoge-docs/goals/{manifest.get('goal_id', '')}/"
     normalized_path = normalize_repo_path(path)
     managed_paths = {normalize_repo_path(item) for item in manifest.get("ignored_generated_paths", [])}
-    return normalized_path.startswith(goal_prefix) or normalized_path in managed_paths
+    if normalized_path.startswith(goal_prefix) or normalized_path in managed_paths:
+        return True
+    if not normalized_path.startswith("docs/"):
+        return False
+    authority_scope = manifest.get("authority_scope") if isinstance(manifest.get("authority_scope"), dict) else {}
+    if not authority_scope:
+        return False
+    relative = normalized_path.removeprefix("docs/")
+    baseline = manifest.get("authority_files") if isinstance(manifest.get("authority_files"), dict) else {}
+    if relative in baseline:
+        return False
+    if root is None or not isinstance(root, Path):
+        return False
+    config = load_config(root)
+    current = goal_authority_file_snapshot(root, goal_target_config(config, str(manifest.get("version", ""))), authority_scope)
+    return relative not in current
+
+
+def goal_dirty_paths(root: Path, manifest: dict) -> list[str]:
+    return [
+        path
+        for path in git_dirty_paths(root, manifest.get("ignored_generated_paths", []))
+        if not goal_managed_git_path(root, manifest, path)
+    ]
 
 
 def goal_commit_matches_expected(root: Path, manifest: dict, expected: str, current: str) -> bool:
@@ -6360,7 +6736,41 @@ def goal_commit_matches_expected(root: Path, manifest: dict, expected: str, curr
     if not git_is_ancestor(root, expected, current):
         return False
     changed = git_changed_paths(root, expected, current)
-    return bool(changed) and all(goal_managed_git_path(manifest, path) for path in changed)
+    return bool(changed) and all(goal_managed_git_path(root, manifest, path) for path in changed)
+
+
+def goal_retry_commit_matches_expected(root: Path, manifest: dict, expected: str, current: str) -> bool:
+    """Allow recovery from a failed verification commit without erasing it.
+
+    A failed checkpoint deliberately does not advance the checkpoint chain, but
+    its implementation commit is still the only honest place from which to
+    continue.  Recovery is limited to descendants of a failed attempt and to
+    that task's declared paths (plus generated Goal evidence), so an unrelated
+    commit still makes the Goal stale.
+    """
+    if manifest.get("status") != "verification_failed" or not expected or not current:
+        return False
+    failed_tasks = [
+        item for item in manifest.get("ordered_tasks", [])
+        if item.get("status") == "verification_failed"
+        and isinstance(item.get("last_attempt"), dict)
+        and item.get("last_attempt", {}).get("commit")
+    ]
+    if not failed_tasks or not git_is_ancestor(root, expected, current) or git_merge_commits(root, expected, current):
+        return False
+    attempt_commits = [str(item["last_attempt"]["commit"]) for item in failed_tasks]
+    if not any(commit == current or git_is_ancestor(root, commit, current) for commit in attempt_commits):
+        return False
+    allowed_paths = [
+        path
+        for task in failed_tasks
+        for path in task.get("allowed_paths", [])
+    ]
+    changed = git_changed_paths(root, expected, current)
+    return bool(changed) and all(
+        goal_managed_git_path(root, manifest, path) or goal_path_matches(path, allowed_paths)
+        for path in changed
+    )
 
 
 def git_merge_commits(root: Path, base: str, head: str) -> list[str]:
@@ -6543,6 +6953,113 @@ def ordered_goal_features(features: list[dict]) -> tuple[list[dict], list[str]]:
     return [by_id[feature_id] for feature_id in ordered], cycles
 
 
+def goal_task_path_conflict(left: dict, right: dict) -> bool:
+    """Return whether two implementation lanes can touch the same path boundary."""
+    left_paths = [str(item) for item in left.get("allowed_paths", []) if valid_goal_path(str(item))]
+    right_paths = [str(item) for item in right.get("allowed_paths", []) if valid_goal_path(str(item))]
+    if goal_path_conflicts(left_paths, right_paths):
+        return True
+    # A forbidden boundary is also a coordination boundary.  A lane that owns
+    # an ancestor of another lane's forbidden path must not be advertised as
+    # independent, even when the currently declared implementation files differ.
+    left_forbidden = [str(item) for item in left.get("forbidden_paths", []) if valid_goal_path(str(item))]
+    right_forbidden = [str(item) for item in right.get("forbidden_paths", []) if valid_goal_path(str(item))]
+    return bool(
+        goal_path_conflicts(left_paths, right_forbidden)
+        or goal_path_conflicts(right_paths, left_forbidden)
+    )
+
+
+def plan_goal_execution(tasks: list[dict]) -> dict:
+    """Derive deterministic serial/parallel lanes from task dependencies and paths.
+
+    The planner is intentionally conservative.  A parallel lane is only a
+    planning signal; the existing checkpoint protocol still validates one
+    atomic commit at a time.  This keeps recovery auditable while giving the
+    developer an explicit set of safe independent work streams.
+    """
+    by_id = {str(task.get("task_id", "")): task for task in tasks}
+    dependencies = {
+        task_id: sorted({str(item) for item in task.get("dependencies", []) if str(item) in by_id})
+        for task_id, task in by_id.items()
+    }
+    depth: dict[str, int] = {}
+    cycle_nodes: set[str] = set()
+
+    def visit(task_id: str, stack: tuple[str, ...] = ()) -> int:
+        """Calculate longest dependency depth independent of input ordering."""
+        if task_id in depth:
+            return depth[task_id]
+        if task_id in stack:
+            cycle_nodes.update(stack[stack.index(task_id):])
+            return 0
+        values = [visit(dependency, (*stack, task_id)) + 1 for dependency in dependencies[task_id]]
+        depth[task_id] = max(values, default=0)
+        return depth[task_id]
+
+    for task_id in sorted(by_id):
+        visit(task_id)
+
+    groups: list[dict] = []
+    for task in sorted(tasks, key=lambda item: (depth.get(str(item.get("task_id", "")), 0), int(item.get("sequence", 0)), str(item.get("task_id", "")))):
+        task_id = str(task.get("task_id", ""))
+        task_depth = depth.get(task_id, 0)
+        chosen: dict | None = None
+        for group in groups:
+            if group["depth"] != task_depth:
+                continue
+            if any(goal_task_path_conflict(task, other) for other in group["tasks"]):
+                continue
+            chosen = group
+            break
+        if chosen is None:
+            chosen = {"depth": task_depth, "tasks": []}
+            groups.append(chosen)
+        chosen["tasks"].append(task)
+
+    lanes: list[dict] = []
+    task_to_lane: dict[str, str] = {}
+    for index, group in enumerate(groups, start=1):
+        lane_id = f"LANE-{index:03d}"
+        task_ids = [str(item.get("task_id", "")) for item in group["tasks"]]
+        dependency_tasks = sorted({
+            str(dependency)
+            for item in group["tasks"]
+            for dependency in item.get("dependencies", [])
+            if str(dependency) not in task_ids
+        })
+        dependency_lanes = sorted({task_to_lane[item] for item in dependency_tasks if item in task_to_lane})
+        parallel = len(task_ids) > 1 and not cycle_nodes
+        lanes.append({
+            "lane_id": lane_id,
+            "sequence": index,
+            "task_ids": task_ids,
+            "dependency_task_ids": dependency_tasks,
+            "dependencies": dependency_lanes,
+            "mode": "parallel" if parallel else "serial",
+            "parallel": parallel,
+            "reason": (
+                "任务没有依赖且工程落点、禁止边界和共享状态均不冲突。"
+                if parallel
+                else "任务存在依赖、路径边界冲突、循环依赖，或当前批次只有一个可安全调度的任务。"
+            ),
+        })
+        for task in group["tasks"]:
+            task_to_lane[str(task.get("task_id", ""))] = lane_id
+            task["parallel_group"] = lane_id
+            task["parallel_eligible"] = parallel
+            task["parallel_reason"] = lanes[-1]["reason"]
+
+    parallel_lanes = [item for item in lanes if item["parallel"]]
+    return {
+        "mode": "parallel_lanes" if parallel_lanes else "serial",
+        "lanes": lanes,
+        "parallel_lane_count": len(parallel_lanes),
+        "task_count": len(tasks),
+        "notice": "并行标记只表示可独立规划；每个原子提交仍必须按 Goal 检查点协议验证和登记。",
+    }
+
+
 def normalize_goal_issue(root: Path, value: str) -> str:
     return value.replace(str(root), ".")
 
@@ -6553,7 +7070,6 @@ def command_prepare_goal(args: argparse.Namespace) -> dict:
     target_config = goal_target_config(config, getattr(args, "version", None))
     target_version = str(target_config["current_version"])
     generated_paths = goal_generated_paths(root, config)
-    dirty_paths = git_dirty_paths(root, generated_paths)
     # Keep the active execution browser on the project's current version. A
     # historical Goal uses an in-memory target projection instead.
     generate_indexes(root, config)
@@ -6591,8 +7107,6 @@ def command_prepare_goal(args: argparse.Namespace) -> dict:
     source_commit = git_head(root) or ""
     if not source_commit:
         block("SOURCE_COMMIT", "当前项目没有可解析的 Git HEAD")
-    if dirty_paths:
-        block("WORKTREE_DIRTY", f"工作区存在未提交变化：{', '.join(dirty_paths)}")
     if cycles:
         block("TASK_CYCLE", f"功能依赖形成循环：{', '.join(cycles)}")
 
@@ -6688,7 +7202,21 @@ def command_prepare_goal(args: argparse.Namespace) -> dict:
             }
         )
 
-    authority_digest_value = str(payload.get("authority_digest", ""))
+    execution_plan = plan_goal_execution(tasks)
+    for task in tasks:
+        task["parallel_eligible"] = bool(task.get("parallel_eligible", False))
+    authority_scope = goal_authority_scope(root, target_config, requested)
+    authority_digest_value, authority_snapshot = goal_authority_digest(root, target_config, authority_scope)
+    scope_manifest = {
+        "goal_id": goal_id,
+        "version": target_version,
+        "authority_scope": authority_scope,
+        "authority_files": authority_snapshot,
+        "ignored_generated_paths": generated_paths,
+    }
+    dirty_paths = goal_dirty_paths(root, scope_manifest)
+    if dirty_paths:
+        block("WORKTREE_DIRTY", f"工作区存在当前 Goal 范围内未提交变化：{', '.join(dirty_paths)}")
     if not authority_digest_value:
         block("AUTHORITY_DIGEST", "未生成 authority digest")
     blocking.sort(key=lambda item: (item["code"], item.get("feature_id", ""), item["reason"]))
@@ -6709,6 +7237,8 @@ def command_prepare_goal(args: argparse.Namespace) -> dict:
         "forbidden_paths": sorted({value for task in tasks for value in task["forbidden_paths"]}),
         "forbidden_actions": sorted({value for feature_id in requested for value in packet_by_feature.get(feature_id, {}).get("forbidden_actions", [])}),
         "authority_digest": authority_digest_value,
+        "authority_scope": authority_scope,
+        "authority_files": authority_snapshot,
         "source_commit": source_commit,
         "tool_version": TOOL_VERSION,
         "browser_schema_version": payload.get("schema_version"),
@@ -6716,7 +7246,14 @@ def command_prepare_goal(args: argparse.Namespace) -> dict:
         "selection_digest": canonical_digest({"version": target_version, "features": requested}),
         "ordered_tasks": tasks,
         "integration_order": [task["task_id"] for task in tasks],
-        "execution_policy": "serial",
+        "execution_policy": execution_plan["mode"],
+        "execution_plan": execution_plan,
+        "document_sync_policy": {
+            "mode": "authority_first",
+            "trigger": "权威文档、ADR、AC、实现落点或验证命令变化",
+            "required_action": "停止受影响任务，更新权威来源并重新运行 index、check、相关 gate 和 prepare-goal",
+            "source_snapshot": "authority_files",
+        },
         "verification_commands": all_commands,
         "evidence_requirements": sorted(evidence_types),
         "stop_conditions": [
@@ -6759,7 +7296,8 @@ def command_goal_status(args: argparse.Namespace) -> dict | int:
     target_config = goal_target_config(config, str(manifest.get("version", "")))
     _, expected_commit = validate_goal_checkpoint_chain(root, manifest)
     completion = validate_goal_completion(root, manifest)
-    current_digest = authority_digest(root, target_config)[0]
+    authority_scope = manifest.get("authority_scope") if isinstance(manifest.get("authority_scope"), dict) else {}
+    current_digest = goal_authority_digest(root, target_config, authority_scope)[0] if authority_scope else authority_digest(root, target_config)[0]
     current_commit = git_head(root) or ""
     reasons: list[str] = []
     freshness_reasons: list[str] = []
@@ -6772,14 +7310,17 @@ def command_goal_status(args: argparse.Namespace) -> dict | int:
             freshness_reasons.append("当前工具版本已变化")
     else:
         if manifest.get("authority_digest") != current_digest:
-            reasons.append("权威文档摘要已变化")
+            baseline = manifest.get("authority_files") if isinstance(manifest.get("authority_files"), dict) else {}
+            changed = authority_change_paths(root, target_config, baseline, authority_scope or None)
+            suffix = f"：{', '.join(changed[:8])}" if changed else ""
+            reasons.append(f"权威文档摘要已变化{suffix}")
         if not manifest.get("source_commit"):
             reasons.append("清单没有绑定 source_commit")
-        elif not goal_commit_matches_expected(root, manifest, expected_commit, current_commit):
+        elif not goal_commit_matches_expected(root, manifest, expected_commit, current_commit) and not goal_retry_commit_matches_expected(root, manifest, expected_commit, current_commit):
             reasons.append("当前 HEAD 与最近受控检查点不一致")
         if manifest.get("tool_version") != TOOL_VERSION:
             reasons.append("DAOGE Docs 工具版本已变化")
-        dirty_paths = git_dirty_paths(root, manifest.get("ignored_generated_paths", []))
+        dirty_paths = goal_dirty_paths(root, manifest)
         if dirty_paths:
             reasons.append(f"工作区存在清单外未提交变化：{', '.join(dirty_paths)}")
     previous_status = str(manifest.get("status", ""))
@@ -6804,6 +7345,9 @@ def command_goal_status(args: argparse.Namespace) -> dict | int:
     if not getattr(args, "read_only", False):
         write_json(manifest_path, manifest)
     next_task = next((item for item in manifest.get("ordered_tasks", []) if item.get("status") != "completed"), None)
+    runtime_manifest = dict(manifest)
+    runtime_manifest["status"] = manifest["status"]
+    execution = goal_execution_snapshot(runtime_manifest)
     payload = {
         "Goal ID": goal_id,
         "状态": manifest["status"],
@@ -6815,6 +7359,8 @@ def command_goal_status(args: argparse.Namespace) -> dict | int:
         "阻塞数": len(manifest.get("blocking_findings", [])),
         "下一任务": next_task.get("task_id", "") if next_task and manifest["status"] in {"ready", "running", "verification_failed"} else "",
         "最近检查点": manifest.get("checkpoints", [])[-1].get("checkpoint_id", "") if manifest.get("checkpoints") else "",
+        "可执行任务": execution["actionable_task_ids"] if manifest["status"] in {"ready", "running", "verification_failed"} else [],
+        "执行快照": execution,
         "当前权威摘要": current_digest,
         "清单权威摘要": manifest.get("authority_digest", ""),
         "当前提交": current_commit,
@@ -6828,18 +7374,54 @@ def command_goal_status(args: argparse.Namespace) -> dict | int:
     return payload
 
 
+def command_goal_plan(args: argparse.Namespace) -> dict:
+    """Show the current dependency-ready tasks and lane states for a Goal."""
+    root = project_root(args.root)
+    config = load_config(root)
+    goal_id = args.goal.strip().upper()
+    manifest_path, manifest = load_goal_manifest(root, goal_id)
+    _, expected_commit = validate_goal_checkpoint_chain(root, manifest)
+    completion = validate_goal_completion(root, manifest)
+    reasons: list[str] = []
+    if completion:
+        status = "completed"
+    else:
+        reasons = goal_execution_reasons(root, config, manifest, expected_commit)
+        if not reasons and manifest.get("status") == "stale":
+            reasons = list(manifest.get("stale_reasons", [])) or ["Goal 已进入 stale 终态，禁止原地恢复"]
+        status = "stale" if reasons else ("blocked" if manifest.get("blocking_findings") else str(manifest.get("status", "ready")))
+    runtime_manifest = dict(manifest)
+    runtime_manifest["status"] = status
+    execution = goal_execution_snapshot(runtime_manifest)
+    return {
+        "Goal ID": goal_id,
+        "状态": status,
+        "目标版本": manifest.get("version", ""),
+        "当前执行版本": config.get("current_version", ""),
+        "可执行任务": execution["actionable_task_ids"] if status in {"ready", "running", "verification_failed"} else [],
+        "过期原因": reasons,
+        "执行快照": execution,
+        "authority_digest": manifest.get("authority_digest", ""),
+        "文件": str(manifest_path.relative_to(root)),
+    }
+
+
 def goal_execution_reasons(root: Path, config: dict, manifest: dict, expected_commit: str) -> list[str]:
     reasons: list[str] = []
     target_config = goal_target_config(config, str(manifest.get("version", "")))
-    current_digest = authority_digest(root, target_config)[0]
+    authority_scope = manifest.get("authority_scope") if isinstance(manifest.get("authority_scope"), dict) else {}
+    current_digest = goal_authority_digest(root, target_config, authority_scope)[0] if authority_scope else authority_digest(root, target_config)[0]
     current_commit = git_head(root) or ""
     if manifest.get("authority_digest") != current_digest:
-        reasons.append("权威文档摘要已变化")
+        baseline = manifest.get("authority_files") if isinstance(manifest.get("authority_files"), dict) else {}
+        changed = authority_change_paths(root, target_config, baseline, authority_scope or None)
+        suffix = f"：{', '.join(changed[:8])}" if changed else ""
+        reasons.append(f"权威文档摘要已变化{suffix}")
     if manifest.get("tool_version") != TOOL_VERSION:
         reasons.append("DAOGE Docs 工具版本已变化")
-    if not goal_commit_matches_expected(root, manifest, expected_commit, current_commit):
+    if not goal_commit_matches_expected(root, manifest, expected_commit, current_commit) and not goal_retry_commit_matches_expected(root, manifest, expected_commit, current_commit):
         reasons.append("当前 HEAD 与最近受控检查点不一致")
-    dirty_paths = git_dirty_paths(root, manifest.get("ignored_generated_paths", []))
+    dirty_paths = goal_dirty_paths(root, manifest)
     if dirty_paths:
         reasons.append(f"工作区存在清单外未提交变化：{', '.join(dirty_paths)}")
     return reasons
@@ -6862,7 +7444,20 @@ def command_goal_resume_context(args: argparse.Namespace) -> dict:
         write_json(manifest_path, manifest)
         raise DocsError("Goal 恢复条件不满足：" + "；".join(reasons))
     tasks = manifest.get("ordered_tasks", [])
-    next_task = next((item for item in tasks if item.get("status") != "completed"), None)
+    execution = goal_execution_snapshot(manifest)
+    actionable = [item for item in execution["tasks"] if item["state"] in {"ready", "running", "verification_failed"}]
+    requested_task = args.task.strip().upper() if args.task else ""
+    if requested_task:
+        next_task = next((item for item in tasks if str(item.get("task_id", "")) == requested_task), None)
+        if not next_task:
+            raise DocsError(f"Goal 中不存在任务：{requested_task}")
+        task_state = next(item for item in execution["tasks"] if item["task_id"] == requested_task)
+        if task_state["state"] == "blocked":
+            raise DocsError(f"任务依赖尚未完成：{requested_task} -> {', '.join(task_state['missing_dependencies'])}")
+        if task_state["state"] == "completed":
+            raise DocsError(f"任务已经建立检查点：{requested_task}")
+    else:
+        next_task = next((item for item in tasks if str(item.get("task_id", "")) in {item["task_id"] for item in actionable}), None)
     if not next_task:
         raise DocsError("Goal 所有任务已建立检查点；请运行 goal-complete 进行最终验证")
     completed_ids = {item.get("task_id") for item in tasks if item.get("status") == "completed"}
@@ -6887,6 +7482,8 @@ def command_goal_resume_context(args: argparse.Namespace) -> dict:
         "resume_commit": expected_commit,
         "previous_checkpoint": previous,
         "task": next_task,
+        "actionable_task_ids": execution["actionable_task_ids"],
+        "execution_snapshot": execution,
         "remaining_task_ids": [item.get("task_id") for item in tasks if item.get("status") != "completed"],
         "goal_stop_conditions": manifest.get("stop_conditions", []),
         "checkpoint_command": f"{project_python_command()} .daoge-docs/daoge_docs.py goal-checkpoint --root . --goal {goal_id} --task {next_task.get('task_id')}",
@@ -6906,11 +7503,16 @@ def command_goal_checkpoint(args: argparse.Namespace) -> dict:
         raise DocsError("Goal 必须先通过 goal-resume-context 进入 running 状态")
     static_reasons = []
     target_config = goal_target_config(config, str(manifest.get("version", "")))
-    if manifest.get("authority_digest") != authority_digest(root, target_config)[0]:
-        static_reasons.append("权威文档摘要已变化")
+    authority_scope = manifest.get("authority_scope") if isinstance(manifest.get("authority_scope"), dict) else {}
+    current_authority_digest = goal_authority_digest(root, target_config, authority_scope)[0] if authority_scope else authority_digest(root, target_config)[0]
+    if manifest.get("authority_digest") != current_authority_digest:
+        baseline = manifest.get("authority_files") if isinstance(manifest.get("authority_files"), dict) else {}
+        changed = authority_change_paths(root, target_config, baseline, authority_scope or None)
+        suffix = f"：{', '.join(changed[:8])}" if changed else ""
+        static_reasons.append(f"权威文档摘要已变化{suffix}")
     if manifest.get("tool_version") != TOOL_VERSION:
         static_reasons.append("DAOGE Docs 工具版本已变化")
-    dirty_paths = git_dirty_paths(root, manifest.get("ignored_generated_paths", []))
+    dirty_paths = goal_dirty_paths(root, manifest)
     if dirty_paths:
         static_reasons.append(f"工作区存在未提交变化：{', '.join(dirty_paths)}")
     if static_reasons:
@@ -6923,16 +7525,25 @@ def command_goal_checkpoint(args: argparse.Namespace) -> dict:
     if git_merge_commits(root, expected_parent, current_commit):
         raise DocsError("原子任务提交范围内包含 merge commit，拒绝建立检查点")
     tasks = manifest.get("ordered_tasks", [])
-    task = next((item for item in tasks if item.get("status") != "completed"), None)
+    execution = goal_execution_snapshot(manifest)
+    task = next((item for item in tasks if str(item.get("task_id", "")) in execution["actionable_task_ids"]), None)
     if not task:
         raise DocsError("没有待建立检查点的任务；请运行 goal-complete")
     requested_task = args.task.strip().upper() if args.task else str(task.get("task_id", ""))
     if requested_task != task.get("task_id"):
-        raise DocsError(f"任务顺序不允许跳跃；当前任务是 {task.get('task_id')}")
+        candidate = next((item for item in tasks if str(item.get("task_id", "")) == requested_task), None)
+        if not candidate:
+            raise DocsError(f"Goal 中不存在任务：{requested_task}")
+        candidate_state = next(item for item in execution["tasks"] if item["task_id"] == requested_task)
+        if candidate_state["state"] == "blocked":
+            raise DocsError(f"任务依赖尚未完成：{requested_task} -> {', '.join(candidate_state['missing_dependencies'])}")
+        if candidate_state["state"] == "completed":
+            raise DocsError(f"任务已经建立检查点：{requested_task}")
+        task = candidate
     if task.get("status") not in {"running", "verification_failed"}:
         raise DocsError("当前任务尚未通过恢复上下文进入执行态")
     all_changed_paths = git_changed_paths(root, expected_parent, current_commit)
-    managed_paths = [path for path in all_changed_paths if goal_managed_git_path(manifest, path)]
+    managed_paths = [path for path in all_changed_paths if goal_managed_git_path(root, manifest, path)]
     changed_paths = [path for path in all_changed_paths if path not in managed_paths]
     if not changed_paths:
         raise DocsError("当前任务提交没有授权工程路径内的文件差异")
@@ -6947,7 +7558,7 @@ def command_goal_checkpoint(args: argparse.Namespace) -> dict:
         raise DocsError("当前任务没有验证命令，不能建立检查点")
     evidence = [run_goal_verification(root, directory, manifest, command, str(task["task_id"]), current_commit) for command in commands]
     failed = [item for item in evidence if item["result"] != "passed"]
-    verification_dirty_paths = git_dirty_paths(root, manifest.get("ignored_generated_paths", []))
+    verification_dirty_paths = goal_dirty_paths(root, manifest)
     if verification_dirty_paths:
         failed.append(
             {
@@ -6956,7 +7567,7 @@ def command_goal_checkpoint(args: argparse.Namespace) -> dict:
                 "path": "",
             }
         )
-    task["last_attempt"] = {
+    attempt = {
         "commit": current_commit,
         "parent_commit": expected_parent,
         "evidence_paths": [item["path"] for item in evidence],
@@ -6964,6 +7575,8 @@ def command_goal_checkpoint(args: argparse.Namespace) -> dict:
         "worktree_side_effects": verification_dirty_paths,
         "created_at": now_iso(),
     }
+    task.setdefault("verification_attempts", []).append(attempt)
+    task["last_attempt"] = attempt
     if failed:
         task["status"] = "verification_failed"
         manifest["status"] = "verification_failed"
@@ -7092,7 +7705,7 @@ def command_goal_complete(args: argparse.Namespace) -> dict:
         for command in manifest.get("verification_commands", [])
     ]
     failed = [item for item in final_evidence if item["result"] != "passed"]
-    verification_dirty_paths = git_dirty_paths(root, manifest.get("ignored_generated_paths", []))
+    verification_dirty_paths = goal_dirty_paths(root, manifest)
     if verification_dirty_paths:
         failed.append(
             {
@@ -7268,11 +7881,13 @@ def command_audit(args: argparse.Namespace) -> int:
             "def command_goal_resume_context",
             "def command_goal_checkpoint",
             "def command_goal_complete",
+            "def command_goal_plan",
             'add_parser("prepare-goal"',
             'add_parser("goal-status"',
             'add_parser("goal-resume-context"',
             'add_parser("goal-checkpoint"',
             'add_parser("goal-complete"',
+            'add_parser("goal-plan"',
             "manifest_digest",
             "authority_digest",
             "source_commit",
@@ -7512,9 +8127,15 @@ def build_parser() -> argparse.ArgumentParser:
     goal_status.add_argument("--fail-on-stale", action="store_true", help="检测到 stale 时返回非零退出码，供 CI 使用")
     goal_status.set_defaults(handler=command_goal_status)
 
-    goal_resume = subparsers.add_parser("goal-resume-context", help="验证恢复条件并输出唯一下一任务上下文")
+    goal_plan = subparsers.add_parser("goal-plan", help="只读显示 Goal 当前任务与泳道可执行状态")
+    goal_plan.add_argument("--root", default=".")
+    goal_plan.add_argument("--goal", required=True, help="要查看的 GOAL-* ID")
+    goal_plan.set_defaults(handler=command_goal_plan)
+
+    goal_resume = subparsers.add_parser("goal-resume-context", help="验证恢复条件并输出可执行任务上下文")
     goal_resume.add_argument("--root", default=".")
     goal_resume.add_argument("--goal", required=True, help="要开始或恢复的 GOAL-* ID")
+    goal_resume.add_argument("--task", help="指定一个依赖已满足的 TASK-*；省略时选择稳定排序的第一个可执行任务")
     goal_resume.set_defaults(handler=command_goal_resume_context)
 
     goal_checkpoint = subparsers.add_parser("goal-checkpoint", help="执行任务验证并建立受控 Git 检查点")

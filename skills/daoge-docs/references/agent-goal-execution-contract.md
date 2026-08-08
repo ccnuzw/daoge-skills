@@ -157,6 +157,10 @@ stop_conditions / checkpoint_policy
 
 任务图必须显式标出集成任务。迁移与约束、领域规则、应用事务、接口、前端、可观测性、测试和证据存在依赖时，使用确定的拓扑顺序，不能让智能体自行选择方便的先后关系。
 
+`prepare-goal` 会把任务图派生为 `execution_plan.lanes[]`。同一泳道中的任务只有在依赖、`allowed_paths`、`forbidden_paths`、迁移序列、接口契约和共享外部状态均不冲突时才标记为 `parallel`；否则使用 `serial` 泳道并保留原因。并行是开发编排提示，不是绕过检查点的授权：每个任务仍须独立提交、执行声明的验证命令并建立自己的检查点；跨泳道的集成任务必须等待上游检查点完成。
+
+文档与代码可以交错推进，但权威文档优先。Goal 保存目标版本、所选功能及递归依赖的 `authority_scope`，并保存作用域内 `authority_files` 的逐文件摘要和 `document_sync_policy`。后续版本规划可以在作用域外并行更新；产品范围、项目事实、共享架构/测试规则、当前目标版本、递归依赖版本、所选功能、其 AC/ADR、工程落点、验证命令、非目标或数据/接口语义发生变化时，恢复与检查点命令必须停止受影响任务，报告变化文件，先更新权威来源，再运行 `index`、`check`、相关 gate 并从当前摘要创建新 Goal；不得直接编辑 Goal 或派生工作台数据追赶文档。
+
 ## 10. 停止条件
 
 命中任一条件时立即停止受影响任务，不猜测、不扩展范围：
@@ -183,7 +187,7 @@ authority_digest / changed_paths / commands / exit_codes
 evidence_paths / created_at / tool_version
 ```
 
-恢复前重新计算 authority digest，并验证当前 HEAD、父子提交、已改路径和证据摘要。只有完全匹配最近检查点时才能从下一个待办任务继续；不能依赖聊天历史、浏览器本地状态或智能体记忆恢复。
+恢复前重新计算 authority digest，并验证当前 HEAD、父子提交、已改路径和证据摘要。验证失败的任务不会建立检查点，但工具会保留每次 `verification_attempts[]` 及其证据；恢复时允许在该失败提交的授权路径内继续修复，其他未登记提交仍会使 Goal 进入 `stale`。只有完全匹配最近检查点或受限的失败恢复基线时才能继续；不能依赖聊天历史、浏览器本地状态或智能体记忆恢复。
 
 执行期间 HEAD 可以从初始 `source_commit` 前进到已登记的检查点提交，但初始基线不可被替换。出现清单外提交时进入 `stale`。
 
@@ -202,14 +206,15 @@ Goal 进入 `completed` 前必须同时满足：
 
 ## 13. 工具接口与实现状态
 
-`daoge-docs 3.15.1` 在既有 Goal 生命周期上补充全项目功能能力主线校验，并将工作台的基线版本、当前执行版本与未来规划状态分别呈现；这一展示语义不改变 Goal 的 Gate 或授权边界。
+`daoge-docs 3.17.0` 在既有 Goal 生命周期上补充只读运行态 `goal-plan`、泳道级任务状态和依赖已满足任务的显式恢复选择；`3.18.0` 为任务和泳道输出 `phase` 与 `reason_code`，并强化 CI/PR/IDE 对代码变更和 stale 基线的检查。工作台的执行编排只提供保守调度提示，不改变 Goal 的 Gate、原子提交、检查点或授权边界。3.16.0 补充顺序无关的串行/并行泳道、稳定前置泳道和逐权威文件变化定位。
 
 `daoge-docs 3.15.0` 已实现完整的开发级 Goal 生命周期。功能 front matter 引用的 ADR 必须已处于 `accepted`，否则检查、Ready 门禁和 Goal 都保持 `blocked`；同一缺口必须派生为工作台 finding。验收表中的 Markdown 行内代码会在派生 Goal 前规范化为原始 shell 命令。工作台可为任何已登记版本的稳定功能 ID 复制 Goal 准备提示，但该提示不是执行授权：它只能要求智能体调用带 `--version <目标版本>` 的 `prepare-goal`，在 `blocked` 时停止，并在 `ready` 后读取 `goal-resume-context`；实现必须由开发者明确确认后才开始。默认 Goal 使用 `config.current_version`；显式 `--version` 时工具在内存中创建目标版本配置，独立解析该版本功能、需求、E2E、决策、任务图和 Ready 门禁，不写回 `.daoge-docs.json`，不重建当前工作台为历史版本，也不让历史 Gate、任务包或证据覆盖当前执行判断。Goal 清单绑定目标版本；`goal-status`、`goal-resume-context`、`goal-checkpoint` 和 `goal-complete` 必须从清单恢复该目标版本，而不能因为项目活动版本已前进而把清单标为 stale。
 
 ```text
 prepare-goal         已实现：从选定版本和功能生成 Goal 清单
 goal-status          已实现：检查清单防篡改、阻塞、权威摘要、Git 基线和过期状态
-goal-resume-context  已实现：只在恢复条件通过时输出唯一下一任务上下文
+goal-plan            已实现：只读输出泳道、依赖和可执行任务状态
+goal-resume-context  已实现：只在恢复条件通过时输出指定或稳定排序的可执行任务上下文
 goal-checkpoint      已实现：检查提交、路径和命令后写入原子检查点与独立证据
 goal-complete        已实现：复验任务、命令、证据、docs-check 和 Ready 门禁后结束 Goal
 install-integrations 已实现：安装不覆盖现有配置的 CI、PR、IDE 与智能体入口
@@ -237,5 +242,5 @@ prepare-goal
 - 没有通过 Feature Ready 的功能不能生成 `ready` Goal。
 - 任一任务都能从 AC 或分支追踪到实现路径、命令和证据。
 - 并行任务没有路径、迁移、契约、共享状态或外部副作用冲突。
-- 中断后仅凭清单和检查点即可恢复，不依赖对话上下文。
+- 中断后仅凭清单和检查点即可恢复，不依赖对话上下文；多功能 Goal 可按 `goal-plan` 选择任一依赖已满足任务。
 - 没有真实命令和证据时，任何主体都不能把 Goal 标记为 `completed`。

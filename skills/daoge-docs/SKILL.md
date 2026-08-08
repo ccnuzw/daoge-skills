@@ -18,8 +18,6 @@ description: 为软件项目建立和治理中文文档驱动开发体系。用�
 7. 重要需求、功能、验收项、设计分支、E2E 用例和 ADR 使用稳定 ID；重命名、移动或废弃后不得复用 ID。
 8. 任何“已验证”结论必须绑定实际命令、退出码、环境、提交、构建、时间和证据路径。
 
-工作台的 `documents[].status` 是阅读目录的输入状态，不是门禁结果：有 front matter 的权威 Markdown 使用其声明状态；索引生成的 Markdown 使用 `generated`（界面显示“已生成”）；JSON/YAML/OpenAPI 使用 `not_applicable`（界面显示“结构化数据”）；普通 Markdown 缺少 front matter 时使用 `unknown`（界面显示“未知”）。这些状态不能推导 `ready`、`passed` 或已发布，门禁仍只读取各自的权威文档、finding 和机器证据。
-
 开始前按任务读取参考文件：
 
 - 新项目适配：读取 [references/adaptation.md](references/adaptation.md)。
@@ -217,6 +215,14 @@ python3 .daoge-docs/daoge_docs.py prepare-goal \
 python3 .daoge-docs/daoge_docs.py goal-resume-context --root . --goal GOAL-V1-001
 ```
 
+多功能 Goal 可先只读查看当前各泳道、依赖和可执行任务：
+
+```sh
+python3 .daoge-docs/daoge_docs.py goal-plan --root . --goal GOAL-V1-001
+```
+
+需要选择并行泳道中的具体任务时，使用 `goal-resume-context --task TASK-*`；未指定任务时仍按稳定顺序选择第一个可执行任务。并行只改变可恢复任务的选择，不改变每任务独立提交、验证和检查点链。
+
 命令只在 authority digest、活动版本、工具版本、当前 HEAD、最近检查点和工作区完全一致时输出唯一下一任务。只使用返回任务的 `inputs`、`allowed_paths`、AC、稳定分支、验证命令和停止条件，不从对话历史补充范围。
 
 完成原子任务并提交代码后立即建立检查点：
@@ -236,7 +242,15 @@ python3 .daoge-docs/daoge_docs.py goal-complete --root . --goal GOAL-V1-001
 
 完成命令重新生成派生文档，复验 `docs-check`、Version Ready、全部 Feature Ready 和所有指定命令，生成不可覆盖的 `completion.json` 后才进入 `completed`。开发级完成不代表允许发布。
 
+### 单功能与并行开发
+
+同一项目同时支持两种开发视角：单功能时使用一条 Goal 主线；选择多个无依赖功能时，`prepare-goal` 会生成 `execution_plan.lanes[]`，工作台“执行编排与文档同步”面板显示可并行泳道、前置泳道和集成顺序。只有依赖、工程落点、禁止边界、迁移序列、接口契约、共享状态和外部副作用都不冲突时才标记 `parallel`；无法证明安全时保持 `serial` 并说明原因。并行标记不授权合并或跳过检查点，每个任务仍需独立提交、验证和登记检查点，集成任务等待上游检查点完成。
+
+文档与实现可以交错进行，但权威来源优先。Goal 保存目标版本、所选功能及递归依赖的 `authority_scope`，并保存该闭包内逐文件 `authority_files` 摘要和 `document_sync_policy`。后续版本规划可以在闭包外并行更新；产品蓝图、项目事实、共享架构/测试规则、当前目标版本、递归依赖版本、所选功能、其 AC/ADR/数据/接口、工程落点或验证命令变化时，`goal-status`、`goal-plan`、`goal-resume-context` 和 `goal-checkpoint` 必须停止受影响任务，报告变化文件，先更新权威 Markdown/注册表，再运行 `index`、`check`、相关 gate，并从当前权威重新 `prepare-goal`。不得直接编辑 Goal 清单、工作台 HTML 或数据 JS 来追赶文档。
+
 查看状态但不改文件时使用 `goal-status --read-only`；CI 需要 stale 返回非零时再加 `--fail-on-stale`。authority digest、执行基线、活动版本、工具版本或清单外工作区变化不一致时，Goal 必须进入 `stale`。`stale` 清单禁止原地刷新；保留旧清单用于审计，从当前权威创建新 Goal ID。
+
+`goal-plan` 是多功能 Goal 的只读运行态入口，会显示每条泳道的 `ready`、`blocked`、`running`、`completed` 状态和可执行任务；它不修改清单，也不改变检查点或门禁。
 
 安装轻量开发集成时运行：
 
@@ -305,7 +319,8 @@ snapshot          创建不可变版本快照，供变更检测、Goal 恢复和
 authority-digest  计算当前权威文档集合的稳定 SHA-256 摘要
 prepare-goal      从通过门禁的目标版本功能生成确定性 Goal 清单；默认当前版本，显式 --version 不切换活动版本
 goal-status       检查 Goal 清单防篡改、权威摘要、Git 基线和过期状态
-goal-resume-context 验证恢复条件并输出唯一下一任务上下文
+goal-plan         只读显示 Goal 任务、泳道、依赖和可执行状态
+goal-resume-context 验证恢复条件并输出可执行任务上下文
 goal-checkpoint   验证授权路径和命令后建立原子 Git 检查点
 goal-complete     复验全部任务、命令、证据和 Ready 门禁后结束 Goal
 check             检查结构、链接、ID、中文规范、契约和追踪
