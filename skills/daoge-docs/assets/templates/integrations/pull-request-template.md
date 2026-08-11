@@ -21,7 +21,7 @@
 ## P2 Goal 基线
 
 - [ ] `python3 .daoge-docs/daoge_docs.py ci-check --root . --json` 已通过
-- [ ] 所有未完成 Goal 已运行 `goal-status --read-only --fail-on-stale`
+- [ ] 所有未完成 Goal 已运行默认只读的 `goal-status --fail-on-stale`
 - [ ] 若存在 `stale`，已从当前权威重新 `prepare-goal`，没有手改旧清单
 
 ## 证据入口

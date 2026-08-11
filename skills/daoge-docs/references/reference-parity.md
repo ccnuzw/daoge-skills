@@ -18,7 +18,7 @@ DAOGE Docs 的等价目标分为四层：
 | 参考能力 | strict 初始文档 | 动态生成或维护机制 |
 | --- | --- | --- |
 | 项目导航、环境、Git 规范 | `01-项目概览` | 仓库调研后填写，Discovery 门禁校验 |
-| 产品蓝图、路线图、版本约束 | `02-产品与版本` | `new-future-version` 创建后续版本，`index` 更新演进图 |
+| 产品蓝图、跨版本能力/旅程基线、路线图、版本约束 | `02-产品与版本` | `new-future-version` 创建唯一正式后续规划入口，`index` 更新演进图 |
 | 当前版本总览、产品需求、状态 | `02-产品与版本/当前版本` | `new-version` 创建；实现状态由功能文档派生 |
 | FR/NFR/RG、追踪、风险、查找 | `03-功能规格/<版本>` | `new-domain`、`new-feature`、`new-requirement`、`index` |
 | 高风险技术设计 | 同名 `-技术设计.md` | `new-feature --risk high` 自动创建 |

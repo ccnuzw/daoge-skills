@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daoge-docs.local/schemas/project-inputs.schema.json",
+  "title": "DAOGE Docs 项目输入与约束注册表",
+  "type": "object",
+  "required": ["schema_version", "inputs", "constraints", "evidence_assets", "coverage", "authority_scopes"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "inputs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/input"}
+    },
+    "constraints": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/constraint"}
+    },
+    "evidence_assets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/evidence_asset"}
+    },
+    "coverage": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/coverage"}
+    },
+    "authority_scopes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/authority_scope"}
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": ["string", "null"]
+    },
+    "input": {
+      "type": "object",
+      "required": ["id", "title", "summary", "status", "source_kind", "source_ref", "confirmed_by", "confirmed_at", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^INPUT-[0-9]{3}$"},
+        "title": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "status": {"enum": ["observed", "confirmed", "rejected", "superseded"]},
+        "source_kind": {"enum": ["stakeholder_statement", "repository", "external_reference", "experiment", "other"]},
+        "source_ref": {"type": "string", "minLength": 1},
+        "confirmed_by": {"type": ["string", "null"]},
+        "confirmed_at": {"$ref": "#/$defs/timestamp"},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "constraint": {
+      "type": "object",
+      "required": ["id", "title", "kind", "value", "source_input", "status", "confirmed_by", "confirmed_at", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^CONSTRAINT-[0-9]{3}$"},
+        "title": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["hard_requirement", "soft_goal", "reference_observation"]},
+        "value": {"type": "string", "minLength": 1},
+        "source_input": {"type": "string", "pattern": "^(none|INPUT-[0-9]{3})$"},
+        "status": {"enum": ["observed", "confirmed", "rejected", "superseded"]},
+        "confirmed_by": {"type": ["string", "null"]},
+        "confirmed_at": {"$ref": "#/$defs/timestamp"},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "evidence_asset": {
+      "type": "object",
+      "required": ["id", "title", "kind", "source_input", "source_ref", "redacted", "status", "path", "sha256", "missing_reason", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^ASSET-[0-9]{3}$"},
+        "title": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["image", "document", "archive", "recording", "binary", "other"]},
+        "source_input": {"type": "string", "pattern": "^(none|INPUT-[0-9]{3})$"},
+        "source_ref": {"type": "string", "minLength": 1},
+        "redacted": {"type": "boolean"},
+        "status": {"enum": ["available", "missing_source_asset"]},
+        "path": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"},
+        "missing_reason": {"type": ["string", "null"]},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["id", "source_id", "disposition", "version", "requirement_ids", "feature_ids", "e2e_ids", "future_plan", "rationale", "confirmed_by", "confirmed_at", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^COVERAGE-[0-9]{3}$"},
+        "source_id": {"type": "string", "pattern": "^(INPUT|CONSTRAINT)-[0-9]{3}$"},
+        "disposition": {"enum": ["current_scope", "future_candidate", "rejected", "superseded", "not_applicable"]},
+        "version": {"type": ["string", "null"]},
+        "requirement_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "feature_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "e2e_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "future_plan": {"type": ["string", "null"]},
+        "rationale": {"type": ["string", "null"]},
+        "confirmed_by": {"type": "string", "minLength": 1},
+        "confirmed_at": {"$ref": "#/$defs/timestamp"},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "authority_scope": {
+      "type": "object",
+      "required": ["id", "scope", "fact_type", "source", "owner", "status", "supersedes", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^AUTH-[0-9]{3}$"},
+        "scope": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{1,79}$"},
+        "fact_type": {"enum": ["product_direction", "cross_version_constraint", "version_scope", "version_requirement", "feature_behavior", "system_architecture", "api_schema", "data_physical_schema", "data_semantics", "implementation", "test_strategy", "security_baseline", "release_eligibility"]},
+        "source": {"type": "string", "minLength": 1},
+        "owner": {"type": "string", "minLength": 1},
+        "status": {"enum": ["active", "deprecated"]},
+        "supersedes": {"type": ["string", "null"], "pattern": "^AUTH-[0-9]{3}$"},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

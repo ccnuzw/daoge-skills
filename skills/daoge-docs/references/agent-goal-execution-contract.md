@@ -206,13 +206,13 @@ Goal 进入 `completed` 前必须同时满足：
 
 ## 13. 工具接口与实现状态
 
-`daoge-docs 3.17.0` 在既有 Goal 生命周期上补充只读运行态 `goal-plan`、泳道级任务状态和依赖已满足任务的显式恢复选择；`3.18.0` 为任务和泳道输出 `phase` 与 `reason_code`，并强化 CI/PR/IDE 对代码变更和 stale 基线的检查。工作台的执行编排只提供保守调度提示，不改变 Goal 的 Gate、原子提交、检查点或授权边界。3.16.0 补充顺序无关的串行/并行泳道、稳定前置泳道和逐权威文件变化定位。
+`daoge-docs 3.20.0` 将 `goal-status` 改为默认只读，避免观察状态本身改写 Goal 清单；只有显式 `--persist` 才保存派生检查时间和状态。`3.18.0` 为任务和泳道输出 `phase` 与 `reason_code`，并强化 CI/PR/IDE 对代码变更和 stale 基线的检查。工作台的执行编排只提供保守调度提示，不改变 Goal 的 Gate、原子提交、检查点或授权边界。3.16.0 补充顺序无关的串行/并行泳道、稳定前置泳道和逐权威文件变化定位。
 
 `daoge-docs 3.15.0` 已实现完整的开发级 Goal 生命周期。功能 front matter 引用的 ADR 必须已处于 `accepted`，否则检查、Ready 门禁和 Goal 都保持 `blocked`；同一缺口必须派生为工作台 finding。验收表中的 Markdown 行内代码会在派生 Goal 前规范化为原始 shell 命令。工作台可为任何已登记版本的稳定功能 ID 复制 Goal 准备提示，但该提示不是执行授权：它只能要求智能体调用带 `--version <目标版本>` 的 `prepare-goal`，在 `blocked` 时停止，并在 `ready` 后读取 `goal-resume-context`；实现必须由开发者明确确认后才开始。默认 Goal 使用 `config.current_version`；显式 `--version` 时工具在内存中创建目标版本配置，独立解析该版本功能、需求、E2E、决策、任务图和 Ready 门禁，不写回 `.daoge-docs.json`，不重建当前工作台为历史版本，也不让历史 Gate、任务包或证据覆盖当前执行判断。Goal 清单绑定目标版本；`goal-status`、`goal-resume-context`、`goal-checkpoint` 和 `goal-complete` 必须从清单恢复该目标版本，而不能因为项目活动版本已前进而把清单标为 stale。
 
 ```text
 prepare-goal         已实现：从选定版本和功能生成 Goal 清单
-goal-status          已实现：检查清单防篡改、阻塞、权威摘要、Git 基线和过期状态
+goal-status          已实现：默认只读检查清单防篡改、阻塞、权威摘要、Git 基线和过期状态；--persist 才回写
 goal-plan            已实现：只读输出泳道、依赖和可执行任务状态
 goal-resume-context  已实现：只在恢复条件通过时输出指定或稳定排序的可执行任务上下文
 goal-checkpoint      已实现：检查提交、路径和命令后写入原子检查点与独立证据

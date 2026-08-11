@@ -1064,11 +1064,12 @@ class DaogeDocsTests(unittest.TestCase):
         code_path.write_text("def main():\n    return 0\n", encoding="utf-8")
         self.git("add", "src/task_cli.py")
         self.git("commit", "-qm", "add product code")
-        code_stale = json.loads(self.run_cli("check", "--root", ".", "--json", expected=1, vendored=True).stdout)
-        self.assertTrue(
-            any("产品文档浏览器-文档数据.js" in error for error in code_stale["错误"]),
-            code_stale,
-        )
+        # source_commit is index-run metadata.  An unrelated code commit must
+        # not force a second index commit when the derived semantic payload has
+        # not changed; an actual authority or declared engineering signal change
+        # above is still detected through the payload digest.
+        code_current = json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)
+        self.assertTrue(code_current["通过"], code_current)
 
     def test_utf8_server_and_reader_links_keep_markdown_chinese_readable(self) -> None:
         self.init()
@@ -1954,6 +1955,298 @@ class DaogeDocsTests(unittest.TestCase):
                 "docs/90-参考资料/产品文档浏览器-文档数据.js",
             )
         )
+
+    def test_project_inputs_constraints_assets_and_handoff(self) -> None:
+        self.init(profile="lean")
+        registry = self.root / "docs/01-项目概览/项目输入与约束注册表.json"
+        ledger = self.root / "docs/01-项目概览/项目输入与约束总账.md"
+        self.assertTrue(registry.exists())
+        self.assertTrue(ledger.exists())
+        ledger_text = ledger.read_text(encoding="utf-8")
+        self.assertIn("项目输入与约束注册表.json", ledger_text)
+        self.assertIn("来源引用 | 缺失原因", ledger_text)
+
+        rejected = self.run_cli(
+            "record-input",
+            "--root", ".",
+            "--title", "未确认输入",
+            "--summary", "需要责任人确认的原始陈述",
+            "--source-kind", "stakeholder_statement",
+            "--source-ref", "notes/meeting-001.md",
+            "--status", "confirmed",
+            expected=2,
+            vendored=True,
+        )
+        self.assertIn("confirmed 项目输入必须提供", rejected.stderr)
+        self.run_cli(
+            "record-input",
+            "--root", ".",
+            "--title", "观察输入",
+            "--summary", "尚未确认的原始陈述",
+            "--source-kind", "external_reference",
+            "--source-ref", "https://example.invalid/reference",
+            vendored=True,
+        )
+        rejected_constraint = self.run_cli(
+            "record-constraint",
+            "--root", ".",
+            "--title", "未确认硬约束",
+            "--kind", "hard_requirement",
+            "--value", "必须满足的条件",
+            "--source-input", "INPUT-001",
+            "--status", "confirmed",
+            "--confirmed-by", "确认人",
+            expected=2,
+            vendored=True,
+        )
+        self.assertIn("不能引用未确认输入", rejected_constraint.stderr)
+        self.run_cli(
+            "record-constraint",
+            "--root", ".",
+            "--title", "候选硬约束",
+            "--kind", "hard_requirement",
+            "--value", "必须满足的条件",
+            "--source-input", "INPUT-001",
+            vendored=True,
+        )
+        self.run_cli(
+            "update-input",
+            "--root", ".",
+            "--id", "INPUT-001",
+            "--status", "confirmed",
+            "--confirmed-by", "确认人",
+            vendored=True,
+        )
+        self.run_cli(
+            "update-constraint",
+            "--root", ".",
+            "--id", "CONSTRAINT-001",
+            "--status", "confirmed",
+            "--confirmed-by", "确认人",
+            vendored=True,
+        )
+        future = json.loads(
+            self.run_cli("new-future-version", "--root", ".", "--version", "V2", "--name", "扩展能力", vendored=True).stdout
+        )
+        self.assertTrue((self.root / future["正式规划入口"]).is_file())
+        self.run_cli(
+            "map-spec-coverage",
+            "--root", ".",
+            "--source", "INPUT-001",
+            "--disposition", "future_candidate",
+            "--version", "V2",
+            "--confirmed-by", "确认人",
+            vendored=True,
+        )
+        self.run_cli(
+            "map-spec-coverage",
+            "--root", ".",
+            "--source", "CONSTRAINT-001",
+            "--disposition", "future_candidate",
+            "--version", "V2",
+            "--confirmed-by", "确认人",
+            vendored=True,
+        )
+
+        source = self.root / "reference.txt"
+        source.write_text("可复核材料\n", encoding="utf-8")
+        self.run_cli(
+            "add-evidence-asset",
+            "--root", ".",
+            "--title", "已归档材料",
+            "--kind", "document",
+            "--source-ref", "reference.txt",
+            "--file", str(source),
+            "--redacted",
+            vendored=True,
+        )
+        self.run_cli(
+            "add-evidence-asset",
+            "--root", ".",
+            "--title", "缺失材料",
+            "--kind", "archive",
+            "--source-ref", "archive/request-001",
+            "--missing-reason", "原始材料尚未取得",
+            vendored=True,
+        )
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        self.assertEqual([item["id"] for item in data["inputs"]], ["INPUT-001"])
+        available = next(item for item in data["evidence_assets"] if item["status"] == "available")
+        archived = self.root / "docs" / available["path"]
+        self.assertTrue(archived.exists())
+        self.assertEqual(available["source_ref"], "reference.txt")
+        self.assertEqual(available["sha256"], load_cli_module().sha256_file(archived))
+        report = json.loads(self.run_cli("handoff", "--root", ".", vendored=True).stdout)
+        self.assertEqual(report["已确认输入"], ["INPUT-001"])
+        self.assertEqual(report["硬约束"], ["CONSTRAINT-001"])
+        self.assertEqual(report["未覆盖确认事实"], [])
+        self.assertEqual(report["缺失证据资产"], ["ASSET-002"])
+        self.assertEqual([item["status"] for item in report["证据资产"]], ["available", "missing_source_asset"])
+        delayed_source = self.root / "delayed-reference.txt"
+        delayed_source.write_text("后续取得的可复核材料\n", encoding="utf-8")
+        self.run_cli(
+            "resolve-evidence-asset",
+            "--root", ".",
+            "--id", "ASSET-002",
+            "--file", str(delayed_source),
+            "--source-ref", "archive/request-001/result",
+            vendored=True,
+        )
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        resolved = next(item for item in data["evidence_assets"] if item["id"] == "ASSET-002")
+        self.assertEqual(resolved["status"], "available")
+        self.assertIsNone(resolved["missing_reason"])
+        self.assertEqual(resolved["source_ref"], "archive/request-001/result")
+        self.assertEqual(json.loads(self.run_cli("handoff", "--root", ".", vendored=True).stdout)["缺失证据资产"], [])
+        check = json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)
+        self.assertFalse(any("项目输入" in error or "约束" in error or "证据资产" in error for error in check["错误"]))
+
+    def test_spec_coverage_authority_boundary_future_plan_and_root_navigation(self) -> None:
+        self.init()
+        root_readme = self.root / "README.md"
+        root_readme.write_text("# 项目导航\n\n[项目说明](docs/01-项目概览/项目说明.md)\n", encoding="utf-8")
+        self.assertTrue(json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)["通过"])
+
+        self.run_cli(
+            "record-input",
+            "--root", ".",
+            "--title", "确认范围输入",
+            "--summary", "经负责人确认，需要在后续版本建立可追溯规格。",
+            "--source-kind", "stakeholder_statement",
+            "--source-ref", "records/input-001.md",
+            "--status", "confirmed",
+            "--confirmed-by", "产品负责人",
+            vendored=True,
+        )
+        uncovered = json.loads(self.run_cli("check", "--root", ".", "--json", expected=1, vendored=True).stdout)
+        self.assertTrue(any("缺少规格覆盖" in error for error in uncovered["错误"]), uncovered)
+
+        created = json.loads(
+            self.run_cli("new-future-version", "--root", ".", "--version", "V2", "--name", "体验演进", vendored=True).stdout
+        )
+        future_entry = self.root / created["正式规划入口"]
+        self.assertEqual("V2-版本总览.md", future_entry.name)
+        self.assertTrue((future_entry.parent / "README.md").is_file())
+        self.run_cli(
+            "map-spec-coverage",
+            "--root", ".",
+            "--source", "INPUT-001",
+            "--disposition", "future_candidate",
+            "--version", "V2",
+            "--future-plan", created["正式规划入口"],
+            "--confirmed-by", "产品负责人",
+            vendored=True,
+        )
+        covered = json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)
+        self.assertTrue(covered["通过"], covered)
+        portfolio = self.browser_payload()["views"]["workbench"]["version_portfolio"]
+        v2 = next(item for item in portfolio["versions"] if item["id"] == "V2")
+        self.assertEqual("future", v2["role"])
+        self.assertTrue(v2["overview_path"].endswith("V2-版本总览.md"))
+
+        source = "docs/02-产品与版本/产品蓝图.md"
+        first = json.loads(
+            self.run_cli(
+                "register-authority",
+                "--root", ".",
+                "--scope", "product.direction",
+                "--fact-type", "product_direction",
+                "--source", source,
+                "--owner", "产品负责人",
+                vendored=True,
+            ).stdout
+        )
+        duplicate = self.run_cli(
+            "register-authority",
+            "--root", ".",
+            "--scope", "product.direction",
+            "--fact-type", "product_direction",
+            "--source", source,
+            "--owner", "产品负责人",
+            expected=2,
+            vendored=True,
+        )
+        self.assertIn("已有 active 权威", duplicate.stderr)
+        second = json.loads(
+            self.run_cli(
+                "register-authority",
+                "--root", ".",
+                "--scope", "product.direction",
+                "--fact-type", "product_direction",
+                "--source", source,
+                "--owner", "产品负责人",
+                "--supersedes", first["权威 ID"],
+                vendored=True,
+            ).stdout
+        )
+        registry = json.loads((self.root / "docs/01-项目概览/项目输入与约束注册表.json").read_text(encoding="utf-8"))
+        active = [item for item in registry["authority_scopes"] if item["status"] == "active"]
+        self.assertEqual([second["权威 ID"]], [item["id"] for item in active])
+
+        root_readme.write_text("# 项目导航\n\n[失效入口](docs/不存在.md)\n", encoding="utf-8")
+        broken = json.loads(self.run_cli("check", "--root", ".", "--json", expected=1, vendored=True).stdout)
+        self.assertTrue(any("README.md" in error and "链接失效" in error for error in broken["错误"]), broken)
+
+    def test_goal_status_is_read_only_unless_persist_is_explicit(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        prepared = json.loads(
+            self.run_cli("prepare-goal", "--root", ".", "--feature", "DOP-FR-001", "--goal-id", "GOAL-V1-220", vendored=True).stdout
+        )
+        manifest = self.root / ".daoge-docs" / "goals" / prepared["Goal ID"] / "goal-manifest.json"
+        before = manifest.read_bytes()
+        before_data = json.loads(before)
+        status = json.loads(self.run_cli("goal-status", "--root", ".", "--goal", prepared["Goal ID"], vendored=True).stdout)
+        self.assertEqual("read_only", status["查询模式"])
+        self.assertEqual(before, manifest.read_bytes())
+        persisted = json.loads(self.run_cli("goal-status", "--root", ".", "--goal", prepared["Goal ID"], "--persist", vendored=True).stdout)
+        self.assertEqual("persisted", persisted["查询模式"])
+        self.assertNotEqual(before, manifest.read_bytes())
+        after_data = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(1, after_data["status_check_sequence"])
+        self.assertEqual(before_data["manifest_digest"], after_data["manifest_digest"])
+        self.assertEqual(after_data["manifest_digest"], load_cli_module().goal_manifest_digest(after_data))
+
+    def test_generic_reliability_contracts(self) -> None:
+        module = load_cli_module()
+        self.assertFalse(module.PLACEHOLDER_RE.search("说明 TODO/WIP/DONE 文字"))
+        self.assertTrue(module.PLACEHOLDER_RE.search("TODO: 待处理"))
+        self.init()
+        collision_root = self.root / "collision"
+        collision = collision_root / "docs/99-历史归档/占用 ID.md"
+        collision.parent.mkdir(parents=True, exist_ok=True)
+        collision.write_text("---\ndoc_id: DOP-DOC-010-V1\n---\n# 历史记录\n", encoding="utf-8")
+        self.assertEqual(module.allocate_profile_doc_id(collision_root, {"project_code": "DOP", "docs_root": "docs"}, "V1", 10), "DOP-DOC-011-V1")
+
+        process = subprocess.Popen(
+            [PYTHON, str(self.root / ".daoge-docs/daoge_docs.py"), "serve", "--root", ".", "--port", "0"],
+            cwd=self.root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            output: list[str] = []
+            depth = 0
+            if process.stdout:
+                while True:
+                    line = process.stdout.readline()
+                    if not line:
+                        break
+                    output.append(line)
+                    depth += line.count("{") - line.count("}")
+                    if output and depth == 0:
+                        break
+            payload = json.loads("".join(output))
+            self.assertTrue(payload["地址"].startswith("http://127.0.0.1:"))
+            self.assertGreater(int(payload["地址"].rsplit(":", 1)[1]), 0)
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
 
 
 if __name__ == "__main__":

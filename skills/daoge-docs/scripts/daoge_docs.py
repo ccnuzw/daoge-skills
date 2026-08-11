@@ -31,7 +31,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.18.0"
+TOOL_VERSION = "3.20.0"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -58,6 +58,27 @@ RISKS = {"standard", "high"}
 PROFILES = {"lean", "standard", "strict"}
 EVIDENCE_TYPES = {"development", "e2e", "performance", "release"}
 REQUIREMENT_TYPES = {"NFR", "RG"}
+INPUT_STATUSES = {"observed", "confirmed", "rejected", "superseded"}
+INPUT_SOURCE_KINDS = {"stakeholder_statement", "repository", "external_reference", "experiment", "other"}
+CONSTRAINT_KINDS = {"hard_requirement", "soft_goal", "reference_observation"}
+EVIDENCE_ASSET_KINDS = {"image", "document", "archive", "recording", "binary", "other"}
+COVERAGE_DISPOSITIONS = {"current_scope", "future_candidate", "rejected", "superseded", "not_applicable"}
+AUTHORITY_STATUSES = {"active", "deprecated"}
+AUTHORITY_FACT_TYPES = {
+    "product_direction",
+    "cross_version_constraint",
+    "version_scope",
+    "version_requirement",
+    "feature_behavior",
+    "system_architecture",
+    "api_schema",
+    "data_physical_schema",
+    "data_semantics",
+    "implementation",
+    "test_strategy",
+    "security_baseline",
+    "release_eligibility",
+}
 
 # 技术栈发现只读取仓库特征，不执行用户项目的构建、安装或测试命令。
 # 输出的是待开发者确认的候选验证方式，权威命令仍必须写入功能规格的 AC。
@@ -77,8 +98,8 @@ FEATURE_HEADINGS = [
     "## 技术设计",
 ]
 PLACEHOLDER_RE = re.compile(
-    r"\{\{[A-Z0-9_]+\}\}|\[待(?:填写|确认|补充|决定|验证)[^\]]*\]|\bTODO\b|\bTBD\b",
-    re.IGNORECASE,
+    r"\{\{[A-Z0-9_]+\}\}|\[待(?:填写|确认|补充|决定|验证)[^\]]*\]|^\s*(?:[-*]\s*)?(?:TODO|TBD)(?:\s*[:：].*)?\s*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 AC_ROW_RE = re.compile(r"^\|\s*(AC\d{2,})\s*\|", re.MULTILINE)
@@ -94,6 +115,8 @@ STRUCTURED_SECTION_SCAFFOLDS = {
     "风险与应对": ["风险 ID", "领域/对象", "等级", "原因", "影响", "控制", "验证入口"],
     "功能与版本矩阵": ["里程碑 ID", "能力主线", "版本/阶段", "用户可感知变化", "依赖与边界", "完成判定", "状态与来源"],
     "兼容影响": ["关系 ID", "关系类型", "来源版本/里程碑", "目标版本/里程碑", "影响与处理", "状态与来源"],
+    "能力主线基线": ["能力主线 ID", "用户旅程", "价值与边界", "不变量", "来源/证据"],
+    "用户旅程基线": ["旅程 ID", "参与者", "触发", "成功结果", "失败/恢复", "跨版本约束"],
 }
 
 WORKBENCH_TABLE_CONTRACTS = {
@@ -529,11 +552,11 @@ def render_sections(sections: list) -> str:
     return "\n".join(blocks).rstrip()
 
 
-def render_profile_document(item: dict, config: dict, version: str, index: int) -> str:
+def render_profile_document(item: dict, config: dict, version: str, document_id: str) -> str:
     values = values_for(config, version)
     values.update(
         {
-            "DOC_ID": f"{config['project_code']}-DOC-{index:03d}-{version}",
+            "DOC_ID": document_id,
             "TITLE": render(str(item["title"]), values),
             "AUTHORITY": render(str(item["authority"]), values),
             "PURPOSE": render(str(item["purpose"]), values),
@@ -562,6 +585,27 @@ def render_profile_document(item: dict, config: dict, version: str, index: int) 
     return render(template, values)
 
 
+def allocate_profile_doc_id(root: Path, config: dict, version: str, preferred_index: int) -> str:
+    """保留初始编号的可读性，同时避免升级新增文档复用历史稳定 ID。"""
+    docs = docs_root(root, config)
+    existing: set[str] = set()
+    pattern = re.compile(rf"^{re.escape(config['project_code'])}-DOC-(\d{{3}})-{re.escape(version)}$")
+    for path in (docs.rglob("*.md") if docs.exists() else []):
+        match = re.search(r"^doc_id:\s*(\S+)", path.read_text(encoding="utf-8"), re.MULTILINE)
+        if match:
+            existing.add(match.group(1))
+    preferred = f"{config['project_code']}-DOC-{preferred_index:03d}-{version}"
+    if preferred not in existing:
+        return preferred
+    numbers = [int(match.group(1)) for item in existing if (match := pattern.fullmatch(item))]
+    next_number = max(numbers, default=preferred_index) + 1
+    while f"{config['project_code']}-DOC-{next_number:03d}-{version}" in existing:
+        next_number += 1
+    if next_number > 999:
+        raise DocsError(f"{config['project_code']} {version} 文档稳定 ID 已达到上限")
+    return f"{config['project_code']}-DOC-{next_number:03d}-{version}"
+
+
 def materialize_profile(root: Path, config: dict, version: str) -> tuple[list[str], list[str]]:
     target_docs = docs_root(root, config)
     created: list[str] = []
@@ -579,7 +623,8 @@ def materialize_profile(root: Path, config: dict, version: str) -> tuple[list[st
             skipped.append(str(destination.relative_to(root)))
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(render_profile_document(item, config, version, index), encoding="utf-8")
+        document_id = allocate_profile_doc_id(root, config, version, index)
+        destination.write_text(render_profile_document(item, config, version, document_id), encoding="utf-8")
         created.append(str(destination.relative_to(root)))
     return created, skipped
 
@@ -780,6 +825,194 @@ def current_e2e_documents(root: Path, config: dict) -> list[dict]:
 def decisions_path(root: Path, config: dict, version: str | None = None) -> Path:
     selected = version or str(config["current_version"])
     return docs_root(root, config) / "06-决策记录" / f"{selected}-冻结决策注册表.json"
+
+
+def project_inputs_path(root: Path, config: dict) -> Path:
+    """项目输入、约束、交付制品与证据资产的唯一机器权威。"""
+    return docs_root(root, config) / "01-项目概览" / "项目输入与约束注册表.json"
+
+
+def ensure_project_inputs(root: Path, config: dict) -> Path:
+    path = project_inputs_path(root, config)
+    if not path.exists():
+        write_json(
+            path,
+            {
+                "schema_version": 2,
+                "inputs": [],
+                "constraints": [],
+                "evidence_assets": [],
+                "coverage": [],
+                "authority_scopes": [],
+            },
+        )
+    else:
+        data = read_json(path, "项目输入与约束注册表")
+        if data.get("schema_version") == 1:
+            # 3.20 only appends governance collections.  Existing facts retain
+            # their IDs and values, so upgrade never rewrites project decisions.
+            data["schema_version"] = 2
+            data.setdefault("coverage", [])
+            data.setdefault("authority_scopes", [])
+            write_json(path, data)
+    return path
+
+
+def project_inputs(root: Path, config: dict) -> dict:
+    path = project_inputs_path(root, config)
+    if not path.exists():
+        raise DocsError(f"缺少项目输入与约束注册表：{path}；请运行 upgrade")
+    data = read_json(path, "项目输入与约束注册表")
+    for key in ["inputs", "constraints", "evidence_assets", "coverage", "authority_scopes"]:
+        if not isinstance(data.get(key), list):
+            raise DocsError(f"项目输入与约束注册表 {key} 必须是数组：{path}")
+    return data
+
+
+def next_prefixed_id(records: Iterable[dict], prefix: str) -> str:
+    pattern = re.compile(rf"^{re.escape(prefix)}-(\d{{3}})$")
+    numbers = [int(match.group(1)) for item in records if isinstance(item, dict) and (match := pattern.fullmatch(str(item.get("id", ""))))]
+    number = max(numbers, default=0) + 1
+    if number > 999:
+        raise DocsError(f"{prefix} 编号已达到上限")
+    return f"{prefix}-{number:03d}"
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def markdown_cell(value: object) -> str:
+    return str(value or "").replace("|", r"\|").replace("\n", " ").strip()
+
+
+def input_by_id(data: dict) -> dict[str, dict]:
+    return {
+        str(item.get("id", "")): item
+        for item in data.get("inputs", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+
+
+def constraint_by_id(data: dict) -> dict[str, dict]:
+    return {
+        str(item.get("id", "")): item
+        for item in data.get("constraints", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+
+
+def source_record_by_id(data: dict, source_id: str) -> dict | None:
+    return input_by_id(data).get(source_id) or constraint_by_id(data).get(source_id)
+
+
+def stable_csv(value: str) -> list[str]:
+    """Parse a command-line ID list deterministically without accepting blanks."""
+    return sorted(set(list_field(value)))
+
+
+def normalized_project_relative_path(root: Path, value: str, label: str, require_file: bool = True) -> str:
+    relative = Path(value.strip())
+    if not value.strip() or relative.is_absolute() or ".." in relative.parts:
+        raise DocsError(f"{label}必须是项目根目录内的相对路径：{value!r}")
+    target = (root / relative).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise DocsError(f"{label}越出项目根目录：{value!r}") from exc
+    if require_file and not target.is_file():
+        raise DocsError(f"{label}不是已存在的普通文件：{value}")
+    return relative.as_posix()
+
+
+def record_by_id(records: Iterable[dict], record_id: str) -> dict | None:
+    for item in records:
+        if isinstance(item, dict) and str(item.get("id", "")) == record_id:
+            return item
+    return None
+
+
+def render_project_inputs_ledger(root: Path, config: dict) -> str:
+    """从结构化注册表派生跨会话可读的输入、覆盖和权威总账。"""
+    data = project_inputs(root, config)
+    inputs = [item for item in data["inputs"] if isinstance(item, dict)]
+    constraints = [item for item in data["constraints"] if isinstance(item, dict)]
+    assets = [item for item in data["evidence_assets"] if isinstance(item, dict)]
+    coverage = [item for item in data["coverage"] if isinstance(item, dict)]
+    authority_scopes = [item for item in data["authority_scopes"] if isinstance(item, dict)]
+
+    def rows(records: list[dict], columns: list[str], empty: str) -> str:
+        if not records:
+            return f"| {empty} |" + " |" * (len(columns) - 1)
+        return "\n".join("| " + " | ".join(markdown_cell(item.get(column, "")) or "-" for column in columns) + " |" for item in records)
+
+    input_columns = ["id", "title", "status", "source_kind", "source_ref", "confirmed_by", "updated"]
+    constraint_columns = ["id", "title", "kind", "value", "source_input", "status", "confirmed_by", "updated"]
+    asset_columns = ["id", "title", "kind", "status", "path", "sha256", "source_input", "source_ref", "missing_reason", "updated"]
+    coverage_columns = ["id", "source_id", "disposition", "version", "requirement_ids", "feature_ids", "e2e_ids", "future_plan", "rationale", "confirmed_by", "updated"]
+    authority_columns = ["id", "scope", "fact_type", "source", "owner", "status", "supersedes", "updated"]
+    return f"""<!-- generated by daoge-docs; 请通过输入、约束、资产、规格覆盖和权威边界命令修改注册表后运行 index，不要直接编辑 -->
+---
+doc_id: {config['project_code']}-DOC-INPUTS
+status: ready
+owner: project-owner
+updated: {today()}
+authority: 项目输入、约束分类和证据资产的可读派生总账；机器权威为项目输入与约束注册表
+---
+
+# 项目输入与约束总账
+
+本文用于跨会话恢复项目事实。唯一机器权威为 `01-项目概览/项目输入与约束注册表.json`；本文只读派生，不能直接改写。
+
+## 项目输入
+
+| ID | 标题 | 状态 | 来源类型 | 来源引用 | 确认人 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- |
+{rows(inputs, input_columns, "暂无已登记项目输入")}
+
+## 约束分类
+
+    `hard_requirement` 表示必须满足；`soft_goal` 表示优化方向；`reference_observation` 只记录外部观察，不能自动成为验收条件。引用 `observed` 输入的硬性约束必须先完成确认。
+
+| ID | 标题 | 类型 | 内容/数值 | 来源输入 | 状态 | 确认人 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+{rows(constraints, constraint_columns, "暂无已登记约束")}
+
+## 证据资产
+
+资产状态 `available` 表示文件已归档并校验摘要；`missing_source_asset` 表示观察已登记但原始材料未取得。材料中的秘密、个人数据和受版权限制内容必须在归档前脱敏并确认授权。
+
+| ID | 标题 | 类型 | 状态 | 归档路径 | SHA-256 | 来源输入 | 来源引用 | 缺失原因 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{rows(assets, asset_columns, "暂无已登记证据资产")}
+
+## 规格覆盖
+
+已确认输入和硬性约束必须映射到当前版本的稳定需求，或映射到一份正式后续版本规划；只有明确记录理由和确认人的拒绝、替代或不适用结论可以关闭覆盖。`future_candidate` 不是当前开发授权。
+
+| ID | 来源 | 处理结论 | 目标版本 | 需求 | 功能 | E2E | 后续规划 | 理由 | 确认人 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{rows(coverage, coverage_columns, "暂无规格覆盖映射")}
+
+## 权威边界
+
+每个 `范围键 + 事实类型` 只能有一项 `active` 权威。来源可以是项目内 Markdown、OpenAPI、迁移、代码或其他可复核文件；派生索引和机器证据不得登记为产品或规格权威。
+
+| ID | 范围键 | 事实类型 | 唯一来源 | 负责人 | 状态 | 替代对象 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+{rows(authority_scopes, authority_columns, "暂无已登记权威边界")}
+
+## 跨会话恢复
+
+1. 阅读本文和机器注册表，先区分已确认输入、外部观察与缺失资产。
+2. 仅将 `confirmed` 输入和 `hard_requirement` 作为规格冻结候选；外部观察必须经项目确认后才可成为需求。
+3. 先检查每项确认事实的规格覆盖，再读取对应版本、需求、功能、AC 和 E2E 的权威来源。
+4. 任何新增输入、约束、覆盖或权威边界均须重新运行 `index`、`check` 和受影响 Gate。
+"""
 
 
 def ensure_decisions(root: Path, config: dict, version: str) -> Path:
@@ -1330,11 +1563,45 @@ def svg_flow(title: str, labels: list[str], subtitle: str) -> str:
     return "\n".join(blocks) + "\n"
 
 
-def future_version_documents(root: Path, config: dict) -> list[Path]:
+def future_version_plan_records(root: Path, config: dict) -> list[dict]:
+    """Discover one explicit planning entry per future version.
+
+    New projects use ``后续版本/Vn-名称/Vn-版本总览.md``.  The legacy flat
+    ``后续版本/Vn-名称.md`` shape remains readable so an upgrade never loses
+    an existing planning decision.  Supplementary files under a planning
+    directory are intentionally not treated as a second version authority.
+    """
     base = docs_root(root, config) / "02-产品与版本" / "后续版本"
     if not base.exists():
         return []
-    return [path for path in sorted(base.glob("V*-*.md")) if path.name != "README.md"]
+    candidates: set[Path] = {
+        path for path in base.glob("V*-*.md") if path.name != "README.md"
+    }
+    candidates.update(path for path in base.rglob("V*-版本总览.md") if path.name != "README.md")
+    records: list[dict] = []
+    for path in sorted(candidates):
+        text = path.read_text(encoding="utf-8")
+        meta = parse_frontmatter(text)
+        version = str(meta.get("version", "")).strip().upper()
+        if not version:
+            match = re.match(r"^(V\d+)-", path.name, re.IGNORECASE)
+            version = match.group(1).upper() if match else ""
+        if not re.fullmatch(r"V\d+", version):
+            continue
+        records.append(
+            {
+                "version": version,
+                "path": path,
+                "status": str(meta.get("status", "planning")),
+                "title": markdown_title(text),
+                "formal": path.name == f"{version}-版本总览.md",
+            }
+        )
+    return records
+
+
+def future_version_documents(root: Path, config: dict) -> list[Path]:
+    return [item["path"] for item in future_version_plan_records(root, config)]
 
 
 def registered_version_rows(root: Path, config: dict) -> list[dict]:
@@ -1358,6 +1625,10 @@ def registered_version_ids(root: Path, config: dict) -> list[str]:
         for version_id in sorted(discovered, key=lambda value: (int(value[1:]), value)):
             if version_id not in ids:
                 ids.append(version_id)
+    for plan in future_version_plan_records(root, config):
+        version_id = str(plan["version"])
+        if version_id not in ids:
+            ids.append(version_id)
     current = str(config["current_version"]).upper()
     if current not in ids:
         ids.insert(0, current)
@@ -3394,6 +3665,44 @@ def browser_version_portfolio(root: Path, config: dict, documents: list[dict]) -
                 ],
             }
         )
+        seen.add(str(config["current_version"]))
+
+    # A formal future plan is useful before the roadmap has been frozen.  It is
+    # shown as an isolated planning card, never as active execution scope or
+    # implementation evidence.  Once the roadmap registers the same version,
+    # the plan enriches that card instead of duplicating version facts.
+    cards_by_id = {str(item.get("id", "")): item for item in cards}
+    for plan in future_version_plan_records(root, config):
+        version_id = str(plan["version"])
+        relative = plan["path"].relative_to(docs_root(root, config)).as_posix()
+        source = browser_source(relative, "版本总览", version_id, f"{version_id} 后续版本规划入口")
+        existing = cards_by_id.get(version_id)
+        if existing:
+            if not existing.get("overview_path"):
+                existing["overview_path"] = relative
+            if not existing.get("goal"):
+                existing["goal"] = str(plan["title"])
+            if existing.get("planning_status") in {"", "unknown"}:
+                existing["planning_status"] = str(plan["status"])
+            if source not in existing.get("sources", []):
+                existing.setdefault("sources", []).append(source)
+            continue
+        card = {
+            "id": version_id,
+            "order": len(cards),
+            "role": "future",
+            "goal": str(plan["title"]),
+            "planning_status": str(plan["status"]),
+            "prerequisites": "未在版本路线图登记",
+            "exit_condition": "未在版本路线图登记",
+            "overview_path": relative,
+            "feature_count": 0,
+            "features": [],
+            "delivery": {"specification": "unknown", "implementation": "unknown", "verification": "unknown"},
+            "sources": [source],
+        }
+        cards.append(card)
+        cards_by_id[version_id] = card
     return {
         "status": "ready" if cards and table["status"] == "ready" else "unknown",
         "active_execution_version": str(config["current_version"]),
@@ -4046,30 +4355,6 @@ def browser_data_semantic_payload(content: str) -> dict | None:
     return payload
 
 
-def browser_data_commit_advance_is_index_owned(root: Path, config: dict, payload: dict) -> bool:
-    source_commit = str(payload.get("source_commit", ""))
-    current_commit = git_head(root) or ""
-    if not source_commit or not current_commit or source_commit == current_commit:
-        return True
-    result = subprocess.run(
-        ["git", "-c", "core.quotepath=false", "diff", "--name-only", source_commit, current_commit],
-        cwd=root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return False
-    generated = goal_generated_paths(root, config)
-    index_owned_prefixes = (".daoge-docs/assets/",)
-    index_owned_files = {CONFIG_NAME, ".daoge-docs/daoge_docs.py"}
-    changed = [path.strip() for path in result.stdout.splitlines() if path.strip()]
-    return all(
-        path in generated or path in index_owned_files or path.startswith(index_owned_prefixes)
-        for path in changed
-    )
-
-
 def generated_document_is_current(root: Path, config: dict, path: Path, actual: str, expected: str) -> bool:
     if actual == expected:
         return True
@@ -4082,7 +4367,6 @@ def generated_document_is_current(root: Path, config: dict, path: Path, actual: 
         raw_actual_payload is not None
         and actual_payload is not None
         and actual_payload == expected_payload
-        and browser_data_commit_advance_is_index_owned(root, config, raw_actual_payload)
     )
 
 
@@ -4108,6 +4392,7 @@ def generated_documents(root: Path, config: dict) -> dict[Path, str]:
     docs = docs_root(root, config)
     version = str(config["current_version"])
     candidates = {
+        docs / "01-项目概览" / "项目输入与约束总账.md": render_project_inputs_ledger(root, config),
         docs / "03-功能规格" / version / "README.md": render_feature_index(root, config),
         docs / "03-功能规格" / version / "功能查找表.md": render_feature_lookup(root, config),
         docs / "03-功能规格" / version / "功能风险分级.md": render_risk_index(root, config),
@@ -4178,6 +4463,8 @@ def command_init(args: argparse.Namespace) -> dict:
     created.append(str(requirements_path(root, config, version).relative_to(root)))
     ensure_decisions(root, config, version)
     created.append(str(decisions_path(root, config, version).relative_to(root)))
+    ensure_project_inputs(root, config)
+    created.append(str(project_inputs_path(root, config).relative_to(root)))
     evidence_selector = root / ".daoge-docs" / "evidence.json"
     if not evidence_selector.exists():
         write_json(
@@ -4224,6 +4511,7 @@ def command_upgrade(args: argparse.Namespace) -> dict:
     created.extend(doc_created)
     skipped.extend(doc_skipped)
     ensure_requirements(root, config, str(config["current_version"]))
+    ensure_project_inputs(root, config)
     write_json(root / CONFIG_NAME, config)
     generated = generate_indexes(root, config)
     return {
@@ -4306,12 +4594,19 @@ def command_new_version(args: argparse.Namespace) -> dict:
 def command_new_future_version(args: argparse.Namespace) -> dict:
     root = project_root(args.root)
     config = load_config(root)
-    version = safe_segment(args.version, "后续版本号")
+    version = safe_segment(args.version, "后续版本号").upper()
+    if not re.fullmatch(r"V\d+", version):
+        raise DocsError("后续版本号必须使用 V 加正整数，例如 V2")
     if version == str(config["current_version"]):
         raise DocsError("后续版本不能与当前版本相同；需要建立活动版本空间时使用 new-version")
+    if any(item["version"] == version for item in future_version_plan_records(root, config)):
+        raise DocsError(f"{version} 已有后续版本规划入口；如需变更请更新该权威文档或建立替代关系")
     name = safe_segment(args.name, "后续版本名称")
-    path = docs_root(root, config) / "02-产品与版本" / "后续版本" / f"{version}-{name}.md"
+    directory = docs_root(root, config) / "02-产品与版本" / "后续版本" / f"{version}-{name}"
+    path = directory / f"{version}-版本总览.md"
+    readme = directory / "README.md"
     content = f"""---
+doc_id: {config['project_code']}-FUTURE-{version}
 version: {version}
 status: planning
 owner: unassigned
@@ -4319,7 +4614,9 @@ updated: {today()}
 authority: {version} 规划范围、依赖和进入开发条件
 ---
 
-# {version} {args.name.strip()}
+# {version} {args.name.strip()}版本总览
+
+> 本文是后续版本的唯一规划入口，不是当前版本开发授权。将候选推进为稳定需求前，必须在版本路线图登记版本顺序，并使用 `new-version` 建立独立的活动版本空间。
 
 ## 版本定位
 
@@ -4370,8 +4667,29 @@ authority: {version} 规划范围、依赖和进入开发条件
 - [ ] 高风险决策已经冻结，版本负责人完成批准。
 """
     write_new(path, content)
+    write_new(
+        readme,
+        f"""---
+doc_id: {config['project_code']}-FUTURE-{version}-NAV
+status: planning
+owner: unassigned
+updated: {today()}
+authority: {version} 后续版本规划目录导航
+---
+
+# {version} {args.name.strip()}规划目录
+
+本目录只保存 {version} 的规划材料。唯一版本规划入口为 [{version} 版本总览]({path.name})；补充调研必须链接回该入口，不能形成第二份范围定义。
+""",
+    )
     generate_indexes(root, config)
-    return {"状态": "已创建后续版本规划", "版本": version, "文件": str(path.relative_to(root))}
+    return {
+        "状态": "已创建后续版本规划",
+        "版本": version,
+        "正式规划入口": str(path.relative_to(root)),
+        "目录导航": str(readme.relative_to(root)),
+        "下一步": "在版本路线图登记目标、前置与退出条件；候选成熟后使用 new-version 建立独立版本空间。",
+    }
 
 
 def command_new_architecture_spec(args: argparse.Namespace) -> dict:
@@ -4507,6 +4825,476 @@ review_after: {args.review_after}
     write_new(path, content)
     generate_indexes(root, config)
     return {"状态": "已创建非权威参考资料", "文件": str(path.relative_to(root))}
+
+
+def command_record_input(args: argparse.Namespace) -> dict:
+    """登记来自利益相关方、仓库或外部材料的项目输入，不直接把观察升级为需求。"""
+    root = project_root(args.root)
+    config = load_config(root)
+    source_kind = args.source_kind.strip()
+    status = args.status.strip()
+    if source_kind not in INPUT_SOURCE_KINDS:
+        raise DocsError("输入来源类型无效：" + ", ".join(sorted(INPUT_SOURCE_KINDS)))
+    if status not in INPUT_STATUSES:
+        raise DocsError("输入状态无效：" + ", ".join(sorted(INPUT_STATUSES)))
+    if status == "confirmed" and not args.confirmed_by.strip():
+        raise DocsError("confirmed 项目输入必须提供 --confirmed-by，工具不会自行确认")
+    if not args.title.strip() or not args.summary.strip() or not args.source_ref.strip():
+        raise DocsError("项目输入的标题、摘要和来源引用不能为空")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    inputs = data.setdefault("inputs", [])
+    if not isinstance(inputs, list):
+        raise DocsError(f"项目输入与约束注册表 inputs 必须是数组：{path}")
+    input_id = next_prefixed_id(inputs, "INPUT")
+    inputs.append(
+        {
+            "id": input_id,
+            "title": args.title.strip(),
+            "summary": args.summary.strip(),
+            "status": status,
+            "source_kind": source_kind,
+            "source_ref": args.source_ref.strip(),
+            "confirmed_by": args.confirmed_by.strip() or None,
+            "confirmed_at": now_iso() if status == "confirmed" else None,
+            "updated": today(),
+        }
+    )
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {"状态": "已登记项目输入", "输入 ID": input_id, "注册表": str(path.relative_to(root))}
+
+
+def command_record_constraint(args: argparse.Namespace) -> dict:
+    """登记规格约束，并显式区分硬要求、软目标和外部观察。"""
+    root = project_root(args.root)
+    config = load_config(root)
+    kind = args.kind.strip()
+    status = args.status.strip()
+    if kind not in CONSTRAINT_KINDS:
+        raise DocsError("约束类型无效：" + ", ".join(sorted(CONSTRAINT_KINDS)))
+    if status not in INPUT_STATUSES:
+        raise DocsError("约束状态无效：" + ", ".join(sorted(INPUT_STATUSES)))
+    if status == "confirmed" and not args.confirmed_by.strip():
+        raise DocsError("confirmed 项目约束必须提供 --confirmed-by，工具不会自行确认")
+    if not args.title.strip() or not args.value.strip():
+        raise DocsError("项目约束的标题和内容不能为空")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    source_input = args.source_input.strip() or "none"
+    if source_input != "none" and source_input not in input_by_id(data):
+        raise DocsError(f"约束引用的项目输入不存在：{source_input}")
+    if (
+        kind == "hard_requirement"
+        and status == "confirmed"
+        and source_input != "none"
+        and input_by_id(data)[source_input].get("status") != "confirmed"
+    ):
+        raise DocsError(f"确认硬性约束不能引用未确认输入：{source_input}；先确认该输入或保留约束为 observed")
+    constraints = data.setdefault("constraints", [])
+    if not isinstance(constraints, list):
+        raise DocsError(f"项目输入与约束注册表 constraints 必须是数组：{path}")
+    constraint_id = next_prefixed_id(constraints, "CONSTRAINT")
+    constraints.append(
+        {
+            "id": constraint_id,
+            "title": args.title.strip(),
+            "kind": kind,
+            "value": args.value.strip(),
+            "source_input": source_input,
+            "status": status,
+            "confirmed_by": args.confirmed_by.strip() or None,
+            "confirmed_at": now_iso() if status == "confirmed" else None,
+            "updated": today(),
+        }
+    )
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {"状态": "已登记项目约束", "约束 ID": constraint_id, "注册表": str(path.relative_to(root))}
+
+
+def command_update_input(args: argparse.Namespace) -> dict:
+    """在保留稳定 ID 与原始来源的前提下更新项目输入状态。"""
+    root = project_root(args.root)
+    config = load_config(root)
+    input_id = args.input_id.strip()
+    status = args.status.strip()
+    if status not in INPUT_STATUSES:
+        raise DocsError("输入状态无效：" + ", ".join(sorted(INPUT_STATUSES)))
+    if status == "confirmed" and not args.confirmed_by.strip():
+        raise DocsError("confirmed 项目输入必须提供 --confirmed-by，工具不会自行确认")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    record = record_by_id(data.get("inputs", []), input_id)
+    if record is None:
+        raise DocsError(f"项目输入不存在：{input_id}")
+    record["status"] = status
+    if status == "confirmed":
+        record["confirmed_by"] = args.confirmed_by.strip()
+        record["confirmed_at"] = now_iso()
+    record["updated"] = today()
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {"状态": "已更新项目输入", "输入 ID": input_id, "输入状态": status, "注册表": str(path.relative_to(root))}
+
+
+def command_update_constraint(args: argparse.Namespace) -> dict:
+    """在保留稳定 ID 与来源链的前提下更新项目约束状态。"""
+    root = project_root(args.root)
+    config = load_config(root)
+    constraint_id = args.constraint_id.strip()
+    status = args.status.strip()
+    if status not in INPUT_STATUSES:
+        raise DocsError("约束状态无效：" + ", ".join(sorted(INPUT_STATUSES)))
+    if status == "confirmed" and not args.confirmed_by.strip():
+        raise DocsError("confirmed 项目约束必须提供 --confirmed-by，工具不会自行确认")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    record = record_by_id(data.get("constraints", []), constraint_id)
+    if record is None:
+        raise DocsError(f"项目约束不存在：{constraint_id}")
+    source_input = str(record.get("source_input", "none"))
+    if (
+        record.get("kind") == "hard_requirement"
+        and status == "confirmed"
+        and source_input != "none"
+        and input_by_id(data).get(source_input, {}).get("status") != "confirmed"
+    ):
+        raise DocsError(f"确认硬性约束不能引用未确认输入：{source_input}；先确认该输入或保留约束为 observed")
+    record["status"] = status
+    if status == "confirmed":
+        record["confirmed_by"] = args.confirmed_by.strip()
+        record["confirmed_at"] = now_iso()
+    record["updated"] = today()
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {"状态": "已更新项目约束", "约束 ID": constraint_id, "约束状态": status, "注册表": str(path.relative_to(root))}
+
+
+def command_add_evidence_asset(args: argparse.Namespace) -> dict:
+    """将可长期保存的调研材料归档，或显式登记尚未取得的原始材料。"""
+    root = project_root(args.root)
+    config = load_config(root)
+    kind = args.kind.strip()
+    if kind not in EVIDENCE_ASSET_KINDS:
+        raise DocsError("证据资产类型无效：" + ", ".join(sorted(EVIDENCE_ASSET_KINDS)))
+    if not args.title.strip():
+        raise DocsError("证据资产标题不能为空")
+    if not args.source_ref.strip():
+        raise DocsError("证据资产必须提供 --source-ref，以保留原始来源")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    source_input = args.source_input.strip() or "none"
+    if source_input != "none" and source_input not in input_by_id(data):
+        raise DocsError(f"证据资产引用的项目输入不存在：{source_input}")
+    assets = data.setdefault("evidence_assets", [])
+    if not isinstance(assets, list):
+        raise DocsError(f"项目输入与约束注册表 evidence_assets 必须是数组：{path}")
+    asset_id = next_prefixed_id(assets, "ASSET")
+    record = {
+        "id": asset_id,
+        "title": args.title.strip(),
+        "kind": kind,
+        "source_input": source_input,
+        "source_ref": args.source_ref.strip(),
+        "redacted": bool(args.redacted),
+        "updated": today(),
+    }
+    if args.file:
+        source = Path(args.file).expanduser()
+        if not source.is_file():
+            raise DocsError(f"证据资产不是可读取的普通文件：{source}")
+        suffix = source.suffix.lower()
+        target_dir = docs_root(root, config) / "90-参考资料" / "证据资产"
+        target = target_dir / f"{asset_id}-{safe_segment(args.title, '证据资产')}{suffix}"
+        if target.exists():
+            raise DocsError(f"证据资产目标已存在：{target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        record.update(
+            {
+                "status": "available",
+                "path": target.relative_to(docs_root(root, config)).as_posix(),
+                "sha256": sha256_file(target),
+                "missing_reason": None,
+            }
+        )
+    else:
+        if not args.missing_reason.strip():
+            raise DocsError("缺失证据资产必须提供 --missing-reason")
+        record.update(
+            {
+                "status": "missing_source_asset",
+                "path": None,
+                "sha256": None,
+                "missing_reason": args.missing_reason.strip(),
+            }
+        )
+    assets.append(record)
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {
+        "状态": "已登记证据资产",
+        "资产 ID": asset_id,
+        "资产状态": record["status"],
+        "注册表": str(path.relative_to(root)),
+        "归档路径": record.get("path"),
+    }
+
+
+def command_resolve_evidence_asset(args: argparse.Namespace) -> dict:
+    """将已登记的缺失证据资产补齐为可校验归档材料。"""
+    root = project_root(args.root)
+    config = load_config(root)
+    asset_id = args.asset_id.strip()
+    if not args.source_ref.strip():
+        raise DocsError("补齐证据资产必须提供 --source-ref，以保留实际材料来源")
+    source = Path(args.file).expanduser()
+    if not source.is_file():
+        raise DocsError(f"证据资产不是可读取的普通文件：{source}")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    record = record_by_id(data.get("evidence_assets", []), asset_id)
+    if record is None:
+        raise DocsError(f"证据资产不存在：{asset_id}")
+    if record.get("status") != "missing_source_asset":
+        raise DocsError(f"只有 missing_source_asset 可补齐：{asset_id}")
+    suffix = source.suffix.lower()
+    target_dir = docs_root(root, config) / "90-参考资料" / "证据资产"
+    target = target_dir / f"{asset_id}-{safe_segment(str(record.get('title', '证据资产')), '证据资产')}{suffix}"
+    if target.exists():
+        raise DocsError(f"证据资产目标已存在：{target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    record.update(
+        {
+            "status": "available",
+            "path": target.relative_to(docs_root(root, config)).as_posix(),
+            "sha256": sha256_file(target),
+            "missing_reason": None,
+            "source_ref": args.source_ref.strip(),
+            "redacted": bool(args.redacted),
+            "updated": today(),
+        }
+    )
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {"状态": "已补齐证据资产", "资产 ID": asset_id, "归档路径": record["path"], "注册表": str(path.relative_to(root))}
+
+
+def command_map_spec_coverage(args: argparse.Namespace) -> dict:
+    """Map a confirmed input or hard constraint to an explicit specification outcome."""
+    root = project_root(args.root)
+    config = load_config(root)
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    source_id = args.source.strip().upper()
+    source = source_record_by_id(data, source_id)
+    if source is None:
+        raise DocsError(f"规格覆盖引用未知输入或约束：{source_id}")
+    if source.get("status") != "confirmed":
+        raise DocsError(f"只有 confirmed 输入或约束可以建立规格覆盖：{source_id}")
+    disposition = args.disposition.strip()
+    if disposition not in COVERAGE_DISPOSITIONS:
+        raise DocsError("规格覆盖处理结论无效：" + ", ".join(sorted(COVERAGE_DISPOSITIONS)))
+    if not args.confirmed_by.strip():
+        raise DocsError("规格覆盖必须提供 --confirmed-by；工具不会自行确认范围结论")
+    requirement_ids = stable_csv(args.requirements)
+    feature_ids = stable_csv(args.features)
+    e2e_ids = stable_csv(args.e2e)
+    version = args.version.strip().upper()
+    rationale = args.rationale.strip()
+    future_plan = ""
+    current_version = str(config["current_version"]).upper()
+
+    if disposition == "current_scope":
+        if version != current_version:
+            raise DocsError(f"current_scope 必须映射到当前版本 {current_version}")
+        if not requirement_ids:
+            raise DocsError("current_scope 必须至少映射一个稳定需求 ID")
+        known_requirements = {str(item.get("id", "")) for item in requirement_records(root, config)}
+        unknown = sorted(set(requirement_ids) - known_requirements)
+        if unknown:
+            raise DocsError(f"规格覆盖引用当前版本未知需求：{', '.join(unknown)}")
+        known_features = {str(item.get("meta", {}).get("id", "")) for item in feature_documents(root, config)}
+        unknown_features = sorted(set(feature_ids) - known_features)
+        if unknown_features:
+            raise DocsError(f"规格覆盖引用当前版本未知功能：{', '.join(unknown_features)}")
+        known_e2e = {str(item.get("meta", {}).get("id", "")) for item in current_e2e_documents(root, config)}
+        unknown_e2e = sorted(set(e2e_ids) - known_e2e)
+        if unknown_e2e:
+            raise DocsError(f"规格覆盖引用当前版本未知 E2E：{', '.join(unknown_e2e)}")
+    elif disposition == "future_candidate":
+        if not version or version == current_version:
+            raise DocsError("future_candidate 必须指定非当前版本，例如 --version V2")
+        plans = [item for item in future_version_plan_records(root, config) if item["version"] == version]
+        if len(plans) != 1:
+            raise DocsError(f"future_candidate 必须映射到唯一正式后续版本规划：{version}")
+        future_plan = plans[0]["path"].relative_to(root).as_posix()
+        if args.future_plan.strip():
+            declared = normalized_project_relative_path(root, args.future_plan, "后续版本规划文件")
+            if declared != future_plan:
+                raise DocsError(f"--future-plan 必须指向 {version} 的正式规划入口：{future_plan}")
+        if requirement_ids or feature_ids or e2e_ids:
+            raise DocsError("future_candidate 只能保留候选范围，不能提前绑定当前稳定需求、功能或 E2E")
+    else:
+        if version or requirement_ids or feature_ids or e2e_ids or args.future_plan.strip():
+            raise DocsError(f"{disposition} 覆盖不能继续声明当前或后续规格目标")
+        if not rationale:
+            raise DocsError(f"{disposition} 覆盖必须提供 --rationale，保留处理依据")
+
+    if source_id.startswith("CONSTRAINT-") and source.get("kind") == "hard_requirement" and disposition in {"rejected", "not_applicable"}:
+        raise DocsError("confirmed hard_requirement 不能标记为 rejected 或 not_applicable；请映射当前/后续规格，或以 superseded 保留替代关系")
+
+    coverage = data.setdefault("coverage", [])
+    if not isinstance(coverage, list):
+        raise DocsError(f"项目输入与约束注册表 coverage 必须是数组：{path}")
+    fingerprint = (source_id, disposition, version, tuple(requirement_ids), tuple(feature_ids), tuple(e2e_ids), future_plan)
+    for item in coverage:
+        if not isinstance(item, dict):
+            continue
+        existing = (
+            str(item.get("source_id", "")),
+            str(item.get("disposition", "")),
+            str(item.get("version", "")),
+            tuple(item.get("requirement_ids", []) if isinstance(item.get("requirement_ids"), list) else []),
+            tuple(item.get("feature_ids", []) if isinstance(item.get("feature_ids"), list) else []),
+            tuple(item.get("e2e_ids", []) if isinstance(item.get("e2e_ids"), list) else []),
+            str(item.get("future_plan", "")),
+        )
+        if existing == fingerprint:
+            raise DocsError(f"相同规格覆盖已存在：{item.get('id', '未知')}")
+    coverage_id = next_prefixed_id(coverage, "COVERAGE")
+    coverage.append(
+        {
+            "id": coverage_id,
+            "source_id": source_id,
+            "disposition": disposition,
+            "version": version or None,
+            "requirement_ids": requirement_ids,
+            "feature_ids": feature_ids,
+            "e2e_ids": e2e_ids,
+            "future_plan": future_plan or None,
+            "rationale": rationale or None,
+            "confirmed_by": args.confirmed_by.strip(),
+            "confirmed_at": now_iso(),
+            "updated": today(),
+        }
+    )
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {"状态": "已登记规格覆盖", "覆盖 ID": coverage_id, "来源": source_id, "处理结论": disposition, "注册表": str(path.relative_to(root))}
+
+
+def command_register_authority(args: argparse.Namespace) -> dict:
+    """Register the single active source for a bounded category of project facts."""
+    root = project_root(args.root)
+    config = load_config(root)
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    scope = args.scope.strip().lower()
+    if not re.fullmatch(r"[a-z][a-z0-9._-]{1,79}", scope):
+        raise DocsError("权威范围键必须为 2 至 80 位小写字母、数字、点、下划线或连字符，并以字母开头")
+    fact_type = args.fact_type.strip()
+    if fact_type not in AUTHORITY_FACT_TYPES:
+        raise DocsError("权威事实类型无效：" + ", ".join(sorted(AUTHORITY_FACT_TYPES)))
+    if not args.owner.strip():
+        raise DocsError("权威边界必须提供 --owner")
+    source = normalized_project_relative_path(root, args.source, "权威来源")
+    source_path = root / source
+    if source_path.suffix.lower() in {".md", ".html", ".js", ".svg"} and GENERATED_MARKER in source_path.read_text(encoding="utf-8")[:200]:
+        raise DocsError("派生文档不能登记为事实权威；请登记其对应的原始 Markdown、代码、迁移或契约文件")
+    scopes = data.setdefault("authority_scopes", [])
+    if not isinstance(scopes, list):
+        raise DocsError(f"项目输入与约束注册表 authority_scopes 必须是数组：{path}")
+    active = [item for item in scopes if isinstance(item, dict) and item.get("status") == "active" and item.get("scope") == scope and item.get("fact_type") == fact_type]
+    supersedes = args.supersedes.strip().upper() or None
+    if active and not supersedes:
+        raise DocsError(f"范围 {scope} / {fact_type} 已有 active 权威：{active[0].get('id', '未知')}；使用 --supersedes 显式替代")
+    if supersedes:
+        previous = record_by_id(scopes, supersedes)
+        if previous is None:
+            raise DocsError(f"要替代的权威边界不存在：{supersedes}")
+        if previous.get("status") != "active" or previous.get("scope") != scope or previous.get("fact_type") != fact_type:
+            raise DocsError("--supersedes 必须引用同一范围和事实类型的 active 权威")
+        previous["status"] = "deprecated"
+        previous["updated"] = today()
+    authority_id = next_prefixed_id(scopes, "AUTH")
+    scopes.append(
+        {
+            "id": authority_id,
+            "scope": scope,
+            "fact_type": fact_type,
+            "source": source,
+            "owner": args.owner.strip(),
+            "status": "active",
+            "supersedes": supersedes,
+            "updated": today(),
+        }
+    )
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {"状态": "已登记权威边界", "权威 ID": authority_id, "范围": scope, "事实类型": fact_type, "来源": source, "注册表": str(path.relative_to(root))}
+
+
+def command_handoff(args: argparse.Namespace) -> dict:
+    """输出新会话开始时需要的通用事实、证据状态和 Gate 概览。"""
+    root = project_root(args.root)
+    config = load_config(root)
+    data = project_inputs(root, config)
+    discovery_errors, discovery_warnings = collect_gate(root, config, "discovery", None)
+    version_errors, version_warnings = collect_gate(root, config, "version-ready", None)
+    inputs = [item for item in data["inputs"] if isinstance(item, dict)]
+    constraints = [item for item in data["constraints"] if isinstance(item, dict)]
+    assets = [item for item in data["evidence_assets"] if isinstance(item, dict)]
+    coverage = [item for item in data["coverage"] if isinstance(item, dict)]
+    authority_scopes = [item for item in data["authority_scopes"] if isinstance(item, dict)]
+    covered_sources = {str(item.get("source_id", "")) for item in coverage}
+    coverage_required = [
+        str(item.get("id", ""))
+        for item in inputs
+        if item.get("status") == "confirmed" and item.get("id")
+    ] + [
+        str(item.get("id", ""))
+        for item in constraints
+        if item.get("status") == "confirmed" and item.get("kind") == "hard_requirement" and item.get("id")
+    ]
+    return {
+        "项目": {"名称": config["project_name"], "代码": config["project_code"], "当前版本": config["current_version"]},
+        "权威摘要": authority_digest(root, config)[0],
+        "事实注册表": str(project_inputs_path(root, config).relative_to(root)),
+        "项目输入": [
+            {key: item.get(key) for key in ["id", "title", "status", "source_kind", "source_ref"]}
+            for item in inputs
+        ],
+        "约束": [
+            {key: item.get(key) for key in ["id", "title", "kind", "status", "source_input"]}
+            for item in constraints
+        ],
+        "证据资产": [
+            {key: item.get(key) for key in ["id", "title", "status", "kind", "path", "source_ref"]}
+            for item in assets
+        ],
+        "规格覆盖": [
+            {key: item.get(key) for key in ["id", "source_id", "disposition", "version", "requirement_ids", "feature_ids", "e2e_ids", "future_plan"]}
+            for item in coverage
+        ],
+        "权威边界": [
+            {key: item.get(key) for key in ["id", "scope", "fact_type", "source", "owner", "status", "supersedes"]}
+            for item in authority_scopes
+        ],
+        "已确认输入": [item["id"] for item in inputs if item.get("status") == "confirmed"],
+        "待确认输入": [item["id"] for item in inputs if item.get("status") == "observed"],
+        "硬约束": [item["id"] for item in constraints if item.get("kind") == "hard_requirement" and item.get("status") == "confirmed"],
+        "未覆盖确认事实": sorted(item for item in coverage_required if item not in covered_sources),
+        "活跃权威边界": [item["id"] for item in authority_scopes if item.get("status") == "active"],
+        "缺失证据资产": [item["id"] for item in assets if item.get("status") == "missing_source_asset"],
+        "门禁": {
+            "discovery": {"状态": "ready" if not discovery_errors else "blocked", "错误": discovery_errors, "警告": discovery_warnings},
+            "version_ready": {"状态": "ready" if not version_errors else "blocked", "错误": version_errors, "警告": version_warnings},
+        },
+        "恢复规则": "先核对本摘要和项目输入与约束总账；不得把 observed 或 reference_observation 直接升级为需求；每项 confirmed 输入和 hard_requirement 都要有明确规格覆盖或关闭结论；同一范围和事实类型只能保留一个 active 权威来源；变更后重新运行 index、check 和受影响 Gate。",
+    }
 
 
 def command_archive(args: argparse.Namespace) -> dict:
@@ -4890,7 +5678,7 @@ def normalize_link_target(raw: str) -> str:
     return unquote(target)
 
 
-def collect_link_errors(markdown_files: Iterable[Path]) -> list[str]:
+def collect_link_errors(markdown_files: Iterable[Path], boundary: Path | None = None) -> list[str]:
     errors: list[str] = []
     for path in markdown_files:
         text = path.read_text(encoding="utf-8")
@@ -4899,7 +5687,16 @@ def collect_link_errors(markdown_files: Iterable[Path]) -> list[str]:
             if not target or target.startswith("#") or re.match(r"^(https?:|mailto:|data:)", target):
                 continue
             file_part = target.split("#", 1)[0]
-            if file_part and not (path.parent / file_part).resolve().exists():
+            if not file_part:
+                continue
+            resolved = (path.parent / file_part).resolve()
+            if boundary is not None:
+                try:
+                    resolved.relative_to(boundary.resolve())
+                except ValueError:
+                    errors.append(f"导航链接越出项目根目录：{path} -> {target}")
+                    continue
+            if not resolved.exists():
                 errors.append(f"链接失效：{path} -> {target}")
     return errors
 
@@ -4907,7 +5704,7 @@ def collect_link_errors(markdown_files: Iterable[Path]) -> list[str]:
 def incomplete(value: str) -> bool:
     normalized = value.strip().lower()
     return not normalized or bool(PLACEHOLDER_RE.search(value)) or normalized in {
-        "pending", "planned", "not_run", "missing", "none", "n/a", "-", "尚无", "未填写", "未映射"
+        "pending", "planned", "not_run", "missing", "none", "n/a", "-", "尚无", "未填写", "未映射", "todo", "tbd"
     }
 
 
@@ -5269,9 +6066,18 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
         for child_id in directory.get("child_ids", []) or []:
             if str(child_id) not in directory_ids:
                 errors.append(f"工作台目录引用未知子目录：{relative} -> {child_id}")
+    catalog = load_profile_catalog()
+    selected_level = int(catalog["levels"][str(config["profile"])])
+    optional_profile_paths = {
+        render(str(item["path"]), values_for(config))
+        for item in catalog["documents"]
+        if int(catalog["levels"][item["level"]]) > selected_level
+    }
     for source_path in sorted(set(browser_source_paths(payload))):
         path = browser_doc_path(docs, source_path)
         if not path or not path.exists():
+            if source_path in optional_profile_paths:
+                continue
             errors.append(f"工作台派生对象引用不存在的权威来源：{source_path}")
     feature_ids = set(project_feature_ids)
     for timeline in (payload.get("views") or {}).get("timelines", []):
@@ -5402,6 +6208,239 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
     return sorted(set(errors))
 
 
+def validate_project_inputs(root: Path, config: dict) -> list[str]:
+    """校验跨会话输入、约束与资产是否能作为规格事实安全复用。"""
+    errors: list[str] = []
+    path = project_inputs_path(root, config)
+    if not path.exists():
+        return [f"缺少项目输入与约束注册表：{path}"]
+    try:
+        data = project_inputs(root, config)
+    except DocsError as exc:
+        return [str(exc)]
+    if data.get("schema_version") != 2:
+        errors.append(f"项目输入与约束注册表 schema_version 必须是 2：{path}；请运行 upgrade")
+
+    seen: set[str] = set()
+    inputs = input_by_id(data)
+    for item in data["inputs"]:
+        if not isinstance(item, dict):
+            errors.append(f"项目输入必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", ""))
+        if not re.fullmatch(r"INPUT-\d{3}", item_id):
+            errors.append(f"项目输入 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目输入/约束/资产 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        if incomplete(str(item.get("title", ""))) or incomplete(str(item.get("summary", ""))):
+            errors.append(f"项目输入缺少标题或摘要：{item_id or '未知'}：{path}")
+        if item.get("status") not in INPUT_STATUSES:
+            errors.append(f"项目输入状态无效：{item_id or '未知'}={item.get('status', '缺失')}：{path}")
+        if item.get("source_kind") not in INPUT_SOURCE_KINDS:
+            errors.append(f"项目输入来源类型无效：{item_id or '未知'}：{path}")
+        if incomplete(str(item.get("source_ref", ""))):
+            errors.append(f"项目输入缺少来源引用：{item_id or '未知'}：{path}")
+        if item.get("status") == "confirmed" and incomplete(str(item.get("confirmed_by", ""))):
+            errors.append(f"已确认项目输入缺少确认人：{item_id or '未知'}：{path}")
+
+    for item in data["constraints"]:
+        if not isinstance(item, dict):
+            errors.append(f"项目约束必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", ""))
+        if not re.fullmatch(r"CONSTRAINT-\d{3}", item_id):
+            errors.append(f"项目约束 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目输入/约束/资产 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        if incomplete(str(item.get("title", ""))) or incomplete(str(item.get("value", ""))):
+            errors.append(f"项目约束缺少标题或内容：{item_id or '未知'}：{path}")
+        if item.get("kind") not in CONSTRAINT_KINDS:
+            errors.append(f"项目约束类型无效：{item_id or '未知'}：{path}")
+        if item.get("status") not in INPUT_STATUSES:
+            errors.append(f"项目约束状态无效：{item_id or '未知'}：{path}")
+        source_input = str(item.get("source_input", "none"))
+        if source_input != "none" and source_input not in inputs:
+            errors.append(f"项目约束引用未知输入：{item_id or '未知'} -> {source_input}：{path}")
+        if item.get("status") == "confirmed" and incomplete(str(item.get("confirmed_by", ""))):
+            errors.append(f"已确认项目约束缺少确认人：{item_id or '未知'}：{path}")
+        if (
+            item.get("kind") == "hard_requirement"
+            and item.get("status") == "confirmed"
+            and source_input != "none"
+            and inputs[source_input].get("status") != "confirmed"
+        ):
+            errors.append(f"已确认硬性约束不能引用未确认输入：{item_id or '未知'} -> {source_input}：{path}")
+
+    docs = docs_root(root, config).resolve()
+    for item in data["evidence_assets"]:
+        if not isinstance(item, dict):
+            errors.append(f"证据资产必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", ""))
+        if not re.fullmatch(r"ASSET-\d{3}", item_id):
+            errors.append(f"证据资产 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目输入/约束/资产 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        if incomplete(str(item.get("title", ""))) or item.get("kind") not in EVIDENCE_ASSET_KINDS:
+            errors.append(f"证据资产缺少标题或类型无效：{item_id or '未知'}：{path}")
+        if incomplete(str(item.get("source_ref", ""))):
+            errors.append(f"证据资产缺少来源引用：{item_id or '未知'}：{path}")
+        source_input = str(item.get("source_input", "none"))
+        if source_input != "none" and source_input not in inputs:
+            errors.append(f"证据资产引用未知输入：{item_id or '未知'} -> {source_input}：{path}")
+        status = item.get("status")
+        if status == "available":
+            relative = Path(str(item.get("path", "")))
+            if relative.is_absolute() or ".." in relative.parts:
+                errors.append(f"证据资产路径必须位于 docs 内：{item_id or '未知'}：{path}")
+                continue
+            asset_path = (docs / relative).resolve()
+            try:
+                asset_path.relative_to(docs)
+            except ValueError:
+                errors.append(f"证据资产路径越出 docs：{item_id or '未知'}：{path}")
+                continue
+            if not asset_path.is_file():
+                errors.append(f"证据资产文件不存在：{item_id or '未知'}：{asset_path}")
+            elif item.get("sha256") != sha256_file(asset_path):
+                errors.append(f"证据资产摘要不匹配：{item_id or '未知'}：{asset_path}")
+        elif status == "missing_source_asset":
+            if incomplete(str(item.get("missing_reason", ""))):
+                errors.append(f"缺失证据资产必须说明原因：{item_id or '未知'}：{path}")
+        else:
+            errors.append(f"证据资产状态无效：{item_id or '未知'}={status or '缺失'}：{path}")
+
+    source_records = {**input_by_id(data), **constraint_by_id(data)}
+    current_version = str(config["current_version"]).upper()
+    known_requirements = {str(item.get("id", "")) for item in requirement_records(root, config)}
+    known_features = {str(item.get("meta", {}).get("id", "")) for item in feature_documents(root, config)}
+    known_e2e = {str(item.get("meta", {}).get("id", "")) for item in current_e2e_documents(root, config)}
+    future_plans = {item["version"]: item["path"].relative_to(root).as_posix() for item in future_version_plan_records(root, config)}
+    coverage_by_source: dict[str, list[dict]] = {}
+    for item in data["coverage"]:
+        if not isinstance(item, dict):
+            errors.append(f"规格覆盖必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", ""))
+        if not re.fullmatch(r"COVERAGE-\d{3}", item_id):
+            errors.append(f"规格覆盖 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目输入、约束、资产、覆盖或权威 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        source_id = str(item.get("source_id", ""))
+        source = source_records.get(source_id)
+        if source is None:
+            errors.append(f"规格覆盖引用未知输入或约束：{item_id or '未知'} -> {source_id or '缺失'}：{path}")
+            continue
+        coverage_by_source.setdefault(source_id, []).append(item)
+        if source.get("status") != "confirmed":
+            errors.append(f"规格覆盖只能引用 confirmed 输入或约束：{item_id or '未知'} -> {source_id}：{path}")
+        disposition = str(item.get("disposition", ""))
+        if disposition not in COVERAGE_DISPOSITIONS:
+            errors.append(f"规格覆盖处理结论无效：{item_id or '未知'}={disposition or '缺失'}：{path}")
+            continue
+        if incomplete(str(item.get("confirmed_by", ""))):
+            errors.append(f"规格覆盖缺少确认人：{item_id or '未知'}：{path}")
+        version = str(item.get("version") or "").upper()
+        requirement_ids = item.get("requirement_ids", [])
+        feature_ids = item.get("feature_ids", [])
+        e2e_ids = item.get("e2e_ids", [])
+        if not isinstance(requirement_ids, list) or not isinstance(feature_ids, list) or not isinstance(e2e_ids, list):
+            errors.append(f"规格覆盖目标 ID 必须是字符串数组：{item_id or '未知'}：{path}")
+            continue
+        if not all(isinstance(value, str) and value for value in [*requirement_ids, *feature_ids, *e2e_ids]):
+            errors.append(f"规格覆盖目标 ID 必须是非空字符串：{item_id or '未知'}：{path}")
+        if disposition == "current_scope":
+            if version != current_version:
+                errors.append(f"current_scope 必须绑定当前版本：{item_id or '未知'} -> {version or '缺失'}：{path}")
+            if not requirement_ids:
+                errors.append(f"current_scope 缺少稳定需求映射：{item_id or '未知'}：{path}")
+            unknown = sorted(set(requirement_ids) - known_requirements)
+            if unknown:
+                errors.append(f"规格覆盖引用未知需求：{item_id or '未知'} -> {', '.join(unknown)}：{path}")
+            unknown_features = sorted(set(feature_ids) - known_features)
+            if unknown_features:
+                errors.append(f"规格覆盖引用未知功能：{item_id or '未知'} -> {', '.join(unknown_features)}：{path}")
+            unknown_e2e = sorted(set(e2e_ids) - known_e2e)
+            if unknown_e2e:
+                errors.append(f"规格覆盖引用未知 E2E：{item_id or '未知'} -> {', '.join(unknown_e2e)}：{path}")
+            if item.get("future_plan"):
+                errors.append(f"current_scope 不能绑定后续规划文件：{item_id or '未知'}：{path}")
+        elif disposition == "future_candidate":
+            expected_plan = future_plans.get(version)
+            if not expected_plan:
+                errors.append(f"future_candidate 未绑定正式后续版本规划：{item_id or '未知'} -> {version or '缺失'}：{path}")
+            elif str(item.get("future_plan") or "") != expected_plan:
+                errors.append(f"future_candidate 规划入口不匹配：{item_id or '未知'}：{path}")
+            if requirement_ids or feature_ids or e2e_ids:
+                errors.append(f"future_candidate 不能提前绑定稳定需求、功能或 E2E：{item_id or '未知'}：{path}")
+        else:
+            if version or requirement_ids or feature_ids or e2e_ids or item.get("future_plan"):
+                errors.append(f"{disposition} 覆盖不能继续声明规格目标：{item_id or '未知'}：{path}")
+            if incomplete(str(item.get("rationale") or "")):
+                errors.append(f"{disposition} 覆盖缺少处理依据：{item_id or '未知'}：{path}")
+        if source.get("kind") == "hard_requirement" and disposition in {"rejected", "not_applicable"}:
+            errors.append(f"hard_requirement 不能以 {disposition} 关闭：{item_id or '未知'}：{path}")
+
+    required_coverage = [
+        str(item.get("id", ""))
+        for item in data["inputs"]
+        if isinstance(item, dict) and item.get("status") == "confirmed"
+    ] + [
+        str(item.get("id", ""))
+        for item in data["constraints"]
+        if isinstance(item, dict) and item.get("status") == "confirmed" and item.get("kind") == "hard_requirement"
+    ]
+    for source_id in sorted(item for item in required_coverage if item and item not in coverage_by_source):
+        errors.append(f"已确认输入或硬性约束缺少规格覆盖：{source_id}：{path}")
+
+    authority_by_id: dict[str, dict] = {}
+    active_authority_keys: dict[tuple[str, str], str] = {}
+    for item in data["authority_scopes"]:
+        if not isinstance(item, dict):
+            errors.append(f"权威边界必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", ""))
+        if not re.fullmatch(r"AUTH-\d{3}", item_id):
+            errors.append(f"权威边界 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目输入、约束、资产、覆盖或权威 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        authority_by_id[item_id] = item
+        scope = str(item.get("scope", ""))
+        fact_type = str(item.get("fact_type", ""))
+        if not re.fullmatch(r"[a-z][a-z0-9._-]{1,79}", scope):
+            errors.append(f"权威范围键无效：{item_id or '未知'}：{path}")
+        if fact_type not in AUTHORITY_FACT_TYPES:
+            errors.append(f"权威事实类型无效：{item_id or '未知'}={fact_type or '缺失'}：{path}")
+        if incomplete(str(item.get("owner", ""))):
+            errors.append(f"权威边界缺少负责人：{item_id or '未知'}：{path}")
+        status = str(item.get("status", ""))
+        if status not in AUTHORITY_STATUSES:
+            errors.append(f"权威边界状态无效：{item_id or '未知'}={status or '缺失'}：{path}")
+        elif status == "active":
+            key = (scope, fact_type)
+            previous = active_authority_keys.get(key)
+            if previous:
+                errors.append(f"同一范围和事实类型存在多个 active 权威：{previous} 与 {item_id}：{path}")
+            active_authority_keys[key] = item_id
+        try:
+            source = normalized_project_relative_path(root, str(item.get("source", "")), "权威来源")
+            source_path = root / source
+            if source_path.suffix.lower() in {".md", ".html", ".js", ".svg"} and GENERATED_MARKER in source_path.read_text(encoding="utf-8")[:200]:
+                errors.append(f"派生文档不能作为事实权威：{item_id or '未知'} -> {source}：{path}")
+        except DocsError as exc:
+            errors.append(f"权威边界来源无效：{item_id or '未知'}：{exc}")
+    for item_id, item in authority_by_id.items():
+        supersedes = str(item.get("supersedes") or "")
+        if supersedes and supersedes not in authority_by_id:
+            errors.append(f"权威边界替代对象不存在：{item_id} -> {supersedes}：{path}")
+    return errors
+
+
 def collect_checks(root: Path, config: dict, check_derived: bool = True) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -5412,6 +6451,7 @@ def collect_checks(root: Path, config: dict, check_derived: bool = True) -> tupl
         warnings.append("项目未声明 language=zh-CN")
     if not docs.exists():
         return [f"文档根目录不存在：{docs}"], warnings
+    errors.extend(validate_project_inputs(root, config))
     values = values_for(config)
     for item in profile_documents(str(config["profile"])):
         relative = rendered_profile_path(item, values)
@@ -5436,6 +6476,13 @@ def collect_checks(root: Path, config: dict, check_derived: bool = True) -> tupl
 
     markdown_files = sorted(docs.rglob("*.md"))
     errors.extend(collect_link_errors(markdown_files))
+    # The repository README is the usual first entry point, but historically
+    # lived outside docs/ and therefore escaped docs-check.  Treat it as a
+    # project navigation document when present without requiring repositories
+    # that intentionally have no root README to create one.
+    root_readme = root / "README.md"
+    if root_readme.is_file():
+        errors.extend(collect_link_errors([root_readme], boundary=root))
     warnings.extend(english_only_heading_warnings(markdown_files))
     ids: dict[str, Path] = {}
     for path in markdown_files:
@@ -5526,7 +6573,14 @@ def collect_checks(root: Path, config: dict, check_derived: bool = True) -> tupl
             if requirement_id not in known_requirements:
                 errors.append(f"E2E 用例引用未知需求：{case['meta'].get('id')} -> {requirement_id}")
 
-    for path in future_version_documents(root, config):
+    future_plan_versions: dict[str, Path] = {}
+    for plan in future_version_plan_records(root, config):
+        path = plan["path"]
+        version_id = str(plan["version"])
+        if version_id in future_plan_versions:
+            errors.append(f"后续版本存在多个规划入口：{version_id}：{future_plan_versions[version_id]} 与 {path}")
+        else:
+            future_plan_versions[version_id] = path
         text = path.read_text(encoding="utf-8")
         meta = parse_frontmatter(text)
         if meta.get("status") not in {"planning", "draft", "ready", "deprecated"}:
@@ -6219,13 +7273,14 @@ def command_serve(args: argparse.Namespace) -> dict:
     root = project_root(args.root)
     config = load_config(root)
     port = int(args.port)
-    if not 1 <= port <= 65535:
-        raise DocsError("服务端口必须在 1 至 65535 之间")
+    if not 0 <= port <= 65535:
+        raise DocsError("服务端口必须在 0 至 65535 之间；0 表示自动选择空闲端口")
     handler = partial(Utf8DocsRequestHandler, directory=str(root))
     try:
         server = ThreadingHTTPServer((args.host, port), handler)
     except OSError as exc:
-        raise DocsError(f"无法启动本地文档服务：{args.host}:{port}：{exc}") from exc
+        hint = "；可使用 --port 0 自动选择空闲端口" if port else ""
+        raise DocsError(f"无法启动本地文档服务：{args.host}:{port}：{exc}{hint}") from exc
     address = f"http://{args.host}:{server.server_address[1]}"
     print_result(
         {
@@ -6370,7 +7425,7 @@ def git_dirty_paths(root: Path, ignored_paths: Iterable[str] = ()) -> list[str]:
 
 def goal_semantic_payload(manifest: dict) -> dict:
     value = json.loads(json.dumps(manifest, ensure_ascii=False))
-    for key in ["generated_at", "status", "status_checked_at", "stale_reasons", "manifest_digest"]:
+    for key in ["generated_at", "status", "status_checked_at", "status_check_sequence", "stale_reasons", "manifest_digest"]:
         value.pop(key, None)
     return value
 
@@ -7342,7 +8397,13 @@ def command_goal_status(args: argparse.Namespace) -> dict | int:
         manifest["status"] = "ready"
     manifest["status_checked_at"] = now_iso()
     manifest["stale_reasons"] = reasons
-    if not getattr(args, "read_only", False):
+    # Status inspection must not silently mutate an execution manifest.  A
+    # caller that wants to persist the derived runtime status opts in explicitly.
+    if getattr(args, "persist", False):
+        # Keep a monotonic audit marker as timestamps have second precision.
+        # This makes every explicit persisted inspection observable without
+        # turning a runtime query into a semantic Goal change.
+        manifest["status_check_sequence"] = int(manifest.get("status_check_sequence", 0)) + 1
         write_json(manifest_path, manifest)
     next_task = next((item for item in manifest.get("ordered_tasks", []) if item.get("status") != "completed"), None)
     runtime_manifest = dict(manifest)
@@ -7367,6 +8428,7 @@ def command_goal_status(args: argparse.Namespace) -> dict | int:
         "期望提交": expected_commit,
         "初始提交": manifest.get("source_commit", ""),
         "文件": str(manifest_path.relative_to(root)),
+        "查询模式": "persisted" if getattr(args, "persist", False) else "read_only",
     }
     if getattr(args, "fail_on_stale", False) and manifest["status"] == "stale":
         print_result(payload)
@@ -7915,6 +8977,17 @@ def command_audit(args: argparse.Namespace) -> int:
         "可视化与完整文档浏览器": browser_complete and (docs / "02-产品与版本/图表/功能演进-版本主链路.svg").exists(),
         "UTF-8 来源阅读与本地服务": utf8_delivery_complete,
         "Goal 可恢复执行生命周期": goal_commands_complete,
+        "输入覆盖与权威边界治理": all(
+            marker in script_text
+            for marker in [
+                "def command_map_spec_coverage",
+                "def command_register_authority",
+                'add_parser("map-spec-coverage"',
+                'add_parser("register-authority"',
+                "COVERAGE_DISPOSITIONS",
+                "AUTHORITY_FACT_TYPES",
+            ]
+        ),
         "CI、PR、IDE 与智能体集成模板": integration_templates_complete,
         "四类当前证据": selected_count == len(EVIDENCE_TYPES),
     }
@@ -8062,6 +9135,86 @@ def build_parser() -> argparse.ArgumentParser:
     evidence.add_argument("--no-select", dest="select", action="store_false", help="不设为当前证据")
     evidence.set_defaults(handler=command_new_evidence, select=True)
 
+    input_record = subparsers.add_parser("record-input", help="登记可追溯的项目输入，不直接升级为需求")
+    input_record.add_argument("--root", default=".")
+    input_record.add_argument("--title", required=True, help="输入的简短标题")
+    input_record.add_argument("--summary", required=True, help="可复用的事实或要求摘要")
+    input_record.add_argument("--source-kind", choices=sorted(INPUT_SOURCE_KINDS), required=True)
+    input_record.add_argument("--source-ref", required=True, help="来源标识、路径、访谈记录或外部链接")
+    input_record.add_argument("--status", choices=sorted(INPUT_STATUSES), default="observed")
+    input_record.add_argument("--confirmed-by", default="", help="status=confirmed 时必填")
+    input_record.set_defaults(handler=command_record_input)
+
+    constraint = subparsers.add_parser("record-constraint", help="登记硬要求、软目标或外部观察，避免混淆验收口径")
+    constraint.add_argument("--root", default=".")
+    constraint.add_argument("--title", required=True)
+    constraint.add_argument("--kind", choices=sorted(CONSTRAINT_KINDS), required=True)
+    constraint.add_argument("--value", required=True, help="约束内容、目标或观察结论")
+    constraint.add_argument("--source-input", default="none", help="关联 INPUT-*；没有时使用 none")
+    constraint.add_argument("--status", choices=sorted(INPUT_STATUSES), default="observed")
+    constraint.add_argument("--confirmed-by", default="", help="status=confirmed 时必填")
+    constraint.set_defaults(handler=command_record_constraint)
+
+    input_update = subparsers.add_parser("update-input", help="保留稳定 ID 更新项目输入状态")
+    input_update.add_argument("--root", default=".")
+    input_update.add_argument("--id", dest="input_id", required=True, help="要更新的 INPUT-* ID")
+    input_update.add_argument("--status", choices=sorted(INPUT_STATUSES), required=True)
+    input_update.add_argument("--confirmed-by", default="", help="status=confirmed 时必填")
+    input_update.set_defaults(handler=command_update_input)
+
+    constraint_update = subparsers.add_parser("update-constraint", help="保留稳定 ID 更新项目约束状态")
+    constraint_update.add_argument("--root", default=".")
+    constraint_update.add_argument("--id", dest="constraint_id", required=True, help="要更新的 CONSTRAINT-* ID")
+    constraint_update.add_argument("--status", choices=sorted(INPUT_STATUSES), required=True)
+    constraint_update.add_argument("--confirmed-by", default="", help="status=confirmed 时必填")
+    constraint_update.set_defaults(handler=command_update_constraint)
+
+    asset = subparsers.add_parser("add-evidence-asset", help="归档可复核证据资产，或显式登记缺失的原始材料")
+    asset.add_argument("--root", default=".")
+    asset.add_argument("--title", required=True)
+    asset.add_argument("--kind", choices=sorted(EVIDENCE_ASSET_KINDS), required=True)
+    asset.add_argument("--source-input", default="none", help="关联 INPUT-*；没有时使用 none")
+    asset.add_argument("--source-ref", required=True, help="原始材料的位置、外部链接或取得记录")
+    source_group = asset.add_mutually_exclusive_group(required=True)
+    source_group.add_argument("--file", help="要复制到 docs/90-参考资料/证据资产/ 的本地文件")
+    source_group.add_argument("--missing-reason", help="原始材料不可得时的明确原因")
+    asset.add_argument("--redacted", action="store_true", help="声明归档前已完成必要脱敏")
+    asset.set_defaults(handler=command_add_evidence_asset)
+
+    asset_resolve = subparsers.add_parser("resolve-evidence-asset", help="将缺失的证据资产补齐为可校验归档材料")
+    asset_resolve.add_argument("--root", default=".")
+    asset_resolve.add_argument("--id", dest="asset_id", required=True, help="要补齐的 ASSET-* ID")
+    asset_resolve.add_argument("--file", required=True, help="要复制到 docs/90-参考资料/证据资产/ 的本地文件")
+    asset_resolve.add_argument("--source-ref", required=True, help="实际材料的位置、外部链接或取得记录")
+    asset_resolve.add_argument("--redacted", action="store_true", help="声明归档前已完成必要脱敏")
+    asset_resolve.set_defaults(handler=command_resolve_evidence_asset)
+
+    coverage = subparsers.add_parser("map-spec-coverage", help="把确认输入或硬约束映射到当前规格、后续规划或关闭结论")
+    coverage.add_argument("--root", default=".")
+    coverage.add_argument("--source", required=True, help="已确认的 INPUT-* 或 CONSTRAINT-* ID")
+    coverage.add_argument("--disposition", choices=sorted(COVERAGE_DISPOSITIONS), required=True)
+    coverage.add_argument("--version", default="", help="current_scope 或 future_candidate 的目标版本")
+    coverage.add_argument("--requirements", default="", help="current_scope 的逗号分隔稳定需求 ID")
+    coverage.add_argument("--features", default="", help="可选的逗号分隔当前版本功能 ID")
+    coverage.add_argument("--e2e", default="", help="可选的逗号分隔当前版本 E2E ID")
+    coverage.add_argument("--future-plan", default="", help="可选校验：后续版本正式规划入口的项目相对路径")
+    coverage.add_argument("--rationale", default="", help="rejected、superseded 或 not_applicable 的处理依据")
+    coverage.add_argument("--confirmed-by", required=True, help="确认本次范围结论的责任人")
+    coverage.set_defaults(handler=command_map_spec_coverage)
+
+    authority = subparsers.add_parser("register-authority", help="登记范围内唯一 active 的事实权威，并显式记录替代关系")
+    authority.add_argument("--root", default=".")
+    authority.add_argument("--scope", required=True, help="稳定范围键，例如 version-scope.v1")
+    authority.add_argument("--fact-type", choices=sorted(AUTHORITY_FACT_TYPES), required=True)
+    authority.add_argument("--source", required=True, help="项目根目录内的权威文件路径")
+    authority.add_argument("--owner", required=True, help="对该事实边界负责的角色或人员")
+    authority.add_argument("--supersedes", default="", help="要替代的同范围、同事实类型 AUTH-*；省略时不得已有 active 权威")
+    authority.set_defaults(handler=command_register_authority)
+
+    handoff = subparsers.add_parser("handoff", help="输出跨会话恢复所需的当前项目事实、证据和 Gate 概览")
+    handoff.add_argument("--root", default=".")
+    handoff.set_defaults(handler=command_handoff)
+
     reference = subparsers.add_parser("new-reference", help="创建非权威调研或外部资料记录")
     reference.add_argument("--root", default=".")
     reference.add_argument("--name", required=True)
@@ -8094,7 +9247,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", help="启动仅绑定本机且显式使用 UTF-8 的只读文档服务")
     serve.add_argument("--root", default=".")
     serve.add_argument("--host", choices=["127.0.0.1", "localhost"], default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=8877)
+    serve.add_argument("--port", type=int, default=8877, help="监听端口；0 表示自动选择空闲端口")
     serve.set_defaults(handler=command_serve)
 
     browser_check = subparsers.add_parser("browser-check", help="执行工作台来源、视图和 UTF-8 服务 Smoke 验收")
@@ -8120,10 +9273,11 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_goal.add_argument("--objective", help="单句、可验证的 Goal 目标")
     prepare_goal.set_defaults(handler=command_prepare_goal)
 
-    goal_status = subparsers.add_parser("goal-status", help="重新评估 Goal 的基线、权威摘要和过期状态")
+    goal_status = subparsers.add_parser("goal-status", help="只读重新评估 Goal 的基线、权威摘要和过期状态")
     goal_status.add_argument("--root", default=".")
     goal_status.add_argument("--goal", required=True, help="要检查的 GOAL-* ID")
-    goal_status.add_argument("--read-only", action="store_true", help="只评估，不回写状态与检查时间")
+    goal_status.add_argument("--read-only", action="store_true", help="兼容选项；goal-status 默认不回写")
+    goal_status.add_argument("--persist", action="store_true", help="显式回写派生状态与检查时间；常规查询不需要")
     goal_status.add_argument("--fail-on-stale", action="store_true", help="检测到 stale 时返回非零退出码，供 CI 使用")
     goal_status.set_defaults(handler=command_goal_status)
 

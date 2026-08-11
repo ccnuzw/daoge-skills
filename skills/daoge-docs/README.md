@@ -349,6 +349,7 @@ docs/
 
 - 项目说明：问题、目标用户、范围、非目标、成功指标和术语。
 - 产品蓝图：长期价值、核心概念、角色、全局规则和长期边界。
+- 跨版本能力与旅程基线：稳定能力概念、核心旅程和不可破坏的跨版本不变量。
 - 版本路线图与当前版本 PRD：当前目标、范围、依赖、里程碑、退出条件和未来版本隔离。
 - 领域边界：每个领域的职责、数据所有权、上游/下游契约与禁止依赖。
 
@@ -375,6 +376,8 @@ python3 .daoge-docs/daoge_docs.py new-feature \
 ```
 
 功能主文档应当明确回答：用户问题、范围与非目标、前置条件、主路径、失败路径、AC、相关需求、工程落点、允许/禁止修改路径、测试命令和完成证据。
+
+`new-future-version` 会建立 `后续版本/V4-生态开放/V4-版本总览.md` 作为该版本唯一正式规划入口，并建立目录导航。它仅保存候选范围，不能代替路线图登记、稳定需求或开发授权；准备实现时仍须以 `new-version` 创建独立版本空间。
 
 需要独立登记的非功能需求或全局规则，可使用：
 
@@ -424,6 +427,60 @@ python3 .daoge-docs/daoge_docs.py new-task \
 python3 .daoge-docs/daoge_docs.py new-evidence \
   --root . --type development --environment ci \
   --commit <git-sha> --build-id <immutable-build-id>
+```
+
+### 4.1 项目输入、约束与证据资产
+
+跨会话仍以 `docs/01-项目概览/项目输入与约束注册表.json` 为机器权威，以生成的 `项目输入与约束总账.md` 为阅读入口。注册表当前为 `schema_version: 2`，除输入、约束和证据资产外，还保存规格覆盖与权威边界。先登记来源，再决定是否确认：
+
+```bash
+python3 .daoge-docs/daoge_docs.py record-input \
+  --root . --title "利益相关方输入" --summary "可复用的原始陈述" \
+  --source-kind stakeholder_statement --source-ref "会议记录/2026-01-01"
+
+python3 .daoge-docs/daoge_docs.py record-constraint \
+  --root . --title "必须满足的约束" --kind hard_requirement \
+  --value "可执行且可验证的约束" --source-input INPUT-001 \
+  --status confirmed --confirmed-by "确认人"
+
+python3 .daoge-docs/daoge_docs.py add-evidence-asset \
+  --root . --title "原始访谈材料" --kind document \
+  --source-ref "会议记录/2026-01-01" --missing-reason "原始文件尚未取得"
+```
+
+`record-input` 的 `observed` 只是观察，`record-constraint` 的 `reference_observation` 不能自动成为验收条件。可归档资产会复制到 `docs/90-参考资料/证据资产/` 并保存 SHA-256；不可得材料必须登记缺失原因。新会话可运行 `handoff --root .` 获取摘要，但不得把摘要当作新的权威事实。
+
+确认到来时保留原始 ID，避免一项事实出现多个互相竞争的记录：
+
+```bash
+python3 .daoge-docs/daoge_docs.py update-input \
+  --root . --id INPUT-001 --status confirmed --confirmed-by "确认人"
+
+python3 .daoge-docs/daoge_docs.py update-constraint \
+  --root . --id CONSTRAINT-001 --status confirmed --confirmed-by "确认人"
+
+python3 .daoge-docs/daoge_docs.py resolve-evidence-asset \
+  --root . --id ASSET-001 --file <local-file> --source-ref "实际材料来源"
+```
+
+确认事实必须有可检查的规格归宿。映射当前范围时必须指向当前版本的稳定需求；映射未来范围时只能指向由 `new-future-version` 创建的正式规划入口。拒绝、替代或不适用必须留下确认人与处理依据：
+
+```bash
+python3 .daoge-docs/daoge_docs.py map-spec-coverage \
+  --root . --source INPUT-001 --disposition current_scope --version V1 \
+  --requirements OMS-NFR-001 --confirmed-by "产品负责人"
+
+python3 .daoge-docs/daoge_docs.py map-spec-coverage \
+  --root . --source CONSTRAINT-001 --disposition future_candidate --version V2 \
+  --confirmed-by "产品负责人"
+```
+
+要把单一事实来源纳入机器检查时，登记范围与事实类型。一个范围键加事实类型只能有一条 `active` 记录；替代时必须显式保留旧记录：
+
+```bash
+python3 .daoge-docs/daoge_docs.py register-authority \
+  --root . --scope version-scope.v1 --fact-type version_scope \
+  --source docs/02-产品与版本/当前版本/V1-版本总览.md --owner "产品负责人"
 ```
 
 ### 5. 变更回流与版本演进
@@ -507,10 +564,10 @@ python3 .daoge-docs/daoge_docs.py goal-complete \
 
 ```bash
 python3 .daoge-docs/daoge_docs.py goal-status \
-  --root . --goal GOAL-V1-001 --read-only
+  --root . --goal GOAL-V1-001
 ```
 
-在 CI 中希望检测到 `stale` 就失败时，加 `--fail-on-stale`。不要原地刷新或手改旧 Goal 清单，因为那会破坏审计链。
+`goal-status` 默认只读，不会改写清单；只有明确需要保存本次派生运行状态时才加 `--persist`。在 CI 中希望检测到 `stale` 就失败时，加 `--fail-on-stale`。不要原地刷新或手改旧 Goal 清单，因为那会破坏审计链。
 
 ## 门禁、验证与发布证据
 
@@ -638,7 +695,7 @@ python3 .daoge-docs/daoge_docs.py <command> --help
 | 初始化 | `upgrade` | 升级项目内工具与模板，保留项目事实 |
 | 初始化 | `install-integrations` | 补充 CI、PR、VS Code 和智能体入口，不覆盖现有文件 |
 | 结构 | `new-version` | 创建新版本并可切换活动版本 |
-| 结构 | `new-future-version` | 创建未激活的后续版本规划骨架 |
+| 结构 | `new-future-version` | 创建未激活的后续版本正式规划入口和目录导航 |
 | 结构 | `new-domain` | 创建领域说明和功能目录 |
 | 结构 | `new-architecture-spec` | 创建生命周期、协议、接入或扩展类架构专项 |
 | 规格 | `new-feature` | 创建功能主文档和必要的高风险技术设计 |
@@ -649,6 +706,14 @@ python3 .daoge-docs/daoge_docs.py <command> --help
 | 协作 | `new-task` | 从已冻结功能创建开发任务书 |
 | 证据 | `new-evidence` | 新建 development/E2E/performance/release 机器证据报告 |
 | 资料 | `new-reference` | 记录非权威调研或外部资料 |
+| 事实 | `record-input` | 登记可追溯的项目输入 |
+| 事实 | `record-constraint` | 分类约束并校验确认链 |
+| 事实 | `update-input` / `update-constraint` | 保留稳定 ID 更新确认状态 |
+| 证据资产 | `add-evidence-asset` | 归档材料或登记缺失来源 |
+| 证据资产 | `resolve-evidence-asset` | 补齐原证据资产并校验摘要 |
+| 规格治理 | `map-spec-coverage` | 映射确认输入或硬约束到当前规格、后续规划或关闭结论 |
+| 规格治理 | `register-authority` | 登记唯一 active 权威来源并显式保留替代链 |
+| 协作 | `handoff` | 输出跨会话恢复摘要，包括覆盖与权威边界 |
 | 资料 | `archive` | 归档旧资料并记录替代权威 |
 | 派生 | `index` | 重建索引、矩阵、状态页、图表和工作台 |
 | 诊断 | `doctor` | 只读检查环境、Git 状态和技术栈候选 |
@@ -660,7 +725,7 @@ python3 .daoge-docs/daoge_docs.py <command> --help
 | 权威性 | `snapshot` | 创建不可变版本快照，供变更检测和审计使用 |
 | 权威性 | `authority-digest` | 计算当前权威集合的稳定 SHA-256 摘要 |
 | Goal | `prepare-goal` | 从通过门禁的功能生成确定性 Goal 清单 |
-| Goal | `goal-status` | 评估 Goal 基线、权威摘要和过期状态 |
+| Goal | `goal-status` | 默认只读评估 Goal 基线、权威摘要和过期状态；`--persist` 才回写 |
 | Goal | `goal-plan` / `goal-resume-context` | 查看泳道运行态，并在依赖满足时获取指定任务上下文 |
 | Goal | `goal-checkpoint` | 执行任务验证并建立受控 Git 检查点 |
 | Goal | `goal-complete` | 复验任务、命令和门禁，结束开发级 Goal |

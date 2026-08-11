@@ -36,7 +36,7 @@
     {
       "label": "DAOGE Docs: Goal 状态",
       "type": "shell",
-      "command": "${command:python.interpreterPath} .daoge-docs/daoge_docs.py goal-status --root . --goal ${input:goalId} --read-only",
+      "command": "${command:python.interpreterPath} .daoge-docs/daoge_docs.py goal-status --root . --goal ${input:goalId}",
       "problemMatcher": []
     },
     {

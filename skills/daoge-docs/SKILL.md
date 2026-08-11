@@ -61,7 +61,12 @@ python3 <skill-dir>/scripts/daoge_docs.py init \
 5. 已有 `docs/` 时先审计冲突，再加 `--merge`；工具只能补文件，不能覆盖项目事实。
 6. 初始化后使用项目内固定版本命令：macOS/Linux 使用 `python3 .daoge-docs/daoge_docs.py ...`；Windows 优先使用 `py -3 .daoge-docs/daoge_docs.py ...`。
 7. 先完成 `项目调研与事实清单`，再按产品、版本、功能、架构、测试、决策的权威顺序消除占位。
-8. 依次运行 `index`、`check`、`gate --stage discovery`、`gate --stage version-ready`。门禁失败是待办事实，不得通过伪造内容绕过。
+8. 用 `record-input` 登记访谈、仓库、外部资料和实验等输入；用 `record-constraint` 把候选结论明确分类为硬性要求、软目标或外部观察。未确认输入不得直接变成确认硬性约束。
+9. 用 `add-evidence-asset` 归档可复核材料或登记缺失来源；资产必须保留来源引用、脱敏声明和 SHA-256。跨会话恢复使用 `handoff`，但它只输出摘要，不替代权威注册表。
+10. 后续确认使用 `update-input`、`update-constraint` 保留原 ID；取得缺失材料后使用 `resolve-evidence-asset` 补齐原资产记录，不要重复创建记录。
+11. 每项 `confirmed` 输入和 `hard_requirement` 必须用 `map-spec-coverage` 映射到当前版本稳定需求、正式后续版本规划，或带确认人和理由的关闭结论。`future_candidate` 不是开发授权。
+12. 需要把“哪个文件定义哪类事实”形式化时，用 `register-authority` 登记范围键、事实类型、唯一来源与负责人；替代必须引用同范围、同事实类型的旧 `AUTH-*`，不能并存两个 `active` 来源。
+13. 依次运行 `index`、`check`、`gate --stage discovery`、`gate --stage version-ready`。门禁失败是待办事实，不得通过伪造内容绕过。
 
 ## 创建版本与领域
 
@@ -79,7 +84,7 @@ python3 .daoge-docs/daoge_docs.py new-domain --root . --name 身份与权限
 
 领域说明必须写明职责、数据所有权、上下游契约、禁止依赖和不变量。
 
-尚未进入开发的后续版本使用 `new-future-version`，不要提前激活。生命周期、协议格式、接入指南等项目专属架构文档使用 `new-architecture-spec`；需要最小 YAML 和 JSON fixture 时加 `--with-example`。
+尚未进入开发的后续版本使用 `new-future-version`，不要提前激活。它会建立 `后续版本/Vn-名称/Vn-版本总览.md` 这份唯一正式规划入口和目录导航；仍须在版本路线图明确版本顺序、前置与退出条件后，才可使用 `new-version` 进入独立实现空间。strict Profile 的“跨版本能力与旅程基线”定义长期能力和旅程概念，功能演进矩阵只定义版本里程碑、兼容与替代关系。生命周期、协议格式、接入指南等项目专属架构文档使用 `new-architecture-spec`；需要最小 YAML 和 JSON fixture 时加 `--with-example`。
 
 ## 创建功能和需求
 
@@ -248,7 +253,7 @@ python3 .daoge-docs/daoge_docs.py goal-complete --root . --goal GOAL-V1-001
 
 文档与实现可以交错进行，但权威来源优先。Goal 保存目标版本、所选功能及递归依赖的 `authority_scope`，并保存该闭包内逐文件 `authority_files` 摘要和 `document_sync_policy`。后续版本规划可以在闭包外并行更新；产品蓝图、项目事实、共享架构/测试规则、当前目标版本、递归依赖版本、所选功能、其 AC/ADR/数据/接口、工程落点或验证命令变化时，`goal-status`、`goal-plan`、`goal-resume-context` 和 `goal-checkpoint` 必须停止受影响任务，报告变化文件，先更新权威 Markdown/注册表，再运行 `index`、`check`、相关 gate，并从当前权威重新 `prepare-goal`。不得直接编辑 Goal 清单、工作台 HTML 或数据 JS 来追赶文档。
 
-查看状态但不改文件时使用 `goal-status --read-only`；CI 需要 stale 返回非零时再加 `--fail-on-stale`。authority digest、执行基线、活动版本、工具版本或清单外工作区变化不一致时，Goal 必须进入 `stale`。`stale` 清单禁止原地刷新；保留旧清单用于审计，从当前权威创建新 Goal ID。
+`goal-status` 默认只读；只有需要保留派生检查时间和状态时才显式加 `--persist`。CI 需要 stale 返回非零时再加 `--fail-on-stale`。authority digest、执行基线、活动版本、工具版本或清单外工作区变化不一致时，Goal 必须进入 `stale`。`stale` 清单禁止原地刷新；保留旧清单用于审计，从当前权威创建新 Goal ID。
 
 `goal-plan` 是多功能 Goal 的只读运行态入口，会显示每条泳道的 `ready`、`blocked`、`running`、`completed` 状态和可执行任务；它不修改清单，也不改变检查点或门禁。
 
@@ -311,6 +316,15 @@ new-decision      登记 proposed/accepted/deprecated 冻结决策
 new-task          从功能创建开发任务书
 new-evidence      创建并选择机器可读证据报告
 new-reference     创建带时效和可信度的非权威调研
+record-input      登记可追溯的利益相关方、仓库、外部或实验输入
+record-constraint 登记硬性要求、软目标或外部观察并校验确认链
+update-input      保留 INPUT-* 稳定 ID 更新输入状态
+update-constraint 保留 CONSTRAINT-* 稳定 ID 更新约束状态
+add-evidence-asset 归档证据资产或登记缺失的原始材料
+resolve-evidence-asset 补齐原 ASSET-* 记录并校验归档摘要
+map-spec-coverage  将确认输入或硬约束映射到当前规格、正式后续规划或关闭结论
+register-authority 登记同一范围和事实类型的唯一 active 权威，并显式替代旧来源
+handoff           输出跨会话恢复所需的输入、覆盖、权威边界、资产和门禁摘要
 archive           创建历史归档并指向当前替代权威
 index             重建索引、风险表、追踪矩阵、实现状态、派生图表和产品文档浏览器
 serve             启动仅绑定本机且显式声明 UTF-8 的只读文档服务
@@ -318,7 +332,7 @@ browser-check     对工作台、派生来源和 UTF-8 Markdown 服务执行 Smo
 snapshot          创建不可变版本快照，供变更检测、Goal 恢复和审计使用
 authority-digest  计算当前权威文档集合的稳定 SHA-256 摘要
 prepare-goal      从通过门禁的目标版本功能生成确定性 Goal 清单；默认当前版本，显式 --version 不切换活动版本
-goal-status       检查 Goal 清单防篡改、权威摘要、Git 基线和过期状态
+goal-status       默认只读检查 Goal 清单防篡改、权威摘要、Git 基线和过期状态；--persist 才回写
 goal-plan         只读显示 Goal 任务、泳道、依赖和可执行状态
 goal-resume-context 验证恢复条件并输出可执行任务上下文
 goal-checkpoint   验证授权路径和命令后建立原子 Git 检查点
