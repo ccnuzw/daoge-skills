@@ -14,6 +14,7 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("daoge_docs.py")
@@ -2623,6 +2624,25 @@ class DaogeDocsTests(unittest.TestCase):
 
         self.assertEqual('{"状态":"已完成"}\n', target.read_text(encoding="utf-8"))
         self.assertEqual([], list(target.parent.glob(f".{target.name}.*.tmp")))
+
+    def test_atomic_copy_syncs_a_writable_file_descriptor(self) -> None:
+        module = load_cli_module()
+        source = self.root / "source.txt"
+        destination = self.root / "docs" / "copied.txt"
+        source.write_text("已完成\n", encoding="utf-8")
+        original_open = Path.open
+        modes: list[str] = []
+
+        def tracking_open(path: Path, *args: object, **kwargs: object):
+            if path.name.startswith(".copied.txt.") and path.suffix == ".tmp":
+                modes.append(str(args[0] if args else kwargs.get("mode", "r")))
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", new=tracking_open):
+            module.atomic_copy_file(source, destination)
+
+        self.assertEqual("已完成\n", destination.read_text(encoding="utf-8"))
+        self.assertEqual(["r+b"], modes)
 
     def test_mutating_commands_wait_for_the_project_write_lock(self) -> None:
         module = load_cli_module()

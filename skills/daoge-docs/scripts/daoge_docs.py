@@ -369,7 +369,7 @@ def atomic_copy_file(source: Path, destination: Path) -> None:
         ) as stream:
             temporary = Path(stream.name)
         shutil.copy2(source, temporary)
-        with temporary.open("rb") as stream:
+        with temporary.open("r+b") as stream:
             os.fsync(stream.fileno())
         os.replace(temporary, destination)
         sync_parent_directory(destination)
