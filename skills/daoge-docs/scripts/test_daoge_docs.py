@@ -2644,6 +2644,43 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertEqual("已完成\n", destination.read_text(encoding="utf-8"))
         self.assertEqual(["r+b"], modes)
 
+    def test_windows_lock_initialization_does_not_read_locked_byte(self) -> None:
+        module = load_cli_module()
+
+        class FakeLockStream:
+            def __init__(self) -> None:
+                self.content = ""
+                self.position = 0
+
+            def seek(self, offset: int, whence: int = 0) -> int:
+                self.position = len(self.content) if whence == os.SEEK_END else offset
+                return self.position
+
+            def tell(self) -> int:
+                return self.position
+
+            def write(self, content: str) -> int:
+                self.content += content
+                self.position = len(self.content)
+                return len(content)
+
+            def read(self, _size: int = -1) -> str:
+                raise AssertionError("Windows lock initialization must not read a locked byte")
+
+            def flush(self) -> None:
+                pass
+
+            def fileno(self) -> int:
+                return 7
+
+        stream = FakeLockStream()
+        with patch.object(module.os, "fsync"):
+            module.initialize_windows_lock_file(stream)
+
+        self.assertEqual("\n", stream.content)
+        module.initialize_windows_lock_file(stream)
+        self.assertEqual("\n", stream.content)
+
     def test_mutating_commands_wait_for_the_project_write_lock(self) -> None:
         module = load_cli_module()
         self.init("lean")

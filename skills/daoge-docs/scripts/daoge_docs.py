@@ -398,6 +398,15 @@ def sync_parent_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def initialize_windows_lock_file(stream: object) -> None:
+    """Ensure msvcrt can lock the first byte without reading a peer-held lock."""
+    stream.seek(0, os.SEEK_END)
+    if stream.tell() != 0:
+        return
+    stream.write("\n")
+    stream.flush()
+    os.fsync(stream.fileno())
+
 @contextmanager
 def project_write_lock(root: Path, timeout_seconds: float = 30.0) -> Iterable[None]:
     """Serialize mutations without leaving a stale lock after a process exits."""
@@ -412,11 +421,7 @@ def project_write_lock(root: Path, timeout_seconds: float = 30.0) -> Iterable[No
     try:
         if os.name == "nt":
             import msvcrt
-
-            stream.seek(0)
-            if not stream.read(1):
-                stream.write("\n")
-                stream.flush()
+            initialize_windows_lock_file(stream)
             while not acquired:
                 try:
                     stream.seek(0)
