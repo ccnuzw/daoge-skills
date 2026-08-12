@@ -17,6 +17,7 @@ description: 为软件项目建立和治理中文文档驱动开发体系。用�
 6. 权限、资金、秘密、并发、删除、外部副作用、动态制品、跨系统状态或恢复语义冲突时，停止实现，先记录决策。
 7. 重要需求、功能、验收项、设计分支、E2E 用例和 ADR 使用稳定 ID；重命名、移动或废弃后不得复用 ID。
 8. 任何“已验证”结论必须绑定实际命令、退出码、环境、提交、构建、时间和证据路径。
+9. 所有会改变项目文档、注册表、Goal 或证据的 CLI 命令由项目级写锁串行执行；读取、审计与门禁可并行。锁等待超时后必须保持原状并报告，不能绕过锁或手工改写机器状态。
 
 开始前按任务读取参考文件：
 
@@ -66,7 +67,9 @@ python3 <skill-dir>/scripts/daoge_docs.py init \
 10. 后续确认使用 `update-input`、`update-constraint` 保留原 ID；取得缺失材料后使用 `resolve-evidence-asset` 补齐原资产记录，不要重复创建记录。
 11. 每项 `confirmed` 输入和 `hard_requirement` 必须用 `map-spec-coverage` 映射到当前版本稳定需求、正式后续版本规划，或带确认人和理由的关闭结论。`future_candidate` 不是开发授权。
 12. 需要把“哪个文件定义哪类事实”形式化时，用 `register-authority` 登记范围键、事实类型、唯一来源与负责人；替代必须引用同范围、同事实类型的旧 `AUTH-*`，不能并存两个 `active` 来源。
-13. 依次运行 `index`、`check`、`gate --stage discovery`、`gate --stage version-ready`。门禁失败是待办事实，不得通过伪造内容绕过。
+13. strict Profile 在版本进入开发前必须先提出 `version_scope` 开发确认，再由真实开发者使用 `decide-approval` 记录 `approved` 或 `rejected`；确认绑定当前版本权威摘要，摘要变化后自动失效，不能批准过期请求。lean/standard 保留该记录能力，但不把它作为强制门禁。
+14. AI 起草新的或替换既有规格时，先用 `new-spec-draft` 将候选 Markdown 隔离保存于 `.daoge-docs/spec-drafts/`；开发者经 `decide-spec-draft` 批准后，才可用 `materialize-spec-draft` 写入 `docs`。草案、批准和工作台投影不是权威事实，未物化草案不得进入 Goal。
+15. 依次运行 `index`、`check`、`gate --stage discovery`、`gate --stage version-ready`。门禁失败是待办事实，不得通过伪造内容绕过。
 
 ## 创建版本与领域
 
@@ -111,7 +114,7 @@ python3 .daoge-docs/daoge_docs.py new-feature \
 
 `version-ready` 前不能只补齐标题和状态。必须逐份评审以下可执行契约：
 
-1. `版本进入开发门禁.md`：门禁输入、权威摘要失效条件、产品范围、稳定需求、架构风险、测试发布准备、批准和例外。
+1. `版本进入开发门禁.md`：门禁输入、权威摘要失效条件、产品范围、稳定需求、架构风险、测试发布准备、开发确认、批准和例外。
 2. `测试策略.md`：静态、单元、Integration/Contract、前端、E2E、性能、安全和发布各层职责；风险到失败注入、副作用和最低证据的映射；失败分类与退出标准。
 3. E2E 规范、环境、夹具和执行手册：真实入口、真实核心组件、最终业务副作用、`Arrange/Act/Assert/Replay/Cleanup`、环境失败与业务失败分离、报告保存和清理。
 4. 性能规范、环境、负载、场景和执行手册：逐请求测量、明确比较符、批准 Profile 与 SHA-256、稳态/峰值/过载/恢复、资源有界、业务不变量和停止条件。不得用两个聚合分位数相减推导阶段耗时。
@@ -130,6 +133,12 @@ python3 .daoge-docs/daoge_docs.py new-e2e \
 ```
 
 功能通过 Ready 门禁后，用 `new-task` 创建有明确授权边界的开发任务书。长期架构、数据、安全、兼容或运维决策用 `new-adr`；跨功能但不改变架构边界的业务决定用 `new-decision` 登记。`accepted` 状态必须提供真实确认人，工具不会自行批准。
+
+已确认功能、模块或版本需要二次增强、废弃、拆分或延期时，先更新原有权威 Markdown/ADR，再创建 `CHANGESET-*`。ChangeSet 只记录稳定影响 ID、权威路径、变更类型、摘要绑定和人工决定，绝不复制业务正文。`approved` 只在绑定摘要仍匹配时有效；权威内容再次变化后派生为 `expired`，必须重新提出。需把修订交给编程智能体时，提交已确认文档后运行 `prepare-goal --change-set CHANGESET-001`；未批准、已拒绝、已取消或已失效的 ChangeSet 必须保持 Goal `blocked`。
+
+规格尚未成为项目事实时，不得让智能体直接写入 `docs`。把候选内容先保存为项目根目录下、`docs` 与 `.daoge-docs` 之外的 Markdown 文件，使用 `new-spec-draft --kind create|replace` 登记目标和候选摘要。`decide-spec-draft --decision approved` 只记录人工批准，仍不写入目标；只有 `materialize-spec-draft` 在候选内容和目标基线都未变时才写入权威 Markdown。新建、审批或拒绝草案不会改变 `authority_digest`；成功物化才会使受影响 Goal、确认和证据按既有机制重新评估。草案内容被改动必须重新提出，拒绝、替代或未物化的草案不得成为 Goal 输入。
+
+功能、模块或版本的“开发级完成”必须回写到项目输入与约束注册表中的 `DELIVERY-*`，但该记录只能引用稳定目标 ID、Goal ID、`completion.json` 摘要和开发者确认，不能复制需求或让智能体自述替代证据。单功能可直接使用 `close-delivery --target CODE-FR-001 --decision accepted --goal GOAL-*`；跨功能模块先以 `new-delivery-module` 登记 `MODULE-*` 边界；版本目标使用 `--target Vn`，关联 Goal 必须覆盖该版本的全部功能。权威摘要、范围、提交或绑定完成证据变化后，已确认记录派生为 `needs_reverification`，历史记录保留；`exception` 只表达明确例外，永远不等于完成。
 
 ## 证据和发布
 
@@ -191,15 +200,16 @@ python3 .daoge-docs/daoge_docs.py serve --root . --port 8877
 
 交付前至少验证：六个主视图可切换且没有额外一级入口；工作台首屏在一个视口内完成开发判断；总览、六类图谱、能力演进和逐功能时间线来自权威来源；验证面板不混淆结构、实现、证据和批准；旧 governance/diff 深链可达新位置；搜索可进入正文或功能时间线；Markdown 表格、代码、图片和内部链接可用；所有来源链接在当前页和新标签页均显示正确中文；原始 `.md` 响应包含 UTF-8 charset；URL hash 与本地状态可恢复；桌面布局没有遮挡；移动端六个入口完整可达，目录与章节抽屉可显式关闭，宽表可横向阅读，筛选输入不会因重绘中断。浏览器可直接离线打开；测试工具拒绝 `file://` 时，使用内置 `serve` 命令验收。
 
-浏览器只是人类认知入口。面向编程智能体的大型任务必须从同一权威文档生成绑定 `source_commit` 和 `authority_digest` 的 Goal 清单，并遵守 Goal 执行契约；浏览器不得直接运行 Goal。工作台或 Goal 的新增能力只有在生成器、检查器和回归测试同时落地后才能标为已实现。
+浏览器只是人类认知入口。面向编程智能体的大型任务必须从同一权威文档生成绑定 `source_commit` 和 `authority_digest` 的 Goal 清单，并遵守 Goal 执行契约；strict Profile 还必须先有当前版本的 `approved` 开发确认，浏览器不得直接运行 Goal。工作台或 Goal 的新增能力只有在生成器、检查器和回归测试同时落地后才能标为已实现。
 
 ## 准备大型 Goal
 
-只有目标版本和所选功能通过现有 `version-ready`、`feature-ready` 门禁，Git HEAD 可解析，权威摘要稳定，工程落点、AC、稳定分支和验证命令完整时，才能生成 `ready` Goal：
+只有目标版本和所选功能通过现有 `version-ready`、`feature-ready` 门禁，strict Profile 还有绑定当前版本权威摘要的 `approved` 开发确认，Git HEAD 可解析，权威摘要稳定，工程落点、AC、稳定分支和验证命令完整时，才能生成 `ready` Goal：
 
 ```sh
 python3 .daoge-docs/daoge_docs.py prepare-goal \
   --root . --feature CODE-FR-001 --feature CODE-FR-002 \
+  --change-set CHANGESET-001 \
   --objective "完成订单闭环并取得开发级机器证据"
 ```
 
@@ -324,6 +334,15 @@ add-evidence-asset 归档证据资产或登记缺失的原始材料
 resolve-evidence-asset 补齐原 ASSET-* 记录并校验归档摘要
 map-spec-coverage  将确认输入或硬约束映射到当前规格、正式后续规划或关闭结论
 register-authority 登记同一范围和事实类型的唯一 active 权威，并显式替代旧来源
+request-approval 提出绑定当前版本权威摘要的开发确认请求
+decide-approval 由开发者记录开发确认的批准或拒绝，工具不会自行批准
+new-change-set 提出当前版本的规格修订，记录影响 ID、权威来源和摘要绑定
+decide-change-set 由开发者批准、拒绝或取消 ChangeSet；过期摘要不能批准
+new-spec-draft  在 docs 外登记待确认的 Markdown 规格候选，不写入权威文档
+decide-spec-draft 由开发者批准或拒绝隔离草案；批准仍不写入 docs
+materialize-spec-draft 将内容和目标基线未变的已批准草案物化为权威 Markdown
+new-delivery-module 登记由稳定功能 ID 组成的交付模块，不复制功能规格
+close-delivery 由开发者以可复验 Goal 完成证据回写功能、模块或版本的开发状态
 handoff           输出跨会话恢复所需的输入、覆盖、权威边界、资产和门禁摘要
 archive           创建历史归档并指向当前替代权威
 index             重建索引、风险表、追踪矩阵、实现状态、派生图表和产品文档浏览器

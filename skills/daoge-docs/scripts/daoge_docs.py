@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from functools import partial
 import hashlib
 import html
@@ -16,6 +17,8 @@ import shutil
 import subprocess
 import sys
 import threading
+import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -31,7 +34,7 @@ BROWSER_TEMPLATES = ASSETS / "templates" / "browser"
 INTEGRATION_TEMPLATES = ASSETS / "templates" / "integrations"
 PROFILES_PATH = ASSETS / "profiles.json"
 CONFIG_NAME = ".daoge-docs.json"
-TOOL_VERSION = "3.20.0"
+TOOL_VERSION = "3.25.0"
 MIN_PYTHON_VERSION = (3, 10)
 GOAL_SCHEMA_VERSION = 1
 GOAL_ID_RE = re.compile(r"GOAL-[A-Z0-9][A-Z0-9-]*")
@@ -64,6 +67,57 @@ CONSTRAINT_KINDS = {"hard_requirement", "soft_goal", "reference_observation"}
 EVIDENCE_ASSET_KINDS = {"image", "document", "archive", "recording", "binary", "other"}
 COVERAGE_DISPOSITIONS = {"current_scope", "future_candidate", "rejected", "superseded", "not_applicable"}
 AUTHORITY_STATUSES = {"active", "deprecated"}
+APPROVAL_SCOPES = {"version_scope"}
+APPROVAL_STATUSES = {"proposed", "approved", "rejected", "superseded"}
+CHANGESET_KINDS = {"add", "change", "deprecate", "split", "defer"}
+CHANGESET_STATUSES = {"proposed", "approved", "rejected", "superseded", "cancelled"}
+CHANGESET_DECISIONS = {"approved", "rejected", "cancelled"}
+DELIVERY_UNIT_KINDS = {"module"}
+DELIVERY_UNIT_STATUSES = {"active", "deprecated"}
+DELIVERY_DECISIONS = {"accepted", "exception"}
+SPEC_DRAFT_STATUSES = {"proposed", "approved", "rejected", "materialized", "superseded"}
+SPEC_DRAFT_DECISIONS = {"approved", "rejected"}
+MUTATING_COMMANDS = {
+    "init",
+    "upgrade",
+    "install-integrations",
+    "new-version",
+    "new-future-version",
+    "new-domain",
+    "new-architecture-spec",
+    "new-feature",
+    "new-requirement",
+    "new-e2e",
+    "new-adr",
+    "new-decision",
+    "new-task",
+    "new-evidence",
+    "record-input",
+    "record-constraint",
+    "update-input",
+    "update-constraint",
+    "add-evidence-asset",
+    "resolve-evidence-asset",
+    "map-spec-coverage",
+    "register-authority",
+    "request-approval",
+    "decide-approval",
+    "new-change-set",
+    "decide-change-set",
+    "new-spec-draft",
+    "decide-spec-draft",
+    "materialize-spec-draft",
+    "new-delivery-module",
+    "close-delivery",
+    "archive",
+    "index",
+    "ci-check",
+    "snapshot",
+    "prepare-goal",
+    "goal-resume-context",
+    "goal-checkpoint",
+    "goal-complete",
+}
 AUTHORITY_FACT_TYPES = {
     "product_direction",
     "cross_version_constraint",
@@ -273,11 +327,142 @@ def render(text: str, values: dict[str, str]) -> str:
     return text
 
 
+def atomic_write_text(path: Path, content: str) -> None:
+    """Write a UTF-8 file without exposing a partially written target."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        sync_parent_directory(path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def atomic_copy_file(source: Path, destination: Path) -> None:
+    """Copy an arbitrary asset without exposing a partially copied target."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+        shutil.copy2(source, temporary)
+        with temporary.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+        sync_parent_directory(destination)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def sync_parent_directory(path: Path) -> None:
+    """Best-effort directory sync after an atomic replacement on POSIX."""
+    if os.name == "nt":
+        return
+    try:
+        descriptor = os.open(path.parent, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def project_write_lock(root: Path, timeout_seconds: float = 30.0) -> Iterable[None]:
+    """Serialize mutations without leaving a stale lock after a process exits."""
+    root = root.resolve()
+    lock_key = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
+    directory = Path(tempfile.gettempdir()) / "daoge-docs-locks"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{lock_key}.lock"
+    deadline = time.monotonic() + timeout_seconds
+    stream = path.open("a+", encoding="utf-8")
+    acquired = False
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            stream.seek(0)
+            if not stream.read(1):
+                stream.write("\n")
+                stream.flush()
+            while not acquired:
+                try:
+                    stream.seek(0)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    acquired = True
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise DocsError(f"等待项目写入锁超时：{path}")
+                    time.sleep(0.1)
+        else:
+            import fcntl
+
+            while not acquired:
+                try:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise DocsError(f"等待项目写入锁超时：{path}")
+                    time.sleep(0.1)
+        stream.seek(0)
+        stream.truncate()
+        stream.write(json.dumps({"pid": os.getpid(), "acquired_at": now_iso()}, ensure_ascii=False) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+        yield
+    finally:
+        try:
+            if acquired:
+                if os.name == "nt":
+                    import msvcrt
+
+                    stream.seek(0)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        finally:
+            stream.close()
+
+
 def write_new(path: Path, content: str) -> None:
     if path.exists():
         raise DocsError(f"拒绝覆盖已有文件：{path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    atomic_write_text(path, content)
 
 
 def write_generated(path: Path, content: str) -> None:
@@ -285,8 +470,7 @@ def write_generated(path: Path, content: str) -> None:
         existing = path.read_text(encoding="utf-8")
         if "generated by daoge-docs" not in existing[:200]:
             raise DocsError(f"拒绝覆盖非工具生成的派生文件：{path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    atomic_write_text(path, content)
 
 
 def read_json(path: Path, label: str) -> dict:
@@ -300,8 +484,7 @@ def read_json(path: Path, label: str) -> dict:
 
 
 def write_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
 def load_profile_catalog() -> dict:
@@ -624,7 +807,7 @@ def materialize_profile(root: Path, config: dict, version: str) -> tuple[list[st
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
         document_id = allocate_profile_doc_id(root, config, version, index)
-        destination.write_text(render_profile_document(item, config, version, document_id), encoding="utf-8")
+        atomic_write_text(destination, render_profile_document(item, config, version, document_id))
         created.append(str(destination.relative_to(root)))
     return created, skipped
 
@@ -651,8 +834,7 @@ def vendor_tooling(root: Path, overwrite: bool = False) -> tuple[list[str], list
         if destination.exists() and not overwrite:
             skipped.append(str(destination.relative_to(root)))
             continue
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        atomic_copy_file(source, destination)
         created.append(str(destination.relative_to(root)))
     return created, skipped
 
@@ -838,12 +1020,17 @@ def ensure_project_inputs(root: Path, config: dict) -> Path:
         write_json(
             path,
             {
-                "schema_version": 2,
+                "schema_version": 6,
                 "inputs": [],
                 "constraints": [],
                 "evidence_assets": [],
                 "coverage": [],
                 "authority_scopes": [],
+                "approvals": [],
+                "change_sets": [],
+                "delivery_units": [],
+                "delivery_records": [],
+                "spec_drafts": [],
             },
         )
     else:
@@ -854,6 +1041,39 @@ def ensure_project_inputs(root: Path, config: dict) -> Path:
             data["schema_version"] = 2
             data.setdefault("coverage", [])
             data.setdefault("authority_scopes", [])
+        if data.get("schema_version") == 2:
+            # 3.21 adds version-scope developer approvals. Approval history is
+            # append-only and does not rewrite existing input or constraint IDs.
+            data["schema_version"] = 3
+            data.setdefault("approvals", [])
+        if data.get("schema_version") == 3:
+            # 3.22 adds governed ChangeSet proposals. Existing facts retain
+            # their IDs and values; only the new collection is initialized.
+            data["schema_version"] = 4
+            data.setdefault("approvals", [])
+            data.setdefault("change_sets", [])
+        if data.get("schema_version") == 4:
+            # 3.23 introduces independently auditable delivery units and
+            # developer closure records. They only reference Goal/evidence
+            # facts and never duplicate specification prose.
+            data["schema_version"] = 5
+            data.setdefault("approvals", [])
+            data.setdefault("change_sets", [])
+            data.setdefault("delivery_units", [])
+            data.setdefault("delivery_records", [])
+        if data.get("schema_version") == 5:
+            # 3.24 adds isolated, developer-approved specification drafts. Draft
+            # metadata is intentionally separate from authority content so review
+            # activity cannot invalidate an already frozen development baseline.
+            data["schema_version"] = 6
+            data.setdefault("spec_drafts", [])
+        if data.get("schema_version") == 6:
+            data.setdefault("approvals", [])
+            data.setdefault("change_sets", [])
+            data.setdefault("delivery_units", [])
+            data.setdefault("delivery_records", [])
+            data.setdefault("spec_drafts", [])
+        if data.get("schema_version") in {2, 3, 4, 5, 6}:
             write_json(path, data)
     return path
 
@@ -863,7 +1083,7 @@ def project_inputs(root: Path, config: dict) -> dict:
     if not path.exists():
         raise DocsError(f"缺少项目输入与约束注册表：{path}；请运行 upgrade")
     data = read_json(path, "项目输入与约束注册表")
-    for key in ["inputs", "constraints", "evidence_assets", "coverage", "authority_scopes"]:
+    for key in ["inputs", "constraints", "evidence_assets", "coverage", "authority_scopes", "approvals", "change_sets", "delivery_units", "delivery_records", "spec_drafts"]:
         if not isinstance(data.get(key), list):
             raise DocsError(f"项目输入与约束注册表 {key} 必须是数组：{path}")
     return data
@@ -944,6 +1164,18 @@ def render_project_inputs_ledger(root: Path, config: dict) -> str:
     assets = [item for item in data["evidence_assets"] if isinstance(item, dict)]
     coverage = [item for item in data["coverage"] if isinstance(item, dict)]
     authority_scopes = [item for item in data["authority_scopes"] if isinstance(item, dict)]
+    approvals = [item for item in data["approvals"] if isinstance(item, dict)]
+    change_sets = [change_set_summary(root, config, item) for item in change_set_records(data)]
+    spec_drafts = [spec_draft_summary(root, config, item) for item in spec_draft_records(data)]
+    delivery_units = [item for item in data.get("delivery_units", []) if isinstance(item, dict)]
+    delivery_records = []
+    for item in data.get("delivery_records", []):
+        if not isinstance(item, dict):
+            continue
+        try:
+            delivery_records.append(delivery_record_summary(root, config, item))
+        except (DocsError, OSError, ValueError):
+            delivery_records.append(item)
 
     def rows(records: list[dict], columns: list[str], empty: str) -> str:
         if not records:
@@ -955,7 +1187,12 @@ def render_project_inputs_ledger(root: Path, config: dict) -> str:
     asset_columns = ["id", "title", "kind", "status", "path", "sha256", "source_input", "source_ref", "missing_reason", "updated"]
     coverage_columns = ["id", "source_id", "disposition", "version", "requirement_ids", "feature_ids", "e2e_ids", "future_plan", "rationale", "confirmed_by", "updated"]
     authority_columns = ["id", "scope", "fact_type", "source", "owner", "status", "supersedes", "updated"]
-    return f"""<!-- generated by daoge-docs; 请通过输入、约束、资产、规格覆盖和权威边界命令修改注册表后运行 index，不要直接编辑 -->
+    approval_columns = ["id", "scope", "version", "title", "status", "requested_by", "confirmed_by", "supersedes", "updated"]
+    change_set_columns = ["id", "version", "kind", "title", "status", "delivery_status", "affected_ids", "source_paths", "requested_by", "confirmed_by"]
+    spec_draft_columns = ["id", "version", "kind", "title", "status", "target_path", "content_digest_match", "target_baseline_match", "requested_by", "confirmed_by", "materialized_by"]
+    delivery_unit_columns = ["id", "version", "title", "status", "feature_ids", "source_paths", "owner"]
+    delivery_record_columns = ["id", "target_id", "target_kind", "version", "decision", "scope_digest_match", "goal_ids", "confirmed_by", "confirmed_at", "rationale"]
+    return f"""<!-- generated by daoge-docs; 请通过输入、约束、资产、规格覆盖、权威边界和 ChangeSet 命令修改注册表后运行 index，不要直接编辑 -->
 ---
 doc_id: {config['project_code']}-DOC-INPUTS
 status: ready
@@ -1006,12 +1243,54 @@ authority: 项目输入、约束分类和证据资产的可读派生总账；机
 | --- | --- | --- | --- | --- | --- | --- | --- |
 {rows(authority_scopes, authority_columns, "暂无已登记权威边界")}
 
+## 开发确认
+
+开发确认是开发者对当前版本冻结范围的显式授权，不是需求、实现或发布证据。`approved` 仅在其绑定的版本范围摘要仍匹配时有效；摘要变化后记录保留为审计历史，必须重新提出并确认。确认记录不改变或替代权威规格。
+
+| ID | 范围 | 版本 | 标题 | 状态 | 提出人 | 确认人 | 替代对象 | 更新时间 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{rows(approvals, approval_columns, "暂无开发确认记录")}
+
+## 规格变更集
+
+ChangeSet 只记录变更类型、稳定影响 ID、权威来源、人工决定和摘要绑定；需求、AC、设计与实现事实仍只写入原有权威文档。只有摘要匹配的 `approved` ChangeSet 才能通过 `prepare-goal --change-set` 进入开发；Goal 的准备、执行和完成状态从其清单与机器证据派生，不回写为第二份规格事实。
+
+| ID | 版本 | 类型 | 标题 | 变更状态 | 交付状态 | 影响 ID | 权威来源 | 提出人 | 确认人 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{rows(change_sets, change_set_columns, "暂无已登记 ChangeSet")}
+
+## 待确认规格草案
+
+规格草案是智能体或开发者提出的非权威候选，内容保存在 `.daoge-docs/spec-drafts/`，在开发者批准并物化前绝不进入 `docs`、Goal 或门禁依据。批准同时绑定草案内容摘要和目标 Markdown 基线；任一方变化都会使草案失效，必须重新提出和审批。
+
+| ID | 版本 | 类型 | 标题 | 状态 | 目标文档 | 内容摘要匹配 | 目标基线匹配 | 提出人 | 确认人 | 物化人 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{rows(spec_drafts, spec_draft_columns, "暂无待确认规格草案")}
+
+## 交付单元
+
+交付单元只把多个功能组合成可追踪的模块边界；它不复制功能规格正文。模块的实现与验证仍由关联 Goal、代码和机器证据证明。
+
+| ID | 版本 | 名称 | 状态 | 功能 ID | 权威来源 | 负责人 |
+| --- | --- | --- | --- | --- | --- | --- |
+{rows(delivery_units, delivery_unit_columns, "暂无已登记模块")}
+
+## 开发完成回写
+
+交付记录是开发者对机器完成证据的可追溯确认，不是智能体自述。`accepted` 必须绑定当前可复验的 `completion.json`；摘要变化后派生为需复验，`exception` 只表示明确例外，不表示开发级完成。
+
+| ID | 目标 | 类型 | 版本 | 决定 | 摘要匹配 | Goal | 确认人 | 确认时间 | 依据 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{rows(delivery_records, delivery_record_columns, "暂无开发完成回写")}
+
 ## 跨会话恢复
 
 1. 阅读本文和机器注册表，先区分已确认输入、外部观察与缺失资产。
 2. 仅将 `confirmed` 输入和 `hard_requirement` 作为规格冻结候选；外部观察必须经项目确认后才可成为需求。
 3. 先检查每项确认事实的规格覆盖，再读取对应版本、需求、功能、AC 和 E2E 的权威来源。
-4. 任何新增输入、约束、覆盖或权威边界均须重新运行 `index`、`check` 和受影响 Gate。
+4. 当前版本进入开发前，先提出并确认 `version_scope`；权威范围变化后，旧确认自动失效并必须重新确认。
+5. 需要修订已完成或已规划范围时，先更新原权威文档，再用 ChangeSet 记录影响、确认和 Goal 绑定；不要在 ChangeSet 中复制业务规则。
+6. 草案必须先经开发者确认再物化；物化后才运行 `index`、`check` 和受影响 Gate。任何新增输入、约束、覆盖、权威边界、开发确认或 ChangeSet 也均须重新运行这些检查。
 """
 
 
@@ -1954,12 +2233,34 @@ def browser_findings(
     findings: list[dict] = []
     python_command = project_python_command()
     adr_records = {str(record["meta"].get("id", "")): record for record in adr_documents(root, config)}
+    approval = governance.get("approval", {})
+    approval_blocker = str(approval.get("blocking_reason", ""))
+    if approval_blocker:
+        findings.append(
+            _finding(
+                rule_id="VERSION-APPROVAL",
+                stage="version-ready",
+                severity="blocking",
+                object_type="approval",
+                object_id="version_scope",
+                title="当前版本尚未获得有效开发确认",
+                reason=approval_blocker,
+                source_path="01-项目概览/项目输入与约束注册表.json",
+                source_section="approvals",
+                recovery_action=str(approval.get("recovery_action", "提出并由开发者确认当前版本范围。")),
+                verification_command=f"{python_command} .daoge-docs/daoge_docs.py gate --root . --stage version-ready",
+                owner="版本负责人",
+                authority_digest_value=authority_digest_value,
+            )
+        )
     for gate in governance.get("gates", []):
         for signal in gate.get("blocking_signals", []):
             # The feature-level finding below names the exact ADR and recovery path.
             # Keep the aggregated gate signal on its card, but do not duplicate it in
             # the selected feature's action list or Goal blockers.
             if gate.get("id") in {"version-ready", "feature-ready"} and re.fullmatch(r"\d+ 个功能依赖的 ADR 尚未接受", str(signal)):
+                continue
+            if gate.get("id") == "version-ready" and str(signal) == approval_blocker:
                 continue
             findings.append(
                 _finding(
@@ -2149,7 +2450,7 @@ def workbench_development_findings(findings: list[dict], feature_id: str = "") -
     for item in findings:
         if item.get("status") != "open" or item.get("stage") not in DEVELOPMENT_WORKBENCH_STAGES:
             continue
-        if item.get("object_id") == feature_id or item.get("object_type") == "gate":
+        if item.get("object_id") == feature_id or item.get("object_type") in {"gate", "approval"}:
             relevant.append(item)
     return relevant
 
@@ -2258,7 +2559,7 @@ def browser_task_packets(
         item["id"]
         for item in findings
         if item.get("status") == "open"
-        and item.get("object_type") == "gate"
+        and item.get("object_type") in {"gate", "approval"}
         and item.get("stage") in {"discovery", "version-ready"}
         and item.get("severity") in {"blocking", "high"}
     ]
@@ -2396,6 +2697,17 @@ def browser_evidence(root: Path, config: dict, current_authority_digest: str | N
 def browser_governance(root: Path, config: dict, features: list[dict], current_authority_digest: str | None = None) -> dict:
     docs = docs_root(root, config)
     values = values_for(config)
+    approval = version_scope_approval(root, config)
+    change_sets = [
+        change_set_summary(root, config, item)
+        for item in change_set_records(project_inputs(root, config))
+        if str(item.get("version", "")) == str(config["current_version"])
+    ]
+    spec_drafts = [
+        spec_draft_summary(root, config, item)
+        for item in spec_draft_records(project_inputs(root, config))
+        if str(item.get("version", "")) == str(config["current_version"])
+    ]
     gate_definitions = [
         ("discovery", "Discovery", {"discovery"}),
         ("version-ready", "Version Ready", {"discovery", "version-ready"}),
@@ -2455,6 +2767,8 @@ def browser_governance(root: Path, config: dict, features: list[dict], current_a
                 blockers.append(f"{placeholders} 份门禁文档仍有待决占位")
             if gate_id == "version-ready" and unresolved_feature_adrs:
                 blockers.append(f"{len(unresolved_feature_adrs)} 个功能依赖的 ADR 尚未接受")
+            if gate_id == "version-ready" and approval["blocking_reason"]:
+                blockers.append(approval["blocking_reason"])
             path = records[0]["path"] if records else ""
         status = "not_run" if not total else ("structure_ready" if not blockers else "blocked")
         gates.append(
@@ -2500,6 +2814,9 @@ def browser_governance(root: Path, config: dict, features: list[dict], current_a
     return {
         "evaluation": "derived_structure",
         "notice": "结构信号用于发现缺口，不等于任何门禁已批准；passed 只来自实际机器证据。",
+        "approval": approval,
+        "change_sets": change_sets,
+        "spec_drafts": spec_drafts,
         "gates": gates,
         "testing": testing,
         "design_depth": {
@@ -3517,6 +3834,7 @@ def portfolio_feature_summary(root: Path, config: dict, record: dict, version: s
         # Cross-version evidence is never inferred from the active evidence
         # selector.  A project may retain only a historical specification.
         "verification": "unknown",
+        "delivery": delivery_target_summary(root, config, str(meta.get("id", "")), version) if is_active_version and meta.get("id") else {"state": "unknown", "basis": "历史版本没有独立交付登记。", "goal_links": [], "records": []},
         "sources": [
             browser_source(
                 record["path"].relative_to(docs_root(root, config)).as_posix(),
@@ -3929,6 +4247,7 @@ def browser_payload(root: Path, config: dict) -> dict:
                 "branches": branches,
                 "implementation_points": implementation_points,
                 "implementation_signal": implementation_signal,
+                "delivery": delivery_target_summary(root, config, str(meta.get("id", "")), str(config["current_version"])) if meta.get("id") else {"state": "unknown", "basis": "功能没有稳定 ID。", "goal_links": [], "records": []},
                 "non_goals": non_goals,
                 "has_design": design_path.exists(),
                 "has_unit_contract": not bool(missing_headings(design_text, ["函数/用例签名"] if meta.get("risk") == "high" else ["单元契约"])),
@@ -4000,6 +4319,8 @@ def browser_payload(root: Path, config: dict) -> dict:
         for item in decision_records(root, config)
     ]
     governance = browser_governance(root, config, features, authority_digest_value)
+    delivery_targets = browser_delivery_targets(root, config, features)
+    governance["delivery_targets"] = delivery_targets
     findings = browser_findings(root, config, documents, directories, features, governance, authority_digest_value)
     finding_by_object: dict[str, int] = {}
     for finding in findings:
@@ -4271,14 +4592,14 @@ def browser_payload(root: Path, config: dict) -> dict:
     goal_readiness["execution_plan"] = execution_plan
     goal_readiness["document_sync_policy"] = {
         "mode": "authority_first",
-        "trigger": "权威文档、ADR、AC、实现落点或验证命令变化",
+        "trigger": "权威文档、ChangeSet、ADR、AC、实现落点或验证命令变化",
         "required_action": "停止受影响任务，更新权威来源并重新运行 index、check、相关 gate 和 prepare-goal",
     }
     workbench_view["execution_plan"] = execution_plan
     workbench_view["document_sync_policy"] = goal_readiness["document_sync_policy"]
     workbench_view["goal_runtime"] = goal_runtime
     payload = {
-        "schema_version": 8,
+        "schema_version": 12,
         "generated_at": generation_stamp,
         "tool_version": TOOL_VERSION,
         "source_commit": source_commit or "",
@@ -4304,6 +4625,7 @@ def browser_payload(root: Path, config: dict) -> dict:
         "adrs": adrs,
         "e2e": e2e,
         "governance": governance,
+        "delivery_targets": delivery_targets,
         "snapshots": snapshots,
         "evidence_freshness": governance.get("evidence_freshness", {}),
         "views": views,
@@ -5009,8 +5331,7 @@ def command_add_evidence_asset(args: argparse.Namespace) -> dict:
         target = target_dir / f"{asset_id}-{safe_segment(args.title, '证据资产')}{suffix}"
         if target.exists():
             raise DocsError(f"证据资产目标已存在：{target}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        atomic_copy_file(source, target)
         record.update(
             {
                 "status": "available",
@@ -5064,8 +5385,7 @@ def command_resolve_evidence_asset(args: argparse.Namespace) -> dict:
     target = target_dir / f"{asset_id}-{safe_segment(str(record.get('title', '证据资产')), '证据资产')}{suffix}"
     if target.exists():
         raise DocsError(f"证据资产目标已存在：{target}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
+    atomic_copy_file(source, target)
     record.update(
         {
             "status": "available",
@@ -5208,7 +5528,7 @@ def command_register_authority(args: argparse.Namespace) -> dict:
     if not isinstance(scopes, list):
         raise DocsError(f"项目输入与约束注册表 authority_scopes 必须是数组：{path}")
     active = [item for item in scopes if isinstance(item, dict) and item.get("status") == "active" and item.get("scope") == scope and item.get("fact_type") == fact_type]
-    supersedes = args.supersedes.strip().upper() or None
+    supersedes = (args.supersedes or "").strip().upper() or None
     if active and not supersedes:
         raise DocsError(f"范围 {scope} / {fact_type} 已有 active 权威：{active[0].get('id', '未知')}；使用 --supersedes 显式替代")
     if supersedes:
@@ -5237,6 +5557,992 @@ def command_register_authority(args: argparse.Namespace) -> dict:
     return {"状态": "已登记权威边界", "权威 ID": authority_id, "范围": scope, "事实类型": fact_type, "来源": source, "注册表": str(path.relative_to(root))}
 
 
+def command_request_approval(args: argparse.Namespace) -> dict:
+    """Create an explicit, immutable proposal for current-version development."""
+    root = project_root(args.root)
+    config = load_config(root)
+    scope = args.scope.strip()
+    if scope not in APPROVAL_SCOPES:
+        raise DocsError("开发确认范围无效：" + ", ".join(sorted(APPROVAL_SCOPES)))
+    if not args.title.strip() or not args.requested_by.strip() or not args.rationale.strip():
+        raise DocsError("开发确认必须提供 --title、--requested-by 和 --rationale；工具不会自行确认范围")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    approvals = data.setdefault("approvals", [])
+    if not isinstance(approvals, list):
+        raise DocsError(f"项目输入与约束注册表 approvals 必须是数组：{path}")
+    version = str(config["current_version"])
+    digest, _ = version_scope_authority_digest(root, config)
+    active = [
+        item
+        for item in approvals
+        if isinstance(item, dict)
+        and item.get("scope") == scope
+        and str(item.get("version", "")) == version
+        and item.get("authority_digest") == digest
+        and item.get("status") in {"proposed", "approved"}
+    ]
+    if active:
+        raise DocsError(
+            f"当前版本 {version} 已有绑定当前权威摘要的开发确认：{active[-1].get('id', '未知')}"
+            "；请由开发者决定该请求，或先修改权威规格后重新提出。"
+        )
+    approval_id = next_prefixed_id(approvals, "APPROVAL")
+    supersedes = (args.supersedes or "").strip().upper() or None
+    if supersedes:
+        previous = record_by_id(approvals, supersedes)
+        if previous is None:
+            raise DocsError(f"要替代的开发确认不存在：{supersedes}")
+        if previous.get("scope") != scope or str(previous.get("version", "")) != version:
+            raise DocsError("--supersedes 必须引用同一范围和版本的开发确认")
+        if previous.get("status") == "superseded":
+            raise DocsError(f"开发确认已经被替代：{supersedes}")
+        previous["status"] = "superseded"
+        previous["superseded_by"] = approval_id
+        previous["updated"] = today()
+    approvals.append(
+        {
+            "id": approval_id,
+            "scope": scope,
+            "version": version,
+            "title": args.title.strip(),
+            "status": "proposed",
+            "authority_digest": digest,
+            "requested_by": args.requested_by.strip(),
+            "requested_at": now_iso(),
+            "confirmed_by": None,
+            "confirmed_at": None,
+            "rationale": args.rationale.strip(),
+            "supersedes": supersedes,
+            "superseded_by": None,
+            "updated": today(),
+        }
+    )
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {
+        "状态": "已提出开发确认",
+        "确认 ID": approval_id,
+        "范围": scope,
+        "版本": version,
+        "权威摘要": digest,
+        "下一步": f"由开发者执行 decide-approval --root . --id {approval_id} --decision approved|rejected --confirmed-by <确认人> --rationale <依据>。",
+        "注册表": str(path.relative_to(root)),
+    }
+
+
+def command_decide_approval(args: argparse.Namespace) -> dict:
+    """Record a developer's decision without allowing the tool to self-approve."""
+    root = project_root(args.root)
+    config = load_config(root)
+    approval_id = args.approval_id.strip().upper()
+    decision = args.decision.strip()
+    if decision not in {"approved", "rejected"}:
+        raise DocsError("开发确认决定只能是 approved 或 rejected")
+    if not args.confirmed_by.strip() or not args.rationale.strip():
+        raise DocsError("开发确认决定必须提供 --confirmed-by 和 --rationale")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    record = record_by_id(data.get("approvals", []), approval_id)
+    if record is None:
+        raise DocsError(f"开发确认不存在：{approval_id}")
+    if record.get("status") != "proposed":
+        raise DocsError(f"只有 proposed 开发确认可以决定：{approval_id} 当前为 {record.get('status', '未知')}")
+    if record.get("scope") != "version_scope" or str(record.get("version", "")) != str(config["current_version"]):
+        raise DocsError("只能决定当前执行版本的 version_scope 开发确认；其他版本须先切换为独立实现空间")
+    if decision == "approved":
+        current_digest, _ = version_scope_authority_digest(root, config)
+        if record.get("authority_digest") != current_digest:
+            raise DocsError("开发确认绑定的权威摘要已失效；请先重新提出确认，不能对过期规格直接批准")
+    record["status"] = decision
+    record["confirmed_by"] = args.confirmed_by.strip()
+    record["confirmed_at"] = now_iso()
+    record["rationale"] = args.rationale.strip()
+    record["updated"] = today()
+    write_json(path, data)
+    generate_indexes(root, config)
+    summary = version_scope_approval(root, config)
+    return {
+        "状态": "已记录开发确认决定",
+        "确认 ID": approval_id,
+        "决定": decision,
+        "版本": record.get("version"),
+        "当前确认状态": summary["status"],
+        "权威摘要匹配": summary["authority_digest_match"],
+        "注册表": str(path.relative_to(root)),
+    }
+
+
+def change_set_records(data: dict) -> list[dict]:
+    records = data.get("change_sets", [])
+    return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+
+
+def spec_draft_records(data: dict) -> list[dict]:
+    records = data.get("spec_drafts", [])
+    return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+
+
+def spec_draft_directory(root: Path, draft_id: str) -> Path:
+    if not re.fullmatch(r"SPEC-DRAFT-\d{3}", draft_id):
+        raise DocsError(f"规格草案 ID 无效：{draft_id}")
+    return root / ".daoge-docs" / "spec-drafts" / draft_id
+
+
+def spec_draft_content_path(root: Path, draft_id: str) -> Path:
+    return spec_draft_directory(root, draft_id) / "draft.md"
+
+
+def spec_draft_target_path(root: Path, config: dict, value: str, require_file: bool = False) -> tuple[str, Path]:
+    relative = normalized_project_relative_path(root, value, "规格草案目标", require_file=require_file)
+    target = (root / relative).resolve()
+    docs = docs_root(root, config).resolve()
+    try:
+        target.relative_to(docs)
+    except ValueError as exc:
+        raise DocsError("规格草案目标必须位于项目 docs 内") from exc
+    doc_relative = target.relative_to(docs).as_posix()
+    if target.suffix.lower() != ".md" or doc_relative.split("/", 1)[0] in {"90-参考资料", "99-历史归档"}:
+        raise DocsError("规格草案目标必须是 docs 内非派生、非历史归档 Markdown")
+    if target.exists() and GENERATED_MARKER in target.read_text(encoding="utf-8")[:200]:
+        raise DocsError("规格草案不能覆盖派生文档")
+    return relative, target
+
+
+def spec_draft_summary(root: Path, config: dict, record: dict) -> dict:
+    draft_id = str(record.get("id", ""))
+    content_path = spec_draft_content_path(root, draft_id)
+    target_relative = str(record.get("target_path", ""))
+    target = root / target_relative if target_relative else None
+    current_content_digest = sha256_file(content_path) if content_path.is_file() else ""
+    current_target_digest = sha256_file(target) if target and target.is_file() else None
+    content_match = bool(current_content_digest and current_content_digest == record.get("content_digest"))
+    status = str(record.get("status", "unknown"))
+    baseline = record.get("target_digest")
+    # After a successful materialization the target must intentionally differ
+    # from its review baseline. Show whether it still matches the approved
+    # candidate instead of presenting that expected write as a mismatch.
+    baseline_match = (
+        current_target_digest == record.get("content_digest")
+        if status == "materialized"
+        else current_target_digest == baseline if baseline else current_target_digest is None
+    )
+    if status in {"proposed", "approved"} and (not content_match or not baseline_match):
+        status = "expired"
+    return {
+        "id": draft_id,
+        "version": str(record.get("version", "")),
+        "kind": str(record.get("kind", "")),
+        "title": str(record.get("title", "")),
+        "status": status,
+        "base_status": str(record.get("status", "")),
+        "target_path": target_relative,
+        "content_path": str(content_path.relative_to(root)),
+        "content_digest": str(record.get("content_digest", "")),
+        "current_content_digest": current_content_digest,
+        "content_digest_match": content_match,
+        "target_digest": baseline,
+        "current_target_digest": current_target_digest,
+        "target_baseline_match": baseline_match,
+        "requested_by": record.get("requested_by"),
+        "requested_at": record.get("requested_at"),
+        "confirmed_by": record.get("confirmed_by"),
+        "confirmed_at": record.get("confirmed_at"),
+        "rationale": str(record.get("rationale", "")),
+        "decision_rationale": record.get("decision_rationale"),
+        "materialized_by": record.get("materialized_by"),
+        "materialized_at": record.get("materialized_at"),
+        "materialized_target_digest": record.get("materialized_target_digest"),
+        "recovery_action": (
+            "草案内容或目标文档已变化；重新生成草案或重新提出审批。"
+            if status == "expired" else
+            "等待开发者审阅并执行 decide-spec-draft。"
+            if status == "proposed" else
+            "执行 materialize-spec-draft 将已批准草案写入权威 Markdown。"
+            if status == "approved" else ""
+        ),
+    }
+
+
+def command_new_spec_draft(args: argparse.Namespace) -> dict:
+    """Store an AI-authored candidate outside docs for developer review."""
+    root = project_root(args.root)
+    config = load_config(root)
+    kind = args.kind.strip()
+    if kind not in {"create", "replace"}:
+        raise DocsError("规格草案类型必须是 create 或 replace")
+    if not args.title.strip() or not args.requested_by.strip() or not args.rationale.strip():
+        raise DocsError("规格草案必须提供 --title、--requested-by 和 --rationale")
+    target_relative, target = spec_draft_target_path(root, config, args.target, require_file=False)
+    if kind == "create" and target.exists():
+        raise DocsError("create 草案的目标文档已存在；请使用 replace")
+    if kind == "replace" and not target.is_file():
+        raise DocsError("replace 草案的目标文档不存在")
+    content_relative = normalized_project_relative_path(root, args.content_file, "规格草案内容", require_file=True)
+    content_source = root / content_relative
+    if content_source.suffix.lower() != ".md":
+        raise DocsError("规格草案内容必须是 Markdown 文件")
+    if content_source.resolve().is_relative_to((root / ".daoge-docs").resolve()):
+        raise DocsError("规格草案内容不能位于 .daoge-docs；请从项目工作区中的候选 Markdown 提交")
+    try:
+        content_source.resolve().relative_to(docs_root(root, config).resolve())
+    except ValueError:
+        pass
+    else:
+        raise DocsError("规格草案内容必须位于 docs 之外；候选内容不能先写入权威目录")
+    content = content_source.read_text(encoding="utf-8")
+    if not content.strip() or not re.search(r"^#\s+\S+", content, re.MULTILINE):
+        raise DocsError("规格草案内容必须包含非空一级 Markdown 标题")
+    if GENERATED_MARKER in content[:200]:
+        raise DocsError("规格草案不能使用派生文档内容")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    records = data.setdefault("spec_drafts", [])
+    if not isinstance(records, list):
+        raise DocsError(f"项目输入与约束注册表 spec_drafts 必须是数组：{path}")
+    active = [
+        item for item in spec_draft_records(data)
+        if str(item.get("target_path", "")) == target_relative and item.get("status") in {"proposed", "approved"}
+    ]
+    supersedes = (args.supersedes or "").strip().upper() or None
+    if active and not supersedes:
+        raise DocsError(f"目标已有待审或已批准草案：{active[-1].get('id', '未知')}；请先决定或使用 --supersedes")
+    if active and supersedes not in {str(item.get("id", "")) for item in active}:
+        raise DocsError("存在待审或已批准草案时，--supersedes 必须明确替代其中之一")
+    draft_id = next_prefixed_id(records, "SPEC-DRAFT")
+    if supersedes:
+        previous = record_by_id(records, supersedes)
+        if previous is None:
+            raise DocsError(f"要替代的规格草案不存在：{supersedes}")
+        if str(previous.get("target_path", "")) != target_relative:
+            raise DocsError("规格草案只能替代同一目标文档的旧草案")
+        if previous.get("status") in {"materialized", "rejected", "superseded"}:
+            raise DocsError(f"规格草案已经关闭，不能再次替代：{supersedes}")
+        previous["status"] = "superseded"
+        previous["superseded_by"] = draft_id
+        previous.setdefault("events", []).append(
+            {"status": "superseded", "actor": args.requested_by.strip(), "at": now_iso(), "rationale": f"由 {draft_id} 替代"}
+        )
+        previous["updated"] = today()
+    draft_path = spec_draft_content_path(root, draft_id)
+    draft_path.parent.mkdir(parents=True, exist_ok=False)
+    atomic_write_text(draft_path, content)
+    now = now_iso()
+    record = {
+        "id": draft_id,
+        "version": str(config["current_version"]),
+        "kind": kind,
+        "title": args.title.strip(),
+        "status": "proposed",
+        "target_path": target_relative,
+        "target_digest": sha256_file(target) if target.is_file() else None,
+        "content_digest": sha256_file(draft_path),
+        "requested_by": args.requested_by.strip(),
+        "requested_at": now,
+        "confirmed_by": None,
+        "confirmed_at": None,
+        "rationale": args.rationale.strip(),
+        "decision_rationale": None,
+        "materialized_by": None,
+        "materialized_at": None,
+        "materialized_target_digest": None,
+        "supersedes": supersedes,
+        "superseded_by": None,
+        "events": [{"status": "proposed", "actor": args.requested_by.strip(), "at": now, "rationale": args.rationale.strip()}],
+        "updated": today(),
+    }
+    records.append(record)
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {
+        "状态": "已提出规格草案",
+        "草案 ID": draft_id,
+        "目标文档": target_relative,
+        "草案内容": str(draft_path.relative_to(root)),
+        "内容摘要": record["content_digest"],
+        "下一步": f"由开发者审阅后执行 decide-spec-draft --root . --id {draft_id} --decision approved|rejected --confirmed-by <确认人> --rationale <依据>。",
+        "注册表": str(path.relative_to(root)),
+    }
+
+
+def command_decide_spec_draft(args: argparse.Namespace) -> dict:
+    """Record a developer approval/rejection without touching the target document."""
+    root = project_root(args.root)
+    config = load_config(root)
+    draft_id = args.draft_id.strip().upper()
+    decision = args.decision.strip()
+    if decision not in SPEC_DRAFT_DECISIONS:
+        raise DocsError("规格草案决定必须是 approved 或 rejected")
+    if not args.confirmed_by.strip() or not args.rationale.strip():
+        raise DocsError("规格草案决定必须提供 --confirmed-by 和 --rationale")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    record = record_by_id(data.get("spec_drafts", []), draft_id)
+    if record is None:
+        raise DocsError(f"规格草案不存在：{draft_id}")
+    if record.get("status") != "proposed":
+        raise DocsError(f"只有 proposed 规格草案可以决定：{draft_id} 当前为 {record.get('status', '未知')}")
+    if str(record.get("version", "")) != str(config["current_version"]):
+        raise DocsError("只能决定当前执行版本的规格草案；其他版本须先切换为独立实现空间")
+    summary = spec_draft_summary(root, config, record)
+    if decision == "approved" and summary["status"] != "proposed":
+        raise DocsError("规格草案内容或目标文档基线已变化；请重新提出，不能批准过期草案")
+    now = now_iso()
+    record["status"] = decision
+    record["confirmed_by"] = args.confirmed_by.strip()
+    record["confirmed_at"] = now
+    record["decision_rationale"] = args.rationale.strip()
+    record.setdefault("events", []).append(
+        {"status": decision, "actor": args.confirmed_by.strip(), "at": now, "rationale": args.rationale.strip()}
+    )
+    record["updated"] = today()
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {
+        "状态": "已记录规格草案决定",
+        "草案 ID": draft_id,
+        "决定": decision,
+        "目标文档": record.get("target_path"),
+        "下一步": f"执行 materialize-spec-draft --root . --id {draft_id} --materialized-by <开发者> 将已批准内容物化到权威文档。" if decision == "approved" else "草案保持审计记录，不会写入权威文档。",
+        "注册表": str(path.relative_to(root)),
+    }
+
+
+def command_materialize_spec_draft(args: argparse.Namespace) -> dict:
+    """Write only an approved, unchanged candidate to its reviewed docs target."""
+    root = project_root(args.root)
+    config = load_config(root)
+    draft_id = args.draft_id.strip().upper()
+    if not args.materialized_by.strip():
+        raise DocsError("物化规格草案必须提供 --materialized-by")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    record = record_by_id(data.get("spec_drafts", []), draft_id)
+    if record is None:
+        raise DocsError(f"规格草案不存在：{draft_id}")
+    if record.get("status") != "approved":
+        raise DocsError(f"只有 approved 规格草案可以物化：{draft_id} 当前为 {record.get('status', '未知')}")
+    summary = spec_draft_summary(root, config, record)
+    if summary["status"] != "approved":
+        raise DocsError("规格草案内容或目标文档基线已变化；请重新提出并审批后再物化")
+    target_relative, target = spec_draft_target_path(root, config, str(record.get("target_path", "")), require_file=False)
+    if target_relative != record.get("target_path"):
+        raise DocsError("规格草案目标路径无效")
+    content_path = spec_draft_content_path(root, draft_id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(target, content_path.read_text(encoding="utf-8"))
+    now = now_iso()
+    record["status"] = "materialized"
+    record["materialized_by"] = args.materialized_by.strip()
+    record["materialized_at"] = now
+    record["materialized_target_digest"] = sha256_file(target)
+    record.setdefault("events", []).append(
+        {"status": "materialized", "actor": args.materialized_by.strip(), "at": now, "rationale": f"物化到 {target_relative}"}
+    )
+    record["updated"] = today()
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {
+        "状态": "已物化规格草案",
+        "草案 ID": draft_id,
+        "权威文档": target_relative,
+        "下一步": "运行 index、check 和受影响的 gate；权威内容是否可开发仍由现有门禁判断。",
+        "注册表": str(path.relative_to(root)),
+    }
+
+
+def change_set_source_paths(root: Path, config: dict, values: list[str]) -> list[str]:
+    """Resolve ChangeSet sources to existing non-derived docs-relative authority files."""
+    if not values:
+        raise DocsError("ChangeSet 必须至少提供一个 --source 权威文档路径")
+    docs = docs_root(root, config)
+    allowed = {path.relative_to(docs).as_posix() for path in authority_files(root, config)}
+    resolved: set[str] = set()
+    for raw in values:
+        source, explanation = normalize_doc_source(root, config, raw)
+        if not source:
+            raise DocsError(f"ChangeSet 来源无法定位到 docs 文件：{raw}；{explanation}")
+        if source not in allowed:
+            raise DocsError(f"ChangeSet 来源必须是当前项目的权威文件，不能引用派生或非权威文件：{source}")
+        resolved.add(source)
+    return sorted(resolved)
+
+
+def change_set_status(root: Path, config: dict, record: dict) -> str:
+    status = str(record.get("status", ""))
+    if status in {"proposed", "approved"}:
+        current_digest, _ = version_scope_authority_digest(root, config)
+        if str(record.get("authority_digest", "")) != current_digest:
+            return "expired"
+    return status or "unknown"
+
+
+def change_set_goal_links(root: Path, change_set_id: str) -> list[dict]:
+    links: list[dict] = []
+    goals_root = root / ".daoge-docs" / "goals"
+    if not goals_root.exists():
+        return links
+    for manifest_path in sorted(goals_root.glob("GOAL-*/goal-manifest.json")):
+        try:
+            manifest = read_json(manifest_path, "Goal 清单")
+        except DocsError:
+            continue
+        if change_set_id not in [str(item) for item in manifest.get("change_set_ids", []) if item]:
+            continue
+        goal_id = str(manifest.get("goal_id", manifest_path.parent.name))
+        completion = manifest_path.parent / "completion.json"
+        links.append(
+            {
+                "goal_id": goal_id,
+                "status": str(manifest.get("status", "unknown")),
+                "completion": completion.relative_to(root).as_posix() if completion.exists() else None,
+                "path": manifest_path.relative_to(root).as_posix(),
+            }
+        )
+    return links
+
+
+def change_set_summary(root: Path, config: dict, record: dict) -> dict:
+    links = change_set_goal_links(root, str(record.get("id", "")))
+    statuses = {str(item.get("status", "")) for item in links}
+    if "completed" in statuses:
+        delivery = "completed"
+    elif statuses & {"running", "verification_failed", "stale"}:
+        delivery = "executing"
+    elif statuses & {"ready", "blocked"}:
+        delivery = "goal_ready"
+    else:
+        delivery = "not_started"
+    current_digest, _ = version_scope_authority_digest(root, config)
+    digest_match = str(record.get("authority_digest", "")) == current_digest
+    status = change_set_status(root, config, record)
+    return {
+        "id": str(record.get("id", "")),
+        "version": str(record.get("version", "")),
+        "kind": str(record.get("kind", "")),
+        "title": str(record.get("title", "")),
+        "status": status,
+        "base_status": str(record.get("status", "")),
+        "delivery_status": delivery,
+        "authority_digest": str(record.get("authority_digest", "")),
+        "authority_digest_match": digest_match,
+        "affected_ids": sorted(str(item) for item in record.get("affected_ids", []) if item),
+        "source_paths": sorted(str(item) for item in record.get("source_paths", []) if item),
+        "requested_by": str(record.get("requested_by", "")),
+        "requested_at": record.get("requested_at"),
+        "confirmed_by": record.get("confirmed_by"),
+        "confirmed_at": record.get("confirmed_at"),
+        "rationale": str(record.get("rationale", "")),
+        "decision_rationale": record.get("decision_rationale"),
+        "goal_links": links,
+        "supersedes": record.get("supersedes"),
+        "superseded_by": record.get("superseded_by"),
+        "updated": record.get("updated"),
+        "recovery_action": (
+            f"修改权威文档后重新运行 new-change-set 提出；当前状态为 {status}。"
+            if status == "expired"
+            else ""
+        ),
+    }
+
+
+def command_new_change_set(args: argparse.Namespace) -> dict:
+    """Create a version-scoped change proposal without duplicating specification text."""
+    root = project_root(args.root)
+    config = load_config(root)
+    version = str(config["current_version"])
+    kind = args.kind.strip()
+    if kind not in CHANGESET_KINDS:
+        raise DocsError("ChangeSet 类型无效：" + ", ".join(sorted(CHANGESET_KINDS)))
+    if not args.title.strip() or not args.requested_by.strip() or not args.rationale.strip():
+        raise DocsError("ChangeSet 必须提供 --title、--requested-by 和 --rationale")
+    affected_ids = stable_csv(",".join(args.affected or []))
+    if not affected_ids or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]*", item) for item in affected_ids):
+        raise DocsError("ChangeSet 必须提供至少一个格式有效的稳定影响 ID")
+    source_paths = change_set_source_paths(root, config, args.source or [])
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    records = data.setdefault("change_sets", [])
+    if not isinstance(records, list):
+        raise DocsError(f"项目输入与约束注册表 change_sets 必须是数组：{path}")
+    digest, _ = version_scope_authority_digest(root, config)
+    fingerprint = (version, kind, tuple(affected_ids), tuple(source_paths), digest)
+    for existing in change_set_records(data):
+        existing_fingerprint = (
+            str(existing.get("version", "")),
+            str(existing.get("kind", "")),
+            tuple(sorted(str(item) for item in existing.get("affected_ids", []) if item)),
+            tuple(sorted(str(item) for item in existing.get("source_paths", []) if item)),
+            str(existing.get("authority_digest", "")),
+        )
+        if existing_fingerprint == fingerprint and existing.get("status") in {"proposed", "approved"}:
+            raise DocsError(f"相同 ChangeSet 已存在：{existing.get('id', '未知')}；请先决定或修改权威范围")
+    changeset_id = next_prefixed_id(records, "CHANGESET")
+    supersedes = args.supersedes.strip().upper() or None
+    if supersedes:
+        previous = record_by_id(records, supersedes)
+        if previous is None:
+            raise DocsError(f"要替代的 ChangeSet 不存在：{supersedes}")
+        if str(previous.get("version", "")) != version:
+            raise DocsError("--supersedes 必须引用当前执行版本的 ChangeSet")
+        if previous.get("status") in {"superseded", "cancelled"}:
+            raise DocsError(f"ChangeSet 已经关闭，不能再次替代：{supersedes}")
+        previous["status"] = "superseded"
+        previous["superseded_by"] = changeset_id
+        previous.setdefault("events", []).append(
+            {"status": "superseded", "actor": args.requested_by.strip(), "at": now_iso(), "rationale": f"由 {changeset_id} 替代"}
+        )
+        previous["updated"] = today()
+    now = now_iso()
+    records.append(
+        {
+            "id": changeset_id,
+            "version": version,
+            "kind": kind,
+            "title": args.title.strip(),
+            "status": "proposed",
+            "authority_digest": digest,
+            "affected_ids": affected_ids,
+            "source_paths": source_paths,
+            "requested_by": args.requested_by.strip(),
+            "requested_at": now,
+            "confirmed_by": None,
+            "confirmed_at": None,
+            "rationale": args.rationale.strip(),
+            "decision_rationale": None,
+            "supersedes": supersedes,
+            "superseded_by": None,
+            "events": [{"status": "proposed", "actor": args.requested_by.strip(), "at": now, "rationale": args.rationale.strip()}],
+            "updated": today(),
+        }
+    )
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {
+        "状态": "已提出 ChangeSet",
+        "ChangeSet ID": changeset_id,
+        "版本": version,
+        "变更类型": kind,
+        "影响 ID": affected_ids,
+        "权威来源": source_paths,
+        "权威摘要": digest,
+        "下一步": f"由开发者执行 decide-change-set --root . --id {changeset_id} --decision approved|rejected|cancelled --confirmed-by <确认人> --rationale <依据>。",
+        "注册表": str(path.relative_to(root)),
+    }
+
+
+def command_decide_change_set(args: argparse.Namespace) -> dict:
+    """Record the developer decision for a proposed ChangeSet."""
+    root = project_root(args.root)
+    config = load_config(root)
+    changeset_id = args.changeset_id.strip().upper()
+    decision = args.decision.strip()
+    if decision not in CHANGESET_DECISIONS:
+        raise DocsError("ChangeSet 决定无效：" + ", ".join(sorted(CHANGESET_DECISIONS)))
+    if not args.confirmed_by.strip() or not args.rationale.strip():
+        raise DocsError("ChangeSet 决定必须提供 --confirmed-by 和 --rationale")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    record = record_by_id(data.get("change_sets", []), changeset_id)
+    if record is None:
+        raise DocsError(f"ChangeSet 不存在：{changeset_id}")
+    if record.get("status") != "proposed":
+        raise DocsError(f"只有 proposed ChangeSet 可以决定：{changeset_id} 当前为 {record.get('status', '未知')}")
+    if str(record.get("version", "")) != str(config["current_version"]):
+        raise DocsError("只能决定当前执行版本的 ChangeSet；其他版本须先切换为独立实现空间")
+    if decision == "approved":
+        current_digest, _ = version_scope_authority_digest(root, config)
+        if record.get("authority_digest") != current_digest:
+            raise DocsError("ChangeSet 绑定的权威摘要已失效；请先重新提出，不能批准过期规格变更")
+    record["status"] = decision
+    record["confirmed_by"] = args.confirmed_by.strip()
+    record["confirmed_at"] = now_iso()
+    record["decision_rationale"] = args.rationale.strip()
+    record.setdefault("events", []).append(
+        {"status": decision, "actor": args.confirmed_by.strip(), "at": record["confirmed_at"], "rationale": args.rationale.strip()}
+    )
+    record["updated"] = today()
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {
+        "状态": "已记录 ChangeSet 决定",
+        "ChangeSet ID": changeset_id,
+        "决定": decision,
+        "交付状态": change_set_summary(root, config, record)["delivery_status"],
+        "注册表": str(path.relative_to(root)),
+    }
+
+
+def delivery_unit_records(data: dict) -> list[dict]:
+    records = data.get("delivery_units", [])
+    return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+
+
+def delivery_record_records(data: dict) -> list[dict]:
+    records = data.get("delivery_records", [])
+    return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+
+
+def delivery_feature_versions(root: Path, config: dict) -> list[str]:
+    versions = {str(config["current_version"])}
+    feature_root = docs_root(root, config) / "03-功能规格"
+    if feature_root.exists():
+        versions.update(path.name.upper() for path in feature_root.iterdir() if path.is_dir() and re.fullmatch(r"V\d+", path.name, re.IGNORECASE))
+    return sorted(versions, key=lambda value: (int(value[1:]) if value[1:].isdigit() else 9999, value))
+
+
+def delivery_target(root: Path, config: dict, target_id: str, version_hint: str | None = None) -> dict:
+    """Resolve one feature, registered module, or version to its stable scope."""
+    target = target_id.strip().upper()
+    if not target:
+        raise DocsError("交付目标 ID 不能为空")
+    data = project_inputs(root, config)
+    modules = [item for item in delivery_unit_records(data) if str(item.get("id", "")).upper() == target]
+    if modules:
+        module = modules[-1]
+        if module.get("status") != "active":
+            raise DocsError(f"交付模块不是 active：{target}")
+        version = str(module.get("version", "")).upper()
+        if version_hint and str(version_hint).upper() != version:
+            raise DocsError(f"交付模块 {target} 属于 {version}，不能绑定 {version_hint}")
+        feature_ids = sorted(set(str(item) for item in module.get("feature_ids", []) if item))
+        if not feature_ids:
+            raise DocsError(f"交付模块没有绑定功能：{target}")
+        target_config = goal_target_config(config, version)
+        known = {str(item["meta"].get("id", "")) for item in feature_documents(root, target_config, version)}
+        unknown = sorted(set(feature_ids) - known)
+        if unknown:
+            raise DocsError(f"交付模块引用未知功能：{target} -> {', '.join(unknown)}")
+        return {
+            "target_id": target,
+            "target_kind": "module",
+            "version": version,
+            "feature_ids": feature_ids,
+            "source_paths": sorted(str(item) for item in module.get("source_paths", []) if item),
+            "title": str(module.get("title", target)),
+            "unit": module,
+        }
+
+    if re.fullmatch(r"V\d+", target):
+        version = target
+        if version_hint and str(version_hint).upper() != version:
+            raise DocsError(f"版本交付目标与 --version 冲突：{target} / {version_hint}")
+        if version not in delivery_feature_versions(root, config):
+            raise DocsError(f"交付版本不是已登记实现空间：{version}")
+        target_config = goal_target_config(config, version)
+        records = feature_documents(root, target_config, version)
+        feature_ids = sorted(str(item["meta"].get("id", "")) for item in records if item["meta"].get("id"))
+        return {
+            "target_id": version,
+            "target_kind": "version",
+            "version": version,
+            "feature_ids": feature_ids,
+            "source_paths": sorted(item["path"].relative_to(docs_root(root, config)).as_posix() for item in records),
+            "title": f"{version} 版本",
+            "unit": None,
+        }
+
+    candidates: list[dict] = []
+    for version in delivery_feature_versions(root, config):
+        target_config = goal_target_config(config, version)
+        for record in feature_documents(root, target_config, version):
+            if str(record["meta"].get("id", "")).upper() == target:
+                candidates.append({"version": version, "record": record})
+    if version_hint:
+        candidates = [item for item in candidates if item["version"] == str(version_hint).upper()]
+    if not candidates:
+        raise DocsError(f"交付目标不是已登记功能、模块或版本：{target}")
+    if len(candidates) > 1:
+        raise DocsError(f"功能 ID 在多个版本出现，请显式提供 --version：{target}")
+    candidate = candidates[0]
+    record = candidate["record"]
+    return {
+        "target_id": target,
+        "target_kind": "feature",
+        "version": candidate["version"],
+        "feature_ids": [target],
+        "source_paths": [record["path"].relative_to(docs_root(root, config)).as_posix()],
+        "title": record["title"],
+        "unit": None,
+    }
+
+
+def delivery_target_digest(root: Path, config: dict, target: dict) -> str:
+    target_config = goal_target_config(config, str(target["version"]))
+    scope = goal_authority_scope(root, target_config, list(target["feature_ids"]))
+    authority, _ = goal_authority_digest(root, target_config, scope)
+    unit = target.get("unit") or {}
+    return canonical_digest(
+        {
+            "target_id": target["target_id"],
+            "target_kind": target["target_kind"],
+            "version": target["version"],
+            "feature_ids": target["feature_ids"],
+            "source_paths": target["source_paths"],
+            "module_status": unit.get("status", "") if isinstance(unit, dict) else "",
+            "authority_digest": authority,
+        }
+    )
+
+
+def delivery_goal_link(root: Path, config: dict, manifest_path: Path, target: dict) -> dict | None:
+    try:
+        goal_id = manifest_path.parent.name
+        _, manifest = load_goal_manifest(root, goal_id)
+        if str(manifest.get("version", "")) != str(target["version"]):
+            return None
+        overlap = sorted(set(str(item) for item in manifest.get("feature_ids", [])) & set(target["feature_ids"]))
+        if not overlap:
+            return None
+        completion = validate_goal_completion(root, manifest)
+        status = str(manifest.get("status", "unknown"))
+        freshness_reasons: list[str] = []
+        completion_digest = ""
+        if completion:
+            completion_digest = str(completion.get("completion_digest", ""))
+            target_config = goal_target_config(config, str(manifest.get("version", "")))
+            authority_scope = manifest.get("authority_scope") if isinstance(manifest.get("authority_scope"), dict) else {}
+            current_digest = goal_authority_digest(root, target_config, authority_scope)[0] if authority_scope else authority_digest(root, target_config)[0]
+            if str(manifest.get("authority_digest", "")) != current_digest:
+                freshness_reasons.append("Goal 关联的权威规格摘要已变化")
+            current_commit = git_head(root) or ""
+            final_commit = str(completion.get("final_commit", ""))
+            if current_commit and final_commit and not git_is_ancestor(root, final_commit, current_commit):
+                freshness_reasons.append("Goal 最终提交不在当前 Git 历史中")
+            status = "completed" if not freshness_reasons else "stale"
+        elif status not in {"ready", "running", "verification_failed", "blocked", "stale", "aborted"}:
+            status = "unknown"
+        return {
+            "goal_id": goal_id,
+            "version": str(manifest.get("version", "")),
+            "feature_ids": sorted(str(item) for item in manifest.get("feature_ids", []) if item),
+            "overlap_feature_ids": overlap,
+            "status": status,
+            "fresh": status == "completed",
+            "completion_digest": completion_digest,
+            "freshness_reasons": freshness_reasons,
+            "path": manifest_path.relative_to(root).as_posix(),
+        }
+    except (DocsError, OSError, ValueError):
+        return None
+
+
+def delivery_goal_links(root: Path, config: dict, target: dict) -> list[dict]:
+    goals_root = root / ".daoge-docs" / "goals"
+    if not goals_root.is_dir():
+        return []
+    links: list[dict] = []
+    for manifest_path in sorted(goals_root.glob("GOAL-*/goal-manifest.json")):
+        link = delivery_goal_link(root, config, manifest_path, target)
+        if link:
+            links.append(link)
+    return links
+
+
+def delivery_record_summary(root: Path, config: dict, record: dict, target: dict | None = None) -> dict:
+    resolved = target or delivery_target(root, config, str(record.get("target_id", "")), str(record.get("version", "")))
+    current_digest = delivery_target_digest(root, config, resolved)
+    stored = str(record.get("scope_digest", ""))
+    return {
+        "id": str(record.get("id", "")),
+        "target_id": str(record.get("target_id", "")),
+        "target_kind": str(record.get("target_kind", "")),
+        "version": str(record.get("version", "")),
+        "feature_ids": sorted(str(item) for item in record.get("feature_ids", []) if item),
+        "decision": str(record.get("decision", "")),
+        "scope_digest": stored,
+        "scope_digest_match": bool(stored and stored == current_digest),
+        "goal_ids": [str(item) for item in record.get("goal_ids", []) if item],
+        "goal_completion_digests": record.get("goal_completion_digests", []),
+        "confirmed_by": record.get("confirmed_by"),
+        "confirmed_at": record.get("confirmed_at"),
+        "rationale": str(record.get("rationale", "")),
+        "supersedes": record.get("supersedes"),
+        "superseded_by": record.get("superseded_by"),
+        "updated": record.get("updated"),
+        "current_scope_digest": current_digest,
+        "source_paths": resolved.get("source_paths", []),
+    }
+
+
+def delivery_target_summary(root: Path, config: dict, target_id: str, version_hint: str | None = None) -> dict:
+    try:
+        target = delivery_target(root, config, target_id, version_hint)
+    except DocsError as exc:
+        return {"target_id": target_id, "target_kind": "unknown", "version": version_hint or "", "feature_ids": [], "state": "unknown", "basis": str(exc), "goal_links": [], "records": [], "sources": []}
+    target_config = goal_target_config(config, str(target["version"]))
+    feature_records = {str(item["meta"].get("id", "")): item for item in feature_documents(root, target_config, str(target["version"]))}
+    design_ready = all(
+        feature_records.get(feature_id) is not None
+        and str(feature_records[feature_id]["meta"].get("status", "draft")) in READY_STATUSES
+        and not PLACEHOLDER_RE.search(feature_records[feature_id]["text"])
+        for feature_id in target["feature_ids"]
+    )
+    approval = version_scope_approval(root, target_config)
+    records = []
+    for item in delivery_record_records(project_inputs(root, config)):
+        if str(item.get("target_id", "")).upper() != target["target_id"] or str(item.get("version", "")) != target["version"] or item.get("superseded_by"):
+            continue
+        try:
+            records.append(delivery_record_summary(root, config, item, target))
+        except (DocsError, OSError, ValueError):
+            records.append({"id": item.get("id", ""), "decision": item.get("decision", ""), "scope_digest_match": False, "rationale": item.get("rationale", "")})
+    records.sort(key=lambda item: (str(item.get("confirmed_at", "")), str(item.get("id", ""))))
+    latest = records[-1] if records else None
+    goal_links = delivery_goal_links(root, config, target)
+    fresh_completed = [item for item in goal_links if item.get("fresh")]
+    covered = set().union(*(set(item.get("overlap_feature_ids", [])) for item in fresh_completed)) if fresh_completed else set()
+    complete_coverage = covered >= set(target["feature_ids"])
+    stale_completion = any(item.get("status") == "stale" for item in goal_links)
+    running = any(item.get("status") in {"ready", "running", "verification_failed"} for item in goal_links)
+    state = "unknown"
+    basis = ""
+    if not target["feature_ids"]:
+        state, basis = "not_designed", "目标尚未绑定功能规格。"
+    elif latest and not latest.get("scope_digest_match"):
+        state, basis = "needs_reverification", "完成决定绑定的目标摘要已变化，必须重新验证或重新登记。"
+    elif latest and latest.get("decision") == "exception":
+        state, basis = "exception", "开发者登记了例外；例外不等于开发级完成。"
+    elif latest and latest.get("decision") == "accepted":
+        bound = {str(item.get("goal_id", "")): str(item.get("completion_digest", "")) for item in latest.get("goal_completion_digests", [])}
+        bound_ok = all(any(item.get("goal_id") == goal_id and item.get("fresh") and item.get("completion_digest") == digest for item in goal_links) for goal_id, digest in bound.items())
+        if complete_coverage and bound_ok and bound:
+            state, basis = "development_complete", "开发者已确认，且所有关联 Goal 完成记录和当前权威摘要均可复验。"
+        else:
+            state, basis = "needs_reverification", "已登记完成但关联 Goal 或覆盖证据不再完整，必须重新验证。"
+    elif stale_completion:
+        state, basis = "needs_reverification", "历史完成证据存在，但其权威摘要或提交已过期。"
+    elif running:
+        state, basis = "in_development", "存在正在执行、待验证或验证失败的关联 Goal。"
+    elif complete_coverage:
+        state, basis = "awaiting_delivery_confirmation", "关联 Goal 已完成，等待开发者用 close-delivery 登记可追溯的完成标记。"
+    elif not design_ready:
+        state, basis = "designing", "功能规格尚未达到结构就绪或仍有待决占位。"
+    elif str(target_config.get("profile", config.get("profile", ""))) == "strict" and not approval.get("valid"):
+        state, basis = "blocked", f"目标版本开发确认未通过：{approval.get('reason', '未登记')}"
+    else:
+        state, basis = "ready_for_development", "规格与目标范围已就绪，可生成受控 Goal。"
+    return {
+        "target_id": target["target_id"],
+        "target_kind": target["target_kind"],
+        "version": target["version"],
+        "title": target["title"],
+        "feature_ids": target["feature_ids"],
+        "state": state,
+        "basis": basis,
+        "scope_digest": delivery_target_digest(root, config, target),
+        "goal_links": goal_links,
+        "records": records,
+        "source_paths": target["source_paths"],
+        "recovery_action": "重新运行 goal-status/goal-complete 后使用 close-delivery 登记" if state == "awaiting_delivery_confirmation" else ("更新权威文档、重新运行 index、重新验证并登记新的 DELIVERY 记录" if state == "needs_reverification" else ""),
+        "sources": [browser_source(path, "交付状态", target["target_id"], "功能、模块或版本权威入口") for path in target["source_paths"]],
+    }
+
+
+def browser_delivery_targets(root: Path, config: dict, features: list[dict]) -> list[dict]:
+    """Expose feature/module/version delivery states as one read-only projection."""
+    targets: list[dict] = []
+    seen: set[str] = set()
+    for feature in features:
+        feature_id = str(feature.get("id", ""))
+        if feature_id and feature_id not in seen:
+            targets.append(feature.get("delivery") or delivery_target_summary(root, config, feature_id, str(config["current_version"])))
+            seen.add(feature_id)
+    data = project_inputs(root, config)
+    for unit in delivery_unit_records(data):
+        module_id = str(unit.get("id", "")).upper()
+        if module_id and module_id not in seen and unit.get("status") == "active":
+            targets.append(delivery_target_summary(root, config, module_id, str(unit.get("version", ""))))
+            seen.add(module_id)
+    version = str(config["current_version"])
+    if version not in seen:
+        targets.append(delivery_target_summary(root, config, version, version))
+    return targets
+
+
+def command_new_delivery_module(args: argparse.Namespace) -> dict:
+    root = project_root(args.root)
+    config = load_config(root)
+    module_id = args.module_id.strip().upper()
+    if not re.fullmatch(r"MODULE-[A-Z0-9][A-Z0-9-]*", module_id):
+        raise DocsError("模块 ID 必须匹配 MODULE-*，且创建后不得复用")
+    version = str(args.version or config["current_version"]).strip().upper()
+    if not re.fullmatch(r"V\d+", version):
+        raise DocsError("模块必须绑定 Vn 版本")
+    if not args.title.strip() or not args.owner.strip():
+        raise DocsError("模块必须提供 --title 和 --owner")
+    feature_ids = stable_csv(",".join(args.feature or []))
+    target = delivery_target(root, config, version, version)
+    known = set(target["feature_ids"])
+    unknown = sorted(set(feature_ids) - known)
+    if not feature_ids or unknown:
+        raise DocsError(f"模块必须绑定该版本已登记功能；未知功能：{', '.join(unknown) if unknown else '未提供'}")
+    source_paths = change_set_source_paths(root, goal_target_config(config, version), args.source or [])
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    units = data.setdefault("delivery_units", [])
+    if record_by_id(units, module_id):
+        raise DocsError(f"交付模块 ID 已存在：{module_id}")
+    units.append({"id": module_id, "kind": "module", "version": version, "title": args.title.strip(), "status": "active", "feature_ids": feature_ids, "source_paths": source_paths, "owner": args.owner.strip(), "superseded_by": None, "updated": today()})
+    write_json(path, data)
+    generate_indexes(root, config)
+    return {"状态": "已登记交付模块", "模块 ID": module_id, "版本": version, "功能 ID": feature_ids, "权威来源": source_paths, "注册表": str(path.relative_to(root))}
+
+
+def command_close_delivery(args: argparse.Namespace) -> dict:
+    root = project_root(args.root)
+    config = load_config(root)
+    decision = args.decision.strip()
+    if decision not in DELIVERY_DECISIONS:
+        raise DocsError("交付决定必须是 accepted 或 exception")
+    if not args.confirmed_by.strip() or not args.rationale.strip():
+        raise DocsError("交付决定必须提供 --confirmed-by 和 --rationale")
+    target = delivery_target(root, config, args.target, args.version)
+    goal_ids = stable_csv(",".join(args.goal or []))
+    links = {str(item.get("goal_id", "")): item for item in delivery_goal_links(root, config, target)}
+    completion_refs: list[dict] = []
+    if decision == "accepted":
+        if not goal_ids:
+            raise DocsError("accepted 交付决定必须绑定至少一个已完成 Goal")
+        covered: set[str] = set()
+        for goal_id in goal_ids:
+            link = links.get(goal_id)
+            if not link or not link.get("fresh"):
+                raise DocsError(f"accepted 交付决定只能绑定当前可复验的已完成 Goal：{goal_id}")
+            covered.update(link.get("overlap_feature_ids", []))
+            completion_refs.append({"goal_id": goal_id, "completion_digest": link.get("completion_digest", "")})
+        missing = sorted(set(target["feature_ids"]) - covered)
+        if missing:
+            raise DocsError(f"关联 Goal 未覆盖交付目标功能：{', '.join(missing)}")
+    elif goal_ids:
+        raise DocsError("exception 交付决定不能伪装绑定 Goal 完成证据；请把例外原因写入 --rationale")
+    path = ensure_project_inputs(root, config)
+    data = read_json(path, "项目输入与约束注册表")
+    records = data.setdefault("delivery_records", [])
+    supersedes = (args.supersedes or "").strip().upper() or None
+    if supersedes:
+        previous = record_by_id(records, supersedes)
+        if previous is None or previous.get("superseded_by"):
+            raise DocsError(f"要替代的交付记录不存在或已被替代：{supersedes}")
+        if str(previous.get("target_id", "")).upper() != target["target_id"]:
+            raise DocsError("交付记录只能替代同一目标的旧记录")
+        delivery_id = next_prefixed_id(records, "DELIVERY")
+        previous["superseded_by"] = delivery_id
+        previous.setdefault("events", []).append({"decision": "superseded", "actor": args.confirmed_by.strip(), "at": now_iso(), "rationale": f"由 {delivery_id} 替代"})
+        previous["updated"] = today()
+    else:
+        delivery_id = next_prefixed_id(records, "DELIVERY")
+        active = [item for item in records if str(item.get("target_id", "")).upper() == target["target_id"] and not item.get("superseded_by")]
+        if active:
+            raise DocsError(f"目标已有当前交付记录；如需重新确认请使用 --supersedes {active[-1].get('id', '')}")
+    now = now_iso()
+    records.append({"id": delivery_id, "target_id": target["target_id"], "target_kind": target["target_kind"], "version": target["version"], "feature_ids": target["feature_ids"], "decision": decision, "scope_digest": delivery_target_digest(root, config, target), "goal_ids": goal_ids, "goal_completion_digests": completion_refs, "confirmed_by": args.confirmed_by.strip(), "confirmed_at": now, "rationale": args.rationale.strip(), "supersedes": supersedes, "superseded_by": None, "events": [{"decision": decision, "actor": args.confirmed_by.strip(), "at": now, "rationale": args.rationale.strip()}], "updated": today()})
+    write_json(path, data)
+    generate_indexes(root, config)
+    summary = delivery_target_summary(root, config, target["target_id"], target["version"])
+    return {"状态": "已写入交付完成标记", "交付记录 ID": delivery_id, "目标": target["target_id"], "决定": decision, "派生状态": summary["state"], "Goal": goal_ids, "登记文件": str(path.relative_to(root))}
+
+
 def command_handoff(args: argparse.Namespace) -> dict:
     """输出新会话开始时需要的通用事实、证据状态和 Gate 概览。"""
     root = project_root(args.root)
@@ -5249,6 +6555,19 @@ def command_handoff(args: argparse.Namespace) -> dict:
     assets = [item for item in data["evidence_assets"] if isinstance(item, dict)]
     coverage = [item for item in data["coverage"] if isinstance(item, dict)]
     authority_scopes = [item for item in data["authority_scopes"] if isinstance(item, dict)]
+    approvals = approval_records(data)
+    change_sets = [change_set_summary(root, config, item) for item in change_set_records(data)]
+    spec_drafts = [
+        spec_draft_summary(root, config, item)
+        for item in spec_draft_records(data)
+        if str(item.get("version", "")) == str(config["current_version"])
+    ]
+    delivery_targets = browser_delivery_targets(
+        root,
+        config,
+        [{"id": record["meta"].get("id", ""), "delivery": delivery_target_summary(root, config, str(record["meta"].get("id", "")), str(config["current_version"]))} for record in feature_documents(root, config) if record["meta"].get("id")],
+    )
+    approval = version_scope_approval(root, config)
     covered_sources = {str(item.get("source_id", "")) for item in coverage}
     coverage_required = [
         str(item.get("id", ""))
@@ -5283,6 +6602,26 @@ def command_handoff(args: argparse.Namespace) -> dict:
             {key: item.get(key) for key in ["id", "scope", "fact_type", "source", "owner", "status", "supersedes"]}
             for item in authority_scopes
         ],
+        "开发确认": {
+            key: approval.get(key)
+            for key in ["scope", "version", "status", "enforced", "valid", "approval_id", "record_status", "authority_digest_match", "reason", "recovery_action"]
+        },
+        "开发确认历史": [
+            {key: item.get(key) for key in ["id", "scope", "version", "title", "status", "requested_by", "confirmed_by", "supersedes", "superseded_by", "updated"]}
+            for item in approvals
+        ],
+        "ChangeSets": [
+            {key: item.get(key) for key in ["id", "version", "kind", "title", "status", "delivery_status", "affected_ids", "source_paths", "confirmed_by", "goal_links", "recovery_action"]}
+            for item in change_sets
+        ],
+        "规格草案": [
+            {key: item.get(key) for key in ["id", "version", "kind", "title", "status", "target_path", "content_digest_match", "target_baseline_match", "requested_by", "confirmed_by", "materialized_at", "recovery_action"]}
+            for item in spec_drafts
+        ],
+        "交付状态": [
+            {key: item.get(key) for key in ["target_id", "target_kind", "version", "state", "basis", "feature_ids", "goal_links", "records", "recovery_action"]}
+            for item in delivery_targets
+        ],
         "已确认输入": [item["id"] for item in inputs if item.get("status") == "confirmed"],
         "待确认输入": [item["id"] for item in inputs if item.get("status") == "observed"],
         "硬约束": [item["id"] for item in constraints if item.get("kind") == "hard_requirement" and item.get("status") == "confirmed"],
@@ -5293,7 +6632,7 @@ def command_handoff(args: argparse.Namespace) -> dict:
             "discovery": {"状态": "ready" if not discovery_errors else "blocked", "错误": discovery_errors, "警告": discovery_warnings},
             "version_ready": {"状态": "ready" if not version_errors else "blocked", "错误": version_errors, "警告": version_warnings},
         },
-        "恢复规则": "先核对本摘要和项目输入与约束总账；不得把 observed 或 reference_observation 直接升级为需求；每项 confirmed 输入和 hard_requirement 都要有明确规格覆盖或关闭结论；同一范围和事实类型只能保留一个 active 权威来源；变更后重新运行 index、check 和受影响 Gate。",
+        "恢复规则": "先核对本摘要、交付状态和项目输入与约束总账；不得把 observed 或 reference_observation 直接升级为需求；每项 confirmed 输入和 hard_requirement 都要有明确规格覆盖或关闭结论；同一范围和事实类型只能保留一个 active 权威来源；规格候选必须先保存在隔离草案中，经开发者批准并物化到 docs 后才成为事实，未物化草案不得进入 Goal；strict Profile 在开发前还必须存在绑定当前版本权威摘要的 approved 开发确认；修订已确认范围时，先更新权威文档并由开发者批准 ChangeSet，再用 prepare-goal --change-set 生成新的受控任务；变更后重新运行 index、check 和受影响 Gate。",
     }
 
 
@@ -5902,8 +7241,52 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
         "delivery_trace",
         "risk_hotspots",
     }
-    if payload.get("schema_version") != 8:
-        errors.append("工作台数据契约 schema_version 必须为 8")
+    if payload.get("schema_version") != 12:
+        errors.append("工作台数据契约 schema_version 必须为 12")
+    approval = (payload.get("governance") or {}).get("approval") or {}
+    if approval.get("status") not in {"not_requested", "requested", "approved", "rejected", "expired"}:
+        errors.append("工作台开发确认状态无效")
+    if approval.get("version") != str(config["current_version"]):
+        errors.append("工作台开发确认版本与当前执行版本不一致")
+    if approval.get("valid") != (approval.get("status") == "approved"):
+        errors.append("工作台开发确认有效性与状态不一致")
+    change_sets = (payload.get("governance") or {}).get("change_sets") or []
+    if not isinstance(change_sets, list):
+        errors.append("工作台 ChangeSet 必须是数组")
+    else:
+        for item in change_sets:
+            if not isinstance(item, dict) or not re.fullmatch(r"CHANGESET-\d{3}", str(item.get("id", ""))):
+                errors.append("工作台 ChangeSet ID 无效")
+                continue
+            if item.get("status") not in {*CHANGESET_STATUSES, "expired"}:
+                errors.append(f"工作台 ChangeSet 状态无效：{item.get('id', '未知')}")
+            if item.get("delivery_status") not in {"not_started", "goal_ready", "executing", "completed"}:
+                errors.append(f"工作台 ChangeSet 交付状态无效：{item.get('id', '未知')}")
+    spec_drafts = (payload.get("governance") or {}).get("spec_drafts") or []
+    if not isinstance(spec_drafts, list):
+        errors.append("工作台规格草案必须是数组")
+    else:
+        for item in spec_drafts:
+            if not isinstance(item, dict) or not re.fullmatch(r"SPEC-DRAFT-\d{3}", str(item.get("id", ""))):
+                errors.append("工作台规格草案 ID 无效")
+                continue
+            if item.get("status") not in {*SPEC_DRAFT_STATUSES, "expired"}:
+                errors.append(f"工作台规格草案状态无效：{item.get('id', '未知')}")
+            if not isinstance(item.get("content_digest_match"), bool) or not isinstance(item.get("target_baseline_match"), bool):
+                errors.append(f"工作台规格草案摘要匹配信号无效：{item.get('id', '未知')}")
+    delivery_targets = (payload.get("governance") or {}).get("delivery_targets") or []
+    if not isinstance(delivery_targets, list):
+        errors.append("工作台交付状态必须是数组")
+    else:
+        allowed_delivery_states = {"not_designed", "designing", "ready_for_development", "in_development", "awaiting_delivery_confirmation", "development_complete", "needs_reverification", "exception", "blocked", "unknown"}
+        for item in delivery_targets:
+            if not isinstance(item, dict) or item.get("target_kind") not in {"feature", "module", "version"}:
+                errors.append("工作台交付目标类型无效")
+                continue
+            if item.get("state") not in allowed_delivery_states:
+                errors.append(f"工作台交付目标状态无效：{item.get('target_id', '未知')}")
+            if not isinstance(item.get("goal_links"), list) or not isinstance(item.get("records"), list):
+                errors.append(f"工作台交付目标关联数据无效：{item.get('target_id', '未知')}")
     if set((payload.get("views") or {})) != required_views:
         errors.append("工作台六视图数据不完整：必须包含工作台、总览、阅读、图谱、功能演进和时间线")
     maps = (payload.get("views") or {}).get("maps") or {}
@@ -6190,7 +7573,10 @@ def validate_browser_contract(root: Path, config: dict) -> list[str]:
         "function setEvolutionFocus",
         "evolution-matrix",
         "data-evolution-cell",
-        "function renderVerificationPanel",
+            "function renderVerificationPanel",
+            "governance-approval",
+            "governance-change-sets",
+        "开发确认",
         "当前交付进度",
         "点击步骤返回权威来源",
         "打开 Markdown 原文",
@@ -6218,8 +7604,8 @@ def validate_project_inputs(root: Path, config: dict) -> list[str]:
         data = project_inputs(root, config)
     except DocsError as exc:
         return [str(exc)]
-    if data.get("schema_version") != 2:
-        errors.append(f"项目输入与约束注册表 schema_version 必须是 2：{path}；请运行 upgrade")
+    if data.get("schema_version") != 6:
+        errors.append(f"项目输入与约束注册表 schema_version 必须是 6：{path}；请运行 upgrade")
 
     seen: set[str] = set()
     inputs = input_by_id(data)
@@ -6438,6 +7824,345 @@ def validate_project_inputs(root: Path, config: dict) -> list[str]:
         supersedes = str(item.get("supersedes") or "")
         if supersedes and supersedes not in authority_by_id:
             errors.append(f"权威边界替代对象不存在：{item_id} -> {supersedes}：{path}")
+
+    approval_by_id: dict[str, dict] = {}
+    open_approval_keys: dict[tuple[str, str, str], str] = {}
+    for item in data["approvals"]:
+        if not isinstance(item, dict):
+            errors.append(f"开发确认必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", ""))
+        if not re.fullmatch(r"APPROVAL-\d{3}", item_id):
+            errors.append(f"开发确认 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目输入、约束、资产、覆盖、权威或开发确认 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        approval_by_id[item_id] = item
+        scope = str(item.get("scope", ""))
+        version = str(item.get("version", ""))
+        status = str(item.get("status", ""))
+        digest = str(item.get("authority_digest", ""))
+        if scope not in APPROVAL_SCOPES:
+            errors.append(f"开发确认范围无效：{item_id or '未知'}={scope or '缺失'}：{path}")
+        if not re.fullmatch(r"V\d+", version):
+            errors.append(f"开发确认版本无效：{item_id or '未知'}={version or '缺失'}：{path}")
+        if status not in APPROVAL_STATUSES:
+            errors.append(f"开发确认状态无效：{item_id or '未知'}={status or '缺失'}：{path}")
+        if incomplete(str(item.get("title", ""))) or incomplete(str(item.get("requested_by", ""))) or incomplete(str(item.get("rationale", ""))):
+            errors.append(f"开发确认缺少标题、提出人或依据：{item_id or '未知'}：{path}")
+        if not valid_sha256(digest):
+            errors.append(f"开发确认权威摘要无效：{item_id or '未知'}：{path}")
+        if not item.get("requested_at"):
+            errors.append(f"开发确认缺少提出时间：{item_id or '未知'}：{path}")
+        if status in {"approved", "rejected"}:
+            if incomplete(str(item.get("confirmed_by", ""))) or not item.get("confirmed_at"):
+                errors.append(f"已决定开发确认缺少确认人或确认时间：{item_id or '未知'}：{path}")
+        elif status == "proposed" and (item.get("confirmed_by") or item.get("confirmed_at")):
+            errors.append(f"未决定开发确认不能填写确认人或确认时间：{item_id or '未知'}：{path}")
+        if status in {"proposed", "approved"} and scope and version and digest:
+            key = (scope, version, digest)
+            previous = open_approval_keys.get(key)
+            if previous:
+                errors.append(f"同一范围、版本和摘要存在多个未关闭开发确认：{previous} 与 {item_id}：{path}")
+            open_approval_keys[key] = item_id
+    for item_id, item in approval_by_id.items():
+        supersedes = str(item.get("supersedes") or "")
+        superseded_by = str(item.get("superseded_by") or "")
+        if supersedes:
+            previous = approval_by_id.get(supersedes)
+            if previous is None:
+                errors.append(f"开发确认替代对象不存在：{item_id} -> {supersedes}：{path}")
+            elif previous.get("scope") != item.get("scope") or previous.get("version") != item.get("version"):
+                errors.append(f"开发确认只能替代同一范围和版本记录：{item_id} -> {supersedes}：{path}")
+        if superseded_by:
+            replacement = approval_by_id.get(superseded_by)
+            if replacement is None:
+                errors.append(f"开发确认替代记录不存在：{item_id} -> {superseded_by}：{path}")
+            elif replacement.get("supersedes") != item_id:
+                errors.append(f"开发确认替代关系不一致：{item_id} -> {superseded_by}：{path}")
+        if item.get("status") == "superseded" and not superseded_by:
+            errors.append(f"已替代开发确认缺少 superseded_by：{item_id}：{path}")
+
+    change_set_by_id: dict[str, dict] = {}
+    open_change_set_keys: dict[tuple[str, str, tuple[str, ...], tuple[str, ...], str], str] = {}
+    docs_relative = docs_root(root, config)
+    authority_paths = {item.relative_to(docs_relative).as_posix() for item in authority_files(root, config)}
+    for item in data["change_sets"]:
+        if not isinstance(item, dict):
+            errors.append(f"ChangeSet 必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", ""))
+        if not re.fullmatch(r"CHANGESET-\d{3}", item_id):
+            errors.append(f"ChangeSet ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目输入、约束、资产、覆盖、权威、开发确认或 ChangeSet ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        change_set_by_id[item_id] = item
+        version = str(item.get("version", ""))
+        kind = str(item.get("kind", ""))
+        status = str(item.get("status", ""))
+        digest = str(item.get("authority_digest", ""))
+        affected_ids = item.get("affected_ids", [])
+        source_paths = item.get("source_paths", [])
+        events = item.get("events", [])
+        if not re.fullmatch(r"V\d+", version):
+            errors.append(f"ChangeSet 版本无效：{item_id or '未知'}={version or '缺失'}：{path}")
+        if kind not in CHANGESET_KINDS:
+            errors.append(f"ChangeSet 类型无效：{item_id or '未知'}={kind or '缺失'}：{path}")
+        if status not in CHANGESET_STATUSES:
+            errors.append(f"ChangeSet 状态无效：{item_id or '未知'}={status or '缺失'}：{path}")
+        if not valid_sha256(digest):
+            errors.append(f"ChangeSet 权威摘要无效：{item_id or '未知'}：{path}")
+        if incomplete(str(item.get("title", ""))) or incomplete(str(item.get("requested_by", ""))) or incomplete(str(item.get("rationale", ""))):
+            errors.append(f"ChangeSet 缺少标题、提出人或依据：{item_id or '未知'}：{path}")
+        if not item.get("requested_at"):
+            errors.append(f"ChangeSet 缺少提出时间：{item_id or '未知'}：{path}")
+        if not isinstance(affected_ids, list) or not affected_ids or any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]*", value) for value in affected_ids):
+            errors.append(f"ChangeSet 影响 ID 必须是非空、格式有效的稳定 ID 数组：{item_id or '未知'}：{path}")
+        if not isinstance(source_paths, list) or not source_paths:
+            errors.append(f"ChangeSet 必须提供权威来源路径：{item_id or '未知'}：{path}")
+        elif any(not isinstance(value, str) or value not in authority_paths for value in source_paths):
+            errors.append(f"ChangeSet 来源必须是当前项目权威文件：{item_id or '未知'}：{path}")
+        if status in {"approved", "rejected", "cancelled"}:
+            if incomplete(str(item.get("confirmed_by", ""))) or not item.get("confirmed_at") or incomplete(str(item.get("decision_rationale", ""))):
+                errors.append(f"已决定 ChangeSet 缺少确认人、确认时间或决定依据：{item_id or '未知'}：{path}")
+        elif status == "proposed" and (item.get("confirmed_by") or item.get("confirmed_at") or item.get("decision_rationale")):
+            errors.append(f"未决定 ChangeSet 不能填写确认信息：{item_id or '未知'}：{path}")
+        if not isinstance(events, list) or not events:
+            errors.append(f"ChangeSet 必须保留非空事件审计链：{item_id or '未知'}：{path}")
+        else:
+            for event in events:
+                if not isinstance(event, dict) or event.get("status") not in CHANGESET_STATUSES or incomplete(str(event.get("actor", ""))) or not event.get("at") or incomplete(str(event.get("rationale", ""))):
+                    errors.append(f"ChangeSet 事件无效：{item_id or '未知'}：{path}")
+                    break
+        if status in {"proposed", "approved"} and version and kind and digest and isinstance(affected_ids, list) and isinstance(source_paths, list):
+            key = (version, kind, tuple(sorted(str(value) for value in affected_ids)), tuple(sorted(str(value) for value in source_paths)), digest)
+            previous = open_change_set_keys.get(key)
+            if previous:
+                errors.append(f"相同范围和摘要存在多个未关闭 ChangeSet：{previous} 与 {item_id}：{path}")
+            open_change_set_keys[key] = item_id
+    for item_id, item in change_set_by_id.items():
+        supersedes = str(item.get("supersedes") or "")
+        superseded_by = str(item.get("superseded_by") or "")
+        if supersedes:
+            previous = change_set_by_id.get(supersedes)
+            if previous is None:
+                errors.append(f"ChangeSet 替代对象不存在：{item_id} -> {supersedes}：{path}")
+            elif previous.get("version") != item.get("version"):
+                errors.append(f"ChangeSet 只能替代同一版本记录：{item_id} -> {supersedes}：{path}")
+        if superseded_by:
+            replacement = change_set_by_id.get(superseded_by)
+            if replacement is None:
+                errors.append(f"ChangeSet 替代记录不存在：{item_id} -> {superseded_by}：{path}")
+            elif replacement.get("supersedes") != item_id:
+                errors.append(f"ChangeSet 替代关系不一致：{item_id} -> {superseded_by}：{path}")
+        if item.get("status") == "superseded" and not superseded_by:
+            errors.append(f"已替代 ChangeSet 缺少 superseded_by：{item_id}：{path}")
+
+    spec_draft_by_id: dict[str, dict] = {}
+    open_spec_draft_targets: dict[str, str] = {}
+    for item in data.get("spec_drafts", []):
+        if not isinstance(item, dict):
+            errors.append(f"规格草案必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", "")).upper()
+        if not re.fullmatch(r"SPEC-DRAFT-\d{3}", item_id):
+            errors.append(f"规格草案 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目治理稳定 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        spec_draft_by_id[item_id] = item
+        version = str(item.get("version", ""))
+        kind = str(item.get("kind", ""))
+        status = str(item.get("status", ""))
+        target_path = str(item.get("target_path", ""))
+        target_digest = item.get("target_digest")
+        content_digest = str(item.get("content_digest", ""))
+        events = item.get("events", [])
+        if not re.fullmatch(r"V\d+", version):
+            errors.append(f"规格草案版本无效：{item_id or '未知'}={version or '缺失'}：{path}")
+        if kind not in {"create", "replace"}:
+            errors.append(f"规格草案类型无效：{item_id or '未知'}={kind or '缺失'}：{path}")
+        if status not in SPEC_DRAFT_STATUSES:
+            errors.append(f"规格草案状态无效：{item_id or '未知'}={status or '缺失'}：{path}")
+        if incomplete(str(item.get("title", ""))) or incomplete(str(item.get("requested_by", ""))) or incomplete(str(item.get("rationale", ""))):
+            errors.append(f"规格草案缺少标题、提出人或依据：{item_id or '未知'}：{path}")
+        if not item.get("requested_at"):
+            errors.append(f"规格草案缺少提出时间：{item_id or '未知'}：{path}")
+        if not valid_sha256(content_digest):
+            errors.append(f"规格草案内容摘要无效：{item_id or '未知'}：{path}")
+        if kind == "create" and target_digest is not None:
+            errors.append(f"create 规格草案的目标基线必须为空：{item_id or '未知'}：{path}")
+        if kind == "replace" and not valid_sha256(str(target_digest or "")):
+            errors.append(f"replace 规格草案缺少有效目标基线摘要：{item_id or '未知'}：{path}")
+        try:
+            normalized_target, _ = spec_draft_target_path(root, config, target_path, require_file=False)
+            if normalized_target != target_path:
+                errors.append(f"规格草案目标路径未规范化：{item_id or '未知'}：{path}")
+        except DocsError as exc:
+            errors.append(f"规格草案目标路径无效：{item_id or '未知'}：{exc}")
+        content_path = spec_draft_content_path(root, item_id)
+        if not content_path.is_file():
+            errors.append(f"规格草案内容文件缺失：{item_id or '未知'}：{content_path}")
+        elif sha256_file(content_path) != content_digest:
+            errors.append(f"规格草案内容摘要不匹配，不能继续审阅或物化：{item_id or '未知'}：{path}")
+        confirmed = not incomplete(str(item.get("confirmed_by", ""))) and bool(item.get("confirmed_at"))
+        decision_rationale = item.get("decision_rationale")
+        materialized = not incomplete(str(item.get("materialized_by", ""))) and bool(item.get("materialized_at"))
+        if status == "proposed":
+            if item.get("confirmed_by") or item.get("confirmed_at") or decision_rationale or item.get("materialized_by") or item.get("materialized_at"):
+                errors.append(f"proposed 规格草案不能填写确认或物化信息：{item_id or '未知'}：{path}")
+        elif status in {"approved", "rejected"}:
+            if not confirmed or incomplete(str(decision_rationale or "")):
+                errors.append(f"已决定规格草案缺少确认人、确认时间或决定依据：{item_id or '未知'}：{path}")
+            if item.get("materialized_by") or item.get("materialized_at"):
+                errors.append(f"未物化规格草案不能填写物化信息：{item_id or '未知'}：{path}")
+        elif status == "materialized":
+            if not confirmed or incomplete(str(decision_rationale or "")):
+                errors.append(f"已物化规格草案缺少审批确认链：{item_id or '未知'}：{path}")
+            if not materialized:
+                errors.append(f"已物化规格草案缺少物化人或物化时间：{item_id or '未知'}：{path}")
+            if item.get("materialized_target_digest") != content_digest:
+                errors.append(f"已物化规格草案缺少与内容一致的物化摘要：{item_id or '未知'}：{path}")
+        if not isinstance(events, list) or not events:
+            errors.append(f"规格草案必须保留非空事件审计链：{item_id or '未知'}：{path}")
+        else:
+            for event in events:
+                if not isinstance(event, dict) or event.get("status") not in SPEC_DRAFT_STATUSES or incomplete(str(event.get("actor", ""))) or not event.get("at") or incomplete(str(event.get("rationale", ""))):
+                    errors.append(f"规格草案事件无效：{item_id or '未知'}：{path}")
+                    break
+            if status in SPEC_DRAFT_STATUSES and str(events[-1].get("status", "")) != status:
+                errors.append(f"规格草案最终事件与当前状态不一致：{item_id or '未知'}：{path}")
+        if status in {"proposed", "approved"} and target_path:
+            previous = open_spec_draft_targets.get(target_path)
+            if previous:
+                errors.append(f"同一目标存在多个待处理规格草案：{previous} 与 {item_id}：{path}")
+            open_spec_draft_targets[target_path] = item_id
+    for item_id, item in spec_draft_by_id.items():
+        supersedes = str(item.get("supersedes") or "").upper()
+        superseded_by = str(item.get("superseded_by") or "").upper()
+        if supersedes:
+            previous = spec_draft_by_id.get(supersedes)
+            if previous is None:
+                errors.append(f"规格草案替代对象不存在：{item_id} -> {supersedes}：{path}")
+            elif previous.get("target_path") != item.get("target_path"):
+                errors.append(f"规格草案只能替代同一目标文档的记录：{item_id} -> {supersedes}：{path}")
+            elif str(previous.get("superseded_by") or "").upper() != item_id:
+                errors.append(f"规格草案替代关系不一致：{item_id} -> {supersedes}：{path}")
+        if superseded_by:
+            replacement = spec_draft_by_id.get(superseded_by)
+            if replacement is None or str(replacement.get("supersedes") or "").upper() != item_id:
+                errors.append(f"规格草案替代关系不一致：{item_id} -> {superseded_by}：{path}")
+        if item.get("status") == "superseded" and not superseded_by:
+            errors.append(f"已替代规格草案缺少 superseded_by：{item_id}：{path}")
+
+    delivery_unit_by_id: dict[str, dict] = {}
+    for item in data.get("delivery_units", []):
+        if not isinstance(item, dict):
+            errors.append(f"交付模块必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", "")).upper()
+        if not re.fullmatch(r"MODULE-[A-Z0-9][A-Z0-9-]*", item_id):
+            errors.append(f"交付模块 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目治理稳定 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        delivery_unit_by_id[item_id] = item
+        version = str(item.get("version", "")).upper()
+        if not re.fullmatch(r"V\d+", version) or version not in delivery_feature_versions(root, config):
+            errors.append(f"交付模块版本无效：{item_id or '未知'}={version or '缺失'}：{path}")
+        if item.get("kind") not in DELIVERY_UNIT_KINDS or item.get("status") not in DELIVERY_UNIT_STATUSES:
+            errors.append(f"交付模块 kind/status 无效：{item_id or '未知'}：{path}")
+        if incomplete(str(item.get("title", ""))) or incomplete(str(item.get("owner", ""))):
+            errors.append(f"交付模块缺少名称或负责人：{item_id or '未知'}：{path}")
+        feature_ids = item.get("feature_ids", [])
+        if not isinstance(feature_ids, list) or not feature_ids:
+            errors.append(f"交付模块必须绑定功能：{item_id or '未知'}：{path}")
+        else:
+            try:
+                known = {str(record["meta"].get("id", "")) for record in feature_documents(root, goal_target_config(config, version), version)}
+                unknown = sorted(set(str(value) for value in feature_ids) - known)
+                if unknown:
+                    errors.append(f"交付模块引用未知功能：{item_id or '未知'} -> {', '.join(unknown)}：{path}")
+            except DocsError as exc:
+                errors.append(f"交付模块版本无法解析：{item_id or '未知'}：{exc}")
+        source_paths = item.get("source_paths", [])
+        if not isinstance(source_paths, list) or not source_paths:
+            errors.append(f"交付模块必须提供权威来源：{item_id or '未知'}：{path}")
+        else:
+            valid_sources = {candidate.relative_to(docs_root(root, config)).as_posix() for candidate in authority_files(root, config)}
+            if any(str(value) not in valid_sources for value in source_paths):
+                errors.append(f"交付模块来源必须是当前权威文件：{item_id or '未知'}：{path}")
+
+    delivery_record_by_id: dict[str, dict] = {}
+    for item in data.get("delivery_records", []):
+        if not isinstance(item, dict):
+            errors.append(f"交付记录必须是对象：{path}")
+            continue
+        item_id = str(item.get("id", "")).upper()
+        if not re.fullmatch(r"DELIVERY-\d{3}", item_id):
+            errors.append(f"交付记录 ID 无效：{item_id or '缺失'}：{path}")
+        if item_id in seen:
+            errors.append(f"项目治理稳定 ID 重复：{item_id}：{path}")
+        seen.add(item_id)
+        delivery_record_by_id[item_id] = item
+        target_id = str(item.get("target_id", "")).upper()
+        target_kind = str(item.get("target_kind", ""))
+        version = str(item.get("version", "")).upper()
+        if target_kind not in {"feature", "module", "version"} or not re.fullmatch(r"V\d+", version):
+            errors.append(f"交付记录目标类型或版本无效：{item_id or '未知'}：{path}")
+        if item.get("decision") not in DELIVERY_DECISIONS:
+            errors.append(f"交付记录决定无效：{item_id or '未知'}：{path}")
+        if not valid_sha256(item.get("scope_digest", "")):
+            errors.append(f"交付记录目标摘要无效：{item_id or '未知'}：{path}")
+        if incomplete(str(item.get("confirmed_by", ""))) or incomplete(str(item.get("rationale", ""))) or not item.get("confirmed_at"):
+            errors.append(f"交付记录缺少确认人、时间或依据：{item_id or '未知'}：{path}")
+        if not isinstance(item.get("feature_ids"), list) or not item.get("feature_ids"):
+            errors.append(f"交付记录必须绑定功能：{item_id or '未知'}：{path}")
+        if not isinstance(item.get("events"), list) or not item.get("events"):
+            errors.append(f"交付记录必须保留事件审计链：{item_id or '未知'}：{path}")
+        else:
+            for event in item["events"]:
+                if not isinstance(event, dict) or event.get("decision") not in {*DELIVERY_DECISIONS, "superseded"} or incomplete(str(event.get("actor", ""))) or not event.get("at") or incomplete(str(event.get("rationale", ""))):
+                    errors.append(f"交付记录事件无效：{item_id or '未知'}：{path}")
+                    break
+        goal_refs = item.get("goal_completion_digests", [])
+        if not isinstance(goal_refs, list):
+            errors.append(f"交付记录 Goal 完成摘要必须是数组：{item_id or '未知'}：{path}")
+        elif any(not isinstance(ref, dict) or not re.fullmatch(r"GOAL-[A-Z0-9][A-Z0-9-]*", str(ref.get("goal_id", ""))) or not valid_sha256(ref.get("completion_digest", "")) for ref in goal_refs):
+            errors.append(f"交付记录 Goal 完成摘要无效：{item_id or '未知'}：{path}")
+        try:
+            target = delivery_target(root, config, target_id, version)
+            if target.get("target_kind") != target_kind or sorted(str(value) for value in item.get("feature_ids", [])) != sorted(target.get("feature_ids", [])):
+                errors.append(f"交付记录目标范围与当前登记不一致：{item_id or '未知'}：{path}")
+            if item.get("decision") == "accepted":
+                goal_ids = sorted(str(value) for value in item.get("goal_ids", []) if value)
+                refs_by_goal = {str(ref.get("goal_id", "")): str(ref.get("completion_digest", "")) for ref in goal_refs if isinstance(ref, dict)}
+                if not goal_ids or set(goal_ids) != set(refs_by_goal):
+                    errors.append(f"accepted 交付记录必须为每个 Goal 保存完成摘要：{item_id or '未知'}：{path}")
+                links = {str(link.get("goal_id", "")): link for link in delivery_goal_links(root, config, target)}
+                covered: set[str] = set()
+                for goal_id in goal_ids:
+                    link = links.get(goal_id)
+                    if not link or not link.get("completion_digest") or link.get("completion_digest") != refs_by_goal.get(goal_id):
+                        errors.append(f"交付记录引用的 Goal 完成证据无效或已被篡改：{item_id or '未知'} -> {goal_id}：{path}")
+                        continue
+                    covered.update(str(value) for value in link.get("overlap_feature_ids", []))
+                if not set(target.get("feature_ids", [])) <= covered:
+                    errors.append(f"accepted 交付记录没有覆盖目标全部功能：{item_id or '未知'}：{path}")
+            elif item.get("goal_ids") or goal_refs:
+                errors.append(f"exception 交付记录不能绑定 Goal 完成证据：{item_id or '未知'}：{path}")
+        except (DocsError, OSError, ValueError) as exc:
+            errors.append(f"交付记录目标或 Goal 无法复验：{item_id or '未知'}：{exc}")
+    for item_id, item in delivery_record_by_id.items():
+        supersedes = str(item.get("supersedes") or "").upper()
+        superseded_by = str(item.get("superseded_by") or "").upper()
+        if supersedes and supersedes not in delivery_record_by_id:
+            errors.append(f"交付记录替代对象不存在：{item_id} -> {supersedes}：{path}")
+        if superseded_by and (superseded_by not in delivery_record_by_id or delivery_record_by_id[superseded_by].get("supersedes") != item_id):
+            errors.append(f"交付记录替代关系不一致：{item_id} -> {superseded_by}：{path}")
+        if item.get("target_id") in delivery_unit_by_id and item.get("target_kind") != "module":
+            errors.append(f"模块目标必须使用 target_kind=module：{item_id}：{path}")
     return errors
 
 
@@ -6734,7 +8459,10 @@ def authority_files(root: Path, config: dict) -> list[Path]:
         if relative.parts[0] in {"90-参考资料", "99-历史归档"} or "报告" in relative.parts:
             continue
         content = path.read_text(encoding="utf-8")
-        if GENERATED_MARKER in content[:200]:
+        # Generated readers may carry a more specific explanation after the
+        # common marker.  Skip the whole family so derived ledger updates do not
+        # change a specification/approval digest.
+        if content.lstrip().startswith("<!-- generated by daoge-docs;") or GENERATED_MARKER in content[:200]:
             continue
         if path.suffix.lower() == ".md":
             authority = parse_frontmatter(content).get("authority")
@@ -6751,7 +8479,7 @@ def authority_digest(root: Path, config: dict) -> tuple[str, int]:
     for path in files:
         digest.update(path.relative_to(docs).as_posix().encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(approval_digest_content(root, config, path))
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}", len(files)
 
@@ -6760,7 +8488,7 @@ def authority_file_snapshot(root: Path, config: dict) -> dict[str, str]:
     """Return per-file authority digests for document/development sync checks."""
     docs = docs_root(root, config)
     return {
-        path.relative_to(docs).as_posix(): canonical_digest(path.read_bytes().decode("utf-8"))
+        path.relative_to(docs).as_posix(): canonical_digest(approval_digest_content(root, config, path).decode("utf-8"))
         for path in authority_files(root, config)
     }
 
@@ -6840,7 +8568,7 @@ def goal_authority_files(root: Path, config: dict, scope: dict) -> list[Path]:
 def goal_authority_file_snapshot(root: Path, config: dict, scope: dict) -> dict[str, str]:
     docs = docs_root(root, config)
     return {
-        path.relative_to(docs).as_posix(): canonical_digest(path.read_text(encoding="utf-8"))
+        path.relative_to(docs).as_posix(): canonical_digest(approval_digest_content(root, config, path).decode("utf-8"))
         for path in goal_authority_files(root, config, scope)
     }
 
@@ -6848,6 +8576,129 @@ def goal_authority_file_snapshot(root: Path, config: dict, scope: dict) -> dict[
 def goal_authority_digest(root: Path, config: dict, scope: dict) -> tuple[str, dict[str, str]]:
     snapshot = goal_authority_file_snapshot(root, config, scope)
     return canonical_digest(snapshot), snapshot
+
+
+def approval_digest_content(root: Path, config: dict, path: Path) -> bytes:
+    """Return authority content with approval history removed from its own digest.
+
+    Governance records must bind a specification snapshot, not invalidate the
+    snapshot when their request, decision or Goal link is appended. Inputs,
+    constraints, coverage and authority boundaries remain inside the digest.
+    """
+    if path.resolve() != project_inputs_path(root, config).resolve():
+        return path.read_bytes()
+    data = read_json(path, "项目输入与约束注册表")
+    normalized = json.loads(json.dumps(data, ensure_ascii=False))
+    normalized.pop("approvals", None)
+    normalized.pop("change_sets", None)
+    # A specification draft is isolated outside docs and becomes authority only
+    # when materialized. Its review history must not invalidate a frozen scope.
+    normalized.pop("spec_drafts", None)
+    # Delivery governance is a projection over Goal/evidence facts. It must
+    # not invalidate the specification snapshot when a completion record or
+    # module grouping is appended.
+    normalized.pop("delivery_units", None)
+    normalized.pop("delivery_records", None)
+    return json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def version_scope_authority_digest(root: Path, config: dict) -> tuple[str, int]:
+    """Digest the active version closure used by its developer confirmation.
+
+    Future-version planning remains outside this closure.  The approval registry
+    itself is included except for append-only approval history, so a new request
+    or decision cannot make its own binding stale.
+    """
+    feature_ids = [str(record["meta"].get("id", "")) for record in feature_documents(root, config)]
+    scope = goal_authority_scope(root, config, feature_ids)
+    files = goal_authority_files(root, config, scope)
+    digest = hashlib.sha256()
+    docs = docs_root(root, config)
+    for path in files:
+        relative = path.relative_to(docs)
+        # Release qualification is a separate gate.  Editing deployment,
+        # rollback or release checklists must not revoke permission to continue
+        # development on an already-confirmed version scope.
+        if relative.parts[:2] == ("05-测试与发布", "发布"):
+            continue
+        digest.update(relative.as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(approval_digest_content(root, config, path))
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}", len(files)
+
+
+def approval_records(data: dict) -> list[dict]:
+    records = data.get("approvals", [])
+    return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+
+
+def version_scope_approval(root: Path, config: dict) -> dict:
+    """Derive whether the active version has a valid explicit development approval."""
+    version = str(config["current_version"])
+    current_digest, file_count = version_scope_authority_digest(root, config)
+    records = [
+        item
+        for item in approval_records(project_inputs(root, config))
+        if item.get("scope") == "version_scope" and str(item.get("version", "")) == version
+    ]
+    matching = [item for item in records if item.get("authority_digest") == current_digest]
+
+    def latest(status: str) -> dict | None:
+        candidates = [item for item in matching if item.get("status") == status]
+        return candidates[-1] if candidates else None
+
+    record = latest("approved")
+    if record:
+        status = "approved"
+        reason = f"当前版本 {version} 已有绑定当前权威摘要的开发确认。"
+    else:
+        record = latest("proposed")
+        if record:
+            status = "requested"
+            reason = f"当前版本 {version} 的开发确认尚待开发者决定。"
+        else:
+            record = latest("rejected")
+            if record:
+                status = "rejected"
+                reason = f"当前版本 {version} 的开发确认已被拒绝，需要重新提出。"
+            elif records:
+                status = "expired"
+                record = records[-1]
+                reason = f"当前版本 {version} 的历史开发确认未绑定当前权威摘要，已失效。"
+            else:
+                status = "not_requested"
+                record = None
+                reason = f"当前版本 {version} 尚未提出开发确认。"
+
+    command = f"{project_python_command()} .daoge-docs/daoge_docs.py"
+    approval_id = str(record.get("id", "")) if record else ""
+    if status == "requested":
+        recovery_action = f"由开发者执行 {command} decide-approval --root . --id {approval_id} --decision approved --confirmed-by <确认人> --rationale <确认依据>。"
+    else:
+        recovery_action = f"执行 {command} request-approval --root . --scope version_scope --title \"{version} 进入开发确认\" --requested-by <提出人> --rationale <确认范围与依据>。"
+    enforced = str(config.get("profile", "")) == "strict"
+    return {
+        "scope": "version_scope",
+        "version": version,
+        "status": status,
+        "enforced": enforced,
+        "valid": status == "approved",
+        "approval_id": approval_id,
+        "record_status": str(record.get("status", "")) if record else "",
+        "title": str(record.get("title", "")) if record else "",
+        "requested_by": str(record.get("requested_by", "")) if record else "",
+        "requested_at": record.get("requested_at") if record else None,
+        "confirmed_by": record.get("confirmed_by") if record else None,
+        "confirmed_at": record.get("confirmed_at") if record else None,
+        "authority_digest": current_digest,
+        "bound_authority_digest": record.get("authority_digest") if record else None,
+        "authority_digest_match": bool(record and record.get("authority_digest") == current_digest),
+        "authority_file_count": file_count,
+        "reason": reason,
+        "recovery_action": recovery_action,
+        "blocking_reason": reason if enforced and status != "approved" else "",
+    }
 
 
 def authority_change_paths(root: Path, config: dict, baseline: dict[str, str], scope: dict | None = None) -> list[str]:
@@ -7155,6 +9006,12 @@ def collect_gate(
     elif normalized == "version-ready":
         errors.extend(validate_stage_documents(root, config, {"discovery", "version-ready"}, READY_STATUSES))
         errors.extend(validate_features_ready(root, config, None))
+        try:
+            approval = version_scope_approval(root, config)
+            if approval["blocking_reason"]:
+                errors.append(approval["blocking_reason"])
+        except DocsError as exc:
+            errors.append(f"无法评估当前版本开发确认：{exc}")
         active_cases = current_e2e_documents(root, config)
         known_e2e_requirements = {req for case in active_cases for req in list_field(case["meta"].get("requirements", ""))}
         required = {str(item.get("id")) for item in requirement_records(root, config)}
@@ -8151,6 +10008,20 @@ def command_prepare_goal(args: argparse.Namespace) -> dict:
         if item not in blocking:
             blocking.append(item)
 
+    change_set_ids = stable_csv(",".join(getattr(args, "change_set", []) or []))
+    change_sets = {str(item.get("id", "")): item for item in change_set_records(project_inputs(root, config))}
+    for changeset_id in change_set_ids:
+        record = change_sets.get(changeset_id)
+        if record is None:
+            block("CHANGESET_MISSING", f"未登记 ChangeSet：{changeset_id}")
+            continue
+        if str(record.get("version", "")) != target_version:
+            block("CHANGESET_VERSION", f"ChangeSet {changeset_id} 绑定版本 {record.get('version', '未知')}，与 Goal 目标版本 {target_version} 不一致")
+            continue
+        status = change_set_status(root, target_config, record)
+        if status != "approved":
+            block("CHANGESET_APPROVAL", f"ChangeSet {changeset_id} 当前为 {status}；只有绑定当前权威摘要的 approved ChangeSet 能进入 Goal")
+
     derived_checks = target_version == str(config["current_version"])
     version_errors, _ = collect_gate(root, target_config, "version-ready", None, check_derived=derived_checks)
     for error in version_errors:
@@ -8298,14 +10169,15 @@ def command_prepare_goal(args: argparse.Namespace) -> dict:
         "tool_version": TOOL_VERSION,
         "browser_schema_version": payload.get("schema_version"),
         "ignored_generated_paths": sorted(generated_paths),
-        "selection_digest": canonical_digest({"version": target_version, "features": requested}),
+        "selection_digest": canonical_digest({"version": target_version, "features": requested, "change_sets": change_set_ids}),
+        "change_set_ids": change_set_ids,
         "ordered_tasks": tasks,
         "integration_order": [task["task_id"] for task in tasks],
         "execution_policy": execution_plan["mode"],
         "execution_plan": execution_plan,
         "document_sync_policy": {
             "mode": "authority_first",
-            "trigger": "权威文档、ADR、AC、实现落点或验证命令变化",
+            "trigger": "权威文档、ChangeSet、ADR、AC、实现落点或验证命令变化",
             "required_action": "停止受影响任务，更新权威来源并重新运行 index、check、相关 gate 和 prepare-goal",
             "source_snapshot": "authority_files",
         },
@@ -8334,6 +10206,7 @@ def command_prepare_goal(args: argparse.Namespace) -> dict:
         "Goal ID": goal_id,
         "功能": requested,
         "目标版本": target_version,
+        "ChangeSets": change_set_ids,
         "当前执行版本": str(config["current_version"]),
         "任务数": len(tasks),
         "阻塞数": len(blocking),
@@ -8823,6 +10696,10 @@ def command_goal_complete(args: argparse.Namespace) -> dict:
     manifest["status_checked_at"] = now_iso()
     manifest["manifest_digest"] = goal_manifest_digest(manifest)
     write_json(manifest_path, manifest)
+    # The completion record is part of the read-only delivery projection. Rebuild
+    # derived indexes after persisting it so the workbench cannot lag one state
+    # behind and report an executing Goal after goal-complete succeeds.
+    generate_indexes(root, config)
     return {
         "Goal ID": goal_id,
         "状态": "completed",
@@ -8902,6 +10779,8 @@ def command_audit(args: argparse.Namespace) -> int:
             "function renderSearch",
             "function renderVerificationPanel",
             "function renderChangeSummary",
+            "governance-spec-drafts",
+            "governance-delivery",
             "function renderProductArchitectureMap",
             "function renderCoreFlowMap",
             "function renderVersionRoadmapMap",
@@ -8924,7 +10803,7 @@ def command_audit(args: argparse.Namespace) -> int:
             ".article th, .article td { min-width: 104px; }",
             "catch { if (location.hash !== hash) location.hash = hash; }",
         ]
-    ) and all(marker in browser_data_text for marker in ['"schema_version":8', '"documents":', '"directories":', '"entities":', '"content":', '"content_digest":', '"sections":', '"features":', '"requirements":', '"relations":', '"findings":', '"task_packets":', '"governance":', '"views":', '"version_portfolio":', '"active_execution_version":', '"navigation":', '"change_summary":', '"goal_readiness":', '"design_depth":', '"evidence_binding":'])
+    ) and all(marker in browser_data_text for marker in ['"schema_version":12', '"documents":', '"directories":', '"entities":', '"content":', '"content_digest":', '"sections":', '"features":', '"requirements":', '"relations":', '"findings":', '"task_packets":', '"governance":', '"approval":', '"change_sets":', '"spec_drafts":', '"delivery_targets":', '"views":', '"version_portfolio":', '"active_execution_version":', '"navigation":', '"change_summary":', '"goal_readiness":', '"design_depth":', '"evidence_binding":'])
     script_text = SCRIPT_PATH.read_text(encoding="utf-8")
     utf8_delivery_complete = all(
         marker in script_text
@@ -8977,15 +10856,67 @@ def command_audit(args: argparse.Namespace) -> int:
         "可视化与完整文档浏览器": browser_complete and (docs / "02-产品与版本/图表/功能演进-版本主链路.svg").exists(),
         "UTF-8 来源阅读与本地服务": utf8_delivery_complete,
         "Goal 可恢复执行生命周期": goal_commands_complete,
-        "输入覆盖与权威边界治理": all(
+        "输入覆盖、权威边界与开发确认治理": all(
             marker in script_text
             for marker in [
                 "def command_map_spec_coverage",
                 "def command_register_authority",
+                "def command_request_approval",
+                "def command_decide_approval",
                 'add_parser("map-spec-coverage"',
                 'add_parser("register-authority"',
+                'add_parser("request-approval"',
+                'add_parser("decide-approval"',
                 "COVERAGE_DISPOSITIONS",
                 "AUTHORITY_FACT_TYPES",
+                "APPROVAL_STATUSES",
+            ]
+        ),
+        "ChangeSet 规格修订治理": all(
+            marker in script_text
+            for marker in [
+                "def command_new_change_set",
+                "def command_decide_change_set",
+                'add_parser("new-change-set"',
+                'add_parser("decide-change-set"',
+                "CHANGESET_STATUSES",
+                "change_set_ids",
+            ]
+        ),
+        "规格草案确认闭环": all(
+            marker in script_text
+            for marker in [
+                "def command_new_spec_draft",
+                "def command_decide_spec_draft",
+                "def command_materialize_spec_draft",
+                'add_parser("new-spec-draft"',
+                'add_parser("decide-spec-draft"',
+                'add_parser("materialize-spec-draft"',
+                "SPEC_DRAFT_STATUSES",
+                "spec_drafts",
+            ]
+        ),
+        "证据驱动交付回写": all(
+            marker in script_text
+            for marker in [
+                "def command_new_delivery_module",
+                "def command_close_delivery",
+                "def delivery_target_summary",
+                'add_parser("new-delivery-module"',
+                'add_parser("close-delivery"',
+                "DELIVERY_DECISIONS",
+                "delivery_records",
+            ]
+        ),
+        "受控并发写入与原子保存": all(
+            marker in script_text
+            for marker in [
+                "def atomic_write_text",
+                "def atomic_copy_file",
+                "def project_write_lock",
+                "MUTATING_COMMANDS",
+                "with project_write_lock",
+                "os.replace",
             ]
         ),
         "CI、PR、IDE 与智能体集成模板": integration_templates_complete,
@@ -9211,6 +11142,88 @@ def build_parser() -> argparse.ArgumentParser:
     authority.add_argument("--supersedes", default="", help="要替代的同范围、同事实类型 AUTH-*；省略时不得已有 active 权威")
     authority.set_defaults(handler=command_register_authority)
 
+    approval_request = subparsers.add_parser("request-approval", help="提出当前版本进入开发的显式确认请求，并绑定版本范围权威摘要")
+    approval_request.add_argument("--root", default=".")
+    approval_request.add_argument("--scope", choices=sorted(APPROVAL_SCOPES), required=True, help="当前仅支持 version_scope")
+    approval_request.add_argument("--title", required=True, help="本次开发确认的简短标题")
+    approval_request.add_argument("--requested-by", required=True, help="提出确认的开发者、产品负责人或角色")
+    approval_request.add_argument("--rationale", required=True, help="确认当前版本范围的依据与边界")
+    approval_request.add_argument("--supersedes", default="", help="可选：替代同一范围和版本的 APPROVAL-*")
+    approval_request.set_defaults(handler=command_request_approval)
+
+    approval_decision = subparsers.add_parser("decide-approval", help="由开发者记录当前版本开发确认的批准或拒绝决定")
+    approval_decision.add_argument("--root", default=".")
+    approval_decision.add_argument("--id", dest="approval_id", required=True, help="要决定的 APPROVAL-* ID")
+    approval_decision.add_argument("--decision", choices=["approved", "rejected"], required=True)
+    approval_decision.add_argument("--confirmed-by", required=True, help="实际作出决定的开发者或负责人")
+    approval_decision.add_argument("--rationale", required=True, help="批准或拒绝的依据")
+    approval_decision.set_defaults(handler=command_decide_approval)
+
+    change_set = subparsers.add_parser("new-change-set", help="提出当前版本的规格变更集，不复制权威规格正文")
+    change_set.add_argument("--root", default=".")
+    change_set.add_argument("--kind", choices=sorted(CHANGESET_KINDS), required=True, help="新增、修改、废弃、拆分或延期")
+    change_set.add_argument("--title", required=True, help="本次变更的简短标题")
+    change_set.add_argument("--affected", action="append", required=True, help="受影响稳定 ID，可重复或用逗号分隔")
+    change_set.add_argument("--source", action="append", required=True, help="已更新的权威 docs 文件路径，可重复")
+    change_set.add_argument("--requested-by", required=True, help="提出变更的开发者、产品负责人或角色")
+    change_set.add_argument("--rationale", required=True, help="变更动机、范围与非目标")
+    change_set.add_argument("--supersedes", default="", help="可选：替代当前版本的 CHANGESET-*")
+    change_set.set_defaults(handler=command_new_change_set)
+
+    change_set_decision = subparsers.add_parser("decide-change-set", help="由开发者批准、拒绝或取消一个 ChangeSet")
+    change_set_decision.add_argument("--root", default=".")
+    change_set_decision.add_argument("--id", dest="changeset_id", required=True, help="要决定的 CHANGESET-* ID")
+    change_set_decision.add_argument("--decision", choices=sorted(CHANGESET_DECISIONS), required=True)
+    change_set_decision.add_argument("--confirmed-by", required=True, help="实际作出决定的开发者或负责人")
+    change_set_decision.add_argument("--rationale", required=True, help="批准、拒绝或取消的依据")
+    change_set_decision.set_defaults(handler=command_decide_change_set)
+
+    spec_draft = subparsers.add_parser("new-spec-draft", help="在 docs 外保存待确认的规格 Markdown 草案")
+    spec_draft.add_argument("--root", default=".")
+    spec_draft.add_argument("--kind", choices=["create", "replace"], required=True, help="创建新权威文档或替换既有权威文档")
+    spec_draft.add_argument("--title", required=True, help="草案的简短标题")
+    spec_draft.add_argument("--target", required=True, help="docs 内的目标 Markdown 相对路径")
+    spec_draft.add_argument("--content-file", required=True, help="docs 外的候选 Markdown 相对路径")
+    spec_draft.add_argument("--requested-by", required=True, help="提出草案的开发者、产品负责人或角色")
+    spec_draft.add_argument("--rationale", required=True, help="草案动机、范围与非目标")
+    spec_draft.add_argument("--supersedes", default="", help="可选：替代同一目标的 SPEC-DRAFT-*")
+    spec_draft.set_defaults(handler=command_new_spec_draft)
+
+    spec_draft_decision = subparsers.add_parser("decide-spec-draft", help="由开发者批准或拒绝一个隔离规格草案")
+    spec_draft_decision.add_argument("--root", default=".")
+    spec_draft_decision.add_argument("--id", dest="draft_id", required=True, help="要决定的 SPEC-DRAFT-* ID")
+    spec_draft_decision.add_argument("--decision", choices=sorted(SPEC_DRAFT_DECISIONS), required=True)
+    spec_draft_decision.add_argument("--confirmed-by", required=True, help="实际作出决定的开发者或负责人")
+    spec_draft_decision.add_argument("--rationale", required=True, help="批准或拒绝的依据")
+    spec_draft_decision.set_defaults(handler=command_decide_spec_draft)
+
+    spec_draft_materialize = subparsers.add_parser("materialize-spec-draft", help="将未变更的已批准草案物化为权威 Markdown")
+    spec_draft_materialize.add_argument("--root", default=".")
+    spec_draft_materialize.add_argument("--id", dest="draft_id", required=True, help="要物化的 SPEC-DRAFT-* ID")
+    spec_draft_materialize.add_argument("--materialized-by", required=True, help="实际执行物化的开发者或负责人")
+    spec_draft_materialize.set_defaults(handler=command_materialize_spec_draft)
+
+    delivery_module = subparsers.add_parser("new-delivery-module", help="登记由多个功能组成的稳定交付模块边界")
+    delivery_module.add_argument("--root", default=".")
+    delivery_module.add_argument("--module-id", required=True, help="稳定 MODULE-* ID")
+    delivery_module.add_argument("--version", help="模块所属版本；默认当前执行版本")
+    delivery_module.add_argument("--title", required=True, help="模块名称")
+    delivery_module.add_argument("--feature", action="append", required=True, help="绑定功能 ID，可重复或逗号分隔")
+    delivery_module.add_argument("--source", action="append", required=True, help="模块边界权威来源，可重复")
+    delivery_module.add_argument("--owner", required=True, help="模块负责人")
+    delivery_module.set_defaults(handler=command_new_delivery_module)
+
+    delivery_close = subparsers.add_parser("close-delivery", help="以 Goal 完成证据登记功能、模块或版本的开发完成回写")
+    delivery_close.add_argument("--root", default=".")
+    delivery_close.add_argument("--target", required=True, help="功能 ID、MODULE-* 或 Vn")
+    delivery_close.add_argument("--version", help="功能 ID 跨版本重复时必填")
+    delivery_close.add_argument("--decision", choices=sorted(DELIVERY_DECISIONS), required=True, help="accepted 或明确 exception")
+    delivery_close.add_argument("--goal", action="append", default=[], help="accepted 时绑定已完成 GOAL-*，可重复或逗号分隔")
+    delivery_close.add_argument("--confirmed-by", required=True, help="实际确认交付状态的开发者")
+    delivery_close.add_argument("--rationale", required=True, help="完成确认或例外的依据")
+    delivery_close.add_argument("--supersedes", help="替代同一目标的旧 DELIVERY-* 记录")
+    delivery_close.set_defaults(handler=command_close_delivery)
+
     handoff = subparsers.add_parser("handoff", help="输出跨会话恢复所需的当前项目事实、证据和 Gate 概览")
     handoff.add_argument("--root", default=".")
     handoff.set_defaults(handler=command_handoff)
@@ -9271,6 +11284,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_goal.add_argument("--feature", action="append", required=True, help="目标版本功能 ID，可重复或使用逗号分隔")
     prepare_goal.add_argument("--goal-id", help="显式 Goal ID；默认按目标版本分配下一个编号")
     prepare_goal.add_argument("--objective", help="单句、可验证的 Goal 目标")
+    prepare_goal.add_argument("--change-set", action="append", default=[], help="绑定已批准的 CHANGESET-*，可重复或用逗号分隔")
     prepare_goal.set_defaults(handler=command_prepare_goal)
 
     goal_status = subparsers.add_parser("goal-status", help="只读重新评估 Goal 的基线、权威摘要和过期状态")
@@ -9327,7 +11341,14 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     try:
-        result = args.handler(args)
+        requires_write_lock = args.command in MUTATING_COMMANDS or (
+            args.command == "goal-status" and bool(args.persist)
+        )
+        if requires_write_lock:
+            with project_write_lock(project_root(args.root)):
+                result = args.handler(args)
+        else:
+            result = args.handler(args)
         if isinstance(result, int):
             return result
         print_result(result)

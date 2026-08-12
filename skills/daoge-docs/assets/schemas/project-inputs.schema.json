@@ -3,9 +3,9 @@
   "$id": "https://daoge-docs.local/schemas/project-inputs.schema.json",
   "title": "DAOGE Docs 项目输入与约束注册表",
   "type": "object",
-  "required": ["schema_version", "inputs", "constraints", "evidence_assets", "coverage", "authority_scopes"],
+  "required": ["schema_version", "inputs", "constraints", "evidence_assets", "coverage", "authority_scopes", "approvals", "change_sets", "delivery_units", "delivery_records", "spec_drafts"],
   "properties": {
-    "schema_version": {"const": 2},
+    "schema_version": {"const": 6},
     "inputs": {
       "type": "array",
       "items": {"$ref": "#/$defs/input"}
@@ -25,6 +25,26 @@
     "authority_scopes": {
       "type": "array",
       "items": {"$ref": "#/$defs/authority_scope"}
+    },
+    "approvals": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/approval"}
+    },
+    "change_sets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/change_set"}
+    },
+    "delivery_units": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/delivery_unit"}
+    },
+    "delivery_records": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/delivery_record"}
+    },
+    "spec_drafts": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/spec_draft"}
     }
   },
   "$defs": {
@@ -107,6 +127,127 @@
         "owner": {"type": "string", "minLength": 1},
         "status": {"enum": ["active", "deprecated"]},
         "supersedes": {"type": ["string", "null"], "pattern": "^AUTH-[0-9]{3}$"},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": ["id", "scope", "version", "title", "status", "authority_digest", "requested_by", "requested_at", "confirmed_by", "confirmed_at", "rationale", "supersedes", "superseded_by", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^APPROVAL-[0-9]{3}$"},
+        "scope": {"const": "version_scope"},
+        "version": {"type": "string", "pattern": "^V[0-9]+$"},
+        "title": {"type": "string", "minLength": 1},
+        "status": {"enum": ["proposed", "approved", "rejected", "superseded"]},
+        "authority_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "requested_by": {"type": "string", "minLength": 1},
+        "requested_at": {"type": "string", "minLength": 1},
+        "confirmed_by": {"type": ["string", "null"]},
+        "confirmed_at": {"$ref": "#/$defs/timestamp"},
+        "rationale": {"type": "string", "minLength": 1},
+        "supersedes": {"type": ["string", "null"], "pattern": "^APPROVAL-[0-9]{3}$"},
+        "superseded_by": {"type": ["string", "null"], "pattern": "^APPROVAL-[0-9]{3}$"},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "change_set": {
+      "type": "object",
+      "required": ["id", "version", "kind", "title", "status", "authority_digest", "affected_ids", "source_paths", "requested_by", "requested_at", "confirmed_by", "confirmed_at", "rationale", "decision_rationale", "supersedes", "superseded_by", "events", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^CHANGESET-[0-9]{3}$"},
+        "version": {"type": "string", "pattern": "^V[0-9]+$"},
+        "kind": {"enum": ["add", "change", "deprecate", "split", "defer"]},
+        "title": {"type": "string", "minLength": 1},
+        "status": {"enum": ["proposed", "approved", "rejected", "superseded", "cancelled"]},
+        "authority_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "affected_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"}},
+        "source_paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "requested_by": {"type": "string", "minLength": 1},
+        "requested_at": {"type": "string", "minLength": 1},
+        "confirmed_by": {"type": ["string", "null"]},
+        "confirmed_at": {"$ref": "#/$defs/timestamp"},
+        "rationale": {"type": "string", "minLength": 1},
+        "decision_rationale": {"type": ["string", "null"]},
+        "supersedes": {"type": ["string", "null"], "pattern": "^CHANGESET-[0-9]{3}$"},
+        "superseded_by": {"type": ["string", "null"], "pattern": "^CHANGESET-[0-9]{3}$"},
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["status", "actor", "at", "rationale"],
+            "properties": {
+              "status": {"enum": ["proposed", "approved", "rejected", "superseded", "cancelled"]},
+              "actor": {"type": "string", "minLength": 1},
+              "at": {"type": "string", "minLength": 1},
+              "rationale": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "delivery_unit": {
+      "type": "object",
+      "required": ["id", "kind", "version", "title", "status", "feature_ids", "source_paths", "owner", "superseded_by", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^MODULE-[A-Z0-9][A-Z0-9-]*$"},
+        "kind": {"const": "module"},
+        "version": {"type": "string", "pattern": "^V[0-9]+$"},
+        "title": {"type": "string", "minLength": 1},
+        "status": {"enum": ["active", "deprecated"]},
+        "feature_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "source_paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "owner": {"type": "string", "minLength": 1},
+        "superseded_by": {"type": ["string", "null"], "pattern": "^MODULE-[A-Z0-9][A-Z0-9-]*$"},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "delivery_record": {
+      "type": "object",
+      "required": ["id", "target_id", "target_kind", "version", "feature_ids", "decision", "scope_digest", "goal_ids", "goal_completion_digests", "confirmed_by", "confirmed_at", "rationale", "supersedes", "superseded_by", "events", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^DELIVERY-[0-9]{3}$"},
+        "target_id": {"type": "string", "minLength": 1},
+        "target_kind": {"enum": ["feature", "module", "version"]},
+        "version": {"type": "string", "pattern": "^V[0-9]+$"},
+        "feature_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "decision": {"enum": ["accepted", "exception"]},
+        "scope_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "goal_ids": {"type": "array", "items": {"type": "string", "pattern": "^GOAL-[A-Z0-9][A-Z0-9-]*$"}},
+        "goal_completion_digests": {"type": "array", "items": {"type": "object", "required": ["goal_id", "completion_digest"], "properties": {"goal_id": {"type": "string", "pattern": "^GOAL-[A-Z0-9][A-Z0-9-]*$"}, "completion_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}}}},
+        "confirmed_by": {"type": "string", "minLength": 1},
+        "confirmed_at": {"type": "string", "minLength": 1},
+        "rationale": {"type": "string", "minLength": 1},
+        "supersedes": {"type": ["string", "null"], "pattern": "^DELIVERY-[0-9]{3}$"},
+        "superseded_by": {"type": ["string", "null"], "pattern": "^DELIVERY-[0-9]{3}$"},
+        "events": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["decision", "actor", "at", "rationale"], "properties": {"decision": {"enum": ["accepted", "exception", "superseded"]}, "actor": {"type": "string", "minLength": 1}, "at": {"type": "string", "minLength": 1}, "rationale": {"type": "string", "minLength": 1}}}},
+        "updated": {"type": "string", "minLength": 1}
+      }
+    },
+    "spec_draft": {
+      "type": "object",
+      "required": ["id", "version", "kind", "title", "status", "target_path", "target_digest", "content_digest", "requested_by", "requested_at", "confirmed_by", "confirmed_at", "rationale", "decision_rationale", "materialized_by", "materialized_at", "materialized_target_digest", "supersedes", "superseded_by", "events", "updated"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^SPEC-DRAFT-[0-9]{3}$"},
+        "version": {"type": "string", "pattern": "^V[0-9]+$"},
+        "kind": {"enum": ["create", "replace"]},
+        "title": {"type": "string", "minLength": 1},
+        "status": {"enum": ["proposed", "approved", "rejected", "materialized", "superseded"]},
+        "target_path": {"type": "string", "minLength": 1},
+        "target_digest": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "requested_by": {"type": "string", "minLength": 1},
+        "requested_at": {"type": "string", "minLength": 1},
+        "confirmed_by": {"type": ["string", "null"]},
+        "confirmed_at": {"$ref": "#/$defs/timestamp"},
+        "rationale": {"type": "string", "minLength": 1},
+        "decision_rationale": {"type": ["string", "null"]},
+        "materialized_by": {"type": ["string", "null"]},
+        "materialized_at": {"$ref": "#/$defs/timestamp"},
+        "materialized_target_digest": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"},
+        "supersedes": {"type": ["string", "null"], "pattern": "^SPEC-DRAFT-[0-9]{3}$"},
+        "superseded_by": {"type": ["string", "null"], "pattern": "^SPEC-DRAFT-[0-9]{3}$"},
+        "events": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["status", "actor", "at", "rationale"], "properties": {"status": {"enum": ["proposed", "approved", "rejected", "materialized", "superseded"]}, "actor": {"type": "string", "minLength": 1}, "at": {"type": "string", "minLength": 1}, "rationale": {"type": "string", "minLength": 1}}}},
         "updated": {"type": "string", "minLength": 1}
       }
     }

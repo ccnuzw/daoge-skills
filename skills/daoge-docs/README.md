@@ -6,7 +6,7 @@ DAOGE Docs 是一个面向开发团队和编程智能体的 Codex Skill。它以
 
 它解决的不是“多写几份文档”，而是把每个版本的范围、行为、工程落点、验证方式和证据边界固定下来，使多人协作、跨会话恢复和 MVP/V1/V2/V3 的连续迭代都有可检查的依据。
 
-当前工具版本：`3.18.0`（基于上游 `daoge-docs-v3.13.4`，包含本地门禁、索引新鲜度、跨版本 E2E、ADR 开发授权、跨版本工作台组合层、全项目功能浏览目录、显式目标版本 Goal、并行 Goal 运行态和 stale 基线集成校验）。
+当前工具版本：`3.25.0`（包含本地门禁、索引新鲜度、跨版本 E2E、ADR 开发授权、跨版本工作台组合层、全项目功能浏览目录、显式目标版本 Goal、并行 Goal 运行态、stale 基线集成校验、版本范围开发确认、ChangeSet 规格修订治理、隔离规格草案确认闭环、证据驱动的功能/模块/版本完成回写，以及项目级串行写入和原子文件保存）。
 
 ## 开发执行工作台
 
@@ -431,7 +431,7 @@ python3 .daoge-docs/daoge_docs.py new-evidence \
 
 ### 4.1 项目输入、约束与证据资产
 
-跨会话仍以 `docs/01-项目概览/项目输入与约束注册表.json` 为机器权威，以生成的 `项目输入与约束总账.md` 为阅读入口。注册表当前为 `schema_version: 2`，除输入、约束和证据资产外，还保存规格覆盖与权威边界。先登记来源，再决定是否确认：
+跨会话仍以 `docs/01-项目概览/项目输入与约束注册表.json` 为机器权威，以生成的 `项目输入与约束总账.md` 为阅读入口。注册表当前为 `schema_version: 6`，除输入、约束、证据资产、规格覆盖、权威边界、版本范围开发确认、ChangeSet、交付模块与开发完成回写外，还保存隔离规格草案的审计链。先登记来源，再决定是否确认：
 
 ```bash
 python3 .daoge-docs/daoge_docs.py record-input \
@@ -483,6 +483,72 @@ python3 .daoge-docs/daoge_docs.py register-authority \
   --source docs/02-产品与版本/当前版本/V1-版本总览.md --owner "产品负责人"
 ```
 
+strict Profile 的当前版本在 Version Ready 前还必须有开发者确认。请求只绑定当前版本权威摘要，决定不会修改需求正文；权威范围变化后旧批准会派生为失效，需重新请求：
+
+```bash
+python3 .daoge-docs/daoge_docs.py request-approval \
+  --root . --scope version_scope --title "V1 进入开发确认" \
+  --requested-by "版本负责人" --rationale "范围、非目标、需求和验证边界已审查"
+
+python3 .daoge-docs/daoge_docs.py decide-approval \
+  --root . --id APPROVAL-001 --decision approved \
+  --confirmed-by "产品负责人" --rationale "批准 V1 进入受控开发准备"
+```
+
+`request-approval` 只能提出请求，工具不会自行批准；`decide-approval` 拒绝过期摘要的批准。`handoff` 与工作台只显示确认状态摘要，Goal 仍从权威文档和门禁生成。
+
+需要对已完成或已规划范围做二次开发时，先更新原始权威规格，再提出 ChangeSet。它只引用稳定影响 ID 和已更新的权威路径，不复制需求、AC 或设计正文；开发者批准且提交文档基线后，才能作为 Goal 输入：
+
+```bash
+python3 .daoge-docs/daoge_docs.py new-change-set \
+  --root . --kind change --title "补充订单失败恢复语义" \
+  --affected OMS-FR-001,AC03 \
+  --source docs/03-功能规格/V1/订单/01-创建订单.md \
+  --requested-by "版本负责人" --rationale "规格、非目标和验证已更新"
+
+python3 .daoge-docs/daoge_docs.py decide-change-set \
+  --root . --id CHANGESET-001 --decision approved \
+  --confirmed-by "产品负责人" --rationale "批准本次受控修订"
+```
+
+ChangeSet 的 `proposed`、`rejected`、`cancelled` 或派生 `expired` 状态不能进入 Goal。权威内容再次变化后，已批准记录自动失效；保留旧记录用于审计，再基于新规格提出新的 ChangeSet。
+
+尚未确认的规格不能直接写入 `docs`。先把候选内容放在项目根目录中、`docs` 和 `.daoge-docs` 之外的 Markdown 文件，再建立隔离草案；开发者批准后仍须显式物化。草案本身、批准或拒绝都不会改变权威摘要，只有物化完成才成为规范事实并按既有规则使 Goal、确认和证据重新评估：
+
+```bash
+python3 .daoge-docs/daoge_docs.py new-spec-draft \
+  --root . --kind create --title "订单取消功能规格" \
+  --target docs/03-功能规格/V1/订单/02-取消订单.md \
+  --content-file drafts/取消订单.md \
+  --requested-by "产品负责人" --rationale "先供开发者复核范围、AC 与非目标"
+
+python3 .daoge-docs/daoge_docs.py decide-spec-draft \
+  --root . --id SPEC-DRAFT-001 --decision approved \
+  --confirmed-by "开发负责人" --rationale "已审阅目标、行为边界和验收条件"
+
+python3 .daoge-docs/daoge_docs.py materialize-spec-draft \
+  --root . --id SPEC-DRAFT-001 --materialized-by "开发负责人"
+```
+
+草案内容或目标文档基线在批准前后被改动时，物化会拒绝执行，必须重新提出。`rejected`、`superseded`、`proposed` 和尚未物化的 `approved` 草案只保留审计价值，不能作为 Goal、Gate 或实现范围的输入。
+
+同一项目有多个编程智能体或开发者同时工作时，所有会写入文档、注册表、Goal、证据或派生索引的 CLI 命令会取得项目级写锁并串行执行；读取 `check`、`gate`、`handoff` 和默认 `goal-status` 可以并行。写入使用临时文件和原子替换，进程中断不会留下半截权威文档或 JSON。锁等待超时会直接失败且不修改项目；它不替代 Git 分支、合并策略或人工批准。
+
+开发级完成必须由 `goal-complete` 的防篡改 `completion.json` 与开发者确认共同构成。功能可直接关闭；多个功能构成一个模块时先登记 `MODULE-*`。版本关闭要求关联 Goal 覆盖该版本全部已登记功能。工作台只投影 `设计中`、`可开发`、`开发中`、`待确认完成`、`开发级完成`、`需复验` 或明确 `例外`，不会把智能体文本当作完成事实：
+
+```bash
+python3 .daoge-docs/daoge_docs.py new-delivery-module \
+  --root . --module-id MODULE-ORDER --version V1 --title "订单闭环" \
+  --feature OMS-FR-001 --source docs/03-功能规格/V1/订单/01-创建订单.md \
+  --owner "版本负责人"
+
+python3 .daoge-docs/daoge_docs.py close-delivery \
+  --root . --target OMS-FR-001 --decision accepted --goal GOAL-V1-001 \
+  --confirmed-by "版本负责人" --rationale "复核完成记录、提交、权限范围与开发级证据。"
+```
+
+`close-delivery --decision accepted` 只接受当前可复验、且覆盖目标全部功能的已完成 Goal，并保存其完成摘要。权威规格、目标范围、最终提交或关联证据变化后，原记录保留审计历史但工作台派生为 `needs_reverification`；`exception` 必须明确说明原因，永不等价于完成。
+
 ### 5. 变更回流与版本演进
 
 功能需求变化时先更新权威规格，再重新生成索引、检查门禁并重新准备受影响的 Goal。不要通过修改已生成的 Goal 清单或工作台数据“追上”规格变化。
@@ -500,7 +566,7 @@ Goal 是从已经冻结的权威文档中生成的、带 Git 基线与权威摘�
 
 ### 生成前提
 
-只有同时满足以下条件时，`prepare-goal` 才应产生 `ready` Goal：
+只有同时满足以下条件时，`prepare-goal` 才应产生 `ready` Goal（strict Profile 还要求当前版本开发确认状态为 `approved` 且摘要匹配；传入 `--change-set` 时，该 ChangeSet 也必须为摘要匹配的 `approved`）：
 
 - 当前版本已经通过 `version-ready`。
 - 每个所选功能已经通过 `feature-ready`。
@@ -510,6 +576,7 @@ Goal 是从已经冻结的权威文档中生成的、带 Git 基线与权威摘�
 ```bash
 python3 .daoge-docs/daoge_docs.py prepare-goal \
   --root . --feature OMS-FR-001 --feature OMS-FR-002 \
+  --change-set CHANGESET-001 \
   --objective "完成订单创建与支付前校验，并取得开发级机器证据"
 ```
 
@@ -724,6 +791,11 @@ python3 .daoge-docs/daoge_docs.py <command> --help
 | 工作台 | `browser-check` | 验证工作台、来源闭合、视图和 UTF-8 原文响应 |
 | 权威性 | `snapshot` | 创建不可变版本快照，供变更检测和审计使用 |
 | 权威性 | `authority-digest` | 计算当前权威集合的稳定 SHA-256 摘要 |
+| 规格修订 | `new-change-set` | 提出当前版本的规格变更，引用稳定影响 ID 和权威来源 |
+| 规格修订 | `decide-change-set` | 记录开发者批准、拒绝或取消决定；过期摘要不能批准 |
+| 规格草案 | `new-spec-draft` | 在 `docs` 外登记待确认的 Markdown 规格候选 |
+| 规格草案 | `decide-spec-draft` | 记录开发者批准或拒绝；批准不直接写入权威文档 |
+| 规格草案 | `materialize-spec-draft` | 物化内容和目标基线未变的已批准草案 |
 | Goal | `prepare-goal` | 从通过门禁的功能生成确定性 Goal 清单 |
 | Goal | `goal-status` | 默认只读评估 Goal 基线、权威摘要和过期状态；`--persist` 才回写 |
 | Goal | `goal-plan` / `goal-resume-context` | 查看泳道运行态，并在依赖满足时获取指定任务上下文 |

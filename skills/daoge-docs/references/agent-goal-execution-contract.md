@@ -12,7 +12,9 @@ authority: 编程智能体大型任务准备、执行、恢复与完成契约
 
 本文定义如何把已冻结的 DAOGE Docs 权威文档转换为可恢复、可停止、可验证的大型开发任务。目标不是让智能体自由解释一组文档，而是生成一份确定的派生执行清单，使每一步都能回到版本、功能、需求、验收项、稳定分支、验证命令和证据。
 
-Goal 清单是执行输入，不是新的业务权威。需求、设计或决策发生变化时，必须先修改对应权威文档并重新生成清单，不能直接修改 Goal 清单来绕过文档治理。
+Goal 清单是执行输入，不是新的业务权威。需求、设计或决策发生变化时，必须先修改对应权威文档并重新生成清单，不能直接修改 Goal 清单来绕过文档治理。隔离的 `SPEC-DRAFT-*` 候选内容、其人工批准和工作台摘要均不属于权威文档；只有 `materialize-spec-draft` 成功写入 `docs` 后，新的内容才能参与摘要、Gate 和 Goal。
+
+所有会推进 Goal、写入检查点、完成记录、规格草案、注册表或派生索引的 CLI 命令均由项目级写锁串行执行。读取 Goal、门禁和工作台数据不需要该锁。写入中的进程中断不能留下半截 JSON 或 Markdown；等待锁超时时工具必须不做修改而退出。该机制只保证同一项目工作区内的 CLI 写入顺序，不能代替 Git 分支、远端合并或开发者审批。
 
 ## 2. 职责边界
 
@@ -114,6 +116,12 @@ stop_conditions / checkpoint_policy
 6. 生成确定的拓扑顺序，并计算清单摘要。
 7. 无阻塞时进入 `ready`；否则进入 `blocked` 并记录 finding ID 和恢复动作。
 
+strict Profile 的 `version-ready` 还必须包含当前目标版本的 `version_scope` 开发确认：记录状态为 `approved`，且绑定摘要与当前版本范围摘要一致。`proposed`、`rejected`、`expired` 或缺失确认均保持 Goal `blocked`；开发者只能通过 `request-approval` / `decide-approval` 形成或更新该事实，不能手工编辑 Goal 清单。批准后再改变版本范围、共享规则或当前功能规格时，确认与 Goal 都必须重新评估。
+
+当本次 Goal 是已完成或已规划范围的二次修订时，必须显式传入 `--change-set CHANGESET-*`。ChangeSet 必须绑定目标版本、已存在的权威来源和当前 `version_scope` 摘要，并处于 `approved`；`proposed`、`rejected`、`cancelled`、`superseded` 或摘要不匹配的记录产生 `CHANGESET_APPROVAL` 阻塞。Goal 清单只保存 `change_set_ids` 和其摘要，不复制变更正文；工作台通过 Goal 清单、检查点和 `completion.json` 派生交付状态。
+
+未物化的规格草案不能作为 `inputs`、`authority_files`、`change_set_ids` 或任一任务的规格来源。智能体发现需要新增或修改业务语义时，应停止受影响任务，生成隔离候选并请求开发者确认；不得把草案路径、聊天摘要或工作台状态替代为权威 Markdown。物化前的草案提出、批准、拒绝或替代不改变 `authority_digest`；物化后由常规摘要校验使旧 Goal 进入 `stale`，再从当前权威重新准备。
+
 同一 `source_commit`、`authority_digest`、工具版本和 Goal 选择必须产生语义相同的任务图。生成时间、绝对路径等环境字段不得参与语义排序。
 
 ## 7. 版本与迭代边界
@@ -144,6 +152,17 @@ stop_conditions / checkpoint_policy
 `stale` Goal 不原地刷新。必须保留旧清单用于审计，并从当前权威重新创建新 Goal ID。
 
 `completed` 是不可逆历史事实。后续版本、权威文档或工具发生变化时，完成记录显示为 `historical`，但不能把已经通过且防篡改的完成记录改写成 `stale`；检查器仍须验证最终提交位于当前 Git 历史、检查点链和证据摘要完整。
+
+## 8.1 开发完成回写
+
+`completion.json` 证明一个 Goal 的开发级执行已完成，但不自动断言功能、模块或版本已经完成。开发者必须用 `close-delivery` 将一个稳定目标与当前可复验的 Goal 完成摘要绑定；工具拒绝缺少 Goal、覆盖不完整或已失效的完成记录。
+
+- 功能目标是稳定 `FR` ID。
+- 模块目标必须先用 `new-delivery-module` 建立 `MODULE-*` 和其功能集合。
+- 版本目标是 `Vn`，关联 Goal 必须覆盖该版本全部已登记功能。
+- 权威范围、目标集合、最终提交或证据变化后，交付状态为 `needs_reverification`，而 Goal 完成记录仍保留历史审计价值。
+
+`exception` 可以记录明确的人工例外，但不得被解释为 Goal 完成、功能完成或发布批准。
 
 ## 9. 串行、并行和集成顺序
 
@@ -206,7 +225,7 @@ Goal 进入 `completed` 前必须同时满足：
 
 ## 13. 工具接口与实现状态
 
-`daoge-docs 3.20.0` 将 `goal-status` 改为默认只读，避免观察状态本身改写 Goal 清单；只有显式 `--persist` 才保存派生检查时间和状态。`3.18.0` 为任务和泳道输出 `phase` 与 `reason_code`，并强化 CI/PR/IDE 对代码变更和 stale 基线的检查。工作台的执行编排只提供保守调度提示，不改变 Goal 的 Gate、原子提交、检查点或授权边界。3.16.0 补充顺序无关的串行/并行泳道、稳定前置泳道和逐权威文件变化定位。
+`daoge-docs 3.25.0` 在保留 `goal-status` 默认只读、任务泳道阶段信号和 stale 基线检查的基础上，要求 strict Profile 的目标版本拥有绑定当前摘要的 `approved` 开发确认；带 `--change-set` 的 Goal 还必须绑定已批准的 ChangeSet。隔离规格草案必须经开发者批准并物化为权威 Markdown，才会改变摘要或成为 Goal 输入。确认、ChangeSet 或权威内容失效时 Goal 准备、恢复和门禁保持阻塞。所有会推进 Goal、写入草案、注册表、证据或派生索引的 CLI 命令由项目级写锁串行执行，并以原子文件替换保存；工作台的执行编排只提供保守调度提示，不改变 Goal 的 Gate、原子提交、检查点或授权边界；开发完成回写额外要求开发者确认和可复验 `completion.json`。历史版本仍保留既有兼容行为和审计字段。
 
 `daoge-docs 3.15.0` 已实现完整的开发级 Goal 生命周期。功能 front matter 引用的 ADR 必须已处于 `accepted`，否则检查、Ready 门禁和 Goal 都保持 `blocked`；同一缺口必须派生为工作台 finding。验收表中的 Markdown 行内代码会在派生 Goal 前规范化为原始 shell 命令。工作台可为任何已登记版本的稳定功能 ID 复制 Goal 准备提示，但该提示不是执行授权：它只能要求智能体调用带 `--version <目标版本>` 的 `prepare-goal`，在 `blocked` 时停止，并在 `ready` 后读取 `goal-resume-context`；实现必须由开发者明确确认后才开始。默认 Goal 使用 `config.current_version`；显式 `--version` 时工具在内存中创建目标版本配置，独立解析该版本功能、需求、E2E、决策、任务图和 Ready 门禁，不写回 `.daoge-docs.json`，不重建当前工作台为历史版本，也不让历史 Gate、任务包或证据覆盖当前执行判断。Goal 清单绑定目标版本；`goal-status`、`goal-resume-context`、`goal-checkpoint` 和 `goal-complete` 必须从清单恢复该目标版本，而不能因为项目活动版本已前进而把清单标为 stale。
 

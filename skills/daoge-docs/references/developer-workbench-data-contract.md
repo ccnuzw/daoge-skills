@@ -10,7 +10,7 @@ authority: 开发执行工作台派生数据契约
 
 ## 1. 契约目的
 
-本文定义产品文档浏览器、开发执行工作台和 Goal 执行器共享的派生数据。`daoge-docs 3.20.0` 当前输出 `schema_version: 8`；旧 schema 只作为兼容输入。
+本文定义产品文档浏览器、开发执行工作台和 Goal 执行器共享的派生数据。`daoge-docs 3.25.0` 当前输出 `schema_version: 12`；旧 schema 只作为兼容输入。
 
 数据由权威 Markdown、JSON、YAML、OpenAPI、迁移、代码事实和机器证据生成。派生数据不是新的业务事实来源。
 
@@ -20,16 +20,16 @@ authority: 开发执行工作台派生数据契约
 2. 每个结论、节点、关系、里程碑和状态至少携带一个来源。
 3. 找不到结构化来源时返回 `unknown` 或能力降级，不从标题或 prose 猜测。
 4. 浏览器只读；CLI 检查器、浏览器和 Goal 准备器读取同一评估结果。
-5. 规划、实现、验证和批准使用不同字段，不能互相推导。
+5. 规划、实现、验证和批准使用不同字段，不能互相推导；开发确认是进入受控开发的独立治理事实。
 6. 工作台默认输出面向人的摘要，完整机器字段仅供展开或 Goal 清单使用。
 
 ## 3. 顶层对象
 
 ```json
 {
-  "schema_version": 8,
+  "schema_version": 12,
   "generated_at": "2026-08-03T00:00:00Z",
-  "tool_version": "3.14.1",
+  "tool_version": "3.25.0",
   "source_commit": "",
   "authority_digest": "sha256:...",
   "project": {},
@@ -42,7 +42,7 @@ authority: 开发执行工作台派生数据契约
   "requirements": [],
   "findings": [],
   "task_packets": [],
-  "governance": {},
+  "governance": {"approval": {}, "change_sets": [], "spec_drafts": [], "delivery_targets": []},
   "views": {},
   "change_summary": {},
   "goal_readiness": {}
@@ -50,6 +50,14 @@ authority: 开发执行工作台派生数据契约
 ```
 
 `authority_digest` 变化后，旧任务包、旧证据批准、旧变化摘要和旧 Goal 清单不能继续显示为当前有效。`source_commit` 是执行 `index` 时可见的 Git 溯源信息；它和 `generated_at` 仅描述派生运行，不能作为浏览器数据内容新鲜度的判据。检查器忽略这两个字段后严格比较全部其余派生语义：权威正文、结构化注册表、声明的工程落点或证据变化导致派生内容变化时必须重新生成；不影响派生内容的无关提交不应强制产生第二次索引提交。
+
+`governance.approval` 是当前执行版本的只读开发确认摘要。它绑定版本范围权威摘要，并排除注册表中 append-only 的确认历史本身；状态变化只能通过 CLI 的确认命令写入。未来版本规划不进入当前版本摘要。
+
+`governance.change_sets[]` 是当前执行版本的只读规格修订摘要。每项包含 `id`、`kind`、`title`、`status`、`delivery_status`、`affected_ids`、`source_paths`、摘要匹配和 Goal 链接。`status` 的 `approved` 只来自 `decide-change-set`，摘要变化后派生为 `expired`；`delivery_status` 只能由关联 Goal 清单、检查点和完成证据派生，不能由工作台写入。ChangeSet 是治理元数据，不替代功能规格、AC、ADR 或实现状态。
+
+`governance.spec_drafts[]` 是当前执行版本的只读隔离规格草案摘要。每项至少包含 `id`、`kind`、`title`、`status`、`target_path`、`content_digest_match`、`target_baseline_match`、提出/确认/物化人和恢复动作。草案内容位于 `.daoge-docs/spec-drafts/`，不在 `docs`；`proposed`、`approved`、`rejected`、`superseded` 与派生 `expired` 都不属于权威事实。只有 `materialized` 表示内容已由 CLI 写入目标 Markdown；它的目标匹配信号比较物化内容摘要，而非旧目标基线。工作台不得提供编辑、批准或物化入口，也不得把草案作为 Goal、Gate 或规格来源。
+
+`governance.delivery_targets[]` 是功能、`MODULE-*` 模块和当前版本的统一交付状态投影。每项包含 `target_id`、`target_kind`、`version`、`feature_ids`、`state`、依据、关联 Goal、交付记录和来源。可用状态为：`not_designed`、`designing`、`ready_for_development`、`in_development`、`awaiting_delivery_confirmation`、`development_complete`、`needs_reverification`、`exception`、`blocked` 和 `unknown`。`development_complete` 同时要求开发者的 `DELIVERY-*` 确认、目标覆盖完整的 Goal 完成记录和匹配的完成摘要；页面不得自行写入或把文档 `status` 解释为完成。
 
 ## 4. 来源引用
 
@@ -379,7 +387,12 @@ dependencies / milestones / evidence_summary / sources
 - 结构：`ready`、`blocked`、`unknown`。
 - 实现：`not_started`、`implementing`、`implemented`、`unknown`。
 - 证据：`not_run`、`passed`、`failed`、`environment_failed`、`stale`。
-- 批准：`not_requested`、`approved`、`rejected`、`expired`。
+- 开发确认：`not_requested`、`requested`、`approved`、`rejected`、`expired`。
+- ChangeSet 确认：`proposed`、`approved`、`rejected`、`cancelled`、`superseded`，以及摘要变化派生的 `expired`。
+- ChangeSet 交付：`not_started`、`goal_ready`、`executing`、`completed`。
+- 规格草案：`proposed`、`approved`、`rejected`、`materialized`、`superseded`，以及候选内容或目标基线变化派生的 `expired`。
+- 开发完成：`not_designed`、`designing`、`ready_for_development`、`in_development`、`awaiting_delivery_confirmation`、`development_complete`、`needs_reverification`、`exception`、`blocked`、`unknown`。
+- 发布批准：使用发布证据中的人工批准字段，不得与开发确认合并。
 
 工作台只显示摘要，完整门禁、测试、证据和提交/构建绑定在次级面板展示。
 
@@ -427,6 +440,8 @@ dependencies / milestones / evidence_summary / sources
 
 完整 Goal 清单由独立准备命令生成，遵守 `agent-goal-execution-contract.md`。
 
+strict Profile 没有有效 `governance.approval` 时，`goal_readiness.status` 必须为 `blocked`，并保留 `VERSION-APPROVAL` finding；工作台不能把“规格结构就绪”显示成“允许开发”。
+
 `goal_readiness.execution_plan` 与 `views.workbench.execution_plan` 提供并行/串行泳道摘要：泳道包含稳定 `lane_id`、任务 ID、前置泳道、模式、是否可并行和保守判定原因。它只用于人类编排，不改变 Gate、Goal 检查点或授权路径。Goal 的 `authority_scope` 明确目标版本、所选功能、递归依赖版本和共享规则闭包；作用域外的未来版本规划可并行编辑。`document_sync_policy` 明确作用域内权威文件变化后的停止、重索引、重门禁和重建 Goal 动作。
 
 `goal_runtime[]` 是工作台只读的 Goal 运行态摘要。每个 Goal 提供 `status`、`actionable_task_ids`、`execution.tasks[]` 和 `execution.lanes[]`；任务状态由检查点、依赖和验证失败记录派生，不能由浏览器修改。CLI 的 `goal-plan` 返回同一快照；`goal-resume-context --task TASK-*` 只能选择状态为 `ready`、`running` 或 `verification_failed` 且依赖已满足的任务。任务与泳道同时输出 `phase` 和 `reason_code`，分别区分 `not_started`、`dependency_blocked`、`executing`、`verification_failed`、`completed`；Goal 级运行态还区分 `blocked`、`stale`。这些字段是可解释的派生信号，不是可手工写入的状态。
@@ -458,7 +473,7 @@ Goal 执行目录只包含三类可变运行时产物：
 
 ## 13. 兼容与迁移
 
-- `schema_version: 5`、`6` 或 `7` 可进入阅读和基本视图，但显示“旧数据契约”；跨版本组合层、项目功能浏览和语义阅读导航需要迁移到 `schema_version: 8`。
+- `schema_version: 5`、`6`、`7`、`8`、`9`、`10` 或 `11` 可进入阅读和基本视图，但显示“旧数据契约”；隔离规格草案投影需要迁移到 `schema_version: 12`。
 - `#view=governance` 重定向到工作台验证面板。
 - `#view=diff` 重定向到功能演进的变化摘要。
 - 缺少 `views.maps` 时不得用通用计数图冒充项目图谱。

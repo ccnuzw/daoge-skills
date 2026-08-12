@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -107,7 +108,40 @@ class DaogeDocsTests(unittest.TestCase):
             return f'& "{PYTHON}" -m {module}'
         return f'"{PYTHON}" -m {module}'
 
-    def complete_for_release(self) -> None:
+    def approve_current_version(self, supersedes: str = "") -> str:
+        args = [
+            "request-approval",
+            "--root",
+            ".",
+            "--scope",
+            "version_scope",
+            "--title",
+            "V1 进入开发确认",
+            "--requested-by",
+            "测试开发者",
+            "--rationale",
+            "当前版本范围、功能规格、验收和验证边界已经完成审查。",
+        ]
+        if supersedes:
+            args.extend(["--supersedes", supersedes])
+        requested = json.loads(self.run_cli(*args, vendored=True).stdout)
+        self.run_cli(
+            "decide-approval",
+            "--root",
+            ".",
+            "--id",
+            requested["确认 ID"],
+            "--decision",
+            "approved",
+            "--confirmed-by",
+            "测试开发者",
+            "--rationale",
+            "确认当前版本可以进入受控开发。",
+            vendored=True,
+        )
+        return requested["确认 ID"]
+
+    def complete_for_release(self, approve: bool = True) -> None:
         self.run_cli("new-domain", "--root", ".", "--name", "订单", vendored=True)
         self.run_cli(
             "new-feature",
@@ -173,9 +207,11 @@ class DaogeDocsTests(unittest.TestCase):
         text = self.replace_pseudocode_placeholder(text)
         feature.write_text(text, encoding="utf-8")
         self.run_cli("index", "--root", ".", vendored=True)
+        if approve:
+            self.approve_current_version()
 
-    def complete_for_goal(self) -> None:
-        self.complete_for_release()
+    def complete_for_goal(self, approve: bool = True) -> None:
+        self.complete_for_release(approve=False)
         feature = self.root / "docs/03-功能规格/V1/订单/01-创建订单.md"
         text = feature.read_text(encoding="utf-8")
         verification_command = self.python_module_command("unittest tests.orders.test_create_order")
@@ -199,6 +235,8 @@ class DaogeDocsTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
         self.run_cli("index", "--root", ".", vendored=True)
+        if approve:
+            self.approve_current_version()
         self.commit_all("prepare deterministic goal baseline")
 
     def create_passing_evidence(self) -> dict[str, Path]:
@@ -673,6 +711,7 @@ class DaogeDocsTests(unittest.TestCase):
             'has_acceptance:"具备验收"',
             'implemented_by:"由任务实现"',
             "function renderVerificationPanel",
+            "governance-delivery",
             "function renderChangeSummary",
             "当前交付进度",
             "点击步骤返回权威来源",
@@ -714,7 +753,7 @@ class DaogeDocsTests(unittest.TestCase):
         self.assertGreater(browser_html.rfind("\n    init();"), browser_html.find("const MAP_META"))
         browser_js = (self.root / "docs/90-参考资料/产品文档浏览器-文档数据.js").read_text(encoding="utf-8")
         payload = json.loads(browser_js.split("Object.freeze(", 1)[1].rsplit(");", 1)[0])
-        self.assertEqual(8, payload["schema_version"])
+        self.assertEqual(12, payload["schema_version"])
         for key in ["generated_at", "tool_version", "authority_digest", "directories", "entities", "relations", "findings", "task_packets", "snapshots", "views", "change_summary", "goal_readiness", "workbench"]:
             self.assertIn(key, payload)
         self.assertTrue(payload["directories"])
@@ -1025,7 +1064,8 @@ class DaogeDocsTests(unittest.TestCase):
             for finding in payload["findings"]
             if finding.get("object_id") == "DOP-FR-001" and finding.get("rule_id") == "FEATURE-ADR-ACCEPTANCE"
         ]
-        self.assertEqual(adr_finding_ids, payload["workbench"]["top_blockers"])
+        self.assertTrue(set(adr_finding_ids).issubset(set(payload["workbench"]["top_blockers"])))
+        self.assertLessEqual(len(payload["workbench"]["top_blockers"]), 3)
         self.assertEqual("blocked", payload["goal_readiness"]["status"])
         self.assertFalse("`" in payload["task_packets"][0]["verification_commands"][0])
         self.assertTrue(
@@ -1675,6 +1715,84 @@ class DaogeDocsTests(unittest.TestCase):
         )
         self.assertIn("Goal 证据摘要无效", tampered.stderr)
 
+    def test_delivery_close_requires_completed_goal_and_reverification_after_authority_change(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        prepared = json.loads(
+            self.run_cli(
+                "prepare-goal", "--root", ".", "--feature", "DOP-FR-001", "--goal-id", "GOAL-V1-DELIVERY", vendored=True
+            ).stdout
+        )
+        self.assertEqual("ready", prepared["状态"])
+        self.run_cli("goal-resume-context", "--root", ".", "--goal", "GOAL-V1-DELIVERY", vendored=True)
+        service = self.root / "src/orders/service.py"
+        service.write_text("def create_order():\n    return 'delivery-001'\n", encoding="utf-8")
+        self.commit_all("complete delivery goal task")
+        self.run_cli("goal-checkpoint", "--root", ".", "--goal", "GOAL-V1-DELIVERY", "--task", "TASK-DOP-FR-001", vendored=True)
+        self.run_cli("goal-complete", "--root", ".", "--goal", "GOAL-V1-DELIVERY", vendored=True)
+        self.commit_all("record completed delivery goal")
+
+        before = self.browser_payload()
+        feature_delivery = next(item for item in before["governance"]["delivery_targets"] if item["target_id"] == "DOP-FR-001")
+        self.assertEqual("awaiting_delivery_confirmation", feature_delivery["state"])
+        closed = json.loads(
+            self.run_cli(
+                "close-delivery",
+                "--root", ".",
+                "--target", "DOP-FR-001",
+                "--decision", "accepted",
+                "--goal", "GOAL-V1-DELIVERY",
+                "--confirmed-by", "测试开发者",
+                "--rationale", "已复核 Goal 完成记录、提交和开发级机器证据。",
+                vendored=True,
+            ).stdout
+        )
+        self.assertEqual("development_complete", closed["派生状态"])
+        registry = json.loads((self.root / "docs/01-项目概览/项目输入与约束注册表.json").read_text(encoding="utf-8"))
+        self.assertEqual(6, registry["schema_version"])
+        self.assertEqual("DELIVERY-001", closed["交付记录 ID"])
+        payload = self.browser_payload()
+        feature_delivery = next(item for item in payload["governance"]["delivery_targets"] if item["target_id"] == "DOP-FR-001")
+        self.assertEqual("development_complete", feature_delivery["state"])
+        self.assertTrue(json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)["通过"])
+
+        feature = self.root / "docs/03-功能规格/V1/订单/01-创建订单.md"
+        feature.write_text(feature.read_text(encoding="utf-8") + "\n开发完成后的权威规格修订。\n", encoding="utf-8")
+        self.run_cli("index", "--root", ".", vendored=True)
+        payload = self.browser_payload()
+        feature_delivery = next(item for item in payload["governance"]["delivery_targets"] if item["target_id"] == "DOP-FR-001")
+        self.assertEqual("needs_reverification", feature_delivery["state"])
+
+    def test_delivery_module_and_version_closure_require_complete_feature_coverage(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        feature_path = "docs/03-功能规格/V1/订单/01-创建订单.md"
+        module = json.loads(
+            self.run_cli(
+                "new-delivery-module",
+                "--root", ".",
+                "--module-id", "MODULE-ORDER",
+                "--title", "订单闭环",
+                "--feature", "DOP-FR-001",
+                "--source", feature_path,
+                "--owner", "测试开发者",
+                vendored=True,
+            ).stdout
+        )
+        self.assertEqual("MODULE-ORDER", module["模块 ID"])
+        rejected = self.run_cli(
+            "close-delivery",
+            "--root", ".",
+            "--target", "MODULE-ORDER",
+            "--decision", "accepted",
+            "--goal", "GOAL-V1-NOPE",
+            "--confirmed-by", "测试开发者",
+            "--rationale", "不能由不存在的 Goal 证明完成。",
+            expected=2,
+            vendored=True,
+        )
+        self.assertIn("当前可复验的已完成 Goal", rejected.stderr)
+
     def test_p2_checkpoint_rejects_failed_verification_and_out_of_scope_paths(self) -> None:
         self.init()
         self.complete_for_goal()
@@ -1957,7 +2075,7 @@ class DaogeDocsTests(unittest.TestCase):
         )
 
     def test_project_inputs_constraints_assets_and_handoff(self) -> None:
-        self.init(profile="lean")
+        self.init()
         registry = self.root / "docs/01-项目概览/项目输入与约束注册表.json"
         ledger = self.root / "docs/01-项目概览/项目输入与约束总账.md"
         self.assertTrue(registry.exists())
@@ -2101,6 +2219,250 @@ class DaogeDocsTests(unittest.TestCase):
         check = json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)
         self.assertFalse(any("项目输入" in error or "约束" in error or "证据资产" in error for error in check["错误"]))
 
+    def test_version_scope_approval_is_explicit_and_invalidates_on_authority_change(self) -> None:
+        self.init()
+        self.complete_for_goal(approve=False)
+
+        blocked = json.loads(
+            self.run_cli("gate", "--root", ".", "--stage", "version-ready", "--json", expected=1, vendored=True).stdout
+        )
+        self.assertTrue(any("尚未提出开发确认" in error for error in blocked["错误"]), blocked)
+        payload = self.browser_payload()
+        self.assertEqual("not_requested", payload["governance"]["approval"]["status"])
+        self.assertTrue(any(item["rule_id"] == "VERSION-APPROVAL" for item in payload["findings"]), payload["findings"])
+
+        requested = json.loads(
+            self.run_cli(
+                "request-approval",
+                "--root",
+                ".",
+                "--scope",
+                "version_scope",
+                "--title",
+                "V1 进入开发确认",
+                "--requested-by",
+                "测试开发者",
+                "--rationale",
+                "确认 V1 的范围、非目标、需求和验证边界。",
+                vendored=True,
+            ).stdout
+        )
+        approval_id = requested["确认 ID"]
+        pending = json.loads(self.run_cli("handoff", "--root", ".", vendored=True).stdout)
+        self.assertEqual("requested", pending["开发确认"]["status"])
+        self.assertEqual(approval_id, pending["开发确认"]["approval_id"])
+        self.run_cli(
+            "decide-approval",
+            "--root",
+            ".",
+            "--id",
+            approval_id,
+            "--decision",
+            "rejected",
+            "--confirmed-by",
+            "测试开发者",
+            "--rationale",
+            "先补充一个范围边界。",
+            vendored=True,
+        )
+        rejected = json.loads(self.run_cli("handoff", "--root", ".", vendored=True).stdout)
+        self.assertEqual("rejected", rejected["开发确认"]["status"])
+
+        approved_id = self.approve_current_version(supersedes=approval_id)
+        self.assertNotEqual(approval_id, approved_id)
+        self.commit_all("approve version scope")
+        ready = json.loads(self.run_cli("gate", "--root", ".", "--stage", "version-ready", "--json", vendored=True).stdout)
+        self.assertTrue(ready["通过"], ready)
+        approved = json.loads(self.run_cli("handoff", "--root", ".", vendored=True).stdout)
+        self.assertEqual("approved", approved["开发确认"]["status"])
+        self.assertTrue(approved["开发确认"]["authority_digest_match"])
+
+        blueprint = self.root / "docs/02-产品与版本/产品蓝图.md"
+        blueprint.write_text(blueprint.read_text(encoding="utf-8") + "\n版本范围发生了新的权威变化。\n", encoding="utf-8")
+        expired = json.loads(self.run_cli("handoff", "--root", ".", vendored=True).stdout)
+        self.assertEqual("expired", expired["开发确认"]["status"])
+        invalid = json.loads(
+            self.run_cli("gate", "--root", ".", "--stage", "version-ready", "--json", expected=1, vendored=True).stdout
+        )
+        self.assertTrue(any("未绑定当前权威摘要" in error for error in invalid["错误"]), invalid)
+
+    def test_change_set_requires_approval_binds_goal_and_expires_on_authority_change(self) -> None:
+        self.init()
+        self.complete_for_goal()
+        feature_path = "docs/03-功能规格/V1/订单/01-创建订单.md"
+        proposed = json.loads(
+            self.run_cli(
+                "new-change-set",
+                "--root", ".",
+                "--kind", "change",
+                "--title", "补充订单创建错误语义",
+                "--affected", "DOP-FR-001,AC01",
+                "--source", feature_path,
+                "--requested-by", "测试开发者",
+                "--rationale", "已在功能规格中补充可恢复的错误语义，需要重新执行受控开发。",
+                vendored=True,
+            ).stdout
+        )
+        changeset_id = proposed["ChangeSet ID"]
+        self.assertEqual("CHANGESET-001", changeset_id)
+        pending = json.loads(self.run_cli("handoff", "--root", ".", vendored=True).stdout)
+        self.assertEqual("proposed", pending["ChangeSets"][0]["status"])
+        self.assertEqual("not_started", pending["ChangeSets"][0]["delivery_status"])
+
+        blocked = json.loads(
+            self.run_cli(
+                "prepare-goal",
+                "--root", ".",
+                "--feature", "DOP-FR-001",
+                "--change-set", changeset_id,
+                "--goal-id", "GOAL-V1-CHANGESET-BLOCKED",
+                vendored=True,
+            ).stdout
+        )
+        self.assertEqual("blocked", blocked["状态"])
+        blocked_manifest = json.loads((self.root / blocked["文件"]).read_text(encoding="utf-8"))
+        self.assertTrue(any(item["code"] == "CHANGESET_APPROVAL" for item in blocked_manifest["blocking_findings"]))
+
+        self.run_cli(
+            "decide-change-set",
+            "--root", ".",
+            "--id", changeset_id,
+            "--decision", "approved",
+            "--confirmed-by", "测试开发者",
+            "--rationale", "确认本次规格变更范围、非目标与验证边界。",
+            vendored=True,
+        )
+        self.commit_all("approve changeset")
+        ready = json.loads(
+            self.run_cli(
+                "prepare-goal",
+                "--root", ".",
+                "--feature", "DOP-FR-001",
+                "--change-set", changeset_id,
+                "--goal-id", "GOAL-V1-CHANGESET-READY",
+                vendored=True,
+            ).stdout
+        )
+        self.assertEqual("ready", ready["状态"], ready)
+        manifest = json.loads((self.root / ready["文件"]).read_text(encoding="utf-8"))
+        self.assertEqual([changeset_id], manifest["change_set_ids"])
+        payload = self.browser_payload()
+        change_set = payload["governance"]["change_sets"][0]
+        self.assertEqual("approved", change_set["status"])
+        self.assertEqual("goal_ready", change_set["delivery_status"])
+
+        feature = self.root / feature_path
+        feature.write_text(feature.read_text(encoding="utf-8") + "\nChangeSet 后的权威规格修订。\n", encoding="utf-8")
+        self.run_cli("index", "--root", ".", vendored=True)
+        payload = self.browser_payload()
+        self.assertEqual("expired", payload["governance"]["change_sets"][0]["status"])
+        expired = json.loads(
+            self.run_cli(
+                "prepare-goal",
+                "--root", ".",
+                "--feature", "DOP-FR-001",
+                "--change-set", changeset_id,
+                "--goal-id", "GOAL-V1-CHANGESET-EXPIRED",
+                vendored=True,
+            ).stdout
+        )
+        expired_manifest = json.loads((self.root / expired["文件"]).read_text(encoding="utf-8"))
+        self.assertTrue(any(item["code"] == "CHANGESET_APPROVAL" and "expired" in item["reason"] for item in expired_manifest["blocking_findings"]))
+
+    def test_spec_draft_isolated_approved_and_materialized_only_after_baseline_recheck(self) -> None:
+        self.init()
+        before = json.loads(self.run_cli("authority-digest", "--root", ".", vendored=True).stdout)["权威文档摘要"]
+        candidate = self.root / "drafts" / "隔离规格.md"
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text("# 隔离规格\n\n这份候选内容尚未成为项目事实。\n", encoding="utf-8")
+        target_relative = "docs/03-功能规格/V1/隔离规格.md"
+        target = self.root / target_relative
+
+        proposed = json.loads(
+            self.run_cli(
+                "new-spec-draft",
+                "--root", ".",
+                "--kind", "create",
+                "--title", "隔离规格",
+                "--target", target_relative,
+                "--content-file", "drafts/隔离规格.md",
+                "--requested-by", "测试开发者",
+                "--rationale", "先由开发者审阅候选规格。",
+                vendored=True,
+            ).stdout
+        )
+        draft_id = proposed["草案 ID"]
+        self.assertEqual("SPEC-DRAFT-001", draft_id)
+        self.assertFalse(target.exists())
+        self.assertTrue((self.root / ".daoge-docs" / "spec-drafts" / draft_id / "draft.md").is_file())
+        self.assertEqual(before, json.loads(self.run_cli("authority-digest", "--root", ".", vendored=True).stdout)["权威文档摘要"])
+        self.run_cli("materialize-spec-draft", "--root", ".", "--id", draft_id, "--materialized-by", "测试开发者", expected=2, vendored=True)
+
+        self.run_cli(
+            "decide-spec-draft",
+            "--root", ".",
+            "--id", draft_id,
+            "--decision", "approved",
+            "--confirmed-by", "测试开发者",
+            "--rationale", "候选范围和验收边界已审阅。",
+            vendored=True,
+        )
+        self.assertFalse(target.exists())
+        self.assertEqual(before, json.loads(self.run_cli("authority-digest", "--root", ".", vendored=True).stdout)["权威文档摘要"])
+        self.assertTrue(json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)["通过"])
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# 外部写入\n", encoding="utf-8")
+        blocked = self.run_cli(
+            "materialize-spec-draft", "--root", ".", "--id", draft_id, "--materialized-by", "测试开发者", expected=2, vendored=True
+        )
+        self.assertIn("目标文档基线已变化", blocked.stderr)
+        target.unlink()
+
+        replacement = json.loads(
+            self.run_cli(
+                "new-spec-draft",
+                "--root", ".",
+                "--kind", "create",
+                "--title", "隔离规格修订候选",
+                "--target", target_relative,
+                "--content-file", "drafts/隔离规格.md",
+                "--requested-by", "测试开发者",
+                "--rationale", "基线变化后重新提出。",
+                "--supersedes", draft_id,
+                vendored=True,
+            ).stdout
+        )
+        replacement_id = replacement["草案 ID"]
+        self.assertEqual("SPEC-DRAFT-002", replacement_id)
+        self.run_cli(
+            "decide-spec-draft",
+            "--root", ".",
+            "--id", replacement_id,
+            "--decision", "approved",
+            "--confirmed-by", "测试开发者",
+            "--rationale", "重新审阅后批准。",
+            vendored=True,
+        )
+        self.run_cli("materialize-spec-draft", "--root", ".", "--id", replacement_id, "--materialized-by", "测试开发者", vendored=True)
+        self.assertEqual(candidate.read_text(encoding="utf-8"), target.read_text(encoding="utf-8"))
+        after = json.loads(self.run_cli("authority-digest", "--root", ".", vendored=True).stdout)["权威文档摘要"]
+        self.assertNotEqual(before, after)
+        registry = json.loads((self.root / "docs/01-项目概览/项目输入与约束注册表.json").read_text(encoding="utf-8"))
+        completed = next(item for item in registry["spec_drafts"] if item["id"] == replacement_id)
+        self.assertEqual("materialized", completed["status"])
+        self.assertEqual(completed["content_digest"], completed["materialized_target_digest"])
+        payload = self.browser_payload()
+        summary = next(item for item in payload["governance"]["spec_drafts"] if item["id"] == replacement_id)
+        self.assertEqual("materialized", summary["status"])
+        self.assertTrue(summary["content_digest_match"])
+        self.assertTrue(summary["target_baseline_match"])
+        handoff = json.loads(self.run_cli("handoff", "--root", ".", vendored=True).stdout)
+        self.assertEqual("materialized", next(item for item in handoff["规格草案"] if item["id"] == replacement_id)["status"])
+        self.assertTrue(json.loads(self.run_cli("check", "--root", ".", "--json", vendored=True).stdout)["通过"])
+        browser = json.loads(self.run_cli("browser-check", "--root", ".", "--json", vendored=True).stdout)
+        self.assertTrue(browser["通过"], browser)
+
     def test_spec_coverage_authority_boundary_future_plan_and_root_navigation(self) -> None:
         self.init()
         root_readme = self.root / "README.md"
@@ -2211,6 +2573,9 @@ class DaogeDocsTests(unittest.TestCase):
         module = load_cli_module()
         self.assertFalse(module.PLACEHOLDER_RE.search("说明 TODO/WIP/DONE 文字"))
         self.assertTrue(module.PLACEHOLDER_RE.search("TODO: 待处理"))
+        self.assertIn("materialize-spec-draft", module.MUTATING_COMMANDS)
+        self.assertIn("goal-complete", module.MUTATING_COMMANDS)
+        self.assertNotIn("handoff", module.MUTATING_COMMANDS)
         self.init()
         collision_root = self.root / "collision"
         collision = collision_root / "docs/99-历史归档/占用 ID.md"
@@ -2247,6 +2612,40 @@ class DaogeDocsTests(unittest.TestCase):
                 process.stdout.close()
             if process.stderr:
                 process.stderr.close()
+
+    def test_governed_writes_are_atomic_and_utf8(self) -> None:
+        module = load_cli_module()
+        target = self.root / "docs" / "registry.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("旧内容\n", encoding="utf-8")
+
+        module.atomic_write_text(target, '{"状态":"已完成"}\n')
+
+        self.assertEqual('{"状态":"已完成"}\n', target.read_text(encoding="utf-8"))
+        self.assertEqual([], list(target.parent.glob(f".{target.name}.*.tmp")))
+
+    def test_mutating_commands_wait_for_the_project_write_lock(self) -> None:
+        module = load_cli_module()
+        self.init("lean")
+        process: subprocess.Popen[str] | None = None
+        try:
+            with module.project_write_lock(self.root):
+                process = subprocess.Popen(
+                    [PYTHON, str(self.root / ".daoge-docs" / "daoge_docs.py"), "new-domain", "--root", ".", "--name", "并发领域"],
+                    cwd=self.root,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                time.sleep(0.2)
+                self.assertIsNone(process.poll(), "第二个写命令不应在锁持有期间执行")
+            stdout, stderr = process.communicate(timeout=10)
+            self.assertEqual(0, process.returncode, msg=f"stdout:\n{stdout}\nstderr:\n{stderr}")
+        finally:
+            if process and process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+        self.assertTrue((self.root / "docs/03-功能规格/V1/并发领域/README.md").is_file())
 
 
 if __name__ == "__main__":
