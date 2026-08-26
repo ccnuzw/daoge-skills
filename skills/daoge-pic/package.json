@@ -1,39 +1,50 @@
 {
   "name": "daoge-pic",
-  "version": "4.0.0",
-  "description": "DAOGE Pic batch image workflow and local workbench.",
-  "main": "src/cli/daoge.js",
+  "version": "5.0.0",
+  "description": "DAOGE Pic vNext conversation-first local image creation Studio.",
+  "main": "dist/vnext/cli/daoge.js",
   "bin": {
     "daoge": "scripts/daoge.js"
   },
   "files": [
-    "src/",
-    "app/",
-    "scripts/",
-    "references/",
-    "agents/",
-    ".env.example",
+    "dist/",
+    "scripts/daoge.js",
+    "references/provider.env.example",
+    "docs/daoge_pic_vnext_upgrade_spec_zh.md",
     "README.md",
     "SKILL.md",
-    "!references/examples/examples_catalog.html",
-    "!references/template_registry_report.html",
-    "!references/template_registry_report.md",
-    "!references/template_registry_validation_report.json"
+    "LICENSE"
   ],
   "directories": {
+    "doc": "docs",
     "test": "tests"
   },
   "scripts": {
-    "test": "npm run test:unit && npm run test:contracts && npm run test:integration && npm run test:artifacts && npm run test:smoke",
-    "test:unit": "node --test tests/unit/*.test.js",
-    "test:contracts": "node --test tests/contracts/*.test.js",
-    "test:integration": "node --test tests/integration/*.test.js",
-    "test:artifacts": "node --test tests/artifacts/*.test.js",
-    "test:smoke": "bash scripts/run_smoke_tests.sh"
+    "build:vnext": "node -e \"require('node:fs').rmSync('dist/vnext', { recursive: true, force: true })\" && tsc -p tsconfig.vnext.json",
+    "build:workbench": "vite build --config vite.workbench.config.mjs",
+    "build": "npm run build:vnext && npm run build:workbench",
+    "test:vnext": "npm run build && node --test tests/vnext/*.test.js",
+    "test": "npm run test:vnext",
+    "test:package": "npm run build && node scripts/package-smoke.js",
+    "prepack": "npm run build"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
-  "dependencies": {}
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@vitejs/plugin-react": "^5.1.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "types": "./dist/vnext/cli/daoge.d.ts"
 }

@@ -3,7 +3,6 @@
 __pycache__/
 *.py[cod]
 .bytro
-daoge.db
-daoge.db-*
-/snapshots/
-skills/daoge-pic/.docker-workspace/
+skills/daoge-pic/node_modules/
+skills/daoge-pic/dist/
+skills/daoge-pic/*.tgz

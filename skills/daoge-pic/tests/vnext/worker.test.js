@@ -1,0 +1,170 @@
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { initializeStudio } = require('../../dist/vnext/studio/workspace');
+const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
+const { loadProviderConfig, providerStatus } = require('../../dist/vnext/studio/provider-config');
+const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan } = require('../../dist/vnext/domain/studio-commands');
+const { createDryRunPreview, queueGenerationRun, getGenerationRun, listGenerationRunItems } = require('../../dist/vnext/runner/run-commands');
+const { GenerationWorker } = require('../../dist/vnext/runner/worker');
+const { StudioGeneratedAssetPersister } = require('../../dist/vnext/media/generated-assets');
+
+const skillRoot = path.resolve(__dirname, '../..');
+const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
+
+function temporaryWorkspace() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-worker-'));
+}
+
+function setupRun() {
+  const workspaceRoot = temporaryWorkspace();
+  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  fs.writeFileSync(initialized.paths.providerEnvPath, [
+    'IMAGE_PROVIDER=openai-images',
+    'OPENAI_BASE_URL=https://images.example.test/v1',
+    'OPENAI_API_KEY=memory-only-key',
+    'OPENAI_MODEL=gpt-image-2'
+  ].join('\n') + '\n');
+  const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'worker test', idempotencyKey: 'project' });
+  const task = createTaskDraft(db, { projectId: project.value.id, name: 'image', idempotencyKey: 'task' });
+  const round = createRoundDraft(db, { taskId: task.value.id, purpose: 'exploration', idempotencyKey: 'round' });
+  const prepared = prepareRoundForConfirmation(db, { roundId: round.value.id, plan: { operation: 'generate', itemCount: 1, prompt: 'single clean image' }, expectedVersion: round.value.version, idempotencyKey: 'prepare' });
+  const confirmed = confirmRoundPlan(db, { roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
+  const config = loadProviderConfig(initialized.paths);
+  const status = providerStatus(initialized.paths);
+  const dryRun = createDryRunPreview(db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
+  const run = queueGenerationRun(db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
+  return { workspaceRoot, initialized, db, config, run };
+}
+
+function cleanup(fixture) {
+  closeStudioDatabase(fixture.db);
+  fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true });
+}
+
+function fakeProvider(generate, classifyError) {
+  return {
+    id: 'openai-images',
+    validateConfig: () => ({ valid: true, missing: [] }),
+    capabilities: () => ({ textToImage: true, referenceEdit: true, maskEdit: true, cancellation: false, reconciliation: false, idempotency: false, acceptedReferenceMediaTypes: ['image/png'] }),
+    generate,
+    classifyError
+  };
+}
+
+test('worker persists a successful Provider result and completes its run', async () => {
+  const fixture = setupRun();
+  try {
+    const persisted = [];
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-success',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => ({ bytes: png, mediaType: 'image/png', externalRequestId: 'remote-success', safeMeta: { model: 'safe' } }), () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetPersister: { persistGeneratedImage: async ({ result }) => { persisted.push(result); return { assetId: 'asset-output', mediaType: result.mediaType, byteSize: result.bytes.length, contentHash: 'content-hash' }; } },
+      now: () => new Date('2026-01-01T00:00:00.000Z')
+    });
+    const result = await worker.processOnce();
+    assert.deepEqual(result, { claimed: 1, succeeded: 1, retrying: 0, blocked: 0, unknown: 0 });
+    assert.equal(persisted.length, 1);
+    assert.equal(getGenerationRun(fixture.db, fixture.run.value.id).status, 'completed');
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'succeeded');
+    const storedResult = fixture.db.prepare('SELECT result_json FROM run_items WHERE run_id = ?').get(fixture.run.value.id).result_json;
+    assert.equal(storedResult.includes('memory-only-key'), false);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('worker archives generated bytes and records a managed Studio asset', async () => {
+  const fixture = setupRun();
+  try {
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-archive',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => ({ bytes: png, mediaType: 'image/png', externalRequestId: 'remote-archive', safeMeta: { provider: 'openai-images' } }), () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetPersister: new StudioGeneratedAssetPersister({ db: fixture.db, paths: fixture.initialized.paths, studioId: fixture.initialized.manifest.studioId }),
+      now: () => new Date('2026-01-01T00:00:00.000Z')
+    });
+    await worker.processOnce();
+    const asset = fixture.db.prepare('SELECT storage_path, source_json, content_hash FROM assets').get();
+    assert.equal(asset.storage_path.startsWith('daoge-assets/generated/asset_'), true);
+    assert.equal(fs.existsSync(path.join(fixture.workspaceRoot, asset.storage_path)), true);
+    assert.equal(asset.source_json.includes('memory-only-key'), false);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS total FROM asset_relations WHERE target_type = ?').get('run_item').total, 1);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('worker schedules a bounded retry for rate limits without persisting an asset', async () => {
+  const fixture = setupRun();
+  try {
+    let persistenceCalls = 0;
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-retry',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => { const error = new Error('slow down'); error.status = 429; throw error; }, (error) => ({ kind: 'rate_limited', code: '429', message: error.message, retryAfterMs: 1000 })),
+      assetPersister: { persistGeneratedImage: async () => { persistenceCalls += 1; throw new Error('should not persist'); } },
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 5000, jitterRatio: 0 },
+      now: () => new Date('2026-01-01T00:00:00.000Z')
+    });
+    const result = await worker.processOnce();
+    assert.deepEqual(result, { claimed: 1, succeeded: 0, retrying: 1, blocked: 0, unknown: 0 });
+    const item = listGenerationRunItems(fixture.db, fixture.run.value.id)[0];
+    assert.equal(item.status, 'retry_wait');
+    assert.equal(item.retryAt, '2026-01-01T00:00:01.000Z');
+    assert.equal(persistenceCalls, 0);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+
+test('worker blocks local persistence failure without classifying or replaying the Provider request', async () => {
+  const fixture = setupRun();
+  try {
+    let calls = 0;
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-local-persistence',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => { calls += 1; return { bytes: png, mediaType: 'image/png' }; }, () => { throw new Error('Provider classifier must not receive local persistence errors.'); }),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('disk full'); } },
+      now: () => new Date('2026-01-01T00:00:00.000Z')
+    });
+    assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 1, unknown: 0 });
+    assert.equal(calls, 1);
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'blocked');
+  } finally { cleanup(fixture); }
+});
+
+test('worker never automatically replays an unknown Provider outcome', async () => {
+  const fixture = setupRun();
+  try {
+    let calls = 0;
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-unknown',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => { calls += 1; throw new Error('connection dropped after request'); }, () => ({ kind: 'unknown_outcome', code: 'connection_lost', message: 'connection dropped after request' })),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('should not persist'); } },
+      now: () => new Date('2026-01-01T00:00:00.000Z')
+    });
+    const first = await worker.processOnce();
+    const second = await worker.processOnce();
+    assert.deepEqual(first, { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 1 });
+    assert.deepEqual(second, { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0 });
+    assert.equal(calls, 1);
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'outcome_unknown');
+  } finally {
+    cleanup(fixture);
+  }
+});

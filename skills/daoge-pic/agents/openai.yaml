@@ -1,4 +1,0 @@
-interface:
-  display_name: "DAOGE Pic"
-  short_description: "DAOGE Pic 中文批量生图，从需求、提示词到结果回填与本地工作台。"
-  default_prompt: "使用 $daoge-pic：请把我的中文生图需求整理为可审阅任务与提示词批次，先预览并确认，再执行或回填结果。"
