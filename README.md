@@ -6,14 +6,14 @@
 
 | Skill | 解决的问题 | 主要使用者 | 独立说明 |
 | --- | --- | --- | --- |
-| [`daoge-pic`](./skills/daoge-pic/README.md) | 将批量生图需求整理为可审阅任务，执行或回填结果，并在本地工作台完成筛选、问题处理与导出 | 内容团队、设计师、运营人员、图像工作流开发者 | [进入生图 Skill](./skills/daoge-pic/README.md) |
+| [`daoge-pic`](./skills/daoge-pic/README.md) | 会话优先的本地图像创作管理：确认创作计划后，以 SQLite Studio、后台运行与 Workbench 管理生成、资产与交付 | 内容团队、设计师、运营人员、图像工作流开发者 | [进入图像创作 Skill](./skills/daoge-pic/README.md) |
 | [`daoge-docs`](./skills/daoge-docs/README.md) | 建立中文文档驱动开发体系，生成开发执行工作台和受控 Goal 输入 | 产品、研发、架构与使用编程智能体的团队 | [进入文档 Skill](./skills/daoge-docs/README.md) |
 
 ## 选择 Skill
 
 如果你的目标是“规划和交付一个软件项目”，选择 `daoge-docs`：它负责产品蓝图、版本 PRD、功能规格、架构、测试、门禁、证据、开发者工作台与 Goal 输入。
 
-如果你的目标是“批量生成、管理或回填图片资产”，选择 `daoge-pic`：它负责把 brief 整理为 `task_spec.json`、提示词、批次计划、问题队列和本地资产工作台。
+如果你的目标是“规划、生成、管理或交付图片资产”，选择 `daoge-pic`：它负责在会话中澄清 brief、确认创作计划，并用本地 Studio 管理项目、轮次、受控生成运行、资产复核和交付。它不兼容旧任务 JSON、静态工作区或目录状态工作流。
 
 两者可以在同一产品中共同使用，但不互相依赖：
 
@@ -73,24 +73,22 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 
 详细流程、工作台、门禁与 Goal 说明见 [DAOGE Docs README](./skills/daoge-docs/README.md)。
 
-### 批量生图与资产管理
+### 本地图像创作与资产管理
 
-在 `daoge-pic` 目录准备一个任务说明后，先生成可审阅工作区：
+`daoge-pic` 的主入口是会话。先在会话中确认创作目标、数量、画幅、风格、限制、参考素材与交付用途；只有得到用户明确确认后，才可创建受控生成运行。为每个项目指定稳定工作区后，可启动 Studio：
 
 ```bash
-node scripts/daoge.js prepare \
-  --task-spec references/examples/task_spec.minimal.json \
-  --output-dir out
-node scripts/daoge.js open --output-dir out
+node skills/daoge-pic/scripts/daoge.js studio --workspace /absolute/workspace
+node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 ```
 
-`prepare` 不调用图片 provider；先在本地工作台检查任务、提示词和素材，再决定使用本地 provider 执行，或让其他宿主工具生成图片后再回填结果。完整流程见 [DAOGE Pic README](./skills/daoge-pic/README.md)。
+真实生成只从 `<workspace>/daoge-studio/provider.env` 读取 Provider 配置。Workbench 用于查看项目、轮次、运行、资产、复核和交付，不提供第二个聊天入口，也不读取 `task_spec.json`、旧静态工作区或旧目录状态。完整流程见 [DAOGE Pic v5 README](./skills/daoge-pic/README.md)。
 
 ## 系列原则
 
 - **中文优先**：面向用户的对话、手册、工作台与业务文档默认使用中文；保留必要的代码标识、协议和专业术语。
 - **单一入口**：每项能力都有明确的 Skill 名称、脚本入口和用户手册，不要求用户从内部临时文件或历史脚本开始。
-- **可检查的中间态**：文档 Skill 以权威 Markdown、门禁和证据约束流程；生图 Skill 以任务规格、提示词、问题队列和工作台约束流程。
+- **可检查的中间态**：文档 Skill 以权威 Markdown、门禁和证据约束流程；图像创作 Skill 以可确认的创作计划、干跑证据、SQLite Studio 事件和 Workbench 约束运行与交付。
 - **边界清晰**：Skill 不把未知输入伪造成结论，也不把预览、结构检查或局部验证冒充最终交付。
 - **独立演进**：不同 Skill 的依赖、运行时、工作区和版本标签独立管理，新增 Skill 不应破坏现有 Skill 的安装和使用。
 
@@ -112,19 +110,20 @@ node scripts/daoge.js open --output-dir out
     │   ├── assets/
     │   └── references/
     └── daoge-pic/
-        ├── README.md                 # 生图工作流使用手册
+        ├── README.md                 # v5 Studio 使用手册
         ├── SKILL.md                  # Codex 执行规范
-        ├── scripts/daoge.js
-        ├── app/                      # 本地工作台
-        ├── src/                      # CLI、契约与运行逻辑
-        └── references/               # 示例、模板与接入契约
+        ├── scripts/daoge.js          # Studio CLI 入口
+        ├── src/vnext/                # SQLite Studio、运行与媒体逻辑
+        ├── web/                      # React Workbench 源码
+        ├── docs/                     # vNext 规格与验证证据
+        └── references/provider.env.example
 ```
 
 `SKILL.md` 供 Codex 在任务触发时读取，README 面向使用者与维护者。请优先从各 Skill 自己的 README 进入具体流程。
 
 ## 发布与反馈
 
-每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。
+每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前正式版本为 [v5.0.0](https://github.com/ccnuzw/daoge-skills/releases/tag/v5.0.0)，其发布包、校验和和机器验证记录位于该 Release 与 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md)。
 
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
