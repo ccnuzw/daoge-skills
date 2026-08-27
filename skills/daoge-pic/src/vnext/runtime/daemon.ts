@@ -5,7 +5,7 @@ import { StudioGeneratedAssetPersister } from '../media/generated-assets';
 import { StudioAssetResolver } from '../media/asset-resolver';
 import { createImageProvider } from '../providers/http-adapters';
 import { GenerationWorker } from '../runner/worker';
-import { recoverExpiredLeases } from '../runner/run-commands';
+import { reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, closeStudioDatabase, openStudioDatabase } from '../studio/database';
 import { loadProviderConfig, providerSnapshot } from '../studio/provider-config';
@@ -121,6 +121,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
       if (stopping) return;
       try {
         recoverExpiredLeases(workerDb);
+        const reconciledRuns = reconcileTerminalRuns(workerDb);
         const currentConfig = loadProviderConfig(initialized.paths);
         const currentSnapshot = currentConfig ? providerSnapshot(currentConfig) : null;
         if (!configChangeReported && JSON.stringify(currentSnapshot) !== JSON.stringify(workerSnapshot)) {
@@ -129,7 +130,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
         }
         if (worker) {
           const result = await worker.processOnce(2);
-          timer = setTimeout(() => { void tick(); }, result.claimed ? 30 : pollMs);
+          timer = setTimeout(() => { void tick(); }, result.claimed || reconciledRuns ? 30 : pollMs);
           return;
         }
       } catch (error) {

@@ -235,6 +235,33 @@ export function listGenerationRunItems(db: StudioDatabase, runId: string): Gener
   return (db.prepare('SELECT id, run_id, sequence, status, prompt_payload_json, request_id, lease_token, lease_expires_at, attempts, retry_at FROM run_items WHERE run_id = ? ORDER BY sequence').all(runId) as unknown as StoredRunItem[]).map(runItemFromRow);
 }
 
+const ACTIVE_RUN_ITEM_STATUSES: readonly RunItemStatus[] = ['pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested'];
+
+export function settleTerminalGenerationRun(db: StudioDatabase, runId: string, now = new Date()): RunStatus | null {
+  const run = getGenerationRun(db, runId);
+  if (!run || !['running', 'pausing'].includes(run.status)) return null;
+  const items = listGenerationRunItems(db, runId);
+  if (!items.length || items.some((item) => ACTIVE_RUN_ITEM_STATUSES.includes(item.status))) return null;
+  const successful = items.filter((item) => item.status === 'succeeded').length;
+  const nextStatus: RunStatus = run.status === 'pausing' ? 'paused' : successful === items.length ? 'completed' : successful > 0 ? 'partial' : 'failed';
+  const timestamp = now.toISOString();
+  const studio = db.prepare('SELECT p.studio_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ?').get(runId) as { studio_id: string } | undefined;
+  withTransaction(db, () => {
+    assertRunTransition(run.status, nextStatus);
+    if (nextStatus === 'paused') db.prepare('UPDATE generation_runs SET status = ?, version = version + 1, updated_at = ? WHERE id = ?').run(nextStatus, timestamp, runId);
+    else db.prepare('UPDATE generation_runs SET status = ?, completed_at = ?, version = version + 1, updated_at = ? WHERE id = ?').run(nextStatus, timestamp, timestamp, runId);
+    if (studio) appendStudioEvent(db, { studioId: studio.studio_id, entityType: 'generation_run', entityId: runId, eventType: 'run.' + nextStatus, payload: { succeeded: successful, total: items.length, reconciled: true } });
+  });
+  return nextStatus;
+}
+
+export function reconcileTerminalRuns(db: StudioDatabase, now = new Date()): number {
+  const rows = db.prepare("SELECT r.id FROM generation_runs r WHERE r.status IN ('running', 'pausing') AND EXISTS (SELECT 1 FROM run_items i WHERE i.run_id = r.id) AND NOT EXISTS (SELECT 1 FROM run_items i WHERE i.run_id = r.id AND i.status IN ('pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested')) ORDER BY r.created_at").all() as Array<{ id: string }> ;
+  let reconciled = 0;
+  for (const row of rows) if (settleTerminalGenerationRun(db, row.id, now)) reconciled += 1;
+  return reconciled;
+}
+
 export function claimRunItems(db: StudioDatabase, input: { workerId: string; limit: number; leaseMs: number; now?: Date; providerSnapshot?: { providerId: string; model: string; endpoint: string | null } }): ClaimedRunItem[] {
   const workerId = requireValue(input.workerId, 'workerId');
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) throw new InvalidCommandError('Claim limit must be an integer between 1 and 100.');

@@ -6,7 +6,7 @@ import { closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../stud
 import { initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { loadProviderConfig, providerStatus } from '../studio/provider-config';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
-import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, markRunsResumePending, pauseGenerationRun, preflightRound, queueGenerationRun, recoverExpiredLeases, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
+import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, markRunsResumePending, pauseGenerationRun, preflightRound, queueGenerationRun, reconcileTerminalRuns, recoverExpiredLeases, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, softDeleteAsset } from '../domain/assets';
 import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
@@ -112,6 +112,7 @@ export class LocalStudioService {
     recoverAssetMediaOperations(this.db, this.initialized.paths, this.initialized.manifest.studioId);
     reconcileManagedMedia(this.db, this.initialized.paths, this.initialized.manifest.studioId);
     recoverExpiredLeases(this.db);
+    reconcileTerminalRuns(this.db);
     markRunsResumePending(this.db);
     this.pollMs = Math.min(5000, Math.max(100, options.ssePollMs || 400));
     this.workbenchDir = options.workbenchDir ? path.resolve(options.workbenchDir) : path.resolve(__dirname, '../../workbench');
@@ -132,7 +133,10 @@ export class LocalStudioService {
   async close(): Promise<void> {
     const server = this.server;
     this.server = null;
-    if (server) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    if (server) await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+      server.closeAllConnections();
+    });
     closeStudioDatabase(this.db);
   }
 

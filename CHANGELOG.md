@@ -2,6 +2,15 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.0.1 - 2026-08-27
+
+### 修复
+
+- Worker 将同批领取的运行项并发处理，并在同批单项异常后仍收敛已确定终态的运行，避免慢 Provider 响应令后续租约过期并遗留 `running`。
+- daemon 启动和轮询会基于 SQLite 中所有已终态的运行项幂等补记 `completed`、`partial` 或 `failed`，不重放任何 Provider 请求。
+- Studio 服务关闭时主动终止 SSE 长连接，避免 Workbench 保持连接导致 daemon 无法响应终止信号。
+- Workbench 对已完成运行显示正确终态，并隐藏无效的“取消会话”操作。
+
 ## daoge-docs 3.25.0 - 2026-08-12
 
 ### 新增

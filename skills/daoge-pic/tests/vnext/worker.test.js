@@ -20,7 +20,7 @@ function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-worker-'));
 }
 
-function setupRun() {
+function setupRun(itemCount = 1) {
   const workspaceRoot = temporaryWorkspace();
   const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
   fs.writeFileSync(initialized.paths.providerEnvPath, [
@@ -33,7 +33,7 @@ function setupRun() {
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'worker test', idempotencyKey: 'project' });
   const task = createTaskDraft(db, { projectId: project.value.id, name: 'image', idempotencyKey: 'task' });
   const round = createRoundDraft(db, { taskId: task.value.id, purpose: 'exploration', idempotencyKey: 'round' });
-  const prepared = prepareRoundForConfirmation(db, { roundId: round.value.id, plan: { operation: 'generate', itemCount: 1, prompt: 'single clean image' }, expectedVersion: round.value.version, idempotencyKey: 'prepare' });
+  const prepared = prepareRoundForConfirmation(db, { roundId: round.value.id, plan: { operation: 'generate', itemCount, prompt: 'single clean image' }, expectedVersion: round.value.version, idempotencyKey: 'prepare' });
   const confirmed = confirmRoundPlan(db, { roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
   const config = loadProviderConfig(initialized.paths);
   const status = providerStatus(initialized.paths);
@@ -76,6 +76,34 @@ test('worker persists a successful Provider result and completes its run', async
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'succeeded');
     const storedResult = fixture.db.prepare('SELECT result_json FROM run_items WHERE run_id = ?').get(fixture.run.value.id).result_json;
     assert.equal(storedResult.includes('memory-only-key'), false);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('worker starts every claimed batch item before waiting for a slow Provider response', async () => {
+  const fixture = setupRun(2);
+  try {
+    let calls = 0;
+    let releaseFirst;
+    const firstResponse = new Promise((resolve) => { releaseFirst = resolve; });
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-concurrent-batch',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => {
+        calls += 1;
+        if (calls === 1) await firstResponse;
+        return { bytes: png, mediaType: 'image/png', externalRequestId: 'remote-batch-' + calls };
+      }, () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetPersister: { persistGeneratedImage: async ({ result }) => ({ assetId: 'asset-' + result.externalRequestId, mediaType: result.mediaType, byteSize: result.bytes.length, contentHash: 'content-hash-' + result.externalRequestId }) }
+    });
+    const execution = worker.processOnce(2);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 2, 'a later lease must begin before the first Provider response resolves');
+    releaseFirst();
+    assert.deepEqual(await execution, { claimed: 2, succeeded: 2, retrying: 0, blocked: 0, unknown: 0 });
+    assert.equal(getGenerationRun(fixture.db, fixture.run.value.id).status, 'completed');
   } finally {
     cleanup(fixture);
   }

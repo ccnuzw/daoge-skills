@@ -9,7 +9,7 @@ const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/st
 const { loadProviderConfig, providerStatus } = require('../../dist/vnext/studio/provider-config');
 const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
 const { preflightGenerationPlan } = require('../../dist/vnext/runner/preflight');
-const { createDryRunPreview, listDryRunPreviews, preflightRound, queueGenerationRun, retryGenerationRunItems, getGenerationRun, listGenerationRunItems, claimRunItems, transitionRunItem, markRunsResumePending, resolveUnknownRunItems, resumeGenerationRun, recoverExpiredLeases } = require('../../dist/vnext/runner/run-commands');
+const { createDryRunPreview, listDryRunPreviews, preflightRound, queueGenerationRun, retryGenerationRunItems, getGenerationRun, listGenerationRunItems, claimRunItems, transitionRunItem, markRunsResumePending, resolveUnknownRunItems, resumeGenerationRun, reconcileTerminalRuns, recoverExpiredLeases } = require('../../dist/vnext/runner/run-commands');
 
 const skillRoot = path.resolve(__dirname, '../..');
 const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
@@ -134,6 +134,30 @@ test('retries only explicit safe failed items and never requeues unknown outcome
     assert.throws(() => retryGenerationRunItems(fixture.db, { runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'retry-unknown' }), InvalidCommandError);
     resolveUnknownRunItems(fixture.db, { runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'resolve-for-retry-guard' });
     assert.throws(() => retryGenerationRunItems(fixture.db, { runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'retry-resolved-unknown' }), InvalidCommandError);
+  } finally {
+    closeStudioDatabase(fixture.db);
+    cleanup(fixture.workspaceRoot);
+  }
+});
+
+test('reconciles a historical running run when every item already reached a terminal state', () => {
+  const fixture = configuredStudio();
+  try {
+    const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 1, prompt: 'terminal recovery' }, 'terminal-recovery');
+    const config = loadProviderConfig(fixture.initialized.paths);
+    const status = providerStatus(fixture.initialized.paths);
+    const dryRun = createDryRunPreview(fixture.db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'terminal-recovery-dry-run' });
+    const queued = queueGenerationRun(fixture.db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'terminal-recovery-run' });
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    const [item] = claimRunItems(fixture.db, { workerId: 'worker-terminal', limit: 1, leaseMs: 30000, now });
+    transitionRunItem(fixture.db, { itemId: item.id, leaseToken: item.leaseToken, status: 'requesting', now });
+    transitionRunItem(fixture.db, { itemId: item.id, leaseToken: item.leaseToken, status: 'receiving', now });
+    transitionRunItem(fixture.db, { itemId: item.id, leaseToken: item.leaseToken, status: 'persisting', now });
+    transitionRunItem(fixture.db, { itemId: item.id, leaseToken: item.leaseToken, status: 'succeeded', result: { assetId: 'asset-terminal' }, now });
+    assert.equal(getGenerationRun(fixture.db, queued.value.id).status, 'running');
+    assert.equal(reconcileTerminalRuns(fixture.db, now), 1);
+    assert.equal(getGenerationRun(fixture.db, queued.value.id).status, 'completed');
+    assert.equal(reconcileTerminalRuns(fixture.db, now), 0);
   } finally {
     closeStudioDatabase(fixture.db);
     cleanup(fixture.workspaceRoot);

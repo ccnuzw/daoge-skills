@@ -1,9 +1,9 @@
 import { ImageProvider, ImageRequest, ImageResult, ProviderError } from '../providers/contracts';
 import { ManagedAssetResolver } from '../media/asset-resolver';
 import { InvalidCommandError } from '../domain/studio-commands';
-import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
+import { StudioDatabase } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
-import { ClaimedRunItem, claimRunItems, getGenerationRun, listGenerationRunItems, renewRunItemLease, transitionRunItem } from './run-commands';
+import { ClaimedRunItem, claimRunItems, getGenerationRun, renewRunItemLease, settleTerminalGenerationRun, transitionRunItem } from './run-commands';
 import { retryDecision, RetryPolicy, DEFAULT_RETRY_POLICY } from './retry-policy';
 
 export interface PersistedImageResult {
@@ -82,13 +82,13 @@ export class GenerationWorker {
     const snapshot = providerSnapshot(this.providerConfig);
     const claimedItems = claimRunItems(this.db, { workerId: this.workerId, limit, leaseMs: this.leaseMs, now: this.clock(), providerSnapshot: { providerId: snapshot.providerId, model: snapshot.model, endpoint: snapshot.endpoint } });
     const result: WorkerProcessResult = { claimed: claimedItems.length, succeeded: 0, retrying: 0, blocked: 0, unknown: 0 };
-    const affectedRuns = new Set<string>();
-    for (const item of claimedItems) {
-      const outcome = await this.processClaimedItem(item);
-      result[outcome] += 1;
-      affectedRuns.add(item.runId);
-    }
+    const affectedRuns = new Set(claimedItems.map((item) => item.runId));
+    // A batch lease is a concurrency budget. Processing it serially can let later items expire while an earlier Provider call is still pending.
+    const outcomes = await Promise.allSettled(claimedItems.map((item) => this.processClaimedItem(item)));
+    for (const outcome of outcomes) if (outcome.status === 'fulfilled') result[outcome.value] += 1;
     for (const runId of affectedRuns) this.settleRun(runId);
+    const failure = outcomes.find((outcome) => outcome.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
     return result;
   }
 
@@ -150,27 +150,6 @@ export class GenerationWorker {
   }
 
   settleRun(runId: string): void {
-    const run = getGenerationRun(this.db, runId);
-    if (!run || run.status === 'cancelled' || run.status === 'completed' || run.status === 'failed') return;
-    const items = listGenerationRunItems(this.db, runId);
-    if (!items.length) return;
-    const active = items.some((item) => ['pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested'].includes(item.status));
-    if (active) return;
-    const timestamp = this.clock().toISOString();
-    const studio = this.db.prepare('SELECT p.studio_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ?').get(runId) as { studio_id: string } | undefined;
-    if (run.status === 'pausing') {
-      withTransaction(this.db, () => {
-        this.db.prepare('UPDATE generation_runs SET status = ?, version = version + 1, updated_at = ? WHERE id = ?').run('paused', timestamp, runId);
-        if (studio) appendStudioEvent(this.db, { studioId: studio.studio_id, entityType: 'generation_run', entityId: runId, eventType: 'run.paused', payload: { settledByWorker: true } });
-      });
-      return;
-    }
-    const successful = items.filter((item) => item.status === 'succeeded').length;
-    const nextStatus = successful === items.length ? 'completed' : successful > 0 ? 'partial' : 'failed';
-    if (nextStatus === run.status) return;
-    withTransaction(this.db, () => {
-      this.db.prepare('UPDATE generation_runs SET status = ?, completed_at = ?, version = version + 1, updated_at = ? WHERE id = ?').run(nextStatus, timestamp, timestamp, runId);
-      if (studio) appendStudioEvent(this.db, { studioId: studio.studio_id, entityType: 'generation_run', entityId: runId, eventType: 'run.' + nextStatus, payload: { succeeded: successful, total: items.length } });
-    });
+    settleTerminalGenerationRun(this.db, runId, this.clock());
   }
 }

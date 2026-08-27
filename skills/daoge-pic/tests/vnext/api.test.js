@@ -156,6 +156,30 @@ test('asset write endpoints replay idempotency receipts without duplicate events
 });
 
 
+test('local Studio service closes even while a Workbench SSE stream remains open', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  let controller;
+  try {
+    initializeStudio({ workspaceRoot, providerTemplatePath });
+    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath, ssePollMs: 20 });
+    controller = new AbortController();
+    const sse = await fetch(started.url + '/api/events?after=0', { headers: { accept: 'text/event-stream' }, signal: controller.signal });
+    assert.equal(sse.status, 200);
+    let timeout;
+    await Promise.race([
+      started.service.close(),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Studio service close was blocked by SSE.')), 500); })
+    ]);
+    clearTimeout(timeout);
+    started = null;
+  } finally {
+    if (controller) controller.abort();
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('SSE replays Studio events after a cursor without a page refresh', async () => {
   const workspaceRoot = temporaryWorkspace();
   let started;
