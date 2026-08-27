@@ -123,7 +123,7 @@ node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 
 ## 发布与反馈
 
-每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前正式版本为 [v5.0.1](https://github.com/ccnuzw/daoge-skills/releases/tag/v5.0.1)，其发布包、校验和和机器验证记录位于该 Release 与 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md)。
+每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前正式版本为 [v5.0.1](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.0.1)，其发布包、校验和和机器验证记录位于该 Release 与 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md)。
 
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
