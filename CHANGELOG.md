@@ -2,6 +2,14 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.0.2 - 2026-08-27
+
+### 修复
+
+- 高级详情按实际持久化的干跑记录读取 `planVersion`、`planSnapshot` 与脱敏 Provider 元数据，不再访问不存在的 `preflight` 字段而导致 Workbench 黑屏。
+- 高级详情对缺失或历史不完整的记录使用安全降级，并添加应用级错误边界，避免单个详情异常使整页不可用。
+- 高级详情不展示 Provider endpoint。
+
 ## daoge-pic 5.0.1 - 2026-08-27
 
 ### 修复

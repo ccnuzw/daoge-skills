@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Archive, Bookmark, Check, CircleAlert, CloudOff, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, MessageSquareText, PackageCheck, PanelLeftClose, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
 import './styles.css';
 
 const EMPTY = [];
@@ -55,6 +56,17 @@ function AssetCard({ asset, view, selected, onToggleSelect, onReview, onTrash, o
     </div>
     {annotating && <div className="annotation-editor"><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="记录本轮反馈" /><button type="button" className="outline-button" disabled={!note.trim()} onClick={saveNote}>保存批注</button></div>}
   </article>;
+}
+
+class WorkbenchErrorBoundary extends Component {
+  state = { failed: false };
+
+  static getDerivedStateFromError() { return { failed: true }; }
+
+  render() {
+    if (this.state.failed) return <main className="fatal-error"><CircleAlert size={24} /><div><h1>无法显示工作台</h1><p>详情内容未能安全显示。刷新后可继续使用 Studio。</p></div><button type="button" className="command-button" onClick={() => window.location.reload()}>刷新</button></main>;
+    return this.props.children;
+  }
 }
 
 function App() {
@@ -295,7 +307,7 @@ function App() {
     if (!selectedRound) return;
     try {
       const [plans, dryRuns] = await Promise.all([api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/plan-versions'), api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/dry-runs')]);
-      setAdvancedDetails({ plans: plans.planVersions || [], dryRuns: dryRuns.dryRuns || [] });
+      setAdvancedDetails(normalizeAdvancedDetails({ plans: plans.planVersions, dryRuns: dryRuns.dryRuns }));
     } catch (nextError) { setError(nextError.message || '无法读取高级详情。'); }
   };
 
@@ -335,7 +347,7 @@ function App() {
 
       {view === 'runs' ? <section className="run-stage">
         <div className="run-focus"><div><p className="eyebrow">{selectedRound ? ({ exploration: '探索轮次', refinement: '优化轮次', variation: '变体轮次', edit: '编辑轮次', fill: '补图轮次' })[selectedRound.purpose] : '等待会话确认轮次'}</p><h2>{activeRun ? '当前生成会话' : '尚无生成会话'}</h2></div>{activeRun && <StatusPill value={activeRun.status} />}</div>
-        {activeRun ? <><div className="run-metrics"><div><span>计划产出</span><b>{activeRun.planSnapshot.itemCount}</b></div><div><span>执行状态</span><b>{runExecutionLabel(activeRun.status)}</b></div><div><span>当前进度</span><b>{statusLabel(activeRun.status)}</b></div></div><div className="run-controls">{['queued', 'running'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void controlRun('pause')}><Pause size={16} />暂停</button>}{['paused'].includes(activeRun.status) && <button type="button" className="command-button" onClick={() => void controlRun('resume')}><Play size={16} />继续</button>}{['partial', 'failed'].includes(activeRun.status) && <button type="button" className="command-button" onClick={() => void controlRun('retry')}><RefreshCw size={16} />重试</button>}{canCancelActiveRun && <button type="button" className="outline-button danger-text" onClick={() => void controlRun('cancel')}><X size={16} />取消会话</button>}</div><section className="run-item-list"><div className="run-item-list-head"><span>运行项</span><small>{runItems.length} 项</small></div>{runItems.map((item) => <div className="run-item-row" key={item.id}><span>第 {item.sequence} 项</span><StatusPill value={item.status} />{['failed', 'blocked', 'retry_wait'].includes(item.status) ? <IconButton label={'重试第 ' + item.sequence + ' 项'} onClick={() => void retryRunItem(item.id)}><RefreshCw size={15} /></IconButton> : item.status === 'outcome_unknown' ? <small className="run-item-warning">需在会话中核实结果</small> : <span />}</div>)}</section><div className="run-advanced-toggle"><IconButton label="查看高级计划与干跑详情" onClick={() => void openAdvancedDetails()}><Eye size={16} /></IconButton><span>高级详情</span></div>{advancedDetails && <section className="advanced-details"><div className="advanced-details-head"><div><p className="eyebrow">仅在需要复核时显示</p><h3>计划与干跑证据</h3></div><IconButton label="关闭高级详情" onClick={() => setAdvancedDetails(null)}><X size={16} /></IconButton></div><div className="advanced-evidence"><div><b>计划版本</b>{advancedDetails.plans.map((plan) => <details key={plan.version}><summary>第 {plan.version} 版 · {statusLabel(plan.state)}</summary><pre>{JSON.stringify(plan.plan, null, 2)}</pre></details>)}</div><div><b>干跑记录</b>{advancedDetails.dryRuns.map((preview) => <details key={preview.id}><summary>可执行性：{preview.preflight.valid ? '通过' : '需要修正'}</summary><pre>{JSON.stringify(preview.preflight, null, 2)}</pre></details>)}</div></div></section>}</> : <div className="empty-stage"><Sparkles size={28} strokeWidth={1.2} /><p>在会话中确认创作计划后，生成会话会在这里出现。</p></div>}
+        {activeRun ? <><div className="run-metrics"><div><span>计划产出</span><b>{activeRun.planSnapshot.itemCount}</b></div><div><span>执行状态</span><b>{runExecutionLabel(activeRun.status)}</b></div><div><span>当前进度</span><b>{statusLabel(activeRun.status)}</b></div></div><div className="run-controls">{['queued', 'running'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void controlRun('pause')}><Pause size={16} />暂停</button>}{['paused'].includes(activeRun.status) && <button type="button" className="command-button" onClick={() => void controlRun('resume')}><Play size={16} />继续</button>}{['partial', 'failed'].includes(activeRun.status) && <button type="button" className="command-button" onClick={() => void controlRun('retry')}><RefreshCw size={16} />重试</button>}{canCancelActiveRun && <button type="button" className="outline-button danger-text" onClick={() => void controlRun('cancel')}><X size={16} />取消会话</button>}</div><section className="run-item-list"><div className="run-item-list-head"><span>运行项</span><small>{runItems.length} 项</small></div>{runItems.map((item) => <div className="run-item-row" key={item.id}><span>第 {item.sequence} 项</span><StatusPill value={item.status} />{['failed', 'blocked', 'retry_wait'].includes(item.status) ? <IconButton label={'重试第 ' + item.sequence + ' 项'} onClick={() => void retryRunItem(item.id)}><RefreshCw size={15} /></IconButton> : item.status === 'outcome_unknown' ? <small className="run-item-warning">需在会话中核实结果</small> : <span />}</div>)}</section><div className="run-advanced-toggle"><IconButton label="查看高级计划与干跑详情" onClick={() => void openAdvancedDetails()}><Eye size={16} /></IconButton><span>高级详情</span></div>{advancedDetails && <section className="advanced-details"><div className="advanced-details-head"><div><p className="eyebrow">仅在需要复核时显示</p><h3>计划与干跑证据</h3></div><IconButton label="关闭高级详情" onClick={() => setAdvancedDetails(null)}><X size={16} /></IconButton></div><div className="advanced-evidence"><div><b>计划版本</b>{advancedDetails.plans.map((plan) => <details key={plan.id || plan.planVersion}><summary>第 {plan.planVersion || '未知'} 版 · {statusLabel(plan.state)}</summary><pre>{JSON.stringify(plan.plan, null, 2)}</pre></details>)}</div><div><b>干跑记录</b>{advancedDetails.dryRuns.map((preview) => <details key={preview.id}><summary>第 {dryRunEvidence(preview).planVersion || '未知'} 版 · {dryRunEvidence(preview).status}{dryRunEvidence(preview).details.itemCount === null ? '' : ' · ' + dryRunEvidence(preview).details.itemCount + ' 项'}</summary><pre>{JSON.stringify(dryRunEvidence(preview).details, null, 2)}</pre></details>)}</div></div></section>}</> : <div className="empty-stage"><Sparkles size={28} strokeWidth={1.2} /><p>在会话中确认创作计划后，生成会话会在这里出现。</p></div>}
       </section> : view === 'library' ? <section className="library-stage">
         <div className="library-column"><div className="library-head"><Tag size={17} /><div><p className="eyebrow">官方任务类型</p><h2>创作语义</h2></div></div><div className="type-grid">{taskTypes.map((type) => <article className="type-item" key={type.id}><b>{type.name}</b><p>{type.definition.summary || '由会话补全创作字段。'}</p><span>{type.source === 'official' ? '官方' : '自定义'}</span></article>)}</div></div>
         <div className="library-column kits-column"><div className="library-head"><Library size={17} /><div><p className="eyebrow">可复用上下文</p><h2>风格与品牌</h2></div></div><div className="kit-list">{styleKits.map((kit) => <article className="kit-item" key={kit.id}><span>风格包</span><b>{kit.name}</b><small>{kit.assetIds.length} 张参考资产</small></article>)}{brandKits.map((kit) => <article className="kit-item" key={kit.id}><span>品牌包</span><b>{kit.name}</b><small>{kit.assetIds.length} 张参考资产</small></article>)}{!styleKits.length && !brandKits.length && <div className="kit-empty">在会话中建立风格包或品牌包后，它们会显示在这里。</div>}</div></div>
@@ -352,4 +364,4 @@ function App() {
   </main>;
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<WorkbenchErrorBoundary><App /></WorkbenchErrorBoundary>);

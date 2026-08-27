@@ -3,7 +3,7 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; background: #171b1a; }
 button { font: inherit; }
 button:focus-visible { outline: 2px solid #d4dd74; outline-offset: 2px; }
-.loading-shell { min-height: 100vh; display: grid; place-content: center; gap: 12px; color: #b9c1b6; letter-spacing: .08em; font-size: 12px; }
+.loading-shell { min-height: 100vh; display: grid; place-content: center; gap: 12px; color: #b9c1b6; letter-spacing: .08em; font-size: 12px; }.fatal-error { min-height: 100vh; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-content: center; justify-content: center; gap: 14px; padding: 24px; color: #edf0e8; }.fatal-error h1 { margin: 0 0 5px; font-size: 18px; }.fatal-error p { margin: 0; color: #b9c1b6; font-size: 13px; line-height: 1.5; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .studio-shell { min-height: 100vh; display: grid; grid-template-columns: 252px minmax(0, 1fr); background: #171b1a; }
