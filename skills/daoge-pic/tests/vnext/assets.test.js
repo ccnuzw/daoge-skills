@@ -6,8 +6,8 @@ const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
-const { createProject } = require('../../dist/vnext/domain/studio-commands');
-const { importStudioAsset, listStudioAssets, assetFilePath, recoverAssetMediaOperations, softDeleteAsset, restoreAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
+const { createProject, createRoundDraft, createTaskDraft } = require('../../dist/vnext/domain/studio-commands');
+const { importStudioAsset, listScopedStudioAssets, listStudioAssets, assetFilePath, recoverAssetMediaOperations, softDeleteAsset, restoreAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
 const { archiveStagedImage, plannedArchivePath, stageImage } = require('../../dist/vnext/media/archive');
 
 const skillRoot = path.resolve(__dirname, '../..');
@@ -90,6 +90,37 @@ test('soft deletes and restores assets without encoding review state in folders'
     assert.equal(fs.existsSync(assetFilePath(value.initialized.paths, restored)), true);
     assert.equal(fs.existsSync(path.join(value.workspaceRoot, 'daoge-assets', 'selected')), false);
     assert.equal(fs.existsSync(path.join(value.workspaceRoot, 'daoge-assets', 'review')), false);
+  } finally {
+    cleanup(value);
+  }
+});
+
+test('lists assets by round, task, project, and Studio without cross-project leakage or duplicates', () => {
+  const value = fixture();
+  try {
+    const projectId = value.project.value.id;
+    const task = createTaskDraft(value.db, { projectId, name: '范围任务', intent: {}, idempotencyKey: 'scope-task' }).value;
+    const round = createRoundDraft(value.db, { taskId: task.id, purpose: 'exploration', plan: {}, idempotencyKey: 'scope-round' }).value;
+    const otherProject = createProject(value.db, { studioId: value.initialized.manifest.studioId, name: '另一项目', idempotencyKey: 'scope-project-b' }).value;
+    const createdAt = new Date().toISOString();
+    const addAsset = (id, relationType, targetType, targetId) => {
+      value.db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, value.initialized.manifest.studioId, 'generated', 'image/png', 'daoge-assets/generated/' + id + '.png', 'hash-' + id, 1, '{}', createdAt, createdAt);
+      value.db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('relation-' + id, id, relationType, targetType, targetId, '{}', createdAt);
+    };
+    value.db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('run_scope', round.id, 'completed', '{}', '{}', createdAt, createdAt);
+    value.db.prepare('INSERT INTO run_items (id, run_id, sequence, status, prompt_payload_json, request_id, attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run('item_scope', 'run_scope', 1, 'succeeded', '{}', 'request_scope', 1, createdAt, createdAt);
+    addAsset('asset_project', 'attached_to', 'project', projectId);
+    addAsset('asset_task', 'attached_to', 'creative_task', task.id);
+    addAsset('asset_round', 'attached_to', 'creative_round', round.id);
+    addAsset('asset_output', 'output_of', 'run_item', 'item_scope');
+    value.db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('relation-output-duplicate', 'asset_output', 'attached_to', 'run_item', 'item_scope', '{}', createdAt);
+    addAsset('asset_other_project', 'attached_to', 'project', otherProject.id);
+    const ids = (scope) => listScopedStudioAssets(value.db, value.initialized.manifest.studioId, scope).map((asset) => asset.id).sort();
+    assert.deepEqual(ids({ scope: 'round', projectId, taskId: task.id, roundId: round.id }), ['asset_output', 'asset_round']);
+    assert.deepEqual(ids({ scope: 'task', projectId, taskId: task.id }), ['asset_output', 'asset_round', 'asset_task']);
+    assert.deepEqual(ids({ scope: 'project', projectId }), ['asset_output', 'asset_project', 'asset_round', 'asset_task']);
+    assert.deepEqual(ids({ scope: 'studio' }), ['asset_other_project', 'asset_output', 'asset_project', 'asset_round', 'asset_task']);
+    assert.throws(() => listScopedStudioAssets(value.db, value.initialized.manifest.studioId, { scope: 'round', projectId: otherProject.id, taskId: task.id, roundId: round.id }), /not part/);
   } finally {
     cleanup(value);
   }

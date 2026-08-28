@@ -5,9 +5,9 @@ import { URL } from 'node:url';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
 import { initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { loadProviderConfig, providerStatus } from '../studio/provider-config';
-import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
+import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, markRunsResumePending, pauseGenerationRun, preflightRound, queueGenerationRun, reconcileTerminalRuns, recoverExpiredLeases, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
-import { assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, softDeleteAsset } from '../domain/assets';
+import { AssetScope, assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, softDeleteAsset } from '../domain/assets';
 import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { createDelivery, exportDelivery, listDeliveries } from '../domain/deliveries';
@@ -94,6 +94,12 @@ function numberValue(value: unknown): number {
   return Number(value);
 }
 
+function assetScope(value: string | null): AssetScope | null {
+  if (!value) return null;
+  if (value === 'round' || value === 'task' || value === 'project' || value === 'studio') return value;
+  throw new InvalidCommandError('Unknown asset scope.');
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -153,7 +159,14 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db) });
       if (request.method === 'GET' && parsed.pathname === '/api/style-kits') return success(response, { styleKits: listStyleKits(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/brand-kits') return success(response, { brandKits: listBrandKits(this.db, this.initialized.manifest.studioId) });
-      if (request.method === 'GET' && parsed.pathname === '/api/assets') return success(response, { assets: listStudioAssets(this.db, this.initialized.manifest.studioId, { includeDeleted: parsed.searchParams.get('deleted') === 'true', targetType: parsed.searchParams.get('targetType') || undefined, targetId: parsed.searchParams.get('targetId') || undefined }) });
+      const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(parsed.pathname);
+      if (request.method === 'GET' && sessionMatch) return success(response, { session: getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionMatch[1] }) });
+      if (request.method === 'GET' && parsed.pathname === '/api/assets') {
+        const scope = assetScope(parsed.searchParams.get('scope'));
+        const input = { includeDeleted: parsed.searchParams.get('deleted') === 'true', projectId: parsed.searchParams.get('projectId') || undefined, taskId: parsed.searchParams.get('taskId') || undefined, roundId: parsed.searchParams.get('roundId') || undefined, limit: parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : undefined };
+        if (scope) return success(response, { assets: listScopedStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, scope }), scope });
+        return success(response, { assets: listStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, targetType: parsed.searchParams.get('targetType') || undefined, targetId: parsed.searchParams.get('targetId') || undefined }) });
+      }
       const assetImpactMatch = /^\/api\/assets\/([^/]+)\/impact$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetImpactMatch) return success(response, { impact: getAssetImpact(this.db, this.initialized.manifest.studioId, assetImpactMatch[1]) });
       const deliveryMatch = /^\/api\/projects\/([^/]+)\/deliveries$/.exec(parsed.pathname);

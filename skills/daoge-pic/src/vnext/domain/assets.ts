@@ -8,6 +8,7 @@ import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
 
 export type AssetKind = 'import' | 'generated' | 'export';
 export type ReviewDecisionValue = 'keep' | 'review' | 'reject' | 'derive';
+export type AssetScope = 'round' | 'task' | 'project' | 'studio';
 
 export interface StudioAsset {
   id: string;
@@ -83,7 +84,7 @@ function relativePath(paths: StudioPaths, absolutePath: string): string {
 }
 
 function assertRelationTarget(targetType: string, targetId: string): void {
-  if (!/^(project|creative_task|creative_round|run_item|style_kit|brand_kit)$/.test(targetType)) throw new InvalidCommandError('Unsupported asset relation target.');
+  if (!/^(project|creative_task|creative_round|run_item|style_kit|brand_kit|delivery)$/.test(targetType)) throw new InvalidCommandError('Unsupported asset relation target.');
   if (!String(targetId || '').trim()) throw new InvalidCommandError('Asset relation target id is required.');
 }
 
@@ -181,6 +182,48 @@ export function listStudioAssets(db: StudioDatabase, studioId: string, input: { 
     return (db.prepare('SELECT a.id, a.studio_id, a.kind, a.media_type, a.storage_path, a.content_hash, a.byte_size, a.source_json, a.deleted_at FROM assets a JOIN asset_relations r ON r.asset_id = a.id WHERE a.studio_id = ? AND r.target_type = ? AND r.target_id = ? AND (? = 1 OR a.deleted_at IS NULL) ORDER BY a.created_at DESC LIMIT ?').all(studioId, input.targetType, input.targetId, input.includeDeleted ? 1 : 0, limit) as unknown as StoredAsset[]).map(assetFromRow);
   }
   return (db.prepare('SELECT id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, deleted_at FROM assets WHERE studio_id = ? AND (? = 1 OR deleted_at IS NULL) ORDER BY created_at DESC LIMIT ?').all(studioId, input.includeDeleted ? 1 : 0, limit) as unknown as StoredAsset[]).map(assetFromRow);
+}
+
+function scopedAssetCondition(scope: AssetScope, input: { projectId?: string; taskId?: string; roundId?: string }): { sql: string; values: string[] } {
+  if (scope === 'studio') return { sql: '1 = 1', values: [] };
+  if (scope === 'round') {
+    const roundId = String(input.roundId || '').trim();
+    if (!roundId) throw new InvalidCommandError('Round asset scope requires roundId.');
+    return { sql: "EXISTS (SELECT 1 FROM asset_relations relation WHERE relation.asset_id = a.id AND ((relation.target_type = 'creative_round' AND relation.target_id = ?) OR (relation.target_type = 'run_item' AND relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id WHERE item.id = relation.target_id AND run.round_id = ?))))", values: [roundId, roundId] };
+  }
+  if (scope === 'task') {
+    const taskId = String(input.taskId || '').trim();
+    if (!taskId) throw new InvalidCommandError('Task asset scope requires taskId.');
+    return { sql: "EXISTS (SELECT 1 FROM asset_relations relation WHERE relation.asset_id = a.id AND ((relation.target_type = 'creative_task' AND relation.target_id = ?) OR (relation.target_type = 'creative_round' AND EXISTS (SELECT 1 FROM creative_rounds round WHERE round.id = relation.target_id AND round.task_id = ?)) OR (relation.target_type = 'run_item' AND relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id WHERE item.id = relation.target_id AND round.task_id = ?))))", values: [taskId, taskId, taskId] };
+  }
+  const projectId = String(input.projectId || '').trim();
+  if (!projectId) throw new InvalidCommandError('Project asset scope requires projectId.');
+  return { sql: "EXISTS (SELECT 1 FROM asset_relations relation WHERE relation.asset_id = a.id AND ((relation.target_type = 'project' AND relation.target_id = ?) OR (relation.target_type = 'creative_task' AND EXISTS (SELECT 1 FROM creative_tasks task WHERE task.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'creative_round' AND EXISTS (SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id WHERE round.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'run_item' AND relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.id = relation.target_id AND task.project_id = ?))))", values: [projectId, projectId, projectId, projectId] };
+}
+
+function assertScopedAssetHierarchy(db: StudioDatabase, studioId: string, input: { scope: AssetScope; projectId?: string; taskId?: string; roundId?: string }): void {
+  if (input.scope === 'studio') return;
+  if (input.scope === 'project') {
+    const project = db.prepare('SELECT id FROM projects WHERE id = ? AND studio_id = ?').get(String(input.projectId || ''), studioId) as { id: string } | undefined;
+    if (!project) throw new InvalidCommandError('Project asset scope is not part of this Studio.');
+    return;
+  }
+  if (input.scope === 'task') {
+    const task = db.prepare('SELECT task.id, task.project_id FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?').get(String(input.taskId || ''), studioId) as { id: string; project_id: string } | undefined;
+    if (!task || (input.projectId && input.projectId !== task.project_id)) throw new InvalidCommandError('Task asset scope is not part of this Studio project.');
+    return;
+  }
+  const round = db.prepare('SELECT round.id, round.task_id, task.project_id FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?').get(String(input.roundId || ''), studioId) as { id: string; task_id: string; project_id: string } | undefined;
+  if (!round || (input.taskId && input.taskId !== round.task_id) || (input.projectId && input.projectId !== round.project_id)) throw new InvalidCommandError('Round asset scope is not part of this Studio task.');
+}
+
+export function listScopedStudioAssets(db: StudioDatabase, studioId: string, input: { scope: AssetScope; projectId?: string; taskId?: string; roundId?: string; includeDeleted?: boolean; limit?: number }): StudioAsset[] {
+  ensureStudio(db, studioId);
+  assertScopedAssetHierarchy(db, studioId, input);
+  const limit = Math.min(500, Math.max(1, Number.isInteger(input.limit) ? Number(input.limit) : 100));
+  const condition = scopedAssetCondition(input.scope, input);
+  const query = 'SELECT a.id, a.studio_id, a.kind, a.media_type, a.storage_path, a.content_hash, a.byte_size, a.source_json, a.deleted_at FROM assets a WHERE a.studio_id = ? AND (? = 1 OR a.deleted_at IS NULL) AND (' + condition.sql + ') ORDER BY a.created_at DESC, a.id DESC LIMIT ?';
+  return (db.prepare(query).all(studioId, input.includeDeleted ? 1 : 0, ...condition.values, limit) as unknown as StoredAsset[]).map(assetFromRow);
 }
 
 export function getStudioAsset(db: StudioDatabase, studioId: string, assetId: string): StudioAsset | null {

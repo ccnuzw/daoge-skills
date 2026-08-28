@@ -160,6 +160,13 @@ export function executeIdempotent<T>(db: StudioDatabase, idempotencyKey: string,
   });
 }
 
+export function getStudioSession(db: StudioDatabase, input: { studioId: string; sessionId: string }): StudioSession {
+  ensureStudio(db, input.studioId);
+  const session = db.prepare('SELECT id, studio_id, conversation_id, active_project_id, active_task_id, active_round_id, version FROM studio_sessions WHERE id = ?').get(requireValue(input.sessionId, 'sessionId')) as StoredSession | undefined;
+  if (!session || session.studio_id !== input.studioId) throw new StudioNotFoundError('Studio session not found: ' + input.sessionId);
+  return sessionFromRow(session);
+}
+
 export function openOrAttachStudioSession(db: StudioDatabase, input: { studioId: string; conversationId: string }): StudioSession {
   const studioId = requireValue(input.studioId, 'studioId');
   const conversationId = requireValue(input.conversationId, 'conversationId');

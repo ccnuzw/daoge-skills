@@ -77,7 +77,7 @@ export function taskPresentation(task, rounds = []) {
 }
 
 export function runExecutionPresentation(run, items = []) {
-  if (!run) return { label: '尚无生成会话', tone: QUIET };
+  if (!run) return { label: '尚无生成运行', tone: QUIET };
   if (['completed', 'partial', 'failed', 'cancelled', 'paused', 'resume_pending', 'pausing'].includes(run.status)) return statusPresentation('run', run.status);
   if (items.some((item) => ['requesting', 'receiving', 'persisting'].includes(item?.status))) return { label: '正在生成', tone: LIVE };
   if (items.some((item) => item?.status === 'leased')) return { label: '正在准备', tone: LIVE };
