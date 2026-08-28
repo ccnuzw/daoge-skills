@@ -87,7 +87,7 @@ test('creates the vNext schema and emits monotonic Studio events', () => {
   try {
     const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.equal(studioSchemaVersion(db), 9);
+    assert.equal(studioSchemaVersion(db), 10);
     const studio = db.prepare('SELECT id, workspace_root FROM studios WHERE id = ?').get(initialized.manifest.studioId);
     assert.equal(studio.id, initialized.manifest.studioId);
     assert.equal(studio.workspace_root, initialized.paths.workspaceRoot);

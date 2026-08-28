@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 9;
+export const STUDIO_SCHEMA_VERSION = 10;
 
 const SCHEMA_V1 = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -57,6 +57,11 @@ const SCHEMA_V9 = [
   "CREATE TRIGGER IF NOT EXISTS studio_search_rounds_ai AFTER INSERT ON creative_rounds BEGIN INSERT INTO studio_search (studio_id, entity_type, entity_id, content) SELECT p.studio_id, 'round', NEW.id, NEW.plan_json FROM creative_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = NEW.task_id; END",
   "CREATE TRIGGER IF NOT EXISTS studio_search_rounds_au AFTER UPDATE OF plan_json ON creative_rounds BEGIN DELETE FROM studio_search WHERE entity_type = 'round' AND entity_id = NEW.id; INSERT INTO studio_search (studio_id, entity_type, entity_id, content) SELECT p.studio_id, 'round', NEW.id, NEW.plan_json FROM creative_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = NEW.task_id; END",
   "CREATE TRIGGER IF NOT EXISTS studio_search_rounds_ad AFTER DELETE ON creative_rounds BEGIN DELETE FROM studio_search WHERE entity_type = 'round' AND entity_id = OLD.id; END"
+].join(';\n') + ';';
+const SCHEMA_V10 = [
+  "CREATE TABLE IF NOT EXISTS delivery_assets (delivery_id TEXT NOT NULL REFERENCES deliveries(id), asset_id TEXT NOT NULL REFERENCES assets(id), sequence INTEGER NOT NULL, source_snapshot_json TEXT NOT NULL, review_snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (delivery_id, asset_id), UNIQUE (delivery_id, sequence))",
+  "CREATE INDEX IF NOT EXISTS idx_delivery_assets_delivery_sequence ON delivery_assets(delivery_id, sequence)",
+  "INSERT OR IGNORE INTO delivery_assets (delivery_id, asset_id, sequence, source_snapshot_json, review_snapshot_json, created_at) SELECT delivery.id, CAST(selected.value AS TEXT), CAST(selected.key AS INTEGER) + 1, COALESCE(asset.source_json, '{}'), COALESCE((SELECT json_object('id', review.id, 'decision', review.decision, 'feedback', review.feedback_json, 'taskId', review.task_id, 'roundId', review.round_id, 'createdAt', review.created_at) FROM review_decisions review WHERE review.asset_id = CAST(selected.value AS TEXT) ORDER BY review.created_at DESC, review.id DESC LIMIT 1), '{\"available\":false,\"reason\":\"legacy_unavailable\"}'), delivery.updated_at FROM deliveries delivery JOIN json_each(delivery.manifest_json, '$.assetIds') selected LEFT JOIN assets asset ON asset.id = CAST(selected.value AS TEXT)"
 ].join(';\n') + ';';
 
 export type StudioDatabase = DatabaseSyncType;
@@ -114,7 +119,8 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
       { version: 6, sql: SCHEMA_V6 },
       { version: 7, sql: SCHEMA_V7 },
       { version: 8, sql: SCHEMA_V8 },
-      { version: 9, sql: SCHEMA_V9 }
+      { version: 9, sql: SCHEMA_V9 },
+    { version: 10, sql: SCHEMA_V10 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;

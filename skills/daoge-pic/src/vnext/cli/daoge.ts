@@ -50,7 +50,7 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
   throw new Error('Studio daemon 未能在 6 秒内启动。请检查 daoge-studio/runtime/daemon.log。');
 }
 
-async function api(record: RuntimeRecord, method: 'GET' | 'POST', pathname: string, body?: JsonObject): Promise<unknown> {
+async function api(record: RuntimeRecord, method: 'GET' | 'POST' | 'PUT', pathname: string, body?: JsonObject): Promise<unknown> {
   const response = await fetch(record.url + pathname, {
     method,
     headers: { accept: 'application/json', ...(method === 'POST' ? { 'content-type': 'application/json', 'idempotency-key': 'skill-' + randomUUID() } : {}) },
@@ -95,8 +95,11 @@ function usage(): string {
     'daoge task-type --workspace <path> --name <name> [--definition <json>]',
     'daoge style-kit --workspace <path> --name <name> [--definition <json>] [--assets <asset-id,...>]',
     'daoge brand-kit --workspace <path> --name <name> [--definition <json>] [--assets <asset-id,...>]',
-    'daoge delivery --workspace <path> --project <id> --name <name> --assets <asset-id,...> [--creative-record true]',
-    'daoge delivery-export --workspace <path> --delivery <id>',
+    'daoge delivery --workspace <path> --project <id> --name <name> --assets <asset-id,...> [--creative-record true]  # 创建草稿',
+    'daoge delivery-update --workspace <path> --delivery <id> --assets <asset-id,...>',
+    'daoge delivery-ready --workspace <path> --delivery <id>',
+    'daoge delivery-draft --workspace <path> --delivery <id>',
+    'daoge delivery-export --workspace <path> --delivery <id>  # 仅已准备交付',
     'daoge round --workspace <path> --task <id> --purpose <exploration|refinement|variation|edit|fill> [--session <id>]',
     'daoge plan --workspace <path> --round <id> --version <n> --plan <json>',
     'daoge confirm --workspace <path> --round <id> --version <n>',
@@ -138,6 +141,9 @@ async function main(): Promise<void> {
   else if (command === 'style-kit') result = await api(record, 'POST', '/api/style-kits', { name: required(args, '--name'), definition: jsonFlag(args, '--definition'), assetIds: assetIdsFlag(args) });
   else if (command === 'brand-kit') result = await api(record, 'POST', '/api/brand-kits', { name: required(args, '--name'), definition: jsonFlag(args, '--definition'), assetIds: assetIdsFlag(args) });
   else if (command === 'delivery') result = await api(record, 'POST', '/api/deliveries', { projectId: required(args, '--project'), name: required(args, '--name'), assetIds: assetIdsFlag(args), includeCreativeRecord: booleanFlag(args, '--creative-record') });
+  else if (command === 'delivery-update') result = await api(record, 'PUT', '/api/deliveries/' + encodeURIComponent(required(args, '--delivery')) + '/items', { assetIds: assetIdsFlag(args), includeCreativeRecord: booleanFlag(args, '--creative-record') });
+  else if (command === 'delivery-ready') result = await api(record, 'POST', '/api/deliveries/' + encodeURIComponent(required(args, '--delivery')) + '/ready', {});
+  else if (command === 'delivery-draft') result = await api(record, 'POST', '/api/deliveries/' + encodeURIComponent(required(args, '--delivery')) + '/draft', {});
   else if (command === 'delivery-export') result = await api(record, 'POST', '/api/deliveries/' + encodeURIComponent(required(args, '--delivery')) + '/export', {});
   else if (command === 'round') result = await api(record, 'POST', '/api/rounds', { taskId: required(args, '--task'), purpose: required(args, '--purpose'), parentRoundId: flag(args, '--parent') || undefined, sessionId: flag(args, '--session') || undefined });
   else if (command === 'plan') result = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(required(args, '--round')) + '/prepare', { expectedVersion: Number(required(args, '--version')), plan: jsonFlag(args, '--plan') });

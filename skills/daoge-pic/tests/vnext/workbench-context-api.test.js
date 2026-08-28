@@ -40,6 +40,14 @@ test('Workbench Session context is readable, validates hierarchy, and never sele
     assert.equal(restored.body.data.session.activeRoundId, round.body.data.value.id);
     const roundRuns = await requestJson(started.url, '/api/rounds/' + round.body.data.value.id + '/runs');
     assert.deepEqual(roundRuns.body.data.runs, []);
+    const overview = await requestJson(started.url, '/api/tasks/' + task.body.data.value.id + '/overview');
+    assert.equal(overview.status, 200);
+    assert.equal(overview.body.data.overview.task.name, 'P0 任务');
+    assert.equal(overview.body.data.overview.summary.roundCount, 1);
+    const creativeRecord = await requestJson(started.url, '/api/rounds/' + round.body.data.value.id + '/creative-record');
+    assert.equal(creativeRecord.status, 200);
+    assert.equal(creativeRecord.body.data.record.selectedRunId, null);
+    assert.deepEqual(creativeRecord.body.data.record.items, []);
     const scopedAssets = await requestJson(started.url, '/api/assets?scope=round&projectId=' + project.body.data.value.id + '&taskId=' + task.body.data.value.id + '&roundId=' + round.body.data.value.id);
     assert.equal(scopedAssets.status, 200);
     assert.deepEqual(scopedAssets.body.data.assets, []);

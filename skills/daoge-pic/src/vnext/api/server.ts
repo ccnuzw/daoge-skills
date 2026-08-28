@@ -7,10 +7,11 @@ import { initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { loadProviderConfig, providerStatus } from '../studio/provider-config';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, markRunsResumePending, pauseGenerationRun, preflightRound, queueGenerationRun, reconcileTerminalRuns, recoverExpiredLeases, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
-import { AssetScope, assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, softDeleteAsset } from '../domain/assets';
+import { AssetScope, assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
-import { createDelivery, exportDelivery, listDeliveries } from '../domain/deliveries';
+import { createDelivery, exportDelivery, getDelivery, listDeliveries, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
+import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
 import { reconcileManagedMedia, recoverGeneratedMediaCommits } from '../media/reconcile';
 import { studioEventWindow } from './events';
 import { sha256 } from '../shared/ids';
@@ -104,6 +105,20 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function publicValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(publicValue);
+  if (!value || typeof value !== 'object') return value;
+  const safe: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) if (!/(api[_-]?key|authorization|secret|token|base[_-]?url|endpoint|password|external.*request|storage.*path|content.*hash)/i.test(key)) safe[key] = publicValue(item);
+  return safe;
+}
+
+function publicAsset(asset: StudioAsset & { review?: unknown }): Record<string, unknown> {
+  const result: Record<string, unknown> = { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, byteSize: asset.byteSize, deletedAt: asset.deletedAt, source: publicValue(asset.source) };
+  if (asset.review !== undefined) result.review = publicValue(asset.review);
+  return result;
+}
+
 export class LocalStudioService {
   readonly initialized: InitializeStudioResult;
   readonly db: StudioDatabase;
@@ -164,17 +179,25 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/assets') {
         const scope = assetScope(parsed.searchParams.get('scope'));
         const input = { includeDeleted: parsed.searchParams.get('deleted') === 'true', projectId: parsed.searchParams.get('projectId') || undefined, taskId: parsed.searchParams.get('taskId') || undefined, roundId: parsed.searchParams.get('roundId') || undefined, limit: parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : undefined };
-        if (scope) return success(response, { assets: listScopedStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, scope }), scope });
-        return success(response, { assets: listStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, targetType: parsed.searchParams.get('targetType') || undefined, targetId: parsed.searchParams.get('targetId') || undefined }) });
+        if (scope) return success(response, { assets: listAssetsWithReviewSummaries(this.db, listScopedStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, scope }), input.projectId).map(publicAsset), scope });
+        return success(response, { assets: listAssetsWithReviewSummaries(this.db, listStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, targetType: parsed.searchParams.get('targetType') || undefined, targetId: parsed.searchParams.get('targetId') || undefined }), input.projectId).map(publicAsset) });
       }
       const assetImpactMatch = /^\/api\/assets\/([^/]+)\/impact$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetImpactMatch) return success(response, { impact: getAssetImpact(this.db, this.initialized.manifest.studioId, assetImpactMatch[1]) });
+      const assetProvenanceMatch = /^\/api\/assets\/([^/]+)\/provenance$/.exec(parsed.pathname);
+      if (request.method === 'GET' && assetProvenanceMatch) return success(response, { provenance: getAssetProvenance(this.db, this.initialized.manifest.studioId, assetProvenanceMatch[1]) });
+      const deliveryDetailMatch = /^\/api\/deliveries\/([^/]+)$/.exec(parsed.pathname);
+      if (request.method === 'GET' && deliveryDetailMatch) return success(response, { delivery: getDelivery(this.db, deliveryDetailMatch[1]) });
       const deliveryMatch = /^\/api\/projects\/([^/]+)\/deliveries$/.exec(parsed.pathname);
       if (request.method === 'GET' && deliveryMatch) return success(response, { deliveries: listDeliveries(this.db, deliveryMatch[1]) });
       const taskMatch = /^\/api\/projects\/([^/]+)\/tasks$/.exec(parsed.pathname);
       if (request.method === 'GET' && taskMatch) return success(response, { tasks: listTasks(this.db, taskMatch[1]) });
+      const taskOverviewMatch = /^\/api\/tasks\/([^/]+)\/overview$/.exec(parsed.pathname);
+      if (request.method === 'GET' && taskOverviewMatch) return success(response, { overview: getTaskCreativeOverview(this.db, this.initialized.manifest.studioId, taskOverviewMatch[1]) });
       const roundMatch = /^\/api\/tasks\/([^/]+)\/rounds$/.exec(parsed.pathname);
       if (request.method === 'GET' && roundMatch) return success(response, { rounds: listRounds(this.db, roundMatch[1]) });
+      const creativeRecordMatch = /^\/api\/rounds\/([^/]+)\/creative-record$/.exec(parsed.pathname);
+      if (request.method === 'GET' && creativeRecordMatch) return success(response, { record: getRoundCreativeRecord(this.db, this.initialized.manifest.studioId, creativeRecordMatch[1], parsed.searchParams.get('runId') || undefined) });
       const planVersionsMatch = /^\/api\/rounds\/([^/]+)\/plan-versions$/.exec(parsed.pathname);
       if (request.method === 'GET' && planVersionsMatch) return success(response, { planVersions: listRoundPlanVersions(this.db, planVersionsMatch[1]) });
       const dryRunsMatch = /^\/api\/rounds\/([^/]+)\/dry-runs$/.exec(parsed.pathname);
@@ -187,7 +210,7 @@ export class LocalStudioService {
       if (request.method === 'GET' && assetFileMatch) return this.assetFile(response, assetFileMatch[1]);
       if (request.method === 'GET' && parsed.pathname === '/api/events') return this.events(request, response, parsed);
       if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
-      if (request.method !== 'POST') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
+      if (request.method !== 'POST' && request.method !== 'PUT') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
       const body = await readBody(request);
       return this.write(request, response, parsed.pathname, body);
     } catch (error) {
@@ -209,9 +232,15 @@ export class LocalStudioService {
       const created = createProject(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), description: text(body.description) || undefined, sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
     }
-    if (pathname === '/api/deliveries') return success(response, createDelivery(this.db, { projectId: text(body.projectId), name: text(body.name), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key }));
+    if (pathname === '/api/deliveries' && request.method === 'POST') return success(response, createDelivery(this.db, { projectId: text(body.projectId), name: text(body.name), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key }));
+    const deliveryItemsMatch = /^\/api\/deliveries\/([^/]+)\/items$/.exec(pathname);
+    if (deliveryItemsMatch && request.method === 'PUT') return success(response, updateDeliveryDraft(this.db, { deliveryId: deliveryItemsMatch[1], assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key }));
+    const readyDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/ready$/.exec(pathname);
+    if (readyDeliveryMatch && request.method === 'POST') return success(response, prepareDelivery(this.db, { deliveryId: readyDeliveryMatch[1], idempotencyKey: key }));
+    const returnToDraftMatch = /^\/api\/deliveries\/([^/]+)\/draft$/.exec(pathname);
+    if (returnToDraftMatch && request.method === 'POST') return success(response, returnDeliveryToDraft(this.db, { deliveryId: returnToDraftMatch[1], idempotencyKey: key }));
     const exportDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/export$/.exec(pathname);
-    if (exportDeliveryMatch) return success(response, exportDelivery(this.db, this.initialized.paths, { deliveryId: exportDeliveryMatch[1], idempotencyKey: key }));
+    if (exportDeliveryMatch && request.method === 'POST') return success(response, exportDelivery(this.db, this.initialized.paths, { deliveryId: exportDeliveryMatch[1], idempotencyKey: key }));
     if (pathname === '/api/task-types') return success(response, createUserTaskType(this.db, { name: text(body.name), definition: record(body.definition), idempotencyKey: key }));
     if (pathname === '/api/style-kits') return success(response, createStyleKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
     if (pathname === '/api/brand-kits') return success(response, createBrandKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
@@ -265,9 +294,9 @@ export class LocalStudioService {
       return success(response, reviewed.value);
     }
     const trashMatch = /^\/api\/assets\/([^/]+)\/trash$/.exec(pathname);
-    if (trashMatch) return success(response, executeIdempotent(this.db, key, 'assets.trash', () => softDeleteAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: trashMatch[1] }), { assetId: trashMatch[1] }).value);
+    if (trashMatch) return success(response, publicAsset(executeIdempotent(this.db, key, 'assets.trash', () => softDeleteAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: trashMatch[1] }), { assetId: trashMatch[1] }).value));
     const restoreMatch = /^\/api\/assets\/([^/]+)\/restore$/.exec(pathname);
-    if (restoreMatch) return success(response, executeIdempotent(this.db, key, 'assets.restore', () => restoreAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: restoreMatch[1] }), { assetId: restoreMatch[1] }).value);
+    if (restoreMatch) return success(response, publicAsset(executeIdempotent(this.db, key, 'assets.restore', () => restoreAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: restoreMatch[1] }), { assetId: restoreMatch[1] }).value));
     return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
   }
 
@@ -302,7 +331,7 @@ export class LocalStudioService {
       targetId,
       source: { channel: 'workbench_upload', idempotencyKey: key }
     }), { contentHash: sha256(bytes), mediaType, targetType, targetId, originalFilename });
-    success(response, receipt.value);
+    success(response, publicAsset(receipt.value));
   }
 
   private assetFile(response: ServerResponse, assetId: string): void {
