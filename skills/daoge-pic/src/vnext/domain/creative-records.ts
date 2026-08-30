@@ -67,6 +67,33 @@ export function getTaskCreativeOverview(db: StudioDatabase, studioId: string, ta
   return { task: { id: task.id, projectId: task.project_id, projectName: task.project_name, name: task.name, status: task.status, intent: safeValue(parseRecord(task.intent_json)) }, summary: { roundCount: rounds.length, ...totals }, rounds: rounds.map((round) => ({ id: round.id, parentRoundId: round.parent_round_id, purpose: round.purpose, planVersion: round.plan_version, status: round.status, createdAt: round.created_at, runCount: Number(round.run_count), resultCount: Number(round.result_count) })) };
 }
 
+function comparisonPlanSummary(value: JsonRecord): JsonRecord { const plan = safeValue(value) as JsonRecord; return { operation: plan.operation === 'edit' ? 'edit' : 'generate', itemCount: Number(plan.itemCount || 0) }; }
+function comparisonLineage(db: StudioDatabase, studioId: string, round: RoundRow): JsonRecord { const value = lineage(db, studioId, round); return { truncated: value.truncated, rounds: value.rounds.map((parent) => ({ id: parent.id, parentRoundId: parent.parentRoundId, purpose: parent.purpose, planVersion: parent.planVersion, status: parent.status, createdAt: parent.createdAt })) }; }
+function reviewedOutputs(db: StudioDatabase, studioId: string, projectId: string, items: JsonRecord[]): Map<string, JsonRecord> { const ids = [...new Set(items.flatMap((item) => Array.isArray(item.outputAssets) ? item.outputAssets.map((asset) => String((asset as JsonRecord).id || '')) : []).filter(Boolean))]; const assets = ids.map((id) => getStudioAsset(db, studioId, id)).filter((asset): asset is StudioAsset => Boolean(asset)); const summaries = listAssetsWithReviewSummaries(db, assets, projectId); return new Map(summaries.map((asset) => [asset.id, { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt, review: asset.review }])); }
+
+export function getTaskStudioOverview(db: StudioDatabase, studioId: string, taskId: string, selectedRoundIds: string[] = []): JsonRecord {
+  const task = taskRow(db, studioId, taskId);
+  const available = db.prepare('SELECT id, task_id, parent_round_id, purpose, plan_json, plan_version, status, created_at, updated_at FROM creative_rounds WHERE task_id = ? ORDER BY created_at, id').all(task.id) as RoundRow[];
+  const selected = [...new Set(selectedRoundIds.filter(Boolean))];
+  if (selected.length > 12) throw new InvalidCommandError('At most 12 rounds can be compared.');
+  const byId = new Map(available.map((round) => [round.id, round]));
+  for (const id of selected) if (!byId.has(id)) throw new InvalidCommandError('Selected round does not belong to this task.');
+  const comparisons = selected.map((id) => {
+    const round = byId.get(id) as RoundRow;
+    const roundRecord = getRoundCreativeRecord(db, studioId, round.id) as JsonRecord;
+    const runs = (roundRecord.runs || []) as JsonRecord[];
+    const runDetails = runs.map((run) => getRoundCreativeRecord(db, studioId, round.id, String(run.id)) as JsonRecord);
+    const assets = reviewedOutputs(db, studioId, task.project_id, runDetails.flatMap((record) => record.items as JsonRecord[]));
+    return {
+      round: { id: round.id, parentRoundId: round.parent_round_id, purpose: round.purpose, status: round.status, planVersion: round.plan_version, createdAt: round.created_at, updatedAt: round.updated_at, plan: comparisonPlanSummary(parseRecord(round.plan_json)) },
+      lineage: comparisonLineage(db, studioId, round),
+      summary: roundRecord.summary,
+      runs: runDetails.map((record) => ({ id: record.selectedRunId, status: (record.runs as JsonRecord[]).find((run) => run.id === record.selectedRunId)?.status || 'unknown', items: (record.items as JsonRecord[]).map((item) => ({ id: item.id, sequence: item.sequence, status: item.status, attempts: item.attempts, outputAssets: (item.outputAssets as JsonRecord[]).map((asset) => assets.get(String(asset.id)) || asset) })) }))
+    };
+  });
+  return { task: { id: task.id, projectId: task.project_id, projectName: task.project_name, name: task.name, status: task.status }, availableRounds: available.map((round) => ({ id: round.id, parentRoundId: round.parent_round_id, purpose: round.purpose, status: round.status, planVersion: round.plan_version, createdAt: round.created_at })), selectedRoundIds: selected, comparisons };
+}
+
 export function getRoundCreativeRecord(db: StudioDatabase, studioId: string, roundId: string, runId?: string): JsonRecord {
   const round = roundRow(db, studioId, roundId);
   const task = taskRow(db, studioId, round.task_id);
@@ -87,5 +114,6 @@ export function getAssetProvenance(db: StudioDatabase, studioId: string, assetId
   const relations = db.prepare('SELECT relation_type, target_type, target_id, created_at FROM asset_relations WHERE asset_id = ? AND NOT (relation_type = \'output_of\' AND target_type = \'run_item\') ORDER BY created_at, id').all(asset.id) as Array<{ relation_type: string; target_type: string; target_id: string; created_at: string }>;
   const deliveries = db.prepare('SELECT delivery.id, delivery.name, delivery.status, delivery.project_id FROM delivery_assets item JOIN deliveries delivery ON delivery.id = item.delivery_id WHERE item.asset_id = ? ORDER BY delivery.updated_at DESC').all(asset.id) as Array<{ id: string; name: string; status: string; project_id: string }>;
   const lineages = outputs.map((output) => ({ runId: output.run_id, ...lineage(db, studioId, roundRow(db, studioId, output.round_id)) }));
-  return { asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, byteSize: asset.byteSize, deletedAt: asset.deletedAt, source: safeValue(asset.source) }, outputs: outputs.map((output) => ({ runItem: { id: output.item_id, sequence: output.item_sequence, status: output.item_status }, run: { id: output.run_id, status: output.run_status }, round: { id: output.round_id, purpose: output.round_purpose }, task: { id: output.task_id, name: output.task_name }, project: { id: output.project_id, name: output.project_name } })), lineages, reviews: reviews.map((review) => ({ id: review.id, decision: review.decision, feedback: safeValue(parseRecord(review.feedback_json)), taskId: review.task_id, roundId: review.round_id, createdAt: review.created_at })), relations, deliveries: deliveries.map((delivery) => ({ id: delivery.id, name: delivery.name, status: delivery.status, projectId: delivery.project_id })) };
+  const batches = db.prepare("SELECT batch.id, batch.name, version.id AS version_id, version.version_no, version.status FROM delivery_assets delivery_asset JOIN delivery_batch_version_deliveries member ON member.delivery_id = delivery_asset.delivery_id JOIN delivery_batch_versions version ON version.id = member.version_id JOIN delivery_batches batch ON batch.id = version.batch_id JOIN projects project ON project.id = batch.project_id WHERE delivery_asset.asset_id = ? AND project.studio_id = ? ORDER BY batch.updated_at DESC, version.version_no DESC").all(asset.id, studioId) as Array<{ id: string; name: string; version_id: string; version_no: number; status: string }>;
+  return { asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, byteSize: asset.byteSize, deletedAt: asset.deletedAt, source: safeValue(asset.source) }, outputs: outputs.map((output) => ({ runItem: { id: output.item_id, sequence: output.item_sequence, status: output.item_status }, run: { id: output.run_id, status: output.run_status }, round: { id: output.round_id, purpose: output.round_purpose }, task: { id: output.task_id, name: output.task_name }, project: { id: output.project_id, name: output.project_name } })), lineages, reviews: reviews.map((review) => ({ id: review.id, decision: review.decision, feedback: safeValue(parseRecord(review.feedback_json)), taskId: review.task_id, roundId: review.round_id, createdAt: review.created_at })), relations, deliveries: deliveries.map((delivery) => ({ id: delivery.id, name: delivery.name, status: delivery.status, projectId: delivery.project_id })), deliveryBatches: batches.map((batch) => ({ id: batch.id, name: batch.name, versionId: batch.version_id, versionNo: batch.version_no, status: batch.status })) };
 }

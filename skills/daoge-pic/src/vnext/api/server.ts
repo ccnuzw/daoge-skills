@@ -11,7 +11,8 @@ import { AssetScope, assetFilePath, getAssetImpact, getStudioAsset, importStudio
 import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { createDelivery, exportDelivery, getDelivery, listDeliveries, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
-import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
+import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
+import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
 import { reconcileManagedMedia, recoverGeneratedMediaCommits } from '../media/reconcile';
 import { studioEventWindow } from './events';
 import { sha256 } from '../shared/ids';
@@ -170,7 +171,7 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/provider/status') return success(response, providerStatus(this.initialized.paths));
       if (request.method === 'GET' && parsed.pathname === '/api/provider/details') return success(response, { ...providerStatus(this.initialized.paths), providerEnvPath: 'daoge-studio/provider.env' });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
-      if (request.method === 'GET' && parsed.pathname === '/api/search') return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, parsed.searchParams.get('q') || '') });
+      if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
       if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db) });
       if (request.method === 'GET' && parsed.pathname === '/api/style-kits') return success(response, { styleKits: listStyleKits(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/brand-kits') return success(response, { brandKits: listBrandKits(this.db, this.initialized.manifest.studioId) });
@@ -188,10 +189,16 @@ export class LocalStudioService {
       if (request.method === 'GET' && assetProvenanceMatch) return success(response, { provenance: getAssetProvenance(this.db, this.initialized.manifest.studioId, assetProvenanceMatch[1]) });
       const deliveryDetailMatch = /^\/api\/deliveries\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && deliveryDetailMatch) return success(response, { delivery: getDelivery(this.db, deliveryDetailMatch[1]) });
+      const batchDetailMatch = /^\/api\/delivery-batches\/([^/]+)$/.exec(parsed.pathname);
+      if (request.method === 'GET' && batchDetailMatch) return success(response, { batch: getDeliveryBatch(this.db, this.initialized.manifest.studioId, batchDetailMatch[1]) });
       const deliveryMatch = /^\/api\/projects\/([^/]+)\/deliveries$/.exec(parsed.pathname);
       if (request.method === 'GET' && deliveryMatch) return success(response, { deliveries: listDeliveries(this.db, deliveryMatch[1]) });
+      const batchMatch = /^\/api\/projects\/([^/]+)\/delivery-batches$/.exec(parsed.pathname);
+      if (request.method === 'GET' && batchMatch) return success(response, { batches: listDeliveryBatches(this.db, this.initialized.manifest.studioId, batchMatch[1]) });
       const taskMatch = /^\/api\/projects\/([^/]+)\/tasks$/.exec(parsed.pathname);
       if (request.method === 'GET' && taskMatch) return success(response, { tasks: listTasks(this.db, taskMatch[1]) });
+      const taskStudioOverviewMatch = /^\/api\/tasks\/([^/]+)\/studio-overview$/.exec(parsed.pathname);
+      if (request.method === 'GET' && taskStudioOverviewMatch) return success(response, { overview: getTaskStudioOverview(this.db, this.initialized.manifest.studioId, taskStudioOverviewMatch[1], parsed.searchParams.getAll('round')) });
       const taskOverviewMatch = /^\/api\/tasks\/([^/]+)\/overview$/.exec(parsed.pathname);
       if (request.method === 'GET' && taskOverviewMatch) return success(response, { overview: getTaskCreativeOverview(this.db, this.initialized.manifest.studioId, taskOverviewMatch[1]) });
       const roundMatch = /^\/api\/tasks\/([^/]+)\/rounds$/.exec(parsed.pathname);
@@ -232,6 +239,11 @@ export class LocalStudioService {
       const created = createProject(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), description: text(body.description) || undefined, sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
     }
+    if (pathname === '/api/delivery-batches' && request.method === 'POST') return success(response, createDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), deliveryIds: Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
+    const batchRevisionMatch = /^\/api\/delivery-batches\/([^/]+)\/revisions$/.exec(pathname);
+    if (batchRevisionMatch && request.method === 'POST') return success(response, reviseDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, batchId: batchRevisionMatch[1], deliveryIds: Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
+    const batchReadyMatch = /^\/api\/delivery-batch-versions\/([^/]+)\/ready$/.exec(pathname);
+    if (batchReadyMatch && request.method === 'POST') return success(response, prepareDeliveryBatchVersion(this.db, { studioId: this.initialized.manifest.studioId, versionId: batchReadyMatch[1], idempotencyKey: key }));
     if (pathname === '/api/deliveries' && request.method === 'POST') return success(response, createDelivery(this.db, { projectId: text(body.projectId), name: text(body.name), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key }));
     const deliveryItemsMatch = /^\/api\/deliveries\/([^/]+)\/items$/.exec(pathname);
     if (deliveryItemsMatch && request.method === 'PUT') return success(response, updateDeliveryDraft(this.db, { deliveryId: deliveryItemsMatch[1], assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key }));

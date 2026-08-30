@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 10;
+export const STUDIO_SCHEMA_VERSION = 11;
 
 const SCHEMA_V1 = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -63,6 +63,14 @@ const SCHEMA_V10 = [
   "CREATE INDEX IF NOT EXISTS idx_delivery_assets_delivery_sequence ON delivery_assets(delivery_id, sequence)",
   "INSERT OR IGNORE INTO delivery_assets (delivery_id, asset_id, sequence, source_snapshot_json, review_snapshot_json, created_at) SELECT delivery.id, CAST(selected.value AS TEXT), CAST(selected.key AS INTEGER) + 1, COALESCE(asset.source_json, '{}'), COALESCE((SELECT json_object('id', review.id, 'decision', review.decision, 'feedback', review.feedback_json, 'taskId', review.task_id, 'roundId', review.round_id, 'createdAt', review.created_at) FROM review_decisions review WHERE review.asset_id = CAST(selected.value AS TEXT) ORDER BY review.created_at DESC, review.id DESC LIMIT 1), '{\"available\":false,\"reason\":\"legacy_unavailable\"}'), delivery.updated_at FROM deliveries delivery JOIN json_each(delivery.manifest_json, '$.assetIds') selected LEFT JOIN assets asset ON asset.id = CAST(selected.value AS TEXT)"
 ].join(';\n') + ';';
+const SCHEMA_V11 = [
+  "CREATE TABLE IF NOT EXISTS delivery_batches (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS delivery_batch_versions (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES delivery_batches(id), version_no INTEGER NOT NULL, predecessor_version_id TEXT REFERENCES delivery_batch_versions(id), status TEXT NOT NULL CHECK (status IN ('draft', 'ready', 'superseded')), manifest_json TEXT NOT NULL, created_at TEXT NOT NULL, prepared_at TEXT, superseded_at TEXT, UNIQUE(batch_id, version_no))",
+  "CREATE TABLE IF NOT EXISTS delivery_batch_version_deliveries (version_id TEXT NOT NULL REFERENCES delivery_batch_versions(id), delivery_id TEXT NOT NULL REFERENCES deliveries(id), sequence INTEGER NOT NULL, delivery_snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (version_id, delivery_id), UNIQUE(version_id, sequence))",
+  "CREATE INDEX IF NOT EXISTS idx_delivery_batches_project_updated ON delivery_batches(project_id, updated_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_delivery_batch_versions_batch_number ON delivery_batch_versions(batch_id, version_no DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_delivery_batch_version_deliveries_version_sequence ON delivery_batch_version_deliveries(version_id, sequence)"
+].join(';\n') + ';';
 
 export type StudioDatabase = DatabaseSyncType;
 type DatabaseSyncConstructor = new (path: string) => StudioDatabase;
@@ -120,7 +128,8 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
       { version: 7, sql: SCHEMA_V7 },
       { version: 8, sql: SCHEMA_V8 },
       { version: 9, sql: SCHEMA_V9 },
-    { version: 10, sql: SCHEMA_V10 }
+    { version: 10, sql: SCHEMA_V10 },
+    { version: 11, sql: SCHEMA_V11 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;

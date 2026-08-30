@@ -100,6 +100,9 @@ function usage(): string {
     'daoge delivery-ready --workspace <path> --delivery <id>',
     'daoge delivery-draft --workspace <path> --delivery <id>',
     'daoge delivery-export --workspace <path> --delivery <id>  # 仅已准备交付',
+    'daoge delivery-batch --workspace <path> --project <id> --name <name> --deliveries <delivery-id,...>',
+    'daoge delivery-batch-revise --workspace <path> --batch <id> --deliveries <delivery-id,...>',
+    'daoge delivery-batch-ready --workspace <path> --version <version-id>  # 冻结批次版本',
     'daoge round --workspace <path> --task <id> --purpose <exploration|refinement|variation|edit|fill> [--session <id>]',
     'daoge plan --workspace <path> --round <id> --version <n> --plan <json>',
     'daoge confirm --workspace <path> --round <id> --version <n>',
@@ -145,6 +148,9 @@ async function main(): Promise<void> {
   else if (command === 'delivery-ready') result = await api(record, 'POST', '/api/deliveries/' + encodeURIComponent(required(args, '--delivery')) + '/ready', {});
   else if (command === 'delivery-draft') result = await api(record, 'POST', '/api/deliveries/' + encodeURIComponent(required(args, '--delivery')) + '/draft', {});
   else if (command === 'delivery-export') result = await api(record, 'POST', '/api/deliveries/' + encodeURIComponent(required(args, '--delivery')) + '/export', {});
+  else if (command === 'delivery-batch') result = await api(record, 'POST', '/api/delivery-batches', { projectId: required(args, '--project'), name: required(args, '--name'), deliveryIds: assetIdsFlag(args, '--deliveries') });
+  else if (command === 'delivery-batch-revise') result = await api(record, 'POST', '/api/delivery-batches/' + encodeURIComponent(required(args, '--batch')) + '/revisions', { deliveryIds: assetIdsFlag(args, '--deliveries') });
+  else if (command === 'delivery-batch-ready') result = await api(record, 'POST', '/api/delivery-batch-versions/' + encodeURIComponent(required(args, '--version')) + '/ready', {});
   else if (command === 'round') result = await api(record, 'POST', '/api/rounds', { taskId: required(args, '--task'), purpose: required(args, '--purpose'), parentRoundId: flag(args, '--parent') || undefined, sessionId: flag(args, '--session') || undefined });
   else if (command === 'plan') result = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(required(args, '--round')) + '/prepare', { expectedVersion: Number(required(args, '--version')), plan: jsonFlag(args, '--plan') });
   else if (command === 'confirm') result = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(required(args, '--round')) + '/confirm', { expectedVersion: Number(required(args, '--version')) });

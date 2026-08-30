@@ -27,7 +27,7 @@ export function listRounds(db: StudioDatabase, taskId: string): CreativeRound[] 
 export function listRuns(db: StudioDatabase, roundId: string): Array<GenerationRun & { createdAt: string; updatedAt: string }> { return (db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, version, created_at, updated_at FROM generation_runs WHERE round_id = ? ORDER BY created_at DESC').all(roundId) as unknown as StoredRun[]).map(run); }
 export function listRunItemsForQuery(db: StudioDatabase, runId: string): GenerationRunItem[] { return (db.prepare('SELECT id, run_id, sequence, status, request_id, lease_token, lease_expires_at, attempts, retry_at FROM run_items WHERE run_id = ? ORDER BY sequence').all(runId) as unknown as StoredRunItem[]).map(item); }
 
-export interface StudioSearchResult { entityType: 'project' | 'task' | 'round'; entityId: string; }
+export interface StudioSearchResult { entityType: 'project' | 'task' | 'round'; entityId: string; label: string; projectId: string; taskId?: string; purpose?: string; status?: string; }
 
 export function searchStudio(db: StudioDatabase, studioId: string, query: string, limit = 25): StudioSearchResult[] {
   const term = String(query || '').trim();
@@ -35,5 +35,11 @@ export function searchStudio(db: StudioDatabase, studioId: string, query: string
   const safeQuery = term.split(/\s+/).map((token) => token.replace(/[^\p{L}\p{N}_-]/gu, '')).filter(Boolean).map((token) => token + '*').join(' AND ');
   if (!safeQuery) return [];
   const boundedLimit = Math.min(50, Math.max(1, Number.isInteger(limit) ? limit : 25));
-  return db.prepare('SELECT entity_type, entity_id FROM studio_search WHERE studio_id = ? AND studio_search MATCH ? ORDER BY rank LIMIT ?').all(studioId, safeQuery, boundedLimit).map((row) => ({ entityType: row.entity_type, entityId: row.entity_id })) as StudioSearchResult[];
+  const candidates = db.prepare('SELECT entity_type, entity_id FROM studio_search WHERE studio_id = ? AND studio_search MATCH ? ORDER BY rank LIMIT ?').all(studioId, safeQuery, boundedLimit) as Array<{ entity_type: 'project' | 'task' | 'round'; entity_id: string }> ;
+  return candidates.flatMap((candidate): StudioSearchResult[] => {
+    if (candidate.entity_type === 'project') { const row = db.prepare('SELECT id, name, status FROM projects WHERE id = ? AND studio_id = ?').get(candidate.entity_id, studioId) as { id: string; name: string; status: string } | undefined; return row ? [{ entityType: 'project', entityId: row.id, label: row.name, projectId: row.id, status: row.status }] : []; }
+    if (candidate.entity_type === 'task') { const row = db.prepare('SELECT task.id, task.name, task.status, task.project_id FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?').get(candidate.entity_id, studioId) as { id: string; name: string; status: string; project_id: string } | undefined; return row ? [{ entityType: 'task', entityId: row.id, label: row.name, projectId: row.project_id, taskId: row.id, status: row.status }] : []; }
+    const row = db.prepare('SELECT round.id, round.purpose, round.status, round.task_id, task.project_id, task.name AS task_name FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?').get(candidate.entity_id, studioId) as { id: string; purpose: string; status: string; task_id: string; project_id: string; task_name: string } | undefined;
+    return row ? [{ entityType: 'round', entityId: row.id, label: row.task_name + ' / ' + row.purpose, projectId: row.project_id, taskId: row.task_id, purpose: row.purpose, status: row.status }] : [];
+  });
 }
