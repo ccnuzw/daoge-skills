@@ -7,7 +7,7 @@ import { createImageProvider } from '../providers/http-adapters';
 import { GenerationWorker } from '../runner/worker';
 import { reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
 import { createId, nowIso } from '../shared/ids';
-import { appendStudioEvent, closeStudioDatabase, openStudioDatabase } from '../studio/database';
+import { appendStudioEvent, closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
 import { loadProviderConfig, providerSnapshot } from '../studio/provider-config';
 import { initializeStudio } from '../studio/workspace';
 
@@ -21,6 +21,7 @@ export interface StudioDaemonOptions {
 interface RuntimeRecord {
   pid: number;
   url: string;
+  port: number;
   workspaceRoot: string;
   startedAt: string;
   heartbeatAt: string;
@@ -36,6 +37,16 @@ function writeAtomically(filePath: string, value: unknown): void {
 function isLivePid(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function rememberedPort(portPath: string): number {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(portPath, 'utf8')) as { port?: unknown };
+    const port = Number(parsed.port);
+    return Number.isInteger(port) && port > 0 && port <= 65535 ? port : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function acquireLock(lockPath: string): void {
@@ -64,18 +75,27 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
   const runtimeDir = initialized.paths.runtimeDir;
   const lockPath = path.join(runtimeDir, 'daemon.lock');
   const runtimePath = path.join(runtimeDir, 'daemon.json');
+  const portPath = path.join(runtimeDir, 'daemon.port.json');
   fs.mkdirSync(runtimeDir, { recursive: true });
   acquireLock(lockPath);
 
-  const service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, providerTemplatePath: options.providerTemplatePath });
-  const workerDb = openStudioDatabase(initialized.paths, initialized.manifest);
+  let service: LocalStudioService;
+  let workerDb: StudioDatabase;
+  try {
+    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, providerTemplatePath: options.providerTemplatePath });
+    workerDb = openStudioDatabase(initialized.paths, initialized.manifest);
+  } catch (error) {
+    fs.rmSync(lockPath, { force: true });
+    throw error;
+  }
   let stopping = false;
   let timer: NodeJS.Timeout | null = null;
   let heartbeatTimer: NodeJS.Timeout | null = null;
+  let inFlightTick: Promise<void> | null = null;
   let startedUrl = '';
   const workerId = createId('worker');
 
-  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso() });
+  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso() });
   const startedAt = nowIso();
   const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
   const close = async (): Promise<void> => {
@@ -83,8 +103,9 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
     stopping = true;
     if (timer) clearTimeout(timer);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
-    closeStudioDatabase(workerDb);
+    if (inFlightTick) await inFlightTick.catch(() => undefined);
     await service.close();
+    closeStudioDatabase(workerDb);
     try {
       const current = JSON.parse(fs.readFileSync(runtimePath, 'utf8')) as { pid?: number };
       if (current.pid === process.pid) fs.rmSync(runtimePath, { force: true });
@@ -96,8 +117,10 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
   };
 
   try {
-    const started = await service.listen(options.port || 0);
+    const requestedPort = options.port === 0 ? 0 : options.port || rememberedPort(portPath);
+    const started = await service.listen(requestedPort);
     startedUrl = started.url;
+    writeAtomically(portPath, { port: Number(new URL(startedUrl).port) });
     heartbeat();
     heartbeatTimer = setInterval(heartbeat, 5000);
     const pollMs = Math.max(100, Math.min(5000, options.pollMs || 350));
@@ -130,16 +153,24 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
         }
         if (worker) {
           const result = await worker.processOnce(2);
-          timer = setTimeout(() => { void tick(); }, result.claimed || reconciledRuns ? 30 : pollMs);
+          scheduleTick(result.claimed || reconciledRuns ? 30 : pollMs);
           return;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message.replace(/[A-Za-z0-9_-]{20,}/g, '[redacted]') : 'unknown daemon worker failure';
         fs.appendFileSync(path.join(runtimeDir, 'daemon.log'), nowIso() + ' ' + message + '\n', { mode: 0o600 });
       }
-      timer = setTimeout(() => { void tick(); }, pollMs);
+      scheduleTick(pollMs);
     };
-    timer = setTimeout(() => { void tick(); }, 10);
+    const scheduleTick = (delay: number): void => {
+      if (stopping) return;
+      timer = setTimeout(() => {
+        const next = tick();
+        inFlightTick = next;
+        void next.finally(() => { if (inFlightTick === next) inFlightTick = null; });
+      }, delay);
+    };
+    scheduleTick(10);
     await new Promise<void>((resolve) => {
       const stop = (): void => { void close().finally(resolve); };
       process.once('SIGTERM', stop);

@@ -177,3 +177,31 @@ test('daemon restart preserves a 100-item queue and never replays external reque
     if (daemonStderr) assert.equal(daemonStderr.includes('Studio daemon failed.'), false, daemonStderr);
   }
 });
+
+test('daemon reuses its workspace port across graceful restarts without a Provider', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
+  const portPath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.port.json');
+  let daemon;
+  try {
+    daemon = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await waitFor(() => fs.existsSync(runtimePath), 'first daemon runtime record');
+    const first = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    assert.ok(Number.isInteger(first.port) && first.port > 0);
+    assert.equal((await fetch(first.url + '/api/health')).status, 200);
+    await stopDaemon(daemon);
+    daemon = null;
+    assert.equal(fs.existsSync(runtimePath), false);
+
+    daemon = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await waitFor(() => fs.existsSync(runtimePath), 'second daemon runtime record');
+    const second = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    assert.equal(second.url, first.url);
+    assert.equal(second.port, first.port);
+    assert.equal(JSON.parse(fs.readFileSync(portPath, 'utf8')).port, first.port);
+    assert.equal((await fetch(second.url + '/api/health')).status, 200);
+  } finally {
+    await stopDaemon(daemon);
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});

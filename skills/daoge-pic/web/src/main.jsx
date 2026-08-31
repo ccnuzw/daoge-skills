@@ -2,23 +2,40 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { createRoot } from 'react-dom/client';
 import { Archive, Bookmark, Check, CircleAlert, CloudOff, Columns3, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, MessageSquareText, PackageCheck, PanelLeftClose, Pause, Play, RefreshCw, RotateCcw, Search, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
+import { createTrailingTaskQueue } from './refresh-coordinator.mjs';
 import { runExecutionPresentation, statusPresentation, taskPresentation } from './status-presentation.mjs';
 import { ASSET_SCOPES, parseWorkbenchRoute, selectProject, selectRound, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
 import './styles.css';
 
 const EMPTY = [];
 
+function isAbortError(error) {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    method: options.method || 'GET',
-    headers: {
-      accept: 'application/json',
-      ...(options.body ? { 'content-type': 'application/json' } : {}),
-      ...(options.idempotencyKey ? { 'idempotency-key': options.idempotencyKey } : {})
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
-  const payload = await response.json();
+  let response;
+  try {
+    response = await fetch(path, {
+      method: options.method || 'GET',
+      headers: {
+        accept: 'application/json',
+        ...(options.body ? { 'content-type': 'application/json' } : {}),
+        ...(options.idempotencyKey ? { 'idempotency-key': options.idempotencyKey } : {})
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: options.signal
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw new Error('无法连接到本地 Studio。请刷新到当前 Studio 地址后重试。');
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(response.ok ? '本地 Studio 返回了无效响应。' : '本地 Studio 暂时不可用。');
+  }
   if (!response.ok || !payload.ok) throw new Error(payload?.error?.message || '本地 Studio 请求失败。');
   return payload.data;
 }
@@ -129,11 +146,17 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef(null);
   const eventCursor = useRef(Number(sessionStorage.getItem('daoge-pic:event-cursor') || '0') || 0);
+  const refreshQueue = useRef(null);
+  const performRefreshRef = useRef(null);
+  const refreshAbortController = useRef(null);
+  const refreshDebounceTimer = useRef(null);
+  const searchEpoch = useRef(0);
   const contextSignature = useRef('');
   const restoredSessionContext = useRef(false);
   const { view, projectId: activeProjectId, taskId: activeTaskId, roundId: activeRoundId, compareRoundIds = EMPTY, runId: activeRunId, assetScope } = route;
 
   const navigateRoute = useCallback((changes, replace = false) => {
+    refreshAbortController.current?.abort();
     const next = updateWorkbenchRoute(route, changes);
     const search = serializeWorkbenchRoute(next);
     window.history[replace ? 'replaceState' : 'pushState']({}, '', window.location.pathname + search);
@@ -141,7 +164,7 @@ function App() {
   }, [route]);
 
   useEffect(() => {
-    const onPopState = () => setRoute(parseWorkbenchRoute(window.location.search));
+    const onPopState = () => { refreshAbortController.current?.abort(); setRoute(parseWorkbenchRoute(window.location.search)); };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
@@ -153,9 +176,9 @@ function App() {
     return nextSession;
   }, [session]);
 
-  const refreshStudio = useCallback(async () => {
+  const refreshStudio = useCallback(async (signal) => {
     const [studioData, providerData, projectData, taskTypeData, styleKitData, brandKitData] = await Promise.all([
-      api('/api/studio'), api('/api/provider/status'), api('/api/projects'), api('/api/task-types'), api('/api/style-kits'), api('/api/brand-kits')
+      api('/api/studio', { signal }), api('/api/provider/status', { signal }), api('/api/projects', { signal }), api('/api/task-types', { signal }), api('/api/style-kits', { signal }), api('/api/brand-kits', { signal })
     ]);
     const nextProjects = projectData.projects || [];
     setStudio(studioData);
@@ -167,7 +190,8 @@ function App() {
     return nextProjects;
   }, []);
 
-  const refreshContext = useCallback(async (knownProjects = projects) => {
+  const refreshContext = useCallback(async (knownProjects, signal) => {
+    const load = (path) => api(path, { signal });
     const selectedProject = activeProjectId ? knownProjects.find((project) => project.id === activeProjectId) || null : null;
     if (activeProjectId && !selectedProject) {
       setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setDeliveries(EMPTY); setDeliveryBatches(EMPTY); setAssets(EMPTY); setContextError('该链接所指向的项目已不存在，或不属于当前 Studio。'); return;
@@ -175,14 +199,15 @@ function App() {
     if (!selectedProject) {
       setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setDeliveries(EMPTY); setDeliveryBatches(EMPTY);
       const path = assetScope === 'studio' ? assetPathForRoute(route) : null;
-      setAssets(path ? (await api(path)).assets || [] : EMPTY);
+      setAssets(path ? (await load(path)).assets || [] : EMPTY);
       setContextError(activeTaskId || activeRoundId || activeRunId ? '请先选择一个项目，再继续查看任务、轮次或运行。' : '');
       return;
     }
+    const needsDeliveries = view === 'deliveries';
     const [taskData, deliveryData, batchData] = await Promise.all([
-      api('/api/projects/' + encodeURIComponent(selectedProject.id) + '/tasks'),
-      api('/api/projects/' + encodeURIComponent(selectedProject.id) + '/deliveries'),
-      api('/api/projects/' + encodeURIComponent(selectedProject.id) + '/delivery-batches')
+      load('/api/projects/' + encodeURIComponent(selectedProject.id) + '/tasks'),
+      needsDeliveries ? load('/api/projects/' + encodeURIComponent(selectedProject.id) + '/deliveries') : Promise.resolve({ deliveries: EMPTY }),
+      needsDeliveries ? load('/api/projects/' + encodeURIComponent(selectedProject.id) + '/delivery-batches') : Promise.resolve({ batches: EMPTY })
     ]);
     const nextTasks = taskData.tasks || [];
     setTasks(nextTasks);
@@ -190,83 +215,144 @@ function App() {
     setDeliveryBatches(batchData.batches || []);
     const selectedTask = activeTaskId ? nextTasks.find((task) => task.id === activeTaskId) || null : null;
     if (activeTaskId && !selectedTask) {
-      setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setAssets(assetScope === 'project' || assetScope === 'studio' ? (await api(assetPathForRoute(route))).assets || [] : EMPTY); setContextError('该任务不属于当前项目，或已不存在。'); return;
+      setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setAssets(assetScope === 'project' || assetScope === 'studio' ? (await load(assetPathForRoute(route))).assets || [] : EMPTY); setContextError('该任务不属于当前项目，或已不存在。'); return;
     }
     if (!selectedTask) {
       setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY);
       const path = assetScope === 'project' || assetScope === 'studio' ? assetPathForRoute(route) : null;
-      setAssets(path ? (await api(path)).assets || [] : EMPTY);
+      setAssets(path ? (await load(path)).assets || [] : EMPTY);
       setContextError(activeRoundId || activeRunId ? '请先选择一个任务，再继续查看轮次或运行。' : '');
       return;
     }
-    const roundData = await api('/api/tasks/' + encodeURIComponent(selectedTask.id) + '/rounds');
+    const roundData = await load('/api/tasks/' + encodeURIComponent(selectedTask.id) + '/rounds');
     const nextRounds = roundData.rounds || [];
     setRounds(nextRounds);
     const selectedRound = activeRoundId ? nextRounds.find((round) => round.id === activeRoundId) || null : null;
     if (activeRoundId && !selectedRound) {
       setRuns(EMPTY); setRunItems(EMPTY);
       const path = assetScope === 'task' || assetScope === 'project' || assetScope === 'studio' ? assetPathForRoute(route) : null;
-      setAssets(path ? (await api(path)).assets || [] : EMPTY); setContextError('该轮次不属于当前任务，或已不存在。'); return;
+      setAssets(path ? (await load(path)).assets || [] : EMPTY); setContextError('该轮次不属于当前任务，或已不存在。'); return;
     }
     if (!selectedRound) {
       setRuns(EMPTY); setRunItems(EMPTY);
       const path = assetScope === 'task' || assetScope === 'project' || assetScope === 'studio' ? assetPathForRoute(route) : null;
-      setAssets(path ? (await api(path)).assets || [] : EMPTY);
+      setAssets(path ? (await load(path)).assets || [] : EMPTY);
       setContextError(activeRunId ? '请先选择一个轮次，再继续查看运行。' : '');
       return;
     }
-    const runData = await api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/runs');
+    const runData = await load('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/runs');
     const nextRuns = runData.runs || [];
     setRuns(nextRuns);
     const selectedRun = activeRunId ? nextRuns.find((run) => run.id === activeRunId) || null : null;
     if (activeRunId && !selectedRun) {
       setRunItems(EMPTY); setContextError('该运行不属于当前轮次，或已不存在。');
     } else if (selectedRun) {
-      const itemData = await api('/api/runs/' + encodeURIComponent(selectedRun.id) + '/items');
+      const itemData = await load('/api/runs/' + encodeURIComponent(selectedRun.id) + '/items');
       setRunItems(itemData.items || []); setContextError('');
     } else {
       setRunItems(EMPTY); setContextError('');
     }
     const path = assetPathForRoute(route);
-    setAssets(path ? (await api(path)).assets || [] : EMPTY);
-  }, [activeProjectId, activeTaskId, activeRoundId, activeRunId, assetScope, projects, route]);
+    setAssets(path ? (await load(path)).assets || [] : EMPTY);
+  }, [activeProjectId, activeTaskId, activeRoundId, activeRunId, assetScope, view]);
 
-  const refresh = useCallback(async () => {
+  const performRefresh = useCallback(async (signal) => {
     try {
       setError('');
       await openWorkbenchSession();
-      const nextProjects = await refreshStudio();
-      await refreshContext(nextProjects);
+      const nextProjects = await refreshStudio(signal);
+      await refreshContext(nextProjects, signal);
     } catch (nextError) {
-      setError(nextError.message || '无法读取本地 Studio。');
+      if (!isAbortError(nextError)) setError(nextError.message || '无法读取本地 Studio。');
     } finally {
       setLoading(false);
     }
   }, [openWorkbenchSession, refreshStudio, refreshContext]);
 
-  const refreshForEvent = useCallback(async () => {
-    await refresh();
-  }, [refresh]);
+  performRefreshRef.current = performRefresh;
+  if (!refreshQueue.current) {
+    refreshQueue.current = createTrailingTaskQueue(async () => {
+      const controller = new AbortController();
+      refreshAbortController.current = controller;
+      await performRefreshRef.current(controller.signal);
+      if (refreshAbortController.current === controller) refreshAbortController.current = null;
+    });
+  }
+  const refresh = useCallback(() => refreshQueue.current.request(), []);
 
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
+  useEffect(() => () => {
+    refreshAbortController.current?.abort();
+    refreshQueue.current?.dispose();
+  }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
-    const cursor = eventCursor.current;
-    const source = new EventSource('/api/events?after=' + cursor);
-    const receive = (message) => {
-      try {
-        const event = JSON.parse(message.data);
-        eventCursor.current = Math.max(eventCursor.current, Number(event.id) || 0);
-        sessionStorage.setItem('daoge-pic:event-cursor', String(eventCursor.current));
-        void refreshForEvent(event);
-      } catch { setError('实时更新内容无效，正在等待下一次同步。'); }
+    let source = null;
+    let reconnectTimer = null;
+    let reconnectAttempt = 0;
+    let disposed = false;
+    const scheduleRefresh = () => {
+      if (refreshDebounceTimer.current) return;
+      refreshDebounceTimer.current = window.setTimeout(() => {
+        refreshDebounceTimer.current = null;
+        void refreshRef.current();
+      }, 180);
     };
-    const snapshotRequired = () => { eventCursor.current = 0; sessionStorage.removeItem('daoge-pic:event-cursor'); void refresh(); };
-    source.addEventListener('studio-event', receive);
-    source.addEventListener('snapshot-required', snapshotRequired);
-    source.onerror = () => setError((current) => current || '实时连接暂时中断，正在自动恢复。');
-    source.onopen = () => setError('');
-    return () => source.close();
-  }, [refresh, refreshForEvent]);
+    const reconnect = () => {
+      if (disposed || reconnectTimer) return;
+      const delay = Math.min(30000, 500 * 2 ** reconnectAttempt) + Math.floor(Math.random() * 250);
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(() => { reconnectTimer = null; connect(); }, delay);
+    };
+    const connect = () => {
+      if (disposed) return;
+      const nextSource = new EventSource('/api/events?after=' + eventCursor.current);
+      source = nextSource;
+      const receive = (message) => {
+        try {
+          const event = JSON.parse(message.data);
+          eventCursor.current = Math.max(eventCursor.current, Number(event.id) || 0);
+          sessionStorage.setItem('daoge-pic:event-cursor', String(eventCursor.current));
+          scheduleRefresh();
+        } catch { setError('实时更新内容无效，正在等待下一次同步。'); }
+      };
+      const snapshotRequired = async (message) => {
+        if (disposed || source !== nextSource) return;
+        nextSource.close();
+        try {
+          const snapshot = JSON.parse(message.data || '{}');
+          eventCursor.current = Number(snapshot.cursor) || 0;
+          sessionStorage.setItem('daoge-pic:event-cursor', String(eventCursor.current));
+          await refreshRef.current();
+          reconnectAttempt = 0;
+          connect();
+        } catch (nextError) {
+          if (!isAbortError(nextError)) setError('实时快照恢复失败，正在重试。');
+          reconnect();
+        }
+      };
+      nextSource.addEventListener('studio-event', receive);
+      nextSource.addEventListener('snapshot-required', snapshotRequired);
+      nextSource.onmessage = receive;
+      nextSource.onopen = () => { reconnectAttempt = 0; setError(''); };
+      nextSource.onerror = () => {
+        if (disposed || source !== nextSource) return;
+        nextSource.close();
+        setError((current) => current || '实时连接暂时中断，正在恢复。');
+        reconnect();
+      };
+    };
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      if (refreshDebounceTimer.current) window.clearTimeout(refreshDebounceTimer.current);
+      refreshDebounceTimer.current = null;
+      if (source) source.close();
+    };
+  }, []);
 
   const selectedProject = useMemo(() => activeProjectId ? projects.find((project) => project.id === activeProjectId) || null : null, [projects, activeProjectId]);
   const selectedTask = useMemo(() => activeTaskId ? tasks.find((task) => task.id === activeTaskId) || null : null, [tasks, activeTaskId]);
@@ -283,25 +369,37 @@ function App() {
   const hasIneligibleDeliveryAssets = selectedAssets.length !== selectedDeliveryAssets.length;
 
   useEffect(() => {
-    let cancelled = false;
     if (!selectedTask) { setTaskOverview(null); return undefined; }
-    void api('/api/tasks/' + encodeURIComponent(selectedTask.id) + '/overview').then((data) => { if (!cancelled) setTaskOverview(data.overview || null); }).catch((nextError) => { if (!cancelled) setError(nextError.message || '无法读取任务创作概览。'); });
-    return () => { cancelled = true; };
+    const controller = new AbortController();
+    void api('/api/tasks/' + encodeURIComponent(selectedTask.id) + '/overview', { signal: controller.signal }).then((data) => {
+      if (!controller.signal.aborted) setTaskOverview(data.overview || null);
+    }).catch((nextError) => {
+      if (!controller.signal.aborted && !isAbortError(nextError)) setError(nextError.message || '无法读取任务创作概览。');
+    });
+    return () => controller.abort();
   }, [selectedTask?.id]);
   useEffect(() => {
-    let cancelled = false;
     if (!selectedRound) { setCreativeRecord(null); return undefined; }
+    const controller = new AbortController();
     const query = activeRunId ? '?runId=' + encodeURIComponent(activeRunId) : '';
-    void api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/creative-record' + query).then((data) => { if (!cancelled) setCreativeRecord(data.record || null); }).catch((nextError) => { if (!cancelled) setError(nextError.message || '无法读取轮次创作记录。'); });
-    return () => { cancelled = true; };
+    void api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/creative-record' + query, { signal: controller.signal }).then((data) => {
+      if (!controller.signal.aborted) setCreativeRecord(data.record || null);
+    }).catch((nextError) => {
+      if (!controller.signal.aborted && !isAbortError(nextError)) setError(nextError.message || '无法读取轮次创作记录。');
+    });
+    return () => controller.abort();
   }, [selectedRound?.id, activeRunId]);
   useEffect(() => {
-    let cancelled = false;
     if (view !== 'studio-overview' || !selectedTask) { setStudioOverview(null); return undefined; }
+    const controller = new AbortController();
     const params = new URLSearchParams();
     for (const roundId of compareRoundIds) params.append('round', roundId);
-    void api('/api/tasks/' + encodeURIComponent(selectedTask.id) + '/studio-overview?' + params.toString()).then((data) => { if (!cancelled) setStudioOverview(data.overview || null); }).catch((nextError) => { if (!cancelled) setError(nextError.message || '无法读取任务轮次比较。'); });
-    return () => { cancelled = true; };
+    void api('/api/tasks/' + encodeURIComponent(selectedTask.id) + '/studio-overview?' + params.toString(), { signal: controller.signal }).then((data) => {
+      if (!controller.signal.aborted) setStudioOverview(data.overview || null);
+    }).catch((nextError) => {
+      if (!controller.signal.aborted && !isAbortError(nextError)) setError(nextError.message || '无法读取任务轮次比较。');
+    });
+    return () => controller.abort();
   }, [view, selectedTask?.id, compareRoundIds.join('|')]);
 
   useEffect(() => {
@@ -392,11 +490,21 @@ function App() {
     const next = compareRoundIds.includes(roundId) ? compareRoundIds.filter((id) => id !== roundId) : [...compareRoundIds, roundId].slice(0, 12);
     navigateRoute({ view: 'studio-overview', roundId: next[0] || null, compareRoundIds: next, runId: null, assetScope: 'task' });
   };
-  const search = async (value) => {
-    const query = value.trim();
-    if (!query) { setSearchResults(EMPTY); return; }
-    try { const data = await api('/api/search?q=' + encodeURIComponent(query) + '&limit=12'); setSearchResults(data.results || []); } catch (nextError) { setError(nextError.message || '无法搜索 Studio。'); }
-  };
+  useEffect(() => {
+    const query = searchQuery.trim();
+    const epoch = ++searchEpoch.current;
+    if (!query) { setSearchResults(EMPTY); return undefined; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await api('/api/search?q=' + encodeURIComponent(query) + '&limit=12', { signal: controller.signal });
+        if (!controller.signal.aborted && epoch === searchEpoch.current) setSearchResults(data.results || []);
+      } catch (nextError) {
+        if (!isAbortError(nextError) && epoch === searchEpoch.current) setError(nextError.message || '无法搜索 Studio。');
+      }
+    }, 260);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [searchQuery]);
   const openSearchResult = (result) => {
     const changes = result.entityType === 'project' ? { view: 'assets', projectId: result.projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' } : { view: 'studio-overview', projectId: result.projectId, taskId: result.taskId, roundId: result.entityType === 'round' ? result.entityId : null, compareRoundIds: result.entityType === 'round' ? [result.entityId] : [], runId: null, assetScope: 'task' };
     setSearchResults(EMPTY); setSearchQuery(''); navigateRoute(changes);
@@ -458,7 +566,7 @@ function App() {
       <header className="surface-header">
         <div className="heading-group"><p className="eyebrow">{selectedProject ? '项目 / ' + selectedProject.name : '本地创作空间'}</p><h1>{view === 'assets' ? '素材与结果' : view === 'runs' ? '生成运行' : view === 'studio-overview' ? '创作总览' : view === 'library' ? '创作资料库' : view === 'deliveries' ? '交付准备' : '回收站'}</h1></div>
         <div className="header-actions">
-          <div className="studio-search"><Search size={15} /><input aria-label="搜索 Studio" value={searchQuery} onChange={(event) => { const value = event.target.value; setSearchQuery(value); void search(value); }} placeholder="搜索项目、任务或轮次" />{searchResults.length > 0 && <div className="search-results">{searchResults.map((result) => <button type="button" key={result.entityType + result.entityId} onClick={() => openSearchResult(result)}><span>{result.entityType === 'project' ? '项目' : result.entityType === 'task' ? '任务' : '轮次'}</span><b>{result.label}</b><small>{result.status || result.purpose || ''}</small></button>)}</div>}</div>
+          <div className="studio-search"><Search size={15} /><input aria-label="搜索 Studio" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索项目、任务或轮次" />{searchResults.length > 0 && <div className="search-results">{searchResults.map((result) => <button type="button" key={result.entityType + result.entityId} onClick={() => openSearchResult(result)}><span>{result.entityType === 'project' ? '项目' : result.entityType === 'task' ? '任务' : '轮次'}</span><b>{result.label}</b><small>{result.status || result.purpose || ''}</small></button>)}</div>}</div>
           {provider?.configured ? <span className="connection-state"><span className="signal-dot" />生成配置已就绪</span> : <span className="connection-state is-error"><CloudOff size={14} />生成配置未就绪</span>}
           <IconButton label="查看生成配置详情" onClick={() => void openProviderDetails()}><SlidersHorizontal size={17} /></IconButton>
           {selectedProject && selectedProject.status !== 'archived' && <IconButton label="归档当前项目" onClick={() => void archiveCurrentProject()}><Archive size={17} /></IconButton>}

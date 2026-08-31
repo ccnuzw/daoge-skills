@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 11;
+export const STUDIO_SCHEMA_VERSION = 12;
 
 const SCHEMA_V1 = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -71,6 +71,11 @@ const SCHEMA_V11 = [
   "CREATE INDEX IF NOT EXISTS idx_delivery_batch_versions_batch_number ON delivery_batch_versions(batch_id, version_no DESC)",
   "CREATE INDEX IF NOT EXISTS idx_delivery_batch_version_deliveries_version_sequence ON delivery_batch_version_deliveries(version_id, sequence)"
 ].join(';\n') + ';';
+const SCHEMA_V12 = [
+  "CREATE INDEX IF NOT EXISTS idx_asset_relations_target_lookup ON asset_relations(target_type, target_id, relation_type, asset_id)",
+  "CREATE INDEX IF NOT EXISTS idx_review_decisions_asset_latest ON review_decisions(asset_id, created_at DESC, id DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_delivery_batch_members_delivery ON delivery_batch_version_deliveries(delivery_id, version_id)"
+].join(';\n') + ';';
 
 export type StudioDatabase = DatabaseSyncType;
 type DatabaseSyncConstructor = new (path: string) => StudioDatabase;
@@ -129,7 +134,8 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
       { version: 8, sql: SCHEMA_V8 },
       { version: 9, sql: SCHEMA_V9 },
     { version: 10, sql: SCHEMA_V10 },
-    { version: 11, sql: SCHEMA_V11 }
+    { version: 11, sql: SCHEMA_V11 },
+    { version: 12, sql: SCHEMA_V12 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;

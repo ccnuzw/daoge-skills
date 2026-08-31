@@ -126,6 +126,8 @@ export class LocalStudioService {
   private readonly pollMs: number;
   private readonly workbenchDir: string;
   private server: Server | null = null;
+  private closePromise: Promise<void> | null = null;
+  private readonly activeEventStreams = new Set<() => void>();
 
   constructor(options: StudioServiceOptions) {
     this.initialized = initializeStudio({ workspaceRoot: options.workspaceRoot, providerTemplatePath: options.providerTemplatePath });
@@ -142,24 +144,41 @@ export class LocalStudioService {
 
   async listen(port = 0, host = '127.0.0.1'): Promise<StartedStudioService> {
     if (this.server) throw new Error('Studio service is already listening.');
-    this.server = http.createServer((request, response) => { void this.handle(request, response); });
-    await new Promise<void>((resolve, reject) => {
-      this.server?.once('error', reject);
-      this.server?.listen(port, host, () => resolve());
-    });
-    const address = this.server.address();
-    if (!address || typeof address === 'string') throw new Error('Studio service did not expose a TCP address.');
+    const server = http.createServer((request, response) => { void this.handle(request, response); });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error): void => { server.removeListener('listening', onListening); reject(error); };
+        const onListening = (): void => { server.removeListener('error', onError); resolve(); };
+        server.once('error', onError);
+        server.once('listening', onListening);
+        server.listen(port, host);
+      });
+    } catch (error) {
+      if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw error;
+    }
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw new Error('Studio service did not expose a TCP address.');
+    }
+    this.server = server;
     return { url: 'http://' + host + ':' + address.port, service: this };
   }
 
   async close(): Promise<void> {
-    const server = this.server;
-    this.server = null;
-    if (server) await new Promise<void>((resolve, reject) => {
-      server.close((error) => error ? reject(error) : resolve());
-      server.closeAllConnections();
-    });
-    closeStudioDatabase(this.db);
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = (async () => {
+      for (const teardown of [...this.activeEventStreams]) teardown();
+      const server = this.server;
+      this.server = null;
+      if (server) await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+        server.closeAllConnections();
+      });
+      closeStudioDatabase(this.db);
+    })();
+    return this.closePromise;
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -368,23 +387,63 @@ export class LocalStudioService {
     });
     response.flushHeaders();
     let cursor = Number.isInteger(after) && after >= 0 ? after : 0;
-    const send = () => {
-      const result = studioEventWindow(this.db, this.initialized.manifest.studioId, cursor);
-      if (result.snapshotRequired) {
-        response.write('event: snapshot-required\n');
-        response.write('data: ' + JSON.stringify({ after: cursor }) + '\n\n');
-        return;
+    let timer: NodeJS.Timeout | null = null;
+    let sending = false;
+    let blocked = false;
+    let closed = false;
+    const teardown = (): void => {
+      if (closed) return;
+      closed = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      response.removeListener('drain', resume);
+      this.activeEventStreams.delete(teardown);
+    };
+    const schedule = (): void => {
+      if (!closed && !blocked && !timer) timer = setTimeout(() => { timer = null; void send(); }, this.pollMs);
+    };
+    const resume = (): void => {
+      blocked = false;
+      schedule();
+    };
+    const write = (frame: string): boolean => {
+      if (closed || response.destroyed || response.writableEnded) { teardown(); return false; }
+      if (!response.write(frame)) {
+        blocked = true;
+        response.once('drain', resume);
+        return false;
       }
-      for (const event of result.events) {
-        cursor = event.id;
-        response.write('id: ' + event.id + '\n');
-        response.write('event: studio-event\n');
-        response.write('data: ' + JSON.stringify(event) + '\n\n');
+      return true;
+    };
+    const send = (): void => {
+      if (closed || blocked || sending) return;
+      sending = true;
+      try {
+        const result = studioEventWindow(this.db, this.initialized.manifest.studioId, cursor);
+        if (result.snapshotRequired) {
+          write('id: ' + result.snapshotCursor + '\n' + 'event: snapshot-required\n' + 'data: ' + JSON.stringify({ after: cursor, cursor: result.snapshotCursor }) + '\n\n');
+          teardown();
+          if (!response.destroyed && !response.writableEnded) response.end();
+          return;
+        }
+        for (const event of result.events) {
+          cursor = event.id;
+          if (!write('id: ' + event.id + '\n' + 'event: studio-event\n' + 'data: ' + JSON.stringify(event) + '\n\n')) break;
+        }
+      } catch {
+        teardown();
+        if (!response.destroyed && !response.writableEnded) response.end();
+      } finally {
+        sending = false;
+        schedule();
       }
     };
+    this.activeEventStreams.add(teardown);
+    request.once('aborted', teardown);
+    request.once('close', teardown);
+    response.once('close', teardown);
+    response.once('error', teardown);
     send();
-    const timer = setInterval(send, this.pollMs);
-    request.on('close', () => clearInterval(timer));
   }
 
   private sendError(response: ServerResponse, error: unknown): void {

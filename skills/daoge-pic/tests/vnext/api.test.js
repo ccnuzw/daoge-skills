@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const http = require('node:http');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -226,12 +227,37 @@ test('SSE honors Last-Event-ID and requests a snapshot for an unavailable event 
     started.service.db.prepare('DELETE FROM events WHERE id < (SELECT MAX(id) FROM events)').run();
     controller = new AbortController();
     const sse = await fetch(started.url + '/api/events', { headers: { accept: 'text/event-stream', 'last-event-id': String(firstId) }, signal: controller.signal });
-    const signal = await nextSseMessage(sse.body.getReader());
+    const reader = sse.body.getReader();
+    const signal = await nextSseMessage(reader);
     assert.equal(signal.event, 'snapshot-required');
     assert.equal(signal.data.after, firstId);
+    assert.equal(Number.isInteger(signal.data.cursor), true);
+    assert.ok(signal.data.cursor >= firstId);
+    assert.equal((await reader.read()).done, true);
+    const recovered = await requestJson(started.url, '/api/events?after=' + signal.data.cursor);
+    assert.equal(recovered.body.data.snapshotRequired, false);
     controller.abort();
   } finally {
     if (controller) controller.abort();
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('local Studio releases its database after a fixed port bind failure', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const blocker = http.createServer();
+  let started;
+  try {
+    await new Promise((resolve, reject) => blocker.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve()));
+    const address = blocker.address();
+    assert.ok(address && typeof address !== 'string');
+    await assert.rejects(startLocalStudioService({ workspaceRoot, providerTemplatePath }, address.port), /EADDRINUSE/);
+    await new Promise((resolve, reject) => blocker.close((error) => error ? reject(error) : resolve()));
+    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath }, address.port);
+    assert.equal((await requestJson(started.url, '/api/health')).status, 200);
+  } finally {
+    if (blocker.listening) await new Promise((resolve) => blocker.close(() => resolve()));
     if (started) await started.service.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
