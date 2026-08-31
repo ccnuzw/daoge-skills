@@ -1,5 +1,6 @@
 import { ImageProvider, ImageProviderCapabilities, ImageRequest, ImageRequestContext, ImageResult, ProviderError, ProviderValidationResult, staticCapabilitiesForProvider } from './contracts';
 import { ProviderId, ResolvedProviderConfig } from '../studio/provider-config';
+import { OutputTransport, resolveOutputSpec } from './output-spec';
 
 const MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
@@ -38,34 +39,30 @@ function imageMediaType(value: unknown): string {
   return 'image/png';
 }
 
-function outputSize(output: Record<string, unknown>): string {
-  const size = String(output.size || output.dimensions || '1024x1024').trim();
-  return /^\d{2,5}x\d{2,5}$/i.test(size) ? size : '1024x1024';
+function outputTransport(config: ResolvedProviderConfig, output: Record<string, unknown>): OutputTransport {
+  const resolved = resolveOutputSpec({ providerId: config.providerId, model: config.model, output });
+  if (!resolved.ok) throw errorWithStatus(422, resolved.code + ': ' + resolved.message);
+  return resolved.transport;
 }
 
-function xaiOptions(size: string): Record<string, string> {
-  const parts = /^(\d+)x(\d+)$/i.exec(size);
-  if (!parts) return {};
-  const width = Number(parts[1]);
-  const height = Number(parts[2]);
-  const ratio = width / height;
-  const aspects: Array<[string, number]> = [['1:1', 1], ['16:9', 16 / 9], ['9:16', 9 / 16]];
-  const closest = aspects.map(([label, value]) => ({ label, delta: Math.abs(ratio - value) / value })).sort((a, b) => a.delta - b.delta)[0];
+function xaiOptions(transport: OutputTransport): Record<string, string> {
   const result: Record<string, string> = {};
-  if (closest && closest.delta <= 0.08) result.aspect_ratio = closest.label;
-  const maxSide = Math.max(width, height);
+  if (transport.aspectRatio) result.aspect_ratio = transport.aspectRatio;
+  const parts = /^(\d+)x(\d+)$/i.exec(transport.size || '');
+  if (!parts) return result;
+  const maxSide = Math.max(Number(parts[1]), Number(parts[2]));
   if (Math.abs(maxSide - 1024) <= 256) result.resolution = '1k';
   if (Math.abs(maxSide - 2048) <= 384) result.resolution = '2k';
   return result;
 }
 
 function requestBody(config: ResolvedProviderConfig, request: ImageRequest): Record<string, unknown> {
-  const size = outputSize(request.output);
+  const transport = outputTransport(config, request.output);
   if (config.providerId === 'gemini-image') {
-    return { contents: [{ role: 'user', parts: [{ text: request.prompt }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } };
+    return { contents: [{ role: 'user', parts: [{ text: request.prompt }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'], ...(transport.aspectRatio ? { imageConfig: { aspectRatio: transport.aspectRatio } } : {}) } };
   }
-  const body: Record<string, unknown> = { model: config.model, prompt: request.prompt, n: 1, size, response_format: 'b64_json' };
-  if (config.providerId === 'xai-grok-image') Object.assign(body, xaiOptions(size));
+  const body: Record<string, unknown> = { model: config.model, prompt: request.prompt, n: 1, size: transport.size || '1024x1024', response_format: 'b64_json' };
+  if (config.providerId === 'xai-grok-image') Object.assign(body, xaiOptions(transport));
   return body;
 }
 
@@ -168,6 +165,7 @@ class HttpImageProvider implements ImageProvider {
     if (!validation.valid) throw new Error('Provider configuration is incomplete: ' + validation.missing.join(', '));
     if (!request.referenceAssets.length) throw errorWithStatus(422, 'An edit request requires at least one managed reference asset.');
     const timeout = Math.min(10 * 60 * 1000, Math.max(1000, Number(request.output.timeoutMs || 120000)));
+    const transport = outputTransport(this.config, request.output);
     const signal = AbortSignal.any([context.abortSignal, AbortSignal.timeout(timeout)]);
     let response: Response;
     if (this.config.providerId === 'openai-images') {
@@ -175,7 +173,7 @@ class HttpImageProvider implements ImageProvider {
       body.set('model', this.config.model);
       body.set('prompt', request.prompt);
       body.set('n', '1');
-      body.set('size', outputSize(request.output));
+      body.set('size', transport.size || '1024x1024');
       body.set('response_format', 'b64_json');
       for (const reference of request.referenceAssets) body.append('image', new Blob([new Uint8Array(reference.bytes)], { type: reference.mediaType }), reference.assetId + extension(reference.mediaType));
       if (request.maskAsset) body.set('mask', new Blob([new Uint8Array(request.maskAsset.bytes)], { type: request.maskAsset.mediaType }), request.maskAsset.assetId + '.png');
@@ -183,7 +181,7 @@ class HttpImageProvider implements ImageProvider {
     } else if (this.config.providerId === 'gemini-image' && this.config.referenceEnabled && !request.maskAsset) {
       const parts: Array<Record<string, unknown>> = [{ text: request.prompt }];
       for (const reference of request.referenceAssets) parts.push({ inlineData: { data: reference.bytes.toString('base64'), mimeType: reference.mediaType } });
-      response = await fetch(endpoint(this.config.baseUrl, this.config.providerId, this.config.model), { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'x-goog-api-key': this.config.apiKey }, body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } }), signal });
+      response = await fetch(endpoint(this.config.baseUrl, this.config.providerId, this.config.model), { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'x-goog-api-key': this.config.apiKey }, body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'], ...(transport.aspectRatio ? { imageConfig: { aspectRatio: transport.aspectRatio } } : {}) } }), signal });
     } else {
       throw errorWithStatus(422, 'The selected Provider does not support this managed reference or mask edit.');
     }

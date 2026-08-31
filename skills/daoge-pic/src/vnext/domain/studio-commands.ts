@@ -274,6 +274,11 @@ export function createRoundDraft(db: StudioDatabase, input: { taskId: string; pu
     if (taskState.task_status === 'archived' || taskState.project_status === 'archived') throw new InvalidCommandError('Cannot create a round in archived creative context.');
     const allowedPurposes: CreativeRound['purpose'][] = ['exploration', 'refinement', 'variation', 'edit', 'fill'];
     if (!allowedPurposes.includes(input.purpose)) throw new InvalidCommandError('Unsupported round purpose.');
+    if (input.parentRoundId) {
+      const parent = db.prepare('SELECT task_id FROM creative_rounds WHERE id = ?').get(input.parentRoundId) as { task_id: string } | undefined;
+      if (!parent) throw new StudioNotFoundError('Parent creative round not found: ' + input.parentRoundId);
+      if (parent.task_id !== taskId) throw new InvalidCommandError('Parent creative round must belong to the same task.');
+    }
     const id = createId('round');
     const plan = input.plan || {};
     const timestamp = nowIso();

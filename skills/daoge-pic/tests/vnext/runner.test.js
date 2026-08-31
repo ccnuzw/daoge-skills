@@ -54,6 +54,17 @@ test('preflight rejects unconfigured providers and unsupported edit plans withou
 });
 
 
+
+test('preflight validates requested aspect ratios before a Provider call', () => {
+  const compatible = { providerId: 'gemini-openai-compatible', configured: true, missing: [], model: 'fixture-model', endpoint: 'https://images.example.test', capabilities: { generate: true, edit: false, referenceImage: false, mask: false } };
+  assert.equal(preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'wide scene', output: { aspectRatio: '16:9' } }, compatible).valid, true);
+  const malformed = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'bad format', output: { aspectRatio: 'wide' } }, compatible);
+  assert.deepEqual(malformed.issues.map((issue) => issue.code), ['invalid_aspect_ratio']);
+  const openAi = { ...compatible, providerId: 'openai-images' };
+  const unsupported = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'exact wide scene', output: { aspectRatio: '16:9' } }, openAi);
+  assert.deepEqual(unsupported.issues.map((issue) => issue.code), ['aspect_ratio_unsupported']);
+});
+
 test('persists a no-call dry-run preview and rejects stale Provider snapshots before queueing', () => {
   const fixture = configuredStudio();
   try {
@@ -67,6 +78,7 @@ test('persists a no-call dry-run preview and rejects stale Provider snapshots be
     assert.equal(fixture.db.prepare('SELECT COUNT(*) AS total FROM generation_runs').get().total, 0);
     const changedConfig = { ...config, model: config.model + '-changed' };
     assert.throws(() => queueGenerationRun(fixture.db, { roundId: confirmed.value.id, providerConfig: changedConfig, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'stale-preview' }), InvalidCommandError);
+    fixture.db.prepare('UPDATE dry_run_previews SET plan_snapshot_json = ? WHERE id = ?').run(JSON.stringify({ output: { aspectRatio: '1:1' }, referenceAssetIds: [], prompt: 'dry run evidence', itemCount: 3, operation: 'generate' }), dryRun.value.preview.id);
     const queued = queueGenerationRun(fixture.db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'fresh-preview' });
     assert.equal(queued.value.status, 'queued');
   } finally { cleanup(fixture.workspaceRoot); }

@@ -8,7 +8,7 @@ import { GenerationWorker } from '../runner/worker';
 import { reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
-import { loadProviderConfig, providerSnapshot } from '../studio/provider-config';
+import { loadProviderConfig, providerSnapshot, providerStatus } from '../studio/provider-config';
 import { initializeStudio } from '../studio/workspace';
 
 export interface StudioDaemonOptions {
@@ -25,6 +25,7 @@ interface RuntimeRecord {
   workspaceRoot: string;
   startedAt: string;
   heartbeatAt: string;
+  workerConcurrency: number | null;
 }
 
 function writeAtomically(filePath: string, value: unknown): void {
@@ -93,9 +94,10 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
   let heartbeatTimer: NodeJS.Timeout | null = null;
   let inFlightTick: Promise<void> | null = null;
   let startedUrl = '';
+  let activeWorkerConcurrency: number | null = null;
   const workerId = createId('worker');
 
-  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso() });
+  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso(), workerConcurrency: activeWorkerConcurrency });
   const startedAt = nowIso();
   const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
   const close = async (): Promise<void> => {
@@ -121,13 +123,13 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
     const started = await service.listen(requestedPort);
     startedUrl = started.url;
     writeAtomically(portPath, { port: Number(new URL(startedUrl).port) });
-    heartbeat();
-    heartbeatTimer = setInterval(heartbeat, 5000);
     const pollMs = Math.max(100, Math.min(5000, options.pollMs || 350));
     // A daemon uses one in-memory Provider identity for its lifetime. Configuration changes require a restart and cannot silently alter an in-flight run.
     const workerConfig = loadProviderConfig(initialized.paths);
+    const workerStatus = providerStatus(initialized.paths);
+    activeWorkerConcurrency = workerStatus.configured ? workerConfig?.workerConcurrency || null : null;
     const workerProvider = workerConfig ? createImageProvider(workerConfig) : null;
-    const workerReady = Boolean(workerConfig && workerProvider && workerProvider.validateConfig(workerConfig).valid);
+    const workerReady = Boolean(workerConfig && workerProvider && workerStatus.configured && workerProvider.validateConfig(workerConfig).valid);
     const workerSnapshot = workerConfig ? providerSnapshot(workerConfig) : null;
     let configChangeReported = false;
     const assetPersister = new StudioGeneratedAssetPersister({ db: workerDb, paths: initialized.paths, studioId: initialized.manifest.studioId });
@@ -140,6 +142,8 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
       assetPersister,
       assetResolver
     }) : null;
+    heartbeat();
+    heartbeatTimer = setInterval(heartbeat, 5000);
     const tick = async (): Promise<void> => {
       if (stopping) return;
       try {
@@ -152,7 +156,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
           appendStudioEvent(workerDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_changed', payload: { restartRequired: true } });
         }
         if (worker) {
-          const result = await worker.processOnce(2);
+          const result = await worker.processOnce(activeWorkerConcurrency || 2);
           scheduleTick(result.claimed || reconciledRuns ? 30 : pollMs);
           return;
         }

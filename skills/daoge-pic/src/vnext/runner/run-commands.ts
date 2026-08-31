@@ -91,6 +91,19 @@ function parsePlan(value: string): PreflightPlan {
   };
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map((item) => stableJson(item)).join(',') + ']';
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return '{' + Object.keys(record).filter((key) => record[key] !== undefined).sort().map((key) => JSON.stringify(key) + ':' + stableJson(record[key])).join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
+function storedSnapshotMatches(serialized: string, expected: unknown): boolean {
+  try { return stableJson(JSON.parse(serialized)) === stableJson(expected); } catch { return false; }
+}
+
 function runFromRow(row: StoredRun): GenerationRun {
   return {
     id: row.id,
@@ -201,7 +214,7 @@ export function queueGenerationRun(db: StudioDatabase, input: { roundId: string;
     if (!input.preflightId) throw new InvalidCommandError('Dry-run evidence is required before queueing.');
     {
       const preview = db.prepare('SELECT round_id, plan_version, provider_snapshot_json, plan_snapshot_json FROM dry_run_previews WHERE id = ?').get(input.preflightId) as { round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string } | undefined;
-      if (!preview || preview.round_id !== round.id || preview.plan_version !== round.plan_version || preview.provider_snapshot_json !== JSON.stringify(snapshot) || preview.plan_snapshot_json !== JSON.stringify(preflight.normalizedPlan)) throw new InvalidCommandError('Dry-run evidence is stale. Re-run preflight before queueing.');
+      if (!preview || preview.round_id !== round.id || preview.plan_version !== round.plan_version || !storedSnapshotMatches(preview.provider_snapshot_json, snapshot) || !storedSnapshotMatches(preview.plan_snapshot_json, preflight.normalizedPlan)) throw new InvalidCommandError('Dry-run evidence is stale. Re-run preflight before queueing.');
     }
     const id = createId('run');
     const timestamp = nowIso();

@@ -63,6 +63,8 @@ node scripts/daoge.js open --workspace <path>
 node scripts/daoge.js session --workspace <path> --conversation <conversation-id>
 node scripts/daoge.js project --workspace <path> --session <session-id> --name "项目名称"
 node scripts/daoge.js archive-project --workspace <path> --project <project-id>
+node scripts/daoge.js config --workspace <path> --worker-concurrency <1|2|4>
+node scripts/daoge.js restart --workspace <path>
 node scripts/daoge.js task --workspace <path> --project <project-id> --session <session-id> --name "创作任务" --intent '{"goal":"..."}'
 node scripts/daoge.js task-type --workspace <path> --name "自定义任务类型" --definition '{"summary":"..."}'
 node scripts/daoge.js style-kit --workspace <path> --name "风格包" --assets <asset-id,...> --definition '{"lighting":"..."}'
@@ -93,9 +95,10 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 - daemon 重启时，未完成运行进入 resume_pending；再次外部调用前必须在会话中得到用户确认，并以 resume --session <session-id> 记录该确认。Workbench 只能显示等待状态，不能绕过会话继续运行。
 - retry 只允许对 failed、blocked 或 retry_wait 运行项重试；可指定 --items 做单项重试。outcome_unknown 只能先用 resolve-unknown 明确结案，绝不会作为重试输入。
 - archive-project 会在未完成生成全部暂停、完成、失败或取消后，以事务方式归档项目、任务和轮次；不能通过文件夹变更表达归档状态。
-- daemon 在启动时固定 Provider 配置、模型和端点身份；配置改动会记录“需要重启”的事件，不能静默改变正在运行的工作。
-- Provider 配置快照包含模型、端点身份和能力，不包含 API Key 或完整 URL。Worker 只领取与当前内存配置匹配的运行。
-- 预检会产生可审计的干跑预览和运行项计划，不调用 Provider、不创建正式生成资产。入队使用 --preflight 绑定该证据；计划或安全 Provider 快照变化后必须重新预检。
+- daemon 在启动时固定 Provider 配置、模型、端点身份和 Worker 并发；使用 `config --worker-concurrency <1|2|4>` 只会安全更新期望值，必须再用 `restart` 优雅重启才能生效。
+- `restart` 只终止同工作区 daemon、等待其释放运行记录并复用既有启动流程；它不强制杀进程、不删除锁文件，也不绕过 `resume_pending` 的会话确认。
+- Provider 配置快照包含模型、端点身份和能力，不包含 API Key、完整 URL 或 Worker 调度参数。Worker 只领取与当前内存配置匹配的运行。
+- 预检会产生可审计的干跑预览和运行项计划，不调用 Provider、不创建正式生成资产。入队使用 --preflight 绑定该证据；计划或安全 Provider 快照变化后必须重新预检。显式画幅会按 Provider 规格验证；不支持或不一致的尺寸会在预检拒绝，绝不静默回退为方图。
 - 媒体二进制使用提交恢复日志、暂存和原子归档；导入、生成、回收和恢复都在启动时对账，数据库和事件记录资产关系与决策。
 
 ## Workbench 边界

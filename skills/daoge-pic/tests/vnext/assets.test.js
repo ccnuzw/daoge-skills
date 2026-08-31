@@ -7,8 +7,9 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { createProject, createRoundDraft, createTaskDraft } = require('../../dist/vnext/domain/studio-commands');
-const { importStudioAsset, listScopedStudioAssets, listStudioAssets, assetFilePath, recoverAssetMediaOperations, softDeleteAsset, restoreAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
+const { importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, assetFilePath, recoverAssetMediaOperations, setStudioAssetShared, softDeleteAsset, restoreAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
 const { archiveStagedImage, plannedArchivePath, stageImage } = require('../../dist/vnext/media/archive');
+const { setProjectAssetSelected } = require('../../dist/vnext/domain/project-selections');
 
 const skillRoot = path.resolve(__dirname, '../..');
 const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
@@ -27,7 +28,7 @@ function cleanup(value) {
   fs.rmSync(value.workspaceRoot, { recursive: true, force: true });
 }
 
-test('imports global assets once and relates them to projects without duplicated files', () => {
+test('imports project assets once and shares them only by explicit action', () => {
   const value = fixture();
   try {
     const first = importStudioAsset(value.db, value.initialized.paths, { studioId: value.initialized.manifest.studioId, bytes: png, mediaType: 'image/png', originalFilename: 'brand-logo.png', targetType: 'project', targetId: value.project.value.id, source: { channel: 'drop' } });
@@ -35,6 +36,13 @@ test('imports global assets once and relates them to projects without duplicated
     assert.equal(second.id, first.id);
     assert.equal(listStudioAssets(value.db, value.initialized.manifest.studioId).length, 1);
     assert.equal(listStudioAssets(value.db, value.initialized.manifest.studioId, { targetType: 'project', targetId: value.project.value.id }).length, 1);
+    setProjectAssetSelected(value.db, { studioId: value.initialized.manifest.studioId, projectId: value.project.value.id, assetId: first.id, selected: true });
+    assert.deepEqual(listStudioAssets(value.db, value.initialized.manifest.studioId, { targetType: 'project', targetId: value.project.value.id }).map((asset) => asset.id), [first.id]);
+    assert.deepEqual(listSharedStudioAssets(value.db, value.initialized.manifest.studioId), []);
+    assert.deepEqual(setStudioAssetShared(value.db, { studioId: value.initialized.manifest.studioId, assetId: first.id, shared: true }), { assetId: first.id, shared: true, changed: true });
+    assert.deepEqual(listSharedStudioAssets(value.db, value.initialized.manifest.studioId).map((asset) => asset.id), [first.id]);
+    assert.deepEqual(setStudioAssetShared(value.db, { studioId: value.initialized.manifest.studioId, assetId: first.id, shared: false }), { assetId: first.id, shared: false, changed: true });
+    assert.deepEqual(listSharedStudioAssets(value.db, value.initialized.manifest.studioId), []);
     assert.equal(fs.existsSync(assetFilePath(value.initialized.paths, first)), true);
     assert.equal(fs.readdirSync(path.join(value.workspaceRoot, 'daoge-assets', 'imports')).length, 1);
   } finally {
@@ -84,6 +92,8 @@ test('soft deletes and restores assets without encoding review state in folders'
     assert.match(trashed.storagePath, /^daoge-assets\/trash\//);
     assert.equal(fs.existsSync(assetFilePath(value.initialized.paths, trashed)), true);
     assert.equal(listStudioAssets(value.db, value.initialized.manifest.studioId).length, 0);
+    assert.deepEqual(listStudioAssets(value.db, value.initialized.manifest.studioId, { deletedOnly: true }).map((item) => item.id), [asset.id]);
+    assert.deepEqual(listScopedStudioAssets(value.db, value.initialized.manifest.studioId, { scope: 'project', projectId: value.project.value.id, deletedOnly: true }).map((item) => item.id), [asset.id]);
     const restored = restoreAsset(value.db, value.initialized.paths, { studioId: value.initialized.manifest.studioId, assetId: asset.id });
     assert.match(restored.storagePath, /^daoge-assets\/imports\//);
     assert.equal(restored.deletedAt, null);

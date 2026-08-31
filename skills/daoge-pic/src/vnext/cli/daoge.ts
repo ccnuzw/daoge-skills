@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-interface RuntimeRecord { pid: number; url: string; workspaceRoot: string; heartbeatAt: string; }
+interface RuntimeRecord { pid: number; url: string; workspaceRoot: string; heartbeatAt: string; workerConcurrency?: number | null; }
 
 type JsonObject = Record<string, unknown>;
 
@@ -34,6 +34,44 @@ async function healthy(url: string): Promise<boolean> {
 }
 
 function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+
+function strictWorkerConcurrency(value: string): 1 | 2 | 4 {
+  if (value === '1' || value === '2' || value === '4') return Number(value) as 1 | 2 | 4;
+  throw new Error('--worker-concurrency 只能是 1、2 或 4。');
+}
+
+function updateWorkerConcurrency(workspaceRoot: string, value: 1 | 2 | 4): void {
+  const envPath = path.join(workspaceRoot, 'daoge-studio', 'provider.env');
+  if (!fs.existsSync(envPath)) throw new Error('未找到 Provider 配置。请先完成 Studio 初始化和 Provider 配置。');
+  const existing = fs.readFileSync(envPath, 'utf8');
+  const line = 'DAOGE_PIC_WORKER_CONCURRENCY=' + value;
+  const next = /^DAOGE_PIC_WORKER_CONCURRENCY=.*$/m.test(existing) ? existing.replace(/^DAOGE_PIC_WORKER_CONCURRENCY=.*$/m, line) : existing.replace(/\n?$/, '\n') + line + '\n';
+  const temporary = envPath + '.' + process.pid + '.tmp';
+  fs.writeFileSync(temporary, next, { mode: 0o600 });
+  fs.renameSync(temporary, envPath);
+}
+
+async function waitForDaemonRelease(workspaceRoot: string, pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const current = readRuntime(workspaceRoot);
+    let live = false;
+    try { process.kill(pid, 0); live = true; } catch { /* process is gone */ }
+    if (!live && (!current || current.pid !== pid)) return;
+    await sleep(100);
+  }
+  throw new Error('Studio daemon 未能在 6 秒内安全停止；没有执行强制终止。');
+}
+
+async function restartDaemon(workspaceRoot: string): Promise<{ previousPid: number | null; daemon: RuntimeRecord }> {
+  const existing = readRuntime(workspaceRoot);
+  if (existing && path.resolve(existing.workspaceRoot) !== workspaceRoot) throw new Error('运行记录不属于当前工作区，拒绝重启。');
+  const previousPid = existing?.pid || null;
+  if (existing) {
+    try { process.kill(existing.pid, 'SIGTERM'); } catch { /* wait verifies release or reports a bounded failure */ }
+    await waitForDaemonRelease(workspaceRoot, existing.pid);
+  }
+  return { previousPid, daemon: await ensureDaemon(workspaceRoot) };
+}
 
 async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
   const existing = readRuntime(workspaceRoot);
@@ -87,6 +125,8 @@ function usage(): string {
     'DAOGE Pic vNext Studio',
     'daoge studio --workspace <path>',
     'daoge open --workspace <path>',
+    'daoge config --workspace <path> --worker-concurrency <1|2|4>  # 修改并发，需重启生效',
+    'daoge restart --workspace <path>  # 优雅重启本工作区 Studio',
     'daoge session --workspace <path> --conversation <id>',
     'daoge project --workspace <path> --name <name> [--description <text>] [--session <id>]',
     'daoge archive-project --workspace <path> --project <id>',
@@ -125,6 +165,18 @@ async function main(): Promise<void> {
   if (command === 'status') {
     const record = readRuntime(root);
     process.stdout.write(JSON.stringify({ workspaceRoot: root, daemon: record, healthy: Boolean(record && await healthy(record.url)) }, null, 2) + '\n');
+    return;
+  }
+  if (command === 'config') {
+    const workerConcurrency = strictWorkerConcurrency(required(args, '--worker-concurrency'));
+    updateWorkerConcurrency(root, workerConcurrency);
+    const active = readRuntime(root);
+    process.stdout.write(JSON.stringify({ workspaceRoot: root, workerConcurrency, restartRequired: Boolean(active && await healthy(active.url)), activeWorkerConcurrency: active?.workerConcurrency || null }, null, 2) + '\n');
+    return;
+  }
+  if (command === 'restart') {
+    const restarted = await restartDaemon(root);
+    process.stdout.write(JSON.stringify({ workspaceRoot: root, previousPid: restarted.previousPid, daemon: restarted.daemon }, null, 2) + '\n');
     return;
   }
   const record = await ensureDaemon(root);

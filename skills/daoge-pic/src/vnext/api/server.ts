@@ -7,18 +7,22 @@ import { initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { loadProviderConfig, providerStatus } from '../studio/provider-config';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, markRunsResumePending, pauseGenerationRun, preflightRound, queueGenerationRun, reconcileTerminalRuns, recoverExpiredLeases, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
-import { AssetScope, assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, softDeleteAsset, StudioAsset } from '../domain/assets';
+import { AssetScope, assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { createDelivery, exportDelivery, getDelivery, listDeliveries, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
 import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
 import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
+import { listProjectSelectionAssets, setProjectAssetSelected } from '../domain/project-selections';
 import { reconcileManagedMedia, recoverGeneratedMediaCommits } from '../media/reconcile';
 import { studioEventWindow } from './events';
 import { sha256 } from '../shared/ids';
+import { createImageZip, ZipEntryInput } from '../media/zip';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
+const MAX_ARCHIVE_IMAGE_COUNT = 100;
+const MAX_ARCHIVE_BYTES = 150 * 1024 * 1024;
 
 type JsonBody = Record<string, unknown>;
 
@@ -96,6 +100,8 @@ function numberValue(value: unknown): number {
   return Number(value);
 }
 
+function imageExtension(mediaType: string): string { return mediaType === 'image/jpeg' ? 'jpg' : mediaType === 'image/webp' ? 'webp' : mediaType === 'image/gif' ? 'gif' : 'png'; }
+
 function assetScope(value: string | null): AssetScope | null {
   if (!value) return null;
   if (value === 'round' || value === 'task' || value === 'project' || value === 'studio') return value;
@@ -114,10 +120,16 @@ function publicValue(value: unknown): unknown {
   return safe;
 }
 
-function publicAsset(asset: StudioAsset & { review?: unknown }): Record<string, unknown> {
+function publicAsset(asset: StudioAsset & { review?: unknown; display?: unknown }): Record<string, unknown> {
   const result: Record<string, unknown> = { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, byteSize: asset.byteSize, deletedAt: asset.deletedAt, source: publicValue(asset.source) };
   if (asset.review !== undefined) result.review = publicValue(asset.review);
+  if (asset.display !== undefined) result.display = publicValue(asset.display);
   return result;
+}
+
+function projectSelectionPayload(db: StudioDatabase, studioId: string, projectId: string): Record<string, unknown> {
+  const assets = listProjectSelectionAssets(db, { studioId, projectId });
+  return { projectId, assets: listAssetsWithReviewSummaries(db, assets, projectId).map(publicAsset) };
 }
 
 export class LocalStudioService {
@@ -191,27 +203,37 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/provider/details') return success(response, { ...providerStatus(this.initialized.paths), providerEnvPath: 'daoge-studio/provider.env' });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
-      if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db) });
-      if (request.method === 'GET' && parsed.pathname === '/api/style-kits') return success(response, { styleKits: listStyleKits(this.db, this.initialized.manifest.studioId) });
-      if (request.method === 'GET' && parsed.pathname === '/api/brand-kits') return success(response, { brandKits: listBrandKits(this.db, this.initialized.manifest.studioId) });
+      if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db).map(publicValue) });
+      if (request.method === 'GET' && parsed.pathname === '/api/style-kits') return success(response, { styleKits: listStyleKits(this.db, this.initialized.manifest.studioId).map(publicValue) });
+      if (request.method === 'GET' && parsed.pathname === '/api/brand-kits') return success(response, { brandKits: listBrandKits(this.db, this.initialized.manifest.studioId).map(publicValue) });
+      if (request.method === 'GET' && parsed.pathname === '/api/shared-assets') return success(response, { assets: listSharedStudioAssets(this.db, this.initialized.manifest.studioId).map(publicAsset) });
       const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && sessionMatch) return success(response, { session: getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionMatch[1] }) });
       if (request.method === 'GET' && parsed.pathname === '/api/assets') {
         const scope = assetScope(parsed.searchParams.get('scope'));
-        const input = { includeDeleted: parsed.searchParams.get('deleted') === 'true', projectId: parsed.searchParams.get('projectId') || undefined, taskId: parsed.searchParams.get('taskId') || undefined, roundId: parsed.searchParams.get('roundId') || undefined, limit: parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : undefined };
+        const deletedFilter = parsed.searchParams.get('deleted');
+        const input = { includeDeleted: deletedFilter === 'true', deletedOnly: deletedFilter === 'only', projectId: parsed.searchParams.get('projectId') || undefined, taskId: parsed.searchParams.get('taskId') || undefined, roundId: parsed.searchParams.get('roundId') || undefined, limit: parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : undefined };
         if (scope) return success(response, { assets: listAssetsWithReviewSummaries(this.db, listScopedStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, scope }), input.projectId).map(publicAsset), scope });
         return success(response, { assets: listAssetsWithReviewSummaries(this.db, listStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, targetType: parsed.searchParams.get('targetType') || undefined, targetId: parsed.searchParams.get('targetId') || undefined }), input.projectId).map(publicAsset) });
       }
+      const projectSelectionMatch = /^\/api\/projects\/([^/]+)\/selection$/.exec(parsed.pathname);
+      if (request.method === 'GET' && projectSelectionMatch) return success(response, { selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectSelectionMatch[1]) });
       const assetImpactMatch = /^\/api\/assets\/([^/]+)\/impact$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetImpactMatch) return success(response, { impact: getAssetImpact(this.db, this.initialized.manifest.studioId, assetImpactMatch[1]) });
       const assetProvenanceMatch = /^\/api\/assets\/([^/]+)\/provenance$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetProvenanceMatch) return success(response, { provenance: getAssetProvenance(this.db, this.initialized.manifest.studioId, assetProvenanceMatch[1]) });
+      const projectArchiveMatch = /^\/api\/projects\/([^/]+)\/assets\/archive$/.exec(parsed.pathname);
+      if (request.method === 'GET' && projectArchiveMatch) return this.projectAssetArchive(response, projectArchiveMatch[1], parsed.searchParams.getAll('assetId'));
+      const deliveryArchiveMatch = /^\/api\/deliveries\/([^/]+)\/archive$/.exec(parsed.pathname);
+      if (request.method === 'GET' && deliveryArchiveMatch) return this.deliveryArchive(response, deliveryArchiveMatch[1], parsed.searchParams.getAll('sequence'));
+      const deliveryFileMatch = /^\/api\/deliveries\/([^/]+)\/files\/(\d+)$/.exec(parsed.pathname);
+      if (request.method === 'GET' && deliveryFileMatch) return this.deliveryFile(response, deliveryFileMatch[1], Number(deliveryFileMatch[2]), parsed.searchParams.get('download') === '1');
       const deliveryDetailMatch = /^\/api\/deliveries\/([^/]+)$/.exec(parsed.pathname);
-      if (request.method === 'GET' && deliveryDetailMatch) return success(response, { delivery: getDelivery(this.db, deliveryDetailMatch[1]) });
+      if (request.method === 'GET' && deliveryDetailMatch) { this.assertDeliveryInStudio(deliveryDetailMatch[1]); return success(response, { delivery: getDelivery(this.db, deliveryDetailMatch[1]) }); }
       const batchDetailMatch = /^\/api\/delivery-batches\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && batchDetailMatch) return success(response, { batch: getDeliveryBatch(this.db, this.initialized.manifest.studioId, batchDetailMatch[1]) });
       const deliveryMatch = /^\/api\/projects\/([^/]+)\/deliveries$/.exec(parsed.pathname);
-      if (request.method === 'GET' && deliveryMatch) return success(response, { deliveries: listDeliveries(this.db, deliveryMatch[1]) });
+      if (request.method === 'GET' && deliveryMatch) { this.assertProjectInStudio(deliveryMatch[1]); return success(response, { deliveries: listDeliveries(this.db, deliveryMatch[1]) }); }
       const batchMatch = /^\/api\/projects\/([^/]+)\/delivery-batches$/.exec(parsed.pathname);
       if (request.method === 'GET' && batchMatch) return success(response, { batches: listDeliveryBatches(this.db, this.initialized.manifest.studioId, batchMatch[1]) });
       const taskMatch = /^\/api\/projects\/([^/]+)\/tasks$/.exec(parsed.pathname);
@@ -233,7 +255,7 @@ export class LocalStudioService {
       const runItemsMatch = /^\/api\/runs\/([^/]+)\/items$/.exec(parsed.pathname);
       if (request.method === 'GET' && runItemsMatch) return success(response, { items: listRunItemsForQuery(this.db, runItemsMatch[1]) });
       const assetFileMatch = /^\/api\/assets\/([^/]+)\/file$/.exec(parsed.pathname);
-      if (request.method === 'GET' && assetFileMatch) return this.assetFile(response, assetFileMatch[1]);
+      if (request.method === 'GET' && assetFileMatch) return this.assetFile(response, assetFileMatch[1], parsed.searchParams.get('download') === '1');
       if (request.method === 'GET' && parsed.pathname === '/api/events') return this.events(request, response, parsed);
       if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
       if (request.method !== 'POST' && request.method !== 'PUT') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
@@ -254,6 +276,14 @@ export class LocalStudioService {
     if (sessionContextMatch) return success(response, executeIdempotent(this.db, key, 'sessions.context', () => updateStudioSessionContext(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined }), { sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined }).value);
     const archiveProjectMatch = /^\/api\/projects\/([^/]+)\/archive$/.exec(pathname);
     if (archiveProjectMatch) return success(response, archiveProject(this.db, { projectId: archiveProjectMatch[1], idempotencyKey: key }));
+    const projectSelectionMatch = /^\/api\/projects\/([^/]+)\/selection\/assets\/([^/]+)$/.exec(pathname);
+    if (projectSelectionMatch && request.method === 'POST') {
+      const projectId = projectSelectionMatch[1];
+      const assetId = projectSelectionMatch[2];
+      const selected = body.selected === true;
+      executeIdempotent(this.db, key, 'projects.selection_asset', () => setProjectAssetSelected(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetId, selected }), { projectId, assetId, selected });
+      return success(response, { selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectId) });
+    }
     if (pathname === '/api/projects') {
       const created = createProject(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), description: text(body.description) || undefined, sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
@@ -263,18 +293,18 @@ export class LocalStudioService {
     if (batchRevisionMatch && request.method === 'POST') return success(response, reviseDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, batchId: batchRevisionMatch[1], deliveryIds: Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
     const batchReadyMatch = /^\/api\/delivery-batch-versions\/([^/]+)\/ready$/.exec(pathname);
     if (batchReadyMatch && request.method === 'POST') return success(response, prepareDeliveryBatchVersion(this.db, { studioId: this.initialized.manifest.studioId, versionId: batchReadyMatch[1], idempotencyKey: key }));
-    if (pathname === '/api/deliveries' && request.method === 'POST') return success(response, createDelivery(this.db, { projectId: text(body.projectId), name: text(body.name), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key }));
+    if (pathname === '/api/deliveries' && request.method === 'POST') { this.assertProjectInStudio(text(body.projectId)); return success(response, createDelivery(this.db, { projectId: text(body.projectId), name: text(body.name), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key })); }
     const deliveryItemsMatch = /^\/api\/deliveries\/([^/]+)\/items$/.exec(pathname);
-    if (deliveryItemsMatch && request.method === 'PUT') return success(response, updateDeliveryDraft(this.db, { deliveryId: deliveryItemsMatch[1], assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key }));
+    if (deliveryItemsMatch && request.method === 'PUT') { this.assertDeliveryInStudio(deliveryItemsMatch[1]); return success(response, updateDeliveryDraft(this.db, { deliveryId: deliveryItemsMatch[1], assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: typeof body.includeCreativeRecord === 'boolean' ? body.includeCreativeRecord : undefined, idempotencyKey: key })); }
     const readyDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/ready$/.exec(pathname);
-    if (readyDeliveryMatch && request.method === 'POST') return success(response, prepareDelivery(this.db, { deliveryId: readyDeliveryMatch[1], idempotencyKey: key }));
+    if (readyDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(readyDeliveryMatch[1]); return success(response, prepareDelivery(this.db, { deliveryId: readyDeliveryMatch[1], idempotencyKey: key })); }
     const returnToDraftMatch = /^\/api\/deliveries\/([^/]+)\/draft$/.exec(pathname);
-    if (returnToDraftMatch && request.method === 'POST') return success(response, returnDeliveryToDraft(this.db, { deliveryId: returnToDraftMatch[1], idempotencyKey: key }));
+    if (returnToDraftMatch && request.method === 'POST') { this.assertDeliveryInStudio(returnToDraftMatch[1]); return success(response, returnDeliveryToDraft(this.db, { deliveryId: returnToDraftMatch[1], idempotencyKey: key })); }
     const exportDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/export$/.exec(pathname);
-    if (exportDeliveryMatch && request.method === 'POST') return success(response, exportDelivery(this.db, this.initialized.paths, { deliveryId: exportDeliveryMatch[1], idempotencyKey: key }));
-    if (pathname === '/api/task-types') return success(response, createUserTaskType(this.db, { name: text(body.name), definition: record(body.definition), idempotencyKey: key }));
-    if (pathname === '/api/style-kits') return success(response, createStyleKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
-    if (pathname === '/api/brand-kits') return success(response, createBrandKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
+    if (exportDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(exportDeliveryMatch[1]); return success(response, exportDelivery(this.db, this.initialized.paths, { deliveryId: exportDeliveryMatch[1], idempotencyKey: key })); }
+    if (pathname === '/api/task-types') return success(response, publicValue(createUserTaskType(this.db, { name: text(body.name), definition: record(body.definition), idempotencyKey: key })));
+    if (pathname === '/api/style-kits') return success(response, publicValue(createStyleKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key })));
+    if (pathname === '/api/brand-kits') return success(response, publicValue(createBrandKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key })));
     if (pathname === '/api/tasks') {
       const created = createTaskDraft(this.db, { projectId: text(body.projectId), name: text(body.name), taskTypeId: text(body.taskTypeId) || undefined, intent: record(body.intent), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
@@ -324,6 +354,8 @@ export class LocalStudioService {
       }, { assetId: reviewMatch[1], decision: text(body.decision), taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined, feedback: record(body.feedback) });
       return success(response, reviewed.value);
     }
+    const sharedAssetMatch = /^\/api\/assets\/([^/]+)\/shared$/.exec(pathname);
+    if (sharedAssetMatch && request.method === 'POST') return success(response, executeIdempotent(this.db, key, 'assets.share', () => setStudioAssetShared(this.db, { studioId: this.initialized.manifest.studioId, assetId: sharedAssetMatch[1], shared: body.shared === true }), { assetId: sharedAssetMatch[1], shared: body.shared === true }).value);
     const trashMatch = /^\/api\/assets\/([^/]+)\/trash$/.exec(pathname);
     if (trashMatch) return success(response, publicAsset(executeIdempotent(this.db, key, 'assets.trash', () => softDeleteAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: trashMatch[1] }), { assetId: trashMatch[1] }).value));
     const restoreMatch = /^\/api\/assets\/([^/]+)\/restore$/.exec(pathname);
@@ -345,6 +377,33 @@ export class LocalStudioService {
     fs.createReadStream(resolved).on('error', () => response.destroy()).pipe(response);
   }
 
+  private assertProjectInStudio(projectId: string): void {
+    const project = this.db.prepare('SELECT 1 FROM projects WHERE id = ? AND studio_id = ?').get(projectId, this.initialized.manifest.studioId);
+    if (!project) throw new StudioNotFoundError('Project not found in this Studio: ' + projectId);
+  }
+
+  private assertDeliveryInStudio(deliveryId: string): void {
+    const delivery = this.db.prepare('SELECT 1 FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId);
+    if (!delivery) throw new StudioNotFoundError('Delivery not found in this Studio: ' + deliveryId);
+  }
+
+  private assertImportTarget(targetType?: string, targetId?: string): void {
+    if (Boolean(targetType) !== Boolean(targetId)) throw new InvalidCommandError('导入关系必须同时提供目标类型和目标 ID。');
+    if (!targetType || !targetId) return;
+    const queries: Record<string, string> = {
+      project: 'SELECT 1 FROM projects WHERE id = ? AND studio_id = ?',
+      creative_task: 'SELECT 1 FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?',
+      creative_round: 'SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?',
+      run_item: 'SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?',
+      style_kit: 'SELECT 1 FROM style_kits WHERE id = ? AND studio_id = ?',
+      brand_kit: 'SELECT 1 FROM brand_kits WHERE id = ? AND studio_id = ?',
+      delivery: 'SELECT 1 FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?'
+    };
+    const query = queries[targetType];
+    if (!query) throw new InvalidCommandError('不支持该导入关系目标。');
+    if (!this.db.prepare(query).get(targetId, this.initialized.manifest.studioId)) throw new StudioNotFoundError('未找到当前 Studio 中的导入关系目标。');
+  }
+
   private async importAsset(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const key = headerValue(request, 'idempotency-key');
     if (!key) throw new InvalidCommandError('导入图片需要 idempotency-key。');
@@ -352,6 +411,7 @@ export class LocalStudioService {
     const targetType = headerValue(request, 'x-daoge-target-type') || undefined;
     const targetId = headerValue(request, 'x-daoge-target-id') || undefined;
     const originalFilename = headerValue(request, 'x-daoge-filename') || undefined;
+    this.assertImportTarget(targetType, targetId);
     const bytes = await readBinaryBody(request);
     const receipt = executeIdempotent(this.db, key, 'assets.import', () => importStudioAsset(this.db, this.initialized.paths, {
       studioId: this.initialized.manifest.studioId,
@@ -365,12 +425,93 @@ export class LocalStudioService {
     success(response, publicAsset(receipt.value));
   }
 
-  private assetFile(response: ServerResponse, assetId: string): void {
+  private writeImageArchive(response: ServerResponse, filename: string, entries: ZipEntryInput[]): void {
+    if (!entries.length) throw new InvalidCommandError('请至少选择一张图片进行打包下载。');
+    if (entries.length > MAX_ARCHIVE_IMAGE_COUNT) throw new InvalidCommandError('单次打包最多支持 ' + MAX_ARCHIVE_IMAGE_COUNT + ' 张图片。');
+    let totalBytes = 0;
+    for (const entry of entries) {
+      if (!fs.existsSync(entry.filePath)) throw new StudioNotFoundError('打包图片文件不存在。');
+      const stat = fs.statSync(entry.filePath);
+      if (!stat.isFile()) throw new StudioNotFoundError('打包图片文件不可用。');
+      totalBytes += stat.size;
+    }
+    if (totalBytes > MAX_ARCHIVE_BYTES) throw new InvalidCommandError('本次图片总量超过 150 MB，请减少选择后重试。');
+    const archive = createImageZip(entries);
+    response.writeHead(200, { 'content-type': 'application/zip', 'content-length': String(archive.length), 'content-disposition': 'attachment; filename="' + filename + '"', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
+    response.end(archive);
+  }
+
+  private projectAssetArchive(response: ServerResponse, projectId: string, requestedAssetIds: string[]): void {
+    this.assertProjectInStudio(projectId);
+    const assetIds = [...new Set(requestedAssetIds.map((value) => value.trim()).filter(Boolean))];
+    if (!assetIds.length) throw new InvalidCommandError('请先在项目资产中选择要打包的图片。');
+    const projectAssets = listScopedStudioAssets(this.db, this.initialized.manifest.studioId, { scope: 'project', projectId, limit: 500 });
+    const available = new Map(projectAssets.map((asset) => [asset.id, asset]));
+    const assets = assetIds.map((assetId) => {
+      const asset = available.get(assetId);
+      if (!asset) throw new StudioNotFoundError('项目中未找到要打包的图片。');
+      return asset;
+    });
+    this.writeImageArchive(response, 'daoge-pic-project-images.zip', assets.map((asset, index) => ({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(asset.mediaType), filePath: assetFilePath(this.initialized.paths, asset) })));
+  }
+
+  private deliveryArchive(response: ServerResponse, deliveryId: string, requestedSequences: string[]): void {
+    this.assertDeliveryInStudio(deliveryId);
+    const delivery = this.db.prepare('SELECT delivery.id, delivery.status, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; status: string; manifest_json: string } | undefined;
+    if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('已完成交付不存在：' + deliveryId);
+    let manifest: Record<string, unknown>;
+    try { manifest = record(JSON.parse(delivery.manifest_json)); } catch { throw new InvalidCommandError('交付文件记录无效。'); }
+    const relativeDirectory = typeof manifest.exportDirectory === 'string' ? manifest.exportDirectory : '';
+    const deliveriesRoot = path.resolve(this.initialized.paths.deliveriesRoot) + path.sep;
+    const directory = path.resolve(this.initialized.paths.workspaceRoot, relativeDirectory);
+    if (!relativeDirectory || !directory.startsWith(deliveriesRoot)) throw new StudioNotFoundError('交付图片文件不可用。');
+    const files = Array.isArray(manifest.files) ? manifest.files.map(record) : [];
+    const sequences = requestedSequences.length ? [...new Set(requestedSequences.map((value) => {
+      const sequence = Number(value);
+      if (!Number.isSafeInteger(sequence) || sequence <= 0) throw new InvalidCommandError('交付图片选择无效。');
+      return sequence;
+    }))] : [];
+    const selected = sequences.length ? files.filter((item) => sequences.includes(Number(item.sequence))) : files;
+    if (!selected.length) throw new StudioNotFoundError('未找到要打包的交付图片。');
+    const entries = selected.map((item, index) => {
+      const file = typeof item.file === 'string' ? item.file : '';
+      const mediaType = typeof item.mediaType === 'string' ? item.mediaType : 'image/png';
+      if (!file || path.basename(file) !== file) throw new StudioNotFoundError('交付图片文件不可用。');
+      const filePath = path.resolve(directory, file);
+      if (!filePath.startsWith(directory + path.sep)) throw new StudioNotFoundError('交付图片文件不可用。');
+      return { name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(mediaType), filePath };
+    });
+    this.writeImageArchive(response, 'daoge-pic-delivery-images.zip', entries);
+  }
+
+  private deliveryFile(response: ServerResponse, deliveryId: string, sequence: number, download = false): void {
+    const delivery = this.db.prepare('SELECT delivery.id, delivery.status, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; status: string; manifest_json: string } | undefined;
+    if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('Exported delivery not found: ' + deliveryId);
+    let manifest: Record<string, unknown>;
+    try { manifest = record(JSON.parse(delivery.manifest_json)); } catch { throw new InvalidCommandError('Delivery export manifest is invalid.'); }
+    const relativeDirectory = typeof manifest.exportDirectory === 'string' ? manifest.exportDirectory : '';
+    const deliveriesRoot = path.resolve(this.initialized.paths.deliveriesRoot) + path.sep;
+    const directory = path.resolve(this.initialized.paths.workspaceRoot, relativeDirectory);
+    if (!relativeDirectory || !directory.startsWith(deliveriesRoot)) throw new StudioNotFoundError('Exported delivery files are unavailable.');
+    const files = Array.isArray(manifest.files) ? manifest.files : [];
+    const entry = files.find((item) => record(item).sequence === sequence && typeof record(item).file === 'string') as Record<string, unknown> | undefined;
+    const file = entry && typeof entry.file === 'string' ? entry.file : '';
+    const mediaType = entry && typeof entry.mediaType === 'string' ? entry.mediaType : 'image/png';
+    if (!file || path.basename(file) !== file) throw new StudioNotFoundError('Exported delivery file not found.');
+    const filePath = path.resolve(directory, file);
+    if (!filePath.startsWith(directory + path.sep) || !fs.existsSync(filePath)) throw new StudioNotFoundError('Exported delivery file not found.');
+    const extension = mediaType === 'image/jpeg' ? 'jpg' : mediaType === 'image/webp' ? 'webp' : mediaType === 'image/gif' ? 'gif' : 'png';
+    response.writeHead(200, { 'content-type': mediaType, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-delivery-image.' + extension + '"' } : {}) });
+    fs.createReadStream(filePath).on('error', () => response.destroy()).pipe(response);
+  }
+
+  private assetFile(response: ServerResponse, assetId: string, download = false): void {
     const asset = getStudioAsset(this.db, this.initialized.manifest.studioId, assetId);
     if (!asset || asset.deletedAt) throw new StudioNotFoundError('Asset not found: ' + assetId);
     const filePath = assetFilePath(this.initialized.paths, asset);
     if (!fs.existsSync(filePath)) throw new StudioNotFoundError('Asset media is missing: ' + assetId);
-    response.writeHead(200, { 'content-type': asset.mediaType, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff' });
+    const extension = asset.mediaType === 'image/jpeg' ? 'jpg' : asset.mediaType === 'image/webp' ? 'webp' : asset.mediaType === 'image/gif' ? 'gif' : 'png';
+    response.writeHead(200, { 'content-type': asset.mediaType, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-image.' + extension + '"' } : {}) });
     fs.createReadStream(filePath).on('error', () => response.destroy()).pipe(response);
   }
 

@@ -80,6 +80,29 @@ test('vNext OpenAI adapter sends managed reference and mask bytes as multipart e
   assert.equal(received.body.includes(Buffer.from('asset-mask.png')), true);
 });
 
+
+test('vNext adapters forward requested aspect ratios instead of defaulting to square output', async () => {
+  for (const providerId of ['gemini-image', 'gemini-openai-compatible', 'xai-grok-image']) {
+    let received = null;
+    await withServer((request, response) => {
+      let body = '';
+      request.on('data', (chunk) => { body += chunk; });
+      request.on('end', () => {
+        received = JSON.parse(body);
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(responseFor(providerId)));
+      });
+    }, async (baseUrl) => {
+      const config = { providerId, baseUrl, apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false };
+      const provider = createImageProvider(config);
+      await provider.generate({ requestId: 'request-aspect', idempotencyKey: 'aspect-key', prompt: 'wide cinematic scene', output: { aspectRatio: '16:9' }, referenceAssets: [] }, { abortSignal: new AbortController().signal });
+    });
+    if (providerId === 'gemini-image') assert.equal(received.generationConfig.imageConfig.aspectRatio, '16:9');
+    else if (providerId === 'xai-grok-image') assert.equal(received.aspect_ratio, '16:9');
+    else assert.equal(received.size, '16:9');
+  }
+});
+
 test('vNext Provider adapter classifies rate limits, invalid input, and ambiguous transport errors', () => {
   const config = { providerId: 'openai-images', baseUrl: 'https://images.example.test/v1', apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false };
   const provider = createImageProvider(config);

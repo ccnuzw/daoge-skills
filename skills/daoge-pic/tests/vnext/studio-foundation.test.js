@@ -70,12 +70,19 @@ test('loads provider.env without exposing API keys in the safe status or snapsho
       missing: [],
       model: 'gpt-image-2',
       endpoint: 'https://images.example.test',
-      capabilities: { generate: true, edit: true, referenceImage: true, mask: true }
+      capabilities: { generate: true, edit: true, referenceImage: true, mask: true },
+      workerConcurrency: 2
     });
+    assert.equal(config.workerConcurrency, 2);
     assert.equal(JSON.stringify(status).includes('secret-value-must-not-escape'), false);
     const snapshot = providerSnapshot(config);
     assert.equal(Object.prototype.hasOwnProperty.call(snapshot, 'apiKey'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(snapshot, 'workerConcurrency'), false);
     assert.equal(JSON.stringify(snapshot).includes('secret-value-must-not-escape'), false);
+    fs.appendFileSync(initialized.paths.providerEnvPath, 'DAOGE_PIC_WORKER_CONCURRENCY=02\n');
+    const invalidConcurrency = providerStatus(initialized.paths);
+    assert.equal(invalidConcurrency.configured, false);
+    assert.deepEqual(invalidConcurrency.missing, ['worker_concurrency']);
   } finally {
     cleanup(workspaceRoot);
   }

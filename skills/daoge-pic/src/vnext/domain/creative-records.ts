@@ -50,14 +50,31 @@ function outputAssetsByItem(db: StudioDatabase, itemIds: string[]): Map<string, 
   return results;
 }
 
-export function listAssetsWithReviewSummaries(db: StudioDatabase, assets: StudioAsset[], projectId?: string): Array<StudioAsset & { review: JsonRecord | null }> {
+export function purposeLabel(value: string): string { return ({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' } as Record<string, string>)[value] || value || '创作'; }
+
+function assetDisplayContexts(db: StudioDatabase, assets: StudioAsset[]): Map<string, JsonRecord> {
+  const displays = new Map<string, JsonRecord>();
+  if (!assets.length) return displays;
+  const placeholders = assets.map(() => '?').join(',');
+  const rows = db.prepare("SELECT relation.asset_id, item.sequence AS item_sequence, round.purpose AS round_purpose, task.name AS task_name, (SELECT COUNT(*) FROM creative_rounds prior_round WHERE prior_round.task_id = round.task_id AND (prior_round.created_at < round.created_at OR (prior_round.created_at = round.created_at AND prior_round.id <= round.id))) AS round_sequence, (SELECT COUNT(*) FROM generation_runs prior WHERE prior.round_id = run.round_id AND (prior.created_at < run.created_at OR (prior.created_at = run.created_at AND prior.id <= run.id))) AS run_sequence FROM asset_relations relation JOIN run_items item ON item.id = relation.target_id JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE relation.asset_id IN (" + placeholders + ") AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item' ORDER BY run.created_at, run.id, item.sequence").all(...assets.map((asset) => asset.id)) as Array<{ asset_id: string; item_sequence: number; round_purpose: string; task_name: string; round_sequence: number; run_sequence: number }> ;
+  for (const row of rows) if (!displays.has(row.asset_id)) {
+    const roundLabel = purposeLabel(row.round_purpose) + '第 ' + row.round_sequence + ' 轮';
+    const label = row.task_name + ' · ' + roundLabel + ' · 运行 ' + row.run_sequence + ' · 第 ' + row.item_sequence + ' 张';
+    displays.set(row.asset_id, { label, selectionText: label, taskName: row.task_name, roundPurpose: row.round_purpose, roundSequence: row.round_sequence, runSequence: row.run_sequence, itemSequence: row.item_sequence });
+  }
+  for (const asset of assets) if (!displays.has(asset.id)) displays.set(asset.id, { label: asset.kind === 'import' ? '导入素材' : asset.kind === 'export' ? '导出素材' : '生成结果', selectionText: asset.kind === 'import' ? '导入素材' : asset.kind === 'export' ? '导出素材' : '生成结果' });
+  return displays;
+}
+
+export function listAssetsWithReviewSummaries(db: StudioDatabase, assets: StudioAsset[], projectId?: string): Array<StudioAsset & { review: JsonRecord | null; display: JsonRecord }> {
   if (!assets.length) return [];
   const reviews = new Map<string, JsonRecord>();
+  const displays = assetDisplayContexts(db, assets);
   for (const asset of assets) {
     const row = projectId ? db.prepare("SELECT review.decision, review.created_at FROM review_decisions review LEFT JOIN creative_tasks task ON task.id = review.task_id LEFT JOIN creative_rounds round ON round.id = review.round_id LEFT JOIN creative_tasks round_task ON round_task.id = round.task_id WHERE review.asset_id = ? AND ((review.task_id IS NULL AND review.round_id IS NULL) OR task.project_id = ? OR round_task.project_id = ?) ORDER BY review.created_at DESC, review.rowid DESC LIMIT 1").get(asset.id, projectId, projectId) as { decision: string; created_at: string } | undefined : db.prepare('SELECT review.decision, review.created_at FROM review_decisions review WHERE review.asset_id = ? ORDER BY review.created_at DESC, review.rowid DESC LIMIT 1').get(asset.id) as { decision: string; created_at: string } | undefined;
     if (row) reviews.set(asset.id, { decision: row.decision, createdAt: row.created_at });
   }
-  return assets.map((asset) => ({ ...asset, review: reviews.get(asset.id) || null }));
+  return assets.map((asset) => ({ ...asset, review: reviews.get(asset.id) || null, display: displays.get(asset.id) || { label: '素材', selectionText: '素材' } }));
 }
 
 export function getTaskCreativeOverview(db: StudioDatabase, studioId: string, taskId: string): JsonRecord {
@@ -69,7 +86,7 @@ export function getTaskCreativeOverview(db: StudioDatabase, studioId: string, ta
 
 function comparisonPlanSummary(value: JsonRecord): JsonRecord { const plan = safeValue(value) as JsonRecord; return { operation: plan.operation === 'edit' ? 'edit' : 'generate', itemCount: Number(plan.itemCount || 0) }; }
 function comparisonLineage(db: StudioDatabase, studioId: string, round: RoundRow): JsonRecord { const value = lineage(db, studioId, round); return { truncated: value.truncated, rounds: value.rounds.map((parent) => ({ id: parent.id, parentRoundId: parent.parentRoundId, purpose: parent.purpose, planVersion: parent.planVersion, status: parent.status, createdAt: parent.createdAt })) }; }
-function reviewedOutputs(db: StudioDatabase, studioId: string, projectId: string, items: JsonRecord[]): Map<string, JsonRecord> { const ids = [...new Set(items.flatMap((item) => Array.isArray(item.outputAssets) ? item.outputAssets.map((asset) => String((asset as JsonRecord).id || '')) : []).filter(Boolean))]; const assets = ids.map((id) => getStudioAsset(db, studioId, id)).filter((asset): asset is StudioAsset => Boolean(asset)); const summaries = listAssetsWithReviewSummaries(db, assets, projectId); return new Map(summaries.map((asset) => [asset.id, { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt, review: asset.review }])); }
+function reviewedOutputs(db: StudioDatabase, studioId: string, projectId: string, items: JsonRecord[]): Map<string, JsonRecord> { const ids = [...new Set(items.flatMap((item) => Array.isArray(item.outputAssets) ? item.outputAssets.map((asset) => String((asset as JsonRecord).id || '')) : []).filter(Boolean))]; const assets = ids.map((id) => getStudioAsset(db, studioId, id)).filter((asset): asset is StudioAsset => Boolean(asset)); const summaries = listAssetsWithReviewSummaries(db, assets, projectId); return new Map(summaries.map((asset) => [asset.id, { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt, review: asset.review, display: asset.display }])); }
 
 export function getTaskStudioOverview(db: StudioDatabase, studioId: string, taskId: string, selectedRoundIds: string[] = []): JsonRecord {
   const task = taskRow(db, studioId, taskId);

@@ -1,5 +1,6 @@
 import { ImageOperation, ImageProviderCapabilities } from '../providers/contracts';
 import { SafeProviderStatus } from '../studio/provider-config';
+import { resolveOutputSpec } from '../providers/output-spec';
 
 export interface PreflightPlan {
   operation: ImageOperation;
@@ -53,6 +54,11 @@ export function preflightGenerationPlan(plan: PreflightPlan, providerStatus: Saf
     issues.push({ code: 'invalid_item_count', message: '生成数量必须是 1 到 1000 之间的整数。', field: 'itemCount' });
   }
   if (!normalizedPlan.prompt) issues.push({ code: 'missing_prompt', message: '创作计划缺少可执行的图像描述。', field: 'prompt' });
+  if (providerStatus.providerId && providerStatus.model) {
+    const outputSpec = resolveOutputSpec({ providerId: providerStatus.providerId, model: providerStatus.model, output: normalizedPlan.output });
+    if (!outputSpec.ok) issues.push({ code: outputSpec.code, message: outputSpec.message + (outputSpec.supportedAspectRatios ? ' 可选：' + outputSpec.supportedAspectRatios.join('、') + '。' : ''), field: outputSpec.field });
+    else normalizedPlan.output = outputSpec.output;
+  }
   if (capabilities && !capabilities.textToImage && normalizedPlan.operation === 'generate') {
     issues.push({ code: 'generate_unsupported', message: '当前生成配置不支持文生图。', field: 'operation' });
   }

@@ -8,7 +8,7 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { closeStudioDatabase, openStudioDatabase } = require('../../dist/vnext/studio/database');
 const { createProject, createRoundDraft, createTaskDraft } = require('../../dist/vnext/domain/studio-commands');
 const { importStudioAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
-const { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview } = require('../../dist/vnext/domain/creative-records');
+const { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, listAssetsWithReviewSummaries } = require('../../dist/vnext/domain/creative-records');
 
 const skillRoot = path.resolve(__dirname, '../..');
 const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
@@ -39,6 +39,9 @@ test('P1 creative records connect task, round lineage, explicit run items, outpu
     assert.equal(record.selectedRunId, 'run-record');
     assert.equal(record.lineage.rounds[0].id, parent.id);
     assert.deepEqual(record.items[0].outputAssets.map((output) => output.id), [asset.id]);
+    const display = listAssetsWithReviewSummaries(db, [asset], project.id)[0].display;
+    assert.match(display.label, /^主视觉 · 优化第 \d+ 轮 · 运行 1 · 第 1 张$/);
+    assert.equal(display.selectionText, display.label);
     const provenance = getAssetProvenance(db, initialized.manifest.studioId, asset.id);
     assert.equal(provenance.outputs[0].run.id, 'run-record');
     assert.equal(provenance.reviews.length, 2);

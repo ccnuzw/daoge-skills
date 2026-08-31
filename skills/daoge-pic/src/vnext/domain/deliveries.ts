@@ -116,7 +116,7 @@ export function updateDeliveryDraft(db: StudioDatabase, input: { deliveryId: str
     const project = assertProject(db, current.project_id);
     const timestamp = nowIso();
     const currentManifest = parse(current.manifest_json);
-    const manifest = { ...currentManifest, assetIds: [...new Set(input.assetIds)], includeCreativeRecord: input.includeCreativeRecord === true, updatedAt: timestamp };
+    const manifest = { ...currentManifest, assetIds: [...new Set(input.assetIds)], includeCreativeRecord: typeof input.includeCreativeRecord === 'boolean' ? input.includeCreativeRecord : currentManifest.includeCreativeRecord === true, updatedAt: timestamp };
     const items = replaceDeliveryAssets(db, project, current.id, input.assetIds, timestamp);
     db.prepare('UPDATE deliveries SET manifest_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(manifest), timestamp, current.id);
     appendStudioEvent(db, { studioId: project.studio_id, entityType: 'delivery', entityId: current.id, eventType: 'delivery.draft_updated', payload: { assetCount: items.length } });
@@ -207,7 +207,12 @@ export function exportDelivery(db: StudioDatabase, paths: StudioPaths, input: { 
   if (value.status !== 'ready') throw new InvalidCommandError('Only a prepared delivery can be exported.');
   const project = assertProject(db, value.projectId);
   const frozenItems = deliveryItems(db, value.id);
-  const assets = activeAssets(db, project.studio_id, frozenItems.map((item) => item.assetId));
+  const assets = frozenItems.map((item) => {
+    const asset = getStudioAsset(db, project.studio_id, item.assetId);
+    if (!asset) throw new StudioNotFoundError('Delivery asset not found: ' + item.assetId);
+    if (!fs.existsSync(assetFilePath(paths, asset))) throw new StudioNotFoundError('Delivery asset media is missing: ' + item.assetId);
+    return asset;
+  });
   const directory = path.join(paths.deliveriesRoot, safeSegment(project.name), safeSegment(value.name) + '-' + value.id.slice(-8));
   const temporary = directory + '.tmp-' + process.pid;
   const backup = directory + '.previous-' + process.pid;

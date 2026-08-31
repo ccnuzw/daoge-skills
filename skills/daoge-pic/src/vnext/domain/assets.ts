@@ -84,7 +84,7 @@ function relativePath(paths: StudioPaths, absolutePath: string): string {
 }
 
 function assertRelationTarget(targetType: string, targetId: string): void {
-  if (!/^(project|creative_task|creative_round|run_item|style_kit|brand_kit|delivery)$/.test(targetType)) throw new InvalidCommandError('Unsupported asset relation target.');
+  if (!/^(studio|project|creative_task|creative_round|run_item|style_kit|brand_kit|delivery)$/.test(targetType)) throw new InvalidCommandError('Unsupported asset relation target.');
   if (!String(targetId || '').trim()) throw new InvalidCommandError('Asset relation target id is required.');
 }
 
@@ -174,14 +174,44 @@ export function importStudioAsset(db: StudioDatabase, paths: StudioPaths, input:
   return { id: assetId, studioId: input.studioId, kind: 'import', mediaType: staged.mediaType, storagePath: planned.storagePath, contentHash: staged.contentHash, byteSize: staged.byteSize, source, deletedAt: null };
 }
 
-export function listStudioAssets(db: StudioDatabase, studioId: string, input: { includeDeleted?: boolean; targetType?: string; targetId?: string; limit?: number } = {}): StudioAsset[] {
+function assetVisibilitySql(prefix: string, input: { includeDeleted?: boolean; deletedOnly?: boolean }): string {
+  const column = prefix ? prefix + '.deleted_at' : 'deleted_at';
+  return input.deletedOnly ? column + ' IS NOT NULL' : input.includeDeleted ? '1 = 1' : column + ' IS NULL';
+}
+
+export function listStudioAssets(db: StudioDatabase, studioId: string, input: { includeDeleted?: boolean; deletedOnly?: boolean; targetType?: string; targetId?: string; limit?: number } = {}): StudioAsset[] {
   ensureStudio(db, studioId);
   const limit = Math.min(500, Math.max(1, Number.isInteger(input.limit) ? Number(input.limit) : 100));
   if (input.targetType && input.targetId) {
     assertRelationTarget(input.targetType, input.targetId);
-    return (db.prepare('SELECT a.id, a.studio_id, a.kind, a.media_type, a.storage_path, a.content_hash, a.byte_size, a.source_json, a.deleted_at FROM assets a JOIN asset_relations r ON r.asset_id = a.id WHERE a.studio_id = ? AND r.target_type = ? AND r.target_id = ? AND (? = 1 OR a.deleted_at IS NULL) ORDER BY a.created_at DESC LIMIT ?').all(studioId, input.targetType, input.targetId, input.includeDeleted ? 1 : 0, limit) as unknown as StoredAsset[]).map(assetFromRow);
+    return (db.prepare('SELECT a.id, a.studio_id, a.kind, a.media_type, a.storage_path, a.content_hash, a.byte_size, a.source_json, a.deleted_at FROM assets a WHERE a.studio_id = ? AND EXISTS (SELECT 1 FROM asset_relations r WHERE r.asset_id = a.id AND r.target_type = ? AND r.target_id = ?) AND ' + assetVisibilitySql('a', input) + ' ORDER BY a.created_at DESC LIMIT ?').all(studioId, input.targetType, input.targetId, limit) as unknown as StoredAsset[]).map(assetFromRow);
   }
-  return (db.prepare('SELECT id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, deleted_at FROM assets WHERE studio_id = ? AND (? = 1 OR deleted_at IS NULL) ORDER BY created_at DESC LIMIT ?').all(studioId, input.includeDeleted ? 1 : 0, limit) as unknown as StoredAsset[]).map(assetFromRow);
+  return (db.prepare('SELECT id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, deleted_at FROM assets WHERE studio_id = ? AND ' + assetVisibilitySql('', input) + ' ORDER BY created_at DESC LIMIT ?').all(studioId, limit) as unknown as StoredAsset[]).map(assetFromRow);
+}
+
+export function listSharedStudioAssets(db: StudioDatabase, studioId: string, input: { limit?: number } = {}): StudioAsset[] {
+  ensureStudio(db, studioId);
+  const limit = Math.min(500, Math.max(1, Number.isInteger(input.limit) ? Number(input.limit) : 100));
+  const query = "SELECT a.id, a.studio_id, a.kind, a.media_type, a.storage_path, a.content_hash, a.byte_size, a.source_json, a.deleted_at FROM assets a WHERE a.studio_id = ? AND a.deleted_at IS NULL AND EXISTS (SELECT 1 FROM asset_relations relation WHERE relation.asset_id = a.id AND relation.relation_type = 'shared_across_projects' AND relation.target_type = 'studio' AND relation.target_id = ?) ORDER BY a.created_at DESC, a.id DESC LIMIT ?";
+  return (db.prepare(query).all(studioId, studioId, limit) as unknown as StoredAsset[]).map(assetFromRow);
+}
+
+export function setStudioAssetShared(db: StudioDatabase, input: { studioId: string; assetId: string; shared: boolean }): { assetId: string; shared: boolean; changed: boolean } {
+  ensureStudio(db, input.studioId);
+  const asset = getStudioAsset(db, input.studioId, input.assetId);
+  if (!asset || asset.deletedAt) throw new StudioNotFoundError('Active Studio asset not found: ' + input.assetId);
+  let changed = false;
+  withTransaction(db, () => {
+    if (input.shared) {
+      const result = db.prepare("INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, 'shared_across_projects', 'studio', ?, '{}', ?) ON CONFLICT(asset_id, relation_type, target_type, target_id) DO NOTHING").run(createId('assetrel'), asset.id, input.studioId, nowIso());
+      changed = Number(result.changes) > 0;
+    } else {
+      const result = db.prepare("DELETE FROM asset_relations WHERE asset_id = ? AND relation_type = 'shared_across_projects' AND target_type = 'studio' AND target_id = ?").run(asset.id, input.studioId);
+      changed = Number(result.changes) > 0;
+    }
+    if (changed) appendStudioEvent(db, { studioId: input.studioId, entityType: 'asset', entityId: asset.id, eventType: input.shared ? 'asset.shared_across_projects' : 'asset.unshared_across_projects', payload: {} });
+  });
+  return { assetId: asset.id, shared: input.shared, changed };
 }
 
 function scopedAssetCondition(scope: AssetScope, input: { projectId?: string; taskId?: string; roundId?: string }): { sql: string; values: string[] } {
@@ -217,13 +247,13 @@ function assertScopedAssetHierarchy(db: StudioDatabase, studioId: string, input:
   if (!round || (input.taskId && input.taskId !== round.task_id) || (input.projectId && input.projectId !== round.project_id)) throw new InvalidCommandError('Round asset scope is not part of this Studio task.');
 }
 
-export function listScopedStudioAssets(db: StudioDatabase, studioId: string, input: { scope: AssetScope; projectId?: string; taskId?: string; roundId?: string; includeDeleted?: boolean; limit?: number }): StudioAsset[] {
+export function listScopedStudioAssets(db: StudioDatabase, studioId: string, input: { scope: AssetScope; projectId?: string; taskId?: string; roundId?: string; includeDeleted?: boolean; deletedOnly?: boolean; limit?: number }): StudioAsset[] {
   ensureStudio(db, studioId);
   assertScopedAssetHierarchy(db, studioId, input);
   const limit = Math.min(500, Math.max(1, Number.isInteger(input.limit) ? Number(input.limit) : 100));
   const condition = scopedAssetCondition(input.scope, input);
-  const query = 'SELECT a.id, a.studio_id, a.kind, a.media_type, a.storage_path, a.content_hash, a.byte_size, a.source_json, a.deleted_at FROM assets a WHERE a.studio_id = ? AND (? = 1 OR a.deleted_at IS NULL) AND (' + condition.sql + ') ORDER BY a.created_at DESC, a.id DESC LIMIT ?';
-  return (db.prepare(query).all(studioId, input.includeDeleted ? 1 : 0, ...condition.values, limit) as unknown as StoredAsset[]).map(assetFromRow);
+  const query = 'SELECT a.id, a.studio_id, a.kind, a.media_type, a.storage_path, a.content_hash, a.byte_size, a.source_json, a.deleted_at FROM assets a WHERE a.studio_id = ? AND ' + assetVisibilitySql('a', input) + ' AND (' + condition.sql + ') ORDER BY a.created_at DESC, a.id DESC LIMIT ?';
+  return (db.prepare(query).all(studioId, ...condition.values, limit) as unknown as StoredAsset[]).map(assetFromRow);
 }
 
 export function getStudioAsset(db: StudioDatabase, studioId: string, assetId: string): StudioAsset | null {
