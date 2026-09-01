@@ -40,6 +40,7 @@ vNext 不是旧工作流的兼容升级。它必须完全替换旧任务格式�
 8. 普通用户界面不得默认展示 JSON、manifest、文件路径、Provider 错误码、调试日志或内部运行对象。
 9. Provider 密钥不得写入数据库、任务、轮次、运行记录、事件、日志、快照或导出包。
 10. 所有图像生成、导入、选择、批注、软删除、恢复和导出必须通过统一领域命令写入。
+11. 本地回环地址不等于授权边界。除最小健康检查外，Studio API 必须要求当前 daemon 生成的高熵 local capability 或由其换取的本地会话凭据。
 
 ## 4. 用户入口与职责分工
 
@@ -88,6 +89,14 @@ Workbench 不提供独立聊天入口。项目意图、任务起草和生成确�
 | 智能体建议 | 必须保存为待确认草稿；未确认不得改变任务或发起生成。 |
 | 运行事件 | 必须保存为审计与恢复证据；不作为当前状态源。 |
 | 用户选择与批注 | 必须保存为资产关系和版本化反馈。 |
+
+### 4.5 本地访问授权
+
+Studio 服务必须只监听回环地址，并为每次 daemon 身份生成高熵 local capability。CLI 可以在 `Authorization: Bearer` 中携带 capability；Workbench 只能通过 `open` 生成的 URL fragment 完成一次 bootstrap，以 capability 换取 `HttpOnly`、`SameSite=Strict` 的本地会话 Cookie，并立即从地址栏和浏览器历史中移除 fragment。
+
+除不返回敏感状态的健康检查和静态 Workbench 资源外，所有 API、媒体文件、ZIP、SSE 与写入端点都必须授权。服务必须同时校验请求 Host；Cookie 写入必须校验当前 Studio Origin，JSON mutation 必须要求正确 Content-Type。Capability、会话 token 和 Cookie 值不得写入数据库、领域事件、日志、导出物、Workbench 可见状态或聊天回复，也不得跨 Studio 复用。
+
+Workbench bootstrap 失败必须停留在未授权状态，不得回退为匿名本地访问。CLI 的 `status` 和正常业务输出只能返回脱敏 runtime 信息，不能输出 capability。
 
 ## 5. 领域模型
 
@@ -155,6 +164,8 @@ Skill 必须使用智能体当前绑定的稳定工作区根目录。Skill 禁�
           <delivery-name>/
 
 目录仅在首次实际需要写入时创建。初始化不得创建无业务用途的大量空目录。
+
+初始化在产生任何持久副作用前，必须先验证发布包内 Provider 模板可读取，并校验已有 `studio.json` 的 schema、Studio 身份与规范化 `workspaceRoot` 严格匹配当前请求根目录。模板缺失、manifest 无效或根目录不匹配时必须零持久副作用失败；不得创建半成品目录、manifest、数据库、配置或 `.gitignore` 条目。
 
 ### 6.3 目录职责
 
@@ -228,6 +239,17 @@ Provider adapter 必须声明 generate、edit 和 capabilities。Skill 必须按
 
 如果用户请求参考图、图生图或遮罩编辑，而当前 Provider 不支持对应能力，Skill 必须说明当前本地生成配置不支持该操作，并提供继续使用当前能力或先修改 provider.env 的选择。Skill 禁止伪装能力或将不支持的请求发送给 Provider。
 
+### 7.7 Provider HTTP 与下载安全
+
+携带 API Key 的 Provider 请求必须直接发往用户配置的最终端点，并拒绝任何 HTTP 重定向，避免凭据被转发到未确认目标。Provider 响应若返回远程图片 URL，下载器必须执行独立的 SSRF 防护：
+
+- 只接受不含用户名或密码的 `http:` / `https:` URL。
+- 对域名解析得到的全部地址执行公网地址校验，拒绝 loopback、私网、链路本地、保留、文档与多播地址；连接必须固定到已验证地址，并确认实际远端地址与固定结果一致，防止 DNS rebinding。
+- 每次重定向都重新解析、重新校验并受有限跳数约束；不得把 Provider API 凭据带入图片下载请求。
+- 在读取前后都执行有界大小检查；超限、空响应、无效 base64、非图片内容或中断下载不得形成正式资产。
+
+这些边界同时适用于 generate 与 edit 的远程结果。用户配置自定义 Provider 端点不构成放宽本地网络访问或下载大小限制的授权。
+
 ## 8. 持久运行引擎
 
 ### 8.1 运行生命周期
@@ -285,11 +307,14 @@ outcome_unknown 表示外部请求已发出但本地未获得稳定结果，例�
 
 领域状态变更必须使用事务。创建资产、更新运行项、记录状态转换和写入事件 outbox 时，数据库必须提交同一业务结果。
 
-媒体二进制无法与 SQLite 形成单一原子事务时，媒体服务必须采用 staging、内容哈希、原子移动和启动对账：
+媒体二进制无法与 SQLite 形成单一原子事务时，媒体服务必须采用 staging、内容哈希、原子移动、持久 journal 和启动对账。Journal 必须记录受限的相对源/目标、操作阶段及预期媒体类型、哈希、大小和 Studio 身份；恢复只能在这些身份全部匹配且路径仍位于规定受管理根目录时完成：
 
 - 数据库存在资产但文件缺失时，资产必须标记为可修复，不得伪装为可用。
 - 文件存在但数据库无资产时，启动对账必须将其标记为孤立候选，禁止自动当作正式资产展示。
-- 已确认的正式资产文件不得因缩略图、预览或事件发送失败而被删除。
+- Journal 冲突、身份不匹配、路径越界、符号链接或结果歧义必须记录脱敏拒绝事件并保留人工诊断边界，禁止猜测提交、覆盖或删除。
+- 已确认的正式资产文件不得因缩略图、预览、事件发送或客户端断开失败而被删除。
+
+下载、复制、交付导出和 ZIP 必须基于已验证的文件 snapshot，而不是验证后再次按可变路径打开。Snapshot 必须固定受管理文件身份、拒绝符号链接和路径穿越，并在流式读取期间约束预期大小与内容；ZIP 必须在写响应头前完成条目与聚合上限检查，处理背压和取消，并在断连或失败时关闭全部文件描述符与临时 snapshot。Snapshot 只保证读取一致性，不是新的业务事实源，临时副本必须可清理且不得出现在交付清单中。
 
 ### 8.5 预检与干跑
 
@@ -402,12 +427,12 @@ Studio 全局导航固定为项目、创作资料库、共享素材、学习中�
 | 本地服务 | Node 原生 HTTP 与 SSE 或等价轻量路由层。 | 禁止因 Workbench 引入完整云端 Web 应用依赖。 |
 | 业务数据 | SQLite WAL、FTS5、版本化 SQL migration。 | studio.db 是唯一业务事实源。 |
 | 数据访问 | 小型 typed repository 与 schema 校验。 | 禁止由页面或目录直接写入业务事实。 |
-| 运行引擎 | SQLite 持久队列、独立 Node worker、租约和心跳。 | 禁止依赖浏览器或 stdout 维持运行。 |
+| 运行引擎 | SQLite 持久队列、daemon 内持久 Worker、租约和心跳。 | Worker 与本地服务共享同一 daemon 生命周期，不另起独立 Node worker 服务；禁止依赖浏览器或 stdout 维持运行。 |
 | 实时通道 | SSE 与持久事件 outbox。 | 必须支持断线补偿。 |
 | Workbench | React 与 Vite 构建出的静态 bundle。 | 不提供第二个聊天入口。 |
 | 图片处理 | Node crypto；缩略图与预览可使用可选图像处理依赖。 | 缩略图失败不得破坏正式资产。 |
 | Provider | Image Provider plugin。 | Provider 能力必须显式声明。 |
-| 测试 | Vitest、Playwright、模拟 Provider 与故障注入。 | 必须验证状态恢复和外部副作用。 |
+| 测试 | Node 内置测试运行器、真实浏览器 harness、模拟 Provider 与故障注入。 | 浏览器驱动由验证环境提供，不预设或承诺安装 Vitest/Playwright；必须验证状态恢复、可访问交互和外部副作用。 |
 
 第一版明确不引入独立 Workbench 文本助手、Next.js、Electron、Tauri、Redis、Kafka、BullMQ、Docker、微服务、云数据库、账户体系、客户在线协作和 OS 登录自启动服务。
 
@@ -418,9 +443,12 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 实现前必须为以下能力建立独立技术设计、稳定分支和测试映射：
 
 - Provider 密钥加载与脱敏。
+- Local capability bootstrap、Bearer/Cookie 授权、Host/Origin/Content-Type 与 Studio 隔离。
+- Provider 凭据请求的重定向拒绝，以及远程图片下载的 SSRF、DNS 固定和有界响应。
 - 运行会话状态机与并发租约。
 - 重试、取消、暂停、恢复和未知结果处理。
-- 媒体 staging、原子归档与启动对账。
+- 媒体 staging、原子归档、持久 journal、启动对账与歧义拒绝。
+- 受验证文件 snapshot、流式 ZIP、背压/取消与临时副本清理。
 - SSE 事件补发与状态快照恢复。
 - 软删除、恢复与被引用资产影响分析。
 - provider.env 修改后的配置快照与运行隔离。
@@ -446,6 +474,9 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-012 | 交付默认包含精选图片、联系表和交付清单，且不包含密钥、缓存、日志或未选择的内部材料。 |
 | PIC-VN-AC-013 | 用户可在不调用外部 Provider 的情况下执行预检与干跑；系统必须验证配置、能力、素材、依赖、输出约束和运行项计划，并不得产生计费副作用或正式生成资产。 |
 | PIC-VN-AC-014 | 每个确认轮次保留可版本化计划与 Prompt 证据；高级详情和可选创作记录报告可追溯计划、资产来源、选择结论与脱敏运行摘要，且不包含密钥或内部路径。 |
+| PIC-VN-AC-015 | Workbench 只能通过 local capability bootstrap 获得当前 Studio 会话；除最小健康检查外的 API、媒体、ZIP 与 SSE 均拒绝匿名或跨 Studio 访问，bootstrap 后 URL 不保留 capability。 |
+| PIC-VN-AC-016 | Provider 图片 URL 下载逐跳执行 SSRF 校验、DNS 固定、远端地址确认、重定向和大小限制；携带 Provider 凭据的 API 请求不得跟随重定向。 |
+| PIC-VN-AC-017 | 导入、生成、回收、恢复、交付与 ZIP 在崩溃、文件替换、符号链接、断连或 journal 冲突时不得把身份不明媒体提交为正式资产；恢复与读取只接受受管理根目录内身份匹配的 journal/snapshot。 |
 
 ## 16. 实施与发布约束
 
@@ -475,4 +506,4 @@ vNext 第一版不包含：
 
 ## 18. 规格解释
 
-本规格定义目标产品与目标架构，不代表当前 v2 实现已经满足其中任一 vNext 验收项。当前代码、目录、命令和测试只能作为重构时的能力参考。实现、测试和发布证据必须与本规格分开维护。
+本规格定义目标产品与目标架构，不代表任一源码版本已经通过其中任一 vNext 验收项。代码、目录、命令和测试只能作为实现事实参考；实现状态、机器验证与发布证据必须与本规格分开维护。

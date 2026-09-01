@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { LocalStudioService } from '../api/server';
+import { createLocalCapability } from '../api/local-auth';
 import { StudioGeneratedAssetPersister } from '../media/generated-assets';
 import { StudioAssetResolver } from '../media/asset-resolver';
 import { createImageProvider } from '../providers/http-adapters';
 import { GenerationWorker } from '../runner/worker';
-import { reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
+import { promoteDueRetryWaitItems, reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
+import { recoverStudioStartup } from '../runner/startup-recovery';
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
 import { loadProviderConfig, providerSnapshot, providerStatus } from '../studio/provider-config';
@@ -22,6 +24,7 @@ export interface StudioDaemonOptions {
 interface RuntimeRecord {
   pid: number;
   url: string;
+  capability: string;
   port: number;
   workspaceRoot: string;
   startedAt: string;
@@ -81,12 +84,14 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
   const portPath = path.join(runtimeDir, 'daemon.port.json');
   fs.mkdirSync(runtimeDir, { recursive: true });
   acquireLock(lockPath);
+  const capability = createLocalCapability();
 
   let service: LocalStudioService;
   let workerDb: StudioDatabase;
   try {
-    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, providerTemplatePath: options.providerTemplatePath });
+    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, providerTemplatePath: options.providerTemplatePath, capability });
     workerDb = openStudioDatabase(initialized.paths, initialized.manifest);
+    recoverStudioStartup(workerDb, initialized.paths, initialized.manifest.studioId);
   } catch (error) {
     fs.rmSync(lockPath, { force: true });
     throw error;
@@ -100,7 +105,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
   let activeProvider: { providerId: string; model: string; endpoint: string | null } | null = null;
   const workerId = createId('worker');
 
-  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso(), workerConcurrency: activeWorkerConcurrency, provider: activeProvider });
+  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso(), workerConcurrency: activeWorkerConcurrency, provider: activeProvider });
   const startedAt = nowIso();
   const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
   const close = async (): Promise<void> => {
@@ -153,7 +158,8 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
     const tick = async (): Promise<void> => {
       if (stopping) return;
       try {
-        recoverExpiredLeases(workerDb);
+        const recoveredLeases = recoverExpiredLeases(workerDb);
+        const promotedRetries = promoteDueRetryWaitItems(workerDb);
         const reconciledRuns = reconcileTerminalRuns(workerDb);
         const currentConfig = loadProviderConfig(initialized.paths);
         const currentSnapshot = currentConfig ? providerSnapshot(currentConfig) : null;
@@ -168,7 +174,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
         }
         if (worker) {
           const result = await worker.processOnce(activeWorkerConcurrency || 2);
-          scheduleTick(result.claimed || reconciledRuns ? 30 : pollMs);
+          scheduleTick(result.claimed || recoveredLeases || promotedRetries || reconciledRuns ? 30 : pollMs);
           return;
         }
       } catch (error) {

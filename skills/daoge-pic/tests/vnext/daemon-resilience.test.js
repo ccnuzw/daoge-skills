@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -12,10 +12,12 @@ const { loadProviderConfig, providerStatus } = require('../../dist/vnext/studio/
 const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
 const { createDryRunPreview, queueGenerationRun, claimRunItems, getGenerationRun, listGenerationRunItems, resolveUnknownRunItems, transitionRunItem, resumeGenerationRun } = require('../../dist/vnext/runner/run-commands');
 const { GenerationWorker } = require('../../dist/vnext/runner/worker');
+const { LocalStudioService, startLocalStudioService } = require('../../dist/vnext/api/server');
 
 const skillRoot = path.resolve(__dirname, '../..');
 const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
 const daemonEntry = path.join(skillRoot, 'dist', 'vnext', 'cli', 'daemon.js');
+const cliEntry = path.join(skillRoot, 'dist', 'vnext', 'cli', 'daoge.js');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 function temporaryWorkspace() {
@@ -70,19 +72,17 @@ function createQueuedHundredItemRun(workspaceRoot, providerBaseUrl) {
   ].join('\n') + '\n');
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: '100-item restart recovery', idempotencyKey: 'project' });
-  const task = createTaskDraft(db, { projectId: project.value.id, name: 'catalog images', idempotencyKey: 'task' });
-  const round = createRoundDraft(db, { taskId: task.value.id, purpose: 'exploration', idempotencyKey: 'round' });
-  const prepared = prepareRoundForConfirmation(db, {
-    roundId: round.value.id,
-    plan: { operation: 'generate', itemCount: 100, prompt: 'consistent catalog product image', output: { aspectRatio: '1:1' } },
-    expectedVersion: round.value.version,
-    idempotencyKey: 'prepare'
-  });
-  const confirmed = confirmRoundPlan(db, { roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
+  const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.value.id, name: 'catalog images', idempotencyKey: 'task' });
+  const round = createRoundDraft(db, { studioId: initialized.manifest.studioId, taskId: task.value.id, purpose: 'exploration', idempotencyKey: 'round' });
+  const prepared = prepareRoundForConfirmation(db, { studioId: initialized.manifest.studioId, roundId: round.value.id,
+  plan: { operation: 'generate', itemCount: 100, prompt: 'consistent catalog product image', output: { aspectRatio: '1:1' } },
+  expectedVersion: round.value.version,
+  idempotencyKey: 'prepare' });
+  const confirmed = confirmRoundPlan(db, { studioId: initialized.manifest.studioId, roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
   const config = loadProviderConfig(initialized.paths);
   const status = providerStatus(initialized.paths);
-  const dryRun = createDryRunPreview(db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
-  const queued = queueGenerationRun(db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
+  const dryRun = createDryRunPreview(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
+  const queued = queueGenerationRun(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
   return { initialized, db, config, run: queued.value };
 }
 
@@ -138,14 +138,14 @@ test('daemon restart preserves a 100-item queue and never replays external reque
     assert.deepEqual(recovered.map((item) => item.sequence), Array.from({ length: 100 }, (_, index) => index + 1));
     assert.deepEqual(countByStatus(recovered), { succeeded: 25, outcome_unknown: 10, pending: 65 });
     assert.equal(provider.count(), 0);
-    assert.throws(() => resumeGenerationRun(reopened, { runId: fixture.run.id, idempotencyKey: 'must-not-resume-unknown-outcomes' }), InvalidCommandError);
+    assert.throws(() => resumeGenerationRun(reopened, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.id, idempotencyKey: 'must-not-resume-unknown-outcomes' }), InvalidCommandError);
     assert.equal(provider.count(), 0);
 
     const unknownItems = recovered.filter((candidate) => candidate.status === 'outcome_unknown');
-    resolveUnknownRunItems(reopened, { runId: fixture.run.id, itemIds: unknownItems.map((item) => item.id), idempotencyKey: 'manual-reconciliation-no-result' });
-    assert.throws(() => resumeGenerationRun(reopened, { runId: fixture.run.id, idempotencyKey: 'resume-without-session' }), InvalidCommandError);
+    resolveUnknownRunItems(reopened, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.id, itemIds: unknownItems.map((item) => item.id), idempotencyKey: 'manual-reconciliation-no-result' });
+    assert.throws(() => resumeGenerationRun(reopened, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.id, idempotencyKey: 'resume-without-session' }), InvalidCommandError);
     const session = openOrAttachStudioSession(reopened, { studioId: fixture.initialized.manifest.studioId, conversationId: 'recovery-confirmation' });
-    const explicitlyResumed = resumeGenerationRun(reopened, { runId: fixture.run.id, sessionId: session.id, idempotencyKey: 'user-approved-safe-resume' });
+    const explicitlyResumed = resumeGenerationRun(reopened, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.id, sessionId: session.id, idempotencyKey: 'user-approved-safe-resume' });
     assert.equal(explicitlyResumed.value.status, 'queued');
 
     let safeProviderCalls = 0;
@@ -163,7 +163,7 @@ test('daemon restart preserves a 100-item queue and never replays external reque
       assetPersister: { persistGeneratedImage: async ({ itemId }) => ({ assetId: 'recovered-' + itemId, mediaType: 'image/png', byteSize: png.length, contentHash: 'safe-' + itemId }) }
     });
     const processed = await worker.processOnce(100);
-    assert.deepEqual(processed, { claimed: 65, succeeded: 65, retrying: 0, blocked: 0, unknown: 0 });
+    assert.deepEqual(processed, { claimed: 65, succeeded: 65, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 });
     assert.equal(safeProviderCalls, 65, 'only items known not to have reached the Provider may execute after user confirmation');
     const finalItems = listGenerationRunItems(reopened, fixture.run.id);
     assert.deepEqual(countByStatus(finalItems), { succeeded: 90, failed: 10 });
@@ -178,6 +178,44 @@ test('daemon restart preserves a 100-item queue and never replays external reque
   }
 });
 
+test('standalone service startup performs explicit idempotent recovery without constructor side effects', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const provider = await startCountingProvider();
+  let fixture;
+  let constructed;
+  let started;
+  try {
+    fixture = createQueuedHundredItemRun(workspaceRoot, provider.baseUrl);
+    const [claimed] = claimRunItems(fixture.db, { workerId: 'standalone-crash', limit: 1, leaseMs: 1000, now: new Date('2020-01-01T00:00:00.000Z') });
+    transitionRunItem(fixture.db, { itemId: claimed.id, leaseToken: claimed.leaseToken, status: 'requesting', now: new Date('2020-01-01T00:00:00.500Z') });
+    closeStudioDatabase(fixture.db);
+    fixture.db = null;
+
+    constructed = new LocalStudioService({ workspaceRoot, providerTemplatePath });
+    assert.equal(listGenerationRunItems(constructed.db, fixture.run.id)[0].status, 'requesting');
+    assert.equal(getGenerationRun(constructed.db, fixture.run.id).status, 'running');
+    await constructed.close();
+    constructed = null;
+
+    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    assert.equal(listGenerationRunItems(started.service.db, fixture.run.id)[0].status, 'outcome_unknown');
+    assert.equal(getGenerationRun(started.service.db, fixture.run.id).status, 'resume_pending');
+    assert.equal(provider.count(), 0);
+    await started.service.close();
+    started = null;
+
+    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    assert.equal(listGenerationRunItems(started.service.db, fixture.run.id)[0].status, 'outcome_unknown');
+    assert.equal(getGenerationRun(started.service.db, fixture.run.id).status, 'resume_pending');
+  } finally {
+    if (fixture && fixture.db) closeStudioDatabase(fixture.db);
+    if (constructed) await constructed.close();
+    if (started) await started.service.close();
+    await provider.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('daemon reuses its workspace port across graceful restarts without a Provider', async () => {
   const workspaceRoot = temporaryWorkspace();
   const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
@@ -188,6 +226,20 @@ test('daemon reuses its workspace port across graceful restarts without a Provid
     await waitFor(() => fs.existsSync(runtimePath), 'first daemon runtime record');
     const first = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
     assert.ok(Number.isInteger(first.port) && first.port > 0);
+    assert.equal(typeof first.capability, 'string');
+    assert.ok(first.capability.length >= 43);
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(runtimePath).mode & 0o777, 0o600);
+    }
+    assert.equal((await fetch(first.url + '/api/studio')).status, 401);
+    assert.equal((await fetch(first.url + '/api/studio', { headers: { authorization: 'Bearer ' + first.capability } })).status, 200);
+    const studioOutput = spawnSync(process.execPath, [cliEntry, 'studio', '--workspace', workspaceRoot], { encoding: 'utf8' });
+    assert.equal(studioOutput.status, 0, studioOutput.stderr);
+    assert.equal(studioOutput.stdout.includes(first.capability), false);
+    assert.deepEqual(JSON.parse(studioOutput.stdout).workbench.command, ['daoge', 'open', '--workspace', workspaceRoot]);
+    const statusOutput = spawnSync(process.execPath, [cliEntry, 'status', '--workspace', workspaceRoot], { encoding: 'utf8' });
+    assert.equal(statusOutput.status, 0, statusOutput.stderr);
+    assert.equal(statusOutput.stdout.includes(first.capability), false);
     assert.equal((await fetch(first.url + '/api/health')).status, 200);
     await stopDaemon(daemon);
     daemon = null;
@@ -198,6 +250,7 @@ test('daemon reuses its workspace port across graceful restarts without a Provid
     const second = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
     assert.equal(second.url, first.url);
     assert.equal(second.port, first.port);
+    assert.notEqual(second.capability, first.capability);
     assert.equal(JSON.parse(fs.readFileSync(portPath, 'utf8')).port, first.port);
     assert.equal((await fetch(second.url + '/api/health')).status, 200);
   } finally {

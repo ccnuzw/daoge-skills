@@ -2,6 +2,8 @@
 
 面向中文工作流的 DAOGE Skill 系列。每个 Skill 都是可独立安装、独立使用、独立演进的能力包：Skill 负责把自然语言需求转化为可执行的标准流程，附带的脚本、参考资料和本地工作台负责让关键过程可检查、可恢复、可交付。
 
+> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.6.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.6.0)。
+
 当前仓库包含两项彼此独立的能力：
 
 | Skill | 解决的问题 | 主要使用者 | 独立说明 |
@@ -29,7 +31,7 @@ daoge-pic
 
 ## 安装
 
-可以只安装一个 Skill，也可以按需安装多个。以下命令使用 `npx skills add` 为 Codex 安装指定能力。
+可以只安装一个 Skill，也可以按需安装多个。`daoge-docs` 通过 `npx skills add` 安装；`daoge-pic` 稳定版必须使用对应 GitHub Release 的不可变 `.tgz` 制品。对 `daoge-pic` 而言，npm 安装负责提供 `daoge` CLI 和运行时，link/junction 步骤负责把同一个已安装包注册为 Codex Skill；两步缺一不可。
 
 安装 `daoge-docs`：
 
@@ -37,27 +39,35 @@ daoge-pic
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
 ```
 
-安装 `daoge-pic`：
+在项目根目录安装 `daoge-pic` 稳定正式版 `5.6.0`（固定使用 `daoge-pic-v5.6.0` Release 中的已发布制品，不会随 `main` 变化）：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.6.0/daoge-pic-5.6.0.tgz"
+node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
-需要全局安装时，加 `-g`：
+第二条命令跨 macOS、Linux 和 Windows 创建项目级 Skill 注册：Windows 使用 junction，其他平台使用目录符号链接。它只在 `.agents/skills/daoge-pic` 不存在时创建，不会删除或覆盖已有目录；若目标已存在，请先确认它的来源并自行选择其他项目或安装位置，不要直接覆盖。完成后重启 Codex，使新增 Skill 被重新发现。项目本地安装后的 CLI 可通过 `npx daoge` 或 `./node_modules/.bin/daoge` 调用，例如：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs -g
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
+npx daoge studio --workspace /absolute/workspace
 ```
 
-也可以直接从单个 Skill 的 GitHub 路径安装：
+需要全局安装时，安装同一个 Release 制品，再用 Node 标准库定位 npm 全局包目录并注册到当前用户的 Codex Skill 目录：
 
 ```bash
-npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-docs -a codex
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.6.0/daoge-pic-5.6.0.tgz"
+node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+```
+
+全局注册命令同样采用 fail-if-exists，不删除或覆盖 `~/.codex/skills/daoge-pic`。完成后重启 Codex；CLI 可直接运行 `daoge studio --workspace /absolute/workspace`。
+
+如需直接试用 `main` 分支的开发源码，可使用 `npx skills add` 明确安装 Skill 路径；该方式不等同于固定版本的 GitHub Release 制品：
+
+```bash
 npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic -a codex
 ```
 
-安装后重启 Codex，使新增 Skill 被重新发现。安装一个 Skill 不会自动安装仓库中的另一个 Skill。
+安装 `daoge-docs` 或开发源码 Skill 后也需重启 Codex。安装一个能力不会自动安装仓库中的另一个能力。
 
 ## 两条起步路径
 
@@ -82,7 +92,7 @@ node skills/daoge-pic/scripts/daoge.js studio --workspace /absolute/workspace
 node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 ```
 
-真实生成只从 `<workspace>/daoge-studio/provider.env` 读取 Provider 配置。Workbench 用于查看项目、轮次、运行、资产、复核和交付，不提供第二个聊天入口，也不读取 `task_spec.json`、旧静态工作区或旧目录状态。完整流程见 [DAOGE Pic v5 README](./skills/daoge-pic/README.md)。
+真实生成只从 `<workspace>/daoge-studio/provider.env` 读取 Provider 配置。Workbench 用于查看项目、轮次、Generation History（生成历史）、运行、资产、复核和交付，不提供第二个聊天入口，也不读取 `task_spec.json`、旧静态工作区或旧目录状态。当前源码流程见 [DAOGE Pic vNext README](./skills/daoge-pic/README.md)；需要正式发布包时使用上方标明的稳定版。
 
 ## 系列原则
 
@@ -110,7 +120,7 @@ node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
     │   ├── assets/
     │   └── references/
     └── daoge-pic/
-        ├── README.md                 # v5 Studio 使用手册
+        ├── README.md                 # vNext Studio 使用手册与版本状态
         ├── SKILL.md                  # Codex 执行规范
         ├── scripts/daoge.js          # Studio CLI 入口
         ├── src/vnext/                # SQLite Studio、运行与媒体逻辑
@@ -123,7 +133,7 @@ node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 
 ## 发布与反馈
 
-每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前正式版本为 [v5.4.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.4.0)，其发布包、校验和和机器验证记录位于该 Release 与 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md)。
+每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.6.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.6.0)。已发布证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章维护，证据保存在源码仓库与对应 Release，不属于运行时 npm 包。
 
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。

@@ -1,8 +1,8 @@
-> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口以 `skills/daoge-pic/README.md` 和 `docs/DAOGE_完整使用说明.md` 为准。
+> 历史规划文档：本文只保留为设计、试跑或阶段记录，不作为当前发布入口。当前用户入口为 `skills/daoge-pic/README.md`；`docs/DAOGE_完整使用说明.md` 仅作为历史参考。
 
 # DAOGE 可视化工作台重构正式蓝图
 
-> 归档说明：本文记录旧工作台重构阶段的设计草案，不代表当前发布入口。当前入口以 `skills/daoge-pic/README.md` 为准：`node scripts/daoge.js prepare --task-spec task_spec.json --output-dir out`，然后打开 `out/workspace/index.html`。
+> 归档说明：本文记录历史 v2 工作台重构阶段的设计草案；该阶段曾使用 `prepare`、`task_spec.json` 和 `workspace/index.html`。这些命令、文件和后文流程均为历史记录，当前不可执行，也不代表当前发布入口；当前入口仅以 `skills/daoge-pic/README.md` 为准。
 
 ## 0. 终版执行结论
 

@@ -2,6 +2,12 @@ export const WORKBENCH_VIEWS = ['projects', 'project-overview', 'tasks', 'assets
 export const STUDIO_VIEWS = ['projects', 'library', 'shared-assets', 'guide'];
 export const ASSET_SCOPES = ['round', 'task', 'project', 'studio'];
 
+export const WORKBENCH_VIEW_RENDERERS = Object.freeze(Object.fromEntries(WORKBENCH_VIEWS.map((view) => [view, view])));
+
+export function rendererForWorkbenchView(view) {
+  return WORKBENCH_VIEW_RENDERERS[view] || WORKBENCH_VIEW_RENDERERS.projects;
+}
+
 function known(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }

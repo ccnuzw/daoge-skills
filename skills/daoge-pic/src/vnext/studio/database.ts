@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 14;
+export const STUDIO_SCHEMA_VERSION = 17;
 
 const SCHEMA_V1 = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -86,6 +86,42 @@ const SCHEMA_V14 = [
   "INSERT INTO studio_runtime_settings (studio_id, max_worker_concurrency, updated_at) SELECT studio_id, max_worker_concurrency, updated_at FROM studio_runtime_settings_v13",
   "DROP TABLE studio_runtime_settings_v13"
 ].join(';\n') + ';';
+const SCHEMA_V15 = [
+  "CREATE TABLE IF NOT EXISTS command_receipts (idempotency_key TEXT PRIMARY KEY, command_name TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL, request_hash TEXT)",
+  "ALTER TABLE command_receipts RENAME TO command_receipts_v14",
+  "CREATE TABLE command_receipts (studio_id TEXT NOT NULL REFERENCES studios(id), idempotency_key TEXT NOT NULL, command_name TEXT NOT NULL, request_hash TEXT, response_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (studio_id, idempotency_key))",
+  "CREATE TABLE IF NOT EXISTS command_receipt_migration_quarantine (idempotency_key TEXT PRIMARY KEY, command_name TEXT NOT NULL, request_hash TEXT, response_json TEXT NOT NULL, created_at TEXT NOT NULL, reason TEXT NOT NULL)",
+  "INSERT INTO command_receipts (studio_id, idempotency_key, command_name, request_hash, response_json, created_at) SELECT (SELECT id FROM studios), idempotency_key, command_name, request_hash, response_json, created_at FROM command_receipts_v14 WHERE (SELECT COUNT(*) FROM studios) = 1",
+  "INSERT INTO command_receipt_migration_quarantine (idempotency_key, command_name, request_hash, response_json, created_at, reason) SELECT idempotency_key, command_name, request_hash, response_json, created_at, 'ambiguous_studio_scope' FROM command_receipts_v14 WHERE (SELECT COUNT(*) FROM studios) <> 1",
+  "DROP TABLE command_receipts_v14"
+].join(';\n') + ';';
+const SCHEMA_V16 = [
+  "CREATE TABLE IF NOT EXISTS asset_media_operations (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), asset_id TEXT NOT NULL, operation TEXT NOT NULL CHECK (operation IN ('import', 'trash', 'restore')), source_path TEXT NOT NULL, target_path TEXT NOT NULL, asset_json TEXT, relation_json TEXT, created_at TEXT NOT NULL)",
+  "ALTER TABLE asset_media_operations ADD COLUMN expected_hash TEXT",
+  "ALTER TABLE asset_media_operations ADD COLUMN expected_size INTEGER",
+  "ALTER TABLE asset_media_operations ADD COLUMN expected_media_type TEXT",
+  "ALTER TABLE asset_media_operations ADD COLUMN phase TEXT NOT NULL DEFAULT 'prepared' CHECK (phase IN ('prepared', 'moved'))",
+  "UPDATE asset_media_operations SET expected_hash = json_extract(asset_json, '$.contentHash'), expected_size = json_extract(asset_json, '$.byteSize'), expected_media_type = json_extract(asset_json, '$.mediaType') WHERE operation = 'import' AND asset_json IS NOT NULL AND json_valid(asset_json) AND json_type(asset_json, '$') = 'object' AND json_extract(asset_json, '$.kind') = 'import' AND json_extract(asset_json, '$.mediaType') IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif') AND json_type(asset_json, '$.contentHash') = 'text' AND length(json_extract(asset_json, '$.contentHash')) = 64 AND json_extract(asset_json, '$.contentHash') NOT GLOB '*[^0-9a-f]*' AND json_type(asset_json, '$.byteSize') = 'integer' AND json_extract(asset_json, '$.byteSize') > 0 AND json_extract(asset_json, '$.byteSize') <= 9007199254740991",
+].join(';\n') + ';';
+const SCHEMA_V16_ASSET_BACKFILL = "UPDATE asset_media_operations SET expected_hash = (SELECT asset.content_hash FROM assets asset WHERE asset.id = asset_media_operations.asset_id AND asset.studio_id = asset_media_operations.studio_id AND asset.storage_path = asset_media_operations.source_path), expected_size = (SELECT asset.byte_size FROM assets asset WHERE asset.id = asset_media_operations.asset_id AND asset.studio_id = asset_media_operations.studio_id AND asset.storage_path = asset_media_operations.source_path), expected_media_type = (SELECT asset.media_type FROM assets asset WHERE asset.id = asset_media_operations.asset_id AND asset.studio_id = asset_media_operations.studio_id AND asset.storage_path = asset_media_operations.source_path) WHERE operation IN ('trash', 'restore') AND EXISTS (SELECT 1 FROM assets asset WHERE asset.id = asset_media_operations.asset_id AND asset.studio_id = asset_media_operations.studio_id AND asset.storage_path = asset_media_operations.source_path AND asset.media_type IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif') AND length(asset.content_hash) = 64 AND asset.content_hash NOT GLOB '*[^0-9a-f]*' AND typeof(asset.byte_size) = 'integer' AND asset.byte_size > 0 AND asset.byte_size <= 9007199254740991)";
+const SCHEMA_V17 = [
+  "CREATE TABLE IF NOT EXISTS delivery_export_journal (idempotency_key TEXT PRIMARY KEY, delivery_id TEXT NOT NULL REFERENCES deliveries(id), studio_id TEXT NOT NULL REFERENCES studios(id), directory_path TEXT NOT NULL, manifest_json TEXT NOT NULL, files_json TEXT NOT NULL, created_at TEXT NOT NULL)",
+  "ALTER TABLE delivery_export_journal RENAME TO delivery_export_journal_v16",
+  "CREATE TABLE delivery_export_journal (studio_id TEXT NOT NULL REFERENCES studios(id), idempotency_key TEXT NOT NULL, delivery_id TEXT NOT NULL REFERENCES deliveries(id), directory_path TEXT NOT NULL, manifest_json TEXT NOT NULL, files_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (studio_id, idempotency_key))",
+  "INSERT INTO delivery_export_journal (studio_id, idempotency_key, delivery_id, directory_path, manifest_json, files_json, created_at) SELECT studio_id, idempotency_key, delivery_id, directory_path, manifest_json, files_json, created_at FROM delivery_export_journal_v16",
+  "DROP TABLE delivery_export_journal_v16",
+  "CREATE TABLE IF NOT EXISTS task_types (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, definition_json TEXT NOT NULL, source TEXT NOT NULL CHECK (source IN ('official', 'user')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+  "ALTER TABLE task_types RENAME TO task_types_v16",
+  "CREATE TABLE task_types (id TEXT PRIMARY KEY, studio_id TEXT REFERENCES studios(id), name TEXT NOT NULL, definition_json TEXT NOT NULL, source TEXT NOT NULL CHECK (source IN ('official', 'user')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, CHECK ((source = 'official' AND studio_id IS NULL) OR (source = 'user' AND studio_id IS NOT NULL)))",
+  "CREATE UNIQUE INDEX idx_task_types_official_name ON task_types(name) WHERE source = 'official'",
+  "CREATE UNIQUE INDEX idx_task_types_user_studio_name ON task_types(studio_id, name) WHERE source = 'user'",
+  "CREATE TABLE IF NOT EXISTS task_type_migration_quarantine (id TEXT PRIMARY KEY, name TEXT NOT NULL, definition_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, reason TEXT NOT NULL)",
+  "INSERT INTO task_types (id, studio_id, name, definition_json, source, created_at, updated_at) SELECT id, NULL, name, definition_json, source, created_at, updated_at FROM task_types_v16 WHERE source = 'official'",
+  "INSERT INTO task_types (id, studio_id, name, definition_json, source, created_at, updated_at) SELECT id, (SELECT id FROM studios), name, definition_json, source, created_at, updated_at FROM task_types_v16 WHERE source = 'user' AND (SELECT COUNT(*) FROM studios) = 1",
+  "INSERT INTO task_type_migration_quarantine (id, name, definition_json, created_at, updated_at, reason) SELECT id, name, definition_json, created_at, updated_at, 'ambiguous_studio_scope' FROM task_types_v16 WHERE source = 'user' AND (SELECT COUNT(*) FROM studios) <> 1",
+  "DROP TABLE task_types_v16"
+].join(';\n') + ';';
+
 
 export type StudioDatabase = DatabaseSyncType;
 type DatabaseSyncConstructor = new (path: string) => StudioDatabase;
@@ -147,13 +183,17 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
     { version: 11, sql: SCHEMA_V11 },
     { version: 12, sql: SCHEMA_V12 },
     { version: 13, sql: SCHEMA_V13 },
-    { version: 14, sql: SCHEMA_V14 }
+    { version: 14, sql: SCHEMA_V14 },
+    { version: 15, sql: SCHEMA_V15 },
+    { version: 16, sql: SCHEMA_V16 },
+    { version: 17, sql: SCHEMA_V17 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
     if (existing) continue;
     withTransaction(db, () => {
       db.exec(migration.sql);
+      if (migration.version === 16 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get()) db.exec(SCHEMA_V16_ASSET_BACKFILL);
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());
     });
   }

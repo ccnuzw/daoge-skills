@@ -20,9 +20,9 @@ test('P1 creative records connect task, round lineage, explicit run items, outpu
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '创作链项目', idempotencyKey: 'record-project' }).value;
-    const task = createTaskDraft(db, { projectId: project.id, name: '主视觉', intent: { audience: '设计评审', objective: '建立稳定来源链' }, idempotencyKey: 'record-task' }).value;
-    const parent = createRoundDraft(db, { taskId: task.id, purpose: 'exploration', plan: { direction: '构图探索' }, idempotencyKey: 'record-parent' }).value;
-    const round = createRoundDraft(db, { taskId: task.id, purpose: 'refinement', parentRoundId: parent.id, plan: { direction: '保留结构并优化色彩' }, idempotencyKey: 'record-round' }).value;
+    const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.id, name: '主视觉', intent: { audience: '设计评审', objective: '建立稳定来源链' }, idempotencyKey: 'record-task' }).value;
+    const parent = createRoundDraft(db, { studioId: initialized.manifest.studioId, taskId: task.id, purpose: 'exploration', plan: { direction: '构图探索' }, idempotencyKey: 'record-parent' }).value;
+    const round = createRoundDraft(db, { studioId: initialized.manifest.studioId, taskId: task.id, purpose: 'refinement', parentRoundId: parent.id, plan: { direction: '保留结构并优化色彩' }, idempotencyKey: 'record-round' }).value;
     const now = new Date().toISOString();
     db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, version, worker_id, started_at, completed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run('run-record', round.id, 'completed', '{}', JSON.stringify({ itemCount: 1 }), 1, null, now, now, now, now);
     db.prepare('INSERT INTO run_items (id, run_id, sequence, status, prompt_payload_json, request_id, attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run('item-record', 'run-record', 1, 'completed', '{}', 'request-record', 1, now, now);

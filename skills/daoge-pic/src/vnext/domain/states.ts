@@ -52,7 +52,7 @@ const RUN_ITEM_TRANSITIONS: Record<RunItemStatus, readonly RunItemStatus[]> = {
   leased: ['pending', 'requesting', 'cancel_requested'],
   requesting: ['receiving', 'retry_wait', 'blocked', 'cancel_requested', 'outcome_unknown'],
   receiving: ['persisting', 'retry_wait', 'blocked', 'cancel_requested', 'outcome_unknown'],
-  persisting: ['succeeded', 'blocked', 'outcome_unknown'],
+  persisting: ['succeeded', 'blocked', 'cancel_requested', 'outcome_unknown'],
   succeeded: [],
   retry_wait: ['pending', 'failed', 'cancel_requested'],
   blocked: ['pending', 'failed', 'cancel_requested'],

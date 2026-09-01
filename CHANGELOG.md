@@ -2,6 +2,53 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.6.0 - 2026-09-01
+
+本版本在 5.5.0 动态输出控制基础上完成 Studio 安全、持久恢复、媒体一致性和 Workbench 交互体系升级。
+
+### 新增
+
+- Studio 本地访问加入高熵 capability 授权：Workbench 通过一次性 URL fragment 引导换取 `HttpOnly`、`SameSite=Strict` 本地会话 Cookie，随后立即清除 fragment；CLI 使用 Bearer capability，除健康检查外的 API 均要求授权。
+- Provider 返回 URL 的图片下载加入 SSRF 防护：仅接受无内嵌凭据的 HTTP/HTTPS 公网目标，逐跳重新校验 DNS 与重定向、固定已验证地址并限制响应体；携带 Provider 凭据的 API 请求拒绝重定向。
+- 媒体导入、生成、回收与恢复加入可恢复 journal 和受验证 snapshot；项目与交付 ZIP 以受管理文件快照流式输出，并约束 Studio/项目归属、路径、符号链接、文件身份、条目数与总大小。
+- Workbench 增加明确的 Generation History（生成历史）选择、SSE cursor/快照恢复、可恢复的三阶段交付完成流程、交付历史与冻结文件领取，并完善键盘搜索、焦点圈、模态对话框焦点约束/返回和实时状态可访问性。
+
+### 改进
+
+- Studio 隔离扩展到 manifest 工作区身份、本地 daemon、数据库实体、深链、媒体文件、ZIP 与交付冻结副本；跨 Studio 或跨项目的对象与文件访问会被拒绝。
+- 运行由 daemon 内的持久 Worker 和 SQLite 队列驱动；启动恢复保留已确定结果，将不安全的在途外部调用转为待会话确认状态，并保持 `outcome_unknown` 不自动重放。
+- 所有 Studio mutation 使用幂等收据；CLI 支持显式 `--idempotency-key`，恢复同一操作时可复用相同键和相同请求，避免重复创建或重复外部副作用。
+- 交付继续以 `draft -> ready -> exported` 作为权威状态机；Workbench 的“完成交付”在失败后从已提交阶段继续，已导出的冻结图片不受源资产后来回收影响。
+- CLI 在启动 daemon 或初始化工作区前完成未知命令与必需参数校验；首次初始化会先验证 Provider 模板与工作区身份，失败不留下部分 Studio。
+- 包契约改为解析 npm JSON 后执行真实 pack、临时安装、`daoge` bin/help 与已安装运行时资产路径检查，并清理临时 tarball 与安装目录；最终机器数字留待候选验证阶段记录。
+
+### 修复
+
+- 媒体根目录从工作区起逐级拒绝符号链接，启动对账不会遍历或移动工作区外文件；生成恢复同时验证 run、run item 与 Studio 归属。
+- 单次运行并发正确支持 `1..30`；交付导出 journal 使用 Studio 复合幂等键，不同交付复用同一 key 会被拒绝而不是覆盖恢复记录。
+- 旧幂等回执和用户任务类型只在归属唯一时迁移，歧义数据进入隔离表；用户任务类型按 Studio 隔离。
+- Workbench 授权失败保留 capability 并提供重试页；交付批次和计划对比不再跨项目或轮次残留；图片查看器使用 portal、backdrop 与 `inert` 实现真实模态交互。
+
+### 验证
+
+- Node/Vite 全量回归、真实 package smoke 与 Chromium 桌面/移动验证全部通过；精确制品证据见 `skills/daoge-pic/docs/vnext_verification_evidence_zh.md`。
+
+## daoge-pic 5.5.0 - 2026-09-01
+
+### 新增
+
+- 画幅、尺寸、分辨率和本次生成并发可在会话中动态确认；`1K`、`2K` 等分辨率按画幅归一化为明确尺寸。
+- 新 Studio 工作区 Worker 并发默认上限为 `30`，单次运行可请求 `1..30` 路并发并冻结到运行记录。
+
+### 改进
+
+- 输出规格不再依赖 Provider 名称比例白名单，不支持的传输规格明确拒绝且不回退方图。
+- Provider 生成请求禁止自动跟随重定向；运行时设置迁移到 SQLite Schema v14。
+
+### 验证
+
+- 发布前 vNext 自动化回归 `88/88` 通过，package smoke 通过；正式制品随 `daoge-pic-v5.5.0` GitHub Release 发布。
+
 ## daoge-pic 5.4.0 - 2026-08-31
 
 ### 新增

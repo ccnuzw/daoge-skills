@@ -1,8 +1,10 @@
-# DAOGE Pic 完整使用说明
+# DAOGE Pic 完整使用说明（历史 v2）
 
-本文是 DAOGE v2 用户手册。当前用户只需要记住：一个 CLI、一个工作台入口、四条常用路径。
+> **历史文档，不是当前使用入口。** 本文记录已经退役的 v2 目录/静态 HTML 工作流，仅用于考古与理解旧产物。`prepare`、`execute`、`ingest`、`rerun`、`review` 命令，`task_spec.json` 输入，以及 `workspace/index.html`、`workspace/results.html` 等静态页面契约均已退役，不得作为当前可执行流程、兼容接口或发布要求。当前唯一用户入口是 [`skills/daoge-pic/README.md`](../skills/daoge-pic/README.md)。
 
-本文所有命令默认从 skill 目录执行：
+本文曾是 DAOGE v2 用户手册；下文中的“当前”“推荐”和“入口”均只描述已退役的历史版本。
+
+下列历史命令示例原先默认从 skill 目录执行：
 
 ```bash
 cd skills/daoge-pic
@@ -13,7 +15,7 @@ node scripts/daoge.js <prepare|execute|ingest|rerun|review>
 open out/workspace/index.html
 ```
 
-`workspace/index.html` 是总入口。它会告诉你当前阶段、下一步、该看结果还是先处理问题。
+`workspace/index.html` 曾是历史 v2 的总入口；当前 vNext 不生成、读取或恢复该页面。
 
 ## 1. DAOGE 是什么
 
@@ -27,9 +29,9 @@ DAOGE 是批量生图任务工作台。它负责：
 
 普通用户不需要从 `internal/` 或 `debug/` 开始。排查问题时再看这些文件。
 
-## 2. 唯一 CLI
+## 2. 历史统一 CLI
 
-当前只推荐：
+历史 v2 曾推荐：
 
 ```bash
 node scripts/daoge.js prepare
@@ -39,7 +41,7 @@ node scripts/daoge.js rerun
 node scripts/daoge.js review
 ```
 
-旧多脚本入口、旧工作台页面名、旧 HTML 看板不作为当前入口。历史文档如保留，只作阶段记录。
+本节全部命令现已退役。当前 vNext 不提供旧多脚本入口、旧工作台页面名、旧 HTML 看板或旧任务 JSON 兼容；请返回文首链接进入当前流程。
 
 ## 3. 最小 task_spec
 
@@ -317,10 +319,13 @@ node scripts/daoge.js rerun \
 
 ## 11. 文档分层
 
-用户入口：
+当前用户入口：
 
-- `skills/daoge-pic/README.md`
-- 本文档
+- [`skills/daoge-pic/README.md`](../skills/daoge-pic/README.md)
+
+历史材料：
+
+- 本文档（仅用于旧 v2 流程考古，不可执行）
 
 示例：
 

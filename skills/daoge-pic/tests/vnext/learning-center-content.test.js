@@ -21,7 +21,7 @@ test('learning center only deep-links to Studio-global views', () => {
   const skillRoot = path.resolve(__dirname, '../..');
   const source = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
   const content = fs.readFileSync(path.join(skillRoot, 'web/src/learning-center-content.mjs'), 'utf8');
-  assert.match(source, /<LearningCenter onDismiss=\{dismissGuide\} onNavigate=\{\(view\) => navigateRoute\(\{ view \}\)\} \/>/);
+  assert.match(source, /<LearningCenter onDismiss=\{dismissGuide\} onNavigate=\{\([^)]*\) => navigateRoute\(\{ view: [^}]+ \}\)\} \/>/);
   assert.match(content, /action: 'projects'/);
   assert.match(content, /action: 'library'/);
   assert.doesNotMatch(content, /action: 'runs'/);

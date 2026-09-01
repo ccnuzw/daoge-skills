@@ -8,9 +8,11 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { loadProviderConfig, providerStatus } = require('../../dist/vnext/studio/provider-config');
 const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan } = require('../../dist/vnext/domain/studio-commands');
-const { createDryRunPreview, queueGenerationRun, getGenerationRun, listGenerationRunItems } = require('../../dist/vnext/runner/run-commands');
+const { cancelGenerationRun, createDryRunPreview, queueGenerationRun, getGenerationRun, listGenerationRunItems } = require('../../dist/vnext/runner/run-commands');
 const { GenerationWorker } = require('../../dist/vnext/runner/worker');
 const { StudioGeneratedAssetPersister } = require('../../dist/vnext/media/generated-assets');
+const { assetFilePath, importStudioAsset } = require('../../dist/vnext/domain/assets');
+const { StudioAssetResolver } = require('../../dist/vnext/media/asset-resolver');
 
 const skillRoot = path.resolve(__dirname, '../..');
 const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
@@ -31,20 +33,34 @@ function setupRun(itemCount = 1) {
   ].join('\n') + '\n');
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'worker test', idempotencyKey: 'project' });
-  const task = createTaskDraft(db, { projectId: project.value.id, name: 'image', idempotencyKey: 'task' });
-  const round = createRoundDraft(db, { taskId: task.value.id, purpose: 'exploration', idempotencyKey: 'round' });
-  const prepared = prepareRoundForConfirmation(db, { roundId: round.value.id, plan: { operation: 'generate', itemCount, prompt: 'single clean image' }, expectedVersion: round.value.version, idempotencyKey: 'prepare' });
-  const confirmed = confirmRoundPlan(db, { roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
+  const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.value.id, name: 'image', idempotencyKey: 'task' });
+  const round = createRoundDraft(db, { studioId: initialized.manifest.studioId, taskId: task.value.id, purpose: 'exploration', idempotencyKey: 'round' });
+  const prepared = prepareRoundForConfirmation(db, { studioId: initialized.manifest.studioId, roundId: round.value.id, plan: { operation: 'generate', itemCount, prompt: 'single clean image' }, expectedVersion: round.value.version, idempotencyKey: 'prepare' });
+  const confirmed = confirmRoundPlan(db, { studioId: initialized.manifest.studioId, roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
   const config = loadProviderConfig(initialized.paths);
   const status = providerStatus(initialized.paths);
-  const dryRun = createDryRunPreview(db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
-  const run = queueGenerationRun(db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
+  const dryRun = createDryRunPreview(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
+  const run = queueGenerationRun(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
   return { workspaceRoot, initialized, db, config, run };
 }
 
 function cleanup(fixture) {
   closeStudioDatabase(fixture.db);
   fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true });
+}
+
+function attachManagedAssets(fixture, input) {
+  const item = fixture.db.prepare('SELECT id, prompt_payload_json FROM run_items WHERE run_id = ?').get(fixture.run.value.id);
+  const payload = JSON.parse(item.prompt_payload_json);
+  fixture.db.prepare('UPDATE run_items SET prompt_payload_json = ? WHERE id = ?').run(JSON.stringify({ ...payload, ...input }), item.id);
+}
+
+function largePng(fill = 0x41) {
+  return Buffer.concat([png, Buffer.alloc(192 * 1024 - png.length, fill)]);
+}
+
+function sameSizeReplacement(bytes, fill = 0x42) {
+  return Buffer.concat([bytes.subarray(0, 16), Buffer.alloc(bytes.length - 16, fill)]);
 }
 
 function fakeProvider(generate, classifyError) {
@@ -70,7 +86,7 @@ test('worker persists a successful Provider result and completes its run', async
       now: () => new Date('2026-01-01T00:00:00.000Z')
     });
     const result = await worker.processOnce();
-    assert.deepEqual(result, { claimed: 1, succeeded: 1, retrying: 0, blocked: 0, unknown: 0 });
+    assert.deepEqual(result, { claimed: 1, succeeded: 1, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 });
     assert.equal(persisted.length, 1);
     assert.equal(getGenerationRun(fixture.db, fixture.run.value.id).status, 'completed');
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'succeeded');
@@ -102,7 +118,7 @@ test('worker starts every claimed batch item before waiting for a slow Provider 
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(calls, 2, 'a later lease must begin before the first Provider response resolves');
     releaseFirst();
-    assert.deepEqual(await execution, { claimed: 2, succeeded: 2, retrying: 0, blocked: 0, unknown: 0 });
+    assert.deepEqual(await execution, { claimed: 2, succeeded: 2, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 });
     assert.equal(getGenerationRun(fixture.db, fixture.run.value.id).status, 'completed');
   } finally {
     cleanup(fixture);
@@ -171,7 +187,7 @@ test('worker schedules a bounded retry for rate limits without persisting an ass
       now: () => new Date('2026-01-01T00:00:00.000Z')
     });
     const result = await worker.processOnce();
-    assert.deepEqual(result, { claimed: 1, succeeded: 0, retrying: 1, blocked: 0, unknown: 0 });
+    assert.deepEqual(result, { claimed: 1, succeeded: 0, retrying: 1, blocked: 0, unknown: 0, cancelled: 0 });
     const item = listGenerationRunItems(fixture.db, fixture.run.value.id)[0];
     assert.equal(item.status, 'retry_wait');
     assert.equal(item.retryAt, '2026-01-01T00:00:01.000Z');
@@ -194,7 +210,7 @@ test('worker blocks local persistence failure without classifying or replaying t
       assetPersister: { persistGeneratedImage: async () => { throw new Error('disk full'); } },
       now: () => new Date('2026-01-01T00:00:00.000Z')
     });
-    assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 1, unknown: 0 });
+    assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 1, unknown: 0, cancelled: 0 });
     assert.equal(calls, 1);
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'blocked');
   } finally { cleanup(fixture); }
@@ -214,11 +230,224 @@ test('worker never automatically replays an unknown Provider outcome', async () 
     });
     const first = await worker.processOnce();
     const second = await worker.processOnce();
-    assert.deepEqual(first, { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 1 });
-    assert.deepEqual(second, { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0 });
+    assert.deepEqual(first, { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 1, cancelled: 0 });
+    assert.deepEqual(second, { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 });
     assert.equal(calls, 1);
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'outcome_unknown');
   } finally {
+    cleanup(fixture);
+  }
+});
+
+test('worker safely cancels when the Provider returns a definite result after cancellation', async () => {
+  const fixture = setupRun();
+  try {
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-cancel-returned',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => {
+        cancelGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id, idempotencyKey: 'cancel-returned' });
+        return { bytes: png, mediaType: 'image/png', externalRequestId: 'cancelled-result' };
+      }, () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('cancelled Provider output must not persist'); } },
+      now: () => new Date('2026-01-01T00:00:00.000Z')
+    });
+    assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 1 });
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'cancelled');
+  } finally { cleanup(fixture); }
+});
+
+test('worker closes an abort-ignoring in-flight cancellation as outcome unknown without leaving cancel_requested', async () => {
+  const fixture = setupRun();
+  try {
+    let release;
+    let observedSignal;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-cancel-ignores-abort',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async (_request, options) => { observedSignal = options.abortSignal; await gate; return { bytes: png, mediaType: 'image/png' }; }, () => ({ kind: 'unknown_outcome', code: 'aborted', message: 'aborted' })),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('unknown result must not persist'); } },
+      leaseMs: 1000
+    });
+    const execution = worker.processOnce();
+    await new Promise((resolve) => setImmediate(resolve));
+    cancelGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id, idempotencyKey: 'cancel-ignores-abort' });
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    release();
+    assert.deepEqual(await execution, { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 1, cancelled: 0 });
+    assert.equal(observedSignal.aborted, true);
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'outcome_unknown');
+  } finally { cleanup(fixture); }
+});
+
+test('worker awaits in-progress local persistence before settling cancellation', async () => {
+  const fixture = setupRun();
+  let releasePersistence;
+  try {
+    let persistenceCalls = 0;
+    let markPersistenceStarted;
+    const persistenceStarted = new Promise((resolve) => { markPersistenceStarted = resolve; });
+    const persistenceGate = new Promise((resolve) => { releasePersistence = resolve; });
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-cancel-persisting',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => ({ bytes: png, mediaType: 'image/png' }), () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetPersister: { persistGeneratedImage: async ({ result }) => {
+        persistenceCalls += 1;
+        markPersistenceStarted();
+        await persistenceGate;
+        return { assetId: 'asset-persisting-cancel', mediaType: result.mediaType, byteSize: result.bytes.length, contentHash: 'persisting-cancel-hash' };
+      } },
+      leaseMs: 1000
+    });
+    const execution = worker.processOnce();
+    let settled = false;
+    void execution.then(() => { settled = true; }, () => { settled = true; });
+    await persistenceStarted;
+    cancelGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id, idempotencyKey: 'cancel-during-persistence' });
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(settled, false, 'cancellation must not detach an in-progress local persistence commit');
+    assert.equal(persistenceCalls, 1);
+    releasePersistence();
+    releasePersistence = null;
+    assert.deepEqual(await execution, { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 1 });
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'cancelled');
+    assert.equal(persistenceCalls, 1);
+  } finally {
+    if (releasePersistence) releasePersistence();
+    cleanup(fixture);
+  }
+});
+
+test('worker awaits in-progress local persistence after lease ownership loss', async () => {
+  const fixture = setupRun();
+  let releasePersistence;
+  try {
+    let persistenceCalls = 0;
+    let markPersistenceStarted;
+    const persistenceStarted = new Promise((resolve) => { markPersistenceStarted = resolve; });
+    const persistenceGate = new Promise((resolve) => { releasePersistence = resolve; });
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-lease-loss-persisting',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => ({ bytes: png, mediaType: 'image/png' }), () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetPersister: { persistGeneratedImage: async ({ result }) => {
+        persistenceCalls += 1;
+        markPersistenceStarted();
+        await persistenceGate;
+        return { assetId: 'asset-persisting-lease-loss', mediaType: result.mediaType, byteSize: result.bytes.length, contentHash: 'persisting-lease-loss-hash' };
+      } },
+      leaseMs: 1000
+    });
+    const execution = worker.processOnce();
+    let settled = false;
+    void execution.then(() => { settled = true; }, () => { settled = true; });
+    await persistenceStarted;
+    const item = listGenerationRunItems(fixture.db, fixture.run.value.id)[0];
+    fixture.db.prepare("UPDATE run_items SET lease_token = 'different-owner' WHERE id = ?").run(item.id);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(settled, false, 'lease loss must not detach an in-progress local persistence commit');
+    assert.equal(persistenceCalls, 1);
+    releasePersistence();
+    releasePersistence = null;
+    assert.deepEqual(await execution, { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 1, cancelled: 0 });
+    const recovered = listGenerationRunItems(fixture.db, fixture.run.value.id)[0];
+    assert.equal(recovered.status, 'outcome_unknown');
+    assert.equal(recovered.error.code, 'lease_ownership_lost');
+    assert.equal(persistenceCalls, 1);
+  } finally {
+    if (releasePersistence) releasePersistence();
+    cleanup(fixture);
+  }
+});
+
+test('worker persists lease ownership loss as an unknown outcome', async () => {
+  const fixture = setupRun();
+  try {
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-lease-loss',
+      providerConfig: fixture.config,
+      provider: fakeProvider((_request, options) => new Promise((_resolve, reject) => options.abortSignal.addEventListener('abort', () => reject(new Error('lease lost')), { once: true })), () => ({ kind: 'unknown_outcome', code: 'aborted', message: 'aborted' })),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('unknown result must not persist'); } },
+      leaseMs: 1000
+    });
+    const execution = worker.processOnce();
+    await new Promise((resolve) => setImmediate(resolve));
+    const item = listGenerationRunItems(fixture.db, fixture.run.value.id)[0];
+    fixture.db.prepare("UPDATE run_items SET lease_token = 'different-owner' WHERE id = ?").run(item.id);
+    assert.deepEqual(await execution, { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 1, cancelled: 0 });
+    const recovered = listGenerationRunItems(fixture.db, fixture.run.value.id)[0];
+    assert.equal(recovered.status, 'outcome_unknown');
+    assert.equal(recovered.error.code, 'lease_ownership_lost');
+  } finally { cleanup(fixture); }
+});
+
+test('worker never calls the Provider after a same-size reference replacement before snapshotting', async () => {
+  const fixture = setupRun();
+  try {
+    const original = largePng();
+    const reference = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: original, mediaType: 'image/png' });
+    attachManagedAssets(fixture, { referenceAssetIds: [reference.id] });
+    fs.writeFileSync(assetFilePath(fixture.initialized.paths, reference), sameSizeReplacement(original));
+    let providerCalls = 0;
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-reference-snapshot-rejected',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => { providerCalls += 1; return { bytes: png, mediaType: 'image/png' }; }, () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetResolver: new StudioAssetResolver({ db: fixture.db, paths: fixture.initialized.paths }),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('rejected managed assets must not persist'); } }
+    });
+    assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 1, unknown: 0, cancelled: 0 });
+    assert.equal(providerCalls, 0);
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].error.code, 'managed_asset_resolution_failed');
+    assert.deepEqual(fs.readdirSync(path.join(fixture.initialized.paths.cacheDir, 'staging')), []);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('worker never calls the Provider when a mask is mutated in place during snapshotting', async () => {
+  const fixture = setupRun();
+  const originalReadSync = fs.readSync;
+  try {
+    const original = largePng();
+    const mask = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: original, mediaType: 'image/png' });
+    attachManagedAssets(fixture, { maskAssetId: mask.id });
+    const filePath = assetFilePath(fixture.initialized.paths, mask);
+    const identity = fs.statSync(filePath);
+    let mutated = false;
+    fs.readSync = function (...args) {
+      const read = originalReadSync.apply(fs, args);
+      const opened = fs.fstatSync(args[0]);
+      if (!mutated && args[4] === 0 && opened.dev === identity.dev && opened.ino === identity.ino) {
+        mutated = true;
+        fs.writeFileSync(filePath, sameSizeReplacement(original));
+      }
+      return read;
+    };
+    let providerCalls = 0;
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-mask-snapshot-rejected',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => { providerCalls += 1; return { bytes: png, mediaType: 'image/png' }; }, () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetResolver: new StudioAssetResolver({ db: fixture.db, paths: fixture.initialized.paths }),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('rejected managed assets must not persist'); } }
+    });
+    assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 1, unknown: 0, cancelled: 0 });
+    assert.equal(mutated, true);
+    assert.equal(providerCalls, 0);
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].error.code, 'managed_asset_resolution_failed');
+    assert.deepEqual(fs.readdirSync(path.join(fixture.initialized.paths.cacheDir, 'staging')), []);
+  } finally {
+    fs.readSync = originalReadSync;
     cleanup(fixture);
   }
 });

@@ -2,7 +2,7 @@ import { createId, nowIso } from '../shared/ids';
 import { StudioDatabase, appendStudioEvent, withTransaction } from '../studio/database';
 import { executeIdempotent, InvalidCommandError, StudioNotFoundError } from './studio-commands';
 
-export interface TaskType { id: string; name: string; source: 'official' | 'user'; definition: Record<string, unknown>; }
+export interface TaskType { id: string; studioId: string | null; name: string; source: 'official' | 'user'; definition: Record<string, unknown>; }
 export interface CreativeKit { id: string; studioId: string; name: string; definition: Record<string, unknown>; assetIds: string[]; }
 
 const OFFICIAL_TASK_TYPES: Array<{ id: string; name: string; definition: Record<string, unknown> }> = [
@@ -23,23 +23,26 @@ function requireText(value: string, label: string): string { const text = String
 export function seedOfficialTaskTypes(db: StudioDatabase): void {
   withTransaction(db, () => {
     const timestamp = nowIso();
-    const statement = db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, definition_json = excluded.definition_json, updated_at = excluded.updated_at');
+    const statement = db.prepare('INSERT INTO task_types (id, studio_id, name, definition_json, source, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET studio_id = NULL, name = excluded.name, definition_json = excluded.definition_json, source = excluded.source, updated_at = excluded.updated_at');
     for (const type of OFFICIAL_TASK_TYPES) statement.run(type.id, type.name, JSON.stringify(type.definition), 'official', timestamp, timestamp);
   });
 }
 
-export function listTaskTypes(db: StudioDatabase): TaskType[] {
+export function listTaskTypes(db: StudioDatabase, studioId: string): TaskType[] {
+  ensureStudio(db, studioId);
   seedOfficialTaskTypes(db);
-  return (db.prepare('SELECT id, name, source, definition_json FROM task_types ORDER BY source, name').all() as Array<{ id: string; name: string; source: TaskType['source']; definition_json: string }>).map((row) => ({ id: row.id, name: row.name, source: row.source, definition: object(row.definition_json) }));
+  return (db.prepare("SELECT id, studio_id, name, source, definition_json FROM task_types WHERE source = 'official' OR (source = 'user' AND studio_id = ?) ORDER BY source, name").all(studioId) as Array<{ id: string; studio_id: string | null; name: string; source: TaskType['source']; definition_json: string }>).map((row) => ({ id: row.id, studioId: row.studio_id, name: row.name, source: row.source, definition: object(row.definition_json) }));
 }
 
-export function createUserTaskType(db: StudioDatabase, input: { name: string; definition: Record<string, unknown>; idempotencyKey: string }): TaskType {
-  const receipt = executeIdempotent(db, input.idempotencyKey, 'task_types.create', () => {
+export function createUserTaskType(db: StudioDatabase, input: { studioId: string; name: string; definition: Record<string, unknown>; idempotencyKey: string }): TaskType {
+  const receipt = executeIdempotent(db, input.studioId, input.idempotencyKey, 'task_types.create', () => {
+    ensureStudio(db, input.studioId);
     const id = createId('tasktype');
     const timestamp = nowIso();
     const name = requireText(input.name, 'Task type name');
-    db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, name, JSON.stringify(input.definition || {}), 'user', timestamp, timestamp);
-    return { id, name, source: 'user' as const, definition: input.definition || {} };
+    if (db.prepare("SELECT 1 FROM task_types WHERE studio_id = ? AND source = 'user' AND name = ?").get(input.studioId, name)) throw new InvalidCommandError('A user task type with this name already exists in this Studio.');
+    db.prepare('INSERT INTO task_types (id, studio_id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, input.studioId, name, JSON.stringify(input.definition || {}), 'user', timestamp, timestamp);
+    return { id, studioId: input.studioId, name, source: 'user' as const, definition: input.definition || {} };
   }, input);
   return receipt.value;
 }
@@ -66,7 +69,7 @@ function listKits(db: StudioDatabase, studioId: string, table: 'style_kits' | 'b
 }
 
 function createKit(db: StudioDatabase, input: { studioId: string; name: string; definition: Record<string, unknown>; assetIds?: string[]; idempotencyKey: string; table: 'style_kits' | 'brand_kits'; targetType: 'style_kit' | 'brand_kit' }): CreativeKit {
-  const receipt = executeIdempotent(db, input.idempotencyKey, input.table + '.create', () => {
+  const receipt = executeIdempotent(db, input.studioId, input.idempotencyKey, input.table + '.create', () => {
     ensureStudio(db, input.studioId);
     const name = requireText(input.name, 'Kit name');
     const assetIds = input.assetIds || [];

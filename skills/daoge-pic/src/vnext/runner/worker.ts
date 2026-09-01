@@ -4,7 +4,7 @@ import { ManagedAssetResolver } from '../media/asset-resolver';
 import { InvalidCommandError } from '../domain/studio-commands';
 import { StudioDatabase } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
-import { ClaimedRunItem, claimRunItems, getGenerationRun, renewRunItemLease, settleTerminalGenerationRun, transitionRunItem } from './run-commands';
+import { ClaimedRunItem, claimRunItems, getGenerationRun, getGenerationRunItem, markRunItemOutcomeUnknown, promoteDueRetryWaitItems, renewRunItemLease, settleTerminalGenerationRun, transitionRunItem } from './run-commands';
 import { retryDecision, RetryPolicy, DEFAULT_RETRY_POLICY } from './retry-policy';
 
 export interface PersistedImageResult {
@@ -36,6 +36,7 @@ export interface WorkerProcessResult {
   retrying: number;
   blocked: number;
   unknown: number;
+  cancelled: number;
 }
 
 function promptFromItem(item: ClaimedRunItem): string {
@@ -51,6 +52,14 @@ function outputFromItem(item: ClaimedRunItem): Record<string, unknown> {
 
 function operationFromItem(item: ClaimedRunItem): 'generate' | 'edit' {
   return item.promptPayload.operation === 'edit' ? 'edit' : 'generate';
+}
+
+type ItemProcessingOutcome = 'succeeded' | 'retrying' | 'blocked' | 'unknown' | 'cancelled';
+type MonitorEvent = { kind: 'cancel_requested' } | { kind: 'ownership_lost' };
+type OperationOutcome<T> = { kind: 'fulfilled'; value: T } | { kind: 'rejected'; reason: unknown };
+
+function tracked<T>(operation: Promise<T>): Promise<OperationOutcome<T>> {
+  return operation.then((value) => ({ kind: 'fulfilled', value }), (reason) => ({ kind: 'rejected', reason }));
 }
 
 export class GenerationWorker {
@@ -81,8 +90,10 @@ export class GenerationWorker {
 
   async processOnce(limit = 1): Promise<WorkerProcessResult> {
     const snapshot = providerSnapshot(this.providerConfig);
-    const claimedItems = claimRunItems(this.db, { workerId: this.workerId, limit, leaseMs: this.leaseMs, now: this.clock(), providerSnapshot: { providerId: snapshot.providerId, model: snapshot.model, endpoint: snapshot.endpoint } });
-    const result: WorkerProcessResult = { claimed: claimedItems.length, succeeded: 0, retrying: 0, blocked: 0, unknown: 0 };
+    const now = this.clock();
+    promoteDueRetryWaitItems(this.db, now);
+    const claimedItems = claimRunItems(this.db, { workerId: this.workerId, limit, leaseMs: this.leaseMs, now, providerSnapshot: { providerId: snapshot.providerId, model: snapshot.model, endpoint: snapshot.endpoint } });
+    const result: WorkerProcessResult = { claimed: claimedItems.length, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 };
     const affectedRuns = new Set(claimedItems.map((item) => item.runId));
     // A batch lease is a concurrency budget. Processing it serially can let later items expire while an earlier Provider call is still pending.
     const outcomes = await Promise.allSettled(claimedItems.map((item) => this.processClaimedItem(item)));
@@ -93,7 +104,43 @@ export class GenerationWorker {
     return result;
   }
 
-  private async processClaimedItem(item: ClaimedRunItem): Promise<'succeeded' | 'retrying' | 'blocked' | 'unknown'> {
+  private markUnknown(item: ClaimedRunItem, reason: string): 'unknown' {
+    try {
+      markRunItemOutcomeUnknown(this.db, { itemId: item.id, requestId: item.requestId, reason, now: this.clock() });
+      return 'unknown';
+    } catch (error) {
+      if (getGenerationRunItem(this.db, item.id)?.status === 'outcome_unknown') return 'unknown';
+      throw error;
+    }
+  }
+
+  private settleCancellation(item: ClaimedRunItem, safeToCancel: boolean): 'cancelled' | 'unknown' {
+    const current = getGenerationRunItem(this.db, item.id);
+    if (!current) throw new InvalidCommandError('Cancelled run item no longer exists.');
+    if (current.status === 'cancelled') return 'cancelled';
+    if (current.status === 'outcome_unknown') return 'unknown';
+    if (current.status !== 'cancel_requested' || !safeToCancel) return this.markUnknown(item, current.status === 'cancel_requested' ? 'cancelled_request_uncertain' : 'lease_ownership_lost');
+    try {
+      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'cancelled' });
+      return 'cancelled';
+    } catch {
+      return this.markUnknown(item, 'lease_ownership_lost');
+    }
+  }
+
+  private transitionAfterProvider(item: ClaimedRunItem, safeToCancel: boolean, input: Parameters<typeof transitionRunItem>[1]): ItemProcessingOutcome | null {
+    try {
+      transitionRunItem(this.db, input);
+      return null;
+    } catch {
+      const current = getGenerationRunItem(this.db, item.id);
+      if (current?.status === 'cancel_requested') return this.settleCancellation(item, safeToCancel);
+      if (current?.status === 'cancelled') return 'cancelled';
+      return this.markUnknown(item, 'lease_ownership_lost');
+    }
+  }
+
+  private async processClaimedItem(item: ClaimedRunItem): Promise<ItemProcessingOutcome> {
     const run = getGenerationRun(this.db, item.runId);
     if (!run) throw new InvalidCommandError('Claimed item belongs to a missing run.');
     const snapshotProvider = String(run.providerSnapshot.providerId || '');
@@ -102,52 +149,107 @@ export class GenerationWorker {
       return 'blocked';
     }
 
-    transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'requesting' });
+    try {
+      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'requesting' });
+    } catch (error) {
+      const current = getGenerationRunItem(this.db, item.id);
+      if (current?.status === 'cancelled') return 'cancelled';
+      if (current?.status === 'cancel_requested') return this.settleCancellation(item, true);
+      throw error;
+    }
     const controller = new AbortController();
     let request: ImageRequest;
     try {
       const managedAssets = this.assetResolver ? this.assetResolver.resolve({ studioId: item.studioId, referenceAssetIds: item.promptPayload.referenceAssetIds, maskAssetId: item.promptPayload.maskAssetId }) : { referenceAssets: [], maskAsset: undefined };
       request = { requestId: item.requestId, idempotencyKey: 'run-request-' + item.requestId, prompt: promptFromItem(item), output: outputFromItem(item), ...managedAssets };
     } catch {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'managed_asset_resolution_failed' } });
-      return 'blocked';
+      const transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'managed_asset_resolution_failed' } });
+      return transition || 'blocked';
     }
-    const renewTimer = setInterval(() => {
-      try { renewRunItemLease(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), leaseMs: this.leaseMs, now: this.clock() }); }
-      catch { controller.abort(); }
-    }, Math.max(1000, Math.floor(this.leaseMs / 3)));
-    let imageResult: ImageResult;
+
+    let monitorEvent: MonitorEvent | null = null;
+    let resolveMonitor: (event: MonitorEvent) => void = () => undefined;
+    const monitorPromise = new Promise<MonitorEvent>((resolve) => { resolveMonitor = resolve; });
+    const finishMonitoring = (event: MonitorEvent): MonitorEvent => {
+      if (!monitorEvent) {
+        monitorEvent = event;
+        controller.abort();
+        resolveMonitor(event);
+      }
+      return monitorEvent || event;
+    };
+    const observeLease = (): MonitorEvent | null => {
+      if (monitorEvent) return monitorEvent;
+      try {
+        const current = renewRunItemLease(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), leaseMs: this.leaseMs, now: this.clock() });
+        return current.status === 'cancel_requested' ? finishMonitoring({ kind: 'cancel_requested' }) : null;
+      } catch {
+        return finishMonitoring({ kind: 'ownership_lost' });
+      }
+    };
+    const initialEvent = observeLease();
+    if (initialEvent?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+    if (initialEvent?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+    const renewTimer = setInterval(observeLease, Math.max(100, Math.min(1000, Math.floor(this.leaseMs / 3))));
+
     try {
-      const operation = operationFromItem(item);
-      if (operation === 'edit') {
-        if (!this.provider.edit) throw { code: 'edit_unsupported', message: 'The selected Provider does not implement image editing.', status: 422 };
-        imageResult = await this.provider.edit(request, { abortSignal: controller.signal });
-      } else imageResult = await this.provider.generate(request, { abortSignal: controller.signal });
-    } catch (error) {
+      const providerOperation = Promise.resolve().then(async () => {
+        const operation = operationFromItem(item);
+        if (operation === 'edit') {
+          if (!this.provider.edit) throw { code: 'edit_unsupported', message: 'The selected Provider does not implement image editing.', status: 422 };
+          return await this.provider.edit(request, { abortSignal: controller.signal });
+        }
+        return await this.provider.generate(request, { abortSignal: controller.signal });
+      });
+      const providerOutcome = await Promise.race([tracked(providerOperation), monitorPromise]);
+      if (providerOutcome.kind === 'cancel_requested') return this.settleCancellation(item, false);
+      if (providerOutcome.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+      if (providerOutcome.kind === 'rejected') {
+        const event = monitorEvent || observeLease();
+        if (event?.kind === 'cancel_requested') return this.settleCancellation(item, false);
+        if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+        const classified = this.provider.classifyError(providerOutcome.reason) as ProviderError;
+        const decision = retryDecision(classified, item.attempts, this.clock(), this.policy);
+        const error = { kind: classified.kind, code: classified.code, ...(safeErrorSummary(classified.message) ? { summary: safeErrorSummary(classified.message) } : {}) };
+        if (decision.retry) {
+          const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'retry_wait', retryAt: decision.retryAt, error });
+          return transition || 'retrying';
+        }
+        if (classified.kind === 'unknown_outcome') {
+          const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'outcome_unknown', error });
+          return transition || 'unknown';
+        }
+        const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error });
+        return transition || 'blocked';
+      }
+
+      const imageResult = providerOutcome.value;
+      let event = monitorEvent || observeLease();
+      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+      if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+      let transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'receiving' });
+      if (transition) return transition;
+      event = monitorEvent || observeLease();
+      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+      if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+      transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'persisting' });
+      if (transition) return transition;
+
+      const persistenceOperation = Promise.resolve().then(() => this.assetPersister.persistGeneratedImage({ runId: item.runId, itemId: item.id, result: imageResult }));
+      const persistenceOutcome = await tracked(persistenceOperation);
+      event = monitorEvent || observeLease();
+      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+      if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+      if (persistenceOutcome.kind === 'rejected') {
+        transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'local_persistence_failed' } });
+        return transition || 'blocked';
+      }
+      const persisted = persistenceOutcome.value;
+      transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'succeeded', result: { assetId: persisted.assetId, mediaType: persisted.mediaType, byteSize: persisted.byteSize, contentHash: persisted.contentHash, externalRequestId: imageResult.externalRequestId || null, revisedPrompt: imageResult.revisedPrompt || null, safeMeta: imageResult.safeMeta || {} } });
+      return transition || 'succeeded';
+    } finally {
       clearInterval(renewTimer);
-      const classified = this.provider.classifyError(error) as ProviderError;
-      const decision = retryDecision(classified, item.attempts, this.clock(), this.policy);
-      if (decision.retry) {
-        transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'retry_wait', retryAt: decision.retryAt, error: { kind: classified.kind, code: classified.code, ...(safeErrorSummary(classified.message) ? { summary: safeErrorSummary(classified.message) } : {}) } });
-        return 'retrying';
-      }
-      if (classified.kind === 'unknown_outcome') {
-        transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'outcome_unknown', error: { kind: classified.kind, code: classified.code, ...(safeErrorSummary(classified.message) ? { summary: safeErrorSummary(classified.message) } : {}) } });
-        return 'unknown';
-      }
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { kind: classified.kind, code: classified.code, ...(safeErrorSummary(classified.message) ? { summary: safeErrorSummary(classified.message) } : {}) } });
-      return 'blocked';
     }
-    try {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'receiving' });
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'persisting' });
-      const persisted = await this.assetPersister.persistGeneratedImage({ runId: item.runId, itemId: item.id, result: imageResult });
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'succeeded', result: { assetId: persisted.assetId, mediaType: persisted.mediaType, byteSize: persisted.byteSize, contentHash: persisted.contentHash, externalRequestId: imageResult.externalRequestId || null, revisedPrompt: imageResult.revisedPrompt || null, safeMeta: imageResult.safeMeta || {} } });
-      return 'succeeded';
-    } catch {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'local_persistence_failed' } });
-      return 'blocked';
-    } finally { clearInterval(renewTimer); }
   }
 
   settleRun(runId: string): void {

@@ -1,9 +1,10 @@
 import fs from 'node:fs';
-import { assetFilePath, getStudioAsset } from '../domain/assets';
+import { createAssetSnapshot, getStudioAsset } from '../domain/assets';
 import { InvalidCommandError, StudioNotFoundError } from '../domain/studio-commands';
 import { ImageRequest } from '../providers/contracts';
 import { StudioDatabase } from '../studio/database';
 import { StudioPaths } from '../studio/workspace';
+import { MediaArchiveError, VerifiedManagedFile } from './archive';
 
 export interface ManagedAssetResolutionInput {
   studioId: string;
@@ -18,6 +19,17 @@ export interface ManagedAssetResolver {
 function ids(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0))];
+}
+
+function readVerifiedBytes(opened: VerifiedManagedFile): Buffer {
+  const bytes = Buffer.allocUnsafe(opened.byteSize);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const read = fs.readSync(opened.descriptor, bytes, offset, bytes.length - offset, offset);
+    if (!read) throw new MediaArchiveError('Verified managed asset snapshot ended before its expected byte size.');
+    offset += read;
+  }
+  return bytes;
 }
 
 export class StudioAssetResolver implements ManagedAssetResolver {
@@ -37,10 +49,12 @@ export class StudioAssetResolver implements ManagedAssetResolver {
   private readAsset(studioId: string, assetId: string): { assetId: string; mediaType: string; bytes: Buffer } {
     const asset = getStudioAsset(this.db, studioId, assetId);
     if (!asset || asset.deletedAt) throw new StudioNotFoundError('Active managed asset not found: ' + assetId);
-    const filePath = assetFilePath(this.paths, asset);
-    if (!fs.existsSync(filePath)) throw new StudioNotFoundError('Managed asset media is missing: ' + assetId);
-    const bytes = fs.readFileSync(filePath);
-    if (!bytes.length) throw new InvalidCommandError('Managed asset is empty: ' + assetId);
-    return { assetId: asset.id, mediaType: asset.mediaType, bytes };
+    const opened = createAssetSnapshot(this.paths, asset);
+    try {
+      if (!opened.mediaType) throw new MediaArchiveError('Verified managed asset has no detected media type.');
+      return { assetId: asset.id, mediaType: opened.mediaType, bytes: readVerifiedBytes(opened) };
+    } finally {
+      opened.close();
+    }
   }
 }

@@ -85,3 +85,31 @@ export function runExecutionPresentation(run, items = []) {
   if (run.status === 'queued' || items.some((item) => item?.status === 'pending')) return { label: '排队中', tone: LIVE };
   return statusPresentation('run', run.status);
 }
+
+export function mergeRunHistoryItems(recordItems = [], liveItems = []) {
+  const liveById = new Map(liveItems.map((item) => [item.id, item]));
+  const merged = recordItems.map((recordItem) => {
+    const liveItem = liveById.get(recordItem.id);
+    if (!liveItem) return recordItem;
+    liveById.delete(recordItem.id);
+    return { ...recordItem, ...liveItem, outputAssets: liveItem.outputAssets || recordItem.outputAssets || [] };
+  });
+  return [...merged, ...liveById.values()];
+}
+
+export function runHistoryOption(run) {
+  const createdAt = typeof run?.createdAt === 'string' && run.createdAt ? run.createdAt.replace('T', ' ').replace(/\.\d{3}Z$/, 'Z') : '时间未知';
+  const shortId = run?.shortId || String(run?.id || '').slice(-8) || '未知标识';
+  const planVersion = Number.isInteger(run?.planVersion) ? 'v' + run.planVersion : 'v?';
+  return createdAt + ' · ' + planVersion + ' · ' + shortId + ' · ' + statusPresentation('run', run?.status).label;
+}
+
+export function runItemRecovery(item) {
+  const error = item?.error && typeof item.error === 'object' ? item.error : null;
+  const safeError = error ? [error.summary, error.kind, error.code].filter((value) => typeof value === 'string' && value.trim()).join(' · ') : '';
+  if (item?.status === 'retry_wait') return { error: safeError, advice: item.retryAt ? '系统将在 ' + item.retryAt + ' 后重试；也可立即重试此项。' : '系统正在等待重试；也可立即重试此项。' };
+  if (item?.status === 'outcome_unknown') return { error: safeError, advice: '返回会话核实生成结果，再决定重试或保留。' };
+  if (item?.status === 'blocked') return { error: safeError, advice: '先修复生成配置或输入约束，再重试此项。' };
+  if (item?.status === 'failed') return { error: safeError, advice: '检查安全错误摘要后重试此项；仍失败时返回会话调整计划。' };
+  return { error: safeError, advice: '' };
+}

@@ -43,7 +43,7 @@ export function listStudioEventsAfter(db: StudioDatabase, studioId: string, afte
 export function studioEventWindow(db: StudioDatabase, studioId: string, after = 0, limit = 200): StudioEventWindow {
   const normalizedAfter = Number.isInteger(after) && after >= 0 ? after : 0;
   const bounds = db.prepare('SELECT MIN(id) AS earliest_id, MAX(id) AS latest_id FROM events WHERE studio_id = ?').get(studioId) as { earliest_id: number | null; latest_id: number | null };
-  const snapshotRequired = normalizedAfter > 0 && bounds.earliest_id !== null && normalizedAfter < bounds.earliest_id - 1;
+  const snapshotRequired = normalizedAfter > 0 && (bounds.latest_id === null || normalizedAfter > bounds.latest_id || (bounds.earliest_id !== null && normalizedAfter < bounds.earliest_id - 1));
   return {
     events: snapshotRequired ? [] : listStudioEventsAfter(db, studioId, normalizedAfter, limit),
     snapshotRequired,

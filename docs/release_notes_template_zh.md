@@ -33,22 +33,27 @@
 
 ## 安装
 
-项目级安装：
+以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 Skill；两步缺一不可。
+
+项目级安装（在项目根目录执行）：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
+node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
 全局安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
+node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
+
+注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
 
 ## 升级建议
 
-- 建议重启 Codex 以刷新 skill 发现
-- 如使用手动安装，请覆盖本地 skill 目录
+- 如目标 Skill 目录已存在，请先确认其来源并自行处理，不要直接覆盖
 - 保持项目根目录 `.env` 不变即可继续使用
 ```
 
@@ -86,17 +91,23 @@ npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
 
 ## 安装
 
-项目级安装：
+以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 Skill；两步缺一不可。
+
+项目级安装（在项目根目录执行）：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
+node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
 全局安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
+node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
+
+注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
 
 ## 升级建议
 
@@ -133,23 +144,29 @@ npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
 
 ## 安装
 
-项目级安装：
+以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 Skill；两步缺一不可。
+
+项目级安装（在项目根目录执行）：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
+node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
 全局安装：
 
 ```bash
-npx skills add ccnuzw/daoge-skills -a codex -s daoge-pic -g
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
+node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
+
+注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
 
 ## 升级前建议
 
-- 先备份旧版 skill 目录
+- 先备份旧版 Skill 目录，并确认现有 link/junction 的来源后再处理
 - 如有自定义修改，请先对比差异
-- 升级后先执行一次 DAOGE 唤醒验证
+- 升级后重启 Codex，再执行一次 DAOGE 唤醒验证
 ```
 
 ## 常用句式

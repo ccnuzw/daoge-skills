@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createId, nowIso } from '../shared/ids';
 
@@ -27,10 +29,17 @@ export interface StudioPaths {
   deliveriesRoot: string;
 }
 
+export interface SensitiveAccessDependencies {
+  platform?: NodeJS.Platform;
+  username?: string;
+  run?: (command: string, args: readonly string[]) => void;
+}
+
 export interface InitializeStudioOptions {
   workspaceRoot: string;
   providerTemplatePath: string;
   writeGitignore?: boolean;
+  sensitiveAccess?: SensitiveAccessDependencies;
 }
 
 export interface InitializeStudioResult {
@@ -40,8 +49,131 @@ export interface InitializeStudioResult {
   createdProviderEnv: boolean;
 }
 
-function ensureDirectory(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true });
+function workspaceRelativePath(paths: StudioPaths, targetPath: string): string[] {
+  const workspaceRoot = path.resolve(paths.workspaceRoot);
+  const target = path.resolve(targetPath);
+  const relative = path.relative(workspaceRoot, target);
+  if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new Error('Studio workspace path is outside the workspace root.');
+  return relative ? relative.split(path.sep) : [];
+}
+
+function lstatOrNull(targetPath: string): fs.Stats | null {
+  try { return fs.lstatSync(targetPath); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+/** Verifies every existing component without following a link out of the workspace. */
+export function assertWorkspacePath(paths: StudioPaths, targetPath: string, options: { requireDirectory?: boolean } = {}): boolean {
+  const segments = workspaceRelativePath(paths, targetPath);
+  let current = paths.workspaceRoot;
+  const root = lstatOrNull(current);
+  if (!root) return false;
+  if (root.isSymbolicLink() || !root.isDirectory()) throw new Error('Studio workspace paths may not contain symbolic links or non-directory components.');
+  for (let index = 0; index < segments.length; index += 1) {
+    current = path.join(current, segments[index]);
+    const stat = lstatOrNull(current);
+    if (!stat) return false;
+    if (stat.isSymbolicLink()) throw new Error('Studio workspace paths may not contain symbolic links.');
+    if (index < segments.length - 1 && !stat.isDirectory()) throw new Error('Studio workspace path has a non-directory parent component.');
+    if (index === segments.length - 1 && options.requireDirectory && !stat.isDirectory()) throw new Error('Studio workspace path must be a directory.');
+  }
+  return true;
+}
+
+function ensureWorkspaceDirectory(paths: StudioPaths, directory: string): void {
+  const segments = workspaceRelativePath(paths, directory);
+  let current = paths.workspaceRoot;
+  let stat = lstatOrNull(current);
+  if (!stat) {
+    fs.mkdirSync(current, { recursive: true });
+    stat = fs.lstatSync(current);
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('Studio workspace paths may not contain symbolic links or non-directory components.');
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    stat = lstatOrNull(current);
+    if (!stat) {
+      try { fs.mkdirSync(current); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+      stat = fs.lstatSync(current);
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('Studio workspace paths may not contain symbolic links or non-directory components.');
+  }
+}
+
+export function enforceSensitiveAccess(targetPath: string, directory: boolean, dependencies: SensitiveAccessDependencies = {}): void {
+  const platform = dependencies.platform || process.platform;
+  if (platform !== 'win32') {
+    fs.chmodSync(targetPath, directory ? 0o700 : 0o600);
+    return;
+  }
+  const username = String(dependencies.username || os.userInfo().username).trim();
+  if (!username) throw new Error('Cannot secure sensitive Studio path: the current Windows user is unknown.');
+  const suffix = directory ? '(OI)(CI)F' : 'F';
+  const aclCommands: readonly (readonly string[])[] = [
+    [targetPath, '/reset'],
+    [targetPath, '/inheritance:r'],
+    [targetPath, '/grant:r', username + ':' + suffix, '*S-1-5-18:' + suffix, '*S-1-5-32-544:' + suffix]
+  ];
+  try {
+    const run = dependencies.run || ((command: string, commandArgs: readonly string[]): void => { execFileSync(command, commandArgs, { stdio: 'ignore', windowsHide: true }); });
+    for (const args of aclCommands) run('icacls', args);
+  } catch {
+    throw new Error('Cannot secure sensitive Studio path with Windows ACLs: ' + path.basename(targetPath));
+  }
+}
+
+function ensurePrivateDirectory(paths: StudioPaths, dir: string, dependencies: SensitiveAccessDependencies = {}): void {
+  ensureWorkspaceDirectory(paths, dir);
+  const info = fs.lstatSync(dir);
+  if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('Sensitive Studio path must be a real directory: ' + path.basename(dir));
+  enforceSensitiveAccess(dir, true, dependencies);
+}
+
+function ensurePrivateFile(filePath: string, dependencies: SensitiveAccessDependencies = {}): void {
+  const info = fs.lstatSync(filePath);
+  if (info.isSymbolicLink() || !info.isFile()) throw new Error('provider.env must be a real file.');
+  enforceSensitiveAccess(filePath, false, dependencies);
+}
+
+function createProviderEnv(templatePath: string, providerEnvPath: string): boolean {
+  let descriptor: number | null = null;
+  let created = false;
+  try {
+    descriptor = fs.openSync(providerEnvPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    created = true;
+    fs.writeFileSync(descriptor, fs.readFileSync(templatePath));
+    if (process.platform !== 'win32') fs.fchmodSync(descriptor, 0o600);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    if (descriptor !== null) {
+      fs.closeSync(descriptor);
+      descriptor = null;
+    }
+    if (created) fs.rmSync(providerEnvPath, { force: true });
+    throw error;
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
+  }
+}
+
+function assertReadableProviderTemplate(templatePath: string): void {
+  let descriptor: number | null = null;
+  try {
+    const info = fs.lstatSync(templatePath);
+    if (info.isSymbolicLink() || !info.isFile()) throw new Error('invalid template');
+    descriptor = fs.openSync(templatePath, fs.constants.O_RDONLY);
+  } catch {
+    throw new Error('DAOGE Pic is missing or cannot read the bundled provider.env.example template.');
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
+  }
 }
 
 function writeAtomically(filePath: string, content: string): void {
@@ -81,6 +213,9 @@ export function readStudioManifest(paths: StudioPaths): StudioManifest | null {
   if (parsed.schemaVersion !== STUDIO_MANIFEST_VERSION || !parsed.studioId || !parsed.workspaceRoot) {
     throw new Error('The existing studio.json is not a valid DAOGE Pic vNext Studio manifest.');
   }
+  if (path.resolve(parsed.workspaceRoot) !== paths.workspaceRoot) {
+    throw new Error('The existing studio.json workspaceRoot does not match the requested workspace root.');
+  }
   return parsed;
 }
 
@@ -96,10 +231,16 @@ export function ensureGitignore(paths: StudioPaths): void {
 
 export function initializeStudio(options: InitializeStudioOptions): InitializeStudioResult {
   const paths = studioPaths(options.workspaceRoot);
-  ensureDirectory(paths.workspaceRoot);
-  ensureDirectory(paths.studioDir);
+  assertWorkspacePath(paths, paths.providerEnvPath);
+  const providerEnvExists = fs.existsSync(paths.providerEnvPath);
+  if (!providerEnvExists) assertReadableProviderTemplate(options.providerTemplatePath);
 
-  let manifest = readStudioManifest(paths);
+  const existingManifest = readStudioManifest(paths);
+  ensureWorkspaceDirectory(paths, paths.workspaceRoot);
+  ensurePrivateDirectory(paths, paths.studioDir, options.sensitiveAccess);
+  ensurePrivateDirectory(paths, paths.runtimeDir, options.sensitiveAccess);
+
+  let manifest = existingManifest;
   let createdManifest = false;
   if (!manifest) {
     manifest = {
@@ -113,13 +254,8 @@ export function initializeStudio(options: InitializeStudioOptions): InitializeSt
   }
 
   let createdProviderEnv = false;
-  if (!fs.existsSync(paths.providerEnvPath)) {
-    if (!fs.existsSync(options.providerTemplatePath)) {
-      throw new Error('DAOGE Pic is missing the bundled provider.env.example template.');
-    }
-    fs.copyFileSync(options.providerTemplatePath, paths.providerEnvPath, fs.constants.COPYFILE_EXCL);
-    createdProviderEnv = true;
-  }
+  if (!providerEnvExists) createdProviderEnv = createProviderEnv(options.providerTemplatePath, paths.providerEnvPath);
+  ensurePrivateFile(paths.providerEnvPath, options.sensitiveAccess);
 
   if (options.writeGitignore !== false) ensureGitignore(paths);
   return { paths, manifest, createdManifest, createdProviderEnv };
@@ -128,29 +264,29 @@ export function initializeStudio(options: InitializeStudioOptions): InitializeSt
 export function ensureAssetBucket(paths: StudioPaths, bucket: AssetBucket): string {
   if (!ASSET_BUCKETS.includes(bucket)) throw new Error('Unsupported asset bucket: ' + bucket);
   const directory = path.join(paths.assetRoot, bucket);
-  ensureDirectory(directory);
+  ensureWorkspaceDirectory(paths, directory);
   return directory;
 }
 
 export function ensureRuntimeDirectory(paths: StudioPaths): string {
-  ensureDirectory(paths.runtimeDir);
+  ensurePrivateDirectory(paths, paths.runtimeDir);
   return paths.runtimeDir;
 }
 
 export function ensureRunDirectory(paths: StudioPaths, runId: string): string {
   if (!runId || !runId.trim()) throw new Error('A run id is required.');
   const directory = path.join(paths.runsDir, runId);
-  ensureDirectory(directory);
+  ensureWorkspaceDirectory(paths, directory);
   return directory;
 }
 
 export function ensureCacheDirectory(paths: StudioPaths, name: 'thumbs' | 'previews' | 'staging'): string {
   const directory = path.join(paths.cacheDir, name);
-  ensureDirectory(directory);
+  ensureWorkspaceDirectory(paths, directory);
   return directory;
 }
 
 export function ensureDeliveriesDirectory(paths: StudioPaths): string {
-  ensureDirectory(paths.deliveriesRoot);
+  ensureWorkspaceDirectory(paths, paths.deliveriesRoot);
   return paths.deliveriesRoot;
 }

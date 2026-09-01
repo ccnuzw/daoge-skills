@@ -69,7 +69,7 @@ test('recovers a journaled import after media moved before the database commit',
     const assetId = 'asset_import_journal';
     const planned = plannedArchivePath(value.initialized.paths, { assetId, bucket: 'imports', mediaType: staged.mediaType });
     const now = new Date().toISOString();
-    value.db.prepare('INSERT INTO asset_media_operations (id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run('assetop_import_journal', value.initialized.manifest.studioId, assetId, 'import', path.relative(value.workspaceRoot, staged.stagingPath).split(path.sep).join('/'), planned.storagePath, JSON.stringify({ kind: 'import', mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize, source: { channel: 'recovery-test' } }), null, now);
+    value.db.prepare('INSERT INTO asset_media_operations (id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run('assetop_import_journal', value.initialized.manifest.studioId, assetId, 'import', path.relative(value.workspaceRoot, staged.stagingPath).split(path.sep).join('/'), planned.storagePath, JSON.stringify({ kind: 'import', mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize, source: { channel: 'recovery-test' } }), null, staged.contentHash, staged.byteSize, staged.mediaType, 'moved', now);
     archiveStagedImage(value.initialized.paths, staged, { assetId, bucket: 'imports' });
     assert.equal(recoverAssetMediaOperations(value.db, value.initialized.paths, value.initialized.manifest.studioId), 1);
     assert.equal(listStudioAssets(value.db, value.initialized.manifest.studioId)[0].id, assetId);
@@ -109,8 +109,8 @@ test('lists assets by round, task, project, and Studio without cross-project lea
   const value = fixture();
   try {
     const projectId = value.project.value.id;
-    const task = createTaskDraft(value.db, { projectId, name: '范围任务', intent: {}, idempotencyKey: 'scope-task' }).value;
-    const round = createRoundDraft(value.db, { taskId: task.id, purpose: 'exploration', plan: {}, idempotencyKey: 'scope-round' }).value;
+    const task = createTaskDraft(value.db, { studioId: value.initialized.manifest.studioId, projectId, name: '范围任务', intent: {}, idempotencyKey: 'scope-task' }).value;
+    const round = createRoundDraft(value.db, { studioId: value.initialized.manifest.studioId, taskId: task.id, purpose: 'exploration', plan: {}, idempotencyKey: 'scope-round' }).value;
     const otherProject = createProject(value.db, { studioId: value.initialized.manifest.studioId, name: '另一项目', idempotencyKey: 'scope-project-b' }).value;
     const createdAt = new Date().toISOString();
     const addAsset = (id, relationType, targetType, targetId) => {
@@ -134,4 +134,63 @@ test('lists assets by round, task, project, and Studio without cross-project lea
   } finally {
     cleanup(value);
   }
+});
+
+test('reimporting a deleted hash restores and reuses the same asset with the new relation', () => {
+  const value = fixture();
+  try {
+    const secondProject = createProject(value.db, { studioId: value.initialized.manifest.studioId, name: '恢复目标', idempotencyKey: 'restore-target' }).value;
+    const original = importStudioAsset(value.db, value.initialized.paths, { studioId: value.initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: value.project.value.id });
+    softDeleteAsset(value.db, value.initialized.paths, { studioId: value.initialized.manifest.studioId, assetId: original.id });
+    const reused = importStudioAsset(value.db, value.initialized.paths, { studioId: value.initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: secondProject.id });
+    assert.equal(reused.id, original.id);
+    assert.equal(reused.deletedAt, null);
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS total FROM assets').get().total, 1);
+    assert.equal(value.db.prepare("SELECT COUNT(*) AS total FROM asset_relations WHERE asset_id = ? AND target_type = 'project'").get(original.id).total, 2);
+    assert.equal(value.db.prepare("SELECT COUNT(*) AS total FROM events WHERE entity_id = ? AND event_type = 'asset.restored_reused'").get(original.id).total, 1);
+  } finally { cleanup(value); }
+});
+
+test('corrupt or out-of-root asset journals retain diagnostic state and never commit metadata', () => {
+  const value = fixture();
+  try {
+    const staged = stageImage(value.initialized.paths, png, 'image/png');
+    const planned = plannedArchivePath(value.initialized.paths, { assetId: 'asset_corrupt_journal', bucket: 'imports', mediaType: staged.mediaType });
+    const metadata = JSON.stringify({ kind: 'import', mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize, source: {} });
+    value.db.prepare('INSERT INTO asset_media_operations (id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run('assetop_outside', value.initialized.manifest.studioId, 'asset_corrupt_journal', 'import', '../outside.part', planned.storagePath, metadata, null, staged.contentHash, staged.byteSize, staged.mediaType, 'prepared', new Date().toISOString());
+    assert.equal(recoverAssetMediaOperations(value.db, value.initialized.paths, value.initialized.manifest.studioId), 0);
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS total FROM asset_media_operations WHERE id = ?').get('assetop_outside').total, 1);
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS total FROM assets WHERE id = ?').get('asset_corrupt_journal').total, 0);
+    assert.equal(value.db.prepare("SELECT COUNT(*) AS total FROM events WHERE entity_id = ? AND event_type = 'media.recovery_rejected'").get('assetop_outside').total, 1);
+
+    value.db.prepare('DELETE FROM asset_media_operations WHERE id = ?').run('assetop_outside');
+    const sourcePath = path.relative(value.workspaceRoot, staged.stagingPath).split(path.sep).join('/');
+    value.db.prepare('INSERT INTO asset_media_operations (id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run('assetop_replaced', value.initialized.manifest.studioId, 'asset_corrupt_journal', 'import', sourcePath, planned.storagePath, metadata, null, staged.contentHash, staged.byteSize, staged.mediaType, 'prepared', new Date().toISOString());
+    archiveStagedImage(value.initialized.paths, staged, { assetId: 'asset_corrupt_journal', bucket: 'imports' });
+    fs.appendFileSync(planned.absolutePath, Buffer.from('replacement'));
+    assert.equal(recoverAssetMediaOperations(value.db, value.initialized.paths, value.initialized.manifest.studioId), 0);
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS total FROM asset_media_operations WHERE id = ?').get('assetop_replaced').total, 1);
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS total FROM assets WHERE id = ?').get('asset_corrupt_journal').total, 0);
+  } finally { cleanup(value); }
+});
+
+test('asset recovery rejects dual identities and operation-incompatible relations while retaining journals', () => {
+  const value = fixture();
+  try {
+    const cases = [
+      { id: 'asset_dual_identity', mutateAsset: (asset) => ({ ...asset, kind: 'export' }), relation: null },
+      { id: 'asset_bad_relation', mutateAsset: (asset) => asset, relation: { targetType: 'studio', targetId: value.initialized.manifest.studioId, relationType: 'derived_from' } }
+    ];
+    for (const item of cases) {
+      const staged = stageImage(value.initialized.paths, png, 'image/png');
+      const planned = plannedArchivePath(value.initialized.paths, { assetId: item.id, bucket: 'imports', mediaType: staged.mediaType });
+      const sourcePath = path.relative(value.workspaceRoot, staged.stagingPath).split(path.sep).join('/');
+      const asset = { kind: 'import', mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize, source: {} };
+      value.db.prepare('INSERT INTO asset_media_operations (id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run('op_' + item.id, value.initialized.manifest.studioId, item.id, 'import', sourcePath, planned.storagePath, JSON.stringify(item.mutateAsset(asset)), item.relation ? JSON.stringify(item.relation) : null, staged.contentHash, staged.byteSize, staged.mediaType, 'prepared', new Date().toISOString());
+      archiveStagedImage(value.initialized.paths, staged, { assetId: item.id, bucket: 'imports' });
+    }
+    assert.equal(recoverAssetMediaOperations(value.db, value.initialized.paths, value.initialized.manifest.studioId), 0);
+    assert.equal(value.db.prepare("SELECT COUNT(*) AS total FROM asset_media_operations WHERE id IN ('op_asset_dual_identity', 'op_asset_bad_relation')").get().total, 2);
+    assert.equal(value.db.prepare("SELECT COUNT(*) AS total FROM assets WHERE id IN ('asset_dual_identity', 'asset_bad_relation')").get().total, 0);
+  } finally { cleanup(value); }
 });

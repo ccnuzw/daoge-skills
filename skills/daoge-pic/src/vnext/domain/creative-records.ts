@@ -1,6 +1,8 @@
 import { StudioDatabase } from '../studio/database';
 import { StudioAsset, getStudioAsset } from './assets';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
+import { publicRunPlanSnapshot, publicRunRequestSummary } from './queries';
+import { safeErrorDetail } from '../shared/safe-error';
 
 type JsonRecord = Record<string, unknown>;
 type TaskRow = { id: string; project_id: string; name: string; status: string; intent_json: string; project_name: string; };
@@ -114,13 +116,13 @@ export function getTaskStudioOverview(db: StudioDatabase, studioId: string, task
 export function getRoundCreativeRecord(db: StudioDatabase, studioId: string, roundId: string, runId?: string): JsonRecord {
   const round = roundRow(db, studioId, roundId);
   const task = taskRow(db, studioId, round.task_id);
-  const runs = db.prepare('SELECT id, status, created_at, updated_at, completed_at FROM generation_runs WHERE round_id = ? ORDER BY created_at DESC, id DESC').all(round.id) as Array<{ id: string; status: string; created_at: string; updated_at: string; completed_at: string | null }>;
+  const runs = db.prepare('SELECT id, status, plan_snapshot_json, created_at, updated_at, completed_at FROM generation_runs WHERE round_id = ? ORDER BY created_at DESC, id DESC').all(round.id) as Array<{ id: string; status: string; plan_snapshot_json: string; created_at: string; updated_at: string; completed_at: string | null }>;
   if (runId && !runs.some((run) => run.id === runId)) throw new InvalidCommandError('Selected run does not belong to this round.');
-  const selectedItems = runId ? db.prepare('SELECT id, sequence, status, attempts, created_at, updated_at FROM run_items WHERE run_id = ? ORDER BY sequence').all(runId) as Array<{ id: string; sequence: number; status: string; attempts: number; created_at: string; updated_at: string }> : [];
+  const selectedItems = runId ? db.prepare('SELECT id, sequence, status, attempts, retry_at, error_json, created_at, updated_at FROM run_items WHERE run_id = ? ORDER BY sequence').all(runId) as Array<{ id: string; sequence: number; status: string; attempts: number; retry_at: string | null; error_json: string | null; created_at: string; updated_at: string }> : [];
   const outputs = outputAssetsByItem(db, selectedItems.map((item) => item.id));
   const allOutputCount = Number((db.prepare('SELECT COUNT(DISTINCT asset.id) AS count FROM generation_runs run JOIN run_items item ON item.run_id = run.id JOIN asset_relations relation ON relation.target_id = item.id AND relation.target_type = \'run_item\' AND relation.relation_type = \'output_of\' JOIN assets asset ON asset.id = relation.asset_id WHERE run.round_id = ?').get(round.id) as { count: number }).count);
   const parentLineage = lineage(db, studioId, round);
-  return { task: { id: task.id, projectId: task.project_id, projectName: task.project_name, name: task.name, intent: safeValue(parseRecord(task.intent_json)) }, round: publicRound(round), lineage: parentLineage, summary: { runCount: runs.length, resultCount: allOutputCount }, runs: runs.map((run) => ({ id: run.id, status: run.status, createdAt: run.created_at, updatedAt: run.updated_at, completedAt: run.completed_at })), selectedRunId: runId || null, items: selectedItems.map((item) => ({ id: item.id, sequence: item.sequence, status: item.status, attempts: item.attempts, createdAt: item.created_at, updatedAt: item.updated_at, outputAssets: outputs.get(item.id) || [] })) };
+  return { task: { id: task.id, projectId: task.project_id, projectName: task.project_name, name: task.name, intent: safeValue(parseRecord(task.intent_json)) }, round: publicRound(round), lineage: parentLineage, summary: { runCount: runs.length, resultCount: allOutputCount }, runs: runs.map((run) => { const plan = parseRecord(run.plan_snapshot_json); return { id: run.id, shortId: run.id.slice(-8), status: run.status, planVersion: round.plan_version, createdAt: run.created_at, updatedAt: run.updated_at, completedAt: run.completed_at, planSnapshot: publicRunPlanSnapshot(plan), requestSummary: publicRunRequestSummary(plan) }; }), selectedRunId: runId || null, items: selectedItems.map((item) => ({ id: item.id, sequence: item.sequence, status: item.status, attempts: item.attempts, retryAt: item.retry_at, error: item.error_json ? safeErrorDetail(parseRecord(item.error_json)) : null, createdAt: item.created_at, updatedAt: item.updated_at, outputAssets: outputs.get(item.id) || [] })) };
 }
 
 export function getAssetProvenance(db: StudioDatabase, studioId: string, assetId: string): JsonRecord {

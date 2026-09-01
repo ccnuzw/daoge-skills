@@ -5,12 +5,10 @@ const assert = require('node:assert/strict');
 
 const skillRoot = path.resolve(__dirname, '../..');
 
-test('creator delivery renders in the delivery branch rather than the library branch', () => {
+test('creator delivery is the unique registered delivery renderer', () => {
   const source = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const libraryBranch = source.indexOf("view === 'library' ?");
-  const deliveryBranch = source.indexOf("view === 'deliveries' ?");
-  const creatorDelivery = source.indexOf('<CreatorDelivery project={selectedProject}');
-  assert.ok(libraryBranch >= 0);
-  assert.ok(deliveryBranch > libraryBranch);
-  assert.ok(creatorDelivery > deliveryBranch);
+  assert.match(source, /const viewRenderers = \{/);
+  assert.match(source, /deliveries: \(\) => <CreatorDelivery/);
+  assert.match(source, /const renderActiveView = viewRenderers\[routeView\]/);
+  assert.doesNotMatch(source, /__legacy_deliveries__|DeliveryComposer/);
 });

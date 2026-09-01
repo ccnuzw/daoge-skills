@@ -1,25 +1,29 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import http, { IncomingMessage, Server, ServerResponse } from 'node:http';
+import http, { IncomingMessage, OutgoingHttpHeaders, Server, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
+import { Readable } from 'node:stream';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
-import { initializeStudio, InitializeStudioResult } from '../studio/workspace';
+import { ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { loadProviderConfig, providerSnapshot, providerStatus } from '../studio/provider-config';
 import { getStudioRuntimeSettings, updateStudioRuntimeSettings } from '../studio/runtime-settings';
 import { requestPathFor } from '../providers/http-adapters';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
-import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, markRunsResumePending, pauseGenerationRun, preflightRound, queueGenerationRun, reconcileTerminalRuns, recoverExpiredLeases, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
-import { AssetScope, assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
+import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
+import { StateTransitionError } from '../domain/states';
+import { AssetScope, createAssetSnapshot, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
-import { createDelivery, exportDelivery, getDelivery, listDeliveries, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
+import { completeDeliveryStep, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDelivery, getDelivery, listDeliveries, openDeliveryExportFile, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
 import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
 import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
 import { listProjectSelectionAssets, setProjectAssetSelected } from '../domain/project-selections';
-import { reconcileManagedMedia, recoverGeneratedMediaCommits } from '../media/reconcile';
+import { recoverStudioStartup } from '../runner/startup-recovery';
 import { studioEventWindow } from './events';
 import { sha256 } from '../shared/ids';
-import { createImageZip, ZipEntryInput } from '../media/zip';
+import { validateZipEntries, writeImageZip, ZipEntryInput } from '../media/zip';
+import { MediaArchiveError, MediaValidationError, VerifiedManagedFile } from '../media/archive';
+import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName } from './local-auth';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -33,11 +37,17 @@ export interface StudioServiceOptions {
   providerTemplatePath: string;
   ssePollMs?: number;
   workbenchDir?: string;
+  capability?: string;
 }
 
 export interface StartedStudioService {
   url: string;
   service: LocalStudioService;
+  access: {
+    bearerToken: string;
+    workbenchUrl: string;
+    cookieName: string;
+  };
 }
 
 function json(response: ServerResponse, status: number, body: unknown): void {
@@ -129,6 +139,61 @@ function publicAsset(asset: StudioAsset & { review?: unknown; display?: unknown 
   return result;
 }
 
+function publicDeliveryExport(value: DeliveryExportResult): Record<string, unknown> {
+  const frozen = Array.isArray(value.delivery.manifest.files) ? value.delivery.manifest.files : [];
+  const sequences = new Set<number>();
+  const files: Array<{ sequence: number; file: string; downloadUrl: string }> = [];
+  for (const item of frozen) {
+    const entry = record(item);
+    const sequence = Number(entry.sequence);
+    if (!Number.isSafeInteger(sequence) || sequence <= 0 || sequences.has(sequence) || typeof entry.file !== 'string' || typeof entry.mediaType !== 'string' || !/^image\/(png|jpeg|webp|gif)$/.test(entry.mediaType)) continue;
+    sequences.add(sequence);
+    files.push({ sequence, file: entry.file, downloadUrl: '/api/deliveries/' + encodeURIComponent(value.delivery.id) + '/files/' + sequence + '?download=1' });
+  }
+  return { delivery: value.delivery, files };
+}
+
+function publicDeliveryCompletion(value: DeliveryCompletionResult): Record<string, unknown> {
+  const exported = value.stage === 'exported' ? publicDeliveryExport({ delivery: value.delivery, directory: '', files: value.files }) : null;
+  return { operationId: value.operationId, stage: value.stage, nextAction: value.nextAction, delivery: value.delivery, files: exported?.files || [] };
+}
+
+export function streamVerifiedFileResponse(response: ServerResponse, opened: VerifiedManagedFile, headers: OutgoingHttpHeaders): void {
+  let source: Readable;
+  try {
+    source = opened.createReadStream();
+  } catch (error) {
+    opened.close();
+    throw error;
+  }
+  let handleClosed = false;
+  const closeHandle = (): void => {
+    if (handleClosed) return;
+    handleClosed = true;
+    response.removeListener('close', abort);
+    opened.close();
+  };
+  const abort = (): void => {
+    if (!source.destroyed) source.destroy();
+  };
+  const fail = (error: Error): void => {
+    if (!response.destroyed) response.destroy(error);
+  };
+  source.once('end', () => setImmediate(closeHandle));
+  source.once('close', closeHandle);
+  source.once('error', fail);
+  response.once('close', abort);
+  try {
+    response.writeHead(200, headers);
+    source.pipe(response);
+  } catch (error) {
+    response.removeListener('close', abort);
+    source.destroy();
+    closeHandle();
+    throw error;
+  }
+}
+
 interface ActiveDaemonRuntime {
   workerConcurrency?: unknown;
   provider?: { providerId?: unknown; model?: unknown; endpoint?: unknown } | null;
@@ -153,25 +218,27 @@ export class LocalStudioService {
   readonly db: StudioDatabase;
   private readonly pollMs: number;
   private readonly workbenchDir: string;
+  private readonly capability: string;
+  private readonly sessionToken = createLocalCapability();
+  private readonly cookieName: string;
+  private origin = '';
   private server: Server | null = null;
   private closePromise: Promise<void> | null = null;
   private readonly activeEventStreams = new Set<() => void>();
 
   constructor(options: StudioServiceOptions) {
+    if (options.capability && !/^[A-Za-z0-9_-]{43,}$/.test(options.capability)) throw new Error('Studio capability must be a high-entropy base64url token.');
     this.initialized = initializeStudio({ workspaceRoot: options.workspaceRoot, providerTemplatePath: options.providerTemplatePath });
     this.db = openStudioDatabase(this.initialized.paths, this.initialized.manifest);
-    recoverGeneratedMediaCommits(this.db, this.initialized.paths, this.initialized.manifest.studioId);
-    recoverAssetMediaOperations(this.db, this.initialized.paths, this.initialized.manifest.studioId);
-    reconcileManagedMedia(this.db, this.initialized.paths, this.initialized.manifest.studioId);
-    recoverExpiredLeases(this.db);
-    reconcileTerminalRuns(this.db);
-    markRunsResumePending(this.db);
     this.pollMs = Math.min(5000, Math.max(100, options.ssePollMs || 400));
     this.workbenchDir = options.workbenchDir ? path.resolve(options.workbenchDir) : path.resolve(__dirname, '../../workbench');
+    this.capability = options.capability || createLocalCapability();
+    this.cookieName = localSessionCookieName(this.initialized.manifest.studioId, this.capability);
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<StartedStudioService> {
     if (this.server) throw new Error('Studio service is already listening.');
+    if (host !== '127.0.0.1' && host !== '::1') throw new Error('Studio service must listen on a loopback address.');
     const server = http.createServer((request, response) => { void this.handle(request, response); });
     try {
       await new Promise<void>((resolve, reject) => {
@@ -190,8 +257,19 @@ export class LocalStudioService {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       throw new Error('Studio service did not expose a TCP address.');
     }
+    const hostname = host === '::1' ? '[::1]' : host;
+    const url = 'http://' + hostname + ':' + address.port;
+    this.origin = url;
     this.server = server;
-    return { url: 'http://' + host + ':' + address.port, service: this };
+    return {
+      url,
+      service: this,
+      access: {
+        bearerToken: this.capability,
+        workbenchUrl: url + '/#capability=' + encodeURIComponent(this.capability),
+        cookieName: this.cookieName
+      }
+    };
   }
 
   private runtimeStatus(): { desired: ReturnType<typeof getStudioRuntimeSettings>; active: { workerConcurrency: number | null; provider: { providerId: string; model: string; endpoint: string | null } | null } | null; restartRequired: boolean } {
@@ -225,9 +303,22 @@ export class LocalStudioService {
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
-      const parsed = new URL(request.url || '/', 'http://localhost');
+      const parsed = new URL(request.url || '/', this.origin || 'http://127.0.0.1');
+      assertLocalHost(request, new URL(this.origin).host);
       if (request.method === 'GET' && !parsed.pathname.startsWith('/api/')) return this.workbench(response, parsed.pathname);
       if (request.method === 'GET' && parsed.pathname === '/api/health') return success(response, { service: 'daoge-pic-vnext', studioId: this.initialized.manifest.studioId });
+      if (parsed.pathname === '/api/auth/bootstrap') {
+        if (request.method !== 'POST') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
+        assertLocalWriteOrigin(request, this.origin, 'cookie');
+        assertJsonContentType(request);
+        const body = await readBody(request);
+        if (!constantTimeTokenEqual(text(body.capability), this.capability)) throw new LocalAccessError(401, 'unauthorized', '本地 Studio capability 无效。');
+        response.setHeader('set-cookie', localSessionCookie(this.cookieName, this.sessionToken));
+        return success(response, { authenticated: true });
+      }
+      const authentication = authenticateLocalRequest(request, this.capability, this.cookieName, this.sessionToken);
+      if (!authentication) throw new LocalAccessError(401, 'unauthorized', '需要有效的本地 Studio 授权。');
+      if (request.method === 'POST' || request.method === 'PUT') assertLocalWriteOrigin(request, this.origin, authentication);
       if (request.method === 'GET' && parsed.pathname === '/api/studio') return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion });
       if (request.method === 'GET' && parsed.pathname === '/api/provider/status') return success(response, providerStatus(this.initialized.paths));
       if (request.method === 'GET' && parsed.pathname === '/api/provider/details') {
@@ -237,7 +328,7 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/runtime-settings') return success(response, this.runtimeStatus());
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
-      if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db).map(publicValue) });
+      if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db, this.initialized.manifest.studioId).map(publicValue) });
       if (request.method === 'GET' && parsed.pathname === '/api/style-kits') return success(response, { styleKits: listStyleKits(this.db, this.initialized.manifest.studioId).map(publicValue) });
       if (request.method === 'GET' && parsed.pathname === '/api/brand-kits') return success(response, { brandKits: listBrandKits(this.db, this.initialized.manifest.studioId).map(publicValue) });
       if (request.method === 'GET' && parsed.pathname === '/api/shared-assets') return success(response, { assets: listSharedStudioAssets(this.db, this.initialized.manifest.studioId).map(publicAsset) });
@@ -257,13 +348,13 @@ export class LocalStudioService {
       const assetProvenanceMatch = /^\/api\/assets\/([^/]+)\/provenance$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetProvenanceMatch) return success(response, { provenance: getAssetProvenance(this.db, this.initialized.manifest.studioId, assetProvenanceMatch[1]) });
       const projectArchiveMatch = /^\/api\/projects\/([^/]+)\/assets\/archive$/.exec(parsed.pathname);
-      if (request.method === 'GET' && projectArchiveMatch) return this.projectAssetArchive(response, projectArchiveMatch[1], parsed.searchParams.getAll('assetId'));
+      if (request.method === 'GET' && projectArchiveMatch) return await this.projectAssetArchive(response, projectArchiveMatch[1], parsed.searchParams.getAll('assetId'));
       const deliveryArchiveMatch = /^\/api\/deliveries\/([^/]+)\/archive$/.exec(parsed.pathname);
-      if (request.method === 'GET' && deliveryArchiveMatch) return this.deliveryArchive(response, deliveryArchiveMatch[1], parsed.searchParams.getAll('sequence'));
+      if (request.method === 'GET' && deliveryArchiveMatch) return await this.deliveryArchive(response, deliveryArchiveMatch[1], parsed.searchParams.getAll('sequence'));
       const deliveryFileMatch = /^\/api\/deliveries\/([^/]+)\/files\/(\d+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && deliveryFileMatch) return this.deliveryFile(response, deliveryFileMatch[1], Number(deliveryFileMatch[2]), parsed.searchParams.get('download') === '1');
       const deliveryDetailMatch = /^\/api\/deliveries\/([^/]+)$/.exec(parsed.pathname);
-      if (request.method === 'GET' && deliveryDetailMatch) { this.assertDeliveryInStudio(deliveryDetailMatch[1]); return success(response, { delivery: getDelivery(this.db, deliveryDetailMatch[1]) }); }
+      if (request.method === 'GET' && deliveryDetailMatch) { this.assertDeliveryInStudio(deliveryDetailMatch[1]); return success(response, { delivery: getDelivery(this.db, this.initialized.manifest.studioId, deliveryDetailMatch[1]) }); }
       const batchDetailMatch = /^\/api\/delivery-batches\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && batchDetailMatch) return success(response, { batch: getDeliveryBatch(this.db, this.initialized.manifest.studioId, batchDetailMatch[1]) });
       const deliveryMatch = /^\/api\/projects\/([^/]+)\/deliveries$/.exec(parsed.pathname);
@@ -271,28 +362,29 @@ export class LocalStudioService {
       const batchMatch = /^\/api\/projects\/([^/]+)\/delivery-batches$/.exec(parsed.pathname);
       if (request.method === 'GET' && batchMatch) return success(response, { batches: listDeliveryBatches(this.db, this.initialized.manifest.studioId, batchMatch[1]) });
       const taskMatch = /^\/api\/projects\/([^/]+)\/tasks$/.exec(parsed.pathname);
-      if (request.method === 'GET' && taskMatch) return success(response, { tasks: listTasks(this.db, taskMatch[1]) });
+      if (request.method === 'GET' && taskMatch) return success(response, { tasks: listTasks(this.db, this.initialized.manifest.studioId, taskMatch[1]) });
       const taskStudioOverviewMatch = /^\/api\/tasks\/([^/]+)\/studio-overview$/.exec(parsed.pathname);
       if (request.method === 'GET' && taskStudioOverviewMatch) return success(response, { overview: getTaskStudioOverview(this.db, this.initialized.manifest.studioId, taskStudioOverviewMatch[1], parsed.searchParams.getAll('round')) });
       const taskOverviewMatch = /^\/api\/tasks\/([^/]+)\/overview$/.exec(parsed.pathname);
       if (request.method === 'GET' && taskOverviewMatch) return success(response, { overview: getTaskCreativeOverview(this.db, this.initialized.manifest.studioId, taskOverviewMatch[1]) });
       const roundMatch = /^\/api\/tasks\/([^/]+)\/rounds$/.exec(parsed.pathname);
-      if (request.method === 'GET' && roundMatch) return success(response, { rounds: listRounds(this.db, roundMatch[1]) });
+      if (request.method === 'GET' && roundMatch) return success(response, { rounds: listRounds(this.db, this.initialized.manifest.studioId, roundMatch[1]) });
       const creativeRecordMatch = /^\/api\/rounds\/([^/]+)\/creative-record$/.exec(parsed.pathname);
       if (request.method === 'GET' && creativeRecordMatch) return success(response, { record: getRoundCreativeRecord(this.db, this.initialized.manifest.studioId, creativeRecordMatch[1], parsed.searchParams.get('runId') || undefined) });
       const planVersionsMatch = /^\/api\/rounds\/([^/]+)\/plan-versions$/.exec(parsed.pathname);
-      if (request.method === 'GET' && planVersionsMatch) return success(response, { planVersions: listRoundPlanVersions(this.db, planVersionsMatch[1]) });
+      if (request.method === 'GET' && planVersionsMatch) return success(response, { planVersions: listRoundPlanVersions(this.db, this.initialized.manifest.studioId, planVersionsMatch[1]) });
       const dryRunsMatch = /^\/api\/rounds\/([^/]+)\/dry-runs$/.exec(parsed.pathname);
-      if (request.method === 'GET' && dryRunsMatch) return success(response, { dryRuns: listDryRunPreviews(this.db, dryRunsMatch[1]) });
+      if (request.method === 'GET' && dryRunsMatch) return success(response, { dryRuns: listDryRunPreviews(this.db, this.initialized.manifest.studioId, dryRunsMatch[1]) });
       const runMatch = /^\/api\/rounds\/([^/]+)\/runs$/.exec(parsed.pathname);
-      if (request.method === 'GET' && runMatch) return success(response, { runs: listRuns(this.db, runMatch[1]) });
+      if (request.method === 'GET' && runMatch) return success(response, { runs: listRuns(this.db, this.initialized.manifest.studioId, runMatch[1]) });
       const runItemsMatch = /^\/api\/runs\/([^/]+)\/items$/.exec(parsed.pathname);
-      if (request.method === 'GET' && runItemsMatch) return success(response, { items: listRunItemsForQuery(this.db, runItemsMatch[1]) });
+      if (request.method === 'GET' && runItemsMatch) return success(response, { items: listRunItemsForQuery(this.db, this.initialized.manifest.studioId, runItemsMatch[1]) });
       const assetFileMatch = /^\/api\/assets\/([^/]+)\/file$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetFileMatch) return this.assetFile(response, assetFileMatch[1], parsed.searchParams.get('download') === '1');
       if (request.method === 'GET' && parsed.pathname === '/api/events') return this.events(request, response, parsed);
       if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
       if (request.method !== 'POST' && request.method !== 'PUT') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
+      assertJsonContentType(request);
       const body = await readBody(request);
       return this.write(request, response, parsed.pathname, body);
     } catch (error) {
@@ -303,91 +395,131 @@ export class LocalStudioService {
   private write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody): void {
     const key = idempotencyKey(request, body);
     if (pathname === '/api/runtime-settings' && request.method === 'PUT') {
-      executeIdempotent(this.db, key, 'studio.runtime_settings.update', () => updateStudioRuntimeSettings(this.db, { studioId: this.initialized.manifest.studioId, maxWorkerConcurrency: body.maxWorkerConcurrency }), { maxWorkerConcurrency: body.maxWorkerConcurrency });
+      executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'studio.runtime_settings.update', () => updateStudioRuntimeSettings(this.db, { studioId: this.initialized.manifest.studioId, maxWorkerConcurrency: body.maxWorkerConcurrency }), { maxWorkerConcurrency: body.maxWorkerConcurrency });
       return success(response, this.runtimeStatus());
     }
     if (pathname === '/api/sessions/open') {
-      const session = openOrAttachStudioSession(this.db, { studioId: this.initialized.manifest.studioId, conversationId: text(body.conversationId) });
-      return success(response, session);
+      const conversationId = text(body.conversationId);
+      const session = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'sessions.open', () => openOrAttachStudioSession(this.db, { studioId: this.initialized.manifest.studioId, conversationId }), { conversationId });
+      return success(response, session.value);
     }
     const sessionContextMatch = /^\/api\/sessions\/([^/]+)\/context$/.exec(pathname);
-    if (sessionContextMatch) return success(response, executeIdempotent(this.db, key, 'sessions.context', () => updateStudioSessionContext(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined }), { sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined }).value);
+    if (sessionContextMatch) {
+      this.assertSessionInStudio(sessionContextMatch[1]);
+      if (text(body.projectId)) this.assertProjectInStudio(text(body.projectId));
+      if (text(body.taskId)) this.assertTaskInStudio(text(body.taskId));
+      if (text(body.roundId)) this.assertRoundInStudio(text(body.roundId));
+      return success(response, executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'sessions.context', () => updateStudioSessionContext(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined }), { sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined }).value);
+    }
     const archiveProjectMatch = /^\/api\/projects\/([^/]+)\/archive$/.exec(pathname);
-    if (archiveProjectMatch) return success(response, archiveProject(this.db, { projectId: archiveProjectMatch[1], idempotencyKey: key }));
+    if (archiveProjectMatch) { this.assertProjectInStudio(archiveProjectMatch[1]); return success(response, archiveProject(this.db, { studioId: this.initialized.manifest.studioId, projectId: archiveProjectMatch[1], idempotencyKey: key })); }
     const projectSelectionMatch = /^\/api\/projects\/([^/]+)\/selection\/assets\/([^/]+)$/.exec(pathname);
     if (projectSelectionMatch && request.method === 'POST') {
       const projectId = projectSelectionMatch[1];
       const assetId = projectSelectionMatch[2];
+      this.assertProjectInStudio(projectId);
+      this.assertAssetInStudio(assetId);
       const selected = body.selected === true;
-      executeIdempotent(this.db, key, 'projects.selection_asset', () => setProjectAssetSelected(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetId, selected }), { projectId, assetId, selected });
+      executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'projects.selection_asset', () => setProjectAssetSelected(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetId, selected }), { projectId, assetId, selected });
       return success(response, { selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectId) });
     }
     if (pathname === '/api/projects') {
       const created = createProject(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), description: text(body.description) || undefined, sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
     }
-    if (pathname === '/api/delivery-batches' && request.method === 'POST') return success(response, createDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), deliveryIds: Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
+    if (pathname === '/api/delivery-batches' && request.method === 'POST') {
+      const deliveryIds = Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [];
+      this.assertProjectInStudio(text(body.projectId));
+      for (const deliveryId of deliveryIds) this.assertDeliveryInStudio(deliveryId);
+      return success(response, createDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), deliveryIds, idempotencyKey: key }));
+    }
     const batchRevisionMatch = /^\/api\/delivery-batches\/([^/]+)\/revisions$/.exec(pathname);
-    if (batchRevisionMatch && request.method === 'POST') return success(response, reviseDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, batchId: batchRevisionMatch[1], deliveryIds: Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
+    if (batchRevisionMatch && request.method === 'POST') {
+      const deliveryIds = Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [];
+      this.assertDeliveryBatchInStudio(batchRevisionMatch[1]);
+      for (const deliveryId of deliveryIds) this.assertDeliveryInStudio(deliveryId);
+      return success(response, reviseDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, batchId: batchRevisionMatch[1], deliveryIds, idempotencyKey: key }));
+    }
     const batchReadyMatch = /^\/api\/delivery-batch-versions\/([^/]+)\/ready$/.exec(pathname);
-    if (batchReadyMatch && request.method === 'POST') return success(response, prepareDeliveryBatchVersion(this.db, { studioId: this.initialized.manifest.studioId, versionId: batchReadyMatch[1], idempotencyKey: key }));
-    if (pathname === '/api/deliveries' && request.method === 'POST') { this.assertProjectInStudio(text(body.projectId)); return success(response, createDelivery(this.db, { projectId: text(body.projectId), name: text(body.name), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key })); }
+    if (batchReadyMatch && request.method === 'POST') { this.assertDeliveryBatchVersionInStudio(batchReadyMatch[1]); return success(response, prepareDeliveryBatchVersion(this.db, { studioId: this.initialized.manifest.studioId, versionId: batchReadyMatch[1], idempotencyKey: key })); }
+    if (pathname === '/api/deliveries/complete' && request.method === 'POST') {
+      const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [];
+      const projectId = text(body.projectId);
+      const phase = text(body.phase) as DeliveryCompletionPhase;
+      this.assertProjectInStudio(projectId);
+      for (const assetId of assetIds) this.assertAssetInStudio(assetId);
+      return success(response, publicDeliveryCompletion(completeDeliveryStep(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, operationId: key, phase, projectId, name: text(body.name), assetIds, includeCreativeRecord: body.includeCreativeRecord === true })));
+    }
+    if (pathname === '/api/deliveries' && request.method === 'POST') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; this.assertProjectInStudio(text(body.projectId)); for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, createDelivery(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), assetIds, includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key })); }
     const deliveryItemsMatch = /^\/api\/deliveries\/([^/]+)\/items$/.exec(pathname);
-    if (deliveryItemsMatch && request.method === 'PUT') { this.assertDeliveryInStudio(deliveryItemsMatch[1]); return success(response, updateDeliveryDraft(this.db, { deliveryId: deliveryItemsMatch[1], assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], includeCreativeRecord: typeof body.includeCreativeRecord === 'boolean' ? body.includeCreativeRecord : undefined, idempotencyKey: key })); }
+    if (deliveryItemsMatch && request.method === 'PUT') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; this.assertDeliveryInStudio(deliveryItemsMatch[1]); for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, updateDeliveryDraft(this.db, { studioId: this.initialized.manifest.studioId, deliveryId: deliveryItemsMatch[1], assetIds, includeCreativeRecord: typeof body.includeCreativeRecord === 'boolean' ? body.includeCreativeRecord : undefined, idempotencyKey: key })); }
     const readyDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/ready$/.exec(pathname);
-    if (readyDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(readyDeliveryMatch[1]); return success(response, prepareDelivery(this.db, { deliveryId: readyDeliveryMatch[1], idempotencyKey: key })); }
+    if (readyDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(readyDeliveryMatch[1]); return success(response, prepareDelivery(this.db, { studioId: this.initialized.manifest.studioId, deliveryId: readyDeliveryMatch[1], idempotencyKey: key })); }
     const returnToDraftMatch = /^\/api\/deliveries\/([^/]+)\/draft$/.exec(pathname);
-    if (returnToDraftMatch && request.method === 'POST') { this.assertDeliveryInStudio(returnToDraftMatch[1]); return success(response, returnDeliveryToDraft(this.db, { deliveryId: returnToDraftMatch[1], idempotencyKey: key })); }
+    if (returnToDraftMatch && request.method === 'POST') { this.assertDeliveryInStudio(returnToDraftMatch[1]); return success(response, returnDeliveryToDraft(this.db, { studioId: this.initialized.manifest.studioId, deliveryId: returnToDraftMatch[1], idempotencyKey: key })); }
     const exportDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/export$/.exec(pathname);
-    if (exportDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(exportDeliveryMatch[1]); return success(response, exportDelivery(this.db, this.initialized.paths, { deliveryId: exportDeliveryMatch[1], idempotencyKey: key })); }
-    if (pathname === '/api/task-types') return success(response, publicValue(createUserTaskType(this.db, { name: text(body.name), definition: record(body.definition), idempotencyKey: key })));
-    if (pathname === '/api/style-kits') return success(response, publicValue(createStyleKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key })));
-    if (pathname === '/api/brand-kits') return success(response, publicValue(createBrandKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds: Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key })));
+    if (exportDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(exportDeliveryMatch[1]); return success(response, publicDeliveryExport(exportDelivery(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, deliveryId: exportDeliveryMatch[1], idempotencyKey: key }))); }
+    if (pathname === '/api/task-types') return success(response, publicValue(createUserTaskType(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), idempotencyKey: key })));
+    if (pathname === '/api/style-kits') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, publicValue(createStyleKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds, idempotencyKey: key }))); }
+    if (pathname === '/api/brand-kits') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, publicValue(createBrandKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds, idempotencyKey: key }))); }
     if (pathname === '/api/tasks') {
-      const created = createTaskDraft(this.db, { projectId: text(body.projectId), name: text(body.name), taskTypeId: text(body.taskTypeId) || undefined, intent: record(body.intent), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
+      this.assertProjectInStudio(text(body.projectId));
+      if (text(body.sessionId)) this.assertSessionInStudio(text(body.sessionId));
+      const created = createTaskDraft(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), taskTypeId: text(body.taskTypeId) || undefined, intent: record(body.intent), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
     }
     if (pathname === '/api/rounds') {
-      const created = createRoundDraft(this.db, { taskId: text(body.taskId), purpose: text(body.purpose) as 'exploration' | 'refinement' | 'variation' | 'edit' | 'fill', parentRoundId: text(body.parentRoundId) || undefined, plan: record(body.plan), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
+      this.assertTaskInStudio(text(body.taskId));
+      if (text(body.parentRoundId)) this.assertRoundInStudio(text(body.parentRoundId));
+      if (text(body.sessionId)) this.assertSessionInStudio(text(body.sessionId));
+      const created = createRoundDraft(this.db, { studioId: this.initialized.manifest.studioId, taskId: text(body.taskId), purpose: text(body.purpose) as 'exploration' | 'refinement' | 'variation' | 'edit' | 'fill', parentRoundId: text(body.parentRoundId) || undefined, plan: record(body.plan), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
     }
     const prepareMatch = /^\/api\/rounds\/([^/]+)\/prepare$/.exec(pathname);
     if (prepareMatch) {
-      const prepared = prepareRoundForConfirmation(this.db, { roundId: prepareMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
+      this.assertRoundInStudio(prepareMatch[1]);
+      const prepared = prepareRoundForConfirmation(this.db, { studioId: this.initialized.manifest.studioId, roundId: prepareMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
       return success(response, prepared);
     }
     const confirmMatch = /^\/api\/rounds\/([^/]+)\/confirm$/.exec(pathname);
     if (confirmMatch) {
-      const confirmed = confirmRoundPlan(this.db, { roundId: confirmMatch[1], expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
+      this.assertRoundInStudio(confirmMatch[1]);
+      const confirmed = confirmRoundPlan(this.db, { studioId: this.initialized.manifest.studioId, roundId: confirmMatch[1], expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
       return success(response, confirmed);
     }
     const preflightMatch = /^\/api\/rounds\/([^/]+)\/preflight$/.exec(pathname);
     if (preflightMatch) {
+      this.assertRoundInStudio(preflightMatch[1]);
       const config = loadProviderConfig(this.initialized.paths);
-      if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { roundId: preflightMatch[1], providerStatus: providerStatus(this.initialized.paths) }) });
-      return success(response, createDryRunPreview(this.db, { roundId: preflightMatch[1], providerConfig: config, providerStatus: providerStatus(this.initialized.paths), idempotencyKey: key }));
+      if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerStatus: providerStatus(this.initialized.paths) }) });
+      return success(response, createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: providerStatus(this.initialized.paths), idempotencyKey: key }));
     }
     if (pathname === '/api/runs') {
+      this.assertRoundInStudio(text(body.roundId));
+      if (text(body.preflightId)) this.assertDryRunInStudio(text(body.preflightId));
       const config = loadProviderConfig(this.initialized.paths);
       if (!config) throw new InvalidCommandError('当前工作区没有可用的图片生成配置。');
       const runtime = this.runtimeStatus();
       if (runtime.restartRequired) throw new InvalidCommandError('Provider 或工作区运行设置已变更，必须先重启 Studio 后再提交生成。');
-      const queued = queueGenerationRun(this.db, { roundId: text(body.roundId), providerConfig: config, providerStatus: providerStatus(this.initialized.paths), runtimeSettings: runtime.desired, requestedConcurrency: body.requestedConcurrency, preflightId: text(body.preflightId) || undefined, idempotencyKey: key });
+      const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId: text(body.roundId), providerConfig: config, providerStatus: providerStatus(this.initialized.paths), runtimeSettings: runtime.desired, requestedConcurrency: body.requestedConcurrency, preflightId: text(body.preflightId) || undefined, idempotencyKey: key });
       return success(response, queued);
     }
     const pauseMatch = /^\/api\/runs\/([^/]+)\/pause$/.exec(pathname);
-    if (pauseMatch) return success(response, pauseGenerationRun(this.db, { runId: pauseMatch[1], idempotencyKey: key }));
+    if (pauseMatch) { this.assertRunInStudio(pauseMatch[1]); return success(response, pauseGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: pauseMatch[1], idempotencyKey: key })); }
     const resolveUnknownMatch = /^\/api\/runs\/([^/]+)\/outcomes\/resolve$/.exec(pathname);
-    if (resolveUnknownMatch) return success(response, resolveUnknownRunItems(this.db, { runId: resolveUnknownMatch[1], itemIds: Array.isArray(body.itemIds) ? body.itemIds.filter((item): item is string => typeof item === 'string') : [], idempotencyKey: key }));
+    if (resolveUnknownMatch) { const itemIds = Array.isArray(body.itemIds) ? body.itemIds.filter((item): item is string => typeof item === 'string') : []; this.assertRunInStudio(resolveUnknownMatch[1]); for (const itemId of itemIds) this.assertRunItemInStudio(itemId); return success(response, resolveUnknownRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: resolveUnknownMatch[1], itemIds, idempotencyKey: key })); }
     const retryMatch = /^\/api\/runs\/([^/]+)\/retry$/.exec(pathname);
-    if (retryMatch) return success(response, retryGenerationRunItems(this.db, { runId: retryMatch[1], itemIds: Array.isArray(body.itemIds) ? body.itemIds.filter((item): item is string => typeof item === 'string') : undefined, idempotencyKey: key }));
+    if (retryMatch) { const itemIds = Array.isArray(body.itemIds) ? body.itemIds.filter((item): item is string => typeof item === 'string') : undefined; this.assertRunInStudio(retryMatch[1]); for (const itemId of itemIds || []) this.assertRunItemInStudio(itemId); return success(response, retryGenerationRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: retryMatch[1], itemIds, idempotencyKey: key })); }
     const resumeMatch = /^\/api\/runs\/([^/]+)\/resume$/.exec(pathname);
-    if (resumeMatch) return success(response, resumeGenerationRun(this.db, { runId: resumeMatch[1], sessionId: text(body.sessionId) || undefined, idempotencyKey: key }));
+    if (resumeMatch) { this.assertRunInStudio(resumeMatch[1]); if (text(body.sessionId)) this.assertSessionInStudio(text(body.sessionId)); return success(response, resumeGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: resumeMatch[1], sessionId: text(body.sessionId) || undefined, idempotencyKey: key })); }
     const cancelMatch = /^\/api\/runs\/([^/]+)\/cancel$/.exec(pathname);
-    if (cancelMatch) return success(response, cancelGenerationRun(this.db, { runId: cancelMatch[1], idempotencyKey: key }));
+    if (cancelMatch) { this.assertRunInStudio(cancelMatch[1]); return success(response, cancelGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: cancelMatch[1], idempotencyKey: key })); }
     const reviewMatch = /^\/api\/assets\/([^/]+)\/review$/.exec(pathname);
     if (reviewMatch) {
-      const reviewed = executeIdempotent(this.db, key, 'assets.review', () => {
+      this.assertAssetInStudio(reviewMatch[1]);
+      if (text(body.taskId)) this.assertTaskInStudio(text(body.taskId));
+      if (text(body.roundId)) this.assertRoundInStudio(text(body.roundId));
+      const reviewed = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'assets.review', () => {
         const decision = text(body.decision) as 'keep' | 'review' | 'reject' | 'derive';
         setReviewDecision(this.db, { studioId: this.initialized.manifest.studioId, assetId: reviewMatch[1], decision, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined, feedback: record(body.feedback) });
         return { assetId: reviewMatch[1], decision };
@@ -395,11 +527,11 @@ export class LocalStudioService {
       return success(response, reviewed.value);
     }
     const sharedAssetMatch = /^\/api\/assets\/([^/]+)\/shared$/.exec(pathname);
-    if (sharedAssetMatch && request.method === 'POST') return success(response, executeIdempotent(this.db, key, 'assets.share', () => setStudioAssetShared(this.db, { studioId: this.initialized.manifest.studioId, assetId: sharedAssetMatch[1], shared: body.shared === true }), { assetId: sharedAssetMatch[1], shared: body.shared === true }).value);
+    if (sharedAssetMatch && request.method === 'POST') { this.assertAssetInStudio(sharedAssetMatch[1]); return success(response, executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'assets.share', () => setStudioAssetShared(this.db, { studioId: this.initialized.manifest.studioId, assetId: sharedAssetMatch[1], shared: body.shared === true }), { assetId: sharedAssetMatch[1], shared: body.shared === true }).value); }
     const trashMatch = /^\/api\/assets\/([^/]+)\/trash$/.exec(pathname);
-    if (trashMatch) return success(response, publicAsset(executeIdempotent(this.db, key, 'assets.trash', () => softDeleteAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: trashMatch[1] }), { assetId: trashMatch[1] }).value));
+    if (trashMatch) { this.assertAssetInStudio(trashMatch[1]); return success(response, publicAsset(executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'assets.trash', () => softDeleteAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: trashMatch[1] }), { assetId: trashMatch[1] }).value)); }
     const restoreMatch = /^\/api\/assets\/([^/]+)\/restore$/.exec(pathname);
-    if (restoreMatch) return success(response, publicAsset(executeIdempotent(this.db, key, 'assets.restore', () => restoreAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: restoreMatch[1] }), { assetId: restoreMatch[1] }).value));
+    if (restoreMatch) { this.assertAssetInStudio(restoreMatch[1]); return success(response, publicAsset(executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'assets.restore', () => restoreAsset(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, assetId: restoreMatch[1] }), { assetId: restoreMatch[1] }).value)); }
     return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
   }
 
@@ -422,9 +554,22 @@ export class LocalStudioService {
     if (!project) throw new StudioNotFoundError('Project not found in this Studio: ' + projectId);
   }
 
+  private assertScopedId(id: string, label: string, sql: string): void {
+    if (!this.db.prepare(sql).get(id, this.initialized.manifest.studioId)) throw new StudioNotFoundError(label + ' not found in this Studio: ' + id);
+  }
+
+  private assertSessionInStudio(sessionId: string): void { this.assertScopedId(sessionId, 'Studio session', 'SELECT 1 FROM studio_sessions WHERE id = ? AND studio_id = ?'); }
+  private assertTaskInStudio(taskId: string): void { this.assertScopedId(taskId, 'Creative task', 'SELECT 1 FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?'); }
+  private assertDryRunInStudio(previewId: string): void { this.assertScopedId(previewId, 'Dry-run preview', 'SELECT 1 FROM dry_run_previews preview JOIN creative_rounds round ON round.id = preview.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE preview.id = ? AND project.studio_id = ?'); }
+  private assertRoundInStudio(roundId: string): void { this.assertScopedId(roundId, 'Creative round', 'SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?'); }
+  private assertRunInStudio(runId: string): void { this.assertScopedId(runId, 'Generation run', 'SELECT 1 FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?'); }
+  private assertRunItemInStudio(itemId: string): void { this.assertScopedId(itemId, 'Generation run item', 'SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?'); }
+  private assertAssetInStudio(assetId: string): void { this.assertScopedId(assetId, 'Asset', 'SELECT 1 FROM assets WHERE id = ? AND studio_id = ?'); }
+  private assertDeliveryBatchInStudio(batchId: string): void { this.assertScopedId(batchId, 'Delivery batch', 'SELECT 1 FROM delivery_batches batch JOIN projects project ON project.id = batch.project_id WHERE batch.id = ? AND project.studio_id = ?'); }
+  private assertDeliveryBatchVersionInStudio(versionId: string): void { this.assertScopedId(versionId, 'Delivery batch version', 'SELECT 1 FROM delivery_batch_versions version JOIN delivery_batches batch ON batch.id = version.batch_id JOIN projects project ON project.id = batch.project_id WHERE version.id = ? AND project.studio_id = ?'); }
+
   private assertDeliveryInStudio(deliveryId: string): void {
-    const delivery = this.db.prepare('SELECT 1 FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId);
-    if (!delivery) throw new StudioNotFoundError('Delivery not found in this Studio: ' + deliveryId);
+    this.assertScopedId(deliveryId, 'Delivery', 'SELECT 1 FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?');
   }
 
   private assertImportTarget(targetType?: string, targetId?: string): void {
@@ -447,16 +592,16 @@ export class LocalStudioService {
   private async importAsset(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const key = headerValue(request, 'idempotency-key');
     if (!key) throw new InvalidCommandError('导入图片需要 idempotency-key。');
-    const mediaType = headerValue(request, 'content-type').split(';')[0];
+    const mediaType = imageUploadMediaType(request);
     const targetType = headerValue(request, 'x-daoge-target-type') || undefined;
     const targetId = headerValue(request, 'x-daoge-target-id') || undefined;
     const originalFilename = headerValue(request, 'x-daoge-filename') || undefined;
     this.assertImportTarget(targetType, targetId);
     const bytes = await readBinaryBody(request);
-    const receipt = executeIdempotent(this.db, key, 'assets.import', () => importStudioAsset(this.db, this.initialized.paths, {
+    const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'assets.import', () => importStudioAsset(this.db, this.initialized.paths, {
       studioId: this.initialized.manifest.studioId,
       bytes,
-      mediaType: mediaType || undefined,
+      mediaType,
       originalFilename,
       targetType,
       targetId,
@@ -465,23 +610,29 @@ export class LocalStudioService {
     success(response, publicAsset(receipt.value));
   }
 
-  private writeImageArchive(response: ServerResponse, filename: string, entries: ZipEntryInput[]): void {
+  private async writeImageArchive(response: ServerResponse, filename: string, entries: ZipEntryInput[]): Promise<void> {
     if (!entries.length) throw new InvalidCommandError('请至少选择一张图片进行打包下载。');
     if (entries.length > MAX_ARCHIVE_IMAGE_COUNT) throw new InvalidCommandError('单次打包最多支持 ' + MAX_ARCHIVE_IMAGE_COUNT + ' 张图片。');
-    let totalBytes = 0;
-    for (const entry of entries) {
-      if (!fs.existsSync(entry.filePath)) throw new StudioNotFoundError('打包图片文件不存在。');
-      const stat = fs.statSync(entry.filePath);
-      if (!stat.isFile()) throw new StudioNotFoundError('打包图片文件不可用。');
-      totalBytes += stat.size;
+    try {
+      validateZipEntries(entries, { maxEntries: MAX_ARCHIVE_IMAGE_COUNT, maxAggregateBytes: MAX_ARCHIVE_BYTES, maxEntryBytes: MAX_IMAGE_UPLOAD_BYTES });
+    } catch {
+      for (const entry of entries) entry.snapshot?.close();
+      throw new InvalidCommandError('打包图片文件不可用或超过大小限制。');
     }
-    if (totalBytes > MAX_ARCHIVE_BYTES) throw new InvalidCommandError('本次图片总量超过 150 MB，请减少选择后重试。');
-    const archive = createImageZip(entries);
-    response.writeHead(200, { 'content-type': 'application/zip', 'content-length': String(archive.length), 'content-disposition': 'attachment; filename="' + filename + '"', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
-    response.end(archive);
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    response.once('close', abort);
+    try {
+      await writeImageZip(entries, response, { maxEntries: MAX_ARCHIVE_IMAGE_COUNT, maxAggregateBytes: MAX_ARCHIVE_BYTES, maxEntryBytes: MAX_IMAGE_UPLOAD_BYTES, snapshotDirectory: ensureCacheDirectory(this.initialized.paths, 'staging'), signal: controller.signal, beforeWrite: () => response.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename="' + filename + '"', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' }) });
+      response.removeListener('close', abort);
+      if (!response.destroyed && !response.writableEnded) response.end();
+    } catch (error) {
+      response.removeListener('close', abort);
+      if (!response.destroyed) response.destroy(error instanceof Error ? error : undefined);
+    }
   }
 
-  private projectAssetArchive(response: ServerResponse, projectId: string, requestedAssetIds: string[]): void {
+  private async projectAssetArchive(response: ServerResponse, projectId: string, requestedAssetIds: string[]): Promise<void> {
     this.assertProjectInStudio(projectId);
     const assetIds = [...new Set(requestedAssetIds.map((value) => value.trim()).filter(Boolean))];
     if (!assetIds.length) throw new InvalidCommandError('请先在项目资产中选择要打包的图片。');
@@ -492,19 +643,23 @@ export class LocalStudioService {
       if (!asset) throw new StudioNotFoundError('项目中未找到要打包的图片。');
       return asset;
     });
-    this.writeImageArchive(response, 'daoge-pic-project-images.zip', assets.map((asset, index) => ({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(asset.mediaType), filePath: assetFilePath(this.initialized.paths, asset) })));
+    const entries: ZipEntryInput[] = [];
+    try {
+      for (const [index, asset] of assets.entries()) entries.push({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(asset.mediaType), snapshot: createAssetSnapshot(this.initialized.paths, asset), contentHash: asset.contentHash, byteSize: asset.byteSize, mediaType: asset.mediaType });
+    } catch (error) {
+      for (const entry of entries) entry.snapshot?.close();
+      throw error;
+    }
+    await this.writeImageArchive(response, 'daoge-pic-project-images.zip', entries);
   }
 
-  private deliveryArchive(response: ServerResponse, deliveryId: string, requestedSequences: string[]): void {
+  private async deliveryArchive(response: ServerResponse, deliveryId: string, requestedSequences: string[]): Promise<void> {
     this.assertDeliveryInStudio(deliveryId);
     const delivery = this.db.prepare('SELECT delivery.id, delivery.status, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; status: string; manifest_json: string } | undefined;
     if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('已完成交付不存在：' + deliveryId);
     let manifest: Record<string, unknown>;
     try { manifest = record(JSON.parse(delivery.manifest_json)); } catch { throw new InvalidCommandError('交付文件记录无效。'); }
     const relativeDirectory = typeof manifest.exportDirectory === 'string' ? manifest.exportDirectory : '';
-    const deliveriesRoot = path.resolve(this.initialized.paths.deliveriesRoot) + path.sep;
-    const directory = path.resolve(this.initialized.paths.workspaceRoot, relativeDirectory);
-    if (!relativeDirectory || !directory.startsWith(deliveriesRoot)) throw new StudioNotFoundError('交付图片文件不可用。');
     const files = Array.isArray(manifest.files) ? manifest.files.map(record) : [];
     const sequences = requestedSequences.length ? [...new Set(requestedSequences.map((value) => {
       const sequence = Number(value);
@@ -513,15 +668,21 @@ export class LocalStudioService {
     }))] : [];
     const selected = sequences.length ? files.filter((item) => sequences.includes(Number(item.sequence))) : files;
     if (!selected.length) throw new StudioNotFoundError('未找到要打包的交付图片。');
-    const entries = selected.map((item, index) => {
-      const file = typeof item.file === 'string' ? item.file : '';
-      const mediaType = typeof item.mediaType === 'string' ? item.mediaType : 'image/png';
-      if (!file || path.basename(file) !== file) throw new StudioNotFoundError('交付图片文件不可用。');
-      const filePath = path.resolve(directory, file);
-      if (!filePath.startsWith(directory + path.sep)) throw new StudioNotFoundError('交付图片文件不可用。');
-      return { name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(mediaType), filePath };
-    });
-    this.writeImageArchive(response, 'daoge-pic-delivery-images.zip', entries);
+    const entries: ZipEntryInput[] = [];
+    try {
+      for (const [index, item] of selected.entries()) {
+        const file = typeof item.file === 'string' ? item.file : '';
+        const mediaType = typeof item.mediaType === 'string' ? item.mediaType : '';
+        const contentHash = typeof item.contentHash === 'string' ? item.contentHash : '';
+        const byteSize = Number.isSafeInteger(item.byteSize) ? Number(item.byteSize) : -1;
+        if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(mediaType) || !/^[a-f0-9]{64}$/.test(contentHash) || byteSize < 0) throw new InvalidCommandError('交付图片的冻结文件身份无效。');
+        entries.push({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(mediaType), snapshot: openDeliveryExportFile(this.initialized.paths, { directoryPath: relativeDirectory, name: file, contentHash, byteSize, mediaType }), contentHash, byteSize, mediaType });
+      }
+    } catch (error) {
+      for (const entry of entries) entry.snapshot?.close();
+      throw error;
+    }
+    await this.writeImageArchive(response, 'daoge-pic-delivery-images.zip', entries);
   }
 
   private deliveryFile(response: ServerResponse, deliveryId: string, sequence: number, download = false): void {
@@ -530,29 +691,25 @@ export class LocalStudioService {
     let manifest: Record<string, unknown>;
     try { manifest = record(JSON.parse(delivery.manifest_json)); } catch { throw new InvalidCommandError('Delivery export manifest is invalid.'); }
     const relativeDirectory = typeof manifest.exportDirectory === 'string' ? manifest.exportDirectory : '';
-    const deliveriesRoot = path.resolve(this.initialized.paths.deliveriesRoot) + path.sep;
-    const directory = path.resolve(this.initialized.paths.workspaceRoot, relativeDirectory);
-    if (!relativeDirectory || !directory.startsWith(deliveriesRoot)) throw new StudioNotFoundError('Exported delivery files are unavailable.');
     const files = Array.isArray(manifest.files) ? manifest.files : [];
     const entry = files.find((item) => record(item).sequence === sequence && typeof record(item).file === 'string') as Record<string, unknown> | undefined;
     const file = entry && typeof entry.file === 'string' ? entry.file : '';
-    const mediaType = entry && typeof entry.mediaType === 'string' ? entry.mediaType : 'image/png';
-    if (!file || path.basename(file) !== file) throw new StudioNotFoundError('Exported delivery file not found.');
-    const filePath = path.resolve(directory, file);
-    if (!filePath.startsWith(directory + path.sep) || !fs.existsSync(filePath)) throw new StudioNotFoundError('Exported delivery file not found.');
-    const extension = mediaType === 'image/jpeg' ? 'jpg' : mediaType === 'image/webp' ? 'webp' : mediaType === 'image/gif' ? 'gif' : 'png';
-    response.writeHead(200, { 'content-type': mediaType, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-delivery-image.' + extension + '"' } : {}) });
-    fs.createReadStream(filePath).on('error', () => response.destroy()).pipe(response);
+    const mediaType = entry && typeof entry.mediaType === 'string' ? entry.mediaType : '';
+    const contentHash = entry && typeof entry.contentHash === 'string' ? entry.contentHash : '';
+    const byteSize = entry && Number.isSafeInteger(entry.byteSize) ? Number(entry.byteSize) : -1;
+    if (!file) throw new StudioNotFoundError('Exported delivery file not found.');
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(mediaType) || !/^[a-f0-9]{64}$/.test(contentHash) || byteSize < 0) throw new InvalidCommandError('Delivery export file identity is invalid.');
+    const opened = openDeliveryExportFile(this.initialized.paths, { directoryPath: relativeDirectory, name: file, contentHash, byteSize, mediaType });
+    const extension = imageExtension(mediaType);
+    streamVerifiedFileResponse(response, opened, { 'content-type': mediaType, 'content-length': opened.byteSize, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-delivery-image.' + extension + '"' } : {}) });
   }
 
   private assetFile(response: ServerResponse, assetId: string, download = false): void {
     const asset = getStudioAsset(this.db, this.initialized.manifest.studioId, assetId);
     if (!asset || asset.deletedAt) throw new StudioNotFoundError('Asset not found: ' + assetId);
-    const filePath = assetFilePath(this.initialized.paths, asset);
-    if (!fs.existsSync(filePath)) throw new StudioNotFoundError('Asset media is missing: ' + assetId);
-    const extension = asset.mediaType === 'image/jpeg' ? 'jpg' : asset.mediaType === 'image/webp' ? 'webp' : asset.mediaType === 'image/gif' ? 'gif' : 'png';
-    response.writeHead(200, { 'content-type': asset.mediaType, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-image.' + extension + '"' } : {}) });
-    fs.createReadStream(filePath).on('error', () => response.destroy()).pipe(response);
+    const snapshot = createAssetSnapshot(this.initialized.paths, asset);
+    const extension = imageExtension(asset.mediaType);
+    streamVerifiedFileResponse(response, snapshot, { 'content-type': asset.mediaType, 'content-length': snapshot.byteSize, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-image.' + extension + '"' } : {}) });
   }
 
   private events(request: IncomingMessage, response: ServerResponse, parsed: URL): void {
@@ -632,8 +789,12 @@ export class LocalStudioService {
       response.end();
       return;
     }
+    if (error instanceof LocalAccessError) return json(response, error.status, { ok: false, error: { code: error.code, message: error.message } });
+    if (error instanceof StateTransitionError) return json(response, 409, { ok: false, error: { code: 'invalid_state_transition', message: error.message, details: { entity: error.entity, from: error.from, to: error.to } } });
     if (error instanceof VersionConflictError) return json(response, 409, { ok: false, error: { code: 'version_conflict', message: error.message } });
     if (error instanceof StudioNotFoundError) return json(response, 404, { ok: false, error: { code: 'not_found', message: error.message } });
+    if (error instanceof MediaValidationError) return json(response, 422, { ok: false, error: { code: 'media_validation_failed', message: error.message } });
+    if (error instanceof MediaArchiveError) return json(response, 500, { ok: false, error: { code: 'internal_error', message: 'Studio 本地服务发生未预期错误。' } });
     if (error instanceof InvalidCommandError) return json(response, 400, { ok: false, error: { code: 'invalid_command', message: error.message } });
     return json(response, 500, { ok: false, error: { code: 'internal_error', message: 'Studio 本地服务发生未预期错误。' } });
   }
@@ -642,6 +803,7 @@ export class LocalStudioService {
 export async function startLocalStudioService(options: StudioServiceOptions, port = 0): Promise<StartedStudioService> {
   const service = new LocalStudioService(options);
   try {
+    recoverStudioStartup(service.db, service.initialized.paths, service.initialized.manifest.studioId);
     return await service.listen(port);
   } catch (error) {
     await service.close();
