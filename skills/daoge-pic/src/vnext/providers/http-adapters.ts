@@ -1,4 +1,4 @@
-import { ImageProvider, ImageProviderCapabilities, ImageRequest, ImageRequestContext, ImageResult, ProviderError, ProviderValidationResult, staticCapabilitiesForProvider } from './contracts';
+import { ImageOperation, ImageProvider, ImageProviderCapabilities, ImageRequest, ImageRequestContext, ImageResult, ProviderError, ProviderValidationResult, staticCapabilitiesForProvider } from './contracts';
 import { ProviderId, ResolvedProviderConfig } from '../studio/provider-config';
 import { OutputTransport, resolveOutputSpec } from './output-spec';
 
@@ -28,6 +28,21 @@ function editEndpoint(baseUrl: string): string {
   if (/\/images\/(?:generations|edits)$/i.test(base)) return base.replace(/\/(?:generations|edits)$/i, '/edits');
   if (/\/v1$/i.test(base)) return base + '/images/edits';
   return base + '/v1/images/edits';
+}
+
+export function requestPathFor(config: ResolvedProviderConfig, operation: ImageOperation = 'generate'): string | null {
+  try {
+    const target = operation === 'edit' ? editEndpoint(config.baseUrl) : endpoint(config.baseUrl, config.providerId, config.model);
+    return new URL(target).pathname || '/';
+  } catch {
+    return null;
+  }
+}
+
+function rejectRedirect(response: Response): void {
+  if (response.status >= 300 && response.status < 400) {
+    throw errorWithStatus(response.status, 'Provider generation endpoint redirected; configure the final API endpoint directly.');
+  }
 }
 
 function extension(mediaType: string): string { if (mediaType === 'image/jpeg') return '.jpg'; if (mediaType === 'image/webp') return '.webp'; if (mediaType === 'image/gif') return '.gif'; return '.png'; }
@@ -123,7 +138,7 @@ function classify(error: unknown): ProviderError {
   if (status === 429 || /resource_exhausted/i.test(message)) return { kind: 'rate_limited', code, message };
   if ((status !== null && [408, 409, 425, 500, 502, 503, 504].includes(status)) || /retryable|unavailable|deadline_exceeded|timed out/i.test(message)) return { kind: 'transient', code, message };
   if (status === 401 || status === 403 || /authentication failed|permission/i.test(message)) return { kind: 'permission', code, message };
-  if (status === 404 || /model or endpoint unavailable/i.test(message)) return { kind: 'invalid_config', code, message };
+  if ((status !== null && status >= 300 && status < 400) || status === 404 || /model or endpoint unavailable/i.test(message)) return { kind: 'invalid_config', code, message };
   if (status === 400 || status === 422 || /does not support|response format incompatible/i.test(message)) return { kind: 'invalid_request', code, message };
   return { kind: 'unknown_outcome', code, message };
 }
@@ -151,14 +166,17 @@ class HttpImageProvider implements ImageProvider {
     const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json' };
     if (this.config.providerId === 'gemini-image') headers['x-goog-api-key'] = this.config.apiKey;
     else headers.authorization = 'Bearer ' + this.config.apiKey;
-    const response = await fetch(endpoint(this.config.baseUrl, this.config.providerId, this.config.model), { method: 'POST', headers, body: JSON.stringify(requestBody(this.config, request)), signal });
+    const target = endpoint(this.config.baseUrl, this.config.providerId, this.config.model);
+    const response = await fetch(target, { method: 'POST', headers, body: JSON.stringify(requestBody(this.config, request)), signal, redirect: 'manual' });
+    rejectRedirect(response);
     const json = await readJson(response);
     if (!response.ok) throw errorWithStatus(response.status, String((json.error as Record<string, unknown> | undefined)?.message || json.message || 'Provider request failed.'));
     const payload = extractPayload(json, this.config.providerId);
     if (!payload) throw new Error('Provider response did not include image bytes.');
     const source = payload.b64 ? { bytes: Buffer.from(payload.b64, 'base64'), mediaType: payload.mediaType || 'image/png' } : await download(String(payload.url), signal);
     if (!source.bytes.length) throw new Error('Provider response returned empty image bytes.');
-    return { bytes: source.bytes, mediaType: source.mediaType, revisedPrompt: payload.revisedPrompt, externalRequestId: response.headers.get('x-request-id') || response.headers.get('request-id') || undefined, safeMeta: { responseModel: this.config.model, outputFormat: source.mediaType } };
+    const providerRequestId = response.headers.get('x-request-id') || response.headers.get('request-id') || undefined;
+    return { bytes: source.bytes, mediaType: source.mediaType, revisedPrompt: payload.revisedPrompt, externalRequestId: providerRequestId, safeMeta: { responseModel: this.config.model, outputFormat: source.mediaType, requestPath: requestPathFor(this.config), responseStatus: response.status, ...(providerRequestId ? { providerRequestId } : {}) } };
   }
   async edit(request: ImageRequest, context: ImageRequestContext): Promise<ImageResult> {
     const validation = validateConfig(this.config);
@@ -177,7 +195,7 @@ class HttpImageProvider implements ImageProvider {
       body.set('response_format', 'b64_json');
       for (const reference of request.referenceAssets) body.append('image', new Blob([new Uint8Array(reference.bytes)], { type: reference.mediaType }), reference.assetId + extension(reference.mediaType));
       if (request.maskAsset) body.set('mask', new Blob([new Uint8Array(request.maskAsset.bytes)], { type: request.maskAsset.mediaType }), request.maskAsset.assetId + '.png');
-      response = await fetch(editEndpoint(this.config.baseUrl), { method: 'POST', headers: { authorization: 'Bearer ' + this.config.apiKey, accept: 'application/json' }, body, signal });
+      response = await fetch(editEndpoint(this.config.baseUrl), { method: 'POST', headers: { authorization: 'Bearer ' + this.config.apiKey, accept: 'application/json' }, body, signal, redirect: 'manual' });
     } else if (this.config.providerId === 'gemini-image' && this.config.referenceEnabled && !request.maskAsset) {
       const parts: Array<Record<string, unknown>> = [{ text: request.prompt }];
       for (const reference of request.referenceAssets) parts.push({ inlineData: { data: reference.bytes.toString('base64'), mimeType: reference.mediaType } });
@@ -185,6 +203,7 @@ class HttpImageProvider implements ImageProvider {
     } else {
       throw errorWithStatus(422, 'The selected Provider does not support this managed reference or mask edit.');
     }
+    rejectRedirect(response);
     const json = await readJson(response);
     if (!response.ok) throw errorWithStatus(response.status, String((json.error as Record<string, unknown> | undefined)?.message || json.message || 'Provider edit request failed.'));
     const payload = extractPayload(json, this.config.providerId);

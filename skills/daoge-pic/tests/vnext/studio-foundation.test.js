@@ -6,7 +6,8 @@ const assert = require('node:assert/strict');
 
 const { initializeStudio, studioPaths, ensureAssetBucket } = require('../../dist/vnext/studio/workspace');
 const { loadProviderConfig, providerSnapshot, providerStatus } = require('../../dist/vnext/studio/provider-config');
-const { openStudioDatabase, closeStudioDatabase, appendStudioEvent, studioSchemaVersion } = require('../../dist/vnext/studio/database');
+const { getStudioRuntimeSettings, updateStudioRuntimeSettings } = require('../../dist/vnext/studio/runtime-settings');
+const { openStudioDatabase, closeStudioDatabase, appendStudioEvent, migrateStudioDatabase, studioSchemaVersion } = require('../../dist/vnext/studio/database');
 const { openOrAttachStudioSession, archiveProject, createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan, listRoundPlanVersions, VersionConflictError } = require('../../dist/vnext/domain/studio-commands');
 const { stageImage, archiveStagedImage, validateImageBytes, MediaValidationError } = require('../../dist/vnext/media/archive');
 const { assertRunTransition, assertRunItemTransition, StateTransitionError } = require('../../dist/vnext/domain/states');
@@ -70,19 +71,18 @@ test('loads provider.env without exposing API keys in the safe status or snapsho
       missing: [],
       model: 'gpt-image-2',
       endpoint: 'https://images.example.test',
-      capabilities: { generate: true, edit: true, referenceImage: true, mask: true },
-      workerConcurrency: 2
+      capabilities: { generate: true, edit: true, referenceImage: true, mask: true }
     });
-    assert.equal(config.workerConcurrency, 2);
+    assert.equal(Object.prototype.hasOwnProperty.call(config, 'workerConcurrency'), false);
     assert.equal(JSON.stringify(status).includes('secret-value-must-not-escape'), false);
     const snapshot = providerSnapshot(config);
     assert.equal(Object.prototype.hasOwnProperty.call(snapshot, 'apiKey'), false);
     assert.equal(Object.prototype.hasOwnProperty.call(snapshot, 'workerConcurrency'), false);
     assert.equal(JSON.stringify(snapshot).includes('secret-value-must-not-escape'), false);
     fs.appendFileSync(initialized.paths.providerEnvPath, 'DAOGE_PIC_WORKER_CONCURRENCY=02\n');
-    const invalidConcurrency = providerStatus(initialized.paths);
-    assert.equal(invalidConcurrency.configured, false);
-    assert.deepEqual(invalidConcurrency.missing, ['worker_concurrency']);
+    const legacyConcurrency = providerStatus(initialized.paths);
+    assert.equal(legacyConcurrency.configured, true);
+    assert.deepEqual(legacyConcurrency.missing, []);
   } finally {
     cleanup(workspaceRoot);
   }
@@ -94,7 +94,7 @@ test('creates the vNext schema and emits monotonic Studio events', () => {
   try {
     const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.equal(studioSchemaVersion(db), 12);
+    assert.equal(studioSchemaVersion(db), 14);
     const studio = db.prepare('SELECT id, workspace_root FROM studios WHERE id = ?').get(initialized.manifest.studioId);
     assert.equal(studio.id, initialized.manifest.studioId);
     assert.equal(studio.workspace_root, initialized.paths.workspaceRoot);
@@ -107,6 +107,44 @@ test('creates the vNext schema and emits monotonic Studio events', () => {
   }
 });
 
+
+test('stores the workspace concurrency ceiling outside provider.env', () => {
+  const workspaceRoot = temporaryWorkspace();
+  let db;
+  try {
+    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    db = openStudioDatabase(initialized.paths, initialized.manifest);
+    assert.deepEqual(getStudioRuntimeSettings(db, initialized.manifest.studioId).maxWorkerConcurrency, 30);
+    assert.deepEqual(updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 17 }).maxWorkerConcurrency, 17);
+    assert.deepEqual(updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 30 }).maxWorkerConcurrency, 30);
+    assert.throws(() => updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 31 }), /1 到 30/);
+    assert.equal(JSON.stringify(providerStatus(initialized.paths)).includes('workerConcurrency'), false);
+  } finally {
+    closeStudioDatabase(db);
+    cleanup(workspaceRoot);
+  }
+});
+
+test('migrates v13 concurrency settings to the release range', () => {
+  const workspaceRoot = temporaryWorkspace();
+  let db;
+  try {
+    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const DatabaseSync = require('node:sqlite').DatabaseSync;
+    db = new DatabaseSync(initialized.paths.databasePath);
+    db.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE studios (id TEXT PRIMARY KEY, workspace_root TEXT NOT NULL UNIQUE, schema_version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE studio_runtime_settings (studio_id TEXT PRIMARY KEY REFERENCES studios(id), max_worker_concurrency INTEGER NOT NULL CHECK (max_worker_concurrency IN (1, 2, 4)), updated_at TEXT NOT NULL);");
+    for (let version = 1; version <= 13; version += 1) db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(version, '2026-01-01T00:00:00.000Z');
+    db.prepare('INSERT INTO studios (id, workspace_root, schema_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run('studio_v13', workspaceRoot, 13, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    db.prepare('INSERT INTO studio_runtime_settings (studio_id, max_worker_concurrency, updated_at) VALUES (?, ?, ?)').run('studio_v13', 4, '2026-01-01T00:00:00.000Z');
+    migrateStudioDatabase(db);
+    assert.equal(db.prepare('SELECT max_worker_concurrency FROM studio_runtime_settings WHERE studio_id = ?').get('studio_v13').max_worker_concurrency, 4);
+    db.prepare('UPDATE studio_runtime_settings SET max_worker_concurrency = ? WHERE studio_id = ?').run(30, 'studio_v13');
+    assert.equal(db.prepare('SELECT max_worker_concurrency FROM studio_runtime_settings WHERE studio_id = ?').get('studio_v13').max_worker_concurrency, 30);
+  } finally {
+    closeStudioDatabase(db);
+    cleanup(workspaceRoot);
+  }
+});
 
 test('keeps SQLite FTS search synchronized with project changes', () => {
   const workspaceRoot = temporaryWorkspace();

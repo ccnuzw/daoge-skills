@@ -4,7 +4,9 @@ import http, { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
 import { initializeStudio, InitializeStudioResult } from '../studio/workspace';
-import { loadProviderConfig, providerStatus } from '../studio/provider-config';
+import { loadProviderConfig, providerSnapshot, providerStatus } from '../studio/provider-config';
+import { getStudioRuntimeSettings, updateStudioRuntimeSettings } from '../studio/runtime-settings';
+import { requestPathFor } from '../providers/http-adapters';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, markRunsResumePending, pauseGenerationRun, preflightRound, queueGenerationRun, reconcileTerminalRuns, recoverExpiredLeases, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { AssetScope, assetFilePath, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, recoverAssetMediaOperations, restoreAsset, setReviewDecision, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
@@ -127,6 +129,20 @@ function publicAsset(asset: StudioAsset & { review?: unknown; display?: unknown 
   return result;
 }
 
+interface ActiveDaemonRuntime {
+  workerConcurrency?: unknown;
+  provider?: { providerId?: unknown; model?: unknown; endpoint?: unknown } | null;
+}
+
+function readActiveDaemonRuntime(runtimeDir: string): ActiveDaemonRuntime | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(runtimeDir, 'daemon.json'), 'utf8')) as ActiveDaemonRuntime;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function projectSelectionPayload(db: StudioDatabase, studioId: string, projectId: string): Record<string, unknown> {
   const assets = listProjectSelectionAssets(db, { studioId, projectId });
   return { projectId, assets: listAssetsWithReviewSummaries(db, assets, projectId).map(publicAsset) };
@@ -178,6 +194,20 @@ export class LocalStudioService {
     return { url: 'http://' + host + ':' + address.port, service: this };
   }
 
+  private runtimeStatus(): { desired: ReturnType<typeof getStudioRuntimeSettings>; active: { workerConcurrency: number | null; provider: { providerId: string; model: string; endpoint: string | null } | null } | null; restartRequired: boolean } {
+    const desired = getStudioRuntimeSettings(this.db, this.initialized.manifest.studioId);
+    const record = readActiveDaemonRuntime(this.initialized.paths.runtimeDir);
+    const active = record ? {
+      workerConcurrency: Number.isInteger(record.workerConcurrency) ? Number(record.workerConcurrency) : null,
+      provider: record.provider && typeof record.provider.providerId === 'string' && typeof record.provider.model === 'string' ? { providerId: record.provider.providerId, model: record.provider.model, endpoint: typeof record.provider.endpoint === 'string' ? record.provider.endpoint : null } : null
+    } : null;
+    const config = loadProviderConfig(this.initialized.paths);
+    const desiredProvider = config ? providerSnapshot(config) : null;
+    const desiredIdentity = desiredProvider ? { providerId: desiredProvider.providerId, model: desiredProvider.model, endpoint: desiredProvider.endpoint } : null;
+    const restartRequired = Boolean(active && (active.workerConcurrency !== desired.maxWorkerConcurrency || JSON.stringify(active.provider) !== JSON.stringify(desiredIdentity)));
+    return { desired, active, restartRequired };
+  }
+
   async close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closePromise = (async () => {
@@ -200,7 +230,11 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/health') return success(response, { service: 'daoge-pic-vnext', studioId: this.initialized.manifest.studioId });
       if (request.method === 'GET' && parsed.pathname === '/api/studio') return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion });
       if (request.method === 'GET' && parsed.pathname === '/api/provider/status') return success(response, providerStatus(this.initialized.paths));
-      if (request.method === 'GET' && parsed.pathname === '/api/provider/details') return success(response, { ...providerStatus(this.initialized.paths), providerEnvPath: 'daoge-studio/provider.env' });
+      if (request.method === 'GET' && parsed.pathname === '/api/provider/details') {
+        const config = loadProviderConfig(this.initialized.paths);
+        return success(response, { ...providerStatus(this.initialized.paths), providerEnvPath: 'daoge-studio/provider.env', generationRequestPath: config ? requestPathFor(config) : null, runtime: this.runtimeStatus() });
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/runtime-settings') return success(response, this.runtimeStatus());
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
       if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db).map(publicValue) });
@@ -268,6 +302,10 @@ export class LocalStudioService {
 
   private write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody): void {
     const key = idempotencyKey(request, body);
+    if (pathname === '/api/runtime-settings' && request.method === 'PUT') {
+      executeIdempotent(this.db, key, 'studio.runtime_settings.update', () => updateStudioRuntimeSettings(this.db, { studioId: this.initialized.manifest.studioId, maxWorkerConcurrency: body.maxWorkerConcurrency }), { maxWorkerConcurrency: body.maxWorkerConcurrency });
+      return success(response, this.runtimeStatus());
+    }
     if (pathname === '/api/sessions/open') {
       const session = openOrAttachStudioSession(this.db, { studioId: this.initialized.manifest.studioId, conversationId: text(body.conversationId) });
       return success(response, session);
@@ -332,7 +370,9 @@ export class LocalStudioService {
     if (pathname === '/api/runs') {
       const config = loadProviderConfig(this.initialized.paths);
       if (!config) throw new InvalidCommandError('当前工作区没有可用的图片生成配置。');
-      const queued = queueGenerationRun(this.db, { roundId: text(body.roundId), providerConfig: config, providerStatus: providerStatus(this.initialized.paths), preflightId: text(body.preflightId) || undefined, idempotencyKey: key });
+      const runtime = this.runtimeStatus();
+      if (runtime.restartRequired) throw new InvalidCommandError('Provider 或工作区运行设置已变更，必须先重启 Studio 后再提交生成。');
+      const queued = queueGenerationRun(this.db, { roundId: text(body.roundId), providerConfig: config, providerStatus: providerStatus(this.initialized.paths), runtimeSettings: runtime.desired, requestedConcurrency: body.requestedConcurrency, preflightId: text(body.preflightId) || undefined, idempotencyKey: key });
       return success(response, queued);
     }
     const pauseMatch = /^\/api\/runs\/([^/]+)\/pause$/.exec(pathname);

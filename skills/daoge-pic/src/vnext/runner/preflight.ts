@@ -56,7 +56,7 @@ export function preflightGenerationPlan(plan: PreflightPlan, providerStatus: Saf
   if (!normalizedPlan.prompt) issues.push({ code: 'missing_prompt', message: '创作计划缺少可执行的图像描述。', field: 'prompt' });
   if (providerStatus.providerId && providerStatus.model) {
     const outputSpec = resolveOutputSpec({ providerId: providerStatus.providerId, model: providerStatus.model, output: normalizedPlan.output });
-    if (!outputSpec.ok) issues.push({ code: outputSpec.code, message: outputSpec.message + (outputSpec.supportedAspectRatios ? ' 可选：' + outputSpec.supportedAspectRatios.join('、') + '。' : ''), field: outputSpec.field });
+    if (!outputSpec.ok) issues.push({ code: outputSpec.code, message: outputSpec.message, field: outputSpec.field });
     else normalizedPlan.output = outputSpec.output;
   }
   if (capabilities && !capabilities.textToImage && normalizedPlan.operation === 'generate') {

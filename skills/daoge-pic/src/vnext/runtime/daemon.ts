@@ -9,6 +9,7 @@ import { reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-comma
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
 import { loadProviderConfig, providerSnapshot, providerStatus } from '../studio/provider-config';
+import { getStudioRuntimeSettings } from '../studio/runtime-settings';
 import { initializeStudio } from '../studio/workspace';
 
 export interface StudioDaemonOptions {
@@ -26,6 +27,7 @@ interface RuntimeRecord {
   startedAt: string;
   heartbeatAt: string;
   workerConcurrency: number | null;
+  provider: { providerId: string; model: string; endpoint: string | null } | null;
 }
 
 function writeAtomically(filePath: string, value: unknown): void {
@@ -95,9 +97,10 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
   let inFlightTick: Promise<void> | null = null;
   let startedUrl = '';
   let activeWorkerConcurrency: number | null = null;
+  let activeProvider: { providerId: string; model: string; endpoint: string | null } | null = null;
   const workerId = createId('worker');
 
-  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso(), workerConcurrency: activeWorkerConcurrency });
+  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso(), workerConcurrency: activeWorkerConcurrency, provider: activeProvider });
   const startedAt = nowIso();
   const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
   const close = async (): Promise<void> => {
@@ -127,11 +130,14 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
     // A daemon uses one in-memory Provider identity for its lifetime. Configuration changes require a restart and cannot silently alter an in-flight run.
     const workerConfig = loadProviderConfig(initialized.paths);
     const workerStatus = providerStatus(initialized.paths);
-    activeWorkerConcurrency = workerStatus.configured ? workerConfig?.workerConcurrency || null : null;
+    const runtimeSettings = getStudioRuntimeSettings(workerDb, initialized.manifest.studioId);
+    activeWorkerConcurrency = workerStatus.configured ? runtimeSettings.maxWorkerConcurrency : null;
     const workerProvider = workerConfig ? createImageProvider(workerConfig) : null;
     const workerReady = Boolean(workerConfig && workerProvider && workerStatus.configured && workerProvider.validateConfig(workerConfig).valid);
     const workerSnapshot = workerConfig ? providerSnapshot(workerConfig) : null;
+    activeProvider = workerSnapshot ? { providerId: workerSnapshot.providerId, model: workerSnapshot.model, endpoint: workerSnapshot.endpoint } : null;
     let configChangeReported = false;
+    let runtimeChangeReported = false;
     const assetPersister = new StudioGeneratedAssetPersister({ db: workerDb, paths: initialized.paths, studioId: initialized.manifest.studioId });
     const assetResolver = new StudioAssetResolver({ db: workerDb, paths: initialized.paths });
     const worker = workerConfig && workerProvider && workerReady ? new GenerationWorker({
@@ -154,6 +160,11 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
         if (!configChangeReported && JSON.stringify(currentSnapshot) !== JSON.stringify(workerSnapshot)) {
           configChangeReported = true;
           appendStudioEvent(workerDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_changed', payload: { restartRequired: true } });
+        }
+        const currentRuntimeSettings = getStudioRuntimeSettings(workerDb, initialized.manifest.studioId);
+        if (!runtimeChangeReported && currentRuntimeSettings.maxWorkerConcurrency !== runtimeSettings.maxWorkerConcurrency) {
+          runtimeChangeReported = true;
+          appendStudioEvent(workerDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.runtime_settings_changed', payload: { restartRequired: true } });
         }
         if (worker) {
           const result = await worker.processOnce(activeWorkerConcurrency || 2);

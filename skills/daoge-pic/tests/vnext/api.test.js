@@ -64,6 +64,10 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     const providerDetails = await requestJson(started.url, '/api/provider/details');
     assert.match(providerDetails.body.data.providerEnvPath, /daoge-studio[\/]provider.env$/);
     assert.equal(JSON.stringify(providerDetails.body).includes('api-secret-never-in-http-response'), false);
+    const runtimeBefore = await requestJson(started.url, '/api/runtime-settings');
+    assert.equal(runtimeBefore.body.data.desired.maxWorkerConcurrency, 30);
+    const runtimeUpdated = await requestJson(started.url, '/api/runtime-settings', { method: 'PUT', idempotencyKey: 'runtime-limit', body: { maxWorkerConcurrency: 30 } });
+    assert.equal(runtimeUpdated.body.data.desired.maxWorkerConcurrency, 30);
 
     const project = await requestJson(started.url, '/api/projects', { method: 'POST', idempotencyKey: 'project', body: { name: 'API 项目' } });
     const task = await requestJson(started.url, '/api/tasks', { method: 'POST', idempotencyKey: 'task', body: { projectId: project.body.data.value.id, name: 'API 任务' } });
@@ -82,9 +86,12 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     assert.equal(history.body.data.planVersions[0].state, 'confirmed');
     const dryRuns = await requestJson(started.url, '/api/rounds/' + round.body.data.value.id + '/dry-runs');
     assert.equal(dryRuns.body.data.dryRuns[0].id, preflight.body.data.value.preview.id);
-    const queued = await requestJson(started.url, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id } });
+    const rejectedConcurrency = await requestJson(started.url, '/api/runs', { method: 'POST', idempotencyKey: 'queue-over-limit', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 31 } });
+    assert.equal(rejectedConcurrency.status, 400);
+    const queued = await requestJson(started.url, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 30 } });
     assert.equal(queued.status, 200);
     assert.equal(queued.body.data.value.status, 'queued');
+    assert.equal(queued.body.data.value.requestedConcurrency, 30);
     assert.equal(JSON.stringify(queued.body).includes('api-secret-never-in-http-response'), false);
   } finally {
     if (started) await started.service.close();

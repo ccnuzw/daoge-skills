@@ -9,8 +9,6 @@ export const PROVIDER_IDS = [
 ] as const;
 
 export type ProviderId = typeof PROVIDER_IDS[number];
-export const WORKER_CONCURRENCY_VALUES = [1, 2, 4] as const;
-export type WorkerConcurrency = typeof WORKER_CONCURRENCY_VALUES[number];
 
 export interface ProviderCapabilities {
   generate: boolean;
@@ -25,7 +23,6 @@ export interface ResolvedProviderConfig {
   apiKey: string;
   model: string;
   referenceEnabled: boolean;
-  workerConcurrency: WorkerConcurrency;
 }
 
 export interface SafeProviderStatus {
@@ -35,7 +32,6 @@ export interface SafeProviderStatus {
   model: string | null;
   endpoint: string | null;
   capabilities: ProviderCapabilities | null;
-  workerConcurrency: WorkerConcurrency;
 }
 
 const CAPABILITIES: Record<ProviderId, ProviderCapabilities> = {
@@ -85,24 +81,17 @@ function endpointIdentity(raw: string): string | null {
   }
 }
 
-function configuredWorkerConcurrency(env: Record<string, string>): WorkerConcurrency | null {
-  const raw = valueFor(env, 'DAOGE_PIC_WORKER_CONCURRENCY');
-  if (!raw) return 2;
-  return raw === '1' || raw === '2' || raw === '4' ? Number(raw) as WorkerConcurrency : null;
-}
-
 function valuesForProvider(providerId: ProviderId, env: Record<string, string>): ResolvedProviderConfig {
-  const workerConcurrency = configuredWorkerConcurrency(env) || 2;
   if (providerId === 'openai-images') {
-    return { providerId, baseUrl: valueFor(env, 'OPENAI_BASE_URL'), apiKey: valueFor(env, 'OPENAI_API_KEY'), model: valueFor(env, 'OPENAI_MODEL'), referenceEnabled: true, workerConcurrency };
+    return { providerId, baseUrl: valueFor(env, 'OPENAI_BASE_URL'), apiKey: valueFor(env, 'OPENAI_API_KEY'), model: valueFor(env, 'OPENAI_MODEL'), referenceEnabled: true };
   }
   if (providerId === 'gemini-image') {
-    return { providerId, baseUrl: valueFor(env, 'GEMINI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'GEMINI_IMAGE_API_KEY'), model: valueFor(env, 'GEMINI_IMAGE_MODEL'), referenceEnabled: valueFor(env, 'GEMINI_IMAGE_ENABLE_REFERENCE').toLowerCase() === 'true', workerConcurrency };
+    return { providerId, baseUrl: valueFor(env, 'GEMINI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'GEMINI_IMAGE_API_KEY'), model: valueFor(env, 'GEMINI_IMAGE_MODEL'), referenceEnabled: valueFor(env, 'GEMINI_IMAGE_ENABLE_REFERENCE').toLowerCase() === 'true' };
   }
   if (providerId === 'gemini-openai-compatible') {
-    return { providerId, baseUrl: valueFor(env, 'GEMINI_OPENAI_BASE_URL'), apiKey: valueFor(env, 'GEMINI_OPENAI_API_KEY'), model: valueFor(env, 'GEMINI_OPENAI_MODEL'), referenceEnabled: false, workerConcurrency };
+    return { providerId, baseUrl: valueFor(env, 'GEMINI_OPENAI_BASE_URL'), apiKey: valueFor(env, 'GEMINI_OPENAI_API_KEY'), model: valueFor(env, 'GEMINI_OPENAI_MODEL'), referenceEnabled: false };
   }
-  return { providerId, baseUrl: valueFor(env, 'XAI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'XAI_IMAGE_API_KEY'), model: valueFor(env, 'XAI_IMAGE_MODEL'), referenceEnabled: false, workerConcurrency };
+  return { providerId, baseUrl: valueFor(env, 'XAI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'XAI_IMAGE_API_KEY'), model: valueFor(env, 'XAI_IMAGE_MODEL'), referenceEnabled: false };
 }
 
 export function capabilitiesForProvider(config: ResolvedProviderConfig): ProviderCapabilities {
@@ -122,26 +111,23 @@ export function loadProviderConfig(paths: StudioPaths): ResolvedProviderConfig |
 export function providerStatus(paths: StudioPaths): SafeProviderStatus {
   const config = loadProviderConfig(paths);
   if (!config) {
-    return { providerId: null, configured: false, missing: ['IMAGE_PROVIDER'], model: null, endpoint: null, capabilities: null, workerConcurrency: 2 };
+    return { providerId: null, configured: false, missing: ['IMAGE_PROVIDER'], model: null, endpoint: null, capabilities: null };
   }
-  const env = parseProviderEnv(fs.readFileSync(paths.providerEnvPath, 'utf8'));
   const missing: string[] = [];
   if (!config.baseUrl) missing.push('base_url');
   if (!config.apiKey) missing.push('api_key');
   if (!config.model) missing.push('model');
-  if (!configuredWorkerConcurrency(env)) missing.push('worker_concurrency');
   return {
     providerId: config.providerId,
     configured: missing.length === 0,
     missing,
     model: config.model || null,
     endpoint: endpointIdentity(config.baseUrl),
-    capabilities: capabilitiesForProvider(config),
-    workerConcurrency: config.workerConcurrency
+    capabilities: capabilitiesForProvider(config)
   };
 }
 
-export function providerSnapshot(config: ResolvedProviderConfig): Omit<ResolvedProviderConfig, 'apiKey' | 'baseUrl' | 'workerConcurrency'> & { endpoint: string | null; capabilities: ProviderCapabilities } {
+export function providerSnapshot(config: ResolvedProviderConfig): Omit<ResolvedProviderConfig, 'apiKey' | 'baseUrl'> & { endpoint: string | null; capabilities: ProviderCapabilities } {
   return {
     providerId: config.providerId,
     model: config.model,

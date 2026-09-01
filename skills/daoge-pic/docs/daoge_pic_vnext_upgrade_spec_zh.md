@@ -192,7 +192,7 @@ Skill 包必须携带无密钥样例 references/provider.env.example。首次初
 
 ### 7.2 配置规则
 
-provider.env 必须包含当前启用的 IMAGE_PROVIDER 和各 Provider 的可选配置项。用户可以预先填写多个 Provider 的配置，但当前工作区同一时刻只能启用一个 IMAGE_PROVIDER。
+provider.env 必须包含当前启用的 IMAGE_PROVIDER、端点、密钥、模型与 Provider 固有能力开关。用户可以预先填写多个 Provider 的配置，但当前工作区同一时刻只能启用一个 IMAGE_PROVIDER。画幅、尺寸、数量、提示词和运行并发不得写入 provider.env。
 
 新任务、新轮次和新 Generation Run 必须读取当前 provider.env。已经启动的 Generation Run 必须使用启动时加载的内存配置，并持久化脱敏快照；修改 provider.env 不得改变正在运行或已经完成的会话。
 
@@ -208,7 +208,21 @@ provider.env 是用户主动选择的本地明文密钥文件。Skill 必须：
 - 禁止智能体读取后在会话中回显密钥。
 - 在导出、复制项目或创建交付包前提示 provider.env 不属于交付内容并必须排除。
 
-### 7.4 Provider 能力处理
+### 7.4 Studio 运行设置
+
+工作区并发上限必须作为 Studio 数据库中的独立、版本化运行设置保存，新 Studio 的默认值和发布上限为 30，允许值是 1 到 30 的任意整数。修改设置不得改写 provider.env，且 daemon 必须在优雅重启后才采用新上限。
+
+会话可在用户确认计划且预检通过后，为单次 Generation Run 动态请求 1 到 30 路并发。请求必须与运行记录一起冻结；实际调度并发不能超过 daemon 当前生效工作区上限。超出工作区上限的请求必须拒绝，不得静默降级。
+
+Workbench 只显示期望设置、daemon 当前生效设置和运行请求，不提供绕过会话的调度编辑。
+
+### 7.5 动态输出规格
+
+图片画幅、尺寸、分辨率和数量是会话创建的轮次计划字段，不得按 Provider 名称使用静态画幅白名单。`aspectRatio` 使用正整数比值，`size` 使用 `宽x高`，`resolution` 支持 `1K`、`2K` 等长边规格；当同时指定画幅与 resolution 时，系统必须以保持精确画幅的尺寸归一化。
+
+预检只拒绝格式错误、几何不一致或适配器无法无歧义传输的输出请求。例如只接受尺寸字段的适配器在非方形画幅下必须获得明确尺寸或 resolution。真实 Provider 对模型规格的最终拒绝必须如实记录为运行项结果，Skill 不得为了重试而改写比例、尺寸或数量。
+
+### 7.6 Provider 能力处理
 
 Provider adapter 必须声明 generate、edit 和 capabilities。Skill 必须按当前启用 Provider 的能力决定可执行操作。
 

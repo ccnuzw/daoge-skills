@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { MAX_WORKER_CONCURRENCY, MIN_WORKER_CONCURRENCY } from '../studio/runtime-settings';
 
 interface RuntimeRecord { pid: number; url: string; workspaceRoot: string; heartbeatAt: string; workerConcurrency?: number | null; }
 
@@ -35,20 +36,16 @@ async function healthy(url: string): Promise<boolean> {
 
 function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
-function strictWorkerConcurrency(value: string): 1 | 2 | 4 {
-  if (value === '1' || value === '2' || value === '4') return Number(value) as 1 | 2 | 4;
-  throw new Error('--worker-concurrency 只能是 1、2 或 4。');
+function strictWorkerConcurrency(value: string): number {
+  const concurrency = Number(value);
+  if (Number.isInteger(concurrency) && concurrency >= MIN_WORKER_CONCURRENCY && concurrency <= MAX_WORKER_CONCURRENCY) return concurrency;
+  throw new Error('--worker-concurrency 只能是 1 到 30 的整数。');
 }
 
-function updateWorkerConcurrency(workspaceRoot: string, value: 1 | 2 | 4): void {
-  const envPath = path.join(workspaceRoot, 'daoge-studio', 'provider.env');
-  if (!fs.existsSync(envPath)) throw new Error('未找到 Provider 配置。请先完成 Studio 初始化和 Provider 配置。');
-  const existing = fs.readFileSync(envPath, 'utf8');
-  const line = 'DAOGE_PIC_WORKER_CONCURRENCY=' + value;
-  const next = /^DAOGE_PIC_WORKER_CONCURRENCY=.*$/m.test(existing) ? existing.replace(/^DAOGE_PIC_WORKER_CONCURRENCY=.*$/m, line) : existing.replace(/\n?$/, '\n') + line + '\n';
-  const temporary = envPath + '.' + process.pid + '.tmp';
-  fs.writeFileSync(temporary, next, { mode: 0o600 });
-  fs.renameSync(temporary, envPath);
+function strictRequestedConcurrency(value: string): number {
+  const concurrency = Number(value);
+  if (Number.isInteger(concurrency) && concurrency >= MIN_WORKER_CONCURRENCY && concurrency <= MAX_WORKER_CONCURRENCY) return concurrency;
+  throw new Error('--concurrency 只能是 1 到 30 的整数。');
 }
 
 async function waitForDaemonRelease(workspaceRoot: string, pid: number): Promise<void> {
@@ -91,7 +88,7 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
 async function api(record: RuntimeRecord, method: 'GET' | 'POST' | 'PUT', pathname: string, body?: JsonObject): Promise<unknown> {
   const response = await fetch(record.url + pathname, {
     method,
-    headers: { accept: 'application/json', ...(method === 'POST' ? { 'content-type': 'application/json', 'idempotency-key': 'skill-' + randomUUID() } : {}) },
+    headers: { accept: 'application/json', ...(method !== 'GET' ? { 'content-type': 'application/json', 'idempotency-key': 'skill-' + randomUUID() } : {}) },
     body: body ? JSON.stringify(body) : undefined
   });
   const payload = await response.json() as { ok?: boolean; data?: unknown; error?: { message?: string } };
@@ -125,7 +122,7 @@ function usage(): string {
     'DAOGE Pic vNext Studio',
     'daoge studio --workspace <path>',
     'daoge open --workspace <path>',
-    'daoge config --workspace <path> --worker-concurrency <1|2|4>  # 修改并发，需重启生效',
+    'daoge config --workspace <path> --worker-concurrency <1..30>  # 修改工作区并发上限，需重启生效',
     'daoge restart --workspace <path>  # 优雅重启本工作区 Studio',
     'daoge session --workspace <path> --conversation <id>',
     'daoge project --workspace <path> --name <name> [--description <text>] [--session <id>]',
@@ -147,7 +144,7 @@ function usage(): string {
     'daoge plan --workspace <path> --round <id> --version <n> --plan <json>',
     'daoge confirm --workspace <path> --round <id> --version <n>',
     'daoge preflight --workspace <path> --round <id>',
-    'daoge run --workspace <path> --round <id> --preflight <dry-run-id>',
+    'daoge run --workspace <path> --round <id> --preflight <dry-run-id> [--concurrency <1..30>]',
     'daoge pause --workspace <path> --run <id>',
     'daoge resume --workspace <path> --run <id> --session <session-id>',
     'daoge cancel --workspace <path> --run <id>',
@@ -169,9 +166,9 @@ async function main(): Promise<void> {
   }
   if (command === 'config') {
     const workerConcurrency = strictWorkerConcurrency(required(args, '--worker-concurrency'));
-    updateWorkerConcurrency(root, workerConcurrency);
-    const active = readRuntime(root);
-    process.stdout.write(JSON.stringify({ workspaceRoot: root, workerConcurrency, restartRequired: Boolean(active && await healthy(active.url)), activeWorkerConcurrency: active?.workerConcurrency || null }, null, 2) + '\n');
+    const record = await ensureDaemon(root);
+    const runtime = await api(record, 'PUT', '/api/runtime-settings', { maxWorkerConcurrency: workerConcurrency }) as { desired: { maxWorkerConcurrency: number }; active: { workerConcurrency: number | null } | null; restartRequired: boolean };
+    process.stdout.write(JSON.stringify({ workspaceRoot: root, workerConcurrency: runtime.desired.maxWorkerConcurrency, restartRequired: runtime.restartRequired, activeWorkerConcurrency: runtime.active?.workerConcurrency || null }, null, 2) + '\n');
     return;
   }
   if (command === 'restart') {
@@ -207,7 +204,7 @@ async function main(): Promise<void> {
   else if (command === 'plan') result = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(required(args, '--round')) + '/prepare', { expectedVersion: Number(required(args, '--version')), plan: jsonFlag(args, '--plan') });
   else if (command === 'confirm') result = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(required(args, '--round')) + '/confirm', { expectedVersion: Number(required(args, '--version')) });
   else if (command === 'preflight') result = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(required(args, '--round')) + '/preflight', {});
-  else if (command === 'run') result = await api(record, 'POST', '/api/runs', { roundId: required(args, '--round'), preflightId: required(args, '--preflight') });
+  else if (command === 'run') result = await api(record, 'POST', '/api/runs', { roundId: required(args, '--round'), preflightId: required(args, '--preflight'), requestedConcurrency: flag(args, '--concurrency') ? strictRequestedConcurrency(required(args, '--concurrency')) : undefined });
   else if (command === 'pause') result = await api(record, 'POST', '/api/runs/' + encodeURIComponent(required(args, '--run')) + '/pause', {});
   else if (command === 'resume') result = await api(record, 'POST', '/api/runs/' + encodeURIComponent(required(args, '--run')) + '/resume', { sessionId: required(args, '--session') });
   else if (command === 'cancel') result = await api(record, 'POST', '/api/runs/' + encodeURIComponent(required(args, '--run')) + '/cancel', {});

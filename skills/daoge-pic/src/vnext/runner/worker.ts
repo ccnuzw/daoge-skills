@@ -1,4 +1,5 @@
 import { ImageProvider, ImageRequest, ImageResult, ProviderError } from '../providers/contracts';
+import { safeErrorSummary } from '../shared/safe-error';
 import { ManagedAssetResolver } from '../media/asset-resolver';
 import { InvalidCommandError } from '../domain/studio-commands';
 import { StudioDatabase } from '../studio/database';
@@ -127,14 +128,14 @@ export class GenerationWorker {
       const classified = this.provider.classifyError(error) as ProviderError;
       const decision = retryDecision(classified, item.attempts, this.clock(), this.policy);
       if (decision.retry) {
-        transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'retry_wait', retryAt: decision.retryAt, error: { kind: classified.kind, code: classified.code } });
+        transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'retry_wait', retryAt: decision.retryAt, error: { kind: classified.kind, code: classified.code, ...(safeErrorSummary(classified.message) ? { summary: safeErrorSummary(classified.message) } : {}) } });
         return 'retrying';
       }
       if (classified.kind === 'unknown_outcome') {
-        transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'outcome_unknown', error: { kind: classified.kind, code: classified.code } });
+        transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'outcome_unknown', error: { kind: classified.kind, code: classified.code, ...(safeErrorSummary(classified.message) ? { summary: safeErrorSummary(classified.message) } : {}) } });
         return 'unknown';
       }
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { kind: classified.kind, code: classified.code } });
+      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { kind: classified.kind, code: classified.code, ...(safeErrorSummary(classified.message) ? { summary: safeErrorSummary(classified.message) } : {}) } });
       return 'blocked';
     }
     try {

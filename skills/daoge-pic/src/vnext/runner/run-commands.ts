@@ -5,7 +5,9 @@ import { ImageOperation } from '../providers/contracts';
 import { PreflightPlan, PreflightResult, preflightGenerationPlan } from './preflight';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig, SafeProviderStatus } from '../studio/provider-config';
+import { requireRequestedConcurrency, StudioRuntimeSettings } from '../studio/runtime-settings';
 import { getStudioAsset } from '../domain/assets';
+import { SafeErrorDetail, safeErrorDetail } from '../shared/safe-error';
 
 export interface GenerationRun {
   id: string;
@@ -13,6 +15,7 @@ export interface GenerationRun {
   status: RunStatus;
   providerSnapshot: Record<string, unknown>;
   planSnapshot: PreflightPlan;
+  requestedConcurrency: number | null;
   version: number;
 }
 
@@ -26,6 +29,7 @@ export interface GenerationRunItem {
   leaseExpiresAt: string | null;
   attempts: number;
   retryAt: string | null;
+  error: SafeErrorDetail | null;
 }
 
 export interface ClaimedRunItem extends GenerationRunItem {
@@ -39,6 +43,7 @@ interface StoredRun {
   status: RunStatus;
   provider_snapshot_json: string;
   plan_snapshot_json: string;
+  requested_concurrency: number | null;
   version: number;
 }
 
@@ -53,6 +58,7 @@ interface StoredRunItem {
   lease_expires_at: string | null;
   attempts: number;
   retry_at: string | null;
+  error_json?: string | null;
 }
 
 interface StoredRoundPlan {
@@ -111,8 +117,14 @@ function runFromRow(row: StoredRun): GenerationRun {
     status: row.status,
     providerSnapshot: parseObject(row.provider_snapshot_json),
     planSnapshot: parsePlan(row.plan_snapshot_json),
+    requestedConcurrency: row.requested_concurrency === null || row.requested_concurrency === undefined ? null : Number(row.requested_concurrency),
     version: row.version
   };
+}
+
+function safeRunItemError(value: string | null | undefined): SafeErrorDetail | null {
+  if (!value) return null;
+  try { return safeErrorDetail(parseObject(value)); } catch { return null; }
 }
 
 function runItemFromRow(row: StoredRunItem): GenerationRunItem {
@@ -125,7 +137,8 @@ function runItemFromRow(row: StoredRunItem): GenerationRunItem {
     leaseToken: row.lease_token,
     leaseExpiresAt: row.lease_expires_at,
     attempts: row.attempts,
-    retryAt: row.retry_at
+    retryAt: row.retry_at,
+    error: safeRunItemError(row.error_json)
   };
 }
 
@@ -133,6 +146,13 @@ function requireValue(value: string, label: string): string {
   const normalized = String(value || '').trim();
   if (!normalized) throw new InvalidCommandError(label + ' is required.');
   return normalized;
+}
+
+function requestedConcurrency(value: unknown, runtimeSettings: StudioRuntimeSettings): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const requested = requireRequestedConcurrency(value);
+  if (requested > runtimeSettings.maxWorkerConcurrency) throw new InvalidCommandError('本次运行并发超过当前工作区并发上限。');
+  return requested;
 }
 
 function resolveRound(db: StudioDatabase, roundId: string): StoredRoundPlan {
@@ -203,7 +223,7 @@ export function listDryRunPreviews(db: StudioDatabase, roundId: string): DryRunP
   return (db.prepare('SELECT id, round_id, plan_version, provider_snapshot_json, plan_snapshot_json, item_count, created_at FROM dry_run_previews WHERE round_id = ? ORDER BY created_at DESC').all(requireValue(roundId, 'roundId')) as Array<{ id: string; round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string; item_count: number; created_at: string }>).map(dryRunFromRow);
 }
 
-export function queueGenerationRun(db: StudioDatabase, input: { roundId: string; providerConfig: ResolvedProviderConfig; providerStatus: SafeProviderStatus; preflightId?: string; idempotencyKey: string }): CommandReceipt<GenerationRun> {
+export function queueGenerationRun(db: StudioDatabase, input: { roundId: string; providerConfig: ResolvedProviderConfig; providerStatus: SafeProviderStatus; runtimeSettings: StudioRuntimeSettings; requestedConcurrency?: unknown; preflightId?: string; idempotencyKey: string }): CommandReceipt<GenerationRun> {
   return executeIdempotent(db, input.idempotencyKey, 'runs.queue', () => {
     const round = resolveRound(db, requireValue(input.roundId, 'roundId'));
     if (round.status !== 'active') throw new InvalidCommandError('The creative round must be confirmed before a run can be queued.');
@@ -211,6 +231,7 @@ export function queueGenerationRun(db: StudioDatabase, input: { roundId: string;
     if (!preflight.valid) throw new InvalidCommandError('Generation preflight failed: ' + preflight.issues.map((issue) => issue.code).join(', '));
     if (input.providerConfig.providerId !== input.providerStatus.providerId) throw new InvalidCommandError('Provider configuration changed during preflight. Run preflight again.');
     const snapshot = providerSnapshot(input.providerConfig);
+    const runConcurrency = requestedConcurrency(input.requestedConcurrency, input.runtimeSettings);
     if (!input.preflightId) throw new InvalidCommandError('Dry-run evidence is required before queueing.');
     {
       const preview = db.prepare('SELECT round_id, plan_version, provider_snapshot_json, plan_snapshot_json FROM dry_run_previews WHERE id = ?').get(input.preflightId) as { round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string } | undefined;
@@ -218,12 +239,13 @@ export function queueGenerationRun(db: StudioDatabase, input: { roundId: string;
     }
     const id = createId('run');
     const timestamp = nowIso();
-    db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)').run(
+    db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, requested_concurrency, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)').run(
       id,
       round.id,
       'queued',
       JSON.stringify(snapshot),
       JSON.stringify(preflight.normalizedPlan),
+      runConcurrency,
       timestamp,
       timestamp
     );
@@ -234,18 +256,18 @@ export function queueGenerationRun(db: StudioDatabase, input: { roundId: string;
       const promptPayload = { ...preflight.normalizedPlan, sequence };
       insertItem.run(itemId, id, sequence, 'pending', JSON.stringify(promptPayload), requestId, timestamp, timestamp);
     }
-    appendStudioEvent(db, { studioId: round.studio_id, entityType: 'generation_run', entityId: id, eventType: 'run.queued', payload: { roundId: round.id, itemCount: preflight.normalizedPlan.itemCount } });
-    return { id, roundId: round.id, status: 'queued', providerSnapshot: snapshot, planSnapshot: preflight.normalizedPlan, version: 1 };
-  }, { roundId: input.roundId, preflightId: input.preflightId || null, provider: providerSnapshot(input.providerConfig) });
+    appendStudioEvent(db, { studioId: round.studio_id, entityType: 'generation_run', entityId: id, eventType: 'run.queued', payload: { roundId: round.id, itemCount: preflight.normalizedPlan.itemCount, requestedConcurrency: runConcurrency } });
+    return { id, roundId: round.id, status: 'queued', providerSnapshot: snapshot, planSnapshot: preflight.normalizedPlan, requestedConcurrency: runConcurrency, version: 1 };
+  }, { roundId: input.roundId, preflightId: input.preflightId || null, requestedConcurrency: input.requestedConcurrency ?? null, provider: providerSnapshot(input.providerConfig) });
 }
 
 export function getGenerationRun(db: StudioDatabase, runId: string): GenerationRun | null {
-  const row = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, version FROM generation_runs WHERE id = ?').get(runId) as StoredRun | undefined;
+  const row = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, requested_concurrency, version FROM generation_runs WHERE id = ?').get(runId) as StoredRun | undefined;
   return row ? runFromRow(row) : null;
 }
 
 export function listGenerationRunItems(db: StudioDatabase, runId: string): GenerationRunItem[] {
-  return (db.prepare('SELECT id, run_id, sequence, status, prompt_payload_json, request_id, lease_token, lease_expires_at, attempts, retry_at FROM run_items WHERE run_id = ? ORDER BY sequence').all(runId) as unknown as StoredRunItem[]).map(runItemFromRow);
+  return (db.prepare('SELECT id, run_id, sequence, status, prompt_payload_json, request_id, lease_token, lease_expires_at, attempts, retry_at, error_json FROM run_items WHERE run_id = ? ORDER BY sequence').all(runId) as unknown as StoredRunItem[]).map(runItemFromRow);
 }
 
 const ACTIVE_RUN_ITEM_STATUSES: readonly RunItemStatus[] = ['pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested'];
@@ -275,6 +297,11 @@ export function reconcileTerminalRuns(db: StudioDatabase, now = new Date()): num
   return reconciled;
 }
 
+function runConcurrencyLimit(requested: number | null, globalLimit: number): number {
+  const requestedLimit = requested === null || requested === undefined ? globalLimit : Number(requested);
+  return Number.isInteger(requestedLimit) && requestedLimit >= 1 && requestedLimit <= 4 ? Math.min(globalLimit, requestedLimit) : globalLimit;
+}
+
 export function claimRunItems(db: StudioDatabase, input: { workerId: string; limit: number; leaseMs: number; now?: Date; providerSnapshot?: { providerId: string; model: string; endpoint: string | null } }): ClaimedRunItem[] {
   const workerId = requireValue(input.workerId, 'workerId');
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) throw new InvalidCommandError('Claim limit must be an integer between 1 and 100.');
@@ -284,23 +311,49 @@ export function claimRunItems(db: StudioDatabase, input: { workerId: string; lim
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
   return withTransaction(db, () => {
     const providerFilter = input.providerSnapshot ? " AND json_extract(r.provider_snapshot_json, '$.providerId') = ? AND json_extract(r.provider_snapshot_json, '$.model') = ? AND COALESCE(json_extract(r.provider_snapshot_json, '$.endpoint'), '') = ?" : '';
-    const sql = "SELECT i.id, i.run_id, i.sequence, i.status, i.prompt_payload_json, i.request_id, i.lease_token, i.lease_expires_at, i.attempts, i.retry_at, r.status AS run_status, r.round_id, p.studio_id FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'pending' AND r.status IN ('queued', 'running') AND (i.retry_at IS NULL OR i.retry_at <= ?)" + providerFilter + " ORDER BY r.created_at, i.sequence LIMIT ?";
+    const sql = "SELECT i.id, i.run_id, i.sequence, i.status, i.prompt_payload_json, i.request_id, i.lease_token, i.lease_expires_at, i.attempts, i.retry_at, r.status AS run_status, r.requested_concurrency, r.round_id, p.studio_id FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'pending' AND r.status IN ('queued', 'running') AND (i.retry_at IS NULL OR i.retry_at <= ?)" + providerFilter + " ORDER BY r.created_at, i.sequence LIMIT ?";
     const params: Array<string | number> = [nowValue];
     if (input.providerSnapshot) params.push(input.providerSnapshot.providerId, input.providerSnapshot.model, input.providerSnapshot.endpoint || '');
-    params.push(input.limit);
-    const rows = db.prepare(sql).all(...params) as unknown as Array<StoredRunItem & { run_status: RunStatus; round_id: string; studio_id: string }>;
+    params.push(Math.min(10000, Math.max(input.limit, input.limit * 100)));
+    type CandidateRow = StoredRunItem & { run_status: RunStatus; requested_concurrency: number | null; round_id: string; studio_id: string };
+    const rows = db.prepare(sql).all(...params) as unknown as CandidateRow[];
+    if (!rows.length) return [];
+    const runIds = [...new Set(rows.map((row) => row.run_id))];
+    const placeholders = runIds.map(() => '?').join(', ');
+    const inFlightRows = db.prepare("SELECT run_id, COUNT(*) AS total FROM run_items WHERE run_id IN (" + placeholders + ") AND status IN ('leased', 'requesting', 'receiving', 'persisting', 'cancel_requested') GROUP BY run_id").all(...runIds) as Array<{ run_id: string; total: number }>;
+    const inFlightByRun = new Map(inFlightRows.map((row) => [row.run_id, Number(row.total)]));
+    const availableGlobalSlots = Math.max(0, input.limit - inFlightRows.reduce((total, row) => total + Number(row.total), 0));
+    if (!availableGlobalSlots) return [];
+    const rowsByRun = new Map<string, CandidateRow[]>();
+    for (const row of rows) rowsByRun.set(row.run_id, [...(rowsByRun.get(row.run_id) || []), row]);
+    const queueIndex = new Map<string, number>();
+    const activatedRuns = new Set<string>();
     const claimed: ClaimedRunItem[] = [];
-    for (const row of rows) {
-      if (row.run_status === 'queued') {
-        assertRunTransition('queued', 'running');
-        db.prepare('UPDATE generation_runs SET status = ?, worker_id = ?, started_at = COALESCE(started_at, ?), version = version + 1, updated_at = ? WHERE id = ? AND status = ?').run('running', workerId, nowValue, nowValue, row.run_id, 'queued');
-        appendStudioEvent(db, { studioId: row.studio_id, entityType: 'generation_run', entityId: row.run_id, eventType: 'run.started', payload: { workerId } });
+    let claimedInPass = true;
+    while (claimed.length < availableGlobalSlots && claimedInPass) {
+      claimedInPass = false;
+      for (const [runId, queue] of rowsByRun) {
+        if (claimed.length >= availableGlobalSlots) break;
+        const index = queueIndex.get(runId) || 0;
+        const row = queue[index];
+        if (!row) continue;
+        queueIndex.set(runId, index + 1);
+        const inFlight = inFlightByRun.get(runId) || 0;
+        if (inFlight >= runConcurrencyLimit(row.requested_concurrency, input.limit)) continue;
+        if (row.run_status === 'queued' && !activatedRuns.has(runId)) {
+          assertRunTransition('queued', 'running');
+          const started = db.prepare('UPDATE generation_runs SET status = ?, worker_id = ?, started_at = COALESCE(started_at, ?), version = version + 1, updated_at = ? WHERE id = ? AND status = ?').run('running', workerId, nowValue, nowValue, row.run_id, 'queued');
+          if (Number(started.changes) === 1) appendStudioEvent(db, { studioId: row.studio_id, entityType: 'generation_run', entityId: row.run_id, eventType: 'run.started', payload: { workerId } });
+          activatedRuns.add(runId);
+        }
+        const leaseToken = createId('lease');
+        const updated = db.prepare('UPDATE run_items SET status = ?, lease_token = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND status = ?').run('leased', leaseToken, expiresAt, nowValue, row.id, 'pending');
+        if (Number(updated.changes) !== 1) continue;
+        inFlightByRun.set(runId, inFlight + 1);
+        claimedInPass = true;
+        appendStudioEvent(db, { studioId: row.studio_id, entityType: 'run_item', entityId: row.id, eventType: 'run_item.leased', payload: { runId: row.run_id, workerId } });
+        claimed.push({ ...runItemFromRow({ ...row, status: 'leased', lease_token: leaseToken, lease_expires_at: expiresAt, attempts: row.attempts + 1 }), promptPayload: parseObject(row.prompt_payload_json), studioId: row.studio_id });
       }
-      const leaseToken = createId('lease');
-      const updated = db.prepare('UPDATE run_items SET status = ?, lease_token = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND status = ?').run('leased', leaseToken, expiresAt, nowValue, row.id, 'pending');
-      if (Number(updated.changes) !== 1) continue;
-      appendStudioEvent(db, { studioId: row.studio_id, entityType: 'run_item', entityId: row.id, eventType: 'run_item.leased', payload: { runId: row.run_id, workerId } });
-      claimed.push({ ...runItemFromRow({ ...row, status: 'leased', lease_token: leaseToken, lease_expires_at: expiresAt, attempts: row.attempts + 1 }), promptPayload: parseObject(row.prompt_payload_json), studioId: row.studio_id });
     }
     return claimed;
   });
@@ -351,7 +404,7 @@ export function transitionRunItem(db: StudioDatabase, input: { itemId: string; l
 
 export function pauseGenerationRun(db: StudioDatabase, input: { runId: string; idempotencyKey: string }): CommandReceipt<GenerationRun> {
   return executeIdempotent(db, input.idempotencyKey, 'runs.pause', () => {
-    const run = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, version FROM generation_runs WHERE id = ?').get(requireValue(input.runId, 'runId')) as StoredRun | undefined;
+    const run = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, requested_concurrency, version FROM generation_runs WHERE id = ?').get(requireValue(input.runId, 'runId')) as StoredRun | undefined;
     if (!run) throw new StudioNotFoundError('Generation run not found: ' + input.runId);
     assertRunTransition(run.status, 'pausing');
     const inFlight = countInFlightItems(db, run.id);
@@ -415,7 +468,7 @@ export function retryGenerationRunItems(db: StudioDatabase, input: { runId: stri
 
 export function resumeGenerationRun(db: StudioDatabase, input: { runId: string; sessionId?: string; idempotencyKey: string }): CommandReceipt<GenerationRun> {
   return executeIdempotent(db, input.idempotencyKey, 'runs.resume', () => {
-    const run = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, version FROM generation_runs WHERE id = ?').get(requireValue(input.runId, 'runId')) as StoredRun | undefined;
+    const run = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, requested_concurrency, version FROM generation_runs WHERE id = ?').get(requireValue(input.runId, 'runId')) as StoredRun | undefined;
     if (!run) throw new StudioNotFoundError('Generation run not found: ' + input.runId);
     const unknown = db.prepare("SELECT COUNT(*) AS total FROM run_items WHERE run_id = ? AND status = 'outcome_unknown'").get(run.id) as { total: number };
     if (unknown.total > 0) throw new InvalidCommandError('This run has provider requests with unknown outcomes and cannot resume automatically.');
@@ -435,7 +488,7 @@ export function resumeGenerationRun(db: StudioDatabase, input: { runId: string; 
 
 export function cancelGenerationRun(db: StudioDatabase, input: { runId: string; idempotencyKey: string }): CommandReceipt<GenerationRun> {
   return executeIdempotent(db, input.idempotencyKey, 'runs.cancel', () => {
-    const run = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, version FROM generation_runs WHERE id = ?').get(requireValue(input.runId, 'runId')) as StoredRun | undefined;
+    const run = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, requested_concurrency, version FROM generation_runs WHERE id = ?').get(requireValue(input.runId, 'runId')) as StoredRun | undefined;
     if (!run) throw new StudioNotFoundError('Generation run not found: ' + input.runId);
     assertRunTransition(run.status, 'cancelled');
     const timestamp = nowIso();

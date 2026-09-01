@@ -46,11 +46,17 @@ for (const providerId of ['openai-images', 'gemini-image', 'gemini-openai-compat
       assert.equal(provider.validateConfig(config).valid, true);
       assert.equal(provider.capabilities(config).textToImage, true);
       assert.equal(provider.capabilities(config).referenceEdit, providerId === 'openai-images');
+      assert.equal(result.safeMeta.requestPath, providerId === 'gemini-image' ? '/v1beta/models/fixture-model:generateContent' : '/v1/images/generations');
     });
     assert.equal(received.length, 1);
     assert.equal(received[0].body.prompt || received[0].body.contents?.[0]?.parts?.[0]?.text, 'fixture prompt');
-    if (providerId === 'gemini-image') assert.equal(received[0].apiKey, 'fixture-key');
-    else assert.equal(received[0].authorization, 'Bearer fixture-key');
+    if (providerId === 'gemini-image') {
+      assert.equal(received[0].apiKey, 'fixture-key');
+      assert.equal(received[0].url, '/v1beta/models/fixture-model:generateContent');
+    } else {
+      assert.equal(received[0].authorization, 'Bearer fixture-key');
+      assert.equal(received[0].url, '/v1/images/generations');
+    }
   });
 }
 
@@ -101,6 +107,25 @@ test('vNext adapters forward requested aspect ratios instead of defaulting to sq
     else if (providerId === 'xai-grok-image') assert.equal(received.aspect_ratio, '16:9');
     else assert.equal(received.size, '16:9');
   }
+});
+
+test('vNext adapter rejects generation endpoint redirects before following them', async () => {
+  let redirectedRequestCount = 0;
+  await withServer((request, response) => {
+    if (request.url === '/v1/images/generations') {
+      response.writeHead(307, { location: '/unexpected-proxy' });
+      response.end();
+      return;
+    }
+    redirectedRequestCount += 1;
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(responseFor('openai-images')));
+  }, async (baseUrl) => {
+    const config = { providerId: 'openai-images', baseUrl, apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false };
+    const provider = createImageProvider(config);
+    await assert.rejects(() => provider.generate({ requestId: 'redirect-request', idempotencyKey: 'redirect-key', prompt: 'fixture prompt', output: { size: '1024x1024' }, referenceAssets: [] }, { abortSignal: new AbortController().signal }), /http 307/);
+  });
+  assert.equal(redirectedRequestCount, 0);
 });
 
 test('vNext Provider adapter classifies rate limits, invalid input, and ambiguous transport errors', () => {

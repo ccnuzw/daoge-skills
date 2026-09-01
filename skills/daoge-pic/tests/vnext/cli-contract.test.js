@@ -12,4 +12,6 @@ test('CLI help documents every supported vNext control command', () => {
     assert.equal(result.stdout.includes('daoge ' + command + ' '), true);
   }
   assert.equal((result.stdout.match(/daoge preflight/g) || []).length, 1);
+  assert.match(result.stdout, /daoge config .*--worker-concurrency <1..30>/);
+  assert.match(result.stdout, /daoge run .*--concurrency <1..30>/);
 });

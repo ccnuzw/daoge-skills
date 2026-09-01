@@ -28,7 +28,7 @@ node scripts/daoge.js open --workspace /absolute/workspace
 
 ## Provider 配置
 
-只使用工作区内的 daoge-studio/provider.env。模板文件是 references/provider.env.example。支持：
+只使用工作区内的 daoge-studio/provider.env。模板文件是 references/provider.env.example。该文件仅保存当前 Provider、端点、密钥、模型与 Provider 固有能力开关，不保存画幅、尺寸、数量或运行并发。支持：
 
 - openai-images
 - gemini-image
@@ -37,14 +37,20 @@ node scripts/daoge.js open --workspace /absolute/workspace
 
 密钥不进入 SQLite、事件、导出物、运行记录或 Workbench。安装路径、用户主目录和任意当前目录不是默认状态位置。
 
-Worker 并发默认是 `2`，只接受 `1`、`2`、`4`：
+工作区并发上限默认是 `30`，接受 `1` 到 `30` 的任意整数，由 Studio 数据库存储而不是 `provider.env`：
 
 ```bash
-node scripts/daoge.js config --workspace /absolute/workspace --worker-concurrency 4
+node scripts/daoge.js config --workspace /absolute/workspace --worker-concurrency 30
 node scripts/daoge.js restart --workspace /absolute/workspace
 ```
 
-配置命令不会启动或重启 daemon；重启会优雅停止同工作区进程、保留恢复语义并复用原端口。`status` 的 runtime 记录会显示实际生效的并发值。
+会话可在创建运行时动态请求 `1` 到 `30` 路并发，例如：
+
+```bash
+node scripts/daoge.js run --workspace /absolute/workspace --round <round-id> --preflight <dry-run-id> --concurrency 12
+```
+
+运行实际并发永远不会超过已重启生效的工作区上限。配置命令会启动 Studio 以保存设置，但不会自动重启 daemon；`status` 的 runtime 记录会显示当前生效值。
 
 ## 会话流程
 
@@ -52,7 +58,7 @@ node scripts/daoge.js restart --workspace /absolute/workspace
 2. 它从用户需求建立项目、创作任务和创作轮次。
 3. 它提交可确认的版本化计划与提示词证据。
 4. 用户确认后进行无外部调用的预检，并保存干跑运行项预览。
-5. 预检证据与当前安全 Provider 快照一致时，才创建持久运行；显式画幅会按当前 Provider 能力验证，不支持或不一致时拒绝而不回退为方图；daemon 从 SQLite 队列领取运行项。
+5. 预检证据与当前安全 Provider 快照一致时，才创建持久运行；会话可在此时请求本次并发，且该请求会与运行一同冻结。画幅、尺寸、分辨率和数量全部由会话动态指定；`1K`、`2K` 等分辨率会按画幅归一化为明确尺寸。预检只验证规格格式、几何一致性和适配器传输要求，不按 Provider 名称使用固定比例白名单，也绝不回退为方图；daemon 从 SQLite 队列领取运行项。
 6. Workbench 通过 SSE 显示状态和受管理资产，供拖放/粘贴导入、检查、对比、筛选、批注、衍生、回收、恢复和交付。
 
 命令接口见 SKILL.md。Skill 或客户端不得直接写数据库和状态文件。
@@ -64,7 +70,7 @@ node scripts/daoge.js restart --workspace /absolute/workspace
 - 重启时，外部调用中的运行转入 resume_pending，必须在会话中再次确认并记录 Studio Session；Workbench 不能绕过该确认。
 - failed、blocked 和 retry_wait 运行项可以受控地重试单项或整轮；outcome_unknown 永远不能被重试。
 - 项目归档会拒绝存在未完成生成的项目，并在同一事务中归档项目、任务和轮次。
-- daemon 在启动时固定 Provider 配置和 Worker 并发；修改 provider.env 或通过受控 config 命令更新并发，都必须使用 restart 才能影响后续调度。
+- daemon 在启动时固定 Provider 配置和工作区并发上限；修改 provider.env 或通过受控 config 命令更新工作区上限，都必须使用 restart 才能影响后续调度。单次运行的并发请求会被冻结，并始终受该上限约束。
 - 运行快照不记录 Key 或完整 Provider URL；Worker 只处理匹配当前内存配置的会话。
 
 ## 验证

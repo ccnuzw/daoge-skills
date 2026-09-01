@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { loadProviderConfig, providerStatus } = require('../../dist/vnext/studio/provider-config');
+const { getStudioRuntimeSettings } = require('../../dist/vnext/studio/runtime-settings');
 const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
 const { preflightGenerationPlan } = require('../../dist/vnext/runner/preflight');
 const { createDryRunPreview, listDryRunPreviews, preflightRound, queueGenerationRun, retryGenerationRunItems, getGenerationRun, listGenerationRunItems, claimRunItems, transitionRunItem, markRunsResumePending, resolveUnknownRunItems, resumeGenerationRun, reconcileTerminalRuns, recoverExpiredLeases } = require('../../dist/vnext/runner/run-commands');
@@ -34,7 +35,7 @@ function configuredStudio() {
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: '运行引擎测试', idempotencyKey: 'project' });
   const task = createTaskDraft(db, { projectId: project.value.id, name: '主视觉', idempotencyKey: 'task' });
-  return { workspaceRoot, initialized, db, task };
+  return { workspaceRoot, initialized, db, task, runtimeSettings: getStudioRuntimeSettings(db, initialized.manifest.studioId) };
 }
 
 function confirmedRound(fixture, plan, prefix = 'round') {
@@ -61,8 +62,11 @@ test('preflight validates requested aspect ratios before a Provider call', () =>
   const malformed = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'bad format', output: { aspectRatio: 'wide' } }, compatible);
   assert.deepEqual(malformed.issues.map((issue) => issue.code), ['invalid_aspect_ratio']);
   const openAi = { ...compatible, providerId: 'openai-images' };
-  const unsupported = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'exact wide scene', output: { aspectRatio: '16:9' } }, openAi);
-  assert.deepEqual(unsupported.issues.map((issue) => issue.code), ['aspect_ratio_unsupported']);
+  const explicitSize = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'exact wide scene', output: { aspectRatio: '16:9', resolution: '1K' } }, openAi);
+  assert.equal(explicitSize.valid, true);
+  assert.equal(explicitSize.normalizedPlan.output.size, '1024x576');
+  const missingSize = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'wide scene without dimensions', output: { aspectRatio: '16:9' } }, openAi);
+  assert.deepEqual(missingSize.issues.map((issue) => issue.code), ['aspect_requires_explicit_size']);
 });
 
 test('persists a no-call dry-run preview and rejects stale Provider snapshots before queueing', () => {
@@ -82,6 +86,48 @@ test('persists a no-call dry-run preview and rejects stale Provider snapshots be
     const queued = queueGenerationRun(fixture.db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'fresh-preview' });
     assert.equal(queued.value.status, 'queued');
   } finally { cleanup(fixture.workspaceRoot); }
+});
+
+test('freezes bounded per-run concurrency and shares worker capacity fairly', () => {
+  const fixture = configuredStudio();
+  try {
+    const config = loadProviderConfig(fixture.initialized.paths);
+    const status = providerStatus(fixture.initialized.paths);
+    const first = confirmedRound(fixture, { operation: 'generate', itemCount: 3, prompt: 'first queue' }, 'first');
+    const second = confirmedRound(fixture, { operation: 'generate', itemCount: 3, prompt: 'second queue' }, 'second');
+    const firstDryRun = createDryRunPreview(fixture.db, { roundId: first.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'first-dry-run' });
+    const secondDryRun = createDryRunPreview(fixture.db, { roundId: second.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'second-dry-run' });
+    assert.throws(() => queueGenerationRun(fixture.db, { roundId: first.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 31, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'over-ceiling' }), InvalidCommandError);
+    const firstRun = queueGenerationRun(fixture.db, { roundId: first.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 1, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'first-run' });
+    const secondRun = queueGenerationRun(fixture.db, { roundId: second.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 1, preflightId: secondDryRun.value.preview.id, idempotencyKey: 'second-run' });
+    assert.equal(firstRun.value.requestedConcurrency, 1);
+    assert.equal(secondRun.value.requestedConcurrency, 1);
+    const claimed = claimRunItems(fixture.db, { workerId: 'fair-worker', limit: 2, leaseMs: 30000, now: new Date('2026-01-01T00:00:00.000Z') });
+    assert.equal(claimed.length, 2);
+    assert.deepEqual(new Set(claimed.map((item) => item.runId)), new Set([firstRun.value.id, secondRun.value.id]));
+  } finally {
+    closeStudioDatabase(fixture.db);
+    cleanup(fixture.workspaceRoot);
+  }
+});
+
+test('projects sanitized run item error codes without Provider messages', () => {
+  const fixture = configuredStudio();
+  try {
+    const config = loadProviderConfig(fixture.initialized.paths);
+    const status = providerStatus(fixture.initialized.paths);
+    const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 1, prompt: 'safe error projection' }, 'safe-error');
+    const dryRun = createDryRunPreview(fixture.db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'safe-error-dry-run' });
+    const queued = queueGenerationRun(fixture.db, { roundId: confirmed.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, preflightId: dryRun.value.preview.id, idempotencyKey: 'safe-error-run' });
+    const [claimed] = claimRunItems(fixture.db, { workerId: 'safe-error-worker', limit: 1, leaseMs: 30000, now: new Date('2026-01-01T00:00:00.000Z') });
+    transitionRunItem(fixture.db, { itemId: claimed.id, leaseToken: claimed.leaseToken, status: 'requesting', now: new Date('2026-01-01T00:00:01.000Z') });
+    transitionRunItem(fixture.db, { itemId: claimed.id, leaseToken: claimed.leaseToken, status: 'blocked', error: { kind: 'invalid_input', code: 'http_400', summary: 'Invalid size 1152x2048. Bearer sk_test_abcdefgh is rejected.' }, now: new Date('2026-01-01T00:00:02.000Z') });
+    const [item] = listGenerationRunItems(fixture.db, queued.value.id);
+    assert.deepEqual(item.error, { kind: 'invalid_input', code: 'http_400', summary: 'Invalid size 1152x2048. [redacted-secret] is rejected.' });
+  } finally {
+    closeStudioDatabase(fixture.db);
+    cleanup(fixture.workspaceRoot);
+  }
 });
 
 test('queues a confirmed plan with a safe provider snapshot and leases durable run items', () => {

@@ -43,7 +43,7 @@ Studio 在工作区内维护：
   daoge-deliveries/
 ```
 
-首次启动会从 references/provider.env.example 创建 daoge-studio/provider.env，已有文件绝不覆盖。用户只在此文件配置一个活动 Provider。密钥仅在 daemon/Worker 内存中出现，绝不能写入数据库、事件、导出物、聊天内容或 Workbench 页面。
+首次启动会从 references/provider.env.example 创建 daoge-studio/provider.env，已有文件绝不覆盖。用户只在此文件配置一个活动 Provider、端点、模型、密钥和 Provider 固有能力开关；画幅、尺寸、数量与运行并发不属于此文件。密钥仅在 daemon/Worker 内存中出现，绝不能写入数据库、事件、导出物、聊天内容或 Workbench 页面。
 
 支持的 IMAGE_PROVIDER：openai-images、gemini-image、gemini-openai-compatible、xai-grok-image。
 
@@ -63,7 +63,7 @@ node scripts/daoge.js open --workspace <path>
 node scripts/daoge.js session --workspace <path> --conversation <conversation-id>
 node scripts/daoge.js project --workspace <path> --session <session-id> --name "项目名称"
 node scripts/daoge.js archive-project --workspace <path> --project <project-id>
-node scripts/daoge.js config --workspace <path> --worker-concurrency <1|2|4>
+node scripts/daoge.js config --workspace <path> --worker-concurrency <1..30>
 node scripts/daoge.js restart --workspace <path>
 node scripts/daoge.js task --workspace <path> --project <project-id> --session <session-id> --name "创作任务" --intent '{"goal":"..."}'
 node scripts/daoge.js task-type --workspace <path> --name "自定义任务类型" --definition '{"summary":"..."}'
@@ -77,7 +77,7 @@ node scripts/daoge.js session-context --workspace <path> --session <session-id> 
 node scripts/daoge.js plan --workspace <path> --round <round-id> --version <n> --plan '{"operation":"generate","itemCount":4,"prompt":"..."}'
 node scripts/daoge.js confirm --workspace <path> --round <round-id> --version <n>
 node scripts/daoge.js preflight --workspace <path> --round <round-id>
-node scripts/daoge.js run --workspace <path> --round <round-id> --preflight <dry-run-id>
+node scripts/daoge.js run --workspace <path> --round <round-id> --preflight <dry-run-id> [--concurrency <1..30>]
 node scripts/daoge.js pause --workspace <path> --run <run-id>
 node scripts/daoge.js resume --workspace <path> --run <run-id> --session <session-id>
 node scripts/daoge.js cancel --workspace <path> --run <run-id>
@@ -95,10 +95,10 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 - daemon 重启时，未完成运行进入 resume_pending；再次外部调用前必须在会话中得到用户确认，并以 resume --session <session-id> 记录该确认。Workbench 只能显示等待状态，不能绕过会话继续运行。
 - retry 只允许对 failed、blocked 或 retry_wait 运行项重试；可指定 --items 做单项重试。outcome_unknown 只能先用 resolve-unknown 明确结案，绝不会作为重试输入。
 - archive-project 会在未完成生成全部暂停、完成、失败或取消后，以事务方式归档项目、任务和轮次；不能通过文件夹变更表达归档状态。
-- daemon 在启动时固定 Provider 配置、模型、端点身份和 Worker 并发；使用 `config --worker-concurrency <1|2|4>` 只会安全更新期望值，必须再用 `restart` 优雅重启才能生效。
+- daemon 在启动时固定 Provider 配置、模型、端点身份和工作区并发上限；新 Studio 默认上限为 `30`，使用 `config --worker-concurrency <1..30>` 可安全更新为任意整数，必须再用 `restart` 优雅重启才能生效。会话在每次运行确认时可用 `run --concurrency <1..30>` 动态请求本次并发；请求会冻结在运行记录中且不得超过当前工作区上限。
 - `restart` 只终止同工作区 daemon、等待其释放运行记录并复用既有启动流程；它不强制杀进程、不删除锁文件，也不绕过 `resume_pending` 的会话确认。
-- Provider 配置快照包含模型、端点身份和能力，不包含 API Key、完整 URL 或 Worker 调度参数。Worker 只领取与当前内存配置匹配的运行。
-- 预检会产生可审计的干跑预览和运行项计划，不调用 Provider、不创建正式生成资产。入队使用 --preflight 绑定该证据；计划或安全 Provider 快照变化后必须重新预检。显式画幅会按 Provider 规格验证；不支持或不一致的尺寸会在预检拒绝，绝不静默回退为方图。
+- Provider 配置快照包含模型、端点身份和能力，不包含 API Key、完整 URL 或 Worker 调度参数。工作区设置与 daemon 当前内存配置不一致时，系统拒绝入队直到重启完成；Worker 只领取与当前内存配置匹配的运行。
+- 预检会产生可审计的干跑预览和运行项计划，不调用 Provider、不创建正式生成资产。入队使用 --preflight 绑定该证据；计划或安全 Provider 快照变化后必须重新预检。画幅、尺寸、分辨率和数量由会话动态指定：`resolution` 接受 `1K`、`2K` 等规格并按画幅归一化为明确尺寸。预检只验证格式、比例与尺寸一致性，以及适配器是否能无歧义地传输请求；不得因 Provider 名称使用硬编码画幅白名单。需要明确尺寸承载非方形画幅的适配器会要求尺寸，绝不静默回退为方图。Provider 最终拒绝的输出规格会作为运行项失败返回，不会自动改写或重放。
 - 媒体二进制使用提交恢复日志、暂存和原子归档；导入、生成、回收和恢复都在启动时对账，数据库和事件记录资产关系与决策。
 
 ## Workbench 边界

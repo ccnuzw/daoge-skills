@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 12;
+export const STUDIO_SCHEMA_VERSION = 14;
 
 const SCHEMA_V1 = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -76,6 +76,16 @@ const SCHEMA_V12 = [
   "CREATE INDEX IF NOT EXISTS idx_review_decisions_asset_latest ON review_decisions(asset_id, created_at DESC, id DESC)",
   "CREATE INDEX IF NOT EXISTS idx_delivery_batch_members_delivery ON delivery_batch_version_deliveries(delivery_id, version_id)"
 ].join(';\n') + ';';
+const SCHEMA_V13 = [
+  "CREATE TABLE IF NOT EXISTS studio_runtime_settings (studio_id TEXT PRIMARY KEY REFERENCES studios(id), max_worker_concurrency INTEGER NOT NULL CHECK (max_worker_concurrency BETWEEN 1 AND 30), updated_at TEXT NOT NULL)",
+  "ALTER TABLE generation_runs ADD COLUMN requested_concurrency INTEGER"
+].join(';\n') + ';';
+const SCHEMA_V14 = [
+  "ALTER TABLE studio_runtime_settings RENAME TO studio_runtime_settings_v13",
+  "CREATE TABLE studio_runtime_settings (studio_id TEXT PRIMARY KEY REFERENCES studios(id), max_worker_concurrency INTEGER NOT NULL CHECK (max_worker_concurrency BETWEEN 1 AND 30), updated_at TEXT NOT NULL)",
+  "INSERT INTO studio_runtime_settings (studio_id, max_worker_concurrency, updated_at) SELECT studio_id, max_worker_concurrency, updated_at FROM studio_runtime_settings_v13",
+  "DROP TABLE studio_runtime_settings_v13"
+].join(';\n') + ';';
 
 export type StudioDatabase = DatabaseSyncType;
 type DatabaseSyncConstructor = new (path: string) => StudioDatabase;
@@ -135,7 +145,9 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
       { version: 9, sql: SCHEMA_V9 },
     { version: 10, sql: SCHEMA_V10 },
     { version: 11, sql: SCHEMA_V11 },
-    { version: 12, sql: SCHEMA_V12 }
+    { version: 12, sql: SCHEMA_V12 },
+    { version: 13, sql: SCHEMA_V13 },
+    { version: 14, sql: SCHEMA_V14 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
