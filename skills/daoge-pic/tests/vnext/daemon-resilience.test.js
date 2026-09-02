@@ -8,14 +8,14 @@ const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
-const { loadProviderConfig, providerStatus } = require('../../dist/vnext/studio/provider-config');
+const { configureProvider } = require('./provider-test-helper');
 const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
 const { createDryRunPreview, queueGenerationRun, claimRunItems, getGenerationRun, listGenerationRunItems, resolveUnknownRunItems, transitionRunItem, resumeGenerationRun } = require('../../dist/vnext/runner/run-commands');
 const { GenerationWorker } = require('../../dist/vnext/runner/worker');
 const { LocalStudioService, startLocalStudioService } = require('../../dist/vnext/api/server');
 
 const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
 const daemonEntry = path.join(skillRoot, 'dist', 'vnext', 'cli', 'daemon.js');
 const cliEntry = path.join(skillRoot, 'dist', 'vnext', 'cli', 'daoge.js');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
@@ -35,6 +35,15 @@ async function waitFor(condition, description, timeoutMs = 5000) {
     await wait(25);
   }
 }
+function livePid(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 
 async function startCountingProvider() {
   let requests = 0;
@@ -53,6 +62,7 @@ async function startCountingProvider() {
   };
 }
 
+
 function stopDaemon(child) {
   if (!child || child.exitCode !== null || child.killed) return Promise.resolve();
   return new Promise((resolve) => {
@@ -62,14 +72,26 @@ function stopDaemon(child) {
   });
 }
 
+function runChild(entry, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [entry, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('Timed out waiting for child process to exit.'));
+    }, 5000);
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.once('error', (error) => { clearTimeout(timeout); reject(error); });
+    child.once('close', (code) => { clearTimeout(timeout); resolve({ code, stdout, stderr, pid: child.pid }); });
+  });
+}
+
+
 function createQueuedHundredItemRun(workspaceRoot, providerBaseUrl) {
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-  fs.writeFileSync(initialized.paths.providerEnvPath, [
-    'IMAGE_PROVIDER=openai-images',
-    'OPENAI_BASE_URL=' + providerBaseUrl,
-    'OPENAI_API_KEY=daemon-recovery-test-key',
-    'OPENAI_MODEL=gpt-image-2'
-  ].join('\n') + '\n');
+  const initialized = initializeStudio({ workspaceRoot });
+  const { config, status } = configureProvider(initialized, { baseUrl: providerBaseUrl, model: 'gpt-image-2', apiKey: 'daemon-recovery-test-key' });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: '100-item restart recovery', idempotencyKey: 'project' });
   const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.value.id, name: 'catalog images', idempotencyKey: 'task' });
@@ -79,9 +101,9 @@ function createQueuedHundredItemRun(workspaceRoot, providerBaseUrl) {
   expectedVersion: round.value.version,
   idempotencyKey: 'prepare' });
   const confirmed = confirmRoundPlan(db, { studioId: initialized.manifest.studioId, roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
-  const config = loadProviderConfig(initialized.paths);
-  const status = providerStatus(initialized.paths);
-  const dryRun = createDryRunPreview(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
+  assert.ok(config);
+  assert.equal(status.configured, true);
+  const dryRun = createDryRunPreview(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, executionConcurrency: 100, idempotencyKey: 'dry-run' });
   const queued = queueGenerationRun(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
   return { initialized, db, config, run: queued.value };
 }
@@ -191,20 +213,20 @@ test('standalone service startup performs explicit idempotent recovery without c
     closeStudioDatabase(fixture.db);
     fixture.db = null;
 
-    constructed = new LocalStudioService({ workspaceRoot, providerTemplatePath });
+    constructed = new LocalStudioService({ workspaceRoot });
     assert.equal(listGenerationRunItems(constructed.db, fixture.run.id)[0].status, 'requesting');
     assert.equal(getGenerationRun(constructed.db, fixture.run.id).status, 'running');
     await constructed.close();
     constructed = null;
 
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    started = await startLocalStudioService({ workspaceRoot });
     assert.equal(listGenerationRunItems(started.service.db, fixture.run.id)[0].status, 'outcome_unknown');
     assert.equal(getGenerationRun(started.service.db, fixture.run.id).status, 'resume_pending');
     assert.equal(provider.count(), 0);
     await started.service.close();
     started = null;
 
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    started = await startLocalStudioService({ workspaceRoot });
     assert.equal(listGenerationRunItems(started.service.db, fixture.run.id)[0].status, 'outcome_unknown');
     assert.equal(getGenerationRun(started.service.db, fixture.run.id).status, 'resume_pending');
   } finally {
@@ -216,15 +238,19 @@ test('standalone service startup performs explicit idempotent recovery without c
   }
 });
 
-test('daemon reuses its workspace port across graceful restarts without a Provider', async () => {
+
+test('controlled restart preserves its port and Workbench authorization only inside the daemon process', async () => {
   const workspaceRoot = temporaryWorkspace();
   const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
   const portPath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.port.json');
+  const ownerRecordPath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.lock');
+  const coordinationDatabasePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon-lock.sqlite');
   let daemon;
   try {
     daemon = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
     await waitFor(() => fs.existsSync(runtimePath), 'first daemon runtime record');
     const first = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    const firstOwner = JSON.parse(fs.readFileSync(ownerRecordPath, 'utf8'));
     assert.ok(Number.isInteger(first.port) && first.port > 0);
     assert.equal(typeof first.capability, 'string');
     assert.ok(first.capability.length >= 43);
@@ -241,9 +267,35 @@ test('daemon reuses its workspace port across graceful restarts without a Provid
     assert.equal(statusOutput.status, 0, statusOutput.stderr);
     assert.equal(statusOutput.stdout.includes(first.capability), false);
     assert.equal((await fetch(first.url + '/api/health')).status, 200);
+    const bootstrap = await fetch(first.url + '/api/auth/bootstrap', { method: 'POST', headers: { origin: first.url, 'content-type': 'application/json' }, body: JSON.stringify({ capability: first.capability }) });
+    assert.equal(bootstrap.status, 200);
+    const setCookie = bootstrap.headers.get('set-cookie');
+    assert.ok(setCookie);
+    const cookie = setCookie.split(';', 1)[0];
+    const restart = await fetch(first.url + '/api/restart', { method: 'POST', headers: { cookie, origin: first.url, 'content-type': 'application/json', 'idempotency-key': 'workbench-restart' }, body: '{}' });
+    assert.equal(restart.status, 200);
+    await waitFor(() => {
+      try { return JSON.parse(fs.readFileSync(runtimePath, 'utf8')).startedAt !== first.startedAt; } catch { return false; }
+    }, 'controlled daemon restart');
+    const restarted = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    const restartedOwner = JSON.parse(fs.readFileSync(ownerRecordPath, 'utf8'));
+    assert.equal(restarted.pid, first.pid);
+    assert.equal(restarted.url, first.url);
+    assert.equal(restarted.capability, first.capability);
+    assert.equal(firstOwner.pid, first.pid);
+    assert.equal(restartedOwner.pid, first.pid);
+    assert.notEqual(restartedOwner.ownerId, firstOwner.ownerId, 'controlled restart must release and reacquire the SQLite mutex');
+    assert.equal((await fetch(restarted.url + '/api/studio', { headers: { cookie } })).status, 200);
+    const normalClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
+    assert.deepEqual((await normalClaim.json()).data, { claimed: false, reused: true, reason: 'recent-workbench' }, 'controlled restart must retain recent Workbench presence in daemon memory');
+    const forcedClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
+    assert.deepEqual((await forcedClaim.json()).data, { claimed: true, reused: false, reason: 'forced-opener-claim' });
+    assert.equal((await fetch(restarted.url + '/api/projects', { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:9', 'content-type': 'application/json', 'idempotency-key': 'hostile-local-page' }, body: JSON.stringify({ name: 'blocked' }) })).status, 403);
     await stopDaemon(daemon);
     daemon = null;
     assert.equal(fs.existsSync(runtimePath), false);
+    assert.equal(fs.existsSync(ownerRecordPath), false);
+    assert.equal(fs.existsSync(coordinationDatabasePath), true);
 
     daemon = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
     await waitFor(() => fs.existsSync(runtimePath), 'second daemon runtime record');
@@ -253,6 +305,103 @@ test('daemon reuses its workspace port across graceful restarts without a Provid
     assert.notEqual(second.capability, first.capability);
     assert.equal(JSON.parse(fs.readFileSync(portPath, 'utf8')).port, first.port);
     assert.equal((await fetch(second.url + '/api/health')).status, 200);
+  } finally {
+    await stopDaemon(daemon);
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('a stale owner record plus four concurrent first-start Studio CLIs converges on one healthy daemon owner', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
+  const lockPath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.lock');
+  const coordinationDatabasePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon-lock.sqlite');
+  const manifestPath = path.join(workspaceRoot, 'daoge-studio', 'studio.json');
+  let daemonPid = null;
+  const runtimeDir = path.dirname(runtimePath);
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ownerId: 'stale-live-unrelated-owner', acquiredAt: new Date(0).toISOString() }) + '\n', { mode: 0o600 });
+  const invokeStudio = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cliEntry, 'studio', '--workspace', workspaceRoot], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code, stdout, stderr }));
+  });
+  try {
+    const results = await Promise.all(Array.from({ length: 4 }, invokeStudio));
+    for (const result of results) assert.equal(result.code, 0, result.stderr);
+    const outputs = results.map((result) => JSON.parse(result.stdout));
+    assert.equal(new Set(outputs.map((output) => output.daemon.pid)).size, 1);
+    assert.equal(new Set(outputs.map((output) => output.daemon.url)).size, 1);
+    const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    daemonPid = runtime.pid;
+    assert.equal(runtime.pid, outputs[0].daemon.pid);
+    assert.equal(runtime.workspaceRoot, path.resolve(workspaceRoot));
+    assert.equal(lock.pid, runtime.pid);
+    assert.equal(typeof lock.ownerId, 'string');
+    assert.ok(lock.ownerId.length > 0);
+    assert.equal(fs.existsSync(coordinationDatabasePath), true);
+    const healthResponse = await fetch(runtime.url + '/api/health');
+    assert.equal(healthResponse.status, 200);
+    const health = await healthResponse.json();
+    assert.equal(health.data.studioId, manifest.studioId);
+    assert.equal(manifest.workspaceRoot, path.resolve(workspaceRoot));
+    const initialized = initializeStudio({ workspaceRoot });
+    assert.equal(initialized.manifest.studioId, manifest.studioId);
+    const db = openStudioDatabase(initialized.paths, initialized.manifest);
+    try {
+      const studios = db.prepare('SELECT id, workspace_root FROM studios').all();
+      assert.equal(studios.length, 1);
+      assert.equal(studios[0].id, manifest.studioId);
+      assert.equal(studios[0].workspace_root, path.resolve(workspaceRoot));
+    } finally {
+      closeStudioDatabase(db);
+    }
+  } finally {
+    if (!daemonPid) {
+      try { daemonPid = JSON.parse(fs.readFileSync(runtimePath, 'utf8')).pid || null; } catch { /* daemon never published runtime */ }
+    }
+    if (daemonPid) {
+      try { process.kill(daemonPid, 'SIGTERM'); } catch { /* daemon already stopped */ }
+      await waitFor(() => !livePid(daemonPid) && !fs.existsSync(runtimePath) && !fs.existsSync(lockPath), 'concurrent-start daemon process, runtime, and owner shutdown');
+      await wait(250);
+      assert.equal(livePid(daemonPid), false);
+      assert.equal(fs.existsSync(runtimePath), false, 'no losing launcher may rebuild the runtime record');
+      assert.equal(fs.existsSync(lockPath), false, 'no losing launcher may take over the owner record');
+    }
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('a live unrelated PID owner record is overwritten without signaling that process, while a healthy daemon rejects a second daemon', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const runtimeDir = path.join(workspaceRoot, 'daoge-studio', 'runtime');
+  const runtimePath = path.join(runtimeDir, 'daemon.json');
+  const lockPath = path.join(runtimeDir, 'daemon.lock');
+  let daemon = null;
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ownerId: 'unrelated-live-process', acquiredAt: new Date(0).toISOString() }) + '\n', { mode: 0o600 });
+  try {
+    process.kill(process.pid, 0);
+    daemon = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await waitFor(() => fs.existsSync(runtimePath), 'runtime after unrelated live PID takeover');
+    const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    assert.equal(runtime.pid, daemon.pid);
+    assert.equal(lock.pid, daemon.pid);
+    assert.notEqual(lock.ownerId, 'unrelated-live-process');
+    process.kill(process.pid, 0);
+
+    const duplicate = await runChild(daemonEntry, ['--workspace', workspaceRoot]);
+    assert.equal(duplicate.code, 1);
+    assert.match(duplicate.stderr, /already running/);
+    assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).ownerId, lock.ownerId);
+    assert.equal((await fetch(runtime.url + '/api/health')).status, 200);
   } finally {
     await stopDaemon(daemon);
     fs.rmSync(workspaceRoot, { recursive: true, force: true });

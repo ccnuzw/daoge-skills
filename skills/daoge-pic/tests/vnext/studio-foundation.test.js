@@ -5,16 +5,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { initializeStudio, studioPaths, ensureAssetBucket, ensureDeliveriesDirectory, enforceSensitiveAccess } = require('../../dist/vnext/studio/workspace');
-const { loadProviderConfig, providerSnapshot, providerStatus } = require('../../dist/vnext/studio/provider-config');
-const { getStudioRuntimeSettings, updateStudioRuntimeSettings } = require('../../dist/vnext/studio/runtime-settings');
 const { openStudioDatabase, closeStudioDatabase, appendStudioEvent, migrateStudioDatabase, studioSchemaVersion } = require('../../dist/vnext/studio/database');
 const { openOrAttachStudioSession, archiveProject, createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan, listRoundPlanVersions, VersionConflictError } = require('../../dist/vnext/domain/studio-commands');
 const { stageImage, archiveStagedImage, validateImageBytes, MediaValidationError } = require('../../dist/vnext/media/archive');
 const { assertRunTransition, assertRunItemTransition, StateTransitionError } = require('../../dist/vnext/domain/states');
 const { searchStudio } = require('../../dist/vnext/domain/queries');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 
 function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-vnext-'));
@@ -24,51 +22,36 @@ function cleanup(workspaceRoot) {
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 }
 
-test('initializes a Studio without eagerly creating asset or delivery directories', () => {
+test('initializes a Studio without creating provider.env, Provider.db, assets, or deliveries eagerly', () => {
   const workspaceRoot = temporaryWorkspace();
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     assert.equal(initialized.createdManifest, true);
-    assert.equal(initialized.createdProviderEnv, true);
     assert.ok(fs.existsSync(initialized.paths.studioDir));
     assert.ok(fs.existsSync(initialized.paths.manifestPath));
-    assert.ok(fs.existsSync(initialized.paths.providerEnvPath));
+    assert.equal(fs.existsSync(initialized.paths.providerEnvPath), false);
+    assert.equal(fs.existsSync(initialized.paths.providerDatabasePath), false);
     assert.equal(fs.existsSync(initialized.paths.assetRoot), false);
     assert.equal(fs.existsSync(initialized.paths.deliveriesRoot), false);
-    assert.match(fs.readFileSync(path.join(workspaceRoot, '.gitignore'), 'utf8'), /daoge-studio\/provider.env/);
-
-    const next = initializeStudio({ workspaceRoot, providerTemplatePath });
+    assert.match(fs.readFileSync(path.join(workspaceRoot, '.gitignore'), 'utf8'), /daoge-studio\/Provider\.db/);
+    assert.match(fs.readFileSync(path.join(workspaceRoot, '.gitignore'), 'utf8'), /daoge-studio\/runtime\//);
+    const next = initializeStudio({ workspaceRoot });
     assert.equal(next.createdManifest, false);
-    assert.equal(next.createdProviderEnv, false);
     assert.equal(next.manifest.studioId, initialized.manifest.studioId);
-
     const generatedDir = ensureAssetBucket(next.paths, 'generated');
     assert.ok(fs.existsSync(generatedDir));
     assert.equal(path.dirname(generatedDir), next.paths.assetRoot);
-  } finally {
-    cleanup(workspaceRoot);
-  }
+  } finally { cleanup(workspaceRoot); }
 });
 
-test('first initialization with a missing Provider template has zero persistent side effects', () => {
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-atomic-parent-'));
-  const workspaceRoot = path.join(parent, 'new-workspace');
-  try {
-    assert.throws(() => initializeStudio({ workspaceRoot, providerTemplatePath: path.join(parent, 'missing-provider.env.example') }), /missing or cannot read/);
-    assert.equal(fs.existsSync(workspaceRoot), false);
-  } finally {
-    cleanup(parent);
-  }
-});
 
 test('existing manifests must declare the exact resolved workspace root', () => {
   const workspaceRoot = temporaryWorkspace();
   const studioDir = path.join(workspaceRoot, 'daoge-studio');
   fs.mkdirSync(studioDir);
-  fs.writeFileSync(path.join(studioDir, 'provider.env'), 'IMAGE_PROVIDER=\n');
   fs.writeFileSync(path.join(studioDir, 'studio.json'), JSON.stringify({ schemaVersion: 1, studioId: 'studio-wrong-root', workspaceRoot: workspaceRoot + '-other', createdAt: new Date().toISOString() }));
   try {
-    assert.throws(() => initializeStudio({ workspaceRoot, providerTemplatePath }), /workspaceRoot does not match/);
+    assert.throws(() => initializeStudio({ workspaceRoot }), /workspaceRoot does not match/);
     assert.equal(fs.existsSync(path.join(studioDir, 'runtime')), false);
     assert.equal(fs.existsSync(path.join(workspaceRoot, '.gitignore')), false);
   } finally {
@@ -76,38 +59,24 @@ test('existing manifests must declare the exact resolved workspace root', () => 
   }
 });
 
-test('initialization keeps provider.env private without overwriting existing credentials', () => {
+test('initialization preserves and hardens an existing provider.env only as migration input', () => {
   const workspaceRoot = temporaryWorkspace();
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-    if (process.platform !== 'win32') {
-      assert.equal(fs.statSync(initialized.paths.providerEnvPath).mode & 0o777, 0o600);
-      assert.equal(fs.statSync(initialized.paths.studioDir).mode & 0o777, 0o700);
-      assert.equal(fs.statSync(initialized.paths.runtimeDir).mode & 0o777, 0o700);
-    }
-
+    const initialized = initializeStudio({ workspaceRoot });
     const existing = 'IMAGE_PROVIDER=openai-images\nOPENAI_API_KEY=existing-secret\n';
     fs.writeFileSync(initialized.paths.providerEnvPath, existing, { mode: 0o666 });
-    fs.chmodSync(initialized.paths.providerEnvPath, 0o666);
-    fs.chmodSync(initialized.paths.studioDir, 0o755);
-    fs.chmodSync(initialized.paths.runtimeDir, 0o755);
-
-    const attached = initializeStudio({ workspaceRoot, providerTemplatePath });
-    assert.equal(attached.createdProviderEnv, false);
+    const attached = initializeStudio({ workspaceRoot });
     assert.equal(fs.readFileSync(attached.paths.providerEnvPath, 'utf8'), existing);
     if (process.platform !== 'win32') {
       assert.equal(fs.statSync(attached.paths.providerEnvPath).mode & 0o777, 0o600);
       assert.equal(fs.statSync(attached.paths.studioDir).mode & 0o777, 0o700);
-      assert.equal(fs.statSync(attached.paths.runtimeDir).mode & 0o777, 0o700);
     }
-  } finally {
-    cleanup(workspaceRoot);
-  }
+  } finally { cleanup(workspaceRoot); }
 });
 
 test('Windows sensitive paths reset explicit Everyone/Users ACEs before removing inheritance and granting only trusted principals', () => {
   const calls = [];
-  enforceSensitiveAccess('C:\\workspace with spaces\\provider.env', false, {
+  enforceSensitiveAccess('C:\\workspace with spaces\\Provider.db', false, {
     platform: 'win32',
     username: 'DOMAIN\\current-user',
     run: (command, args) => calls.push({ command, args })
@@ -118,9 +87,9 @@ test('Windows sensitive paths reset explicit Everyone/Users ACEs before removing
     run: (command, args) => calls.push({ command, args })
   });
   assert.deepEqual(calls, [
-    { command: 'icacls', args: ['C:\\workspace with spaces\\provider.env', '/reset'] },
-    { command: 'icacls', args: ['C:\\workspace with spaces\\provider.env', '/inheritance:r'] },
-    { command: 'icacls', args: ['C:\\workspace with spaces\\provider.env', '/grant:r', 'DOMAIN\\current-user:F', '*S-1-5-18:F', '*S-1-5-32-544:F'] },
+    { command: 'icacls', args: ['C:\\workspace with spaces\\Provider.db', '/reset'] },
+    { command: 'icacls', args: ['C:\\workspace with spaces\\Provider.db', '/inheritance:r'] },
+    { command: 'icacls', args: ['C:\\workspace with spaces\\Provider.db', '/grant:r', 'DOMAIN\\current-user:F', '*S-1-5-18:F', '*S-1-5-32-544:F'] },
     { command: 'icacls', args: ['C:\\workspace with spaces\\runtime', '/reset'] },
     { command: 'icacls', args: ['C:\\workspace with spaces\\runtime', '/inheritance:r'] },
     { command: 'icacls', args: ['C:\\workspace with spaces\\runtime', '/grant:r', 'DOMAIN\\current-user:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'] }
@@ -129,13 +98,13 @@ test('Windows sensitive paths reset explicit Everyone/Users ACEs before removing
 
 test('Windows sensitive path hardening stops immediately when any ACL step fails', () => {
   const expected = [
-    { command: 'icacls', args: ['C:\\workspace\\provider.env', '/reset'] },
-    { command: 'icacls', args: ['C:\\workspace\\provider.env', '/inheritance:r'] },
-    { command: 'icacls', args: ['C:\\workspace\\provider.env', '/grant:r', 'current-user:F', '*S-1-5-18:F', '*S-1-5-32-544:F'] }
+    { command: 'icacls', args: ['C:\\workspace\\Provider.db', '/reset'] },
+    { command: 'icacls', args: ['C:\\workspace\\Provider.db', '/inheritance:r'] },
+    { command: 'icacls', args: ['C:\\workspace\\Provider.db', '/grant:r', 'current-user:F', '*S-1-5-18:F', '*S-1-5-32-544:F'] }
   ];
   for (let failureIndex = 0; failureIndex < expected.length; failureIndex += 1) {
     const calls = [];
-    assert.throws(() => enforceSensitiveAccess('C:\\workspace\\provider.env', false, {
+    assert.throws(() => enforceSensitiveAccess('C:\\workspace\\Provider.db', false, {
       platform: 'win32',
       username: 'current-user',
       run: (command, args) => {
@@ -147,51 +116,14 @@ test('Windows sensitive path hardening stops immediately when any ACL step fails
   }
 });
 
-test('loads provider.env without exposing API keys in the safe status or snapshot', () => {
-  const workspaceRoot = temporaryWorkspace();
-  try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-    fs.writeFileSync(initialized.paths.providerEnvPath, [
-      'IMAGE_PROVIDER=openai-images',
-      'OPENAI_BASE_URL=https://images.example.test/v1',
-      'OPENAI_API_KEY=secret-value-must-not-escape',
-      'OPENAI_MODEL=gpt-image-2'
-    ].join('\n') + '\n');
-
-    const config = loadProviderConfig(initialized.paths);
-    assert.ok(config);
-    assert.equal(config.apiKey, 'secret-value-must-not-escape');
-    const status = providerStatus(initialized.paths);
-    assert.deepEqual(status, {
-      providerId: 'openai-images',
-      configured: true,
-      missing: [],
-      model: 'gpt-image-2',
-      endpoint: 'https://images.example.test',
-      capabilities: { generate: true, edit: true, referenceImage: true, mask: true }
-    });
-    assert.equal(Object.prototype.hasOwnProperty.call(config, 'workerConcurrency'), false);
-    assert.equal(JSON.stringify(status).includes('secret-value-must-not-escape'), false);
-    const snapshot = providerSnapshot(config);
-    assert.equal(Object.prototype.hasOwnProperty.call(snapshot, 'apiKey'), false);
-    assert.equal(Object.prototype.hasOwnProperty.call(snapshot, 'workerConcurrency'), false);
-    assert.equal(JSON.stringify(snapshot).includes('secret-value-must-not-escape'), false);
-    fs.appendFileSync(initialized.paths.providerEnvPath, 'DAOGE_PIC_WORKER_CONCURRENCY=02\n');
-    const legacyConcurrency = providerStatus(initialized.paths);
-    assert.equal(legacyConcurrency.configured, true);
-    assert.deepEqual(legacyConcurrency.missing, []);
-  } finally {
-    cleanup(workspaceRoot);
-  }
-});
 
 test('creates the vNext schema and emits monotonic Studio events', () => {
   const workspaceRoot = temporaryWorkspace();
   let db;
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.equal(studioSchemaVersion(db), 18);
+    assert.equal(studioSchemaVersion(db), 19);
     const studio = db.prepare('SELECT id, workspace_root FROM studios WHERE id = ?').get(initialized.manifest.studioId);
     assert.equal(studio.id, initialized.manifest.studioId);
     assert.equal(studio.workspace_root, initialized.paths.workspaceRoot);
@@ -205,50 +137,14 @@ test('creates the vNext schema and emits monotonic Studio events', () => {
 });
 
 
-test('stores the workspace concurrency ceiling outside provider.env', () => {
-  const workspaceRoot = temporaryWorkspace();
-  let db;
-  try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-    db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.deepEqual(getStudioRuntimeSettings(db, initialized.manifest.studioId).maxWorkerConcurrency, 1000);
-    assert.deepEqual(updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 997 }).maxWorkerConcurrency, 997);
-    assert.deepEqual(updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 1000 }).maxWorkerConcurrency, 1000);
-    assert.throws(() => updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 1001 }), /1 到 1000/);
-    assert.equal(JSON.stringify(providerStatus(initialized.paths)).includes('workerConcurrency'), false);
-  } finally {
-    closeStudioDatabase(db);
-    cleanup(workspaceRoot);
-  }
-});
 
-test('migrates legacy concurrency settings to the 1000 ceiling', () => {
-  const workspaceRoot = temporaryWorkspace();
-  let db;
-  try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-    const DatabaseSync = require('node:sqlite').DatabaseSync;
-    db = new DatabaseSync(initialized.paths.databasePath);
-    db.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE studios (id TEXT PRIMARY KEY, workspace_root TEXT NOT NULL UNIQUE, schema_version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE deliveries (id TEXT PRIMARY KEY); CREATE TABLE studio_runtime_settings (studio_id TEXT PRIMARY KEY REFERENCES studios(id), max_worker_concurrency INTEGER NOT NULL CHECK (max_worker_concurrency IN (1, 2, 4)), updated_at TEXT NOT NULL);");
-    for (let version = 1; version <= 13; version += 1) db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(version, '2026-01-01T00:00:00.000Z');
-    db.prepare('INSERT INTO studios (id, workspace_root, schema_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run('studio_v13', workspaceRoot, 13, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
-    db.prepare('INSERT INTO studio_runtime_settings (studio_id, max_worker_concurrency, updated_at) VALUES (?, ?, ?)').run('studio_v13', 4, '2026-01-01T00:00:00.000Z');
-    migrateStudioDatabase(db);
-    assert.equal(db.prepare('SELECT max_worker_concurrency FROM studio_runtime_settings WHERE studio_id = ?').get('studio_v13').max_worker_concurrency, 1000);
-    db.prepare('UPDATE studio_runtime_settings SET max_worker_concurrency = ? WHERE studio_id = ?').run(1000, 'studio_v13');
-    assert.throws(() => db.prepare('UPDATE studio_runtime_settings SET max_worker_concurrency = ? WHERE studio_id = ?').run(1001, 'studio_v13'));
-  } finally {
-    closeStudioDatabase(db);
-    cleanup(workspaceRoot);
-  }
-});
 
 test('migrates v2/v14 receipt storage whether the legacy table is present or missing', () => {
   for (const legacyTablePresent of [false, true]) {
     const workspaceRoot = temporaryWorkspace();
     let db;
     try {
-      const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+      const initialized = initializeStudio({ workspaceRoot });
       const DatabaseSync = require('node:sqlite').DatabaseSync;
       db = new DatabaseSync(initialized.paths.databasePath);
       db.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE studios (id TEXT PRIMARY KEY, workspace_root TEXT NOT NULL UNIQUE, schema_version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE deliveries (id TEXT PRIMARY KEY)');
@@ -277,7 +173,7 @@ test('migrates v15 media operation identity fields whether the legacy table is p
     const workspaceRoot = temporaryWorkspace();
     let db;
     try {
-      const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+      const initialized = initializeStudio({ workspaceRoot });
       const DatabaseSync = require('node:sqlite').DatabaseSync;
       db = new DatabaseSync(initialized.paths.databasePath);
       db.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE studios (id TEXT PRIMARY KEY, workspace_root TEXT NOT NULL UNIQUE, schema_version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE deliveries (id TEXT PRIMARY KEY); CREATE TABLE assets (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL, kind TEXT NOT NULL, media_type TEXT NOT NULL, storage_path TEXT NOT NULL, content_hash TEXT NOT NULL, byte_size INTEGER NOT NULL)');
@@ -295,7 +191,7 @@ test('migrates v15 media operation identity fields whether the legacy table is p
       migrateStudioDatabase(db);
       const columns = db.prepare('PRAGMA table_info(asset_media_operations)').all().map((column) => column.name);
       assert.deepEqual(columns, ['id', 'studio_id', 'asset_id', 'operation', 'source_path', 'target_path', 'asset_json', 'relation_json', 'created_at', 'expected_hash', 'expected_size', 'expected_media_type', 'phase']);
-      assert.equal(studioSchemaVersion(db), 18);
+      assert.equal(studioSchemaVersion(db), 19);
       const migrated = db.prepare('SELECT expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE id = ?').get('operation_v15');
       assert.deepEqual(migrated ? { ...migrated } : null, legacyTablePresent ? { expected_hash: null, expected_size: null, expected_media_type: null, phase: 'prepared' } : null);
       if (legacyTablePresent) {
@@ -316,7 +212,7 @@ test('keeps SQLite FTS search synchronized with project changes', () => {
   const workspaceRoot = temporaryWorkspace();
   let db;
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'FTS 检索项目', description: 'Product visual exploration', idempotencyKey: 'fts-project' });
     assert.deepEqual(searchStudio(db, initialized.manifest.studioId, 'visual').map((result) => result.entityId), [project.value.id]);
@@ -332,7 +228,7 @@ test('keeps SQLite FTS search synchronized with project changes', () => {
 test('stages, validates, and atomically archives managed image bytes', () => {
   const workspaceRoot = temporaryWorkspace();
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
     const staged = stageImage(initialized.paths, png, 'image/png');
     assert.ok(fs.existsSync(staged.stagingPath));
@@ -357,11 +253,11 @@ test('rejects symlinked media directory components without touching external pat
   fs.writeFileSync(sentinelPath, 'do not touch');
   try {
     fs.symlinkSync(outsideRoot, linkedWorkspaceRoot);
-    assert.throws(() => initializeStudio({ workspaceRoot: linkedWorkspaceRoot, providerTemplatePath }), /symbolic links/);
+    assert.throws(() => initializeStudio({ workspaceRoot: linkedWorkspaceRoot }), /symbolic links/);
     assert.equal(fs.readFileSync(sentinelPath, 'utf8'), 'do not touch');
     fs.unlinkSync(linkedWorkspaceRoot);
 
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     fs.symlinkSync(outsideRoot, initialized.paths.cacheDir);
     assert.throws(() => stageImage(initialized.paths, imageBytes, 'image/png'), /symbolic links/);
     assert.equal(fs.readFileSync(sentinelPath, 'utf8'), 'do not touch');
@@ -396,7 +292,7 @@ test('persists confirmed creative context with idempotency and optimistic versio
   const workspaceRoot = temporaryWorkspace();
   let db;
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
     const session = openOrAttachStudioSession(db, { studioId: initialized.manifest.studioId, conversationId: 'conversation-1' });
     assert.equal(openOrAttachStudioSession(db, { studioId: initialized.manifest.studioId, conversationId: 'conversation-1' }).id, session.id);
@@ -438,7 +334,7 @@ test('archives a project and its creative context only after unfinished runs are
   const workspaceRoot = temporaryWorkspace();
   let db;
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '归档项目', idempotencyKey: 'archive-project' });
     const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.value.id, name: '归档任务', idempotencyKey: 'archive-task' });
@@ -472,7 +368,7 @@ test('migrates v16 journals and task types without assigning ambiguous user data
     const workspaceRoot = temporaryWorkspace();
     let db;
     try {
-      const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+      const initialized = initializeStudio({ workspaceRoot });
       const DatabaseSync = require('node:sqlite').DatabaseSync;
       db = new DatabaseSync(initialized.paths.databasePath);
       db.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE studios (id TEXT PRIMARY KEY, workspace_root TEXT NOT NULL UNIQUE, schema_version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE deliveries (id TEXT PRIMARY KEY); CREATE TABLE delivery_export_journal (idempotency_key TEXT PRIMARY KEY, delivery_id TEXT NOT NULL REFERENCES deliveries(id), studio_id TEXT NOT NULL REFERENCES studios(id), directory_path TEXT NOT NULL, manifest_json TEXT NOT NULL, files_json TEXT NOT NULL, created_at TEXT NOT NULL); CREATE TABLE task_types (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, definition_json TEXT NOT NULL, source TEXT NOT NULL CHECK (source IN ('official', 'user')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
@@ -484,7 +380,7 @@ test('migrates v16 journals and task types without assigning ambiguous user data
       db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('official_migration_type', '旧官方类型', '{}', 'official', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('user_migration_type', '旧用户类型', '{}', 'user', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       migrateStudioDatabase(db);
-      assert.equal(studioSchemaVersion(db), 18);
+      assert.equal(studioSchemaVersion(db), 19);
       const journalPrimaryKey = db.prepare('PRAGMA table_info(delivery_export_journal)').all().filter((column) => column.pk > 0).sort((left, right) => left.pk - right.pk).map((column) => column.name);
       assert.deepEqual(journalPrimaryKey, ['studio_id', 'idempotency_key']);
       const migratedJournal = db.prepare('SELECT studio_id, delivery_id FROM delivery_export_journal WHERE idempotency_key = ?').get('legacy-export-key');
@@ -506,7 +402,7 @@ test('quarantines v14 command receipts when more than one Studio exists during v
   const workspaceRoot = temporaryWorkspace();
   let db;
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     const DatabaseSync = require('node:sqlite').DatabaseSync;
     db = new DatabaseSync(initialized.paths.databasePath);
     db.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE studios (id TEXT PRIMARY KEY, workspace_root TEXT NOT NULL UNIQUE, schema_version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE deliveries (id TEXT PRIMARY KEY); CREATE TABLE command_receipts (idempotency_key TEXT PRIMARY KEY, command_name TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL, request_hash TEXT)');

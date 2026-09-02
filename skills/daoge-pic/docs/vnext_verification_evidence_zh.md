@@ -4,9 +4,11 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-## 1. daoge-pic 5.7.0 发布证据
+当前稳定正式版本为 [`5.8.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0)。下列章节按版本隔离发布事实；5.7.0 及更早章节保持历史证据，不得用其哈希、Schema 或旧并发契约解释 5.8.0。
 
-本节对应 [`daoge-pic-v5.7.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.7.0) 的发布源码与不可变 `.tgz` 制品。
+## 1. daoge-pic 5.7.0 已发布历史证据
+
+本节对应 [`daoge-pic-v5.7.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.7.0) 的发布源码与不可变 `.tgz` 制品。以下内容只证明 5.7.0；其中 Schema v18、工作区并发配置和 `1000` 工作区上限均为历史实现，不是当前 Provider.db + 预检冻结 Run 并发契约。
 
 ### 最终机器验证
 
@@ -14,7 +16,7 @@
 - `npm test`：TypeScript 和 Vite 生产构建成功；Node 内置测试执行 217 项，217 通过、0 失败、0 取消、0 跳过。
 - `npm run test:package`：真实构建、打包并临时安装候选包；发布清单 86 个文件，`unexpected=0`、source map 为 0、退役路径为 0，安装、bin 与 help 检查通过。
 - 正式制品 `daoge-pic-5.7.0.tgz` 为 249,611 bytes，npm shasum 为 `3da27b4f4c4c63ad1f3b94a02f3a5297cce86a75`，SHA-256 为 `1fb70265f4a0e7e5858be3dec7cf21ad8706c720fede7c1712e74a36678110fe`。
-- Schema v18 在当前实际工作区完成迁移；受控重启保持原 Workbench 端口，daemon 健康且当前生效工作区并发为 `1000`。当前系统 Skill 注册指向本仓库 `skills/daoge-pic` 源码，包版本为 `5.7.0`。
+- 历史 5.7.0 证据：Schema v18 在当时实际工作区完成迁移；受控重启保持原 Workbench 端口，daemon 健康且当时生效的工作区并发为 `1000`。当时系统 Skill 注册指向本仓库 `skills/daoge-pic` 源码，包版本为 `5.7.0`。
 
 ### Chromium 行为与视觉验证
 
@@ -55,11 +57,11 @@
 
 - 发布前 vNext 自动化回归 `88/88` 通过，package smoke 通过。
 - Release 制品 `daoge-pic-5.5.0.tgz` 为 203,159 bytes，SHA-256 为 `d76844e34aba42feb8a53ed6b4629c5c5a94fd4548dc75f02d4083ffa7bb38d2`。
-- 该版本提供动态画幅、尺寸、分辨率和单次运行并发，工作区 Worker 默认上限提升为 `30`，运行时设置迁移到 SQLite Schema v14。
+- 历史 5.5.0 契约：该版本提供动态画幅、尺寸、分辨率和单次运行并发，当时的工作区 Worker 默认上限提升为 `30`，运行时设置迁移到 SQLite Schema v14；这不是当前契约。
 
-## 4. daoge-pic 5.6.0 发布证据
+## 4. daoge-pic 5.6.0 已发布历史证据
 
-本节对应 [`daoge-pic-v5.6.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.6.0) 的发布源码与不可变 `.tgz` 制品。
+本节对应 [`daoge-pic-v5.6.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.6.0) 的发布源码与不可变 `.tgz` 制品。以下并发、配置与 Schema 描述仅是 5.6.0 历史证据，不定义当前实现。
 
 ### 最终机器证据
 
@@ -71,7 +73,7 @@
 
 ### 覆盖范围
 
-- 运行引擎：取消竞态、租约丢失、`outcome_unknown`、到期自动重试、稳定 request identity、`1..30` 单次运行并发、跨 Worker 全局上限、显式启动恢复与 `resume_pending` 会话门禁。
+- 历史 5.6.0 运行引擎：取消竞态、租约丢失、`outcome_unknown`、到期自动重试、稳定 request identity、当时的 `1..30` 单次运行并发、跨 Worker 全局上限、显式启动恢复与 `resume_pending` 会话门禁。
 - 本地与 Provider 安全：daemon capability、失败可重试的 Cookie bootstrap、Host/Origin/Content-Type 门禁、Studio 跨范围拒绝、凭据重定向拒绝、仅全局单播地址、DNS pin/remote-address 校验、流式响应大小上限和 Windows/POSIX 敏感路径权限合同。
 - 媒体与交付：从工作区根逐级拒绝符号链接、跨 Studio 生成 journal 拒绝、verified snapshot、Provider reference/mask 冻结读取、同 inode/pathname 竞态拒绝、递归 orphan 对账、Studio-scoped 交付 journal、冻结文件集合和带 backpressure/abort 的流式 ZIP。
 - 数据迁移：Schema v17 保留唯一可归属的旧幂等回执和用户任务类型，歧义数据进入隔离表；用户任务类型按 Studio 隔离。
@@ -86,3 +88,35 @@
 ### Provider 验证边界
 
 本轮发布验证刻意没有调用真实图片 Provider。真实计费生成、Provider 侧最终规格接受度和外部请求结果只能在后续得到用户明确确认的独立验证中记录。
+
+## 5. daoge-pic 5.8.0 发布验证证据
+
+本节对应 [`daoge-pic-v5.8.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0) 的发布源码与 GitHub Release `.tgz` 资产。5.8.0 以“会话为入口、Studio 为共享工作台”为稳定协议：同一稳定 workspace 的多个会话共享唯一 daemon 与 Workbench，每个真实 conversation 建立独立 Studio Session，并保持项目、任务、轮次和 Run 归属隔离。
+
+Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Profile、唯一 active、write-only API Key/完整 Base URL 与 Workbench 设置界面。既有 `provider.env` 只作为首次升级的一次迁移或显式 import 输入，成功后不再参与运行时读取；切换 Profile 或其配置版本后必须受控 restart。执行型触发按“稳定 workspace → 普通 open/open-reuse → conversation Session → 项目上下文 → 创作澄清”的顺序执行，咨询/开发型触发不启动 Studio。Workbench 使用 per-tab `sessionStorage` UI Session，与智能体 Sessions 分离。
+
+并发只属于 Generation Run：系统硬上限 `1000`、默认 `4`、串行 `1`；preflight 冻结 `executionConcurrency`，queue 与 run 阶段都不能改写。旧 workspace worker concurrency 与 `config --worker-concurrency` 已移除。Provider 响应使用精确 secret 净化并约束 request-id；打包清单拒绝敏感数据库、配置、runtime 与日志。binary import、fair scheduler、reference flag 和 repeat import 回归均纳入 5.8.0 验证边界。
+
+### 最终机器验证
+
+- 验证日期：2026-09-02；本地 macOS、Node.js 22+。
+- build：PASS；TypeScript 与 Vite 生产构建成功。
+- 完整自动化回归：`238/238` 通过，0 失败、0 取消、0 跳过、0 待办。
+- targeted 集合：`60/60` 通过，包括 `daemon-lock.test.js` 5 项、`daemon-resilience.test.js` 5 项、`worker.test.js` 15 项、`skill-startup-contract.test.js` 4 项、`multi-session-contract.test.js` 3 项、`api.test.js` 12 项、`cli-contract.test.js` 15 项、`workbench-session.test.js` 1 项。
+- package 验证：96 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；临时 consumer 安装、`node_modules/.bin/daoge` 与 `--help` 通过。清单显式拒绝 Provider.db、studio.db、`daemon-lock.sqlite` 及其 journal/WAL/SHM、工作区 runtime、真实 `provider.env`、日志、源码和退役路径。
+- 安装包跨会话场景：同一稳定 workspace 的 4 个并发首次 CLI 收敛为唯一 daemon/PID 与单一 opener 结果，其中 1 个 `opened:true`、3 个 `reused:true`，并以 4 个真实 conversation ID 建立 4 个彼此隔离的 Studio Session；项目与 Run 归属未串话。
+
+### SQLite process lock 与关闭安全证据
+
+- 唯一进程互斥由独立 `runtime/daemon-lock.sqlite` 连接持有不提交业务数据的长期 `BEGIN EXCLUSIVE` 事务实现；连接使用 100ms `busy_timeout`、`journal_mode=DELETE`、`synchronous=FULL`。第二持有者只在 SQLite 主结果码为 `SQLITE_BUSY (5)` 时报告 already running。正常关闭按 pid+ownerId 精确删除 owner record 后 `ROLLBACK`/close；崩溃时由 OS/SQLite 自动释放文件锁，遗留 record 不参与互斥。
+- 永久回归实际覆盖同进程双连接互斥、持锁子进程 `SIGKILL` 后立即重获、无关存活 PID 遗留 record 的原子覆盖，以及四个并发首次 CLI 只收敛到一个 daemon PID；loser 子进程全部退出。唯一 owner 收到一次安全 `SIGTERM` 后，测试等待 PID 与 runtime owner 文件消失，再观察 250ms，确认 loser 不接管、不重建 daemon。
+- daemon 关闭先停止 Worker；即使 Provider 忽略 abort 且请求不返回，`worker.shutdown()` 也会使已领取项进入 `outcome_unknown`，不会等待该 Provider 或自动重放。Worker tick、HTTP service 与 HTTP connection 关闭均有边界，数据库关闭和 mutex 释放完成后才卸载 `SIGTERM` 处理器。
+- 协调 DB 权限固定为 0600、runtime 目录为 0700，启动拒绝协调路径上的 symlink 或非普通文件。DELETE 模式不使用 WAL/SHM；可能出现的 rollback journal 由 SQLite 管理，不做可能误删新持有者文件的用户态清理。
+
+### 制品、迁移与验证边界
+
+- 先前 SHA-256 为 `a454326e3b5c47ce0f9c54629f245eaf5c6d8f438c524876a52221eddca030fd`、安装于 `daoge-pic-5.8.0-a454326e` 的早期候选制品属于 SQLite process lock 与关闭安全修复前基线，现已被后续修复取代（superseded）。该哈希只保留为过程证据，不得作为最终 5.8.0 Release 资产哈希或安装证据。
+- 最终 `.tgz` 的 SHA-256 不写入包内文档，避免制品对自身哈希形成自引用；重新 pack 后的最终哈希、字节数与资产身份由 `.tgz.sha256` sidecar 和 GitHub Release 在包外记录。
+- 验证没有调用任何真实外部图片 Provider，也没有产生计费生成请求；测试 Provider 与 standalone service 只验证本地边界。opener 行为使用可注入 fake opener 与 API/CLI 契约验证，没有调用真实系统默认浏览器，也没有进行桌面/移动真实浏览器视觉验收。
+- `provider.env` 迁移后不再作为运行时配置源；切换 Profile 必须 restart，queue 中不能修改 Run 并发。安装或升级后还需完整重启 Codex，以重建 process-wide Skill registry 并加载 5.8.0。
+- 5.8.0 的发布渠道是 GitHub Release 不可变 `.tgz`；`npm install <GitHub URL>` 只是安装该资产的本地方式，不表示 npm registry 已发布对应包。

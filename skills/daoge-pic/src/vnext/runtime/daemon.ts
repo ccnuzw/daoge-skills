@@ -10,15 +10,21 @@ import { promoteDueRetryWaitItems, reconcileTerminalRuns, recoverExpiredLeases }
 import { recoverStudioStartup } from '../runner/startup-recovery';
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
-import { loadProviderConfig, providerSnapshot, providerStatus } from '../studio/provider-config';
-import { getStudioRuntimeSettings } from '../studio/runtime-settings';
-import { initializeStudio } from '../studio/workspace';
+import { providerSnapshot } from '../studio/provider-config';
+import { closeProviderDatabase, importLegacyProviderEnvOnce, openProviderDatabase, ProviderDatabase, providerStatus, resolveActiveProviderConfig } from '../studio/provider-store';
+import { MAX_GLOBAL_CONCURRENCY } from '../studio/runtime-settings';
+import { ensureRuntimeDirectory, initializeStudio, studioPaths } from '../studio/workspace';
+import { installDaemonRestartHandler } from './restart';
+import { WorkbenchPresence } from './workbench-presence';
+import { acquireDaemonLock } from './daemon-lock';
 
 export interface StudioDaemonOptions {
   workspaceRoot: string;
-  providerTemplatePath: string;
+  capability?: string;
+  sessionToken?: string;
   port?: number;
   pollMs?: number;
+  workbenchPresence?: WorkbenchPresence;
 }
 
 interface RuntimeRecord {
@@ -29,8 +35,7 @@ interface RuntimeRecord {
   workspaceRoot: string;
   startedAt: string;
   heartbeatAt: string;
-  workerConcurrency: number | null;
-  provider: { providerId: string; model: string; endpoint: string | null } | null;
+  provider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null;
 }
 
 function writeAtomically(filePath: string, value: unknown): void {
@@ -40,10 +45,7 @@ function writeAtomically(filePath: string, value: unknown): void {
   fs.renameSync(temporary, filePath);
 }
 
-function isLivePid(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
+// SQLite owns daemon process exclusion; daemon.lock is only the authenticated owner identity record.
 
 function rememberedPort(portPath: string): number {
   try {
@@ -54,99 +56,139 @@ function rememberedPort(portPath: string): number {
     return 0;
   }
 }
+const SHUTDOWN_STEP_TIMEOUT_MS = 3000;
 
-function acquireLock(lockPath: string): void {
-  try {
-    const descriptor = fs.openSync(lockPath, 'wx', 0o600);
-    fs.writeFileSync(descriptor, JSON.stringify({ pid: process.pid, acquiredAt: nowIso() }) + '\n');
-    fs.closeSync(descriptor);
-    return;
-  } catch (error) {
-    if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') throw error;
-  }
-  try {
-    const previous = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as { pid?: number };
-    if (isLivePid(Number(previous.pid))) throw new Error('Studio daemon is already running for this workspace.');
-  } catch (error) {
-    if (error instanceof Error && error.message === 'Studio daemon is already running for this workspace.') throw error;
-  }
-  fs.rmSync(lockPath, { force: true });
-  const descriptor = fs.openSync(lockPath, 'wx', 0o600);
-  fs.writeFileSync(descriptor, JSON.stringify({ pid: process.pid, acquiredAt: nowIso() }) + '\n');
-  fs.closeSync(descriptor);
+async function settleShutdownStep(operation: Promise<void>, label: string, failures: unknown[]): Promise<void> {
+  let timeout: NodeJS.Timeout | undefined;
+  const guarded = operation.catch((error) => { failures.push(error); });
+  await Promise.race([
+    guarded,
+    new Promise<void>((resolve) => {
+      timeout = setTimeout(() => {
+        failures.push(new Error(label + ' did not stop within ' + SHUTDOWN_STEP_TIMEOUT_MS + 'ms.'));
+        resolve();
+      }, SHUTDOWN_STEP_TIMEOUT_MS);
+    })
+  ]);
+  clearTimeout(timeout);
 }
 
-export async function runStudioDaemon(options: StudioDaemonOptions): Promise<void> {
-  const initialized = initializeStudio({ workspaceRoot: options.workspaceRoot, providerTemplatePath: options.providerTemplatePath });
-  const runtimeDir = initialized.paths.runtimeDir;
-  const lockPath = path.join(runtimeDir, 'daemon.lock');
+
+
+export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'stopped' | 'restart'> {
+  const paths = studioPaths(options.workspaceRoot);
+  const runtimeDir = ensureRuntimeDirectory(paths);
   const runtimePath = path.join(runtimeDir, 'daemon.json');
   const portPath = path.join(runtimeDir, 'daemon.port.json');
-  fs.mkdirSync(runtimeDir, { recursive: true });
-  acquireLock(lockPath);
-  const capability = createLocalCapability();
+  const daemonLock = acquireDaemonLock({
+    databasePath: paths.daemonLockDatabasePath,
+    ownerRecordPath: paths.daemonOwnerRecordPath
+  });
 
-  let service: LocalStudioService;
-  let workerDb: StudioDatabase;
-  try {
-    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, providerTemplatePath: options.providerTemplatePath, capability });
-    workerDb = openStudioDatabase(initialized.paths, initialized.manifest);
-    recoverStudioStartup(workerDb, initialized.paths, initialized.manifest.studioId);
-  } catch (error) {
-    fs.rmSync(lockPath, { force: true });
-    throw error;
-  }
+  let service: LocalStudioService | null = null;
+  let workerDb: StudioDatabase | null = null;
+  let workerProviderDb: ProviderDatabase | null = null;
+  let worker: GenerationWorker | null = null;
   let stopping = false;
-  let timer: NodeJS.Timeout | null = null;
-  let heartbeatTimer: NodeJS.Timeout | null = null;
+  let restartRequested = false;
+  let timer: NodeJS.Timeout | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
   let inFlightTick: Promise<void> | null = null;
-  let startedUrl = '';
-  let activeWorkerConcurrency: number | null = null;
-  let activeProvider: { providerId: string; model: string; endpoint: string | null } | null = null;
-  const workerId = createId('worker');
-
-  const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt: startedAt, heartbeatAt: nowIso(), workerConcurrency: activeWorkerConcurrency, provider: activeProvider });
-  const startedAt = nowIso();
-  const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
-  const close = async (): Promise<void> => {
-    if (stopping) return;
+  let closePromise: Promise<void> | null = null;
+  const close = (): Promise<void> => {
+    if (closePromise) return closePromise;
     stopping = true;
-    if (timer) clearTimeout(timer);
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
-    if (inFlightTick) await inFlightTick.catch(() => undefined);
-    await service.close();
-    closeStudioDatabase(workerDb);
-    try {
-      const current = JSON.parse(fs.readFileSync(runtimePath, 'utf8')) as { pid?: number };
-      if (current.pid === process.pid) fs.rmSync(runtimePath, { force: true });
-    } catch { /* no runtime record remains */ }
-    try {
-      const current = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as { pid?: number };
-      if (current.pid === process.pid) fs.rmSync(lockPath, { force: true });
-    } catch { /* lock is already gone */ }
+    clearTimeout(timer);
+    clearInterval(heartbeatTimer);
+    closePromise = (async (): Promise<void> => {
+      const failures: unknown[] = [];
+      if (worker) {
+        worker.shutdown();
+        worker = null;
+      }
+      if (inFlightTick) await settleShutdownStep(inFlightTick, 'Daemon worker tick', failures);
+      if (service) {
+        await settleShutdownStep(service.close(), 'Studio HTTP service', failures);
+        service = null;
+      }
+      if (workerDb) {
+        try { closeStudioDatabase(workerDb); } catch (error) { failures.push(error); }
+        workerDb = null;
+      }
+      if (workerProviderDb) {
+        try { closeProviderDatabase(workerProviderDb); } catch (error) { failures.push(error); }
+        workerProviderDb = null;
+      }
+      try {
+        const current = JSON.parse(fs.readFileSync(runtimePath, 'utf8')) as { pid?: number };
+        if (current.pid === process.pid) fs.rmSync(runtimePath);
+      } catch { /* no runtime record owned by this process remains */ }
+      if (failures.length > 0) throw failures[0];
+    })();
+    return closePromise;
   };
 
+  let resolveShutdown = (): void => undefined;
+  const shutdownRequested = new Promise<void>((resolve) => { resolveShutdown = resolve; });
+  let shutdownStarted = false;
+  const finish = (): void => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    void close().then(resolveShutdown, resolveShutdown);
+  };
+  const stop = (): void => finish();
+  const restart = (): void => {
+    if (!shutdownStarted) restartRequested = true;
+    finish();
+  };
+  const uninstallRestart = installDaemonRestartHandler(restart);
+  const cleanupSignals = (): void => {
+    process.removeListener('SIGTERM', stop);
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGHUP', stop);
+    uninstallRestart();
+  };
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
+  process.on('SIGHUP', stop);
+
   try {
+    const initialized = initializeStudio({ workspaceRoot: paths.workspaceRoot });
+    const capability = options.capability || createLocalCapability();
+    const sessionToken = options.sessionToken || createLocalCapability();
+    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, capability, sessionToken, workbenchPresence: options.workbenchPresence });
+    workerDb = openStudioDatabase(initialized.paths, initialized.manifest);
+    workerProviderDb = openProviderDatabase(initialized.paths);
+    importLegacyProviderEnvOnce(workerProviderDb, initialized.paths);
+    recoverStudioStartup(workerDb, initialized.paths, initialized.manifest.studioId);
+
+    const daemonService = service;
+    const daemonDb = workerDb;
+    const daemonProviderDb = workerProviderDb;
+    let startedUrl = '';
+    let activeProvider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null = null;
+    const workerId = createId('worker');
+    const startedAt = nowIso();
+    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider });
+    const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
+
     const requestedPort = options.port === 0 ? 0 : options.port || rememberedPort(portPath);
-    const started = await service.listen(requestedPort);
+    const started = await daemonService.listen(requestedPort);
     startedUrl = started.url;
     writeAtomically(portPath, { port: Number(new URL(startedUrl).port) });
     const pollMs = Math.max(100, Math.min(5000, options.pollMs || 350));
     // A daemon uses one in-memory Provider identity for its lifetime. Configuration changes require a restart and cannot silently alter an in-flight run.
-    const workerConfig = loadProviderConfig(initialized.paths);
-    const workerStatus = providerStatus(initialized.paths);
-    const runtimeSettings = getStudioRuntimeSettings(workerDb, initialized.manifest.studioId);
-    activeWorkerConcurrency = workerStatus.configured ? runtimeSettings.maxWorkerConcurrency : null;
+    const workerConfig = resolveActiveProviderConfig(daemonProviderDb);
+    const workerStatus = providerStatus(daemonProviderDb);
     const workerProvider = workerConfig ? createImageProvider(workerConfig) : null;
     const workerReady = Boolean(workerConfig && workerProvider && workerStatus.configured && workerProvider.validateConfig(workerConfig).valid);
     const workerSnapshot = workerConfig ? providerSnapshot(workerConfig) : null;
-    activeProvider = workerSnapshot ? { providerId: workerSnapshot.providerId, model: workerSnapshot.model, endpoint: workerSnapshot.endpoint } : null;
+    activeProvider = workerSnapshot ? { profileId: workerSnapshot.profileId, configVersion: workerSnapshot.configVersion, providerId: workerSnapshot.providerId, model: workerSnapshot.model, endpoint: workerSnapshot.endpoint } : null;
     let configChangeReported = false;
-    let runtimeChangeReported = false;
-    const assetPersister = new StudioGeneratedAssetPersister({ db: workerDb, paths: initialized.paths, studioId: initialized.manifest.studioId });
-    const assetResolver = new StudioAssetResolver({ db: workerDb, paths: initialized.paths });
-    const worker = workerConfig && workerProvider && workerReady ? new GenerationWorker({
-      db: workerDb,
+    const assetPersister = new StudioGeneratedAssetPersister({ db: daemonDb, paths: initialized.paths, studioId: initialized.manifest.studioId });
+    const assetResolver = new StudioAssetResolver({ db: daemonDb, paths: initialized.paths });
+    worker = workerConfig && workerProvider && workerReady ? new GenerationWorker({
+      db: daemonDb,
       workerId,
       provider: workerProvider,
       providerConfig: workerConfig,
@@ -158,22 +200,17 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
     const tick = async (): Promise<void> => {
       if (stopping) return;
       try {
-        const recoveredLeases = recoverExpiredLeases(workerDb);
-        const promotedRetries = promoteDueRetryWaitItems(workerDb);
-        const reconciledRuns = reconcileTerminalRuns(workerDb);
-        const currentConfig = loadProviderConfig(initialized.paths);
+        const recoveredLeases = recoverExpiredLeases(daemonDb);
+        const promotedRetries = promoteDueRetryWaitItems(daemonDb);
+        const reconciledRuns = reconcileTerminalRuns(daemonDb);
+        const currentConfig = resolveActiveProviderConfig(daemonProviderDb);
         const currentSnapshot = currentConfig ? providerSnapshot(currentConfig) : null;
         if (!configChangeReported && JSON.stringify(currentSnapshot) !== JSON.stringify(workerSnapshot)) {
           configChangeReported = true;
-          appendStudioEvent(workerDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_changed', payload: { restartRequired: true } });
-        }
-        const currentRuntimeSettings = getStudioRuntimeSettings(workerDb, initialized.manifest.studioId);
-        if (!runtimeChangeReported && currentRuntimeSettings.maxWorkerConcurrency !== runtimeSettings.maxWorkerConcurrency) {
-          runtimeChangeReported = true;
-          appendStudioEvent(workerDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.runtime_settings_changed', payload: { restartRequired: true } });
+          appendStudioEvent(daemonDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_changed', payload: { restartRequired: true } });
         }
         if (worker) {
-          const result = await worker.processOnce(activeWorkerConcurrency || 2);
+          const result = await worker.processOnce(MAX_GLOBAL_CONCURRENCY);
           scheduleTick(result.claimed || recoveredLeases || promotedRetries || reconciledRuns ? 30 : pollMs);
           return;
         }
@@ -192,13 +229,11 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<voi
       }, delay);
     };
     scheduleTick(10);
-    await new Promise<void>((resolve) => {
-      const stop = (): void => { void close().finally(resolve); };
-      process.once('SIGTERM', stop);
-      process.once('SIGINT', stop);
-      process.once('SIGHUP', stop);
-    });
+    await shutdownRequested;
+    return restartRequested ? 'restart' : 'stopped';
   } finally {
-    await close();
+    try { await close(); } finally {
+      try { daemonLock.release(); } finally { cleanupSignals(); }
+    }
   }
 }

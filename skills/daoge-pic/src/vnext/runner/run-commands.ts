@@ -5,7 +5,7 @@ import { ImageOperation } from '../providers/contracts';
 import { PreflightPlan, PreflightResult, preflightGenerationPlan } from './preflight';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig, SafeProviderStatus } from '../studio/provider-config';
-import { requireRequestedConcurrency, StudioRuntimeSettings } from '../studio/runtime-settings';
+import { ConcurrencySource, MAX_GLOBAL_CONCURRENCY, resolveExecutionConcurrency } from '../studio/runtime-settings';
 import { getStudioAsset } from '../domain/assets';
 import { SafeErrorDetail, safeErrorDetail } from '../shared/safe-error';
 
@@ -15,7 +15,8 @@ export interface GenerationRun {
   status: RunStatus;
   providerSnapshot: Record<string, unknown>;
   planSnapshot: PreflightPlan;
-  requestedConcurrency: number | null;
+  executionConcurrency: number;
+  concurrencySource: ConcurrencySource;
   version: number;
 }
 
@@ -43,7 +44,8 @@ interface StoredRun {
   status: RunStatus;
   provider_snapshot_json: string;
   plan_snapshot_json: string;
-  requested_concurrency: number | null;
+  execution_concurrency: number;
+  concurrency_source: ConcurrencySource;
   version: number;
 }
 
@@ -76,6 +78,8 @@ export interface DryRunPreview {
   providerSnapshot: Record<string, unknown>;
   planSnapshot: PreflightPlan;
   itemCount: number;
+  executionConcurrency: number;
+  concurrencySource: ConcurrencySource;
   createdAt: string;
 }
 
@@ -117,7 +121,8 @@ function runFromRow(row: StoredRun): GenerationRun {
     status: row.status,
     providerSnapshot: parseObject(row.provider_snapshot_json),
     planSnapshot: parsePlan(row.plan_snapshot_json),
-    requestedConcurrency: row.requested_concurrency === null || row.requested_concurrency === undefined ? null : Number(row.requested_concurrency),
+    executionConcurrency: Number(row.execution_concurrency),
+    concurrencySource: row.concurrency_source,
     version: row.version
   };
 }
@@ -148,12 +153,6 @@ function requireValue(value: string, label: string): string {
   return normalized;
 }
 
-function requestedConcurrency(value: unknown, runtimeSettings: StudioRuntimeSettings): number | null {
-  if (value === undefined || value === null || value === '') return null;
-  const requested = requireRequestedConcurrency(value);
-  if (requested > runtimeSettings.maxWorkerConcurrency) throw new InvalidCommandError('Requested run concurrency exceeds the current workspace limit of ' + runtimeSettings.maxWorkerConcurrency + '.');
-  return requested;
-}
 
 function resolveRoundInStudio(db: StudioDatabase, studioId: string, roundId: string): StoredRoundPlan {
   const row = db.prepare('SELECT r.id, r.status, r.plan_json, r.plan_version, p.studio_id FROM creative_rounds r JOIN creative_tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(roundId, studioId) as StoredRoundPlan | undefined;
@@ -162,7 +161,7 @@ function resolveRoundInStudio(db: StudioDatabase, studioId: string, roundId: str
 }
 
 function resolveRunInStudio(db: StudioDatabase, studioId: string, runId: string): StoredRun & { studio_id: string } {
-  const row = db.prepare('SELECT r.id, r.round_id, r.status, r.provider_snapshot_json, r.plan_snapshot_json, r.requested_concurrency, r.version, p.studio_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(runId, studioId) as (StoredRun & { studio_id: string }) | undefined;
+  const row = db.prepare('SELECT r.id, r.round_id, r.status, r.provider_snapshot_json, r.plan_snapshot_json, r.execution_concurrency, r.concurrency_source, r.version, p.studio_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(runId, studioId) as (StoredRun & { studio_id: string }) | undefined;
   if (!row) throw new StudioNotFoundError('Generation run not found: ' + runId);
   return row;
 }
@@ -209,11 +208,11 @@ export function preflightRound(db: StudioDatabase, input: { studioId: string; ro
 
 
 
-function dryRunFromRow(row: { id: string; round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string; item_count: number; created_at: string }): DryRunPreview {
-  return { id: row.id, roundId: row.round_id, planVersion: row.plan_version, providerSnapshot: parseObject(row.provider_snapshot_json), planSnapshot: parsePlan(row.plan_snapshot_json), itemCount: row.item_count, createdAt: row.created_at };
+function dryRunFromRow(row: { id: string; round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string; item_count: number; execution_concurrency: number; concurrency_source: ConcurrencySource; created_at: string }): DryRunPreview {
+  return { id: row.id, roundId: row.round_id, planVersion: row.plan_version, providerSnapshot: parseObject(row.provider_snapshot_json), planSnapshot: parsePlan(row.plan_snapshot_json), itemCount: row.item_count, executionConcurrency: Number(row.execution_concurrency), concurrencySource: row.concurrency_source, createdAt: row.created_at };
 }
 
-export function createDryRunPreview(db: StudioDatabase, input: { studioId: string; roundId: string; providerConfig: ResolvedProviderConfig; providerStatus: SafeProviderStatus; idempotencyKey: string }): CommandReceipt<{ preview: DryRunPreview | null; preflight: PreflightResult }> {
+export function createDryRunPreview(db: StudioDatabase, input: { studioId: string; roundId: string; providerConfig: ResolvedProviderConfig; providerStatus: SafeProviderStatus; executionConcurrency?: unknown; concurrencySource?: unknown; idempotencyKey: string }): CommandReceipt<{ preview: DryRunPreview | null; preflight: PreflightResult }> {
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'rounds.dry_run', () => {
     const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
     if (!['awaiting_confirmation', 'active'].includes(round.status)) throw new InvalidCommandError('Only a prepared or confirmed creative round can be dry-run.');
@@ -223,59 +222,47 @@ export function createDryRunPreview(db: StudioDatabase, input: { studioId: strin
     const timestamp = nowIso();
     const id = createId('dryrun');
     const provider = providerSnapshot(input.providerConfig);
-    db.prepare('INSERT INTO dry_run_previews (id, round_id, plan_version, provider_snapshot_json, plan_snapshot_json, item_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, round.id, round.plan_version, JSON.stringify(provider), JSON.stringify(preflight.normalizedPlan), preflight.normalizedPlan.itemCount, timestamp);
+    const frozenConcurrency = resolveExecutionConcurrency(input.executionConcurrency, input.concurrencySource);
+    db.prepare('INSERT INTO dry_run_previews (id, round_id, plan_version, provider_snapshot_json, plan_snapshot_json, item_count, execution_concurrency, concurrency_source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, round.id, round.plan_version, JSON.stringify(provider), JSON.stringify(preflight.normalizedPlan), preflight.normalizedPlan.itemCount, frozenConcurrency.executionConcurrency, frozenConcurrency.concurrencySource, timestamp);
     const insertItem = db.prepare('INSERT INTO dry_run_items (id, preview_id, sequence, prompt_payload_json, created_at) VALUES (?, ?, ?, ?, ?)');
     for (let sequence = 1; sequence <= preflight.normalizedPlan.itemCount; sequence += 1) insertItem.run(createId('dryitem'), id, sequence, JSON.stringify({ ...preflight.normalizedPlan, sequence }), timestamp);
-    appendStudioEvent(db, { studioId: input.studioId, entityType: 'dry_run_preview', entityId: id, eventType: 'dry_run.created', payload: { roundId: round.id, planVersion: round.plan_version, itemCount: preflight.normalizedPlan.itemCount } });
-    return { preview: { id, roundId: round.id, planVersion: round.plan_version, providerSnapshot: provider, planSnapshot: preflight.normalizedPlan, itemCount: preflight.normalizedPlan.itemCount, createdAt: timestamp }, preflight };
-  }, { studioId: input.studioId, roundId: input.roundId, provider: providerSnapshot(input.providerConfig) });
+    appendStudioEvent(db, { studioId: input.studioId, entityType: 'dry_run_preview', entityId: id, eventType: 'dry_run.created', payload: { roundId: round.id, planVersion: round.plan_version, itemCount: preflight.normalizedPlan.itemCount, ...frozenConcurrency } });
+    return { preview: { id, roundId: round.id, planVersion: round.plan_version, providerSnapshot: provider, planSnapshot: preflight.normalizedPlan, itemCount: preflight.normalizedPlan.itemCount, ...frozenConcurrency, createdAt: timestamp }, preflight };
+  }, { studioId: input.studioId, roundId: input.roundId, provider: providerSnapshot(input.providerConfig), concurrency: resolveExecutionConcurrency(input.executionConcurrency, input.concurrencySource) });
 }
 
 export function listDryRunPreviews(db: StudioDatabase, studioId: string, roundId: string): DryRunPreview[] {
   resolveRoundInStudio(db, requireValue(studioId, 'studioId'), requireValue(roundId, 'roundId'));
-  return (db.prepare('SELECT preview.id, preview.round_id, preview.plan_version, preview.provider_snapshot_json, preview.plan_snapshot_json, preview.item_count, preview.created_at FROM dry_run_previews preview JOIN creative_rounds round ON round.id = preview.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE preview.round_id = ? AND project.studio_id = ? ORDER BY preview.created_at DESC').all(roundId, studioId) as Array<{ id: string; round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string; item_count: number; created_at: string }>).map(dryRunFromRow);
+  return (db.prepare('SELECT preview.id, preview.round_id, preview.plan_version, preview.provider_snapshot_json, preview.plan_snapshot_json, preview.item_count, preview.execution_concurrency, preview.concurrency_source, preview.created_at FROM dry_run_previews preview JOIN creative_rounds round ON round.id = preview.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE preview.round_id = ? AND project.studio_id = ? ORDER BY preview.created_at DESC').all(roundId, studioId) as Array<{ id: string; round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string; item_count: number; execution_concurrency: number; concurrency_source: ConcurrencySource; created_at: string }>).map(dryRunFromRow);
 }
 
-export function queueGenerationRun(db: StudioDatabase, input: { studioId: string; roundId: string; providerConfig: ResolvedProviderConfig; providerStatus: SafeProviderStatus; runtimeSettings: StudioRuntimeSettings; requestedConcurrency?: unknown; preflightId?: string; idempotencyKey: string }): CommandReceipt<GenerationRun> {
+export function queueGenerationRun(db: StudioDatabase, input: { studioId: string; roundId: string; providerConfig: ResolvedProviderConfig; providerStatus: SafeProviderStatus; preflightId?: string; idempotencyKey: string }): CommandReceipt<GenerationRun> {
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'runs.queue', () => {
     const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
     if (round.status !== 'active') throw new InvalidCommandError('The creative round must be confirmed before a run can be queued.');
     const preflight = validateManagedAssets(db, round.studio_id, preflightGenerationPlan(parsePlan(round.plan_json), input.providerStatus));
     if (!preflight.valid) throw new InvalidCommandError('Generation preflight failed: ' + preflight.issues.map((issue) => issue.code).join(', '));
-    if (input.providerConfig.providerId !== input.providerStatus.providerId) throw new InvalidCommandError('Provider configuration changed during preflight. Run preflight again.');
     const snapshot = providerSnapshot(input.providerConfig);
-    const runConcurrency = requestedConcurrency(input.requestedConcurrency, input.runtimeSettings);
     if (!input.preflightId) throw new InvalidCommandError('Dry-run evidence is required before queueing.');
-    {
-      const preview = db.prepare('SELECT round_id, plan_version, provider_snapshot_json, plan_snapshot_json FROM dry_run_previews WHERE id = ?').get(input.preflightId) as { round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string } | undefined;
-      if (!preview || preview.round_id !== round.id || preview.plan_version !== round.plan_version || !storedSnapshotMatches(preview.provider_snapshot_json, snapshot) || !storedSnapshotMatches(preview.plan_snapshot_json, preflight.normalizedPlan)) throw new InvalidCommandError('Dry-run evidence is stale. Re-run preflight before queueing.');
-    }
+    const preview = db.prepare('SELECT round_id, plan_version, provider_snapshot_json, plan_snapshot_json, execution_concurrency, concurrency_source FROM dry_run_previews WHERE id = ?').get(input.preflightId) as { round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string; execution_concurrency: number; concurrency_source: ConcurrencySource } | undefined;
+    if (!preview || preview.round_id !== round.id || preview.plan_version !== round.plan_version || !storedSnapshotMatches(preview.provider_snapshot_json, snapshot) || !storedSnapshotMatches(preview.plan_snapshot_json, preflight.normalizedPlan)) throw new InvalidCommandError('Dry-run evidence is stale. Re-run preflight before queueing.');
     const id = createId('run');
     const timestamp = nowIso();
-    db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, requested_concurrency, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)').run(
-      id,
-      round.id,
-      'queued',
-      JSON.stringify(snapshot),
-      JSON.stringify(preflight.normalizedPlan),
-      runConcurrency,
-      timestamp,
-      timestamp
-    );
+    db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, execution_concurrency, concurrency_source, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)').run(id, round.id, 'queued', JSON.stringify(snapshot), JSON.stringify(preflight.normalizedPlan), preview.execution_concurrency, preview.concurrency_source, timestamp, timestamp);
     const insertItem = db.prepare('INSERT INTO run_items (id, run_id, sequence, status, prompt_payload_json, request_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     for (let sequence = 1; sequence <= preflight.normalizedPlan.itemCount; sequence += 1) {
       const itemId = createId('item');
       const requestId = createId('request');
-      const promptPayload = { ...preflight.normalizedPlan, sequence };
-      insertItem.run(itemId, id, sequence, 'pending', JSON.stringify(promptPayload), requestId, timestamp, timestamp);
+      insertItem.run(itemId, id, sequence, 'pending', JSON.stringify({ ...preflight.normalizedPlan, sequence }), requestId, timestamp, timestamp);
     }
-    appendStudioEvent(db, { studioId: round.studio_id, entityType: 'generation_run', entityId: id, eventType: 'run.queued', payload: { roundId: round.id, itemCount: preflight.normalizedPlan.itemCount, requestedConcurrency: runConcurrency } });
-    return { id, roundId: round.id, status: 'queued', providerSnapshot: snapshot, planSnapshot: preflight.normalizedPlan, requestedConcurrency: runConcurrency, version: 1 };
-  }, { studioId: input.studioId, roundId: input.roundId, preflightId: input.preflightId || null, requestedConcurrency: input.requestedConcurrency ?? null, provider: providerSnapshot(input.providerConfig) });
+    const frozen = { executionConcurrency: Number(preview.execution_concurrency), concurrencySource: preview.concurrency_source };
+    appendStudioEvent(db, { studioId: round.studio_id, entityType: 'generation_run', entityId: id, eventType: 'run.queued', payload: { roundId: round.id, itemCount: preflight.normalizedPlan.itemCount, ...frozen } });
+    return { id, roundId: round.id, status: 'queued', providerSnapshot: snapshot, planSnapshot: preflight.normalizedPlan, ...frozen, version: 1 };
+  }, { studioId: input.studioId, roundId: input.roundId, preflightId: input.preflightId || null, provider: providerSnapshot(input.providerConfig) });
 }
 
 export function getGenerationRun(db: StudioDatabase, runId: string): GenerationRun | null {
-  const row = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, requested_concurrency, version FROM generation_runs WHERE id = ?').get(runId) as StoredRun | undefined;
+  const row = db.prepare('SELECT id, round_id, status, provider_snapshot_json, plan_snapshot_json, execution_concurrency, concurrency_source, version FROM generation_runs WHERE id = ?').get(runId) as StoredRun | undefined;
   return row ? runFromRow(row) : null;
 }
 
@@ -331,12 +318,11 @@ export function promoteDueRetryWaitItems(db: StudioDatabase, now = new Date()): 
   });
 }
 
-function runConcurrencyLimit(requested: number | null, globalLimit: number): number {
-  const requestedLimit = requested === null || requested === undefined ? globalLimit : Number(requested);
-  return Number.isInteger(requestedLimit) && requestedLimit >= 1 ? Math.min(globalLimit, requestedLimit) : globalLimit;
+function runConcurrencyLimit(executionConcurrency: number, globalLimit: number): number {
+  return Math.min(MAX_GLOBAL_CONCURRENCY, globalLimit, executionConcurrency);
 }
 
-export function claimRunItems(db: StudioDatabase, input: { workerId: string; limit: number; leaseMs: number; now?: Date; providerSnapshot?: { providerId: string; model: string; endpoint: string | null } }): ClaimedRunItem[] {
+export function claimRunItems(db: StudioDatabase, input: { workerId: string; limit: number; leaseMs: number; now?: Date; providerSnapshot?: { profileId: string; configVersion: number } }): ClaimedRunItem[] {
   const workerId = requireValue(input.workerId, 'workerId');
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 1000) throw new InvalidCommandError('Claim limit must be an integer between 1 and 1000.');
   if (!Number.isInteger(input.leaseMs) || input.leaseMs < 1000) throw new InvalidCommandError('Lease duration must be at least 1000 ms.');
@@ -344,12 +330,12 @@ export function claimRunItems(db: StudioDatabase, input: { workerId: string; lim
   const nowValue = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
   return withTransaction(db, () => {
-    const providerFilter = input.providerSnapshot ? " AND json_extract(r.provider_snapshot_json, '$.providerId') = ? AND json_extract(r.provider_snapshot_json, '$.model') = ? AND COALESCE(json_extract(r.provider_snapshot_json, '$.endpoint'), '') = ?" : '';
-    const sql = "SELECT i.id, i.run_id, i.sequence, i.status, i.prompt_payload_json, i.request_id, i.lease_token, i.lease_expires_at, i.attempts, i.retry_at, r.status AS run_status, r.requested_concurrency, r.round_id, p.studio_id FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'pending' AND r.status IN ('queued', 'running') AND (i.retry_at IS NULL OR i.retry_at <= ?)" + providerFilter + " ORDER BY r.created_at, i.sequence LIMIT ?";
+    const providerFilter = input.providerSnapshot ? " AND json_extract(r.provider_snapshot_json, '$.profileId') = ? AND json_extract(r.provider_snapshot_json, '$.configVersion') = ?" : '';
+    const sql = "WITH ranked_candidates AS (SELECT i.id, i.run_id, i.sequence, i.status, i.prompt_payload_json, i.request_id, i.lease_token, i.lease_expires_at, i.attempts, i.retry_at, r.status AS run_status, r.execution_concurrency, r.round_id, r.created_at AS run_created_at, p.studio_id, ROW_NUMBER() OVER (PARTITION BY i.run_id ORDER BY i.sequence) AS candidate_rank FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'pending' AND r.status IN ('queued', 'running') AND (i.retry_at IS NULL OR i.retry_at <= ?)" + providerFilter + ") SELECT * FROM ranked_candidates WHERE candidate_rank <= MIN(execution_concurrency, ?) ORDER BY run_created_at, run_id, sequence";
     const params: Array<string | number> = [nowValue];
-    if (input.providerSnapshot) params.push(input.providerSnapshot.providerId, input.providerSnapshot.model, input.providerSnapshot.endpoint || '');
-    params.push(Math.min(10000, Math.max(input.limit, input.limit * 100)));
-    type CandidateRow = StoredRunItem & { run_status: RunStatus; requested_concurrency: number | null; round_id: string; studio_id: string };
+    if (input.providerSnapshot) params.push(input.providerSnapshot.profileId, input.providerSnapshot.configVersion);
+    params.push(Math.min(MAX_GLOBAL_CONCURRENCY, input.limit));
+    type CandidateRow = StoredRunItem & { run_status: RunStatus; execution_concurrency: number; round_id: string; studio_id: string };
     const rows = db.prepare(sql).all(...params) as unknown as CandidateRow[];
     if (!rows.length) return [];
     const runIds = [...new Set(rows.map((row) => row.run_id))];
@@ -360,7 +346,11 @@ export function claimRunItems(db: StudioDatabase, input: { workerId: string; lim
     const availableGlobalSlots = Math.max(0, input.limit - Number(globalInFlight.total));
     if (!availableGlobalSlots) return [];
     const rowsByRun = new Map<string, CandidateRow[]>();
-    for (const row of rows) rowsByRun.set(row.run_id, [...(rowsByRun.get(row.run_id) || []), row]);
+    for (const row of rows) {
+      const queue = rowsByRun.get(row.run_id);
+      if (queue) queue.push(row);
+      else rowsByRun.set(row.run_id, [row]);
+    }
     const queueIndex = new Map<string, number>();
     const activatedRuns = new Set<string>();
     const claimed: ClaimedRunItem[] = [];
@@ -374,7 +364,7 @@ export function claimRunItems(db: StudioDatabase, input: { workerId: string; lim
         if (!row) continue;
         queueIndex.set(runId, index + 1);
         const inFlight = inFlightByRun.get(runId) || 0;
-        if (inFlight >= runConcurrencyLimit(row.requested_concurrency, input.limit)) continue;
+        if (inFlight >= runConcurrencyLimit(row.execution_concurrency, input.limit)) continue;
         if (row.run_status === 'queued' && !activatedRuns.has(runId)) {
           assertRunTransition('queued', 'running');
           const started = db.prepare('UPDATE generation_runs SET status = ?, worker_id = ?, started_at = COALESCE(started_at, ?), version = version + 1, updated_at = ? WHERE id = ? AND status = ?').run('running', workerId, nowValue, nowValue, row.run_id, 'queued');

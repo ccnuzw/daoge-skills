@@ -38,15 +38,28 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function isSensitivePackagePath(file) {
+  const normalized = String(file || '').replace(/\\/g, '/').replace(/^\.\/+/, '');
+  if (normalized === 'references/provider.env.example') return false;
+  const lower = normalized.toLowerCase();
+  return /(?:^|\/)daemon-lock\.sqlite(?:$|[.-])/.test(lower)
+    || /(?:^|\/)(?:provider|studio)\.db(?:$|[.-])/.test(lower)
+    || /\.(?:db|sqlite|sqlite3)-(?:wal|shm|journal)(?:$|[.-])/.test(lower)
+    || /(?:^|\/)provider\.env(?:$|[.-])/.test(lower)
+    || /(?:^|\/)daoge-studio\/runtime(?:\/|$)/.test(lower)
+    || /(?:^|\/)[^/]*\.log(?:$|[.-])/.test(lower);
+}
+
 function assertPackagePaths(paths) {
-  const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'references/provider.env.example', 'docs/daoge_pic_vnext_upgrade_spec_zh.md'];
+  const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'references/provider.env.example', 'docs/daoge_pic_vnext_upgrade_spec_zh.md'];
   const allowed = /^(dist\/|scripts\/daoge\.js$|references\/provider\.env\.example$|docs\/daoge_pic_vnext_upgrade_spec_zh\.md$|README\.md$|SKILL\.md$|LICENSE$|package\.json$)/;
   const missing = required.filter((file) => !paths.includes(file));
   const unexpected = paths.filter((file) => !allowed.test(file));
   const maps = paths.filter((file) => file.endsWith('.map'));
   const retired = paths.filter((file) => /^(app|agents|src|tests|references\/(?!provider\.env\.example$)|Dockerfile$|docker-compose\.yml$|\.env\.example$|\.dockerignore$)/.test(file) || file.includes('legacy-adapters'));
-  if (missing.length || unexpected.length || maps.length || retired.length) throw new Error(JSON.stringify({ missing, unexpected, maps, retired }, null, 2));
-  return { missing, unexpected, maps, retired };
+  const sensitive = paths.filter(isSensitivePackagePath);
+  if (missing.length || unexpected.length || maps.length || retired.length || sensitive.length) throw new Error(JSON.stringify({ missing, unexpected, maps, retired, sensitive }, null, 2));
+  return { missing, unexpected, maps, retired, sensitive };
 }
 
 function main({ runCommand = run, removeSync = fs.rmSync } = {}) {
@@ -66,13 +79,13 @@ function main({ runCommand = run, removeSync = fs.rmSync } = {}) {
     fs.writeFileSync(path.join(consumerRoot, 'package.json'), JSON.stringify({ private: true }, null, 2) + '\n');
     runCommand('npm', ['install', tarballPath, '--ignore-scripts'], { cwd: consumerRoot });
     const installedRoot = path.join(consumerRoot, 'node_modules', 'daoge-pic');
-    const runtimeRequired = ['scripts/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/workbench/index.html', 'references/provider.env.example'];
+    const runtimeRequired = ['scripts/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'references/provider.env.example'];
     const runtimeMissing = runtimeRequired.filter((file) => !fs.existsSync(path.join(installedRoot, file)));
     if (runtimeMissing.length) throw new Error(JSON.stringify({ runtimeMissing }, null, 2));
     const installedBin = path.join(consumerRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'daoge.cmd' : 'daoge');
     const help = runCommand(installedBin, ['--help'], { cwd: consumerRoot });
     if (!help.stdout.includes('DAOGE Pic vNext Studio')) throw new Error('Installed daoge --help did not execute the packaged bin.');
-    process.stdout.write(JSON.stringify({ files: paths.length, unexpected: checked.unexpected.length, maps: checked.maps.length, retired: checked.retired.length, installed: true, bin: true, help: true }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ files: paths.length, unexpected: checked.unexpected.length, maps: checked.maps.length, retired: checked.retired.length, sensitive: checked.sensitive.length, installed: true, bin: true, help: true }, null, 2) + '\n');
   } finally {
     if (tarballPath) removeSync(tarballPath, { force: true });
     if (consumerRoot) fs.rmSync(consumerRoot, { recursive: true, force: true });

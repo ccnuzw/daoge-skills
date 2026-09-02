@@ -20,6 +20,8 @@ import { createStudioSearchCoordinator } from './studio-search-model.mjs';
 import { batchOperationSignature, createBatchOperationSnapshot, createDeliveryInteractionGuard, isDeliveryOperationCurrent } from './creator-delivery-model.mjs';
 import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, assetPageOffset, clampAssetPage, normalizeAssetPageSize } from './asset-pagination.mjs';
 import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, filterProjects, filterTasks, paginateWorkspaceItems } from './workspace-list-model.mjs';
+import { ProviderSettings } from './provider-settings.jsx';
+import { workbenchConversationId } from './workbench-session.mjs';
 import './styles.css';
 
 const EMPTY = [];
@@ -69,16 +71,8 @@ function uniqueKey(prefix) {
 const DELIVERY_COMPLETION_PREFIX = 'daoge-pic:delivery-completion:';
 const ASSET_PAGE_SIZE_KEY = 'daoge-pic:asset-page-size';
 
-const WORKBENCH_CONVERSATION_KEY = 'daoge-pic:workbench-conversation-id';
 const ASSET_SCOPE_LABELS = { round: '当前轮次', task: '当前任务', project: '当前项目', studio: '全部 Studio' };
 
-function workbenchConversationId() {
-  const stored = window.localStorage.getItem(WORKBENCH_CONVERSATION_KEY);
-  if (stored) return stored;
-  const value = 'workbench-' + crypto.randomUUID();
-  window.localStorage.setItem(WORKBENCH_CONVERSATION_KEY, value);
-  return value;
-}
 
 function assetPathForRoute(route, pagination = null) {
   const params = new URLSearchParams();
@@ -325,7 +319,7 @@ function App() {
 
   const openWorkbenchSession = useCallback(async () => {
     if (session) return session;
-    const nextSession = await api('/api/sessions/open', { method: 'POST', idempotencyKey: uniqueKey('session-open'), body: { conversationId: workbenchConversationId() } });
+    const nextSession = await api('/api/sessions/open', { method: 'POST', idempotencyKey: uniqueKey('session-open'), body: { conversationId: workbenchConversationId(window.sessionStorage) } });
     setSession(nextSession);
     return nextSession;
   }, [session]);
@@ -334,7 +328,7 @@ function App() {
     const signal = request.signal;
     const [studioData, providerData, projectData, taskTypeData, styleKitData, brandKitData, sharedAssetData] = await Promise.all([
       api('/api/studio', { signal }),
-      api('/api/provider/status', { signal }),
+      api('/api/providers', { signal }),
       api('/api/projects', { signal }),
       api('/api/task-types', { signal }),
       api('/api/style-kits', { signal }),
@@ -344,7 +338,7 @@ function App() {
     if (!request.isCurrent()) throw new DOMException('Stale refresh', 'AbortError');
     const nextProjects = projectData.projects || [];
     setStudio(studioData);
-    setProvider(providerData);
+    setProvider(providerData.status);
     setProjects(nextProjects);
     setTaskTypes(taskTypeData.taskTypes || []);
     setStyleKits(styleKitData.styleKits || []);
@@ -916,9 +910,7 @@ function App() {
     if (!window.confirm('归档后将关闭该项目下的任务与轮次。未完成生成必须先暂停或取消。是否继续？')) return;
     try { await api('/api/projects/' + encodeURIComponent(selectedProject.id) + '/archive', { method: 'POST', idempotencyKey: uniqueKey('archive-project'), body: {} }); await refresh(); } catch (nextError) { setError(nextError.message || '无法归档项目。'); }
   };
-  const openProviderDetails = async () => {
-    try { setProviderDetails(await api('/api/provider/details')); } catch (nextError) { setError(nextError.message || '无法读取生成配置详情。'); }
-  };
+  const openProviderDetails = () => { setProviderDetails({ open: true }); };
   const openAdvancedDetails = async () => {
     if (!selectedRound) return;
     const request = advancedDetailRequests.current.begin([selectedRound.id, activeRunId || ''].join(':'));
@@ -980,7 +972,7 @@ function App() {
       <div className="run-focus"><div><p className="eyebrow">{selectedRound ? ({ exploration: '探索轮次', refinement: '优化轮次', variation: '变体轮次', edit: '编辑轮次', fill: '补图轮次' })[selectedRound.purpose] : '请先选择轮次'}</p><h2>{activeRun ? '已选择生成运行' : selectedRound ? '请选择生成运行' : '尚未选择轮次'}</h2></div>{activeRun && <StatusPill presentation={runExecutionStatus} />}</div>
       {selectedRound && <label className="run-history-select"><span>运行历史</span><select value={activeRunId || ''} onChange={(event) => navigateRoute({ runId: event.target.value || null })}><option value="">请选择生成运行</option>{runs.map((run) => <option value={run.id} key={run.id}>{runHistoryOption(run)}</option>)}</select></label>}
       {taskOverview && <section className="creative-summary"><div><p className="eyebrow">当前任务创作链</p><h3>{taskOverview.task?.name}</h3><span>{taskOverview.summary?.roundCount || 0} 个轮次 · {taskOverview.summary?.runCount || 0} 次运行 · {taskOverview.summary?.resultCount || 0} 个结果</span></div>{creativeRecord && <div className="round-record"><span>第 {creativeRecord.round?.planVersion || 0} 版计划 · {creativeRecord.round?.purpose || '创作'}方向</span><span>{creativeRecord.lineage?.rounds?.length ? '承接 ' + creativeRecord.lineage.rounds.length + ' 个上游轮次' : '首个创作方向'}</span></div>}</section>}
-      {activeRun ? <><div className="run-metrics"><div><span>计划产出</span><b>{activeRun.planSnapshot?.itemCount ?? '未记录'}</b></div><div><span>本次并发请求</span><b>{activeRun.requestedConcurrency ? activeRun.requestedConcurrency + ' 路' : '工作区上限'}</b></div><div><span>实际执行</span><b>{runExecutionStatus.label}</b></div><div><span>运行状态</span><b>{runLifecycleStatus.label}</b></div></div><div className="run-controls">{['queued', 'running'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void controlRun('pause')}><Pause size={16} />暂停</button>}{activeRun.status === 'paused' && <button type="button" className="command-button" onClick={() => void controlRun('resume')}><Play size={16} />继续</button>}{['partial', 'failed'].includes(activeRun.status) && <button type="button" className="command-button" onClick={() => void controlRun('retry')}><RefreshCw size={16} />重试</button>}{canCancelActiveRun && <button type="button" className="outline-button danger-text" onClick={() => void controlRun('cancel')}><X size={16} />取消运行</button>}</div><section className="run-item-list"><div className="run-item-list-head"><span>运行项</span><small>{visibleRunItems.length} 项</small></div>{visibleRunItems.map((item) => <RunItemRow key={item.id} item={item} onInspect={inspectAsset} onRetry={retryRunItem} />)}</section><div className="run-advanced-toggle"><IconButton label="查看高级计划与干跑详情" onClick={() => void openAdvancedDetails()}><Eye size={16} /></IconButton><span>高级详情</span></div>{advancedDetails && <section className="advanced-details"><div className="advanced-details-head"><div><p className="eyebrow">仅在需要复核时显示</p><h3>计划与干跑证据</h3></div><IconButton label="关闭高级详情" onClick={() => setAdvancedDetails(null)}><X size={16} /></IconButton></div><div className="advanced-evidence"><div><b>计划版本</b>{advancedDetails.plans.map((plan) => <details key={plan.id || plan.planVersion}><summary>第 {plan.planVersion || '未知'} 版 · {statusLabel(plan.state)}</summary><pre>{JSON.stringify(plan.plan, null, 2)}</pre></details>)}</div><div><b>干跑记录</b>{advancedDetails.dryRuns.map((preview) => <details key={preview.id}><summary>第 {dryRunEvidence(preview).planVersion || '未知'} 版 · {dryRunEvidence(preview).status}{dryRunEvidence(preview).details.itemCount === null ? '' : ' · ' + dryRunEvidence(preview).details.itemCount + ' 项'}</summary><pre>{JSON.stringify(dryRunEvidence(preview).details, null, 2)}</pre></details>)}</div></div></section>}</> : <div className="empty-stage"><Sparkles size={28} strokeWidth={1.2} /><p>在会话中确认创作计划后，生成运行会在这里出现。</p></div>}
+      {activeRun ? <><div className="run-metrics"><div><span>计划产出</span><b>{activeRun.planSnapshot?.itemCount ?? '未记录'}</b></div><div><span>冻结并发</span><b>{activeRun.executionConcurrency + ' 路'}</b><small>{activeRun.concurrencySource === 'default' ? '默认' : activeRun.concurrencySource === 'serial' ? '串行' : '显式指定'}</small></div><div><span>实际执行</span><b>{runExecutionStatus.label}</b></div><div><span>运行状态</span><b>{runLifecycleStatus.label}</b></div></div><div className="run-controls">{['queued', 'running'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void controlRun('pause')}><Pause size={16} />暂停</button>}{activeRun.status === 'paused' && <button type="button" className="command-button" onClick={() => void controlRun('resume')}><Play size={16} />继续</button>}{['partial', 'failed'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void controlRun('retry')}><RefreshCw size={16} />重试安全项</button>}{canCancelActiveRun && <button type="button" className="danger-button" onClick={() => void controlRun('cancel')}><X size={16} />取消</button>}<IconButton label="查看高级详情" onClick={() => void openAdvancedDetails()}><Ellipsis size={18} /></IconButton></div><div className="run-item-list">{visibleRunItems.length ? visibleRunItems.map((item) => <RunItemRow key={item.id} item={item} onInspect={inspectAsset} onRetry={retryRunItem} />) : <p className="empty-copy">尚无运行项。</p>}</div></> : <p className="empty-copy">从运行历史中选择一次运行，查看冻结计划、并发与执行结果。</p>}
     </section>,
     guide: () => <LearningCenter onDismiss={dismissGuide} onNavigate={(nextView) => navigateRoute({ view: nextView })} />,
     library: () => <CreativeLibrary taskTypes={taskTypes} styleKits={styleKits} brandKits={brandKits} sharedAssets={sharedAssets} onOpenProjects={() => navigateRoute({ view: 'projects' })} onOpenSharedAssets={() => navigateRoute({ view: 'shared-assets' })} />,
@@ -996,7 +988,7 @@ function App() {
     <aside className="studio-rail">
       <div className="brand-mark"><span>DAOGE</span><b>Pic</b></div>
       <WorkbenchNavigation view={view} project={selectedProject} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} />
-      <div className="rail-bottom"><div className="settings-path"><PanelLeftClose size={16} /><span>{provider?.configured ? '本地 Studio 已连接' : '需要配置生成服务'}</span></div></div>
+      <div className="rail-bottom"><button type="button" className="settings-path" onClick={openProviderDetails}><PanelLeftClose size={16} /><span>{provider?.configured ? 'Provider 设置' : '配置生成服务'}</span></button></div>
     </aside>
 
     <section className="work-surface">
@@ -1004,7 +996,7 @@ function App() {
         <div className="heading-group"><p className="eyebrow">{studioView ? 'Studio' : selectedProject ? '项目工作区' : 'Studio'}</p><h1>{view === 'projects' ? '项目' : view === 'project-overview' ? '项目概览' : view === 'tasks' ? '任务' : view === 'assets' ? assetScope === 'project' ? '项目资产' : '结果资产' : view === 'runs' ? '生成运行' : view === 'studio-overview' ? '任务概览' : view === 'prompts' ? '计划与提示词' : view === 'library' ? '创作资料库' : view === 'shared-assets' ? '共享素材' : view === 'guide' ? '学习中心' : view === 'deliveries' ? '交付' : '项目回收站'}</h1>{studioView ? <span>{view === 'library' ? '可复用的任务类型、风格与品牌规则。' : view === 'shared-assets' ? '仅显示从项目明确共享的跨项目图片。' : view === 'guide' ? '从工作流、选片和交付开始。' : '选择一个项目后进入创作与交付工作区。'}</span> : selectedProject ? <span>{selectedProject.name}</span> : null}</div>
         <div className="header-actions">
           <StudioSearch query={searchQuery} results={searchResults} loading={searchLoading} error={searchError} onQueryChange={setSearchQuery} onOpenResult={openSearchResult} />
-          {provider?.configured ? <span className="connection-state"><span className="signal-dot" />生成配置已就绪</span> : <span className="connection-state is-error"><CloudOff size={14} />生成配置未就绪</span>}
+          {provider?.configured ? <button type="button" className="connection-state" onClick={openProviderDetails}><span className="signal-dot" />生成配置已就绪</button> : <button type="button" className="connection-state is-error" onClick={openProviderDetails}><CloudOff size={14} />生成配置未就绪</button>}
           {!studioView && selectedProject && selectedProject.status !== 'archived' && <IconButton label="归档当前项目" onClick={() => void archiveCurrentProject()}><Archive size={17} /></IconButton>}
           <IconButton label="刷新工作台" onClick={() => void refresh()}><RefreshCw size={17} /></IconButton>
           <input ref={inputRef} className="file-input" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void upload(event.target.files)} />
@@ -1017,7 +1009,6 @@ function App() {
       {contextError && <div className="context-strip" role="alert" aria-live="assertive"><CircleAlert size={16} /><span>{contextError}</span></div>}
       {error && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={16} /><span>{error}</span><IconButton label="关闭请求错误" onClick={() => setError('')}><X size={15} /></IconButton></div>}
       {notice && <div className="notice-strip" role="status" aria-live="polite"><Check size={16} /><span>{notice}</span><IconButton label="关闭通知" onClick={() => setNotice('')}><X size={15} /></IconButton></div>}
-      {providerDetails && <section className="provider-details"><div><p className="eyebrow">高级设置</p><h2>生成配置详情</h2></div><div className="provider-details-content"><span>{providerDetails.configured ? '当前配置可用' : '当前配置未就绪'}</span><span>配置文件：<code>{providerDetails.providerEnvPath}</code></span>{providerDetails.providerId && <span>服务：{providerDetails.providerId} · {providerDetails.model}</span>}<span>能力：{providerDetails.capabilities?.edit ? '支持编辑' : '仅生成'}{providerDetails.capabilities?.referenceImage ? ' · 支持参考图' : ''}</span><span>工作区并发上限：{providerDetails.runtime?.desired?.maxWorkerConcurrency ?? '未设置'}{providerDetails.runtime?.active ? ' · 当前生效 ' + providerDetails.runtime.active.workerConcurrency : ''}{providerDetails.runtime?.restartRequired ? ' · 等待重启生效' : ''}</span></div><IconButton label="关闭生成配置详情" onClick={() => setProviderDetails(null)}><X size={16} /></IconButton></section>}
        {view === 'projects' && !guideDismissed && <button type="button" className="guide-nudge" onClick={() => navigateRoute({ view: 'guide' })}>首次使用 Studio？从学习中心了解计划、生成、选片与交付。</button>}
 
       {renderActiveView()}
@@ -1025,6 +1016,7 @@ function App() {
 
     {assetProvenance && <aside className="asset-inspector" aria-label="资产来源与评审记录"><div className="asset-inspector-head"><div><p className="eyebrow">资产检查器</p><h2>{assetProvenance.asset?.kind === 'generated' ? '生成结果来源链' : '导入素材来源链'}</h2></div><IconButton label="关闭资产检查器" onClick={() => setAssetProvenance(null)}><X size={16} /></IconButton></div><div className="asset-inspector-section"><span>来源</span><p>{assetProvenance.asset?.kind === 'generated' ? '由已确认轮次中的运行项保存' : '导入到当前 Studio 的素材'}</p>{assetProvenance.outputs?.map((output) => <button type="button" key={output.runItem.id} className="trace-link" onClick={() => { navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id }); setAssetProvenance(null); }}><span>{output.project.name} / {output.task.name}</span><b>{output.round.purpose} · 运行项 {output.runItem.sequence}</b></button>)}</div><div className="asset-inspector-section"><span>评审历史</span>{assetProvenance.reviews?.length ? assetProvenance.reviews.map((review) => <p key={review.id}><b>{review.decision === 'keep' ? '保留' : review.decision === 'review' ? '待复核' : review.decision === 'reject' ? '不采用' : '衍生方向'}</b> · {review.createdAt}</p>) : <p>尚未记录评审。</p>}</div><div className="asset-inspector-section"><span>交付引用</span>{assetProvenance.deliveries?.length ? assetProvenance.deliveries.map((delivery) => <p key={delivery.id}>{delivery.name} · {delivery.status}</p>) : <p>尚未加入交付草稿。</p>}</div><div className="asset-inspector-section"><span>批次版本</span>{assetProvenance.deliveryBatches?.length ? assetProvenance.deliveryBatches.map((batch) => <p key={batch.versionId}>{batch.name} · v{batch.versionNo} · {batch.status === 'ready' ? '已准备' : batch.status === 'draft' ? '草稿' : '已被新修订版本替代'}</p>) : <p>尚未加入版本化交付批次。</p>}</div></aside>}
     {previewAssets.length > 0 && <AccessibleDialog className="image-inspector" label={previewAssets.length === 2 ? '双图对比' : '素材放大查看'} onDismiss={() => setPreviewAssets([])}><div className="inspector-toolbar"><span>{previewAssets.length === 2 ? '双图对比' : '素材查看'}</span><div><IconButton label="缩小" disabled={previewZoom <= 0.75} onClick={() => setPreviewZoom((value) => Math.max(0.75, value - 0.25))}><ZoomOut size={16} /></IconButton><IconButton label="放大" disabled={previewZoom >= 2} onClick={() => setPreviewZoom((value) => Math.min(2, value + 0.25))}><ZoomIn size={16} /></IconButton><IconButton label="关闭查看" onClick={() => setPreviewAssets([])}><X size={16} /></IconButton></div></div><div className={'inspector-images ' + (previewAssets.length === 2 ? 'is-compare' : '')}>{previewAssets.map((asset, index) => { const selected = selectedAssetIds.has(asset.id); const busy = selectionBusyIds.has(asset.id); return <figure className={selected ? 'is-selected' : ''} key={asset.id}>{selectedProject && !asset.deletedAt && <label className="inspector-select-control"><input type="checkbox" checked={selected} disabled={busy} onChange={() => void markAsDeliverable(asset)} /><span>{selected ? <Check size={15} /> : <Bookmark size={15} />}{busy ? '正在保存' : selected ? '已选成果' : '选为成果'}</span></label>}<img src={'/api/assets/' + encodeURIComponent(asset.id) + '/file'} alt="" style={{ transform: 'scale(' + previewZoom + ')' }} /><figcaption>{asset.display?.label || (previewAssets.length === 2 ? '对比图 ' + (index + 1) : '素材预览')}</figcaption></figure>; })}</div></AccessibleDialog>}
+    {providerDetails && <ProviderSettings request={api} onDismiss={() => setProviderDetails(null)} onChanged={refresh} />}
   </main>;
 }
 

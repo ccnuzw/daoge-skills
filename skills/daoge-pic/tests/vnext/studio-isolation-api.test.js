@@ -8,8 +8,8 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService } = require('../../dist/vnext/api/server');
 const { requestJson } = require('./local-studio-test-helper');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 
 function databaseCounts(db) {
   const tables = ['projects', 'creative_tasks', 'creative_rounds', 'round_plan_versions', 'dry_run_previews', 'generation_runs', 'run_items', 'events', 'command_receipts'];
@@ -20,8 +20,8 @@ test('public project, task, round, run, and run-item APIs reject foreign Studio 
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-studio-isolation-'));
   let started;
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const db = started.service.db;
     const timestamp = '2026-01-01T00:00:00.000Z';
     db.prepare('INSERT INTO studios (id, workspace_root, schema_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run('studio_foreign_matrix', workspaceRoot + '-foreign', initialized.manifest.schemaVersion, timestamp, timestamp);

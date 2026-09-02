@@ -8,8 +8,8 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService } = require('../../dist/vnext/api/server');
 const { fetchStudio, requestJson: json } = require('./local-studio-test-helper');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 const pngVariant = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
@@ -18,8 +18,8 @@ test('project visual selection persists as scoped Studio asset relations', async
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-selection-api-'));
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const projectA = await json(started, '/api/projects', { method: 'POST', key: 'selection-project-a', body: { name: '项目 A' } });
     const projectB = await json(started, '/api/projects', { method: 'POST', key: 'selection-project-b', body: { name: '项目 B' } });
     const projectAId = projectA.body.data.value.id;

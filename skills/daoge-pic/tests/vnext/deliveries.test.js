@@ -10,10 +10,8 @@ const { closeStudioDatabase, openStudioDatabase } = require('../../dist/vnext/st
 const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan } = require('../../dist/vnext/domain/studio-commands');
 const { assetFilePath, getAssetImpact, importStudioAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
 const { createDelivery, exportDelivery, getDelivery, openDeliveryExportFile, prepareDelivery } = require('../../dist/vnext/domain/deliveries');
-const { providerStatus } = require('../../dist/vnext/studio/provider-config');
+const { configureProvider } = require('./provider-test-helper');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 function frozenFileSnapshots(directory) {
@@ -26,7 +24,7 @@ function frozenFileSnapshots(directory) {
 
 test('recovers a committed delivery directory before its idempotency receipt is written', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-journal-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '交付恢复项目', idempotencyKey: 'journal-project' }).value;
@@ -52,7 +50,7 @@ test('recovers a committed delivery directory before its idempotency receipt is 
 
 test('rejects a same-Studio export key for another delivery without replacing its journal entry', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-journal-conflict-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'journal conflict', idempotencyKey: 'journal-conflict-project' }).value;
@@ -73,8 +71,8 @@ test('rejects a same-Studio export key for another delivery without replacing it
 
 test('exports managed assets with a contact sheet and redacted creative record', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-  fs.writeFileSync(initialized.paths.providerEnvPath, 'IMAGE_PROVIDER=openai-images\nOPENAI_BASE_URL=https://private-provider.example.test/v1\nOPENAI_API_KEY=super-secret-key\nOPENAI_MODEL=fixture-model\n');
+  const initialized = initializeStudio({ workspaceRoot });
+  configureProvider(initialized, { name: 'Delivery Provider', baseUrl: 'https://private-provider.example.test/v1', apiKey: 'super-secret-key', model: 'fixture-model' });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '品牌交付项目', idempotencyKey: 'project' }).value;
@@ -114,7 +112,7 @@ test('exports managed assets with a contact sheet and redacted creative record',
 
 test('P1 delivery drafts require a project-scoped keep review and freeze that decision before export', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-draft-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '草稿交付项目', idempotencyKey: 'draft-project' }).value;
@@ -141,7 +139,7 @@ test('P1 delivery drafts require a project-scoped keep review and freeze that de
 
 test('replaced delivery journal files are quarantined and rebuilt before export finalizes', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-corrupt-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '交付校验', idempotencyKey: 'corrupt-project' }).value;
@@ -168,7 +166,7 @@ test('replaced delivery journal files are quarantined and rebuilt before export 
 
 test('idempotent delivery export replay rejects missing, extra, and replaced frozen files', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-replay-integrity-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '重放完整性', idempotencyKey: 'replay-project' }).value;
@@ -197,7 +195,7 @@ test('idempotent delivery export replay rejects missing, extra, and replaced fro
 
 test('an opened delivery file streams its verified inode after a same-size pathname replacement', async () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-inode-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   let opened;
   try {
@@ -225,7 +223,7 @@ test('an opened delivery file streams its verified inode after a same-size pathn
 
 test('contact sheet escapes every hostile HTML text character in delivery names', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-html-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'HTML', idempotencyKey: 'html-project' }).value;
@@ -246,7 +244,7 @@ test('contact sheet escapes every hostile HTML text character in delivery names'
 
 test('delivery export rejects same-size source mutation before committing any image bytes', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-source-mutation-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'mutation', idempotencyKey: 'mutation-project' }).value;

@@ -49,7 +49,7 @@ export async function signalVerifiedDaemon(
   expected: { workspaceRoot: string; studioId: string; lockPid: number; daemonEntry: string },
   dependencies: DaemonSignalDependencies = {}
 ): Promise<void> {
-  if (record.pid !== expected.lockPid) throw new Error('daemon runtime 与锁文件 PID 不匹配，拒绝发送终止信号。');
+  if (record.pid !== expected.lockPid) throw new Error('daemon runtime 与 owner record PID 不匹配，拒绝发送终止信号。');
   if (record.workspaceRoot !== expected.workspaceRoot) throw new Error('daemon runtime 工作区不匹配，拒绝发送终止信号。');
   if (!loopbackRuntimeUrl(record.url)) throw new Error('daemon runtime 地址不是可信 loopback URL，拒绝发送终止信号。');
   const studioId = await healthStudioId(record.url, dependencies.fetch || fetch);

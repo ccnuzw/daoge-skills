@@ -20,8 +20,11 @@ export interface StudioPaths {
   studioDir: string;
   databasePath: string;
   manifestPath: string;
+  providerDatabasePath: string;
   providerEnvPath: string;
   runtimeDir: string;
+  daemonLockDatabasePath: string;
+  daemonOwnerRecordPath: string;
   runsDir: string;
   cacheDir: string;
   evidenceDir: string;
@@ -37,7 +40,6 @@ export interface SensitiveAccessDependencies {
 
 export interface InitializeStudioOptions {
   workspaceRoot: string;
-  providerTemplatePath: string;
   writeGitignore?: boolean;
   sensitiveAccess?: SensitiveAccessDependencies;
 }
@@ -46,7 +48,6 @@ export interface InitializeStudioResult {
   paths: StudioPaths;
   manifest: StudioManifest;
   createdManifest: boolean;
-  createdProviderEnv: boolean;
 }
 
 function workspaceRelativePath(paths: StudioPaths, targetPath: string): string[] {
@@ -141,40 +142,6 @@ function ensurePrivateFile(filePath: string, dependencies: SensitiveAccessDepend
   enforceSensitiveAccess(filePath, false, dependencies);
 }
 
-function createProviderEnv(templatePath: string, providerEnvPath: string): boolean {
-  let descriptor: number | null = null;
-  let created = false;
-  try {
-    descriptor = fs.openSync(providerEnvPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
-    created = true;
-    fs.writeFileSync(descriptor, fs.readFileSync(templatePath));
-    if (process.platform !== 'win32') fs.fchmodSync(descriptor, 0o600);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
-    if (descriptor !== null) {
-      fs.closeSync(descriptor);
-      descriptor = null;
-    }
-    if (created) fs.rmSync(providerEnvPath, { force: true });
-    throw error;
-  } finally {
-    if (descriptor !== null) fs.closeSync(descriptor);
-  }
-}
-
-function assertReadableProviderTemplate(templatePath: string): void {
-  let descriptor: number | null = null;
-  try {
-    const info = fs.lstatSync(templatePath);
-    if (info.isSymbolicLink() || !info.isFile()) throw new Error('invalid template');
-    descriptor = fs.openSync(templatePath, fs.constants.O_RDONLY);
-  } catch {
-    throw new Error('DAOGE Pic is missing or cannot read the bundled provider.env.example template.');
-  } finally {
-    if (descriptor !== null) fs.closeSync(descriptor);
-  }
-}
 
 function writeAtomically(filePath: string, content: string): void {
   const tempPath = filePath + '.tmp-' + process.pid + '-' + Date.now();
@@ -196,9 +163,12 @@ export function studioPaths(workspaceRoot: string): StudioPaths {
     workspaceRoot: root,
     studioDir,
     databasePath: path.join(studioDir, 'studio.db'),
+    providerDatabasePath: path.join(studioDir, 'Provider.db'),
     manifestPath: path.join(studioDir, 'studio.json'),
     providerEnvPath: path.join(studioDir, 'provider.env'),
     runtimeDir: path.join(studioDir, 'runtime'),
+    daemonLockDatabasePath: path.join(studioDir, 'runtime', 'daemon-lock.sqlite'),
+    daemonOwnerRecordPath: path.join(studioDir, 'runtime', 'daemon.lock'),
     runsDir: path.join(studioDir, 'runs'),
     cacheDir: path.join(studioDir, 'cache'),
     evidenceDir: path.join(studioDir, 'evidence'),
@@ -221,20 +191,19 @@ export function readStudioManifest(paths: StudioPaths): StudioManifest | null {
 
 export function ensureGitignore(paths: StudioPaths): void {
   const gitignorePath = path.join(paths.workspaceRoot, '.gitignore');
-  const entry = 'daoge-studio/provider.env';
+  const required = ['daoge-studio/Provider.db', 'daoge-studio/Provider.db-*', 'daoge-studio/provider.env', 'daoge-studio/runtime/'];
   const current = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf8') : '';
-  const entries = current.split(/\r?\n/).map((line) => line.trim());
-  if (entries.includes(entry)) return;
-  const next = current && !current.endsWith('\n') ? current + '\n' + entry + '\n' : current + entry + '\n';
-  writeAtomically(gitignorePath, next);
+  const entries = new Set(current.split(/\r?\n/).map((line) => line.trim()));
+  const missing = required.filter((entry) => !entries.has(entry));
+  if (!missing.length) return;
+  const prefix = current && !current.endsWith('\n') ? current + '\n' : current;
+  writeAtomically(gitignorePath, prefix + missing.join('\n') + '\n');
 }
 
 export function initializeStudio(options: InitializeStudioOptions): InitializeStudioResult {
   const paths = studioPaths(options.workspaceRoot);
-  assertWorkspacePath(paths, paths.providerEnvPath);
-  const providerEnvExists = fs.existsSync(paths.providerEnvPath);
-  if (!providerEnvExists) assertReadableProviderTemplate(options.providerTemplatePath);
-
+  assertWorkspacePath(paths, paths.providerDatabasePath);
+  if (fs.existsSync(paths.providerEnvPath)) assertWorkspacePath(paths, paths.providerEnvPath);
   const existingManifest = readStudioManifest(paths);
   ensureWorkspaceDirectory(paths, paths.workspaceRoot);
   ensurePrivateDirectory(paths, paths.studioDir, options.sensitiveAccess);
@@ -253,12 +222,9 @@ export function initializeStudio(options: InitializeStudioOptions): InitializeSt
     createdManifest = true;
   }
 
-  let createdProviderEnv = false;
-  if (!providerEnvExists) createdProviderEnv = createProviderEnv(options.providerTemplatePath, paths.providerEnvPath);
-  ensurePrivateFile(paths.providerEnvPath, options.sensitiveAccess);
-
+  if (fs.existsSync(paths.providerEnvPath)) ensurePrivateFile(paths.providerEnvPath, options.sensitiveAccess);
   if (options.writeGitignore !== false) ensureGitignore(paths);
-  return { paths, manifest, createdManifest, createdProviderEnv };
+  return { paths, manifest, createdManifest };
 }
 
 export function ensureAssetBucket(paths: StudioPaths, bucket: AssetBucket): string {

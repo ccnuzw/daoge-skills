@@ -11,13 +11,13 @@ const { countScopedStudioAssets, importStudioAsset, listScopedStudioAssets, list
 const { archiveStagedImage, plannedArchivePath, stageImage } = require('../../dist/vnext/media/archive');
 const { setProjectAssetSelected } = require('../../dist/vnext/domain/project-selections');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 function fixture() {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-assets-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: '资产项目', idempotencyKey: 'project' });
   return { workspaceRoot, initialized, db, project };

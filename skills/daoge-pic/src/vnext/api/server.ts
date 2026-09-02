@@ -5,9 +5,10 @@ import { URL } from 'node:url';
 import { Readable } from 'node:stream';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
 import { ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
-import { loadProviderConfig, providerSnapshot, providerStatus } from '../studio/provider-config';
-import { getStudioRuntimeSettings, updateStudioRuntimeSettings } from '../studio/runtime-settings';
-import { requestPathFor } from '../providers/http-adapters';
+import { providerSnapshot } from '../studio/provider-config';
+import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerStatus, resolveActiveProviderConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
+import { createImageProvider } from '../providers/http-adapters';
+import { probeHttpEndpoint } from '../providers/http-safety';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { StateTransitionError } from '../domain/states';
@@ -23,7 +24,9 @@ import { studioEventWindow } from './events';
 import { sha256 } from '../shared/ids';
 import { validateZipEntries, writeImageZip, ZipEntryInput } from '../media/zip';
 import { MediaArchiveError, MediaValidationError, VerifiedManagedFile } from '../media/archive';
+import { daemonRestartAvailable, requestDaemonRestart } from '../runtime/restart';
 import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName } from './local-auth';
+import { WorkbenchPresence } from '../runtime/workbench-presence';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -34,10 +37,11 @@ type JsonBody = Record<string, unknown>;
 
 export interface StudioServiceOptions {
   workspaceRoot: string;
-  providerTemplatePath: string;
+  sessionToken?: string;
   ssePollMs?: number;
   workbenchDir?: string;
   capability?: string;
+  workbenchPresence?: WorkbenchPresence;
 }
 
 export interface StartedStudioService {
@@ -209,8 +213,7 @@ export function streamVerifiedFileResponse(response: ServerResponse, opened: Ver
 }
 
 interface ActiveDaemonRuntime {
-  workerConcurrency?: unknown;
-  provider?: { providerId?: unknown; model?: unknown; endpoint?: unknown } | null;
+  provider?: { profileId?: unknown; configVersion?: unknown; providerId?: unknown; model?: unknown; endpoint?: unknown } | null;
 }
 
 function readActiveDaemonRuntime(runtimeDir: string): ActiveDaemonRuntime | null {
@@ -230,11 +233,13 @@ function projectSelectionPayload(db: StudioDatabase, studioId: string, projectId
 export class LocalStudioService {
   readonly initialized: InitializeStudioResult;
   readonly db: StudioDatabase;
+  readonly providerDb: ProviderDatabase;
   private readonly pollMs: number;
   private readonly workbenchDir: string;
   private readonly capability: string;
-  private readonly sessionToken = createLocalCapability();
+  private readonly sessionToken: string;
   private readonly cookieName: string;
+  private readonly workbenchPresence: WorkbenchPresence;
   private origin = '';
   private server: Server | null = null;
   private closePromise: Promise<void> | null = null;
@@ -242,12 +247,17 @@ export class LocalStudioService {
 
   constructor(options: StudioServiceOptions) {
     if (options.capability && !/^[A-Za-z0-9_-]{43,}$/.test(options.capability)) throw new Error('Studio capability must be a high-entropy base64url token.');
-    this.initialized = initializeStudio({ workspaceRoot: options.workspaceRoot, providerTemplatePath: options.providerTemplatePath });
+    if (options.sessionToken && !/^[A-Za-z0-9_-]{43,}$/.test(options.sessionToken)) throw new Error('Studio session token must be a high-entropy base64url token.');
+    this.initialized = initializeStudio({ workspaceRoot: options.workspaceRoot });
     this.db = openStudioDatabase(this.initialized.paths, this.initialized.manifest);
+    this.providerDb = openProviderDatabase(this.initialized.paths);
+    importLegacyProviderEnvOnce(this.providerDb, this.initialized.paths);
     this.pollMs = Math.min(5000, Math.max(100, options.ssePollMs || 400));
     this.workbenchDir = options.workbenchDir ? path.resolve(options.workbenchDir) : path.resolve(__dirname, '../../workbench');
     this.capability = options.capability || createLocalCapability();
+    this.sessionToken = options.sessionToken || createLocalCapability();
     this.cookieName = localSessionCookieName(this.initialized.manifest.studioId, this.capability);
+    this.workbenchPresence = options.workbenchPresence || new WorkbenchPresence();
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<StartedStudioService> {
@@ -286,18 +296,19 @@ export class LocalStudioService {
     };
   }
 
-  private runtimeStatus(): { desired: ReturnType<typeof getStudioRuntimeSettings>; active: { workerConcurrency: number | null; provider: { providerId: string; model: string; endpoint: string | null } | null } | null; restartRequired: boolean } {
-    const desired = getStudioRuntimeSettings(this.db, this.initialized.manifest.studioId);
+  private runtimeStatus(): { desired: ReturnType<typeof providerSnapshot> | null; active: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null; restartRequired: boolean } {
     const record = readActiveDaemonRuntime(this.initialized.paths.runtimeDir);
-    const active = record ? {
-      workerConcurrency: Number.isInteger(record.workerConcurrency) ? Number(record.workerConcurrency) : null,
-      provider: record.provider && typeof record.provider.providerId === 'string' && typeof record.provider.model === 'string' ? { providerId: record.provider.providerId, model: record.provider.model, endpoint: typeof record.provider.endpoint === 'string' ? record.provider.endpoint : null } : null
+    const active = record?.provider && typeof record.provider.profileId === 'string' && Number.isInteger(record.provider.configVersion) && typeof record.provider.providerId === 'string' && typeof record.provider.model === 'string' ? {
+      profileId: record.provider.profileId,
+      configVersion: Number(record.provider.configVersion),
+      providerId: record.provider.providerId,
+      model: record.provider.model,
+      endpoint: typeof record.provider.endpoint === 'string' ? record.provider.endpoint : null
     } : null;
-    const config = loadProviderConfig(this.initialized.paths);
-    const desiredProvider = config ? providerSnapshot(config) : null;
-    const desiredIdentity = desiredProvider ? { providerId: desiredProvider.providerId, model: desiredProvider.model, endpoint: desiredProvider.endpoint } : null;
-    const restartRequired = Boolean(active && (active.workerConcurrency !== desired.maxWorkerConcurrency || JSON.stringify(active.provider) !== JSON.stringify(desiredIdentity)));
-    return { desired, active, restartRequired };
+    const config = resolveActiveProviderConfig(this.providerDb);
+    const desired = config ? providerSnapshot(config) : null;
+    const desiredIdentity = desired ? { profileId: desired.profileId, configVersion: desired.configVersion, providerId: desired.providerId, model: desired.model, endpoint: desired.endpoint } : null;
+    return { desired, active, restartRequired: Boolean(record && JSON.stringify(active) !== JSON.stringify(desiredIdentity)) };
   }
 
   async close(): Promise<void> {
@@ -307,10 +318,24 @@ export class LocalStudioService {
       const server = this.server;
       this.server = null;
       if (server) await new Promise<void>((resolve, reject) => {
-        server.close((error) => error ? reject(error) : resolve());
+        let settled = false;
+        const timeout = setTimeout(() => {
+          server.closeAllConnections();
+          server.unref();
+          finish();
+        }, 1000);
+        const finish = (error?: Error): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          if (error) reject(error);
+          else resolve();
+        };
+        server.close(finish);
         server.closeAllConnections();
       });
       closeStudioDatabase(this.db);
+      closeProviderDatabase(this.providerDb);
     })();
     return this.closePromise;
   }
@@ -328,18 +353,23 @@ export class LocalStudioService {
         const body = await readBody(request);
         if (!constantTimeTokenEqual(text(body.capability), this.capability)) throw new LocalAccessError(401, 'unauthorized', '本地 Studio capability 无效。');
         response.setHeader('set-cookie', localSessionCookie(this.cookieName, this.sessionToken));
+        this.workbenchPresence.recordAuthenticatedConnection();
         return success(response, { authenticated: true });
       }
       const authentication = authenticateLocalRequest(request, this.capability, this.cookieName, this.sessionToken);
       if (!authentication) throw new LocalAccessError(401, 'unauthorized', '需要有效的本地 Studio 授权。');
       if (request.method === 'POST' || request.method === 'PUT') assertLocalWriteOrigin(request, this.origin, authentication);
-      if (request.method === 'GET' && parsed.pathname === '/api/studio') return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion });
-      if (request.method === 'GET' && parsed.pathname === '/api/provider/status') return success(response, providerStatus(this.initialized.paths));
-      if (request.method === 'GET' && parsed.pathname === '/api/provider/details') {
-        const config = loadProviderConfig(this.initialized.paths);
-        return success(response, { ...providerStatus(this.initialized.paths), providerEnvPath: 'daoge-studio/provider.env', generationRequestPath: config ? requestPathFor(config) : null, runtime: this.runtimeStatus() });
+      if (authentication === 'cookie') this.workbenchPresence.recordAuthenticatedConnection();
+      if (request.method === 'POST' && (parsed.pathname === '/api/workbench/open-claim' || parsed.pathname === '/api/workbench/open-claim/release')) {
+        assertJsonContentType(request);
+        const body = await readBody(request);
+        const claimToken = text(body.claimToken);
+        if (!/^[A-Za-z0-9_-]{43,}$/.test(claimToken)) throw new InvalidCommandError('Workbench open claim requires a high-entropy token.');
+        if (parsed.pathname.endsWith('/release')) return success(response, { released: this.workbenchPresence.release(claimToken) });
+        return success(response, this.workbenchPresence.claim(claimToken, body.force === true));
       }
-      if (request.method === 'GET' && parsed.pathname === '/api/runtime-settings') return success(response, this.runtimeStatus());
+      if (request.method === 'GET' && parsed.pathname === '/api/studio') return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion });
+      if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { profiles: listProviderProfiles(this.providerDb), status: providerStatus(this.providerDb), runtime: this.runtimeStatus() });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
       if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db, this.initialized.manifest.studioId).map(publicValue) });
@@ -402,21 +432,56 @@ export class LocalStudioService {
       const assetFileMatch = /^\/api\/assets\/([^/]+)\/file$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetFileMatch) return this.assetFile(response, assetFileMatch[1], parsed.searchParams.get('download') === '1');
       if (request.method === 'GET' && parsed.pathname === '/api/events') return this.events(request, response, parsed);
-      if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
       if (request.method !== 'POST' && request.method !== 'PUT') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
+      if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
       assertJsonContentType(request);
       const body = await readBody(request);
-      return this.write(request, response, parsed.pathname, body);
+      return await this.write(request, response, parsed.pathname, body);
     } catch (error) {
       this.sendError(response, error);
     }
   }
 
-  private write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody): void {
+  private async write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody): Promise<void> {
     const key = idempotencyKey(request, body);
-    if (pathname === '/api/runtime-settings' && request.method === 'PUT') {
-      executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'studio.runtime_settings.update', () => updateStudioRuntimeSettings(this.db, { studioId: this.initialized.manifest.studioId, maxWorkerConcurrency: body.maxWorkerConcurrency }), { maxWorkerConcurrency: body.maxWorkerConcurrency });
-      return success(response, this.runtimeStatus());
+    if (pathname === '/api/restart' && request.method === 'POST') {
+      if (!daemonRestartAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法从 Workbench 重启。');
+      success(response, { restarting: true });
+      setImmediate(() => requestDaemonRestart());
+      return;
+    }
+    if (pathname === '/api/providers/import-env' && request.method === 'POST') return success(response, importProviderEnvProfile(this.providerDb, this.initialized.paths, key));
+    if (pathname === '/api/providers' && request.method === 'POST') {
+      return success(response, createProviderProfile(this.providerDb, { name: body.name, providerId: body.providerId, model: body.model, baseUrl: body.baseUrl, apiKey: body.apiKey, options: body.options, active: body.active === true, idempotencyKey: key }));
+    }
+    const providerUpdateMatch = /^\/api\/providers\/([^/]+)$/.exec(pathname);
+    if (providerUpdateMatch && request.method === 'PUT') return success(response, updateProviderProfile(this.providerDb, providerUpdateMatch[1], { name: body.name, providerId: body.providerId, model: body.model, baseUrl: body.baseUrl, apiKey: body.apiKey, options: body.options, expectedConfigVersion: body.expectedConfigVersion, idempotencyKey: key }));
+    const providerCopyMatch = /^\/api\/providers\/([^/]+)\/copy$/.exec(pathname);
+    if (providerCopyMatch) return success(response, copyProviderProfile(this.providerDb, providerCopyMatch[1], { name: body.name, idempotencyKey: key }));
+    const providerActivateMatch = /^\/api\/providers\/([^/]+)\/activate$/.exec(pathname);
+    if (providerActivateMatch) return success(response, activateProviderProfile(this.providerDb, providerActivateMatch[1], key));
+    const providerDeleteMatch = /^\/api\/providers\/([^/]+)\/delete$/.exec(pathname);
+    if (providerDeleteMatch) return success(response, deleteProviderProfile(this.providerDb, providerDeleteMatch[1], key));
+    const providerValidateMatch = /^\/api\/providers\/([^/]+)\/validate$/.exec(pathname);
+    if (providerValidateMatch) {
+      const config = resolveProviderProfileForTest(this.providerDb, providerValidateMatch[1], { baseUrl: body.baseUrl, apiKey: body.apiKey });
+      const validation = createImageProvider(config).validateConfig(config);
+      return success(response, { valid: validation.valid, missing: validation.missing });
+    }
+    const providerTestMatch = /^\/api\/providers\/([^/]+)\/test$/.exec(pathname);
+    if (providerTestMatch) {
+      const config = resolveProviderProfileForTest(this.providerDb, providerTestMatch[1], { baseUrl: body.baseUrl, apiKey: body.apiKey });
+      const validation = createImageProvider(config).validateConfig(config);
+      if (!validation.valid) throw new InvalidCommandError('Provider 配置不完整：' + validation.missing.join(', '));
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      try {
+        const headers: Record<string, string> = { accept: 'application/json' };
+        if (config.providerId === 'gemini-image') headers['x-goog-api-key'] = config.apiKey;
+        else headers.authorization = 'Bearer ' + config.apiKey;
+        const result = await probeHttpEndpoint(config.baseUrl, headers, controller.signal);
+        return success(response, { connected: result.reachable, status: result.status });
+      } finally { clearTimeout(timeout); }
     }
     if (pathname === '/api/sessions/open') {
       const conversationId = text(body.conversationId);
@@ -510,18 +575,20 @@ export class LocalStudioService {
     const preflightMatch = /^\/api\/rounds\/([^/]+)\/preflight$/.exec(pathname);
     if (preflightMatch) {
       this.assertRoundInStudio(preflightMatch[1]);
-      const config = loadProviderConfig(this.initialized.paths);
-      if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerStatus: providerStatus(this.initialized.paths) }) });
-      return success(response, createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: providerStatus(this.initialized.paths), idempotencyKey: key }));
+      const config = resolveActiveProviderConfig(this.providerDb);
+      const status = providerStatus(this.providerDb);
+      if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerStatus: status }) });
+      return success(response, createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: status, executionConcurrency: body.executionConcurrency, concurrencySource: body.concurrencySource, idempotencyKey: key }));
     }
     if (pathname === '/api/runs') {
       this.assertRoundInStudio(text(body.roundId));
       if (text(body.preflightId)) this.assertDryRunInStudio(text(body.preflightId));
-      const config = loadProviderConfig(this.initialized.paths);
+      if (body.requestedConcurrency !== undefined || body.executionConcurrency !== undefined || body.concurrencySource !== undefined) throw new InvalidCommandError('并发必须在预检时确定；请重新预检。');
+      const config = resolveActiveProviderConfig(this.providerDb);
       if (!config) throw new InvalidCommandError('当前工作区没有可用的图片生成配置。');
       const runtime = this.runtimeStatus();
-      if (runtime.restartRequired) throw new InvalidCommandError('Provider 或工作区运行设置已变更，必须先重启 Studio 后再提交生成。');
-      const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId: text(body.roundId), providerConfig: config, providerStatus: providerStatus(this.initialized.paths), runtimeSettings: runtime.desired, requestedConcurrency: body.requestedConcurrency, preflightId: text(body.preflightId) || undefined, idempotencyKey: key });
+      if (runtime.restartRequired) throw new InvalidCommandError('Provider 配置已变更，必须先重启 Studio 后再提交生成。');
+      const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId: text(body.roundId), providerConfig: config, providerStatus: providerStatus(this.providerDb), preflightId: text(body.preflightId) || undefined, idempotencyKey: key });
       return success(response, queued);
     }
     const pauseMatch = /^\/api\/runs\/([^/]+)\/pause$/.exec(pathname);
@@ -752,6 +819,7 @@ export class LocalStudioService {
     let sending = false;
     let blocked = false;
     let closed = false;
+    const detachPresence = this.workbenchPresence.attachActiveConnection();
     const teardown = (): void => {
       if (closed) return;
       closed = true;
@@ -759,6 +827,7 @@ export class LocalStudioService {
       timer = null;
       response.removeListener('drain', resume);
       this.activeEventStreams.delete(teardown);
+      detachPresence();
     };
     const schedule = (): void => {
       if (!closed && !blocked && !timer) timer = setTimeout(() => { timer = null; void send(); }, this.pollMs);

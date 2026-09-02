@@ -7,6 +7,8 @@ const { parsePackJson, assertPackagePaths, main } = require('../../scripts/packa
 const metadata = [{ filename: 'daoge-pic-5.5.0.tgz', files: [
   { path: 'dist/vnext/cli/daoge.js' },
   { path: 'dist/vnext/cli/daemon.js' },
+  { path: 'dist/vnext/studio/provider-store.js' },
+  { path: 'dist/vnext/runtime/restart.js' },
   { path: 'dist/workbench/index.html' },
   { path: 'scripts/daoge.js' },
   { path: 'SKILL.md' },
@@ -24,11 +26,26 @@ test('package smoke parser accepts npm JSON with no leading newline and surround
 
 test('package smoke allowlist rejects maps and retired source paths', () => {
   const paths = metadata[0].files.map((file) => file.path);
-  assert.deepEqual(assertPackagePaths(paths), { missing: [], unexpected: [], maps: [], retired: [] });
+  assert.deepEqual(assertPackagePaths(paths), { missing: [], unexpected: [], maps: [], retired: [], sensitive: [] });
   assert.throws(() => assertPackagePaths(paths.filter((file) => file !== 'scripts/daoge.js')), /scripts\/daoge\.js/);
   assert.throws(() => assertPackagePaths([...paths, 'dist/vnext/cli/daoge.js.map']), /daoge\.js\.map/);
   assert.throws(() => assertPackagePaths([...paths, 'src/vnext/cli/daoge.ts']), /src\/vnext/);
   assert.throws(() => assertPackagePaths([...paths, 'notes.txt']), /notes\.txt/);
+  for (const sensitivePath of [
+    'dist/daoge-studio/Provider.db',
+    'dist/daoge-studio/studio.db',
+    'dist/cache/Provider.db-wal',
+    'dist/cache/worker.sqlite-shm',
+    'dist/references/provider.env',
+    'dist/daoge-studio/runtime/daemon.json',
+    'dist/cache/daemon-lock.sqlite',
+    'dist/cache/daemon-lock.sqlite-journal',
+    'dist/cache/daemon-lock.sqlite-wal',
+    'dist/cache/daemon-lock.sqlite-shm',
+    'dist/logs/daemon.log',
+    'dist/logs/runtime.log.1'
+  ]) assert.throws(() => assertPackagePaths([...paths, sensitivePath]), new RegExp(sensitivePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotThrow(() => assertPackagePaths(paths));
 });
 
 test('package smoke removes the tarball when package path validation throws', () => {

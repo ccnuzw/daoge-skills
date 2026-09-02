@@ -306,6 +306,18 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
     return { bytes, contentType: response.headers.get('content-type') };
   }
 }
+export async function probeHttpEndpoint(value: string, headers: Readonly<Record<string, string>>, signal: AbortSignal): Promise<{ reachable: boolean; status: number }> {
+  const target = await assertSafeUrl(value, defaultHostResolver);
+  const result = await pinnedHttpTransport(target.url, target.addresses, { headers, signal });
+  try {
+    assertPublicAddress(hostnameWithoutBrackets(result.remoteAddress));
+    if (!target.addresses.some((address) => sameAddress(address, result.remoteAddress))) throw new Error('Provider connection remote address did not match the pinned DNS result.');
+    const status = result.response.status;
+    return { reachable: status !== 401 && status !== 403 && status < 500, status };
+  } finally {
+    await cancelBody(result.response);
+  }
+}
 
 export function decodeBoundedBase64(value: string, maxDecodedBytes: number): Buffer {
   if (!Number.isSafeInteger(maxDecodedBytes) || maxDecodedBytes < 0) throw new Error('A non-negative decoded image size limit is required.');

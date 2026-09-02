@@ -2,6 +2,38 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.8.0 - 2026-09-02
+
+5.8.0 固化“会话为入口、Studio 为共享工作台”的稳定协议：同一 workspace 的多个会话共享唯一 daemon 与 Workbench，同时用独立 Studio Session 隔离各自上下文、项目与 Run。
+
+### 新增
+
+- Provider 配置迁移到独立 `Provider.db`，支持多个 Profile、唯一 active、write-only API Key/完整 Base URL，以及 Workbench 中的列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试和“保存并重启”。既有 `provider.env` 仅在首次升级时一次迁移或显式 import，之后不再作为运行时配置源。
+- 执行型触发采用稳定 workspace → 普通 open/open-reuse → conversation Studio Session → 项目/任务/轮次上下文 → 创作澄清的强制顺序；咨询/开发型请求不启动 Studio。presence/open-claim 只允许首个会话触发 opener，其余会话安全复用。
+- 同一 workspace 支持 3–4 个并发会话共享单 daemon/Workbench；真实 conversation Session、项目与 Run 归属互相隔离，Workbench 改用 per-tab `sessionStorage` 身份。
+- Generation Run 并发改为 preflight 冻结：范围 `1..1000`、默认 `4`、串行 `1`，queue 和 run 阶段不可改写；移除 `config --worker-concurrency` 与 workspace worker concurrency 双重配置源。
+
+### 改进
+
+- daemon 单实例互斥改为 SQLite `BEGIN EXCLUSIVE` 长事务；崩溃由 OS/SQLite 释放，遗留 owner record 不参与互斥，并发启动的 loser child 会被完整清理。
+- Worker tick、Provider 请求、HTTP service 与连接采用有界关闭；无法确定外部副作用时收敛为 `outcome_unknown`，不自动重放。
+- Provider 响应使用精确 secret 净化并限制 request-id；package sensitive 检查拒绝 Provider/studio 数据库、真实环境配置、runtime、日志、源码与其他敏感内容。
+- 完善 binary import、fair scheduler、公平 Run 领取和 reference flag 传递，保持共享 daemon 下的项目与 Run 隔离。
+
+### 修复
+
+- 修复重复 import 创建重复记录或资产的问题。
+- 修复多会话并发首次启动可能产生重复 daemon/opener，以及 opener claim 失败路径未完整释放的问题。
+- 修复 loser child、忽略 abort 的 Provider 请求和 HTTP 连接在关闭阶段可能残留的问题。
+- 修复 Provider 响应 secret 净化与 request-id 边界不精确的问题。
+
+### 验证
+
+- build PASS；完整自动化回归 `238/238`、targeted 集合 `60/60` 通过。
+- package 验证包含 96 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- 安装包的 4 会话场景收敛为 1 次 open、3 次 reuse 和 4 个隔离 Studio Session；验证未调用真实图片 Provider，未产生计费请求。
+- 发布渠道为 `daoge-pic-v5.8.0` GitHub Release 不可变 `.tgz`；最终资产哈希由重新 pack 后的 sidecar 与 GitHub Release 在包外记录，不写入包内文档。
+
 ## daoge-pic 5.7.0 - 2026-09-02
 
 ### 新增

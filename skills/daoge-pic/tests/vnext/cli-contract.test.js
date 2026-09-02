@@ -19,12 +19,13 @@ test('CLI launcher and direct dist entry expose the same help contract', () => {
   assert.equal(launcher.status, 0, launcher.stderr);
   assert.equal(direct.status, 0, direct.stderr);
   assert.equal(launcher.stdout, direct.stdout);
-  for (const command of ['archive-project', 'config', 'restart', 'preflight', 'run', 'pause', 'resume', 'cancel', 'retry', 'resolve-unknown']) {
+  for (const command of ['archive-project', 'provider-list', 'provider-create', 'provider-update', 'restart', 'preflight', 'run', 'pause', 'resume', 'cancel', 'retry', 'resolve-unknown']) {
     assert.equal(launcher.stdout.includes('daoge ' + command + ' '), true);
   }
   assert.equal((launcher.stdout.match(/daoge preflight/g) || []).length, 1);
-  assert.match(launcher.stdout, /daoge config .*--worker-concurrency <1..1000>/);
-  assert.match(launcher.stdout, /daoge run .*--concurrency <1..1000>/);
+  assert.match(launcher.stdout, /daoge preflight .*--concurrency <1..1000>/);
+  assert.doesNotMatch(launcher.stdout, /worker-concurrency|daoge config/);
+  assert.doesNotMatch(launcher.stdout, /daoge run .*--concurrency/);
 });
 
 test('CLI module exports main without executing it during import', () => {
@@ -62,6 +63,9 @@ test('CLI parser preserves an explicit safe idempotency key for every mutation',
   assert.equal(parsed.request.idempotencyKey, key);
   assert.throws(() => parseCommand(['run', '--workspace', '/tmp/daoge-cli-key', '--round', 'round-1', '--preflight', 'preview-1', '--idempotency-key', 'unsafe key']), /安全字符/);
   assert.throws(() => parseCommand(['status', '--workspace', '/tmp/daoge-cli-key', '--idempotency-key', key]), /未知或不适用/);
+  assert.equal(parseCommand(['open', '--workspace', '/tmp/daoge-cli-key']).force, false);
+  assert.equal(parseCommand(['open', '--workspace', '/tmp/daoge-cli-key', '--force', 'true']).force, true);
+  assert.throws(() => parseCommand(['open', '--workspace', '/tmp/daoge-cli-key', '--force', 'yes']), /只能是 true 或 false/);
 });
 
 test('CLI refuses a mismatched manifest before creating daemon runtime state', () => {
@@ -173,7 +177,7 @@ for (const identityCase of [
   {
     name: 'runtime and lock PID mismatch',
     runtime: { ...legacyIdentityFixture.runtime, pid: 4243 },
-    error: /锁文件 PID 不匹配/
+    error: /runtime 与 owner record PID 不匹配/
   },
   {
     name: 'runtime and manifest workspace mismatch',

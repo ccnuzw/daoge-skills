@@ -9,8 +9,8 @@ const { closeStudioDatabase, openStudioDatabase } = require('../../dist/vnext/st
 const { assetFilePath, importStudioAsset, softDeleteAsset } = require('../../dist/vnext/domain/assets');
 const { StudioAssetResolver } = require('../../dist/vnext/media/asset-resolver');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 function largePng(fill = 0x41) {
@@ -49,7 +49,7 @@ function trackSnapshotDescriptors(paths) {
 
 test('resolves only active Studio asset IDs for references and masks', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png' });
@@ -70,7 +70,7 @@ test('resolves only active Studio asset IDs for references and masks', () => {
 
 test('returns frozen reference and mask bytes after their live paths are replaced and closes every snapshot', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-frozen-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const originalReadSync = fs.readSync;
   let tracker;
@@ -113,7 +113,7 @@ test('returns frozen reference and mask bytes after their live paths are replace
 
 test('rejects a same-size reference replacement before snapshotting and leaves no snapshot behind', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-replaced-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   let tracker;
   try {
@@ -133,7 +133,7 @@ test('rejects a same-size reference replacement before snapshotting and leaves n
 
 test('rejects an in-place mask mutation during snapshotting and closes partial snapshots', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-mask-mutation-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const originalReadSync = fs.readSync;
   let tracker;
@@ -167,7 +167,7 @@ test('rejects an in-place mask mutation during snapshotting and closes partial s
 
 test('rejects a reference path rename during snapshotting and closes partial snapshots', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-path-race-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const originalReadSync = fs.readSync;
   let tracker;
@@ -202,7 +202,7 @@ test('rejects a reference path rename during snapshotting and closes partial sna
 
 test('rejects a managed mask path replaced by a symlink', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-symlink-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   let tracker;
   try {

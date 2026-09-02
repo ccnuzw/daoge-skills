@@ -6,14 +6,13 @@ const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
-const { loadProviderConfig, providerStatus } = require('../../dist/vnext/studio/provider-config');
-const { getStudioRuntimeSettings } = require('../../dist/vnext/studio/runtime-settings');
+const { configureProvider } = require('./provider-test-helper');
 const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
 const { preflightGenerationPlan } = require('../../dist/vnext/runner/preflight');
 const { createDryRunPreview, listDryRunPreviews, preflightRound, queueGenerationRun, retryGenerationRunItems, getGenerationRun, listGenerationRunItems, claimRunItems, transitionRunItem, markRunsResumePending, promoteDueRetryWaitItems, resolveUnknownRunItems, resumeGenerationRun, reconcileTerminalRuns, recoverExpiredLeases } = require('../../dist/vnext/runner/run-commands');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 
 function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-runner-'));
@@ -25,17 +24,12 @@ function cleanup(workspaceRoot) {
 
 function configuredStudio() {
   const workspaceRoot = temporaryWorkspace();
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-  fs.writeFileSync(initialized.paths.providerEnvPath, [
-    'IMAGE_PROVIDER=openai-images',
-    'OPENAI_BASE_URL=https://images.example.test/v1',
-    'OPENAI_API_KEY=provider-key-not-for-db',
-    'OPENAI_MODEL=gpt-image-2'
-  ].join('\n') + '\n');
+  const initialized = initializeStudio({ workspaceRoot });
+  const { config, status } = configureProvider(initialized, { model: 'gpt-image-2', apiKey: 'provider-key-not-for-db' });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: '运行引擎测试', idempotencyKey: 'project' });
   const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.value.id, name: '主视觉', idempotencyKey: 'task' });
-  return { workspaceRoot, initialized, db, task, runtimeSettings: getStudioRuntimeSettings(db, initialized.manifest.studioId) };
+  return { workspaceRoot, initialized, db, task, config, status };
 }
 
 function confirmedRound(fixture, plan, prefix = 'round') {
@@ -73,8 +67,8 @@ test('persists a no-call dry-run preview and rejects stale Provider snapshots be
   const fixture = configuredStudio();
   try {
     const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 3, prompt: 'dry run evidence', output: { aspectRatio: '1:1' } });
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
+    const config = fixture.config;
+    const status = fixture.status;
     const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run-1' });
     assert.equal(dryRun.value.preflight.valid, true);
     assert.equal(dryRun.value.preview.itemCount, 3);
@@ -88,40 +82,61 @@ test('persists a no-call dry-run preview and rejects stale Provider snapshots be
   } finally { cleanup(fixture.workspaceRoot); }
 });
 
-test('freezes bounded per-run concurrency and shares worker capacity fairly', () => {
+test('freezes default and serial concurrency during preflight and shares global capacity fairly', () => {
   const fixture = configuredStudio();
   try {
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
-    const first = confirmedRound(fixture, { operation: 'generate', itemCount: 3, prompt: 'first queue' }, 'first');
-    const second = confirmedRound(fixture, { operation: 'generate', itemCount: 3, prompt: 'second queue' }, 'second');
-    const firstDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'first-dry-run' });
-    const secondDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'second-dry-run' });
-    assert.throws(() => queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 1001, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'over-ceiling' }), InvalidCommandError);
-    const firstRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 1, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'first-run' });
-    const secondRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 1, preflightId: secondDryRun.value.preview.id, idempotencyKey: 'second-run' });
-    assert.equal(firstRun.value.requestedConcurrency, 1);
-    assert.equal(secondRun.value.requestedConcurrency, 1);
-    const claimed = claimRunItems(fixture.db, { workerId: 'fair-worker', limit: 2, leaseMs: 30000, now: new Date('2026-01-01T00:00:00.000Z') });
-    assert.equal(claimed.length, 2);
-    assert.deepEqual(new Set(claimed.map((item) => item.runId)), new Set([firstRun.value.id, secondRun.value.id]));
+    const first = confirmedRound(fixture, { operation: 'generate', itemCount: 5, prompt: 'default queue' }, 'first');
+    const second = confirmedRound(fixture, { operation: 'generate', itemCount: 3, prompt: 'serial queue' }, 'second');
+    const defaultPreview = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: fixture.config, providerStatus: fixture.status, idempotencyKey: 'default-dry-run' });
+    const serialPreview = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: fixture.config, providerStatus: fixture.status, executionConcurrency: 1, concurrencySource: 'serial', idempotencyKey: 'serial-dry-run' });
+    assert.equal(defaultPreview.value.preview.executionConcurrency, 4);
+    assert.equal(defaultPreview.value.preview.concurrencySource, 'default');
+    assert.equal(serialPreview.value.preview.executionConcurrency, 1);
+    assert.equal(serialPreview.value.preview.concurrencySource, 'serial');
+    const firstRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: fixture.config, providerStatus: fixture.status, preflightId: defaultPreview.value.preview.id, idempotencyKey: 'first-run' });
+    const secondRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: fixture.config, providerStatus: fixture.status, preflightId: serialPreview.value.preview.id, idempotencyKey: 'second-run' });
+    assert.equal(firstRun.value.executionConcurrency, 4);
+    assert.equal(secondRun.value.executionConcurrency, 1);
+    const claimed = claimRunItems(fixture.db, { workerId: 'fair-worker', limit: 5, leaseMs: 30000, now: new Date('2026-01-01T00:00:00.000Z') });
+    assert.equal(claimed.filter((item) => item.runId === firstRun.value.id).length, 4);
+    assert.equal(claimed.filter((item) => item.runId === secondRun.value.id).length, 1);
   } finally {
     closeStudioDatabase(fixture.db);
     cleanup(fixture.workspaceRoot);
   }
 });
 
-test('leases requested concurrency values through 1000 subject to the global worker limit', () => {
-  for (const [requestedConcurrency, globalLimit, expectedClaims] of [[5, 1000, 5], [12, 1000, 12], [30, 1000, 30], [1000, 1000, 30]]) {
+test('fair candidate selection includes the eleventh 1000-item Run without idling global capacity', () => {
+  const fixture = configuredStudio();
+  try {
+    const runs = [];
+    for (let index = 0; index < 11; index += 1) {
+      const prefix = 'candidate-window-' + index;
+      const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 1000, prompt: 'large run ' + index }, prefix);
+      const preview = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: fixture.config, providerStatus: fixture.status, executionConcurrency: 1000, idempotencyKey: prefix + '-preview' });
+      const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: fixture.config, providerStatus: fixture.status, preflightId: preview.value.preview.id, idempotencyKey: prefix + '-run' });
+      fixture.db.prepare('UPDATE generation_runs SET created_at = ? WHERE id = ?').run(new Date(Date.UTC(2026, 0, index + 1)).toISOString(), queued.value.id);
+      runs.push(queued.value.id);
+    }
+    const claimed = claimRunItems(fixture.db, { workerId: 'wide-fair-worker', limit: 1000, leaseMs: 30000, now: new Date('2026-02-01T00:00:00.000Z') });
+    assert.equal(claimed.length, 1000, 'all available global slots must be used');
+    assert.deepEqual(new Set(claimed.map((item) => item.runId)), new Set(runs));
+    assert.ok(claimed.some((item) => item.runId === runs[10]), 'the newest large Run must not be excluded by a global candidate window');
+  } finally {
+    closeStudioDatabase(fixture.db);
+    cleanup(fixture.workspaceRoot);
+  }
+});
+
+test('leases explicit preflight concurrency values through the fixed 1000 global ceiling', () => {
+  for (const [executionConcurrency, expectedClaims] of [[5, 5], [12, 12], [30, 30], [1000, 30]]) {
     const fixture = configuredStudio();
     try {
-      const config = loadProviderConfig(fixture.initialized.paths);
-      const status = providerStatus(fixture.initialized.paths);
-      const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 30, prompt: 'concurrency ' + requestedConcurrency }, 'concurrency-' + requestedConcurrency + '-' + globalLimit);
-      const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'concurrency-dry-run-' + requestedConcurrency + '-' + globalLimit });
-      const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency, preflightId: dryRun.value.preview.id, idempotencyKey: 'concurrency-run-' + requestedConcurrency + '-' + globalLimit });
-      assert.equal(queued.value.requestedConcurrency, requestedConcurrency);
-      assert.equal(claimRunItems(fixture.db, { workerId: 'concurrency-worker-' + requestedConcurrency, limit: globalLimit, leaseMs: 30000, now: new Date('2026-01-01T00:00:00.000Z') }).length, expectedClaims);
+      const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 30, prompt: 'concurrency ' + executionConcurrency }, 'concurrency-' + executionConcurrency);
+      const preview = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: fixture.config, providerStatus: fixture.status, executionConcurrency, idempotencyKey: 'concurrency-preview-' + executionConcurrency });
+      const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: fixture.config, providerStatus: fixture.status, preflightId: preview.value.preview.id, idempotencyKey: 'concurrency-run-' + executionConcurrency });
+      assert.equal(queued.value.executionConcurrency, executionConcurrency);
+      assert.equal(claimRunItems(fixture.db, { workerId: 'concurrency-worker-' + executionConcurrency, limit: 1000, leaseMs: 30000, now: new Date('2026-01-01T00:00:00.000Z') }).length, expectedClaims);
     } finally {
       closeStudioDatabase(fixture.db);
       cleanup(fixture.workspaceRoot);
@@ -129,14 +144,12 @@ test('leases requested concurrency values through 1000 subject to the global wor
   }
 });
 
-test('rejects requested concurrency above the current workspace limit', () => {
+test('rejects concurrency 1001 before creating preflight evidence', () => {
   const fixture = configuredStudio();
   try {
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
-    const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 30, prompt: 'workspace concurrency refusal' }, 'workspace-concurrency-refusal');
-    const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'workspace-concurrency-refusal-dry-run' });
-    assert.throws(() => queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, runtimeSettings: { ...fixture.runtimeSettings, maxWorkerConcurrency: 12 }, requestedConcurrency: 30, preflightId: dryRun.value.preview.id, idempotencyKey: 'workspace-concurrency-refusal-run' }), /exceeds the current workspace limit of 12/);
+    const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 30, prompt: 'over global ceiling' }, 'over-ceiling');
+    assert.throws(() => createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: fixture.config, providerStatus: fixture.status, executionConcurrency: 1001, idempotencyKey: 'over-ceiling-preview' }), /1 到 1000/);
+    assert.equal(listDryRunPreviews(fixture.db, fixture.initialized.manifest.studioId, confirmed.value.id).length, 0);
   } finally {
     closeStudioDatabase(fixture.db);
     cleanup(fixture.workspaceRoot);
@@ -146,17 +159,17 @@ test('rejects requested concurrency above the current workspace limit', () => {
 test('counts aggregate in-flight capacity across workers even when an earlier run has no pending items', () => {
   const fixture = configuredStudio();
   try {
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
+    const config = fixture.config;
+    const status = fixture.status;
     const first = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: 'first worker capacity' }, 'capacity-first');
-    const firstDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'capacity-first-dry-run' });
-    const firstRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 2, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'capacity-first-run' });
+    const firstDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, executionConcurrency: 2, idempotencyKey: 'capacity-first-dry-run' });
+    const firstRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'capacity-first-run' });
     const firstClaims = claimRunItems(fixture.db, { workerId: 'capacity-worker-one', limit: 2, leaseMs: 30000, now: new Date('2026-01-01T00:00:00.000Z') });
     assert.equal(firstClaims.length, 2);
     assert.equal(listGenerationRunItems(fixture.db, firstRun.value.id).filter((item) => item.status === 'pending').length, 0);
     const second = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: 'second worker capacity' }, 'capacity-second');
-    const secondDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'capacity-second-dry-run' });
-    const secondRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 2, preflightId: secondDryRun.value.preview.id, idempotencyKey: 'capacity-second-run' });
+    const secondDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: config, providerStatus: status, executionConcurrency: 2, idempotencyKey: 'capacity-second-dry-run' });
+    const secondRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: config, providerStatus: status, preflightId: secondDryRun.value.preview.id, idempotencyKey: 'capacity-second-run' });
     assert.equal(claimRunItems(fixture.db, { workerId: 'capacity-worker-two', limit: 2, leaseMs: 30000, now: new Date('2026-01-01T00:00:01.000Z') }).length, 0);
     transitionRunItem(fixture.db, { itemId: firstClaims[0].id, leaseToken: firstClaims[0].leaseToken, status: 'requesting', now: new Date('2026-01-01T00:00:01.000Z') });
     transitionRunItem(fixture.db, { itemId: firstClaims[0].id, leaseToken: firstClaims[0].leaseToken, status: 'receiving', now: new Date('2026-01-01T00:00:01.000Z') });
@@ -175,11 +188,11 @@ test('counts aggregate in-flight capacity across workers even when an earlier ru
 test('projects sanitized run item error codes without Provider messages', () => {
   const fixture = configuredStudio();
   try {
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
+    const config = fixture.config;
+    const status = fixture.status;
     const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 1, prompt: 'safe error projection' }, 'safe-error');
     const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'safe-error-dry-run' });
-    const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, preflightId: dryRun.value.preview.id, idempotencyKey: 'safe-error-run' });
+    const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'safe-error-run' });
     const [claimed] = claimRunItems(fixture.db, { workerId: 'safe-error-worker', limit: 1, leaseMs: 30000, now: new Date('2026-01-01T00:00:00.000Z') });
     transitionRunItem(fixture.db, { itemId: claimed.id, leaseToken: claimed.leaseToken, status: 'requesting', now: new Date('2026-01-01T00:00:01.000Z') });
     transitionRunItem(fixture.db, { itemId: claimed.id, leaseToken: claimed.leaseToken, status: 'blocked', error: { kind: 'invalid_input', code: 'http_400', summary: 'Invalid size 1152x2048. Bearer sk_test_abcdefgh is rejected.' }, now: new Date('2026-01-01T00:00:02.000Z') });
@@ -195,9 +208,9 @@ test('queues a confirmed plan with a safe provider snapshot and leases durable r
   const fixture = configuredStudio();
   try {
     const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: 'minimal studio product shot', output: { aspectRatio: '1:1' } });
-    const config = loadProviderConfig(fixture.initialized.paths);
+    const config = fixture.config;
     assert.ok(config);
-    const status = providerStatus(fixture.initialized.paths);
+    const status = fixture.status;
     const preflight = preflightRound(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerStatus: status });
     assert.equal(preflight.valid, true);
     assert.throws(() => queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'queue-without-dry-run' }), InvalidCommandError);
@@ -234,8 +247,8 @@ test('queues a confirmed plan with a safe provider snapshot and leases durable r
 test('retries only explicit safe failed items and never requeues unknown outcomes', () => {
   const fixture = configuredStudio();
   try {
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
+    const config = fixture.config;
+    const status = fixture.status;
     const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: 'retry fixture' }, 'retry');
     const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'retry-dry-run' });
     const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'retry-queue' });
@@ -262,8 +275,8 @@ test('retries only explicit safe failed items and never requeues unknown outcome
 test('promotes due automatic retries without changing their stable request identity', () => {
   const fixture = configuredStudio();
   try {
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
+    const config = fixture.config;
+    const status = fixture.status;
     const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 1, prompt: 'automatic retry identity' }, 'retry-due');
     const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'retry-due-dry-run' });
     const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'retry-due-run' });
@@ -291,8 +304,8 @@ test('reconciles a historical running run when every item already reached a term
   const fixture = configuredStudio();
   try {
     const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 1, prompt: 'terminal recovery' }, 'terminal-recovery');
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
+    const config = fixture.config;
+    const status = fixture.status;
     const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'terminal-recovery-dry-run' });
     const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'terminal-recovery-run' });
     const now = new Date('2026-01-01T00:00:00.000Z');
@@ -315,9 +328,9 @@ test('recovers expired leased work as pending and every post-request phase as an
   const fixture = configuredStudio();
   try {
     const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 5, prompt: 'soft daylight portrait' }, 'lease');
-    const config = loadProviderConfig(fixture.initialized.paths);
-    const status = providerStatus(fixture.initialized.paths);
-    const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'lease-dry-run' });
+    const config = fixture.config;
+    const status = fixture.status;
+    const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, executionConcurrency: 5, idempotencyKey: 'lease-dry-run' });
     const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'lease-run' });
     const claimed = claimRunItems(fixture.db, { workerId: 'worker-lease', limit: 5, leaseMs: 1000, now: new Date('2026-01-01T00:00:00.000Z') });
     const originalRequestIds = claimed.map((item) => item.requestId);

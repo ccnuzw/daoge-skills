@@ -9,13 +9,13 @@ const { closeStudioDatabase, openStudioDatabase } = require('../../dist/vnext/st
 const { listTaskTypes, createUserTaskType, createStyleKit, createBrandKit, listStyleKits, listBrandKits } = require('../../dist/vnext/domain/libraries');
 const { importStudioAsset } = require('../../dist/vnext/domain/assets');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 test('seeds official task types and stores user kits with managed asset references', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-library-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const official = listTaskTypes(db, initialized.manifest.studioId);
@@ -41,7 +41,7 @@ test('seeds official task types and stores user kits with managed asset referenc
 
 test('scopes user task types to their Studio while retaining global official task types', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-library-scope-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const secondStudioId = 'studio_task_type_scope_b';
   try {

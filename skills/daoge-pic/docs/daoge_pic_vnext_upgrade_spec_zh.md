@@ -1,6 +1,6 @@
 # DAOGE Pic vNext 升级规格
 
-文档类别：已确认的 vNext 升级要求。实现状态与机器验证不由本文件声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
+文档类别：`5.8.0` 稳定正式版的已确认 vNext 升级要求。当前稳定正式版本为 [`5.8.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0)；实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
 
 ## 1. 定位与结论
 
@@ -20,8 +20,8 @@ vNext 不是旧工作流的兼容升级。它必须完全替换旧任务格式�
 | 创作媒介 | 第一版完整支持图片生成、编辑与管理；领域模型为未来视频、音频与设计文件预留扩展。 |
 | 数据事实源 | Studio 数据库是唯一业务事实源。目录、缓存、页面和事件都不是事实源。 |
 | 项目层级 | 一个 Studio 包含多个项目；一个项目包含多个创作任务；一个任务可以包含无限个创作轮次。 |
-| Provider | 保留插件架构和已验证的 OpenAI Images、Gemini 原生、Gemini OpenAI-compatible、xAI/Grok 四类接入。 |
-| Provider 交互 | 当前工作区固定一份本地 Provider 配置。用户不在每一轮选择 Profile。 |
+| Provider 适配 | 保留插件架构和已验证的 OpenAI Images、Gemini 原生、Gemini OpenAI-compatible、xAI/Grok 四类接入。 |
+| Provider Profile | Provider.db 可保存多个 Profile，第一阶段至多一个 active；daemon 启动时固定 active Profile 的配置快照，切换后必须 restart。 |
 | 复用 | 第一版提供创作任务类型、用户任务类型、风格套件和品牌套件；从成功任务沉淀为可复用方案属于后续能力。 |
 | 评审与交付 | 创作者自行选片、批注、衍生与导出；第一版不提供客户或团队在线协作。 |
 | 外部资产 | 保留通用图片导入，作为新资产导入能力，不兼容旧 host-native 结果格式。 |
@@ -38,30 +38,48 @@ vNext 不是旧工作流的兼容升级。它必须完全替换旧任务格式�
 6. 浏览器关闭、会话切换和终端关闭不得中断已经开始的本地生成会话。
 7. 系统重启后不得自动重新发起外部 Provider 请求。未完成会话必须标记为可继续，等待用户在会话中确认。
 8. 普通用户界面不得默认展示 JSON、manifest、文件路径、Provider 错误码、调试日志或内部运行对象。
-9. Provider 密钥不得写入数据库、任务、轮次、运行记录、事件、日志、快照或导出包。
+9. Provider 密钥不得写入 studio.db、任务、轮次、运行记录、事件、日志、快照或导出包；只允许保存在受本地权限保护的明文 Provider.db。
 10. 所有图像生成、导入、选择、批注、软删除、恢复和导出必须通过统一领域命令写入。
 11. 本地回环地址不等于授权边界。除最小健康检查外，Studio API 必须要求当前 daemon 生成的高熵 local capability 或由其换取的本地会话凭据。
 
 ## 4. 用户入口与职责分工
 
-### 4.1 主交互链路
+### 4.1 主交互链路与执行型启动协议
 
-用户会话 -> Skill 起草与确认 -> 生成会话 -> Workbench 可视化管理 -> 用户会话继续创作
+    执行型触发 -> 解析稳定 workspace -> open Workbench -> 建立/恢复 Studio Session -> 建立/恢复项目上下文 -> 创作澄清与确认 -> 生成会话 -> Workbench 可视化管理 -> 用户会话继续创作
 
-Skill 第一次在当前工作区被触发时，必须确保本地 Studio 服务可用，并自动打开或聚焦同一个 Workbench 窗口。后续 Skill 调用不得重复打开浏览器标签页。
+Skill 必须先分类触发：
 
-如果用户正在讨论已有项目、任务或轮次，Skill 必须将 Workbench 定位到对应上下文。对象不明确时，Skill 必须追问，不得猜测并修改其它项目。
+| 类型 | 判定 | 启动行为 |
+| --- | --- | --- |
+| 执行型 | 用户明确使用 daoge-pic / 刀哥生图，或要求生成、编辑、衍生、导入、管理、选片、Generation History、恢复、重试、取消或交付。 | 首次必须先执行启动协议，再澄清或写入领域事实。 |
+| 咨询/开发型 | 用户讨论架构、配置、源码、文档、测试，或尚未决定使用。 | 不得自动启动 Studio 或打开 Workbench。 |
+
+执行型启动顺序是强制协议：
+
+1. 解析当前会话已绑定的稳定工作区；已有明确绑定时复用。没有可从会话或宿主上下文获得的绑定时，只询问这一不可推导的前置条件，禁止使用临时目录、Skill 安装目录或任意 cwd。
+2. 每个独立智能体会话在该工作区首次执行时都可运行普通 `node scripts/daoge.js open --workspace <path>`。`open` 必须确保 `daemon-lock.sqlite` 的长期 SQLite 排他事务所代表的同工作区唯一健康 daemon；`daemon.lock` 仅作为锁持有者发布的身份记录供受控 CLI 验证。随后通过已授权本地 API 原子申请短期 opener claim。活动 Workbench、最近认证连接或未过期 claim 存在时返回 reused 且不得调用 opener；只有首个持有者实际请求默认浏览器。它只是本地准备，不是 Provider 调用，不需要生成确认，也不得自动测试 Provider 连接。
+3. CLI 必须安全输出 `{opened:true,reused:false}` 或 `{opened:false,reused:true}` 以及非敏感 reason。随后才以当前真实 conversation ID 创建或恢复独立 Studio Session，再建立或恢复该会话自己的项目、任务与轮次上下文，然后开始创作澄清、计划和领域写入。
+
+跨会话去重必须由 daemon 内存 presence/open-claim 实现，不能依赖会话间共享“已经调用过 open”的事实。Claim token 由 CLI 生成，daemon 仅存哈希且不得写响应、DB、事件、日志或 runtime；失败只释放自己的 claim，TTL 到期可恢复。同进程受控 restart 保留最近 presence，独立 daemon 进程重置。`open --force true` 只用于用户明确要求新标签，可绕过 presence 但不得抢占未过期 claim；普通 Skill 启动不得 force。不得声称 OS opener 能识别或强制聚焦现有标签页。
+
+如果自动打开失败但 daemon 健康，Skill 必须只提供安全重试命令 `node scripts/daoge.js open --workspace <path>`；安装包语境可使用 `npx daoge open --workspace <path>`。不得在回复中回显、记录或要求复制 bootstrap URL、capability、Cookie、session token 或 runtime 私密字段，裸 origin 不得作为主要访问方式。
+
+零 active Provider Profile 不得阻止 Studio 启动和 Workbench 打开。Skill 必须引导用户在 Workbench 生成服务页配置并激活 Profile，然后回到会话继续；打开、加载或保存页面不得自动连接测试。
+
+首次成功的中文状态汇报必须包含：Studio 已启动或连接；按 CLI 结果说明 Workbench 已在默认浏览器打开或已复用现有 Workbench；会话用于描述和确认创作，Workbench 用于 Provider、素材、Generation History、选片与交付；Provider readiness、当前项目/任务/轮次及下一步。不得把 reused 谎报为新打开，也不得重复给出链接或 origin。
 
 ### 4.2 智能体会话职责
 
 智能体会话负责：
 
-- 接收自然语言需求、创作反馈和下一轮意图。
-- 推荐创作任务类型，动态追问必要信息。
-- 起草可见、可编辑、待确认的创作计划。
+- 按 4.1 分类触发并执行首次启动或会话内复用。
+- 在 Workbench 打开或复用后建立/恢复 Studio Session 与项目、任务、轮次上下文。
+- 接收自然语言需求、创作反馈和下一轮意图，再动态追问必要信息。
+- 推荐创作任务类型并起草可见、可编辑、待确认的创作计划。
 - 根据当前 Provider 能力判断是否可以使用参考图、图生图或遮罩编辑。
-- 在用户确认后创建任务、轮次与生成会话。
-- 汇报进度、问题、恢复建议和下一步。
+- 只有在用户确认后才发起外部 Provider 调用。
+- 汇报启动状态、进度、问题、恢复建议和下一步。
 - 接受自然语言的暂停、继续、重试、归档和导出指令。
 
 智能体会话禁止直接写文件、扫描目录推断业务状态、直接操作数据库或绕过领域命令调用外部 Provider。
@@ -76,7 +94,7 @@ Workbench 必须支持：
 - 查看图片、放大、对比、筛选、选择、批注与衍生。
 - 暂停、继续、取消、重试单项或整轮生成。
 - 管理项目、归档、软删除、资产复用和导出。
-- 查看脱敏后的 Provider 连接状态和手工编辑 provider.env 的路径。
+- 管理 Provider Profiles，并只查看 write-only 密钥与完整 Base URL 的安全摘要。
 
 Workbench 不提供独立聊天入口。项目意图、任务起草和生成确认以智能体会话为主。Workbench 只提供视觉操作、精细管理和受控运行操作。
 
@@ -97,6 +115,8 @@ Studio 服务必须只监听回环地址，并为每次 daemon 身份生成高�
 除不返回敏感状态的健康检查和静态 Workbench 资源外，所有 API、媒体文件、ZIP、SSE 与写入端点都必须授权。服务必须同时校验请求 Host；Cookie 写入必须校验当前 Studio Origin，JSON mutation 必须要求正确 Content-Type。Capability、会话 token 和 Cookie 值不得写入数据库、领域事件、日志、导出物、Workbench 可见状态或聊天回复，也不得跨 Studio 复用。
 
 Workbench bootstrap 失败必须停留在未授权状态，不得回退为匿名本地访问。CLI 的 `status` 和正常业务输出只能返回脱敏 runtime 信息，不能输出 capability。
+
+Open-claim API 不是匿名端点：必须复用 Bearer/Cookie、Host、Origin 与 JSON Content-Type 门禁，不允许因去重放宽任何授权边界，也不得把 claim 结果纳入持久幂等回执。Workbench 的认证 bootstrap 与 SSE 活动连接是 presence 信号；不得为心跳频繁写磁盘。
 
 ## 5. 领域模型
 
@@ -146,8 +166,9 @@ Skill 必须使用智能体当前绑定的稳定工作区根目录。Skill 禁�
     <当前工作区>/
       daoge-studio/
         studio.db
+        Provider.db
         studio.json
-        provider.env
+        provider.env  # 仅既有工作区一次迁移输入
         runtime/
         runs/
         cache/
@@ -165,13 +186,13 @@ Skill 必须使用智能体当前绑定的稳定工作区根目录。Skill 禁�
 
 目录仅在首次实际需要写入时创建。初始化不得创建无业务用途的大量空目录。
 
-初始化在产生任何持久副作用前，必须先验证发布包内 Provider 模板可读取，并校验已有 `studio.json` 的 schema、Studio 身份与规范化 `workspaceRoot` 严格匹配当前请求根目录。模板缺失、manifest 无效或根目录不匹配时必须零持久副作用失败；不得创建半成品目录、manifest、数据库、配置或 `.gitignore` 条目。
+初始化在产生持久副作用前必须校验已有 `studio.json` 的 schema、Studio 身份与规范化 `workspaceRoot` 严格匹配当前请求根目录。新工作区不创建 `provider.env`；Provider.db、资产与缓存按需创建。
 
 ### 6.3 目录职责
 
 | 目录 | 职责 | 是否业务状态源 |
 | --- | --- | --- |
-| daoge-studio | Studio 数据库、配置、运行记录、缓存和证据。 | 仅 studio.db 是事实源。 |
+| daoge-studio | Studio 数据库、Provider 敏感配置、运行记录、缓存和证据。 | studio.db 是业务事实源；Provider.db 是完整 Provider 配置事实源。 |
 | daoge-assets | 导入、生成、导出与软删除的图片二进制。 | 否。 |
 | daoge-deliveries | 用户明确导出的可交付内容。 | 否；交付事实仍在数据库。 |
 | runtime | 服务 PID、单实例锁、worker 心跳和临时控制信息。 | 否。 |
@@ -191,55 +212,53 @@ Skill 必须使用智能体当前绑定的稳定工作区根目录。Skill 禁�
 7. 用户确认删除后，媒体文件必须移入 daoge-assets/trash 并保留可恢复记录。
 8. 软删除资产在保留期限内必须可恢复。永久清理策略属于后续可配置维护能力，第一版不得静默永久删除被引用资产。
 
-## 7. Provider 配置
+## 7. Provider 配置与运行并发
 
-### 7.1 配置文件
+### 7.1 Provider.db
 
-每个工作区必须只有一份可见的 Provider 配置文件：
+每个工作区的完整 Provider 配置只能保存在精确路径：
 
-    <当前工作区>/daoge-studio/provider.env
+    <当前工作区>/daoge-studio/Provider.db
 
-Skill 包必须携带无密钥样例 references/provider.env.example。首次初始化时，Skill 必须复制样例为 daoge-studio/provider.env。如果目标文件已存在，Skill 禁止覆盖。
+Provider.db 是受本地文件权限保护的明文敏感 SQLite，不得宣称加密。它必须拒绝符号链接，Unix 使用 `0600`，Windows 使用仅当前用户、SYSTEM 与 Administrators 的私有 ACL；SQLite 固定 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。Provider.db 及其辅助文件必须进入 `.gitignore`，并排除导出、交付、诊断与打包。
 
-### 7.2 配置规则
+数据库保存多 Profile 的完整 `name`、`providerId`、`model`、完整 `baseUrl`、`apiKey`、`options`、`configVersion`、`active` 与时间戳。第一阶段同一工作区最多一个 active Profile，也允许零 active。`studio.db` 只保存脱敏历史快照，不保存 Profile 或秘密。
 
-provider.env 必须包含当前启用的 IMAGE_PROVIDER、端点、密钥、模型与 Provider 固有能力开关。用户可以预先填写多个 Provider 的配置，但当前工作区同一时刻只能启用一个 IMAGE_PROVIDER。画幅、尺寸、数量、提示词和运行并发不得写入 provider.env。
+### 7.2 Workbench 与受控 API/CLI
 
-新任务、新轮次和新 Generation Run 必须读取当前 provider.env。已经启动的 Generation Run 必须使用启动时加载的内存配置，并持久化脱敏快照；修改 provider.env 不得改变正在运行或已经完成的会话。
+Workbench 必须提供 Profile 列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试与保存并重启。API Key 与完整 Base URL 是 write-only：GET 只返回安全摘要，更新必须明确 `keep`、`replace` 或 `clear`。密钥只允许在已授权本地页面写入表单中短暂出现；浏览器不得持久化。页面打开、加载或保存不得自动连接 Provider。
 
-普通用户界面必须显示“当前生成配置可用、未配置或检测失败”，不得默认展示 Provider 厂商、模型名和内部能力表。高级设置可以展开查看配置路径、当前 Provider、模型名和能力摘要。
+所有写入必须复用本地 capability/Cookie、Host、Origin、Content-Type、安全错误与幂等约束，并通过同源受控 CLI/API；Skill 与用户不得直接写 Provider.db。密钥与完整 URL 不得进入 studio.db、事件、幂等响应、日志、快照、导出、诊断、打包或聊天。
 
-### 7.3 密钥边界
+### 7.3 provider.env 一次迁移
 
-provider.env 是用户主动选择的本地明文密钥文件。Skill 必须：
+`provider.env` 不再是运行时事实源。既有工作区首次升级时一次性导入完整配置到 Provider.db，`IMAGE_PROVIDER` 对应 Profile 设为 active；成功后运行时只读 Provider.db，不覆盖或删除旧文件。新工作区不自动创建 provider.env。`references/provider.env.example` 只保留为显式 import-env 输入格式。
 
-- 自动将 daoge-studio/provider.env 写入当前工作区 .gitignore，但不得覆盖用户已有规则。
-- 禁止将密钥写入 studio.db、运行快照、任务、轮次、日志、错误消息、导出包或聊天回复。
-- 禁止 Workbench 回显完整密钥。
-- 禁止智能体读取后在会话中回显密钥。
-- 在导出、复制项目或创建交付包前提示 provider.env 不属于交付内容并必须排除。
+### 7.4 daemon 快照与重启
 
-### 7.4 Studio 运行设置
+daemon 启动时固定 active Profile 配置。active Profile、model、endpoint、key、options 或 configVersion 变化后必须标记 `restartRequired`，重启前拒绝新运行；已有运行不得静默切换。安全快照增加 `profileId`、`profileName`、`configVersion`，不含 API Key 或完整 URL；Worker 按 `profileId + configVersion` 领取，不得只靠 providerId、model 或 endpoint。Workbench 发起同一 daemon 进程内的受控重启时，必须只在内存中复用既有 capability 与 HttpOnly 会话 token，使已授权旧页面在端口恢复后继续可用；独立 daemon 进程仍生成新授权，Host、Origin、Cookie 与 capability 边界不得放宽，任意 localhost 页面不得借重启获得授权。
 
-工作区并发上限必须作为 Studio 数据库中的独立、版本化运行设置保存，新 Studio 的默认值和发布上限为 1000，允许值是 1 到 1000 的任意整数。Schema v18 必须将既有 Studio 上限迁移为 1000；修改设置不得改写 provider.env，且 daemon 必须在优雅重启后才采用新上限。
+### 7.5 Generation Run 并发
 
-会话可在用户确认计划且预检通过后，为单次 Generation Run 动态请求 1 到 1000 路并发。请求必须与运行记录一起冻结；实际调度并发不能超过 daemon 当前生效工作区上限。超出工作区上限的请求必须拒绝，不得静默降级。工作区上限不是每个项目的默认并发；每次运行仍由会话按 Provider 能力、成本和任务规模明确指定。
+并发只属于 Generation Run，不属于 Provider/Profile、项目、任务、轮次或工作区长期设置。系统全局硬上限固定 `1000`，不可配置；未指定默认 `4`，会话要求串行时解析为 `1`，显式值只接受 `1..1000`，超出必须拒绝且不得静默截断。
 
-Workbench 只显示期望设置、daemon 当前生效设置和运行请求，不提供绕过会话的调度编辑。
+每次预检冻结非空 `executionConcurrency`，可附仅用于解释的 `concurrencySource`（`default`、`explicit`、`serial`）。并发在预检前或预检时解析并绑定证据；改变并发必须重新预检。Run 从预检证据复制冻结值，queue 时不得另改；运行中不得修改。实际每 Run 不超过冻结值，全局不超过 `1000`。
 
-### 7.5 动态输出规格
+必须移除可配置 workspace worker concurrency、`config --worker-concurrency`、相关 runtime-settings API/业务读取及其 restartRequired。Provider 变化仍要求重启。Schema v19 必须保留现有业务数据与已完成 Run 历史，并把既有可用请求值回填到 `executionConcurrency`，其余历史默认 `4`。
+
+### 7.6 动态输出规格
 
 图片画幅、尺寸、分辨率和数量是会话创建的轮次计划字段，不得按 Provider 名称使用静态画幅白名单。`aspectRatio` 使用正整数比值，`size` 使用 `宽x高`，`resolution` 支持 `1K`、`2K` 等长边规格；当同时指定画幅与 resolution 时，系统必须以保持精确画幅的尺寸归一化。
 
 预检只拒绝格式错误、几何不一致或适配器无法无歧义传输的输出请求。例如只接受尺寸字段的适配器在非方形画幅下必须获得明确尺寸或 resolution。真实 Provider 对模型规格的最终拒绝必须如实记录为运行项结果，Skill 不得为了重试而改写比例、尺寸或数量。
 
-### 7.6 Provider 能力处理
+### 7.7 Provider 能力处理
 
 Provider adapter 必须声明 generate、edit 和 capabilities。Skill 必须按当前启用 Provider 的能力决定可执行操作。
 
-如果用户请求参考图、图生图或遮罩编辑，而当前 Provider 不支持对应能力，Skill 必须说明当前本地生成配置不支持该操作，并提供继续使用当前能力或先修改 provider.env 的选择。Skill 禁止伪装能力或将不支持的请求发送给 Provider。
+如果用户请求参考图、图生图或遮罩编辑，而当前 Provider 不支持对应能力，Skill 必须说明当前 active Profile 不支持该操作，并提供继续使用当前能力或先编辑 Profile 的选择。Skill 禁止伪装能力或将不支持的请求发送给 Provider。
 
-### 7.7 Provider HTTP 与下载安全
+### 7.8 Provider HTTP 与下载安全
 
 携带 API Key 的 Provider 请求必须直接发往用户配置的最终端点，并拒绝任何 HTTP 重定向，避免凭据被转发到未确认目标。Provider 响应若返回远程图片 URL，下载器必须执行独立的 SSRF 防护：
 
@@ -301,7 +320,7 @@ outcome_unknown 表示外部请求已发出但本地未获得稳定结果，例�
 | 浏览器断开 | worker 必须继续运行；重新连接后补齐状态与事件。 |
 | 服务重启 | 已完成项必须保留；未完成会话进入 resume_pending，等待会话确认。 |
 
-运行引擎必须定义有界重试、指数退避和抖动策略。具体默认次数、退避上限与 Provider 特定限制必须在实现阶段写入 provider.env.example 或可版本化运行配置，并通过故障注入测试验证。
+运行引擎必须定义有界重试、指数退避和抖动策略。具体默认次数、退避上限与 Provider 特定限制必须写入可版本化运行配置或源码常量，不得写入或读取 `provider.env`，并通过故障注入测试验证。
 
 ### 8.4 一致性与事件
 
@@ -336,6 +355,8 @@ Skill 必须支持在不调用外部 Provider 的情况下完成预检与干跑�
 Workbench 不得依赖全页刷新、扫描目录或客户端推测来显示最新生成结果。
 
 浏览器本地仅保存非权威交互状态，例如当前项目、筛选条件、页面位置和抽屉开关。项目选片集合是 Studio 业务状态：它以资产关系表达、由 Studio API 恢复，并且独立于当前浏览器、筛选范围和页面刷新。
+
+每个智能体对话必须以真实 conversation ID 对应独立 Studio Session；四个会话的 active project/task/round 更新不得互相覆盖。Workbench 自身 UI Session 只用于该标签页交互，identity 保存在 `sessionStorage`：reload 复用，同源不同标签不共享；它不代表任一智能体会话。单一 Workbench 的 route 始终由用户当前标签选择决定，后台其他 Session context 更新不得自动跟随或抢占。SSE 继续是 Studio 级事件流，使唯一 Workbench 可看到所有项目变化。
 
 ## 10. 创作任务类型与复用
 
@@ -429,7 +450,7 @@ Studio 全局导航固定为项目、创作资料库、共享素材、学习中�
 | 本地服务 | Node 原生 HTTP 与 SSE 或等价轻量路由层。 | 禁止因 Workbench 引入完整云端 Web 应用依赖。 |
 | 业务数据 | SQLite WAL、FTS5、版本化 SQL migration。 | studio.db 是唯一业务事实源。 |
 | 数据访问 | 小型 typed repository 与 schema 校验。 | 禁止由页面或目录直接写入业务事实。 |
-| 运行引擎 | SQLite 持久队列、daemon 内持久 Worker、租约和心跳。 | Worker 与本地服务共享同一 daemon 生命周期，不另起独立 Node worker 服务；禁止依赖浏览器或 stdout 维持运行。 |
+| 运行引擎 | SQLite 持久队列、daemon 内持久 Worker、租约和心跳。 | 同 workspace 仅一个 daemon 持有独立 `runtime/daemon-lock.sqlite` 的长期 `BEGIN EXCLUSIVE` 事务；OS/SQLite 在进程崩溃时自动释放。`daemon.lock` 只是 PID/ownerId 身份记录，不承担互斥。并发 CLI 最终复用同一实例。不同 Session/项目的 Runs 共享 Worker、每 Run 冻结并发与全局 1000 公平队列，不另设 Session/Provider/项目并发。 |
 | 实时通道 | SSE 与持久事件 outbox。 | 必须支持断线补偿。 |
 | Workbench | React 与 Vite 构建出的静态 bundle。 | 不提供第二个聊天入口。 |
 | 图片处理 | Node crypto；缩略图与预览可使用可选图像处理依赖。 | 缩略图失败不得破坏正式资产。 |
@@ -446,6 +467,8 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 
 - Provider 密钥加载与脱敏。
 - Local capability bootstrap、Bearer/Cookie 授权、Host/Origin/Content-Type 与 Studio 隔离。
+- 跨会话 daemon 首次启动竞态、Workbench presence/open-claim 的 TTL/失败释放/受控 restart/force 语义，以及 claim token 非持久化。
+- 真实 conversation Session context、项目/Run 归属、Workbench per-tab identity 与用户 route 不被后台会话抢占。
 - Provider 凭据请求的重定向拒绝，以及远程图片下载的 SSRF、DNS 固定和有界响应。
 - 运行会话状态机与并发租约。
 - 重试、取消、暂停、恢复和未知结果处理。
@@ -453,7 +476,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 - 受验证文件 snapshot、流式 ZIP、背压/取消与临时副本清理。
 - SSE 事件补发与状态快照恢复。
 - 软删除、恢复与被引用资产影响分析。
-- provider.env 修改后的配置快照与运行隔离。
+- Provider Profile 与 configVersion 变化后的安全快照、restartRequired 和运行隔离。
 - 外部资产导入的类型校验、去重、来源和失败处理。
 
 ## 15. 验收标准
@@ -462,15 +485,15 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 
 | ID | 验收项 |
 | --- | --- |
-| PIC-VN-AC-001 | 用户首次在稳定工作区触发 Skill 时，Skill 自动创建 daoge-studio、复制可编辑的 provider.env 样例，并打开或聚焦唯一 Workbench。 |
+| PIC-VN-AC-001 | 用户首次在稳定工作区触发 Skill 时，Skill 创建 daoge-studio 但不创建 provider.env；用户可在唯一 Workbench 中新建并激活 Provider Profile。 |
 | PIC-VN-AC-002 | 用户可仅通过智能体会话起草并确认项目、任务与创作轮次；未确认草稿不得调用 Provider。 |
 | PIC-VN-AC-003 | Workbench 可视化管理项目、任务、轮次、资产、运行、选片、批注、软删除恢复和导出，但不提供第二个聊天入口。 |
-| PIC-VN-AC-004 | daoge-studio/studio.db 是唯一业务事实源；删除、移动或重建缓存不得改变项目、任务、轮次、选择或交付事实。 |
+| PIC-VN-AC-004 | daoge-studio/studio.db 是唯一 Studio 业务事实源；Provider.db 是唯一完整 Provider 配置事实源；删除、移动或重建缓存不得改变业务事实。 |
 | PIC-VN-AC-005 | 图片导入、Provider 生成和外部图片导入均创建稳定 Asset 与来源关系；业务状态不依赖资产目录名。 |
 | PIC-VN-AC-006 | 一个运行会话生成至少 100 个运行项时，浏览器刷新、页面关闭、短时网络故障、429、可重试 5xx 和本地服务重启后，已完成资产不丢失，未完成项可恢复。 |
 | PIC-VN-AC-007 | 系统重启后的未完成运行会话必须进入 resume_pending，且未获得用户确认前不得自动调用外部 Provider。 |
 | PIC-VN-AC-008 | Workbench 通过 SSE 显示新资产、进度和问题；断线重连后不依赖目录扫描或全页刷新即可恢复一致状态。 |
-| PIC-VN-AC-009 | provider.env 中的密钥不进入数据库、日志、导出包、任务、轮次、事件和聊天输出；文件自动进入 .gitignore。 |
+| PIC-VN-AC-009 | Provider 密钥和完整 Base URL 只存在于 Provider.db 与短暂写入/Worker 内存，不进入 studio.db、API GET、事件、日志、幂等响应、快照、导出、诊断、打包、浏览器持久状态或聊天；Provider.db 受本地权限保护并自动进入 .gitignore。 |
 | PIC-VN-AC-010 | 当前本地 Provider 不支持参考图或遮罩编辑时，Skill 必须在会话中给出明确可理解的限制与下一步，不得伪装执行成功。 |
 | PIC-VN-AC-011 | 现有创作模板的有效语义被重构为新的 Task Type Library；旧 task spec、旧模板格式、旧输出目录和旧页面契约不再作为输入或运行依赖。 |
 | PIC-VN-AC-012 | 交付默认包含精选图片、联系表和交付清单，且不包含密钥、缓存、日志或未选择的内部材料。 |
@@ -479,6 +502,10 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-015 | Workbench 只能通过 local capability bootstrap 获得当前 Studio 会话；除最小健康检查外的 API、媒体、ZIP 与 SSE 均拒绝匿名或跨 Studio 访问，bootstrap 后 URL 不保留 capability。 |
 | PIC-VN-AC-016 | Provider 图片 URL 下载逐跳执行 SSRF 校验、DNS 固定、远端地址确认、重定向和大小限制；携带 Provider 凭据的 API 请求不得跟随重定向。 |
 | PIC-VN-AC-017 | 导入、生成、回收、恢复、交付与 ZIP 在崩溃、文件替换、符号链接、断连或 journal 冲突时不得把身份不明媒体提交为正式资产；恢复与读取只接受受管理根目录内身份匹配的 journal/snapshot。 |
+| PIC-VN-AC-018 | Provider Profile 支持 CRUD、复制、唯一 active、本地校验、显式连接测试、write-only secret 更新与受控重启；同进程重启保持既有 Workbench 授权但不放宽 localhost/Origin 边界；Worker 只领取 profileId + configVersion 匹配的运行。 |
+| PIC-VN-AC-019 | 每次 Run 在预检冻结 1..1000 的 executionConcurrency；默认 4、串行 1、1001 拒绝，queue 与运行中都不能改写，系统全局不超过 1000。 |
+| PIC-VN-AC-020 | 执行型触发在稳定 workspace 中先普通 `open`，再建立独立 Session/项目上下文并开始澄清；咨询/开发型不自动启动。每个独立会话都可调用普通 open，daemon 只允许首个实际 opener并让其他会话返回 reused；失败回退不泄露 bootstrap/claim 秘密；force 仅显式用户动作；零 active Provider 仍可启动且不会自动测试连接；首次汇报区分 opened/reused 并包含职责、Provider readiness、当前上下文和下一步。 |
+| PIC-VN-AC-021 | 同一稳定 workspace 的 3–4 个并发会话最终复用唯一 daemon/PID 和单一活动 Workbench；真实 conversation Session 的 project/task/round、项目与 Run 归属互相隔离，Workbench per-tab UI Session 与 agent Sessions 分离，用户当前 route 不被后台 context 更新抢占；所有 Runs 仍共享 daemon Worker 与全局公平队列。 |
 
 ## 16. 实施与发布约束
 
@@ -491,7 +518,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 5. Task Type Library、Style Kit、Brand Kit 与外部资产导入。
 6. 全量 E2E、100 项恢复场景、真实 Provider 受控探测和安全检查。
 
-开发期间不得向最终用户发布旧新混合体验。对最终用户的发布必须在本规格所有验收项、相关高风险技术设计和真实验证证据完成后进行。
+`5.8.0` 稳定正式版已按本规格完成旧新体验的干净切换；后续版本也不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
 
 ## 17. 明确非目标
 
@@ -508,4 +535,4 @@ vNext 第一版不包含：
 
 ## 18. 规格解释
 
-本规格定义目标产品与目标架构，不代表任一源码版本已经通过其中任一 vNext 验收项。代码、目录、命令和测试只能作为实现事实参考；实现状态、机器验证与发布证据必须与本规格分开维护。
+本规格定义 `5.8.0` 稳定正式版的目标产品与目标架构；具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。

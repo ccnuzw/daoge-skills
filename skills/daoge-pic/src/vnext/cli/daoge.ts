@@ -1,19 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { openWorkbenchUrl } from './open-workbench';
-import { MAX_WORKER_CONCURRENCY, MIN_WORKER_CONCURRENCY } from '../studio/runtime-settings';
+import { MAX_GLOBAL_CONCURRENCY, MIN_EXECUTION_CONCURRENCY } from '../studio/runtime-settings';
 import { healthStudioId, signalVerifiedDaemon } from './legacy-daemon';
 import { readStudioManifest, studioPaths } from '../studio/workspace';
 
-interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; heartbeatAt: string; workerConcurrency?: number | null; }
+export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; heartbeatAt: string; }
 
 type JsonObject = Record<string, unknown>;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
 type LocalAction = 'status' | 'studio' | 'open' | 'restart';
-type FlagKind = 'text' | 'json' | 'positive-integer' | 'worker-concurrency' | 'requested-concurrency' | 'list' | 'boolean' | 'purpose';
+type FlagKind = 'text' | 'json' | 'positive-integer' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
   action?: LocalAction;
@@ -27,6 +27,7 @@ interface ParsedCommand {
   workspaceRoot: string;
   action?: LocalAction;
   request?: { method: HttpMethod; pathname: string; body: JsonObject; idempotencyKey?: string };
+  force?: boolean;
 }
 
 function workspaceRoot(value: string | undefined): string {
@@ -36,7 +37,6 @@ function workspaceRoot(value: string | undefined): string {
 }
 
 function runtimePath(workspaceRoot: string): string { return path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json'); }
-function lockPath(workspaceRoot: string): string { return path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.lock'); }
 function manifestPath(workspaceRoot: string): string { return path.join(workspaceRoot, 'daoge-studio', 'studio.json'); }
 function readStudioId(workspaceRoot: string): string {
   try {
@@ -57,7 +57,7 @@ function readRuntime(workspaceRoot: string): RuntimeRecord | null {
 }
 function publicRuntime(record: RuntimeRecord | null): Record<string, unknown> | null {
   if (!record) return null;
-  return { pid: record.pid, url: record.url, workspaceRoot: record.workspaceRoot, heartbeatAt: record.heartbeatAt, workerConcurrency: record.workerConcurrency ?? null };
+  return { pid: record.pid, url: record.url, workspaceRoot: record.workspaceRoot, heartbeatAt: record.heartbeatAt };
 }
 
 function workbenchBootstrapUrl(record: RuntimeRecord): string {
@@ -72,15 +72,10 @@ async function healthy(url: string, expectedStudioId?: string): Promise<boolean>
 
 function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
-function strictWorkerConcurrency(value: string): number {
-  const concurrency = Number(value);
-  if (Number.isInteger(concurrency) && concurrency >= MIN_WORKER_CONCURRENCY && concurrency <= MAX_WORKER_CONCURRENCY) return concurrency;
-  throw new Error('--worker-concurrency 只能是 1 到 1000 的整数。');
-}
 
-function strictRequestedConcurrency(value: string): number {
+function strictExecutionConcurrency(value: string): number {
   const concurrency = Number(value);
-  if (Number.isInteger(concurrency) && concurrency >= MIN_WORKER_CONCURRENCY && concurrency <= MAX_WORKER_CONCURRENCY) return concurrency;
+  if (Number.isInteger(concurrency) && concurrency >= MIN_EXECUTION_CONCURRENCY && concurrency <= MAX_GLOBAL_CONCURRENCY) return concurrency;
   throw new Error('--concurrency 只能是 1 到 1000 的整数。');
 }
 
@@ -88,16 +83,13 @@ function livePid(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function recordedLockPid(workspaceRoot: string): number | null {
+function recordedOwnerPid(workspaceRoot: string): number | null {
   try {
-    const lock = JSON.parse(fs.readFileSync(lockPath(workspaceRoot), 'utf8')) as { pid?: unknown };
-    return Number.isInteger(lock.pid) && Number(lock.pid) > 0 ? Number(lock.pid) : null;
+    const owner = JSON.parse(fs.readFileSync(studioPaths(workspaceRoot).daemonOwnerRecordPath, 'utf8')) as { pid?: unknown };
+    return Number.isInteger(owner.pid) && Number(owner.pid) > 0 ? Number(owner.pid) : null;
   } catch { return null; }
 }
 
-function matchingLockPid(workspaceRoot: string, pid: number): boolean {
-  return recordedLockPid(workspaceRoot) === pid;
-}
 
 async function waitForDaemonRelease(workspaceRoot: string, record: RuntimeRecord): Promise<void> {
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -106,8 +98,9 @@ async function waitForDaemonRelease(workspaceRoot: string, record: RuntimeRecord
     if (!live && !responding) {
       const current = readRuntime(workspaceRoot);
       if (current?.pid === record.pid) fs.rmSync(runtimePath(workspaceRoot), { force: true });
-      if (matchingLockPid(workspaceRoot, record.pid)) fs.rmSync(lockPath(workspaceRoot), { force: true });
-      if (!fs.existsSync(lockPath(workspaceRoot))) return;
+      // A stale daemon.lock observation never blocks the next SQLite lock acquisition.
+      // Only an exact pid+ownerId holder removes its own record during normal shutdown.
+      return;
     }
     await sleep(100);
   }
@@ -117,17 +110,43 @@ async function waitForDaemonRelease(workspaceRoot: string, record: RuntimeRecord
 async function stopRecordedDaemon(workspaceRoot: string, existing: RuntimeRecord): Promise<void> {
   if (path.resolve(existing.workspaceRoot) !== workspaceRoot) throw new Error('运行记录不属于当前工作区，拒绝停止。');
   if (livePid(existing.pid)) {
-    const lockPid = recordedLockPid(workspaceRoot);
-    if (lockPid === null) throw new Error('daemon 锁文件无有效 PID，拒绝发送终止信号。');
+    const ownerPid = recordedOwnerPid(workspaceRoot);
+    if (ownerPid === null) throw new Error('daemon owner record 无有效 PID，拒绝发送终止信号。');
     await signalVerifiedDaemon(existing, {
       workspaceRoot,
       studioId: readStudioId(workspaceRoot),
-      lockPid,
+      lockPid: ownerPid,
       daemonEntry: path.resolve(__dirname, 'daemon.js')
     });
   }
   await waitForDaemonRelease(workspaceRoot, existing);
 }
+async function stopSpawnedDaemon(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.removeListener('exit', onExit);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onExit = (): void => finish();
+    const timeout = setTimeout(() => finish(new Error('本次 CLI 启动的非 owner daemon 未能在 3 秒内退出。')), 3000);
+    child.once('exit', onExit);
+    if (child.exitCode !== null || child.signalCode !== null) return finish();
+    try {
+      if (!child.kill('SIGTERM') && child.exitCode === null && child.signalCode === null) {
+        finish(new Error('无法停止本次 CLI 启动的非 owner daemon。'));
+      }
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error('无法停止本次 CLI 启动的非 owner daemon。'));
+    }
+  });
+}
+
 
 async function restartDaemon(workspaceRoot: string): Promise<{ previousPid: number | null; daemon: RuntimeRecord }> {
   const existing = readRuntime(workspaceRoot);
@@ -146,12 +165,19 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
   const daemonEntry = path.resolve(__dirname, 'daemon.js');
   if (!fs.existsSync(daemonEntry)) throw new Error('未找到 vNext Studio daemon。当前安装包不完整，请重新安装完整发布包。');
   const child = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { detached: true, stdio: 'ignore', windowsHide: true });
-  child.unref();
+  let spawnError: Error | null = null;
+  child.once('error', (error) => { spawnError = error; });
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await sleep(100);
+    if (spawnError) throw spawnError;
     const started = readRuntime(workspaceRoot);
-    if (started?.capability && await healthy(started.url, readStudioId(workspaceRoot))) return started;
+    if (started?.capability && await healthy(started.url, readStudioId(workspaceRoot))) {
+      if (started.pid === child.pid) child.unref();
+      else await stopSpawnedDaemon(child);
+      return started;
+    }
   }
+  await stopSpawnedDaemon(child);
   throw new Error('Studio daemon 未能在 6 秒内启动。请检查 daoge-studio/runtime/daemon.log。');
 }
 
@@ -167,6 +193,28 @@ async function api(record: RuntimeRecord, method: HttpMethod, pathname: string, 
   if (!response.ok || !payload.ok) throw new Error(payload.error?.message || 'Studio API 请求失败。');
   return payload.data;
 }
+export interface WorkbenchOpenOutput {
+  opened: boolean;
+  reused: boolean;
+  reason: 'opener-claim' | 'forced-opener-claim' | 'active-workbench' | 'recent-workbench' | 'open-claim-active';
+}
+
+const WORKBENCH_OPEN_REASONS: Record<WorkbenchOpenOutput['reason'], true> = { 'opener-claim': true, 'forced-opener-claim': true, 'active-workbench': true, 'recent-workbench': true, 'open-claim-active': true };
+
+export async function openOrReuseWorkbench(record: RuntimeRecord, force = false, opener: (url: string) => Promise<void> = openWorkbenchUrl): Promise<WorkbenchOpenOutput> {
+  const claimToken = randomBytes(32).toString('base64url');
+  const claimed = await api(record, 'POST', '/api/workbench/open-claim', { claimToken, force }, 'open-claim-' + randomUUID()) as { claimed?: unknown; reused?: unknown; reason?: unknown };
+  const reason = typeof claimed.reason === 'string' && WORKBENCH_OPEN_REASONS[claimed.reason as WorkbenchOpenOutput['reason']] ? claimed.reason as WorkbenchOpenOutput['reason'] : null;
+  if (!reason || typeof claimed.claimed !== 'boolean' || typeof claimed.reused !== 'boolean') throw new Error('Studio daemon 返回了无效的 Workbench open claim。');
+  if (!claimed.claimed) return { opened: false, reused: true, reason };
+  try {
+    await opener(workbenchBootstrapUrl(record));
+    return { opened: true, reused: false, reason };
+  } catch (error) {
+    await api(record, 'POST', '/api/workbench/open-claim/release', { claimToken }, 'open-claim-release-' + randomUUID()).catch(() => undefined);
+    throw error;
+  }
+}
 
 function textValue(values: Record<string, unknown>, name: string): string { return values[name] as string; }
 function jsonValue(values: Record<string, unknown>, name: string): JsonObject { return (values[name] as JsonObject | undefined) || {}; }
@@ -176,8 +224,16 @@ function booleanValue(values: Record<string, unknown>, name: string): boolean { 
 function encoded(values: Record<string, unknown>, name: string): string { return encodeURIComponent(textValue(values, name)); }
 
 const commandSchemas: Record<string, CommandSchema> = {
-  status: { action: 'status', flags: {} }, studio: { action: 'studio', flags: {} }, open: { action: 'open', flags: {} }, restart: { action: 'restart', flags: {} },
-  config: { method: 'PUT', flags: { '--worker-concurrency': { kind: 'worker-concurrency', required: true } }, pathname: () => '/api/runtime-settings', body: (v) => ({ maxWorkerConcurrency: numberValue(v, '--worker-concurrency') }) },
+  status: { action: 'status', flags: {} }, studio: { action: 'studio', flags: {} }, open: { action: 'open', flags: { '--force': { kind: 'boolean' } } }, restart: { action: 'restart', flags: {} },
+  'provider-list': { method: 'GET', flags: {}, pathname: () => '/api/providers' },
+  'provider-import-env': { method: 'POST', flags: {}, pathname: () => '/api/providers/import-env', body: () => ({}) },
+  'provider-create': { method: 'POST', flags: { '--name': { kind: 'text', required: true }, '--provider': { kind: 'text', required: true }, '--model': { kind: 'text', required: true }, '--base-url': { kind: 'text', required: true }, '--api-key': { kind: 'text', required: true }, '--options': { kind: 'json' }, '--active': { kind: 'boolean' } }, pathname: () => '/api/providers', body: (v) => ({ name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: v['--base-url'], apiKey: v['--api-key'], options: v['--options'], active: v['--active'] === true }) },
+  'provider-update': { method: 'PUT', flags: { '--profile': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--name': { kind: 'text' }, '--provider': { kind: 'text' }, '--model': { kind: 'text' }, '--base-url-action': { kind: 'text', required: true }, '--base-url': { kind: 'text' }, '--api-key-action': { kind: 'text', required: true }, '--api-key': { kind: 'text' }, '--options': { kind: 'json' } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile'), body: (v) => ({ expectedConfigVersion: v['--version'], name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: { action: v['--base-url-action'], ...(v['--base-url'] ? { value: v['--base-url'] } : {}) }, apiKey: { action: v['--api-key-action'], ...(v['--api-key'] ? { value: v['--api-key'] } : {}) }, options: v['--options'] }) },
+  'provider-copy': { method: 'POST', flags: { '--profile': { kind: 'text', required: true }, '--name': { kind: 'text' } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/copy', body: (v) => ({ name: v['--name'] }) },
+  'provider-activate': { method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/activate', body: () => ({}) },
+  'provider-delete': { method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/delete', body: () => ({}) },
+  'provider-validate': { method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/validate', body: () => ({}) },
+  'provider-test': { method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/test', body: () => ({}) },
   session: { method: 'POST', flags: { '--conversation': { kind: 'text', required: true } }, pathname: () => '/api/sessions/open', body: (v) => ({ conversationId: textValue(v, '--conversation') }) },
   'session-context': { method: 'POST', flags: { '--session': { kind: 'text', required: true }, '--project': { kind: 'text' }, '--task': { kind: 'text' }, '--round': { kind: 'text' } }, pathname: (v) => '/api/sessions/' + encoded(v, '--session') + '/context', body: (v) => ({ projectId: v['--project'], taskId: v['--task'], roundId: v['--round'] }) },
   'archive-project': { method: 'POST', flags: { '--project': { kind: 'text', required: true } }, pathname: (v) => '/api/projects/' + encoded(v, '--project') + '/archive', body: () => ({}) },
@@ -197,8 +253,8 @@ const commandSchemas: Record<string, CommandSchema> = {
   round: { method: 'POST', flags: { '--task': { kind: 'text', required: true }, '--purpose': { kind: 'purpose', required: true }, '--parent': { kind: 'text' }, '--session': { kind: 'text' } }, pathname: () => '/api/rounds', body: (v) => ({ taskId: textValue(v, '--task'), purpose: textValue(v, '--purpose'), parentRoundId: v['--parent'], sessionId: v['--session'] }) },
   plan: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--plan': { kind: 'json', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/prepare', body: (v) => ({ expectedVersion: numberValue(v, '--version'), plan: jsonValue(v, '--plan') }) },
   confirm: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/confirm', body: (v) => ({ expectedVersion: numberValue(v, '--version') }) },
-  preflight: { method: 'POST', flags: { '--round': { kind: 'text', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/preflight', body: () => ({}) },
-  run: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--preflight': { kind: 'text', required: true }, '--concurrency': { kind: 'requested-concurrency' } }, pathname: () => '/api/runs', body: (v) => ({ roundId: textValue(v, '--round'), preflightId: textValue(v, '--preflight'), requestedConcurrency: v['--concurrency'] }) },
+  preflight: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--concurrency': { kind: 'execution-concurrency' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/preflight', body: (v) => ({ executionConcurrency: v['--concurrency'] }) },
+  run: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--preflight': { kind: 'text', required: true } }, pathname: () => '/api/runs', body: (v) => ({ roundId: textValue(v, '--round'), preflightId: textValue(v, '--preflight') }) },
   pause: { method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/pause', body: () => ({}) },
   resume: { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/resume', body: (v) => ({ sessionId: textValue(v, '--session') }) },
   cancel: { method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/cancel', body: () => ({}) },
@@ -214,8 +270,7 @@ function validateFlag(name: string, raw: string, kind: FlagKind): unknown {
   if (kind === 'list') { const values = [...new Set(raw.split(',').map((item) => item.trim()).filter(Boolean))]; if (!values.length) throw new Error(name + ' 必须包含至少一个 ID。'); return values; }
   if (kind === 'boolean') { if (value !== 'true' && value !== 'false') throw new Error(name + ' 只能是 true 或 false。'); return value === 'true'; }
   if (kind === 'purpose') { if (!['exploration', 'refinement', 'variation', 'edit', 'fill'].includes(value)) throw new Error(name + ' 不是支持的创作目的。'); return value; }
-  if (kind === 'worker-concurrency') return strictWorkerConcurrency(value);
-  if (kind === 'requested-concurrency') return strictRequestedConcurrency(value);
+  if (kind === 'execution-concurrency') return strictExecutionConcurrency(value);
   const integer = Number(value); if (!Number.isInteger(integer) || integer < 1) throw new Error(name + ' 必须是正整数。'); return integer;
 }
 
@@ -246,7 +301,7 @@ function parseCommand(args: string[]): ParsedCommand {
     values[flagName] = validateFlag(flagName, raw, flagSchema.kind);
   }
   const root = workspaceRoot(rawValues['--workspace']);
-  if (schema.action) return { name, workspaceRoot: root, action: schema.action };
+  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true } : {}) };
   const method = schema.method as HttpMethod;
   const idempotencyKey = method === 'GET' ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
   return { name, workspaceRoot: root, request: { method, pathname: (schema.pathname as (input: Record<string, unknown>) => string)(values), body: schema.body ? schema.body(values) : {}, idempotencyKey } };
@@ -256,8 +311,12 @@ function usage(): string {
   return [
     'DAOGE Pic vNext Studio',
     'daoge studio --workspace <path>',
-    'daoge open --workspace <path>',
-    'daoge config --workspace <path> --worker-concurrency <1..1000>  # 修改工作区并发上限，需重启生效',
+    'daoge open --workspace <path> [--force true]  # 默认复用唯一 Workbench；force 仅用于用户明确要求新标签',
+    'daoge provider-list --workspace <path>',
+    'daoge provider-import-env --workspace <path>  # 显式导入工作区 daoge-studio/provider.env',
+    'daoge provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key <key> [--active true]',
+    'daoge provider-update --workspace <path> --profile <id> --version <n> --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear>',
+    'daoge provider-copy|provider-activate|provider-delete|provider-validate|provider-test --workspace <path> --profile <id>',
     'daoge restart --workspace <path>  # 优雅重启本工作区 Studio',
     'daoge session --workspace <path> --conversation <id>',
     'daoge project --workspace <path> --name <name> [--description <text>] [--session <id>]',
@@ -278,8 +337,8 @@ function usage(): string {
     'daoge round --workspace <path> --task <id> --purpose <exploration|refinement|variation|edit|fill> [--session <id>]',
     'daoge plan --workspace <path> --round <id> --version <n> --plan <json>',
     'daoge confirm --workspace <path> --round <id> --version <n>',
-    'daoge preflight --workspace <path> --round <id>',
-    'daoge run --workspace <path> --round <id> --preflight <dry-run-id> [--concurrency <1..1000>]',
+    'daoge preflight --workspace <path> --round <id> [--concurrency <1..1000>]  # 默认 4；串行使用 1',
+    'daoge run --workspace <path> --round <id> --preflight <dry-run-id>',
     'daoge pause --workspace <path> --run <id>',
     'daoge resume --workspace <path> --run <id> --session <session-id>',
     'daoge cancel --workspace <path> --run <id>',
@@ -309,19 +368,14 @@ export async function main(): Promise<void> {
     return;
   }
   const record = await ensureDaemon(root);
-  if (parsed.action === 'studio') { process.stdout.write(JSON.stringify({ workspaceRoot: root, workbench: { origin: record.url, command: ['daoge', 'open', '--workspace', root] } }, null, 2) + '\n'); return; }
+  if (parsed.action === 'studio') { process.stdout.write(JSON.stringify({ workspaceRoot: root, daemon: publicRuntime(record), workbench: { origin: record.url, command: ['daoge', 'open', '--workspace', root] } }, null, 2) + '\n'); return; }
   if (parsed.action === 'open') {
-    await openWorkbenchUrl(workbenchBootstrapUrl(record));
-    process.stdout.write(JSON.stringify({ workspaceRoot: root, workbenchOrigin: record.url, opened: true }, null, 2) + '\n');
+    const workbench = await openOrReuseWorkbench(record, parsed.force === true);
+    process.stdout.write(JSON.stringify({ workspaceRoot: root, workbenchOrigin: record.url, ...workbench }, null, 2) + '\n');
     return;
   }
   const request = parsed.request as NonNullable<ParsedCommand['request']>;
   const result = await api(record, request.method, request.pathname, request.body, request.idempotencyKey);
-  if (parsed.name === 'config') {
-    const runtime = result as { desired: { maxWorkerConcurrency: number }; active: { workerConcurrency: number | null } | null; restartRequired: boolean };
-    process.stdout.write(JSON.stringify({ workspaceRoot: root, workerConcurrency: runtime.desired.maxWorkerConcurrency, restartRequired: runtime.restartRequired, activeWorkerConcurrency: runtime.active?.workerConcurrency || null }, null, 2) + '\n');
-    return;
-  }
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
 

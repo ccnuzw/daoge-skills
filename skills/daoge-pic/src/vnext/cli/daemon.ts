@@ -1,5 +1,6 @@
-import path from 'node:path';
-import { runStudioDaemon } from '../runtime/daemon';
+import { createLocalCapability } from '../api/local-auth';
+import { runStudioDaemon, StudioDaemonOptions } from '../runtime/daemon';
+import { WorkbenchPresence } from '../runtime/workbench-presence';
 
 function valueAfter(args: string[], flag: string): string | null {
   const index = args.indexOf(flag);
@@ -13,7 +14,8 @@ async function main(): Promise<void> {
   const requestedPort = valueAfter(args, '--port');
   const port = requestedPort === null ? undefined : Number(requestedPort);
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) throw new Error('Studio daemon --port must be an integer between 0 and 65535.');
-  await runStudioDaemon({ workspaceRoot, providerTemplatePath: path.resolve(__dirname, '../../../references/provider.env.example'), port });
+  const options: StudioDaemonOptions = { workspaceRoot, port, capability: createLocalCapability(), sessionToken: createLocalCapability(), workbenchPresence: new WorkbenchPresence() };
+  while (await runStudioDaemon(options) === 'restart') { /* restart after graceful release with the same in-memory Workbench authorization */ }
 }
 
 void main().catch((error) => { process.stderr.write((error instanceof Error ? error.message : 'Studio daemon failed.') + '\n'); process.exitCode = 1; });

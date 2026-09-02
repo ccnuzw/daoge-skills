@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createImageProvider } = require('../../dist/vnext/providers/http-adapters');
+const { sanitizeProviderMetadata, sanitizeProviderRequestId } = require('../../dist/vnext/providers/response-sanitizer');
 const { decodeBoundedBase64, downloadHttpResource, readBoundedResponse } = require('../../dist/vnext/providers/http-safety');
 
 const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==';
@@ -135,6 +136,20 @@ test('vNext Provider adapter classifies rate limits, invalid input, and ambiguou
   assert.equal(provider.classifyError(new Error('http 429: slow down')).kind, 'rate_limited');
   assert.equal(provider.classifyError(new Error('http 400: invalid prompt')).kind, 'invalid_request');
   assert.equal(provider.classifyError(new Error('socket closed after request write')).kind, 'unknown_outcome');
+});
+
+test('Provider request IDs use a bounded metadata-safe format and reject exact sensitive values', () => {
+  const sensitive = { apiKey: 'opaque-provider-key', baseUrl: 'https://provider.example/private/v1' };
+  assert.equal(sanitizeProviderRequestId('request_01-safe:value', sensitive), 'request_01-safe:value');
+  assert.equal(sanitizeProviderRequestId('request id with spaces', sensitive), undefined);
+  assert.equal(sanitizeProviderRequestId('r'.repeat(129), sensitive), undefined);
+  assert.equal(sanitizeProviderRequestId('prefix-' + sensitive.apiKey, sensitive), undefined);
+  assert.equal(sanitizeProviderRequestId(sensitive.baseUrl, sensitive), undefined);
+  const metadata = sanitizeProviderMetadata({ nested: [{ note: 'echo ' + sensitive.apiKey }, { urlEcho: sensitive.baseUrl }], providerRequestId: sensitive.apiKey, [sensitive.apiKey]: 'reflected-key-name' }, sensitive);
+  const serialized = JSON.stringify(metadata);
+  assert.equal(serialized.includes(sensitive.apiKey), false);
+  assert.equal(serialized.includes(sensitive.baseUrl), false);
+  assert.equal(Object.hasOwn(metadata, 'providerRequestId'), false);
 });
 
 test('vNext Gemini edit rejects redirects without forwarding its API key', async () => {

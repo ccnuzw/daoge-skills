@@ -1,5 +1,6 @@
 import { ImageProvider, ImageRequest, ImageResult, ProviderError } from '../providers/contracts';
 import { safeErrorSummary } from '../shared/safe-error';
+import { redactProviderText, sanitizeProviderImageResult, sanitizeProviderRequestId } from '../providers/response-sanitizer';
 import { ManagedAssetResolver } from '../media/asset-resolver';
 import { InvalidCommandError } from '../domain/studio-commands';
 import { StudioDatabase } from '../studio/database';
@@ -55,7 +56,7 @@ function operationFromItem(item: ClaimedRunItem): 'generate' | 'edit' {
 }
 
 type ItemProcessingOutcome = 'succeeded' | 'retrying' | 'blocked' | 'unknown' | 'cancelled';
-type MonitorEvent = { kind: 'cancel_requested' } | { kind: 'ownership_lost' };
+type MonitorEvent = { kind: 'cancel_requested' } | { kind: 'ownership_lost' } | { kind: 'shutdown' };
 type OperationOutcome<T> = { kind: 'fulfilled'; value: T } | { kind: 'rejected'; reason: unknown };
 
 function tracked<T>(operation: Promise<T>): Promise<OperationOutcome<T>> {
@@ -72,6 +73,8 @@ export class GenerationWorker {
   private readonly leaseMs: number;
   private readonly policy: RetryPolicy;
   private readonly clock: () => Date;
+  private stopping = false;
+  private readonly activeShutdowns = new Set<() => void>();
 
   constructor(options: WorkerOptions) {
     this.db = options.db;
@@ -87,12 +90,19 @@ export class GenerationWorker {
       throw new InvalidCommandError('A worker can only process the Provider configuration it was started with.');
     }
   }
+  shutdown(): void {
+    if (this.stopping) return;
+    this.stopping = true;
+    for (const shutdown of [...this.activeShutdowns]) shutdown();
+  }
+
 
   async processOnce(limit = 1): Promise<WorkerProcessResult> {
+    if (this.stopping) return { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 };
     const snapshot = providerSnapshot(this.providerConfig);
     const now = this.clock();
     promoteDueRetryWaitItems(this.db, now);
-    const claimedItems = claimRunItems(this.db, { workerId: this.workerId, limit, leaseMs: this.leaseMs, now, providerSnapshot: { providerId: snapshot.providerId, model: snapshot.model, endpoint: snapshot.endpoint } });
+    const claimedItems = claimRunItems(this.db, { workerId: this.workerId, limit, leaseMs: this.leaseMs, now, providerSnapshot: { profileId: snapshot.profileId, configVersion: snapshot.configVersion } });
     const result: WorkerProcessResult = { claimed: claimedItems.length, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 };
     const affectedRuns = new Set(claimedItems.map((item) => item.runId));
     // A batch lease is a concurrency budget. Processing it serially can let later items expire while an earlier Provider call is still pending.
@@ -143,9 +153,10 @@ export class GenerationWorker {
   private async processClaimedItem(item: ClaimedRunItem): Promise<ItemProcessingOutcome> {
     const run = getGenerationRun(this.db, item.runId);
     if (!run) throw new InvalidCommandError('Claimed item belongs to a missing run.');
-    const snapshotProvider = String(run.providerSnapshot.providerId || '');
-    if (snapshotProvider !== this.provider.id) {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'provider_worker_mismatch' } });
+    const snapshotProfileId = String(run.providerSnapshot.profileId || '');
+    const snapshotConfigVersion = Number(run.providerSnapshot.configVersion);
+    if (snapshotProfileId !== this.providerConfig.profileId || snapshotConfigVersion !== this.providerConfig.configVersion) {
+      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'provider_profile_version_mismatch' } });
       return 'blocked';
     }
 
@@ -187,12 +198,15 @@ export class GenerationWorker {
         return finishMonitoring({ kind: 'ownership_lost' });
       }
     };
-    const initialEvent = observeLease();
-    if (initialEvent?.kind === 'cancel_requested') return this.settleCancellation(item, true);
-    if (initialEvent?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+    const shutdown = (): void => { finishMonitoring({ kind: 'shutdown' }); };
+    this.activeShutdowns.add(shutdown);
     const renewTimer = setInterval(observeLease, Math.max(100, Math.min(1000, Math.floor(this.leaseMs / 3))));
 
     try {
+      const initialEvent = observeLease();
+      if (initialEvent?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+      if (initialEvent?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+      if (initialEvent?.kind === 'shutdown') return this.markUnknown(item, 'daemon_shutdown');
       const providerOperation = Promise.resolve().then(async () => {
         const operation = operationFromItem(item);
         if (operation === 'edit') {
@@ -204,13 +218,16 @@ export class GenerationWorker {
       const providerOutcome = await Promise.race([tracked(providerOperation), monitorPromise]);
       if (providerOutcome.kind === 'cancel_requested') return this.settleCancellation(item, false);
       if (providerOutcome.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+      if (providerOutcome.kind === 'shutdown') return this.markUnknown(item, 'daemon_shutdown');
       if (providerOutcome.kind === 'rejected') {
         const event = monitorEvent || observeLease();
         if (event?.kind === 'cancel_requested') return this.settleCancellation(item, false);
         if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
-        const classified = this.provider.classifyError(providerOutcome.reason) as ProviderError;
+        if (event?.kind === 'shutdown') return this.markUnknown(item, 'daemon_shutdown');
+        const classified: ProviderError = this.provider.classifyError(providerOutcome.reason);
         const decision = retryDecision(classified, item.attempts, this.clock(), this.policy);
-        const error = { kind: classified.kind, code: classified.code, ...(safeErrorSummary(classified.message) ? { summary: safeErrorSummary(classified.message) } : {}) };
+        const summary = safeErrorSummary(redactProviderText(classified.message, this.providerConfig));
+        const error = { kind: sanitizeProviderRequestId(classified.kind, this.providerConfig) || 'unknown_outcome', code: sanitizeProviderRequestId(classified.code, this.providerConfig) || 'provider_error', ...(summary ? { summary } : {}) };
         if (decision.retry) {
           const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'retry_wait', retryAt: decision.retryAt, error });
           return transition || 'retrying';
@@ -223,7 +240,7 @@ export class GenerationWorker {
         return transition || 'blocked';
       }
 
-      const imageResult = providerOutcome.value;
+      const imageResult = sanitizeProviderImageResult(providerOutcome.value, this.providerConfig);
       let event = monitorEvent || observeLease();
       if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
       if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
@@ -248,6 +265,7 @@ export class GenerationWorker {
       transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'succeeded', result: { assetId: persisted.assetId, mediaType: persisted.mediaType, byteSize: persisted.byteSize, contentHash: persisted.contentHash, externalRequestId: imageResult.externalRequestId || null, revisedPrompt: imageResult.revisedPrompt || null, safeMeta: imageResult.safeMeta || {} } });
       return transition || 'succeeded';
     } finally {
+      this.activeShutdowns.delete(shutdown);
       clearInterval(renewTimer);
     }
   }

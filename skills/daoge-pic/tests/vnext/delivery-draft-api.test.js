@@ -8,8 +8,8 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService } = require('../../dist/vnext/api/server');
 const { fetchStudio, requestJson: json } = require('./local-studio-test-helper');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 const pngVariant = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
@@ -18,8 +18,8 @@ test('P1 delivery HTTP API carries project selection through keep-only draft, re
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-api-'));
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const project = await json(started, '/api/projects', { method: 'POST', key: 'delivery-project', body: { name: 'HTTP 交付项目' } });
     const projectId = project.body.data.value.id;
     const uploadResponse = await fetchStudio(started, '/api/assets/import', { method: 'POST', headers: { 'content-type': 'image/png', 'idempotency-key': 'delivery-upload', 'x-daoge-target-type': 'project', 'x-daoge-target-id': projectId }, body: png });

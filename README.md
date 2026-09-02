@@ -2,20 +2,20 @@
 
 面向中文工作流的 DAOGE Skill 系列。每个 Skill 都是可独立安装、独立使用、独立演进的能力包：Skill 负责把自然语言需求转化为可执行的标准流程，附带的脚本、参考资料和本地工作台负责让关键过程可检查、可恢复、可交付。
 
-> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.7.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.7.0)。
+> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.8.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0)。
 
 当前仓库包含两项彼此独立的能力：
 
 | Skill | 解决的问题 | 主要使用者 | 独立说明 |
 | --- | --- | --- | --- |
-| [`daoge-pic`](./skills/daoge-pic/README.md) | 会话优先的本地图像创作管理：确认创作计划后，以 SQLite Studio、后台运行与 Workbench 管理生成、资产与交付 | 内容团队、设计师、运营人员、图像工作流开发者 | [进入图像创作 Skill](./skills/daoge-pic/README.md) |
+| [`daoge-pic`](./skills/daoge-pic/README.md) | 会话优先的本地图像创作管理：以 Provider.db 管理多 Profile，同一工作区跨会话共享唯一 Studio，并以独立 Session 管理生成、资产与交付 | 内容团队、设计师、运营人员、图像工作流开发者 | [进入图像创作 Skill](./skills/daoge-pic/README.md) |
 | [`daoge-docs`](./skills/daoge-docs/README.md) | 建立中文文档驱动开发体系，生成开发执行工作台和受控 Goal 输入 | 产品、研发、架构与使用编程智能体的团队 | [进入文档 Skill](./skills/daoge-docs/README.md) |
 
 ## 选择 Skill
 
 如果你的目标是“规划和交付一个软件项目”，选择 `daoge-docs`：它负责产品蓝图、版本 PRD、功能规格、架构、测试、门禁、证据、开发者工作台与 Goal 输入。
 
-如果你的目标是“规划、生成、管理或交付图片资产”，选择 `daoge-pic`：它负责在会话中澄清 brief、确认创作计划，并用本地 Studio 管理项目、轮次、受控生成运行、资产复核和交付。它不兼容旧任务 JSON、静态工作区或目录状态工作流。
+如果你的目标是“规划、生成、管理或交付图片资产”，选择 `daoge-pic`：它会先在稳定工作区自动打开或复用 Studio，再为当前会话建立独立 Session 和项目上下文，然后澄清 brief、确认创作计划并管理受控生成与交付。它不兼容旧任务 JSON、静态工作区或目录状态工作流。
 
 两者可以在同一产品中共同使用，但不互相依赖：
 
@@ -39,27 +39,27 @@ daoge-pic
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
 ```
 
-在项目根目录安装 `daoge-pic` 稳定正式版 `5.7.0`（固定使用 `daoge-pic-v5.7.0` Release 中的已发布制品，不会随 `main` 变化）：
+在项目根目录安装 `daoge-pic` 稳定正式版 `5.8.0`（固定使用 `daoge-pic-v5.8.0` Release 中的不可变制品，不会随 `main` 变化）：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.7.0/daoge-pic-5.7.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.8.0/daoge-pic-5.8.0.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
 第二条命令跨 macOS、Linux 和 Windows 创建项目级 Skill 注册：Windows 使用 junction，其他平台使用目录符号链接。它只在 `.agents/skills/daoge-pic` 不存在时创建，不会删除或覆盖已有目录；若目标已存在，请先确认它的来源并自行选择其他项目或安装位置，不要直接覆盖。完成后重启 Codex，使新增 Skill 被重新发现。项目本地安装后的 CLI 可通过 `npx daoge` 或 `./node_modules/.bin/daoge` 调用，例如：
 
 ```bash
-npx daoge studio --workspace /absolute/workspace
+npx daoge open --workspace /absolute/workspace
 ```
 
 需要全局安装时，安装同一个 Release 制品，再用 Node 标准库定位 npm 全局包目录并注册到当前用户的 Codex Skill 目录：
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.7.0/daoge-pic-5.7.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.8.0/daoge-pic-5.8.0.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
-全局注册命令同样采用 fail-if-exists，不删除或覆盖 `~/.codex/skills/daoge-pic`。完成后重启 Codex；CLI 可直接运行 `daoge studio --workspace /absolute/workspace`。
+全局注册命令同样采用 fail-if-exists，不删除或覆盖 `~/.codex/skills/daoge-pic`。完成后重启 Codex，使其重建 Skill registry；CLI 可直接运行 `daoge open --workspace /absolute/workspace`。
 
 如需直接试用 `main` 分支的开发源码，可使用 `npx skills add` 明确安装 Skill 路径；该方式不等同于固定版本的 GitHub Release 制品：
 
@@ -85,14 +85,13 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 
 ### 本地图像创作与资产管理
 
-`daoge-pic` 的主入口是会话。先在会话中确认创作目标、数量、画幅、风格、限制、参考素材与交付用途；只有得到用户明确确认后，才可创建受控生成运行。为每个项目指定稳定工作区后，可启动 Studio：
+`daoge-pic` 的主入口是会话。执行型请求会先解析已绑定的稳定工作区，自动执行普通 `open` 以打开或复用 Studio，再用当前真实 conversation ID 建立独立 Session 和项目/任务/轮次上下文，随后才澄清创作目标、数量、画幅、风格、限制、参考素材与交付用途。咨询架构、配置、源码、文档或测试时不会启动 Studio；只有用户确认计划后，才可创建受控生成运行。
 
 ```bash
-node skills/daoge-pic/scripts/daoge.js studio --workspace /absolute/workspace
 node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 ```
 
-真实生成只从 `<workspace>/daoge-studio/provider.env` 读取 Provider 配置。Workbench 用于查看项目、轮次、Generation History（生成历史）、运行、资产、复核和交付，不提供第二个聊天入口，也不读取 `task_spec.json`、旧静态工作区或旧目录状态。当前源码流程见 [DAOGE Pic vNext README](./skills/daoge-pic/README.md)；需要正式发布包时使用上方标明的稳定版。
+同一工作区的多个会话共享唯一 daemon 与 Workbench；presence/open-claim 只允许首个调用触发系统 opener，其余调用返回复用结果。每个会话的 Studio Session、项目与 Run 归属保持隔离，Workbench 每个标签页也使用独立 `sessionStorage` 身份。真实生成只读取 `<workspace>/daoge-studio/Provider.db` 中已激活的 Profile；既有 `provider.env` 仅用于首次迁移或显式 import，不再是运行时配置源。Workbench 用于配置多 Profile、查看项目、轮次、Generation History（生成历史）、运行、资产、复核和交付，不提供第二个聊天入口，也不读取 `task_spec.json`、旧静态工作区或旧目录状态。完整稳定协议见 [DAOGE Pic vNext README](./skills/daoge-pic/README.md)。
 
 ## 系列原则
 
@@ -133,7 +132,7 @@ node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 
 ## 发布与反馈
 
-每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.7.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.7.0)。已发布证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章维护，证据保存在源码仓库与对应 Release，不属于运行时 npm 包。
+每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.8.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0)。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章维护；最终制品哈希由 GitHub Release 和 sidecar 在包外记录，不属于运行时包。
 
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。

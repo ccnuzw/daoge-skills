@@ -8,8 +8,8 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService } = require('../../dist/vnext/api/server');
 const { fetchStudio, requestJson: json } = require('./local-studio-test-helper');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 
@@ -17,8 +17,8 @@ test('P2 searches safe projections, compares explicit task rounds, and keeps del
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-p2-'));
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const project = await json(started, '/api/projects', { method: 'POST', key: 'p2-project', body: { name: 'P2 运营项目' } });
     const projectId = project.body.data.value.id;
     const task = await json(started, '/api/tasks', { method: 'POST', key: 'p2-task', body: { projectId, name: 'P2 安全检索任务', intent: { prompt: 'must-not-return-search-source', apiKey: 'must-not-return-secret', endpoint: 'https://private.example.test' } } });

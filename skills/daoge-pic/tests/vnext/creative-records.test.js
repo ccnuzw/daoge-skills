@@ -10,13 +10,13 @@ const { createProject, createRoundDraft, createTaskDraft } = require('../../dist
 const { importStudioAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
 const { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, listAssetsWithReviewSummaries } = require('../../dist/vnext/domain/creative-records');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 test('P1 creative records connect task, round lineage, explicit run items, output assets, reviews, and safe provenance', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-creative-record-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '创作链项目', idempotencyKey: 'record-project' }).value;

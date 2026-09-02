@@ -8,16 +8,16 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService } = require('../../dist/vnext/api/server');
 const { requestJson } = require('./local-studio-test-helper');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 
 
 test('Workbench Session context is readable, validates hierarchy, and never selects an implicit run', async () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-workbench-context-'));
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const opened = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'context-session-open', body: { conversationId: 'workbench-test-context' } });
     assert.equal(opened.status, 200);
     const session = opened.body.data;

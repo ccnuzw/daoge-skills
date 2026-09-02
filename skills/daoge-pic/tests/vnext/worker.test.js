@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
-const { loadProviderConfig, providerStatus } = require('../../dist/vnext/studio/provider-config');
+const { configureProvider } = require('./provider-test-helper');
 const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan } = require('../../dist/vnext/domain/studio-commands');
 const { cancelGenerationRun, createDryRunPreview, queueGenerationRun, getGenerationRun, listGenerationRunItems } = require('../../dist/vnext/runner/run-commands');
 const { GenerationWorker } = require('../../dist/vnext/runner/worker');
@@ -14,8 +14,8 @@ const { StudioGeneratedAssetPersister } = require('../../dist/vnext/media/genera
 const { assetFilePath, importStudioAsset } = require('../../dist/vnext/domain/assets');
 const { StudioAssetResolver } = require('../../dist/vnext/media/asset-resolver');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 function temporaryWorkspace() {
@@ -24,21 +24,14 @@ function temporaryWorkspace() {
 
 function setupRun(itemCount = 1) {
   const workspaceRoot = temporaryWorkspace();
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-  fs.writeFileSync(initialized.paths.providerEnvPath, [
-    'IMAGE_PROVIDER=openai-images',
-    'OPENAI_BASE_URL=https://images.example.test/v1',
-    'OPENAI_API_KEY=memory-only-key',
-    'OPENAI_MODEL=gpt-image-2'
-  ].join('\n') + '\n');
+  const initialized = initializeStudio({ workspaceRoot });
+  const { config, status } = configureProvider(initialized, { model: 'gpt-image-2', apiKey: 'memory-only-key' });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'worker test', idempotencyKey: 'project' });
   const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.value.id, name: 'image', idempotencyKey: 'task' });
   const round = createRoundDraft(db, { studioId: initialized.manifest.studioId, taskId: task.value.id, purpose: 'exploration', idempotencyKey: 'round' });
   const prepared = prepareRoundForConfirmation(db, { studioId: initialized.manifest.studioId, roundId: round.value.id, plan: { operation: 'generate', itemCount, prompt: 'single clean image' }, expectedVersion: round.value.version, idempotencyKey: 'prepare' });
   const confirmed = confirmRoundPlan(db, { studioId: initialized.manifest.studioId, roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
-  const config = loadProviderConfig(initialized.paths);
-  const status = providerStatus(initialized.paths);
   const dryRun = createDryRunPreview(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
   const run = queueGenerationRun(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
   return { workspaceRoot, initialized, db, config, run };
@@ -281,6 +274,37 @@ test('worker closes an abort-ignoring in-flight cancellation as outcome unknown 
     assert.equal(observedSignal.aborted, true);
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'outcome_unknown');
   } finally { cleanup(fixture); }
+});
+
+test('worker shutdown aborts an in-flight Provider request and settles without awaiting an abort-ignoring Provider', async () => {
+  const fixture = setupRun();
+  let release;
+  try {
+    let observedSignal;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-daemon-shutdown',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async (_request, options) => {
+        observedSignal = options.abortSignal;
+        await gate;
+        return { bytes: png, mediaType: 'image/png' };
+      }, () => ({ kind: 'unknown_outcome', code: 'aborted', message: 'aborted' })),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('shutdown Provider output must not persist'); } },
+      leaseMs: 1000
+    });
+    const execution = worker.processOnce();
+    await new Promise((resolve) => setImmediate(resolve));
+    worker.shutdown();
+    assert.deepEqual(await execution, { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 1, cancelled: 0 });
+    assert.equal(observedSignal.aborted, true);
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'outcome_unknown');
+    assert.deepEqual(await worker.processOnce(), { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 });
+  } finally {
+    if (release) release();
+    cleanup(fixture);
+  }
 });
 
 test('worker awaits in-progress local persistence before settling cancellation', async () => {

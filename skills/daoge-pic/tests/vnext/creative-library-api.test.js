@@ -8,8 +8,8 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService } = require('../../dist/vnext/api/server');
 const { fetchStudio, requestJson: json } = require('./local-studio-test-helper');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 
@@ -17,8 +17,8 @@ test('creative library HTTP API exposes reusable kits without sensitive definiti
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-library-api-'));
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const taskType = await json(started, '/api/task-types', { method: 'POST', key: 'library-task-type', body: { name: '系列商品图', definition: { summary: '连续商品构图', fields: ['product', 'angle'], secret_token: 'not-public' } } });
     assert.equal(taskType.status, 200);
     assert.equal(JSON.stringify(taskType.body.data).includes('not-public'), false);

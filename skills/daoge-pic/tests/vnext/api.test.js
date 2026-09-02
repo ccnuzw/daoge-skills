@@ -10,9 +10,14 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService, streamVerifiedFileResponse } = require('../../dist/vnext/api/server');
 const { fetchStudio, requestJson } = require('./local-studio-test-helper');
+const { configureProvider } = require('./provider-test-helper');
+const { resolveActiveProviderConfig } = require('../../dist/vnext/studio/provider-store');
+const { createImageProvider } = require('../../dist/vnext/providers/http-adapters');
+const { GenerationWorker } = require('../../dist/vnext/runner/worker');
+const { StudioGeneratedAssetPersister } = require('../../dist/vnext/media/generated-assets');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 
 function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-api-'));
@@ -22,6 +27,18 @@ function recursiveKeys(value, keys = []) {
   if (Array.isArray(value)) for (const item of value) recursiveKeys(item, keys);
   else if (value && typeof value === 'object') for (const [key, item] of Object.entries(value)) { keys.push(key); recursiveKeys(item, keys); }
   return keys;
+}
+
+function studioDatabaseText(db) {
+  const values = [];
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
+  for (const table of tables) {
+    const quoted = '"' + table.name.replace(/"/g, '""') + '"';
+    for (const row of db.prepare('SELECT * FROM ' + quoted).all()) {
+      for (const value of Object.values(row)) if (typeof value === 'string') values.push(value);
+    }
+  }
+  return values.join('\n');
 }
 
 
@@ -42,29 +59,24 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
   const workspaceRoot = temporaryWorkspace();
   let started;
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
-    fs.writeFileSync(initialized.paths.providerEnvPath, [
-      'IMAGE_PROVIDER=openai-images',
-      'OPENAI_BASE_URL=https://images.example.test/v1',
-      'OPENAI_API_KEY=api-secret-never-in-http-response',
-      'OPENAI_MODEL=gpt-image-2'
-    ].join('\n') + '\n');
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath, ssePollMs: 20 });
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'API Provider', model: 'gpt-image-2', apiKey: 'api-secret-never-in-http-response' });
+    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
 
     const health = await requestJson(started, '/api/health');
     assert.equal(health.status, 200);
-    const provider = await requestJson(started, '/api/provider/status');
-    assert.equal(provider.body.data.configured, true);
-    assert.equal(JSON.stringify(provider.body).includes('api-secret-never-in-http-response'), false);
+    const profiles = await requestJson(started, '/api/providers');
+    assert.equal(profiles.body.data.status.configured, true);
+    assert.equal(JSON.stringify(profiles.body).includes('api-secret-never-in-http-response'), false);
+    assert.equal(JSON.stringify(profiles.body).includes('https://images.example.test/v1'), false);
     const studio = await requestJson(started, '/api/studio');
     assert.equal(JSON.stringify(studio.body).includes(workspaceRoot), false);
-    const providerDetails = await requestJson(started, '/api/provider/details');
-    assert.match(providerDetails.body.data.providerEnvPath, /daoge-studio[\/]provider.env$/);
-    assert.equal(JSON.stringify(providerDetails.body).includes('api-secret-never-in-http-response'), false);
-    const runtimeBefore = await requestJson(started, '/api/runtime-settings');
-    assert.equal(runtimeBefore.body.data.desired.maxWorkerConcurrency, 1000);
-    const runtimeUpdated = await requestJson(started, '/api/runtime-settings', { method: 'PUT', idempotencyKey: 'runtime-limit', body: { maxWorkerConcurrency: 1000 } });
-    assert.equal(runtimeUpdated.body.data.desired.maxWorkerConcurrency, 1000);
+    assert.equal(profiles.body.data.profiles[0].apiKeyConfigured, true);
+    const profile = profiles.body.data.profiles[0];
+    const updatedProfile = await requestJson(started, '/api/providers/' + profile.id, { method: 'PUT', idempotencyKey: 'provider-secret-update', body: { expectedConfigVersion: profile.configVersion, name: profile.name, providerId: profile.providerId, model: profile.model, baseUrl: { action: 'keep' }, apiKey: { action: 'replace', value: 'replacement-secret-never-returned' }, options: {} } });
+    assert.equal(updatedProfile.body.data.apiKeyConfigured, true);
+    const profilesAfterUpdate = await requestJson(started, '/api/providers');
+    assert.equal(JSON.stringify(profilesAfterUpdate.body).includes('replacement-secret-never-returned'), false);
 
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'project', body: { name: 'API 项目' } });
     const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'task', body: { projectId: project.body.data.value.id, name: 'API 任务' } });
@@ -75,28 +87,28 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
 
     const prepared = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/prepare', { method: 'POST', idempotencyKey: 'prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'API fixture image' } } });
     const confirmed = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { method: 'POST', idempotencyKey: 'confirm', body: { expectedVersion: prepared.body.data.value.version } });
-    const preflight = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { method: 'POST', idempotencyKey: 'preflight', body: {} });
+    const rejectedPreflight = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { method: 'POST', idempotencyKey: 'preflight-over-limit', body: { executionConcurrency: 1001 } });
+    assert.equal(rejectedPreflight.status, 400);
+    const preflight = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { method: 'POST', idempotencyKey: 'preflight', body: { executionConcurrency: 1000 } });
     assert.equal(confirmed.status, 200);
     assert.equal(preflight.body.data.value.preflight.valid, true);
-    assert.ok(preflight.body.data.value.preview.id);
+    assert.equal(preflight.body.data.value.preview.executionConcurrency, 1000);
     const history = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/plan-versions');
     assert.equal(history.body.data.planVersions[0].state, 'confirmed');
     const dryRuns = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/dry-runs');
     assert.equal(dryRuns.body.data.dryRuns[0].id, preflight.body.data.value.preview.id);
-    const rejectedConcurrency = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-over-limit', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 1001 } });
+    const rejectedConcurrency = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-over-limit', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, executionConcurrency: 1 } });
     assert.equal(rejectedConcurrency.status, 400);
-    const runRequest = { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'queue' }, body: JSON.stringify({ roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 1000 }) };
+    const runRequest = { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'queue' }, body: JSON.stringify({ roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id }) };
     const lostResponse = await fetchStudio(started, '/api/runs', runRequest);
     assert.equal(lostResponse.status, 200);
     await lostResponse.body.cancel();
-    const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 1000 } });
+    const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id } });
     assert.equal(queued.status, 200);
     assert.equal(queued.body.data.value.status, 'queued');
-    assert.equal(queued.body.data.value.requestedConcurrency, 1000);
+    assert.equal(queued.body.data.value.executionConcurrency, 1000);
     assert.equal(started.service.db.prepare('SELECT COUNT(*) AS total FROM generation_runs').get().total, 1);
     assert.equal(started.service.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key = 'queue'").get().total, 1);
-    const conflictingReplay = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 999 } });
-    assert.equal(conflictingReplay.status, 409);
     assert.equal(JSON.stringify(queued.body).includes('api-secret-never-in-http-response'), false);
     const runId = queued.body.data.value.id;
     const publicItems = await requestJson(started, '/api/runs/' + runId + '/items');
@@ -114,12 +126,106 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
   }
 });
 
+test('local Provider response echoes are sanitized before database, API, and delivery persistence', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==';
+  const apiKey = 'violet-credential-value-7LQ9M2';
+  let responseMode = 'success';
+  let baseUrl = '';
+  let started;
+  const providerServer = http.createServer((request, response) => {
+    request.resume();
+    request.once('end', () => {
+      if (responseMode === 'success') {
+        response.writeHead(200, { 'content-type': 'application/json', 'x-request-id': apiKey });
+        response.end(JSON.stringify({ data: [{ b64_json: pngBase64, revised_prompt: 'echo ' + apiKey + ' from ' + baseUrl }]}));
+        return;
+      }
+      response.writeHead(400, { 'content-type': 'application/json', 'request-id': baseUrl });
+      response.end(JSON.stringify({ error: { message: 'Rejected ' + apiKey + ' at ' + baseUrl } }));
+    });
+  });
+  try {
+    providerServer.listen(0, '127.0.0.1');
+    await once(providerServer, 'listening');
+    const address = providerServer.address();
+    baseUrl = 'http://127.0.0.1:' + address.port + '/private/provider-base';
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Echo Provider', baseUrl, apiKey, model: 'echo-model' });
+    started = await startLocalStudioService({ workspaceRoot });
+
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'echo-project', body: { name: '回显净化项目' } });
+    const projectId = project.body.data.value.id;
+    const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'echo-task', body: { projectId, name: '回显净化任务' } });
+    const taskId = task.body.data.value.id;
+    const queueRun = async (prefix) => {
+      const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: prefix + '-round', body: { taskId, purpose: 'exploration' } });
+      const roundId = round.body.data.value.id;
+      const prepared = await requestJson(started, '/api/rounds/' + roundId + '/prepare', { method: 'POST', idempotencyKey: prefix + '-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'provider echo fixture' } } });
+      await requestJson(started, '/api/rounds/' + roundId + '/confirm', { method: 'POST', idempotencyKey: prefix + '-confirm', body: { expectedVersion: prepared.body.data.value.version } });
+      const preview = await requestJson(started, '/api/rounds/' + roundId + '/preflight', { method: 'POST', idempotencyKey: prefix + '-preflight', body: { executionConcurrency: 1 } });
+      const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: prefix + '-run', body: { roundId, preflightId: preview.body.data.value.preview.id } });
+      return { roundId, runId: queued.body.data.value.id };
+    };
+
+    const config = resolveActiveProviderConfig(started.service.providerDb);
+    const worker = new GenerationWorker({
+      db: started.service.db,
+      workerId: 'provider-echo-worker',
+      providerConfig: config,
+      provider: createImageProvider(config),
+      assetPersister: new StudioGeneratedAssetPersister({ db: started.service.db, paths: started.service.initialized.paths, studioId: started.service.initialized.manifest.studioId })
+    });
+    const successful = await queueRun('echo-success');
+    assert.equal((await worker.processOnce(1)).succeeded, 1);
+    responseMode = 'failure';
+    const failed = await queueRun('echo-failure');
+    assert.equal((await worker.processOnce(1)).blocked, 1);
+
+    const assetRow = started.service.db.prepare("SELECT id, source_json FROM assets WHERE kind = 'generated'").get();
+    const resultRow = started.service.db.prepare('SELECT result_json FROM run_items WHERE run_id = ?').get(successful.runId);
+    const errorRow = started.service.db.prepare('SELECT error_json FROM run_items WHERE run_id = ?').get(failed.runId);
+    assert.match(assetRow.source_json, /\[redacted-provider-secret\]/);
+    assert.match(assetRow.source_json, /\[redacted-provider-url\]/);
+    assert.equal(JSON.parse(assetRow.source_json).externalRequestId, null);
+    assert.equal(Object.hasOwn(JSON.parse(assetRow.source_json).safeMeta, 'providerRequestId'), false);
+    assert.match(resultRow.result_json, /\[redacted-provider-secret\]/);
+    assert.match(errorRow.error_json, /\[redacted-provider-secret\]/);
+    assert.match(errorRow.error_json, /\[redacted-provider-url\]/);
+
+    const kept = await requestJson(started, '/api/assets/' + assetRow.id + '/review', { method: 'POST', idempotencyKey: 'echo-keep', body: { decision: 'keep' } });
+    assert.equal(kept.status, 200);
+    const delivery = await requestJson(started, '/api/deliveries', { method: 'POST', idempotencyKey: 'echo-delivery', body: { projectId, name: '回显净化交付', assetIds: [assetRow.id], includeCreativeRecord: true } });
+    const deliveryId = delivery.body.data.id;
+    await requestJson(started, '/api/deliveries/' + deliveryId + '/ready', { method: 'POST', idempotencyKey: 'echo-delivery-ready', body: {} });
+    const exported = await requestJson(started, '/api/deliveries/' + deliveryId + '/export', { method: 'POST', idempotencyKey: 'echo-delivery-export', body: {} });
+    const deliveryDetail = await requestJson(started, '/api/deliveries/' + deliveryId);
+    const assetApi = await requestJson(started, '/api/assets?kind=generated');
+    const successItemsApi = await requestJson(started, '/api/runs/' + successful.runId + '/items');
+    const failedItemsApi = await requestJson(started, '/api/runs/' + failed.runId + '/items');
+    const manifest = JSON.parse(started.service.db.prepare('SELECT manifest_json FROM deliveries WHERE id = ?').get(deliveryId).manifest_json);
+    const creativeRecord = fs.readFileSync(path.join(workspaceRoot, manifest.exportDirectory, 'creative-record.json'), 'utf8');
+    const apiText = JSON.stringify([assetApi.body, successItemsApi.body, failedItemsApi.body, delivery.body, exported.body, deliveryDetail.body]);
+    const databaseText = studioDatabaseText(started.service.db);
+    for (const sensitiveValue of [apiKey, baseUrl]) {
+      assert.equal(databaseText.includes(sensitiveValue), false, 'studio.db must not persist exact Provider values');
+      assert.equal(apiText.includes(sensitiveValue), false, 'Studio APIs must not expose exact Provider values');
+      assert.equal(creativeRecord.includes(sensitiveValue), false, 'creative records must not contain exact Provider values');
+    }
+  } finally {
+    if (started) await started.service.close();
+    providerServer.closeAllConnections();
+    if (providerServer.listening) await new Promise((resolve) => providerServer.close(resolve));
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('asset API returns filtered pages with the full scoped total', async () => {
   const workspaceRoot = temporaryWorkspace();
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'asset-page-project', body: { name: '分页项目' } });
     const projectId = project.body.data.value.id;
     const studioId = started.service.initialized.manifest.studioId;
@@ -145,8 +251,8 @@ test('local Studio service serves the built Workbench and managed image files', 
   const workspaceRoot = temporaryWorkspace();
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const page = await fetch(started.url + '/');
     assert.equal(page.status, 200);
     assert.match(await page.text(), /<div id=\"root\"><\/div>/);
@@ -162,8 +268,20 @@ test('local Studio service serves the built Workbench and managed image files', 
     assert.equal(media.status, 200);
     assert.equal(media.headers.get('content-type'), 'image/png');
     assert.deepEqual(Buffer.from(await media.arrayBuffer()), image);
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const jpegUpload = await fetchStudio(started, '/api/assets/import', {
+      method: 'POST',
+      headers: { 'content-type': 'image/jpeg', 'idempotency-key': 'binary-jpeg-upload', 'x-daoge-filename': 'fixture.jpg' },
+      body: jpeg
+    });
+    const jpegPayload = await jpegUpload.json();
+    assert.equal(jpegUpload.status, 200);
+    const jpegMedia = await fetchStudio(started, '/api/assets/' + jpegPayload.data.id + '/file');
+    assert.equal(jpegMedia.status, 200);
+    assert.equal(jpegMedia.headers.get('content-type'), 'image/jpeg');
+    assert.deepEqual(Buffer.from(await jpegMedia.arrayBuffer()), jpeg);
     const importsDirectory = path.join(workspaceRoot, 'daoge-assets', 'imports');
-    const storedImagePath = path.join(importsDirectory, fs.readdirSync(importsDirectory)[0]);
+    const storedImagePath = path.join(importsDirectory, fs.readdirSync(importsDirectory).find((file) => file.endsWith('.png')));
     const mutated = Buffer.alloc(image.length, 0x42);
     fs.writeFileSync(storedImagePath, mutated);
     const rejected = await fetchStudio(started, '/api/assets/' + uploadPayload.data.id + '/file');
@@ -182,8 +300,8 @@ test('local Studio gates APIs with capability, exact origin, content type, Host,
   let started;
   let controller;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath, ssePollMs: 20 });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
 
     assert.equal((await fetch(started.url + '/api/health')).status, 200);
     const missing = await fetch(started.url + '/api/studio');
@@ -250,6 +368,10 @@ test('local Studio gates APIs with capability, exact origin, content type, Host,
     const cookie = setCookie.split(';', 1)[0];
     const cookieStudio = await fetch(started.url + '/api/studio', { headers: { cookie } });
     assert.equal(cookieStudio.status, 200);
+    const claimWithoutJson = await fetchStudio(started, '/api/workbench/open-claim', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ claimToken: 'c'.repeat(43) }) });
+    assert.equal(claimWithoutJson.status, 415);
+    const hostileCookieClaim = await fetch(started.url + '/api/workbench/open-claim', { method: 'POST', headers: { cookie, origin: 'https://attacker.example', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'c'.repeat(43) }) });
+    assert.equal(hostileCookieClaim.status, 403);
     const cookieWriteWithoutOrigin = await fetch(started.url + '/api/projects', {
       method: 'POST',
       headers: { cookie, 'content-type': 'application/json', 'idempotency-key': 'cookie-no-origin' },
@@ -291,8 +413,8 @@ test('asset write endpoints replay idempotency receipts without duplicate events
   const workspaceRoot = temporaryWorkspace();
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
     const upload = async (body = image) => {
       const response = await fetchStudio(started, '/api/assets/import', { method: 'POST', headers: { 'content-type': 'image/png', 'idempotency-key': 'upload-replay' }, body });
@@ -328,8 +450,8 @@ test('session open replays the same request and rejects idempotency key reuse fo
   const workspaceRoot = temporaryWorkspace();
   let started;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
     const options = { method: 'POST', idempotencyKey: 'session-open-replay', body: { conversationId: 'conversation-one' } };
     const opened = await requestJson(started, '/api/sessions/open', options);
     const replayed = await requestJson(started, '/api/sessions/open', options);
@@ -353,8 +475,8 @@ test('local Studio service closes even while a Workbench SSE stream remains open
   let started;
   let controller;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath, ssePollMs: 20 });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
     controller = new AbortController();
     const sse = await fetchStudio(started, '/api/events?after=0', { headers: { accept: 'text/event-stream' }, signal: controller.signal });
     assert.equal(sse.status, 200);
@@ -377,8 +499,8 @@ test('SSE replays Studio events after a cursor without a page refresh', async ()
   let started;
   let controller;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath, ssePollMs: 20 });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
     controller = new AbortController();
     const sse = await fetchStudio(started, '/api/events?after=0', { headers: { accept: 'text/event-stream' }, signal: controller.signal });
     assert.equal(sse.status, 200);
@@ -403,8 +525,8 @@ test('SSE honors Last-Event-ID and requests a snapshot for an unavailable event 
   let started;
   let controller;
   try {
-    initializeStudio({ workspaceRoot, providerTemplatePath });
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath, ssePollMs: 20 });
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
     await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'window-project', body: { name: '事件窗口项目' } });
     const earliest = await requestJson(started, '/api/events?after=0');
     const firstId = earliest.body.data.events[0].id;
@@ -443,9 +565,9 @@ test('local Studio releases its database after a fixed port bind failure', async
     await new Promise((resolve, reject) => blocker.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve()));
     const address = blocker.address();
     assert.ok(address && typeof address !== 'string');
-    await assert.rejects(startLocalStudioService({ workspaceRoot, providerTemplatePath }, address.port), /EADDRINUSE/);
+    await assert.rejects(startLocalStudioService({ workspaceRoot }, address.port), /EADDRINUSE/);
     await new Promise((resolve, reject) => blocker.close((error) => error ? reject(error) : resolve()));
-    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath }, address.port);
+    started = await startLocalStudioService({ workspaceRoot }, address.port);
     assert.equal((await requestJson(started, '/api/health')).status, 200);
   } finally {
     if (blocker.listening) await new Promise((resolve) => blocker.close(() => resolve()));

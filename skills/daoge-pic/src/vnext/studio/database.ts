@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 18;
+export const STUDIO_SCHEMA_VERSION = 19;
 
 const SCHEMA_V1 = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -128,6 +128,16 @@ const SCHEMA_V18 = [
   "DROP TABLE studio_runtime_settings_v17"
 ].join(';\n') + ';';
 const SCHEMA_V18_CREATE = "CREATE TABLE studio_runtime_settings (studio_id TEXT PRIMARY KEY REFERENCES studios(id), max_worker_concurrency INTEGER NOT NULL CHECK (max_worker_concurrency BETWEEN 1 AND 1000), updated_at TEXT NOT NULL)";
+const SCHEMA_V19_RUNS = [
+  "ALTER TABLE generation_runs ADD COLUMN execution_concurrency INTEGER NOT NULL DEFAULT 4 CHECK (execution_concurrency BETWEEN 1 AND 1000)",
+  "ALTER TABLE generation_runs ADD COLUMN concurrency_source TEXT NOT NULL DEFAULT 'default' CHECK (concurrency_source IN ('default', 'explicit', 'serial'))",
+  "UPDATE generation_runs SET execution_concurrency = requested_concurrency, concurrency_source = CASE WHEN requested_concurrency = 1 THEN 'serial' ELSE 'explicit' END WHERE requested_concurrency BETWEEN 1 AND 1000"
+].join(';\n') + ';';
+const SCHEMA_V19_PREFLIGHT = [
+  "ALTER TABLE dry_run_previews ADD COLUMN execution_concurrency INTEGER NOT NULL DEFAULT 4 CHECK (execution_concurrency BETWEEN 1 AND 1000)",
+  "ALTER TABLE dry_run_previews ADD COLUMN concurrency_source TEXT NOT NULL DEFAULT 'default' CHECK (concurrency_source IN ('default', 'explicit', 'serial'))"
+].join(';\n') + ';';
+const SCHEMA_V19 = "DROP TABLE IF EXISTS studio_runtime_settings";
 
 
 
@@ -195,14 +205,19 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
     { version: 15, sql: SCHEMA_V15 },
     { version: 16, sql: SCHEMA_V16 },
     { version: 17, sql: SCHEMA_V17 },
-    { version: 18, sql: SCHEMA_V18 }
+    { version: 18, sql: SCHEMA_V18 },
+    { version: 19, sql: SCHEMA_V19 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
     if (existing) continue;
     withTransaction(db, () => {
       if (migration.version === 18 && !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'studio_runtime_settings'").get()) db.exec(SCHEMA_V18_CREATE);
-      else db.exec(migration.sql);
+      else if (migration.version === 19) {
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'generation_runs'").get()) db.exec(SCHEMA_V19_RUNS);
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dry_run_previews'").get()) db.exec(SCHEMA_V19_PREFLIGHT);
+        db.exec(SCHEMA_V19);
+      } else db.exec(migration.sql);
       if (migration.version === 16 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get()) db.exec(SCHEMA_V16_ASSET_BACKFILL);
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());
     });

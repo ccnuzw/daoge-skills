@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import { StudioPaths } from './workspace';
 
 export const PROVIDER_IDS = [
   'openai-images',
@@ -18,14 +16,21 @@ export interface ProviderCapabilities {
 }
 
 export interface ResolvedProviderConfig {
+  profileId: string;
+  profileName: string;
+  configVersion: number;
   providerId: ProviderId;
   baseUrl: string;
   apiKey: string;
   model: string;
+  options: Record<string, unknown>;
   referenceEnabled: boolean;
 }
 
 export interface SafeProviderStatus {
+  profileId: string | null;
+  profileName: string | null;
+  configVersion: number | null;
   providerId: ProviderId | null;
   configured: boolean;
   missing: string[];
@@ -67,7 +72,7 @@ function valueFor(env: Record<string, string>, key: string): string {
   return String(env[key] || '').trim();
 }
 
-function isProviderId(value: string): value is ProviderId {
+export function isProviderId(value: string): value is ProviderId {
   return PROVIDER_IDS.includes(value as ProviderId);
 }
 
@@ -82,16 +87,12 @@ function endpointIdentity(raw: string): string | null {
 }
 
 function valuesForProvider(providerId: ProviderId, env: Record<string, string>): ResolvedProviderConfig {
-  if (providerId === 'openai-images') {
-    return { providerId, baseUrl: valueFor(env, 'OPENAI_BASE_URL'), apiKey: valueFor(env, 'OPENAI_API_KEY'), model: valueFor(env, 'OPENAI_MODEL'), referenceEnabled: true };
-  }
-  if (providerId === 'gemini-image') {
-    return { providerId, baseUrl: valueFor(env, 'GEMINI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'GEMINI_IMAGE_API_KEY'), model: valueFor(env, 'GEMINI_IMAGE_MODEL'), referenceEnabled: valueFor(env, 'GEMINI_IMAGE_ENABLE_REFERENCE').toLowerCase() === 'true' };
-  }
-  if (providerId === 'gemini-openai-compatible') {
-    return { providerId, baseUrl: valueFor(env, 'GEMINI_OPENAI_BASE_URL'), apiKey: valueFor(env, 'GEMINI_OPENAI_API_KEY'), model: valueFor(env, 'GEMINI_OPENAI_MODEL'), referenceEnabled: false };
-  }
-  return { providerId, baseUrl: valueFor(env, 'XAI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'XAI_IMAGE_API_KEY'), model: valueFor(env, 'XAI_IMAGE_MODEL'), referenceEnabled: false };
+  let config: Omit<ResolvedProviderConfig, 'profileId' | 'profileName' | 'configVersion' | 'options'>;
+  if (providerId === 'openai-images') config = { providerId, baseUrl: valueFor(env, 'OPENAI_BASE_URL'), apiKey: valueFor(env, 'OPENAI_API_KEY'), model: valueFor(env, 'OPENAI_MODEL'), referenceEnabled: true };
+  else if (providerId === 'gemini-image') config = { providerId, baseUrl: valueFor(env, 'GEMINI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'GEMINI_IMAGE_API_KEY'), model: valueFor(env, 'GEMINI_IMAGE_MODEL'), referenceEnabled: valueFor(env, 'GEMINI_IMAGE_ENABLE_REFERENCE').toLowerCase() === 'true' };
+  else if (providerId === 'gemini-openai-compatible') config = { providerId, baseUrl: valueFor(env, 'GEMINI_OPENAI_BASE_URL'), apiKey: valueFor(env, 'GEMINI_OPENAI_API_KEY'), model: valueFor(env, 'GEMINI_OPENAI_MODEL'), referenceEnabled: false };
+  else config = { providerId, baseUrl: valueFor(env, 'XAI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'XAI_IMAGE_API_KEY'), model: valueFor(env, 'XAI_IMAGE_MODEL'), referenceEnabled: false };
+  return { profileId: 'legacy-env-import', profileName: 'Imported ' + providerId, configVersion: 1, options: { referenceEnabled: config.referenceEnabled }, ...config };
 }
 
 export function capabilitiesForProvider(config: ResolvedProviderConfig): ProviderCapabilities {
@@ -100,35 +101,17 @@ export function capabilitiesForProvider(config: ResolvedProviderConfig): Provide
   return capabilities;
 }
 
-export function loadProviderConfig(paths: StudioPaths): ResolvedProviderConfig | null {
-  if (!fs.existsSync(paths.providerEnvPath)) return null;
-  const env = parseProviderEnv(fs.readFileSync(paths.providerEnvPath, 'utf8'));
+export function configFromProviderEnv(env: Record<string, string>): ResolvedProviderConfig | null {
   const providerId = valueFor(env, 'IMAGE_PROVIDER');
   if (!isProviderId(providerId)) return null;
   return valuesForProvider(providerId, env);
 }
 
-export function providerStatus(paths: StudioPaths): SafeProviderStatus {
-  const config = loadProviderConfig(paths);
-  if (!config) {
-    return { providerId: null, configured: false, missing: ['IMAGE_PROVIDER'], model: null, endpoint: null, capabilities: null };
-  }
-  const missing: string[] = [];
-  if (!config.baseUrl) missing.push('base_url');
-  if (!config.apiKey) missing.push('api_key');
-  if (!config.model) missing.push('model');
+export function providerSnapshot(config: ResolvedProviderConfig): Omit<ResolvedProviderConfig, 'apiKey' | 'baseUrl' | 'options'> & { endpoint: string | null; capabilities: ProviderCapabilities } {
   return {
-    providerId: config.providerId,
-    configured: missing.length === 0,
-    missing,
-    model: config.model || null,
-    endpoint: endpointIdentity(config.baseUrl),
-    capabilities: capabilitiesForProvider(config)
-  };
-}
-
-export function providerSnapshot(config: ResolvedProviderConfig): Omit<ResolvedProviderConfig, 'apiKey' | 'baseUrl'> & { endpoint: string | null; capabilities: ProviderCapabilities } {
-  return {
+    profileId: config.profileId,
+    profileName: config.profileName,
+    configVersion: config.configVersion,
     providerId: config.providerId,
     model: config.model,
     referenceEnabled: config.referenceEnabled,

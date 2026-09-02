@@ -8,14 +8,14 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { createProject, createRoundDraft, createTaskDraft } = require('../../dist/vnext/domain/studio-commands');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 
 test('round lineage requires an existing parent in the same creative task', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-round-lineage-'));
   let db;
   try {
-    const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+    const initialized = initializeStudio({ workspaceRoot });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'Lineage project', idempotencyKey: 'lineage-project' }).value;
     const taskA = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.id, name: 'Task A', idempotencyKey: 'lineage-task-a' }).value;

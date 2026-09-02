@@ -11,14 +11,14 @@ const { reconcileManagedMedia, recoverGeneratedMediaCommits } = require('../../d
 const { createProject, createRoundDraft, createTaskDraft } = require('../../dist/vnext/domain/studio-commands');
 const { archiveStagedImage, plannedArchivePath, stageImage } = require('../../dist/vnext/media/archive');
 
-const skillRoot = path.resolve(__dirname, '../..');
-const providerTemplatePath = path.join(skillRoot, 'references', 'provider.env.example');
+
+
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
 
 test('recovers a generated media journal after bytes were archived before the asset database commit', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-journal-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '恢复项目', idempotencyKey: 'journal-project' }).value;
@@ -43,7 +43,7 @@ test('recovers a generated media journal after bytes were archived before the as
 test('generated media recovery rejects a malicious staged journal path outside staging', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-journal-path-'));
   const outsidePath = workspaceRoot + '-outside.png';
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const project = createProject(db, { studioId: initialized.manifest.studioId, name: '恶意路径', idempotencyKey: 'path-project' }).value;
@@ -69,7 +69,7 @@ test('generated media recovery rejects a malicious staged journal path outside s
 
 test('startup media reconciliation quarantines orphan binaries and records missing database media once', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-reconcile-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const asset = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png' });
@@ -91,7 +91,7 @@ test('startup media reconciliation quarantines orphan binaries and records missi
 
 test('reconciliation recursively quarantines same-name nested orphans without collisions', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-reconcile-nested-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const generated = path.join(initialized.paths.assetRoot, 'generated');
@@ -118,7 +118,7 @@ test('reconciliation rejects symlinked asset and bucket roots without traversing
   const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-reconcile-symlink-outside-'));
   const sentinelPath = path.join(outsideRoot, 'sentinel.png');
   fs.writeFileSync(sentinelPath, png);
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     fs.symlinkSync(outsideRoot, initialized.paths.assetRoot);
@@ -139,7 +139,7 @@ test('reconciliation rejects symlinked asset and bucket roots without traversing
 
 test('generated media recovery retains a journal whose run item belongs to another Studio', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-journal-cross-studio-'));
-  const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
+  const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   try {
     const now = new Date().toISOString();
