@@ -11,7 +11,7 @@ import { requestPathFor } from '../providers/http-adapters';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { StateTransitionError } from '../domain/states';
-import { AssetScope, createAssetSnapshot, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
+import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshot, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { completeDeliveryStep, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDelivery, getDelivery, listDeliveries, openDeliveryExportFile, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
@@ -113,6 +113,20 @@ function numberValue(value: unknown): number {
 }
 
 function imageExtension(mediaType: string): string { return mediaType === 'image/jpeg' ? 'jpg' : mediaType === 'image/webp' ? 'webp' : mediaType === 'image/gif' ? 'gif' : 'png'; }
+function archiveTimestamp(now = new Date()): string {
+  return now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+}
+
+function archiveFilename(label: string, timestamp = archiveTimestamp()): string {
+  const safeLabel = String(label || '').normalize('NFKC').replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^[.\- ]+|[.\- ]+$/g, '').slice(0, 100) || 'daoge-pic';
+  return safeLabel + '-' + timestamp + '.zip';
+}
+
+function archiveContentDisposition(filename: string, fallback: string): string {
+  const encoded = encodeURIComponent(filename).replace(/[!'()*]/g, (character) => '%' + character.charCodeAt(0).toString(16).toUpperCase());
+  return 'attachment; filename="' + fallback + '"; filename*=UTF-8\'\'' + encoded;
+}
+
 
 function assetScope(value: string | null): AssetScope | null {
   if (!value) return null;
@@ -337,9 +351,15 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/assets') {
         const scope = assetScope(parsed.searchParams.get('scope'));
         const deletedFilter = parsed.searchParams.get('deleted');
-        const input = { includeDeleted: deletedFilter === 'true', deletedOnly: deletedFilter === 'only', projectId: parsed.searchParams.get('projectId') || undefined, taskId: parsed.searchParams.get('taskId') || undefined, roundId: parsed.searchParams.get('roundId') || undefined, limit: parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : undefined };
-        if (scope) return success(response, { assets: listAssetsWithReviewSummaries(this.db, listScopedStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, scope }), input.projectId).map(publicAsset), scope });
-        return success(response, { assets: listAssetsWithReviewSummaries(this.db, listStudioAssets(this.db, this.initialized.manifest.studioId, { ...input, targetType: parsed.searchParams.get('targetType') || undefined, targetId: parsed.searchParams.get('targetId') || undefined }), input.projectId).map(publicAsset) });
+        const rawKind = parsed.searchParams.get('kind');
+        if (rawKind && rawKind !== 'import' && rawKind !== 'generated' && rawKind !== 'export') throw new InvalidCommandError('Unknown asset kind.');
+        const input = { includeDeleted: deletedFilter === 'true', deletedOnly: deletedFilter === 'only', projectId: parsed.searchParams.get('projectId') || undefined, taskId: parsed.searchParams.get('taskId') || undefined, roundId: parsed.searchParams.get('roundId') || undefined, kind: (rawKind || undefined) as AssetKind | undefined, limit: parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : undefined, offset: parsed.searchParams.has('offset') ? numberValue(parsed.searchParams.get('offset')) : undefined };
+        if (scope) {
+          const scopedInput = { ...input, scope };
+          return success(response, { assets: listAssetsWithReviewSummaries(this.db, listScopedStudioAssets(this.db, this.initialized.manifest.studioId, scopedInput), input.projectId).map(publicAsset), total: countScopedStudioAssets(this.db, this.initialized.manifest.studioId, scopedInput), scope });
+        }
+        const unscopedInput = { ...input, targetType: parsed.searchParams.get('targetType') || undefined, targetId: parsed.searchParams.get('targetId') || undefined };
+        return success(response, { assets: listAssetsWithReviewSummaries(this.db, listStudioAssets(this.db, this.initialized.manifest.studioId, unscopedInput), input.projectId).map(publicAsset), total: countStudioAssets(this.db, this.initialized.manifest.studioId, unscopedInput) });
       }
       const projectSelectionMatch = /^\/api\/projects\/([^/]+)\/selection$/.exec(parsed.pathname);
       if (request.method === 'GET' && projectSelectionMatch) return success(response, { selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectSelectionMatch[1]) });
@@ -610,7 +630,7 @@ export class LocalStudioService {
     success(response, publicAsset(receipt.value));
   }
 
-  private async writeImageArchive(response: ServerResponse, filename: string, entries: ZipEntryInput[]): Promise<void> {
+  private async writeImageArchive(response: ServerResponse, filename: string, fallback: string, entries: ZipEntryInput[]): Promise<void> {
     if (!entries.length) throw new InvalidCommandError('请至少选择一张图片进行打包下载。');
     if (entries.length > MAX_ARCHIVE_IMAGE_COUNT) throw new InvalidCommandError('单次打包最多支持 ' + MAX_ARCHIVE_IMAGE_COUNT + ' 张图片。');
     try {
@@ -623,7 +643,7 @@ export class LocalStudioService {
     const abort = (): void => controller.abort();
     response.once('close', abort);
     try {
-      await writeImageZip(entries, response, { maxEntries: MAX_ARCHIVE_IMAGE_COUNT, maxAggregateBytes: MAX_ARCHIVE_BYTES, maxEntryBytes: MAX_IMAGE_UPLOAD_BYTES, snapshotDirectory: ensureCacheDirectory(this.initialized.paths, 'staging'), signal: controller.signal, beforeWrite: () => response.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename="' + filename + '"', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' }) });
+      await writeImageZip(entries, response, { maxEntries: MAX_ARCHIVE_IMAGE_COUNT, maxAggregateBytes: MAX_ARCHIVE_BYTES, maxEntryBytes: MAX_IMAGE_UPLOAD_BYTES, snapshotDirectory: ensureCacheDirectory(this.initialized.paths, 'staging'), signal: controller.signal, beforeWrite: () => response.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': archiveContentDisposition(filename, fallback), 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' }) });
       response.removeListener('close', abort);
       if (!response.destroyed && !response.writableEnded) response.end();
     } catch (error) {
@@ -634,8 +654,9 @@ export class LocalStudioService {
 
   private async projectAssetArchive(response: ServerResponse, projectId: string, requestedAssetIds: string[]): Promise<void> {
     this.assertProjectInStudio(projectId);
+    const project = this.db.prepare('SELECT name FROM projects WHERE id = ? AND studio_id = ?').get(projectId, this.initialized.manifest.studioId) as { name: string } | undefined;
+    if (!project) throw new StudioNotFoundError('项目不存在：' + projectId);
     const assetIds = [...new Set(requestedAssetIds.map((value) => value.trim()).filter(Boolean))];
-    if (!assetIds.length) throw new InvalidCommandError('请先在项目资产中选择要打包的图片。');
     const projectAssets = listScopedStudioAssets(this.db, this.initialized.manifest.studioId, { scope: 'project', projectId, limit: 500 });
     const available = new Map(projectAssets.map((asset) => [asset.id, asset]));
     const assets = assetIds.map((assetId) => {
@@ -650,12 +671,13 @@ export class LocalStudioService {
       for (const entry of entries) entry.snapshot?.close();
       throw error;
     }
-    await this.writeImageArchive(response, 'daoge-pic-project-images.zip', entries);
+    const timestamp = archiveTimestamp();
+    await this.writeImageArchive(response, archiveFilename(project.name + '-项目资产', timestamp), 'daoge-pic-project-assets-' + timestamp + '.zip', entries);
   }
 
   private async deliveryArchive(response: ServerResponse, deliveryId: string, requestedSequences: string[]): Promise<void> {
     this.assertDeliveryInStudio(deliveryId);
-    const delivery = this.db.prepare('SELECT delivery.id, delivery.status, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; status: string; manifest_json: string } | undefined;
+    const delivery = this.db.prepare('SELECT delivery.id, delivery.name, delivery.status, delivery.manifest_json, project.name AS project_name FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; name: string; status: string; manifest_json: string; project_name: string } | undefined;
     if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('已完成交付不存在：' + deliveryId);
     let manifest: Record<string, unknown>;
     try { manifest = record(JSON.parse(delivery.manifest_json)); } catch { throw new InvalidCommandError('交付文件记录无效。'); }
@@ -682,7 +704,8 @@ export class LocalStudioService {
       for (const entry of entries) entry.snapshot?.close();
       throw error;
     }
-    await this.writeImageArchive(response, 'daoge-pic-delivery-images.zip', entries);
+    const timestamp = archiveTimestamp();
+    await this.writeImageArchive(response, archiveFilename(delivery.project_name + '-' + delivery.name + '-交付图片', timestamp), 'daoge-pic-delivery-' + timestamp + '.zip', entries);
   }
 
   private deliveryFile(response: ServerResponse, deliveryId: string, sequence: number, download = false): void {

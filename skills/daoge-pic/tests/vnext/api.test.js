@@ -62,9 +62,9 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     assert.match(providerDetails.body.data.providerEnvPath, /daoge-studio[\/]provider.env$/);
     assert.equal(JSON.stringify(providerDetails.body).includes('api-secret-never-in-http-response'), false);
     const runtimeBefore = await requestJson(started, '/api/runtime-settings');
-    assert.equal(runtimeBefore.body.data.desired.maxWorkerConcurrency, 30);
-    const runtimeUpdated = await requestJson(started, '/api/runtime-settings', { method: 'PUT', idempotencyKey: 'runtime-limit', body: { maxWorkerConcurrency: 30 } });
-    assert.equal(runtimeUpdated.body.data.desired.maxWorkerConcurrency, 30);
+    assert.equal(runtimeBefore.body.data.desired.maxWorkerConcurrency, 1000);
+    const runtimeUpdated = await requestJson(started, '/api/runtime-settings', { method: 'PUT', idempotencyKey: 'runtime-limit', body: { maxWorkerConcurrency: 1000 } });
+    assert.equal(runtimeUpdated.body.data.desired.maxWorkerConcurrency, 1000);
 
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'project', body: { name: 'API 项目' } });
     const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'task', body: { projectId: project.body.data.value.id, name: 'API 任务' } });
@@ -83,19 +83,19 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     assert.equal(history.body.data.planVersions[0].state, 'confirmed');
     const dryRuns = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/dry-runs');
     assert.equal(dryRuns.body.data.dryRuns[0].id, preflight.body.data.value.preview.id);
-    const rejectedConcurrency = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-over-limit', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 31 } });
+    const rejectedConcurrency = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-over-limit', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 1001 } });
     assert.equal(rejectedConcurrency.status, 400);
-    const runRequest = { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'queue' }, body: JSON.stringify({ roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 30 }) };
+    const runRequest = { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'queue' }, body: JSON.stringify({ roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 1000 }) };
     const lostResponse = await fetchStudio(started, '/api/runs', runRequest);
     assert.equal(lostResponse.status, 200);
     await lostResponse.body.cancel();
-    const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 30 } });
+    const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 1000 } });
     assert.equal(queued.status, 200);
     assert.equal(queued.body.data.value.status, 'queued');
-    assert.equal(queued.body.data.value.requestedConcurrency, 30);
+    assert.equal(queued.body.data.value.requestedConcurrency, 1000);
     assert.equal(started.service.db.prepare('SELECT COUNT(*) AS total FROM generation_runs').get().total, 1);
     assert.equal(started.service.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key = 'queue'").get().total, 1);
-    const conflictingReplay = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 29 } });
+    const conflictingReplay = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, requestedConcurrency: 999 } });
     assert.equal(conflictingReplay.status, 409);
     assert.equal(JSON.stringify(queued.body).includes('api-secret-never-in-http-response'), false);
     const runId = queued.body.data.value.id;
@@ -108,6 +108,33 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     const invalidTransition = await requestJson(started, '/api/runs/' + runId + '/pause', { method: 'POST', idempotencyKey: 'pause-twice', body: {} });
     assert.equal(invalidTransition.status, 409);
     assert.deepEqual(invalidTransition.body.error, { code: 'invalid_state_transition', message: 'Invalid run transition: paused -> pausing', details: { entity: 'run', from: 'paused', to: 'pausing' } });
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('asset API returns filtered pages with the full scoped total', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    initializeStudio({ workspaceRoot, providerTemplatePath });
+    started = await startLocalStudioService({ workspaceRoot, providerTemplatePath });
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'asset-page-project', body: { name: '分页项目' } });
+    const projectId = project.body.data.value.id;
+    const studioId = started.service.initialized.manifest.studioId;
+    for (let index = 0; index < 35; index += 1) {
+      const id = 'asset_api_page_' + String(index).padStart(2, '0');
+      const kind = index < 30 ? 'generated' : 'import';
+      const createdAt = new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+      started.service.db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, studioId, kind, 'image/png', 'daoge-assets/' + kind + '/' + id + '.png', 'hash-' + id, 1, '{}', createdAt, createdAt);
+      started.service.db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('relation-' + id, id, 'attached_to', 'project', projectId, '{}', createdAt);
+    }
+    const page = await requestJson(started, '/api/assets?scope=project&projectId=' + encodeURIComponent(projectId) + '&kind=generated&limit=16&offset=16');
+    assert.equal(page.status, 200);
+    assert.equal(page.body.data.total, 30);
+    assert.equal(page.body.data.assets.length, 14);
+    assert.equal(page.body.data.assets.every((asset) => asset.kind === 'generated'), true);
   } finally {
     if (started) await started.service.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });

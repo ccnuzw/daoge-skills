@@ -97,7 +97,7 @@ test('freezes bounded per-run concurrency and shares worker capacity fairly', ()
     const second = confirmedRound(fixture, { operation: 'generate', itemCount: 3, prompt: 'second queue' }, 'second');
     const firstDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'first-dry-run' });
     const secondDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'second-dry-run' });
-    assert.throws(() => queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 31, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'over-ceiling' }), InvalidCommandError);
+    assert.throws(() => queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 1001, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'over-ceiling' }), InvalidCommandError);
     const firstRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 1, preflightId: firstDryRun.value.preview.id, idempotencyKey: 'first-run' });
     const secondRun = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: config, providerStatus: status, runtimeSettings: fixture.runtimeSettings, requestedConcurrency: 1, preflightId: secondDryRun.value.preview.id, idempotencyKey: 'second-run' });
     assert.equal(firstRun.value.requestedConcurrency, 1);
@@ -111,8 +111,8 @@ test('freezes bounded per-run concurrency and shares worker capacity fairly', ()
   }
 });
 
-test('leases requested concurrency values 5, 12, and 30 subject to the global worker limit', () => {
-  for (const [requestedConcurrency, globalLimit, expectedClaims] of [[5, 30, 5], [12, 30, 12], [30, 30, 30]]) {
+test('leases requested concurrency values through 1000 subject to the global worker limit', () => {
+  for (const [requestedConcurrency, globalLimit, expectedClaims] of [[5, 1000, 5], [12, 1000, 12], [30, 1000, 30], [1000, 1000, 30]]) {
     const fixture = configuredStudio();
     try {
       const config = loadProviderConfig(fixture.initialized.paths);

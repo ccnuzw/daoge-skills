@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { createProject, createRoundDraft, createTaskDraft } = require('../../dist/vnext/domain/studio-commands');
-const { importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, assetFilePath, recoverAssetMediaOperations, setStudioAssetShared, softDeleteAsset, restoreAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
+const { countScopedStudioAssets, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, assetFilePath, recoverAssetMediaOperations, setStudioAssetShared, softDeleteAsset, restoreAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
 const { archiveStagedImage, plannedArchivePath, stageImage } = require('../../dist/vnext/media/archive');
 const { setProjectAssetSelected } = require('../../dist/vnext/domain/project-selections');
 
@@ -131,6 +131,31 @@ test('lists assets by round, task, project, and Studio without cross-project lea
     assert.deepEqual(ids({ scope: 'project', projectId }), ['asset_output', 'asset_project', 'asset_round', 'asset_task']);
     assert.deepEqual(ids({ scope: 'studio' }), ['asset_other_project', 'asset_output', 'asset_project', 'asset_round', 'asset_task']);
     assert.throws(() => listScopedStudioAssets(value.db, value.initialized.manifest.studioId, { scope: 'round', projectId: otherProject.id, taskId: task.id, roundId: round.id }), /not part/);
+  } finally {
+    cleanup(value);
+  }
+});
+
+test('paginates filtered project assets with an exact total', () => {
+  const value = fixture();
+  try {
+    const projectId = value.project.value.id;
+    const studioId = value.initialized.manifest.studioId;
+    for (let index = 0; index < 35; index += 1) {
+      const id = 'asset_page_' + String(index).padStart(2, '0');
+      const kind = index < 30 ? 'generated' : 'import';
+      const createdAt = new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+      value.db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, studioId, kind, 'image/png', 'daoge-assets/' + kind + '/' + id + '.png', 'hash-' + id, 1, '{}', createdAt, createdAt);
+      value.db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('relation-' + id, id, 'attached_to', 'project', projectId, '{}', createdAt);
+    }
+    const query = { scope: 'project', projectId, kind: 'generated' };
+    const firstPage = listScopedStudioAssets(value.db, studioId, { ...query, limit: 16, offset: 0 });
+    const secondPage = listScopedStudioAssets(value.db, studioId, { ...query, limit: 16, offset: 16 });
+    assert.equal(countScopedStudioAssets(value.db, studioId, query), 30);
+    assert.equal(firstPage.length, 16);
+    assert.equal(secondPage.length, 14);
+    assert.equal(firstPage.every((asset) => asset.kind === 'generated'), true);
+    assert.equal(new Set([...firstPage, ...secondPage].map((asset) => asset.id)).size, 30);
   } finally {
     cleanup(value);
   }

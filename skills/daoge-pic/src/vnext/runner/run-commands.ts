@@ -333,12 +333,12 @@ export function promoteDueRetryWaitItems(db: StudioDatabase, now = new Date()): 
 
 function runConcurrencyLimit(requested: number | null, globalLimit: number): number {
   const requestedLimit = requested === null || requested === undefined ? globalLimit : Number(requested);
-  return Number.isInteger(requestedLimit) && requestedLimit >= 1 && requestedLimit <= 30 ? Math.min(globalLimit, requestedLimit) : globalLimit;
+  return Number.isInteger(requestedLimit) && requestedLimit >= 1 ? Math.min(globalLimit, requestedLimit) : globalLimit;
 }
 
 export function claimRunItems(db: StudioDatabase, input: { workerId: string; limit: number; leaseMs: number; now?: Date; providerSnapshot?: { providerId: string; model: string; endpoint: string | null } }): ClaimedRunItem[] {
   const workerId = requireValue(input.workerId, 'workerId');
-  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) throw new InvalidCommandError('Claim limit must be an integer between 1 and 100.');
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 1000) throw new InvalidCommandError('Claim limit must be an integer between 1 and 1000.');
   if (!Number.isInteger(input.leaseMs) || input.leaseMs < 1000) throw new InvalidCommandError('Lease duration must be at least 1000 ms.');
   const now = input.now || new Date();
   const nowValue = now.toISOString();

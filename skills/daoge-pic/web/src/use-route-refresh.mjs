@@ -31,12 +31,12 @@ export function createLatestRequestGate() {
   };
 }
 
-export function useRouteRefresh({ route, beforeRefresh, refreshGlobal, refreshContext, onError, onSettled }) {
+export function useRouteRefresh({ route, contextKey = '', beforeRefresh, refreshGlobal, refreshContext, onError, onSettled }) {
   const callbacks = useRef({ beforeRefresh, refreshGlobal, refreshContext, onError, onSettled });
   const controller = useRef(null);
   const epoch = useRef(0);
   const globalSnapshot = useRef(null);
-  const signature = routeRefreshSignature(route);
+  const signature = routeRefreshSignature(route) + ':' + contextKey;
   callbacks.current = { beforeRefresh, refreshGlobal, refreshContext, onError, onSettled };
 
   const run = useCallback(async (requestedScope = 'all') => {
@@ -49,7 +49,7 @@ export function useRouteRefresh({ route, beforeRefresh, refreshGlobal, refreshCo
       signal: nextController.signal,
       epoch: requestEpoch,
       signature: requestSignature,
-      isCurrent: () => !nextController.signal.aborted && epoch.current === requestEpoch && routeRefreshSignature(route) === requestSignature
+      isCurrent: () => !nextController.signal.aborted && epoch.current === requestEpoch && routeRefreshSignature(route) + ':' + contextKey === requestSignature
     };
     try {
       await callbacks.current.beforeRefresh?.(request);

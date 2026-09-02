@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const { openWorkbenchUrl } = require('../../dist/vnext/cli/open-workbench');
 const { signalVerifiedDaemon } = require('../../dist/vnext/cli/legacy-daemon');
 const { main, parseCommand } = require('../../dist/vnext/cli/daoge');
+const { matchesDaemonProcess } = require('../../dist/vnext/cli/process-identity');
 
 const skillRoot = path.resolve(__dirname, '../..');
 
@@ -22,8 +23,8 @@ test('CLI launcher and direct dist entry expose the same help contract', () => {
     assert.equal(launcher.stdout.includes('daoge ' + command + ' '), true);
   }
   assert.equal((launcher.stdout.match(/daoge preflight/g) || []).length, 1);
-  assert.match(launcher.stdout, /daoge config .*--worker-concurrency <1..30>/);
-  assert.match(launcher.stdout, /daoge run .*--concurrency <1..30>/);
+  assert.match(launcher.stdout, /daoge config .*--worker-concurrency <1..1000>/);
+  assert.match(launcher.stdout, /daoge run .*--concurrency <1..1000>/);
 });
 
 test('CLI module exports main without executing it during import', () => {
@@ -145,6 +146,21 @@ test('legacy daemon signals only when runtime, lock, manifest, health, entry, an
   assert.deepEqual(healthRequests, ['http://127.0.0.1:43123/api/health']);
   assert.deepEqual(processQueries, [runtime.pid]);
   assert.deepEqual(signals, [{ pid: runtime.pid, signal: 'SIGTERM' }]);
+});
+
+test('daemon process identity accepts a registered Skill symlink to the same entry', () => {
+  if (process.platform === 'win32') return;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-daemon-link-'));
+  try {
+    const source = path.join(root, 'source');
+    const registered = path.join(root, 'registered');
+    fs.mkdirSync(source);
+    fs.writeFileSync(path.join(source, 'daemon.js'), '');
+    fs.symlinkSync(source, registered, 'dir');
+    assert.equal(matchesDaemonProcess([process.execPath, path.join(registered, 'daemon.js'), '--workspace', root], path.join(source, 'daemon.js'), root), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 const legacyIdentityFixture = {

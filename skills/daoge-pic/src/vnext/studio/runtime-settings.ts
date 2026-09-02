@@ -3,7 +3,7 @@ import { nowIso } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from './database';
 
 export const MIN_WORKER_CONCURRENCY = 1;
-export const MAX_WORKER_CONCURRENCY = 30;
+export const MAX_WORKER_CONCURRENCY = 1000;
 export type WorkerConcurrency = number;
 export const DEFAULT_WORKER_CONCURRENCY: WorkerConcurrency = MAX_WORKER_CONCURRENCY;
 
@@ -29,13 +29,13 @@ function fromRow(row: StoredRuntimeSettings): StudioRuntimeSettings {
 
 export function requireWorkerConcurrency(value: unknown): WorkerConcurrency {
   const normalized = Number(value);
-  if (!isWorkerConcurrency(normalized)) throw new InvalidCommandError('工作区并发上限只能是 1 到 30 的整数。');
+  if (!isWorkerConcurrency(normalized)) throw new InvalidCommandError('工作区并发上限只能是 1 到 1000 的整数。');
   return normalized;
 }
 
 export function requireRequestedConcurrency(value: unknown): number {
   const normalized = Number(value);
-  if (!Number.isInteger(normalized) || normalized < MIN_WORKER_CONCURRENCY || normalized > MAX_WORKER_CONCURRENCY) throw new InvalidCommandError('本次运行并发只能是 1 到 30 的整数。');
+  if (!Number.isInteger(normalized) || normalized < MIN_WORKER_CONCURRENCY || normalized > MAX_WORKER_CONCURRENCY) throw new InvalidCommandError('本次运行并发只能是 1 到 1000 的整数。');
   return normalized;
 }
 

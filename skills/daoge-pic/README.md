@@ -2,18 +2,18 @@
 
 DAOGE Pic 是面向智能体会话的本地图像创作管理平台。会话负责澄清、规划、确认和汇报；本地 Studio Workbench 负责查看项目上下文、Generation History（生成历史）、运行、资产、选择、复核和交付。
 
-> **版本状态**：当前包版本和稳定正式版本为 [`5.6.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.6.0)。
+> **版本状态**：当前包版本和稳定正式版本为 [`5.7.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.7.0)。
 
 vNext 是一次不兼容替换，不读取或迁移旧 `task_spec.json`、`prepare` / `execute` / `ingest` 命令、旧静态工作区、`results.html`、旧目录状态或旧运行记录。
 
 ## 安装版本
 
-安装稳定正式版 `5.6.0` 时，使用 `daoge-pic-v5.6.0` GitHub Release 中的不可变 `.tgz` 制品，避免默认分支后续变化影响安装内容。npm 安装提供 `daoge` CLI 和运行时；link/junction 注册让 Codex 发现 `daoge-pic` Skill，两步缺一不可。
+安装稳定正式版 `5.7.0` 时，使用 `daoge-pic-v5.7.0` GitHub Release 中的不可变 `.tgz` 制品，避免默认分支后续变化影响安装内容。npm 安装提供 `daoge` CLI 和运行时；link/junction 注册让 Codex 发现 `daoge-pic` Skill，两步缺一不可。
 
 在项目根目录执行：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.6.0/daoge-pic-5.6.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.7.0/daoge-pic-5.7.0.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
@@ -26,7 +26,7 @@ npx daoge studio --workspace /absolute/workspace
 需要全局安装稳定版时，安装同一个 Release `.tgz`，再由 Node 标准库调用 `npm root -g` 定位已安装包并注册到当前用户的 Codex Skill 目录：
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.6.0/daoge-pic-5.6.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.7.0/daoge-pic-5.7.0.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
@@ -143,7 +143,7 @@ Workbench 的“完成交付”使用内部同源 API `/api/deliveries/complete`
 
 ## Workbench 能力边界
 
-Workbench 用于项目/任务/轮次导航、Generation History、SSE 实时状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。交付失败会保留当前阶段，可安全重试；已导出交付按冻结文件领取。
+Workbench 用于项目/任务/轮次导航、Generation History、SSE 实时状态、素材批量导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。图片放大预览可直接选为成果或取消成果，当前选片缩略卡片会为长标题和独立移除按钮保留空间。项目资产采用服务端分页，默认每页 24 张，可切换 16/24/32/48/64/96，并提供只作用于当前页的全选/取消全选；交付图片提供明确的全选/取消全选。项目首页和项目任务列表提供搜索、生命周期筛选与分页，避免项目或任务无限向下堆叠。项目资产和已导出交付 ZIP 使用项目名、交付名及下载时间生成可区分文件名。交付失败会保留当前阶段，可安全重试；已导出交付按冻结文件领取。
 
 键盘和辅助技术契约包括可见焦点、搜索组合框语义、状态/错误 live region，以及模态图片查看器的初始焦点、Tab 焦点约束、Escape 关闭和关闭后焦点返回。
 

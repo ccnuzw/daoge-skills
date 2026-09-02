@@ -5,7 +5,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前包版本和稳定正式版本是 `5.6.0`。
+当前包版本和稳定正式版本是 `5.7.0`。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
@@ -77,7 +77,7 @@ CLI 必须在启动 daemon 或初始化工作区前拒绝未知命令、缺失�
 ```bash
 node scripts/daoge.js studio --workspace <path>
 node scripts/daoge.js open --workspace <path>
-node scripts/daoge.js config --workspace <path> --worker-concurrency <1..30>
+node scripts/daoge.js config --workspace <path> --worker-concurrency <1..1000>
 node scripts/daoge.js restart --workspace <path>
 node scripts/daoge.js session --workspace <path> --conversation <conversation-id>
 node scripts/daoge.js project --workspace <path> --name "项目名称" [--description <text>] [--session <session-id>]
@@ -99,7 +99,7 @@ node scripts/daoge.js round --workspace <path> --task <task-id> --purpose <explo
 node scripts/daoge.js plan --workspace <path> --round <round-id> --version <n> --plan <json>
 node scripts/daoge.js confirm --workspace <path> --round <round-id> --version <n>
 node scripts/daoge.js preflight --workspace <path> --round <round-id>
-node scripts/daoge.js run --workspace <path> --round <round-id> --preflight <dry-run-id> [--concurrency <1..30>]
+node scripts/daoge.js run --workspace <path> --round <round-id> --preflight <dry-run-id> [--concurrency <1..1000>]
 node scripts/daoge.js pause --workspace <path> --run <run-id>
 node scripts/daoge.js resume --workspace <path> --run <run-id> --session <session-id>
 node scripts/daoge.js cancel --workspace <path> --run <run-id>
@@ -127,7 +127,7 @@ node scripts/daoge.js resume --workspace <path> --run <run-id> --session <sessio
 - daemon 重启时，未安全完成的运行进入 `resume_pending`；再次外部调用前必须在会话中得到用户确认，并以 `resume --session <session-id>` 记录。Workbench 只能显示等待状态，不能绕过会话继续。
 - `retry` 只允许 `failed`、`blocked` 或 `retry_wait`；可用 `--items` 做单项重试。`outcome_unknown` 不可直接重试。
 - `archive-project` 会拒绝仍有未完成生成的项目，再以事务方式归档项目、任务和轮次。
-- daemon 启动时固定 Provider、模型、端点身份与工作区并发上限。新 Studio 上限为 `30`；`config --worker-concurrency <1..30>` 更新期望设置，`restart` 后生效。`run --concurrency <1..30>` 的单次请求被冻结且不得超过生效上限。
+- daemon 启动时固定 Provider、模型、端点身份与工作区并发上限。新 Studio 上限为 `1000`；Schema v18 会将既有 Studio 上限迁移为 `1000`。`config --worker-concurrency <1..1000>` 更新期望设置，`restart` 后生效。`run --concurrency <1..1000>` 的单次请求由会话明确指定、冻结到运行记录且不得超过生效上限。
 - 预检快照不含 API Key 或完整 Provider URL。计划或安全 Provider 快照变化后必须重新预检；适配器不能无歧义承载的输出规格必须拒绝，绝不静默回退方图。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。仅在当前 Studio 受管理根、相对路径、媒体类型、哈希、大小、资产和操作身份全部一致时恢复；路径越界、符号链接、冲突或歧义必须拒绝并留下脱敏事件。
 - 下载、复制、交付导出和 ZIP 使用受验证 snapshot 流式读取。文件替换、路径穿越、跨 Studio/跨项目访问、超出条目或聚合上限、客户端断连都不能形成错误交付；失败时关闭文件描述符和临时 snapshot。
@@ -137,6 +137,10 @@ node scripts/daoge.js resume --workspace <path> --run <run-id> --session <sessio
 Generation History 必须按当前轮次列出全部持久 Generation Run，并要求用户或 Skill 显式选择运行。不得把活跃运行、最新运行或当前浏览器缓存静默当作已选择历史。选择后只显示该运行的计划版本、时间、短 ID、状态、运行项和结果资产；历史项不因刷新、SSE 重连或切换路由而改写。
 
 项目当前选片是 SQLite 业务关系。交付权威状态为 `draft -> ready -> exported`；准备时冻结资产来源与评审，导出时建立冻结图片实体。源资产后续进入回收站，不得破坏已导出的交付下载、复制或 ZIP。
+
+项目资产页使用服务端分页，默认每页 `24` 张，可选择 `16`、`24`、`32`、`48`、`64`、`96`。筛选与分页总数必须由当前 Studio、项目/任务/轮次范围和资产类型共同计算；“全选本页”只作用于当前页可见资产，并保持成果选择和 `keep` 评审语义一致。资产导入支持一次选择、拖入或粘贴多张图片，并逐张持久化、汇总成功与失败。交付图片提供明确的全选/取消全选。项目和任务列表提供搜索、状态筛选与分页，避免大列表无限延伸。
+
+图片放大预览必须可直接切换成果选择，选择状态仍写入项目业务关系并保持 `keep` 评审语义。当前选片缩略条的移除按钮不得占据或遮挡标题内容。项目资产 ZIP 使用“项目名 + 项目资产 + 时间”，已导出交付 ZIP 使用“项目名 + 交付名 + 交付图片 + 时间”；HTTP 响应同时提供 UTF-8 文件名和稳定 ASCII 回退名。
 
 Workbench 的普通“完成交付”通过内部 `/api/deliveries/complete` API 依次执行 `draft`、`prepare`、`export`，每阶段使用同一 operation identity 幂等恢复；失败保留已提交阶段。该 API 是 Workbench 内部主流程，不得伪装成公开 `delivery-complete` CLI 命令。高级 CLI 使用 `delivery*` 与 `delivery-batch*` 命令操作同一权威状态机。
 

@@ -4,7 +4,32 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-## 1. daoge-pic 5.4.0 已发布历史证据
+## 1. daoge-pic 5.7.0 发布证据
+
+本节对应 [`daoge-pic-v5.7.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.7.0) 的发布源码与不可变 `.tgz` 制品。
+
+### 最终机器验证
+
+- 验证日期：2026-09-02；本地 macOS、Node.js 22+。
+- `npm test`：TypeScript 和 Vite 生产构建成功；Node 内置测试执行 217 项，217 通过、0 失败、0 取消、0 跳过。
+- `npm run test:package`：真实构建、打包并临时安装候选包；发布清单 86 个文件，`unexpected=0`、source map 为 0、退役路径为 0，安装、bin 与 help 检查通过。
+- 正式制品 `daoge-pic-5.7.0.tgz` 为 249,611 bytes，npm shasum 为 `3da27b4f4c4c63ad1f3b94a02f3a5297cce86a75`，SHA-256 为 `1fb70265f4a0e7e5858be3dec7cf21ad8706c720fede7c1712e74a36678110fe`。
+- Schema v18 在当前实际工作区完成迁移；受控重启保持原 Workbench 端口，daemon 健康且当前生效工作区并发为 `1000`。当前系统 Skill 注册指向本仓库 `skills/daoge-pic` 源码，包版本为 `5.7.0`。
+
+### Chromium 行为与视觉验证
+
+- 使用隔离临时 Studio 构造 13 个项目、15 个任务和 20 张项目资产；未配置 Provider、未创建 Generation Run、未发起外部调用。
+- 项目首页验证“进行中 / 已归档 / 全部”筛选、名称搜索和 12 项分页；13 个项目正确形成 2 页。
+- 项目概览任务摘要按每页 8 项形成 2 页；任务功能页按每页 12 项形成 2 页，搜索与状态筛选控件均可操作。
+- 项目资产把每页数量切换为 16 后，20 张资产正确形成 2 页；“全选本页”选择 16 张并切换为“取消全选本页”。
+- 文件选择器一次上传 2 张图片，界面显示“已导入 2 张图片”，总数从 18 更新为 20；单页仍保持 16 张。
+- 交付页显示“打包下载 16 张”和明确的“取消全选”；取消后选中数为 0，再执行“全选全部 16 张”恢复为 16。
+- 桌面 1440×1000 与移动 390×844 均无 document 横向溢出；移动端全选、每页和分页按钮高度均为 44px。
+- 当前真实项目资产完成图片预览直接选片验证，并在验证后恢复原选择；预览窗口显示明确“选为成果”操作。
+- 当前选片卡片实测移除按钮为 `24×24`，标题区右边界与按钮左边界相距 9px、无重叠；桌面截图确认长标题安全省略。
+- 项目资产 ZIP 响应同时返回秒级 ASCII 回退名与 UTF-8 语义名，例如 `青春四人组-项目资产-YYYYMMDD-HHMMSS.zip`；交付 API 回归覆盖“项目名-交付名-交付图片-时间”命名。
+
+## 2. daoge-pic 5.4.0 已发布历史证据
 
 本节对应已正式发布的 [`daoge-pic-v5.4.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.4.0)。以下历史验证内容原样保留；其中时间、数量、哈希和环境只证明 5.4.0，不得转用为后续版本证据。
 
@@ -24,7 +49,7 @@
 
 当前环境未提供可用的 Playwright 或等价浏览器自动化后端。Chrome 无头模式在本机因 allocator/renderer 异常退出，未生成桌面/移动视口截图或像素级 UI 验证。Vite 生产构建、Workbench 静态服务 API 测试和组件/路由测试覆盖资源可用性与核心交互契约；视觉验收仍应在具备可用浏览器自动化的环境补充。
 
-## 2. daoge-pic 5.5.0 已发布历史证据
+## 3. daoge-pic 5.5.0 已发布历史证据
 
 本节对应已正式发布的 [`daoge-pic-v5.5.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.5.0)，标签提交为 `1741c56bd05ed6fa4974ac679abab60e6b7c6a0f`，发布时间为 2026-09-01T03:13:40Z。
 
@@ -32,7 +57,7 @@
 - Release 制品 `daoge-pic-5.5.0.tgz` 为 203,159 bytes，SHA-256 为 `d76844e34aba42feb8a53ed6b4629c5c5a94fd4548dc75f02d4083ffa7bb38d2`。
 - 该版本提供动态画幅、尺寸、分辨率和单次运行并发，工作区 Worker 默认上限提升为 `30`，运行时设置迁移到 SQLite Schema v14。
 
-## 3. daoge-pic 5.6.0 发布证据
+## 4. daoge-pic 5.6.0 发布证据
 
 本节对应 [`daoge-pic-v5.6.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.6.0) 的发布源码与不可变 `.tgz` 制品。
 

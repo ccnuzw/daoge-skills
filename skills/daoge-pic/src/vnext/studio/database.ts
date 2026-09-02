@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 17;
+export const STUDIO_SCHEMA_VERSION = 18;
 
 const SCHEMA_V1 = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -121,6 +121,14 @@ const SCHEMA_V17 = [
   "INSERT INTO task_type_migration_quarantine (id, name, definition_json, created_at, updated_at, reason) SELECT id, name, definition_json, created_at, updated_at, 'ambiguous_studio_scope' FROM task_types_v16 WHERE source = 'user' AND (SELECT COUNT(*) FROM studios) <> 1",
   "DROP TABLE task_types_v16"
 ].join(';\n') + ';';
+const SCHEMA_V18 = [
+  "ALTER TABLE studio_runtime_settings RENAME TO studio_runtime_settings_v17",
+  "CREATE TABLE studio_runtime_settings (studio_id TEXT PRIMARY KEY REFERENCES studios(id), max_worker_concurrency INTEGER NOT NULL CHECK (max_worker_concurrency BETWEEN 1 AND 1000), updated_at TEXT NOT NULL)",
+  "INSERT INTO studio_runtime_settings (studio_id, max_worker_concurrency, updated_at) SELECT studio_id, 1000, updated_at FROM studio_runtime_settings_v17",
+  "DROP TABLE studio_runtime_settings_v17"
+].join(';\n') + ';';
+const SCHEMA_V18_CREATE = "CREATE TABLE studio_runtime_settings (studio_id TEXT PRIMARY KEY REFERENCES studios(id), max_worker_concurrency INTEGER NOT NULL CHECK (max_worker_concurrency BETWEEN 1 AND 1000), updated_at TEXT NOT NULL)";
+
 
 
 export type StudioDatabase = DatabaseSyncType;
@@ -186,13 +194,15 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
     { version: 14, sql: SCHEMA_V14 },
     { version: 15, sql: SCHEMA_V15 },
     { version: 16, sql: SCHEMA_V16 },
-    { version: 17, sql: SCHEMA_V17 }
+    { version: 17, sql: SCHEMA_V17 },
+    { version: 18, sql: SCHEMA_V18 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
     if (existing) continue;
     withTransaction(db, () => {
-      db.exec(migration.sql);
+      if (migration.version === 18 && !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'studio_runtime_settings'").get()) db.exec(SCHEMA_V18_CREATE);
+      else db.exec(migration.sql);
       if (migration.version === 16 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get()) db.exec(SCHEMA_V16_ASSET_BACKFILL);
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());
     });

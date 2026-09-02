@@ -40,7 +40,9 @@ test('P1 delivery HTTP API carries project selection through keep-only draft, re
     const projectArchive = await fetchStudio(started, '/api/projects/' + projectId + '/assets/archive?assetId=' + asset.id + '&assetId=' + variantAsset.id);
     assert.equal(projectArchive.status, 200);
     assert.equal(projectArchive.headers.get('content-type'), 'application/zip');
-    assert.match(projectArchive.headers.get('content-disposition') || '', /attachment; filename="daoge-pic-project-images\.zip"/);
+    const projectArchiveDisposition = projectArchive.headers.get('content-disposition') || '';
+    assert.match(projectArchiveDisposition, /attachment; filename="daoge-pic-project-assets-\d{8}-\d{6}\.zip"/);
+    assert.match(projectArchiveDisposition, /filename\*=UTF-8''HTTP-%E4%BA%A4%E4%BB%98%E9%A1%B9%E7%9B%AE-%E9%A1%B9%E7%9B%AE%E8%B5%84%E4%BA%A7-\d{8}-\d{6}\.zip/);
     const projectArchiveBytes = Buffer.from(await projectArchive.arrayBuffer());
     assert.equal(projectArchiveBytes.subarray(0, 4).toString('ascii'), 'PK\x03\x04');
     assert.equal(projectArchiveBytes.includes(png), true);
@@ -88,7 +90,9 @@ test('P1 delivery HTTP API carries project selection through keep-only draft, re
     const deliveryArchive = await fetchStudio(started, '/api/deliveries/' + draft.body.data.id + '/archive?sequence=2');
     assert.equal(deliveryArchive.status, 200);
     assert.equal(deliveryArchive.headers.get('content-type'), 'application/zip');
-    assert.match(deliveryArchive.headers.get('content-disposition') || '', /attachment; filename="daoge-pic-delivery-images\.zip"/);
+    const deliveryArchiveDisposition = deliveryArchive.headers.get('content-disposition') || '';
+    assert.match(deliveryArchiveDisposition, /attachment; filename="daoge-pic-delivery-\d{8}-\d{6}\.zip"/);
+    assert.match(deliveryArchiveDisposition, /filename\*=UTF-8''HTTP-%E4%BA%A4%E4%BB%98%E9%A1%B9%E7%9B%AE-P1-%E8%8D%89%E7%A8%BF-%E4%BA%A4%E4%BB%98%E5%9B%BE%E7%89%87-\d{8}-\d{6}\.zip/);
     const deliveryArchiveBytes = Buffer.from(await deliveryArchive.arrayBuffer());
     assert.equal(deliveryArchiveBytes.subarray(0, 4).toString('ascii'), 'PK\x03\x04');
     assert.equal(deliveryArchiveBytes.includes(png), false);

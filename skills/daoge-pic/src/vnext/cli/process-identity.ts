@@ -90,8 +90,13 @@ export function queryProcessArguments(pid: number, dependencies: ProcessQueryDep
 }
 
 function sameCanonicalPath(actual: string, expected: string): boolean {
-  const normalize = process.platform === 'win32' ? (value: string): string => path.resolve(value).toLowerCase() : (value: string): string => path.resolve(value);
-  return normalize(actual) === normalize(expected);
+  const resolved = (value: string): string => {
+    const absolute = path.resolve(value);
+    let canonical = absolute;
+    try { canonical = fs.realpathSync(absolute); } catch { /* missing paths retain their absolute identity */ }
+    return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
+  };
+  return resolved(actual) === resolved(expected);
 }
 
 export function matchesDaemonProcess(arguments_: readonly string[], daemonEntry: string, workspaceRoot: string): boolean {

@@ -75,13 +75,13 @@ function sleep(milliseconds: number): Promise<void> { return new Promise((resolv
 function strictWorkerConcurrency(value: string): number {
   const concurrency = Number(value);
   if (Number.isInteger(concurrency) && concurrency >= MIN_WORKER_CONCURRENCY && concurrency <= MAX_WORKER_CONCURRENCY) return concurrency;
-  throw new Error('--worker-concurrency 只能是 1 到 30 的整数。');
+  throw new Error('--worker-concurrency 只能是 1 到 1000 的整数。');
 }
 
 function strictRequestedConcurrency(value: string): number {
   const concurrency = Number(value);
   if (Number.isInteger(concurrency) && concurrency >= MIN_WORKER_CONCURRENCY && concurrency <= MAX_WORKER_CONCURRENCY) return concurrency;
-  throw new Error('--concurrency 只能是 1 到 30 的整数。');
+  throw new Error('--concurrency 只能是 1 到 1000 的整数。');
 }
 
 function livePid(pid: number): boolean {
@@ -257,7 +257,7 @@ function usage(): string {
     'DAOGE Pic vNext Studio',
     'daoge studio --workspace <path>',
     'daoge open --workspace <path>',
-    'daoge config --workspace <path> --worker-concurrency <1..30>  # 修改工作区并发上限，需重启生效',
+    'daoge config --workspace <path> --worker-concurrency <1..1000>  # 修改工作区并发上限，需重启生效',
     'daoge restart --workspace <path>  # 优雅重启本工作区 Studio',
     'daoge session --workspace <path> --conversation <id>',
     'daoge project --workspace <path> --name <name> [--description <text>] [--session <id>]',
@@ -279,7 +279,7 @@ function usage(): string {
     'daoge plan --workspace <path> --round <id> --version <n> --plan <json>',
     'daoge confirm --workspace <path> --round <id> --version <n>',
     'daoge preflight --workspace <path> --round <id>',
-    'daoge run --workspace <path> --round <id> --preflight <dry-run-id> [--concurrency <1..30>]',
+    'daoge run --workspace <path> --round <id> --preflight <dry-run-id> [--concurrency <1..1000>]',
     'daoge pause --workspace <path> --run <id>',
     'daoge resume --workspace <path> --run <id> --session <session-id>',
     'daoge cancel --workspace <path> --run <id>',

@@ -16,5 +16,5 @@ test('asset cards keep preview controls separate from expanded actions and selec
   assert.doesNotMatch(assetCard.slice(0, previewEnd), /asset-action-menu/);
   assert.match(styles, /\.asset-select-control \{ top:8px; bottom:auto;/);
   assert.match(styles, /\.asset-action-menu \{ display:grid; grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.match(styles, /\.selection-remove \{ display:grid; place-items:center; justify-self:end; width:26px; height:26px;/);
+  assert.match(styles, /\.selection-strip-items article > button\.selection-remove \{ position:absolute; top:7px; right:7px;.*width:24px; height:24px;/);
 });

@@ -191,7 +191,7 @@ test('creates the vNext schema and emits monotonic Studio events', () => {
   try {
     const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.equal(studioSchemaVersion(db), 17);
+    assert.equal(studioSchemaVersion(db), 18);
     const studio = db.prepare('SELECT id, workspace_root FROM studios WHERE id = ?').get(initialized.manifest.studioId);
     assert.equal(studio.id, initialized.manifest.studioId);
     assert.equal(studio.workspace_root, initialized.paths.workspaceRoot);
@@ -211,10 +211,10 @@ test('stores the workspace concurrency ceiling outside provider.env', () => {
   try {
     const initialized = initializeStudio({ workspaceRoot, providerTemplatePath });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.deepEqual(getStudioRuntimeSettings(db, initialized.manifest.studioId).maxWorkerConcurrency, 30);
-    assert.deepEqual(updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 17 }).maxWorkerConcurrency, 17);
-    assert.deepEqual(updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 30 }).maxWorkerConcurrency, 30);
-    assert.throws(() => updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 31 }), /1 到 30/);
+    assert.deepEqual(getStudioRuntimeSettings(db, initialized.manifest.studioId).maxWorkerConcurrency, 1000);
+    assert.deepEqual(updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 997 }).maxWorkerConcurrency, 997);
+    assert.deepEqual(updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 1000 }).maxWorkerConcurrency, 1000);
+    assert.throws(() => updateStudioRuntimeSettings(db, { studioId: initialized.manifest.studioId, maxWorkerConcurrency: 1001 }), /1 到 1000/);
     assert.equal(JSON.stringify(providerStatus(initialized.paths)).includes('workerConcurrency'), false);
   } finally {
     closeStudioDatabase(db);
@@ -222,7 +222,7 @@ test('stores the workspace concurrency ceiling outside provider.env', () => {
   }
 });
 
-test('migrates v13 concurrency settings to the release range', () => {
+test('migrates legacy concurrency settings to the 1000 ceiling', () => {
   const workspaceRoot = temporaryWorkspace();
   let db;
   try {
@@ -234,9 +234,9 @@ test('migrates v13 concurrency settings to the release range', () => {
     db.prepare('INSERT INTO studios (id, workspace_root, schema_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run('studio_v13', workspaceRoot, 13, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
     db.prepare('INSERT INTO studio_runtime_settings (studio_id, max_worker_concurrency, updated_at) VALUES (?, ?, ?)').run('studio_v13', 4, '2026-01-01T00:00:00.000Z');
     migrateStudioDatabase(db);
-    assert.equal(db.prepare('SELECT max_worker_concurrency FROM studio_runtime_settings WHERE studio_id = ?').get('studio_v13').max_worker_concurrency, 4);
-    db.prepare('UPDATE studio_runtime_settings SET max_worker_concurrency = ? WHERE studio_id = ?').run(30, 'studio_v13');
-    assert.equal(db.prepare('SELECT max_worker_concurrency FROM studio_runtime_settings WHERE studio_id = ?').get('studio_v13').max_worker_concurrency, 30);
+    assert.equal(db.prepare('SELECT max_worker_concurrency FROM studio_runtime_settings WHERE studio_id = ?').get('studio_v13').max_worker_concurrency, 1000);
+    db.prepare('UPDATE studio_runtime_settings SET max_worker_concurrency = ? WHERE studio_id = ?').run(1000, 'studio_v13');
+    assert.throws(() => db.prepare('UPDATE studio_runtime_settings SET max_worker_concurrency = ? WHERE studio_id = ?').run(1001, 'studio_v13'));
   } finally {
     closeStudioDatabase(db);
     cleanup(workspaceRoot);
@@ -295,7 +295,7 @@ test('migrates v15 media operation identity fields whether the legacy table is p
       migrateStudioDatabase(db);
       const columns = db.prepare('PRAGMA table_info(asset_media_operations)').all().map((column) => column.name);
       assert.deepEqual(columns, ['id', 'studio_id', 'asset_id', 'operation', 'source_path', 'target_path', 'asset_json', 'relation_json', 'created_at', 'expected_hash', 'expected_size', 'expected_media_type', 'phase']);
-      assert.equal(studioSchemaVersion(db), 17);
+      assert.equal(studioSchemaVersion(db), 18);
       const migrated = db.prepare('SELECT expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE id = ?').get('operation_v15');
       assert.deepEqual(migrated ? { ...migrated } : null, legacyTablePresent ? { expected_hash: null, expected_size: null, expected_media_type: null, phase: 'prepared' } : null);
       if (legacyTablePresent) {
@@ -484,7 +484,7 @@ test('migrates v16 journals and task types without assigning ambiguous user data
       db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('official_migration_type', '旧官方类型', '{}', 'official', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('user_migration_type', '旧用户类型', '{}', 'user', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       migrateStudioDatabase(db);
-      assert.equal(studioSchemaVersion(db), 17);
+      assert.equal(studioSchemaVersion(db), 18);
       const journalPrimaryKey = db.prepare('PRAGMA table_info(delivery_export_journal)').all().filter((column) => column.pk > 0).sort((left, right) => left.pk - right.pk).map((column) => column.name);
       assert.deepEqual(journalPrimaryKey, ['studio_id', 'idempotency_key']);
       const migratedJournal = db.prepare('SELECT studio_id, delivery_id FROM delivery_export_journal WHERE idempotency_key = ?').get('legacy-export-key');
