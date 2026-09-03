@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { closeStudioDatabase, openStudioDatabase } = require('../../dist/vnext/studio/database');
 const { assetFilePath, importStudioAsset, softDeleteAsset } = require('../../dist/vnext/domain/assets');
+const { createProject } = require('../../dist/vnext/domain/studio-commands');
 const { StudioAssetResolver } = require('../../dist/vnext/media/asset-resolver');
 const { MAX_IMAGE_REQUEST_MEDIA_BYTES, MAX_IMAGE_REQUEST_REFERENCE_ASSETS } = require('../../dist/vnext/providers/contracts');
 
@@ -20,6 +21,10 @@ function largePng(fill = 0x41) {
 
 function sameSizeReplacement(bytes, fill = 0x42) {
   return Buffer.concat([bytes.subarray(0, 16), Buffer.alloc(bytes.length - 16, fill)]);
+}
+
+function createTestProject(db, initialized, key) {
+  return createProject(db, { studioId: initialized.manifest.studioId, name: 'resolver project', idempotencyKey: key }).value.id;
 }
 
 function trackSnapshotDescriptors(paths) {
@@ -73,18 +78,19 @@ test('resolves only active Studio asset IDs for references and masks', async () 
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-'));
   const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  const projectId = createTestProject(db, initialized, 'resolver-project-active');
   try {
-    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png' });
-    const mask = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: Buffer.concat([png, Buffer.from('mask')]), mediaType: 'image/png' });
+    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: projectId });
+    const mask = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: Buffer.concat([png, Buffer.from('mask')]), mediaType: 'image/png', targetType: 'project', targetId: projectId });
     const resolver = new StudioAssetResolver({ db, paths: initialized.paths });
-    const resolved = await resolver.resolve({ studioId: initialized.manifest.studioId, referenceAssetIds: [reference.id], maskAssetId: mask.id });
+    const resolved = await resolver.resolve({ studioId: initialized.manifest.studioId, projectId, referenceAssetIds: [reference.id], maskAssetId: mask.id });
     assert.equal(resolved.assets.referenceAssets.length, 1);
     assert.deepEqual(resolved.assets.referenceAssets[0].bytes, png);
     assert.equal(resolved.assets.maskAsset.assetId, mask.id);
     resolved.release();
-    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, referenceAssetIds: ['/arbitrary/unmanaged.png'] }), /not found/);
+    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, projectId, referenceAssetIds: ['/arbitrary/unmanaged.png'] }), /not found/);
     softDeleteAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, assetId: reference.id });
-    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, referenceAssetIds: [reference.id] }), /not found/);
+    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, projectId, referenceAssetIds: [reference.id] }), /not found/);
   } finally {
     closeStudioDatabase(db);
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -95,12 +101,13 @@ test('rejects reference count and aggregate media limits before allocating snaps
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-limits-'));
   const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  const projectId = createTestProject(db, initialized, 'resolver-project-limits');
   try {
     const resolver = new StudioAssetResolver({ db, paths: initialized.paths });
-    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, referenceAssetIds: Array.from({ length: MAX_IMAGE_REQUEST_REFERENCE_ASSETS + 1 }, (_, index) => 'asset-' + index) }), /最多支持/);
-    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png' });
+    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, projectId, referenceAssetIds: Array.from({ length: MAX_IMAGE_REQUEST_REFERENCE_ASSETS + 1 }, (_, index) => 'asset-' + index) }), /最多支持/);
+    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: projectId });
     db.prepare('UPDATE assets SET byte_size = ? WHERE id = ?').run(MAX_IMAGE_REQUEST_MEDIA_BYTES + 1, reference.id);
-    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, referenceAssetIds: [reference.id] }), /合计不能超过/);
+    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, projectId, referenceAssetIds: [reference.id] }), /合计不能超过/);
     assert.deepEqual(fs.readdirSync(path.join(initialized.paths.cacheDir, 'staging')), []);
   } finally {
     closeStudioDatabase(db);
@@ -112,12 +119,13 @@ test('returns verified reference and mask bytes and cleans async snapshots', asy
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-frozen-'));
   const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  const projectId = createTestProject(db, initialized, 'resolver-project-frozen');
   try {
     const referenceBytes = largePng(0x31);
     const maskBytes = largePng(0x32);
-    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: referenceBytes, mediaType: 'image/png' });
-    const mask = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: maskBytes, mediaType: 'image/png' });
-    const resolved = await new StudioAssetResolver({ db, paths: initialized.paths }).resolve({ studioId: initialized.manifest.studioId, referenceAssetIds: [reference.id], maskAssetId: mask.id });
+    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: referenceBytes, mediaType: 'image/png', targetType: 'project', targetId: projectId });
+    const mask = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: maskBytes, mediaType: 'image/png', targetType: 'project', targetId: projectId });
+    const resolved = await new StudioAssetResolver({ db, paths: initialized.paths }).resolve({ studioId: initialized.manifest.studioId, projectId, referenceAssetIds: [reference.id], maskAssetId: mask.id });
     assert.deepEqual(resolved.assets.referenceAssets[0].bytes, referenceBytes);
     assert.deepEqual(resolved.assets.maskAsset.bytes, maskBytes);
     resolved.release();
@@ -132,14 +140,15 @@ test('rejects a same-size reference replacement before snapshotting and leaves n
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-replaced-'));
   const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  const projectId = createTestProject(db, initialized, 'resolver-project-replaced');
   let tracker;
   try {
     const original = largePng();
-    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: original, mediaType: 'image/png' });
+    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: original, mediaType: 'image/png', targetType: 'project', targetId: projectId });
     fs.writeFileSync(assetFilePath(initialized.paths, reference), sameSizeReplacement(original));
     tracker = trackSnapshotDescriptors(initialized.paths);
     const resolver = new StudioAssetResolver({ db, paths: initialized.paths });
-    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, referenceAssetIds: [reference.id] }), /hash|identity|changed/);
+    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, projectId, referenceAssetIds: [reference.id] }), /hash|identity|changed/);
     assert.deepEqual(fs.readdirSync(path.join(initialized.paths.cacheDir, 'staging')), []);
   } finally {
     if (tracker) tracker.restore();
@@ -152,14 +161,15 @@ test('rejects an in-place mask mutation during snapshotting and closes partial s
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-mask-mutation-'));
   const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  const projectId = createTestProject(db, initialized, 'resolver-project-mask-mutation');
   let mutation;
   try {
     const original = largePng();
-    const mask = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: original, mediaType: 'image/png' });
+    const mask = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: original, mediaType: 'image/png', targetType: 'project', targetId: projectId });
     const filePath = assetFilePath(initialized.paths, mask);
     mutation = mutateAfterAsyncRead(filePath, () => fs.writeFileSync(filePath, sameSizeReplacement(original)));
     const resolver = new StudioAssetResolver({ db, paths: initialized.paths });
-    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, maskAssetId: mask.id }), /hash|identity|changed/);
+    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, projectId, maskAssetId: mask.id }), /hash|identity|changed/);
     assert.equal(mutation.mutated, true);
     assert.deepEqual(fs.readdirSync(path.join(initialized.paths.cacheDir, 'staging')), []);
   } finally {
@@ -173,17 +183,18 @@ test('rejects a reference path rename during snapshotting and closes partial sna
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-path-race-'));
   const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  const projectId = createTestProject(db, initialized, 'resolver-project-path-race');
   let mutation;
   try {
     const original = largePng();
-    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: original, mediaType: 'image/png' });
+    const reference = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: original, mediaType: 'image/png', targetType: 'project', targetId: projectId });
     const filePath = assetFilePath(initialized.paths, reference);
     mutation = mutateAfterAsyncRead(filePath, () => {
       fs.renameSync(filePath, filePath + '.verified');
       fs.writeFileSync(filePath, sameSizeReplacement(original));
     });
     const resolver = new StudioAssetResolver({ db, paths: initialized.paths });
-    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, referenceAssetIds: [reference.id] }), /path|changed/);
+    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, projectId, referenceAssetIds: [reference.id] }), /path|changed/);
     assert.equal(mutation.mutated, true);
     assert.deepEqual(fs.readdirSync(path.join(initialized.paths.cacheDir, 'staging')), []);
   } finally {
@@ -197,15 +208,16 @@ test('rejects a managed mask path replaced by a symlink', async () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-resolver-symlink-'));
   const initialized = initializeStudio({ workspaceRoot });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  const projectId = createTestProject(db, initialized, 'resolver-project-symlink');
   let tracker;
   try {
-    const mask = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png' });
+    const mask = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: projectId });
     const filePath = assetFilePath(initialized.paths, mask);
     fs.renameSync(filePath, filePath + '.verified');
     fs.symlinkSync(filePath + '.verified', filePath);
     tracker = trackSnapshotDescriptors(initialized.paths);
     const resolver = new StudioAssetResolver({ db, paths: initialized.paths });
-    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, maskAssetId: mask.id }), /symbolic|regular file|symlink/);
+    await assert.rejects(resolver.resolve({ studioId: initialized.manifest.studioId, projectId, maskAssetId: mask.id }), /symbolic|regular file|symlink/);
     assert.deepEqual(fs.readdirSync(path.join(initialized.paths.cacheDir, 'staging')), []);
   } finally {
     if (tracker) tracker.restore();

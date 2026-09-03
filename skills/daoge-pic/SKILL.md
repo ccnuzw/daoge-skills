@@ -5,7 +5,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.9.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.0)。本文件定义 5.9.0 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.9.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.1)。本文件定义 5.9.1 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
@@ -48,7 +48,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 ## 会话工作法
 
 1. 先完成“执行型启动协议”：Workbench 已打开或已安全复用，Studio Session 与稳定工作区已绑定，项目、任务和轮次上下文已创建或恢复。
-2. 再澄清目标、受众、数量、画幅、风格、限制条件、参考素材与交付用途，并把确认事实写入当前领域上下文。
+2. 再澄清目标、受众、数量、画幅、风格、限制条件、参考素材与交付用途，并把确认事实写入当前领域上下文。参考素材只能来自当前项目或已明确共享到跨项目素材。
 3. 给出用户可审阅的版本化计划：operation、提示词、数量、输出规格、引用素材、父轮次/父资产与风险。
 4. 未得到用户明确确认前，不得发起任何外部 Provider 调用。
 5. 确认后执行预检。预检只验证当前配置快照、能力、素材、规格、依赖与运行项计划，不调用 Provider、不计费、不创建正式生成资产。
@@ -176,6 +176,7 @@ node scripts/daoge.js resume --workspace <path> --run <run-id> --session <sessio
 - 并发只属于 Generation Run：系统全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Schema v20 保留历史业务数据并补齐性能索引与事件窗口。
 - Provider 安全快照只含 profileId、profileName、configVersion、Provider、模型、端点身份与能力，不含 API Key、完整 URL 或调度设置。计划、Profile 版本或并发变化后必须重新预检。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。仅在当前 Studio 受管理根、相对路径、媒体类型、哈希、大小、资产和操作身份全部一致时恢复；路径越界、符号链接、冲突或歧义必须拒绝并留下脱敏事件。
+- 参考图和遮罩只能引用当前项目资产，或具备当前 Studio 明确 `shared_across_projects` 关系的共享素材；计划写入、确认、预检、排队和 Worker 读取前都必须重复校验。其他项目未共享素材不得因同属 Studio 而被引用。
 - 下载、复制、交付导出和 ZIP 使用受验证 snapshot 流式读取。文件替换、路径穿越、跨 Studio/跨项目访问、超出条目或聚合上限、客户端断连都不能形成错误交付；失败时关闭文件描述符和临时 snapshot。
 
 ## Generation History 与交付
@@ -192,7 +193,7 @@ Workbench 的普通“完成交付”通过内部 `/api/deliveries/complete` API
 
 ## Workbench 边界与可访问性
 
-Workbench 可用于：项目/任务/轮次导航、Generation History、SSE 实时状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。
+Workbench 可用于：项目/任务/轮次导航、Generation History、SSE 实时状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。参考图选择只显示当前项目资产与明确共享素材。
 
 Workbench 必须在 SSE cursor 失效或本地事件批次溢出时先完成快照恢复，再推进 cursor；失败时从上次成功位置重试，不把页面状态当事实源。
 

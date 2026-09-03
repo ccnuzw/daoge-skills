@@ -1,4 +1,5 @@
 import { getStudioAsset, StudioAsset } from '../domain/assets';
+import { inspectProjectAssetAccess, ProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { InvalidCommandError, StudioNotFoundError } from '../domain/studio-commands';
 import { ImageRequest, MAX_IMAGE_REQUEST_CACHED_MEDIA_BYTES, MAX_IMAGE_REQUEST_MEDIA_BYTES, MAX_IMAGE_REQUEST_REFERENCE_ASSETS } from '../providers/contracts';
 import { StudioDatabase } from '../studio/database';
@@ -7,6 +8,7 @@ import { createVerifiedSnapshotAsync, MediaArchiveError, resolveManagedMediaPath
 
 export interface ManagedAssetResolutionInput {
   studioId: string;
+  projectId: string;
   referenceAssetIds?: unknown;
   maskAssetId?: unknown;
 }
@@ -54,11 +56,14 @@ export class StudioAssetResolver implements ManagedAssetResolver {
   constructor(options: { db: StudioDatabase; paths: StudioPaths }) { this.db = options.db; this.paths = options.paths; }
 
   async resolve(input: ManagedAssetResolutionInput): Promise<ResolvedManagedAssets> {
+    const projectId = String(input.projectId || '').trim();
+    if (!projectId) throw new InvalidCommandError('项目 ID 是解析参考素材所必需的。');
     const referenceIds = ids(input.referenceAssetIds);
     if (referenceIds.length > MAX_IMAGE_REQUEST_REFERENCE_ASSETS) throw new InvalidCommandError('参考素材最多支持 ' + MAX_IMAGE_REQUEST_REFERENCE_ASSETS + ' 张。');
     const maskId = typeof input.maskAssetId === 'string' && input.maskAssetId.trim() ? input.maskAssetId : null;
-    const referenceRecords = referenceIds.map((assetId) => this.getActiveAsset(input.studioId, assetId));
-    const maskRecord = maskId ? this.getActiveAsset(input.studioId, maskId) : undefined;
+    const access = inspectProjectAssetAccess(this.db, { studioId: input.studioId, projectId, assetIds: [...referenceIds, ...(maskId ? [maskId] : [])] });
+    const referenceRecords = referenceIds.map((assetId) => this.getActiveAsset(input.studioId, assetId, access.get(assetId)));
+    const maskRecord = maskId ? this.getActiveAsset(input.studioId, maskId, access.get(maskId)) : undefined;
     if (maskRecord && maskRecord.mediaType !== 'image/png') throw new InvalidCommandError('遮罩必须是已导入或已生成的 PNG 资产。');
     const aggregateBytes = [...referenceRecords, ...(maskRecord ? [maskRecord] : [])].reduce((total, asset) => total + asset.byteSize, 0);
     if (!Number.isSafeInteger(aggregateBytes) || aggregateBytes > MAX_IMAGE_REQUEST_MEDIA_BYTES) throw new InvalidCommandError('参考素材和遮罩合计不能超过 ' + (MAX_IMAGE_REQUEST_MEDIA_BYTES / (1024 * 1024)) + ' MiB。');
@@ -83,9 +88,10 @@ export class StudioAssetResolver implements ManagedAssetResolver {
     }
   }
 
-  private getActiveAsset(studioId: string, assetId: string): StudioAsset {
+  private getActiveAsset(studioId: string, assetId: string, access: ProjectAssetAccess | undefined): StudioAsset {
     const asset = getStudioAsset(this.db, studioId, assetId);
     if (!asset || asset.deletedAt) throw new StudioNotFoundError('Active managed asset not found: ' + assetId);
+    if (!projectAssetReferenceAllowed(access)) throw new InvalidCommandError('参考素材必须属于当前项目或已明确共享到跨项目素材。');
     return asset;
   }
 

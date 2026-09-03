@@ -7,6 +7,7 @@ import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/da
 import { providerSnapshot, ResolvedProviderConfig, SafeProviderStatus } from '../studio/provider-config';
 import { ConcurrencySource, MAX_GLOBAL_CONCURRENCY, resolveExecutionConcurrency } from '../studio/runtime-settings';
 import { getStudioAsset } from '../domain/assets';
+import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { SafeErrorDetail, safeErrorDetail } from '../shared/safe-error';
 
 export interface GenerationRun {
@@ -69,6 +70,7 @@ interface StoredRoundPlan {
   plan_json: string;
   plan_version: number;
   studio_id: string;
+  project_id: string;
 }
 
 export interface DryRunPreview {
@@ -155,7 +157,7 @@ function requireValue(value: string, label: string): string {
 
 
 function resolveRoundInStudio(db: StudioDatabase, studioId: string, roundId: string): StoredRoundPlan {
-  const row = db.prepare('SELECT r.id, r.status, r.plan_json, r.plan_version, p.studio_id FROM creative_rounds r JOIN creative_tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(roundId, studioId) as StoredRoundPlan | undefined;
+  const row = db.prepare('SELECT r.id, r.status, r.plan_json, r.plan_version, p.studio_id, p.id AS project_id FROM creative_rounds r JOIN creative_tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(roundId, studioId) as StoredRoundPlan | undefined;
   if (!row) throw new StudioNotFoundError('Creative round not found: ' + roundId);
   return row;
 }
@@ -172,21 +174,26 @@ function resolveRunItemInStudio(db: StudioDatabase, studioId: string, itemId: st
   return row;
 }
 
-function validateManagedAssets(db: StudioDatabase, studioId: string, result: PreflightResult): PreflightResult {
+function validateManagedAssets(db: StudioDatabase, studioId: string, projectId: string, result: PreflightResult): PreflightResult {
   const accepted = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+  const referenceAssetIds = result.normalizedPlan.referenceAssetIds || [];
+  const maskAssetId = result.normalizedPlan.maskAssetId;
+  const access = inspectProjectAssetAccess(db, { studioId, projectId, assetIds: [...referenceAssetIds, ...(maskAssetId ? [maskAssetId] : [])] });
   let aggregateBytes = 0;
-  for (const assetId of result.normalizedPlan.referenceAssetIds || []) {
+  for (const assetId of referenceAssetIds) {
     const asset = getStudioAsset(db, studioId, assetId);
     if (!asset || asset.deletedAt) result.issues.push({ code: 'missing_reference_asset', message: '引用素材不存在、已删除或不属于当前 Studio。', field: 'referenceAssetIds' });
     else {
+      if (!projectAssetReferenceAllowed(access.get(assetId))) result.issues.push({ code: 'reference_asset_out_of_scope', message: '参考素材必须属于当前项目或已明确共享到跨项目素材。', field: 'referenceAssetIds' });
       aggregateBytes += asset.byteSize;
       if (!accepted.includes(asset.mediaType)) result.issues.push({ code: 'reference_media_unsupported', message: '引用素材不是支持的图像格式。', field: 'referenceAssetIds' });
     }
   }
-  if (result.normalizedPlan.maskAssetId) {
-    const mask = getStudioAsset(db, studioId, result.normalizedPlan.maskAssetId);
+  if (maskAssetId) {
+    const mask = getStudioAsset(db, studioId, maskAssetId);
     if (!mask || mask.deletedAt) result.issues.push({ code: 'missing_mask_asset', message: '遮罩素材不存在、已删除或不属于当前 Studio。', field: 'maskAssetId' });
     else {
+      if (!projectAssetReferenceAllowed(access.get(maskAssetId))) result.issues.push({ code: 'mask_asset_out_of_scope', message: '遮罩素材必须属于当前项目或已明确共享到跨项目素材。', field: 'maskAssetId' });
       aggregateBytes += mask.byteSize;
       if (mask.mediaType !== 'image/png') result.issues.push({ code: 'mask_must_be_png', message: '遮罩必须是 PNG 格式的受管理资产。', field: 'maskAssetId' });
     }
@@ -208,10 +215,11 @@ function storeRunStatus(db: StudioDatabase, run: StoredRun, status: RunStatus, w
 
 export function preflightRound(db: StudioDatabase, input: { studioId: string; roundId: string; providerStatus: SafeProviderStatus }): PreflightResult {
   const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
+  const validated = validateManagedAssets(db, input.studioId, round.project_id, preflightGenerationPlan(parsePlan(round.plan_json), input.providerStatus));
   if (round.status !== 'active') {
-    return { valid: false, issues: [{ code: 'round_not_confirmed', message: '创作计划需要在会话中确认后才能开始生图。', field: 'roundId' }], normalizedPlan: parsePlan(round.plan_json) };
+    return { ...validated, valid: false, issues: [{ code: 'round_not_confirmed', message: '创作计划需要在会话中确认后才能开始生图。', field: 'roundId' }, ...validated.issues] };
   }
-  return validateManagedAssets(db, input.studioId, preflightGenerationPlan(parsePlan(round.plan_json), input.providerStatus));
+  return validated;
 }
 
 
@@ -225,7 +233,7 @@ export function createDryRunPreview(db: StudioDatabase, input: { studioId: strin
     const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
     if (!['awaiting_confirmation', 'active'].includes(round.status)) throw new InvalidCommandError('Only a prepared or confirmed creative round can be dry-run.');
     if (input.providerConfig.providerId !== input.providerStatus.providerId) throw new InvalidCommandError('Provider configuration changed during dry-run.');
-    const preflight = validateManagedAssets(db, input.studioId, preflightGenerationPlan(parsePlan(round.plan_json), input.providerStatus));
+    const preflight = validateManagedAssets(db, input.studioId, round.project_id, preflightGenerationPlan(parsePlan(round.plan_json), input.providerStatus));
     if (!preflight.valid) return { preview: null, preflight };
     const timestamp = nowIso();
     const id = createId('dryrun');
@@ -248,7 +256,7 @@ export function queueGenerationRun(db: StudioDatabase, input: { studioId: string
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'runs.queue', () => {
     const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
     if (round.status !== 'active') throw new InvalidCommandError('The creative round must be confirmed before a run can be queued.');
-    const preflight = validateManagedAssets(db, round.studio_id, preflightGenerationPlan(parsePlan(round.plan_json), input.providerStatus));
+    const preflight = validateManagedAssets(db, round.studio_id, round.project_id, preflightGenerationPlan(parsePlan(round.plan_json), input.providerStatus));
     if (!preflight.valid) throw new InvalidCommandError('Generation preflight failed: ' + preflight.issues.map((issue) => issue.code).join(', '));
     const snapshot = providerSnapshot(input.providerConfig);
     if (!input.preflightId) throw new InvalidCommandError('Dry-run evidence is required before queueing.');

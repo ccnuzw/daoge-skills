@@ -4,7 +4,7 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-当前稳定正式版本为 [`5.9.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.0)。下列章节按版本隔离发布事实；5.8.0 及更早章节保持历史证据，不得用其哈希、Schema 或旧并发契约解释 5.9.0。
+当前稳定正式版本为 [`5.9.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.1)。下列章节按版本隔离发布事实；5.9.0 及更早章节保持历史证据，不得用其哈希、Schema 或旧并发契约解释 5.9.1。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -145,3 +145,22 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - `npm run build` 与 `npm test` 已通过；`npm test` 执行 262 项，262 通过。`npm run test:package` 已通过，发布清单包含 98 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
 - 最终制品 `daoge-pic-5.9.0.tgz` 为 `288686` bytes，SHA-256 为 `d055be3f8ca3e6ebf9561e1e27181c837b949a8ad542cb8734b962417fc61313`；同值记录在 `daoge-pic-5.9.0.tgz.sha256` sidecar 与 GitHub Release。
 - 发布渠道为 GitHub Release 不可变 `daoge-pic-5.9.0.tgz`；安装使用该制品，不跟随 `main` 变化。
+
+## 7. daoge-pic 5.9.1 发布验证证据
+
+本节对应 `daoge-pic-v5.9.1` GitHub Release `.tgz` 制品，记录参考素材项目边界修复对应的源码与验证。5.9.1 保留 5.9.0 的稳定会话、Provider、Workbench 和运行契约，并补充项目/共享素材访问控制。
+
+### 项目参考素材边界验证
+
+- 参考图和遮罩只能来自当前项目资产或当前 Studio 明确共享的 `shared_across_projects` 素材。
+- 计划创建、计划准备、计划确认、预检、dry-run、排队和 Worker 读取前均重复校验范围。
+- 同一 Studio 其他项目的未共享素材被拒绝；撤销共享后预检和 Worker 均拒绝，且 Worker 不调用 Provider。
+- 历史越界计划保留原计划事实，不自动替换用户素材；必须重新提交合法计划或显式共享素材。
+
+### 最终制品
+
+- `npm run build`、`npm test` 与 `npm run test:package` 均通过；完整 Node 测试执行 264 项，264 通过。
+- `npm audit --omit=dev`：0 vulnerabilities。
+- 最终制品 `daoge-pic-5.9.1.tgz` 为 `290741` bytes，SHA-256 为 `7046e652ff7f143f29df182b526b1a2948b24e8f6a5f19578d4917f6a0c442ec`；同值记录在 `daoge-pic-5.9.1.tgz.sha256` sidecar 与 GitHub Release。
+- 发布清单包含 100 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- 未调用真实图片 Provider，未产生计费生成请求。

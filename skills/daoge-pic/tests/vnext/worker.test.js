@@ -11,7 +11,7 @@ const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirm
 const { cancelGenerationRun, createDryRunPreview, queueGenerationRun, getGenerationRun, listGenerationRunItems } = require('../../dist/vnext/runner/run-commands');
 const { GenerationWorker } = require('../../dist/vnext/runner/worker');
 const { StudioGeneratedAssetPersister } = require('../../dist/vnext/media/generated-assets');
-const { assetFilePath, importStudioAsset } = require('../../dist/vnext/domain/assets');
+const { assetFilePath, importStudioAsset, setStudioAssetShared } = require('../../dist/vnext/domain/assets');
 const { StudioAssetResolver } = require('../../dist/vnext/media/asset-resolver');
 
 
@@ -34,7 +34,7 @@ function setupRun(itemCount = 1) {
   const confirmed = confirmRoundPlan(db, { studioId: initialized.manifest.studioId, roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
   const dryRun = createDryRunPreview(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
   const run = queueGenerationRun(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
-  return { workspaceRoot, initialized, db, config, run };
+  return { workspaceRoot, initialized, db, config, run, projectId: project.value.id };
 }
 
 function cleanup(fixture) {
@@ -148,7 +148,7 @@ test('worker shares one verified reference buffer for concurrent items in the sa
   const fixture = setupRun(2);
   const originalOpen = fs.promises.open;
   try {
-    const reference = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: largePng(), mediaType: 'image/png' });
+    const reference = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: largePng(), mediaType: 'image/png', targetType: 'project', targetId: fixture.projectId });
     attachManagedAssetsToAllItems(fixture, { referenceAssetIds: [reference.id] });
     const referencePath = assetFilePath(fixture.initialized.paths, reference);
     let sourceOpenCount = 0;
@@ -517,7 +517,7 @@ test('worker never calls the Provider after a same-size reference replacement be
   const fixture = setupRun();
   try {
     const original = largePng();
-    const reference = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: original, mediaType: 'image/png' });
+    const reference = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: original, mediaType: 'image/png', targetType: 'project', targetId: fixture.projectId });
     attachManagedAssets(fixture, { referenceAssetIds: [reference.id] });
     fs.writeFileSync(assetFilePath(fixture.initialized.paths, reference), sameSizeReplacement(original));
     let providerCalls = 0;
@@ -543,7 +543,7 @@ test('worker never calls the Provider when a mask is mutated in place during sna
   let mutation;
   try {
     const original = largePng();
-    const mask = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: original, mediaType: 'image/png' });
+    const mask = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: original, mediaType: 'image/png', targetType: 'project', targetId: fixture.projectId });
     attachManagedAssets(fixture, { maskAssetId: mask.id });
     const filePath = assetFilePath(fixture.initialized.paths, mask);
     mutation = mutateAfterAsyncRead(filePath, () => fs.writeFileSync(filePath, sameSizeReplacement(original)));
@@ -563,6 +563,31 @@ test('worker never calls the Provider when a mask is mutated in place during sna
     assert.deepEqual(fs.readdirSync(path.join(fixture.initialized.paths.cacheDir, 'staging')), []);
   } finally {
     if (mutation) mutation.restore();
+    cleanup(fixture);
+  }
+});
+
+test('worker blocks an unshared asset after its shared access is revoked without calling the Provider', async () => {
+  const fixture = setupRun();
+  try {
+    const otherProject = createProject(fixture.db, { studioId: fixture.initialized.manifest.studioId, name: 'other worker project', idempotencyKey: 'worker-other-project' }).value;
+    const reference = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: otherProject.id });
+    setStudioAssetShared(fixture.db, { studioId: fixture.initialized.manifest.studioId, assetId: reference.id, shared: true });
+    attachManagedAssets(fixture, { referenceAssetIds: [reference.id] });
+    setStudioAssetShared(fixture.db, { studioId: fixture.initialized.manifest.studioId, assetId: reference.id, shared: false });
+    let providerCalls = 0;
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-unshared-reference-rejected',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => { providerCalls += 1; return { bytes: png, mediaType: 'image/png' }; }, () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetResolver: new StudioAssetResolver({ db: fixture.db, paths: fixture.initialized.paths }),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('unshared managed assets must not persist'); } }
+    });
+    assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 1, unknown: 0, cancelled: 0 });
+    assert.equal(providerCalls, 0);
+    assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].error.code, 'managed_asset_resolution_failed');
+  } finally {
     cleanup(fixture);
   }
 });

@@ -2,6 +2,24 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.9.1 - 2026-09-03
+
+5.9.1 修复参考素材跨项目越界问题，收紧参考图和遮罩的项目访问边界。
+
+### 安全修复
+
+- 新增统一项目素材访问判定：参考图和遮罩只能来自当前项目资产，或当前 Studio 明确共享的 `shared_across_projects` 素材。
+- 计划创建、准备、确认、预检、dry-run、排队和 Worker 读取前均重复校验；同一 Studio 下其他项目的未共享素材不再可执行。
+- 共享关系撤销后，预检和 Worker 均会阻止继续处理，且不会调用外部图片 Provider。
+- 保留历史错误计划版本，不自动猜测替换素材；用户需重新提交计划或显式共享素材。
+
+### 文档与验证
+
+- 同步更新 Skill 规范、README、vNext 规格和学习中心中的项目/共享素材边界说明。
+- 新增跨项目未共享素材、共享撤销、历史越界计划和 Worker 无 Provider 调用回归测试。
+- `npm test` 执行 264 项且全部通过；`npm run test:package` 与 `npm audit --omit=dev` 通过。
+- 最终制品 `daoge-pic-5.9.1.tgz` 为 `290741` bytes，SHA-256 为 `7046e652ff7f143f29df182b526b1a2948b24e8f6a5f19578d4917f6a0c442ec`。
+
 ## daoge-pic 5.9.0 - 2026-09-03
 
 5.9.0 是 Workbench 性能与体验综合版本，包含本轮性能修复以及工作树中此前已完成、尚未发布的确认对话框、学习中心、Provider 连接测试和视觉可读性改进。

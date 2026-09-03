@@ -2,18 +2,18 @@
 
 DAOGE Pic 是面向智能体会话的本地图像创作管理平台。会话负责澄清、规划、确认和汇报；本地 Studio Workbench 负责查看项目上下文、Generation History（生成历史）、运行、资产、选择、复核和交付。
 
-> **版本状态**：当前稳定正式版本为 [`5.9.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.0)，源码、Skill 契约与固定 GitHub Release 制品使用同一版本。
+> **版本状态**：当前稳定正式版本为 [`5.9.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.1)，源码、Skill 契约与固定 GitHub Release 制品使用同一版本。
 
 vNext 是一次不兼容替换，不读取或迁移旧 `task_spec.json`、`prepare` / `execute` / `ingest` 命令、旧静态工作区、`results.html`、旧目录状态或旧运行记录。
 
 ## 安装版本
 
-安装稳定正式版 `5.9.0` 时，使用 `daoge-pic-v5.9.0` GitHub Release 中的不可变 `.tgz` 制品，避免默认分支后续变化影响安装内容。下列 `npm install` 直接安装 GitHub 资产，不表示包已发布到 npm registry；安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 `daoge-pic` Skill，两步缺一不可。
+安装稳定正式版 `5.9.1` 时，使用 `daoge-pic-v5.9.1` GitHub Release 中的不可变 `.tgz` 制品，避免默认分支后续变化影响安装内容。下列 `npm install` 直接安装 GitHub 资产，不表示包已发布到 npm registry；安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 `daoge-pic` Skill，两步缺一不可。
 
 在项目根目录执行：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.9.0/daoge-pic-5.9.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.9.1/daoge-pic-5.9.1.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
@@ -26,7 +26,7 @@ npx daoge open --workspace /absolute/workspace
 需要全局安装稳定版时，安装同一个 GitHub Release `.tgz`，再由 Node 标准库调用 `npm root -g` 定位已安装包并注册到当前用户的 Codex Skill 目录：
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.9.0/daoge-pic-5.9.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.9.1/daoge-pic-5.9.1.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
@@ -114,7 +114,7 @@ node scripts/daoge.js run --workspace /absolute/workspace --round <round-id> --p
 ## 会话、Schema 与运行语义
 
 1. 执行型请求先按“会话优先的启动顺序”打开或复用 Workbench，再绑定 Studio Session 并建立或恢复项目、任务和轮次上下文；咨询/开发型请求不自动启动。
-2. 上下文就绪后再澄清创作要求。每个轮次保存版本化计划与提示词证据；未得到用户明确确认前，不得调用外部 Provider。
+2. 上下文就绪后再澄清创作要求。每个轮次保存版本化计划与提示词证据；参考图和遮罩只能来自当前项目资产或明确共享到跨项目素材的资产；未得到用户明确确认前，不得调用外部 Provider。
 3. 确认后执行不产生外部调用的预检；预检冻结计划、输出规格、素材关系、Provider 安全快照和运行项预览。
 4. 只有预检仍与当前计划和 daemon 配置匹配时才能创建持久 Generation Run。画幅、尺寸、分辨率和数量由会话动态指定；不使用 Provider 名称硬编码比例白名单，也不回退为方图。
 5. Workbench 通过 SSE 展示状态与受管理资产；事件窗口不连续或本地批次溢出时，先恢复完整快照，再从新 cursor 继续。
@@ -147,8 +147,8 @@ node scripts/daoge.js resume --workspace /absolute/workspace --run <run-id> --se
 - Provider 限流与临时错误进入有界重试；认证、模型和参数错误不会自动重试。
 - daemon 重启后，不安全的在途外部调用进入 `resume_pending`，必须在会话中再次确认并记录 Studio Session；Workbench 不能绕过确认。
 - `failed`、`blocked` 和 `retry_wait` 可受控重试；`outcome_unknown` 只能在用户核实无结果后显式结案。
-- 导入、生成、回收与恢复使用 staging、原子移动、持久 journal 和启动对账。只有路径仍在当前 Studio 受管理根内，且媒体类型、哈希、大小、资产与操作身份全部一致时才恢复；冲突或歧义会拒绝，不会猜测提交。
-- 下载、复制、交付导出与 ZIP 从受验证 snapshot 流式读取，拒绝符号链接、路径穿越、文件替换和跨 Studio/跨项目对象；ZIP 在输出前检查条目与聚合上限，支持背压和断连取消，并关闭临时 snapshot。
+- 导入、生成、回收与恢复使用 staging、原子移动、持久 journal 和启动对账。只有路径仍在当前 Studio 受管理根内，且媒体类型、哈希、大小、资产和操作身份全部一致时才恢复；冲突或歧义会拒绝，不会猜测提交。
+- 参考图和遮罩在计划写入、确认、预检、排队和 Worker 读取前均校验项目边界：只能引用当前项目资产或明确 `shared_across_projects` 共享素材；同一 Studio 的其他项目未共享资产一律拒绝。
 
 项目当前选片是数据库中的业务关系，不是浏览器筛选或文件夹。交付权威状态机是 `draft -> ready -> exported`；准备阶段冻结资产来源和评审事实，导出阶段建立冻结实体图片。源资产后来进入回收站，不会破坏已导出的交付文件。
 
@@ -156,10 +156,10 @@ Workbench 的“完成交付”使用内部同源 API `/api/deliveries/complete`
 
 ## Workbench 能力边界
 
-Workbench 用于项目/任务/轮次导航、Generation History、SSE 实时状态、素材批量导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。图片放大预览可直接选为成果或取消成果，当前选片缩略卡片会为长标题和独立移除按钮保留空间。项目资产采用服务端分页，默认每页 24 张，可切换 16/24/32/48/64/96，并提供只作用于当前页的全选/取消全选；交付图片提供明确的全选/取消全选。项目首页和项目任务列表提供搜索、生命周期筛选与分页，避免项目或任务无限向下堆叠。项目资产和已导出交付 ZIP 使用项目名、交付名及下载时间生成可区分文件名。交付失败会保留当前阶段，可安全重试；已导出交付按冻结文件领取。
+Workbench 用于项目/任务/轮次导航、Generation History、SSE 实时状态、素材批量导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。图片放大预览可直接选为成果或取消成果，当前选片缩略卡片会为长标题和独立移除按钮保留空间。项目资产采用服务端分页，默认每页 24 张，可切换 16/24/32/48/64/96，并提供只作用于当前页的全选/取消全选；交付图片提供明确的全选/取消全选。项目首页和项目任务列表提供搜索、生命周期筛选与分页，避免项目或任务无限向下堆叠。项目资产和已导出交付 ZIP 使用项目名、交付名及下载时间生成可区分文件名。交付失败会保留当前阶段，可安全重试；已导出交付按冻结文件领取。参考素材选择只显示当前项目资产和明确共享素材。
 
 键盘和辅助技术契约包括可见焦点、搜索组合框语义、状态/错误 live region，以及模态图片查看器的初始焦点、Tab 焦点约束、Escape 关闭和关闭后焦点返回。
 
 Workbench 不提供自然语言对话，不绕过会话确认，不显示 Provider 密钥，不接受任意绝对文件路径，也不把浏览器状态、目录或 SSE 当业务事实源。
 
-受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.9.0 发布验证与 5.8.0 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。
+受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.9.1 发布验证与 5.9.0 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。

@@ -1,5 +1,6 @@
 import { createId, nowIso, sha256 } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
+import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from './asset-access';
 
 export class StudioNotFoundError extends Error {}
 export class VersionConflictError extends Error {}
@@ -100,6 +101,14 @@ function parseObject(value: string): Record<string, unknown> {
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return {};
   return parsed as Record<string, unknown>;
+}
+
+function assertPlanAssetScope(db: StudioDatabase, input: { studioId: string; projectId: string; plan: Record<string, unknown> }): void {
+  const referenceAssetIds = Array.isArray(input.plan.referenceAssetIds) ? input.plan.referenceAssetIds.filter((assetId): assetId is string => typeof assetId === 'string' && assetId.trim().length > 0) : [];
+  const maskAssetId = typeof input.plan.maskAssetId === 'string' && input.plan.maskAssetId.trim().length > 0 ? input.plan.maskAssetId : null;
+  const access = inspectProjectAssetAccess(db, { studioId: input.studioId, projectId: input.projectId, assetIds: [...referenceAssetIds, ...(maskAssetId ? [maskAssetId] : [])] });
+  if (referenceAssetIds.some((assetId) => !projectAssetReferenceAllowed(access.get(assetId)))) throw new InvalidCommandError('参考素材必须属于当前项目或已明确共享到跨项目素材。');
+  if (maskAssetId && !projectAssetReferenceAllowed(access.get(maskAssetId))) throw new InvalidCommandError('遮罩素材必须属于当前项目或已明确共享到跨项目素材。');
 }
 
 function sessionFromRow(row: StoredSession): StudioSession {
@@ -338,6 +347,7 @@ export function createRoundDraft(db: StudioDatabase, input: { studioId: string; 
     }
     const id = createId('round');
     const plan = input.plan || {};
+    assertPlanAssetScope(db, { studioId: input.studioId, projectId: task.project_id, plan });
     const timestamp = nowIso();
     db.prepare('INSERT INTO creative_rounds (id, task_id, parent_round_id, purpose, plan_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, task.id, input.parentRoundId || null, input.purpose, JSON.stringify(plan), 'draft', timestamp, timestamp);
     db.prepare('INSERT INTO round_plan_versions (id, round_id, plan_version, plan_json, state, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(createId('planver'), id, 1, JSON.stringify(plan), 'draft', timestamp);
@@ -352,6 +362,7 @@ export function prepareRoundForConfirmation(db: StudioDatabase, input: { studioI
     const row = resolveRoundInStudio(db, input.studioId, input.roundId);
     assertVersion(row.version, input.expectedVersion);
     if (row.status !== 'draft' && row.status !== 'awaiting_confirmation') throw new InvalidCommandError('Only draft rounds can be prepared for confirmation.');
+    assertPlanAssetScope(db, { studioId: input.studioId, projectId: row.project_id, plan: input.plan });
     const timestamp = nowIso();
     db.prepare('UPDATE creative_rounds SET plan_json = ?, plan_version = plan_version + 1, status = ?, version = version + 1, updated_at = ? WHERE id = ?').run(JSON.stringify(input.plan), 'awaiting_confirmation', timestamp, row.id);
     db.prepare('INSERT INTO round_plan_versions (id, round_id, plan_version, plan_json, state, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(createId('planver'), row.id, row.plan_version + 1, JSON.stringify(input.plan), 'awaiting_confirmation', timestamp);
@@ -365,6 +376,7 @@ export function confirmRoundPlan(db: StudioDatabase, input: { studioId: string; 
     const row = resolveRoundInStudio(db, input.studioId, input.roundId);
     assertVersion(row.version, input.expectedVersion);
     if (row.status !== 'awaiting_confirmation') throw new InvalidCommandError('A round must be awaiting confirmation before it can be confirmed.');
+    assertPlanAssetScope(db, { studioId: input.studioId, projectId: row.project_id, plan: parseObject(row.plan_json) });
     const timestamp = nowIso();
     db.prepare('UPDATE creative_rounds SET status = ?, version = version + 1, updated_at = ? WHERE id = ?').run('active', timestamp, row.id);
     db.prepare("UPDATE round_plan_versions SET state = 'confirmed', confirmed_at = ? WHERE round_id = ? AND plan_version = ?").run(timestamp, row.id, row.plan_version);

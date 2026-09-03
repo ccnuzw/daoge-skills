@@ -61,6 +61,10 @@ test('preflight rejects reference and mask metadata above the aggregate byte bud
     const insert = fixture.db.prepare("INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, 'import', 'image/png', ?, ?, ?, '{}', ?, ?)");
     insert.run('large-reference-a', fixture.initialized.manifest.studioId, 'daoge-assets/imports/large-a.png', 'a'.repeat(64), 40 * 1024 * 1024, timestamp, timestamp);
     insert.run('large-reference-b', fixture.initialized.manifest.studioId, 'daoge-assets/imports/large-b.png', 'b'.repeat(64), 40 * 1024 * 1024, timestamp, timestamp);
+    const projectId = fixture.task.value.projectId;
+    const relation = fixture.db.prepare("INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, 'attached_to', 'project', ?, '{}', ?)");
+    relation.run('large-reference-a-relation', 'large-reference-a', projectId, timestamp);
+    relation.run('large-reference-b-relation', 'large-reference-b', projectId, timestamp);
     const confirmed = confirmedRound(fixture, { operation: 'edit', itemCount: 1, prompt: 'large reference budget', referenceAssetIds: ['large-reference-a', 'large-reference-b'] }, 'large-reference');
     const result = preflightRound(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerStatus: fixture.status });
     assert.equal(result.valid, false);
