@@ -7,7 +7,7 @@ import { StudioAssetResolver } from '../media/asset-resolver';
 import { createImageProvider } from '../providers/http-adapters';
 import { GenerationWorker } from '../runner/worker';
 import { promoteDueRetryWaitItems, reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
-import { recoverStudioStartup } from '../runner/startup-recovery';
+import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
 import { providerSnapshot } from '../studio/provider-config';
@@ -160,7 +160,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     workerDb = openStudioDatabase(initialized.paths, initialized.manifest);
     workerProviderDb = openProviderDatabase(initialized.paths);
     importLegacyProviderEnvOnce(workerProviderDb, initialized.paths);
-    recoverStudioStartup(workerDb, initialized.paths, initialized.manifest.studioId);
+    await recoverStudioStartupAsync(workerDb, initialized.paths, initialized.manifest.studioId);
 
     const daemonService = service;
     const daemonDb = workerDb;

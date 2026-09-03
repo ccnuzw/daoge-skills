@@ -20,7 +20,7 @@ test('creator delivery keeps the normal path focused and exposes direct picture 
   assert.match(main, /batchBusy=\{batchBusy\}/);
   assert.match(main, /label="下载原图"/);
   assert.match(main, /复制图片/);
-  assert.match(main, /assetFileUrl\(asset\.id, true\)/);
+  assert.match(main, /assetOriginalUrl\(asset, true\)/);
   assert.match(main, /const markAsDeliverable = async/);
   assert.match(main, /onToggleSelect=\{markAsDeliverable\}/);
   assert.match(delivery, /打包下载/);

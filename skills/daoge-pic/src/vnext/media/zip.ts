@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { PassThrough, Writable } from 'node:stream';
-import { createVerifiedSnapshot, VerifiedManagedFile } from './archive';
+import { createVerifiedSnapshotAsync, VerifiedManagedFile } from './archive';
 
 export interface ZipEntryInput {
   name: string;
@@ -43,6 +43,12 @@ const DEFAULT_MAX_AGGREGATE_BYTES = 150 * 1024 * 1024;
 const DEFAULT_MAX_ENTRY_BYTES = 100 * 1024 * 1024;
 const BUFFER_FIXTURE_MAX_BYTES = 8 * 1024 * 1024;
 const ZIP32_MAX = 0xffffffff;
+const CRC_CHUNK_BYTES = 16 * 1024;
+const CRC_YIELD_BYTES = 256 * 1024;
+
+function nextTurn(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -188,7 +194,7 @@ export function validateZipEntries(entries: ZipEntryInput[], options: ZipStreamO
   });
 }
 
-function openZipEntries(entries: ValidatedZipEntry[], options: ZipStreamOptions, opened: OpenedZipEntry[]): void {
+async function openZipEntries(entries: ValidatedZipEntry[], options: ZipStreamOptions, opened: OpenedZipEntry[]): Promise<void> {
   const maxAggregateBytes = Math.min(ZIP32_MAX, options.maxAggregateBytes ?? DEFAULT_MAX_AGGREGATE_BYTES);
   const maxEntryBytes = Math.min(ZIP32_MAX, options.maxEntryBytes ?? DEFAULT_MAX_ENTRY_BYTES);
   let aggregateBytes = 0;
@@ -197,7 +203,7 @@ function openZipEntries(entries: ValidatedZipEntry[], options: ZipStreamOptions,
     let file = entry.snapshot;
     if (!file) {
       if (!entry.filePath) throw new Error('ZIP file source is missing.');
-      file = createVerifiedSnapshot(entry.filePath, { contentHash: entry.contentHash, byteSize: entry.byteSize, mediaType: entry.mediaType, requireImage: Boolean(entry.mediaType), maxByteSize: Math.min(maxEntryBytes, maxAggregateBytes - aggregateBytes) }, { snapshotDirectory: options.snapshotDirectory });
+      file = await createVerifiedSnapshotAsync(entry.filePath, { contentHash: entry.contentHash, byteSize: entry.byteSize, mediaType: entry.mediaType, requireImage: Boolean(entry.mediaType), maxByteSize: Math.min(maxEntryBytes, maxAggregateBytes - aggregateBytes) }, { snapshotDirectory: options.snapshotDirectory });
     }
     aggregateBytes += file.byteSize;
     if (aggregateBytes > maxAggregateBytes) throw new Error('ZIP aggregate byte limit exceeded.');
@@ -217,7 +223,7 @@ export async function writeImageZip(entries: ZipEntryInput[], output: Writable, 
   let aggregateBytes = 0;
   try {
     const validated = validateZipEntries(entries, options);
-    openZipEntries(validated, options, opened);
+    await openZipEntries(validated, options, opened);
     options.beforeWrite?.();
     for (const entry of opened) {
       assertNotAborted(options.signal);
@@ -228,6 +234,7 @@ export async function writeImageZip(entries: ZipEntryInput[], output: Writable, 
       offset += local.length + entry.nameBytes.length;
       let crc = 0xffffffff;
       let byteSize = 0;
+      let bytesSinceCrcYield = 0;
       const source = entry.file.createReadStream(chunkBytes);
       const abortSource = (): void => {
         const error = new Error('ZIP streaming was aborted.');
@@ -238,14 +245,19 @@ export async function writeImageZip(entries: ZipEntryInput[], output: Writable, 
       try {
         for await (const value of source) {
           const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
-          for (let chunkOffset = 0; chunkOffset < bytes.length; chunkOffset += chunkBytes) {
-            const chunk = bytes.subarray(chunkOffset, Math.min(bytes.length, chunkOffset + chunkBytes));
+          for (let chunkOffset = 0; chunkOffset < bytes.length; chunkOffset += CRC_CHUNK_BYTES) {
+            const chunk = bytes.subarray(chunkOffset, Math.min(bytes.length, chunkOffset + CRC_CHUNK_BYTES));
             byteSize += chunk.length;
             aggregateBytes += chunk.length;
             if (byteSize > maxEntryBytes || aggregateBytes > maxAggregateBytes || byteSize > ZIP32_MAX) throw new Error('ZIP source changed beyond its validated byte limit.');
             crc = updateCrc32(crc, chunk);
             await writeWithBackpressure(output, chunk, options.signal);
             offset += chunk.length;
+            bytesSinceCrcYield += chunk.length;
+            if (bytesSinceCrcYield >= CRC_YIELD_BYTES) {
+              bytesSinceCrcYield = 0;
+              await nextTurn();
+            }
           }
         }
 

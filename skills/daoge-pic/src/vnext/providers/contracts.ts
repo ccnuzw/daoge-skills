@@ -1,6 +1,9 @@
 import { ProviderId, ResolvedProviderConfig } from '../studio/provider-config';
 
 export type ImageOperation = 'generate' | 'edit';
+export const MAX_IMAGE_REQUEST_REFERENCE_ASSETS = 8;
+export const MAX_IMAGE_REQUEST_MEDIA_BYTES = 64 * 1024 * 1024;
+export const MAX_IMAGE_REQUEST_CACHED_MEDIA_BYTES = 256 * 1024 * 1024;
 export type ProviderErrorKind = 'transient' | 'rate_limited' | 'unknown_outcome' | 'invalid_request' | 'invalid_config' | 'missing_asset' | 'permission' | 'unsupported' | 'cancelled';
 
 export interface ImageProviderCapabilities {

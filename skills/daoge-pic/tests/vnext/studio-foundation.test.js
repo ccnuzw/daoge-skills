@@ -123,7 +123,7 @@ test('creates the vNext schema and emits monotonic Studio events', () => {
   try {
     const initialized = initializeStudio({ workspaceRoot });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.equal(studioSchemaVersion(db), 19);
+    assert.equal(studioSchemaVersion(db), 20);
     const studio = db.prepare('SELECT id, workspace_root FROM studios WHERE id = ?').get(initialized.manifest.studioId);
     assert.equal(studio.id, initialized.manifest.studioId);
     assert.equal(studio.workspace_root, initialized.paths.workspaceRoot);
@@ -191,7 +191,7 @@ test('migrates v15 media operation identity fields whether the legacy table is p
       migrateStudioDatabase(db);
       const columns = db.prepare('PRAGMA table_info(asset_media_operations)').all().map((column) => column.name);
       assert.deepEqual(columns, ['id', 'studio_id', 'asset_id', 'operation', 'source_path', 'target_path', 'asset_json', 'relation_json', 'created_at', 'expected_hash', 'expected_size', 'expected_media_type', 'phase']);
-      assert.equal(studioSchemaVersion(db), 19);
+      assert.equal(studioSchemaVersion(db), 20);
       const migrated = db.prepare('SELECT expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE id = ?').get('operation_v15');
       assert.deepEqual(migrated ? { ...migrated } : null, legacyTablePresent ? { expected_hash: null, expected_size: null, expected_media_type: null, phase: 'prepared' } : null);
       if (legacyTablePresent) {
@@ -380,7 +380,7 @@ test('migrates v16 journals and task types without assigning ambiguous user data
       db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('official_migration_type', '旧官方类型', '{}', 'official', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('user_migration_type', '旧用户类型', '{}', 'user', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       migrateStudioDatabase(db);
-      assert.equal(studioSchemaVersion(db), 19);
+      assert.equal(studioSchemaVersion(db), 20);
       const journalPrimaryKey = db.prepare('PRAGMA table_info(delivery_export_journal)').all().filter((column) => column.pk > 0).sort((left, right) => left.pk - right.pk).map((column) => column.name);
       assert.deepEqual(journalPrimaryKey, ['studio_id', 'idempotency_key']);
       const migratedJournal = db.prepare('SELECT studio_id, delivery_id FROM delivery_export_journal WHERE idempotency_key = ?').get('legacy-export-key');

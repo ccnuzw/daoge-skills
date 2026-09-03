@@ -3,7 +3,8 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 19;
+export const STUDIO_SCHEMA_VERSION = 20;
+export const STUDIO_EVENT_RETENTION = 2000;
 
 const SCHEMA_V1 = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -138,6 +139,24 @@ const SCHEMA_V19_PREFLIGHT = [
   "ALTER TABLE dry_run_previews ADD COLUMN concurrency_source TEXT NOT NULL DEFAULT 'default' CHECK (concurrency_source IN ('default', 'explicit', 'serial'))"
 ].join(';\n') + ';';
 const SCHEMA_V19 = "DROP TABLE IF EXISTS studio_runtime_settings";
+const SCHEMA_V20 = [
+  "ALTER TABLE generation_runs ADD COLUMN provider_profile_id TEXT",
+  "ALTER TABLE generation_runs ADD COLUMN provider_config_version INTEGER",
+  "UPDATE generation_runs SET provider_profile_id = json_extract(provider_snapshot_json, '$.profileId'), provider_config_version = CAST(json_extract(provider_snapshot_json, '$.configVersion') AS INTEGER) WHERE provider_profile_id IS NULL OR provider_config_version IS NULL",
+  "CREATE INDEX IF NOT EXISTS idx_assets_studio_visibility_kind_created ON assets(studio_id, deleted_at, kind, created_at DESC, id DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_asset_relations_target_ordered ON asset_relations(target_type, target_id, relation_type, created_at, asset_id)",
+  "CREATE INDEX IF NOT EXISTS idx_asset_relations_asset_lookup ON asset_relations(asset_id, relation_type, target_type, target_id)",
+  "CREATE INDEX IF NOT EXISTS idx_runs_claim_provider ON generation_runs(status, provider_profile_id, provider_config_version, created_at, id)",
+  "CREATE INDEX IF NOT EXISTS idx_run_items_pending_run_sequence ON run_items(status, run_id, sequence)",
+  "CREATE INDEX IF NOT EXISTS idx_run_items_recovery_lease ON run_items(status, lease_expires_at, run_id, sequence)",
+  "CREATE INDEX IF NOT EXISTS idx_run_items_recovery_retry ON run_items(status, retry_at, run_id, sequence)",
+  "CREATE INDEX IF NOT EXISTS idx_delivery_assets_asset_delivery ON delivery_assets(asset_id, delivery_id, sequence)",
+  "CREATE TABLE IF NOT EXISTS studio_event_windows (studio_id TEXT PRIMARY KEY REFERENCES studios(id), earliest_id INTEGER NOT NULL, latest_id INTEGER NOT NULL, retained_count INTEGER NOT NULL CHECK (retained_count BETWEEN 1 AND 2000))",
+  "DELETE FROM events WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY studio_id ORDER BY id DESC) AS position FROM events) WHERE position > 2000)",
+  "INSERT INTO studio_event_windows (studio_id, earliest_id, latest_id, retained_count) SELECT studio_id, MIN(id), MAX(id), COUNT(*) FROM events GROUP BY studio_id ON CONFLICT(studio_id) DO UPDATE SET earliest_id = excluded.earliest_id, latest_id = excluded.latest_id, retained_count = excluded.retained_count",
+  "CREATE TRIGGER IF NOT EXISTS studio_event_windows_after_delete AFTER DELETE ON events BEGIN UPDATE studio_event_windows SET earliest_id = (SELECT id FROM events WHERE studio_id = OLD.studio_id ORDER BY id LIMIT 1), latest_id = (SELECT id FROM events WHERE studio_id = OLD.studio_id ORDER BY id DESC LIMIT 1), retained_count = retained_count - 1 WHERE studio_id = OLD.studio_id AND EXISTS (SELECT 1 FROM events WHERE studio_id = OLD.studio_id); DELETE FROM studio_event_windows WHERE studio_id = OLD.studio_id AND NOT EXISTS (SELECT 1 FROM events WHERE studio_id = OLD.studio_id); END",
+  "INSERT INTO task_types (id, studio_id, name, definition_json, source, created_at, updated_at) VALUES ('portrait-kv', NULL, '人物主视觉', '{\"summary\":\"头像、人物海报、品牌人物封面。\",\"fields\":[\"subject\",\"wardrobe\",\"expression\",\"setting\",\"composition\",\"identity_constraints\"]}', 'official', datetime('now'), datetime('now')), ('ecommerce-product', NULL, '电商商品图', '{\"summary\":\"商品主图、详情页和卖点视觉。\",\"fields\":[\"product\",\"platform\",\"selling_points\",\"background\",\"angle\",\"text_safe_area\"]}', 'official', datetime('now'), datetime('now')), ('brand-packaging', NULL, '品牌包装图', '{\"summary\":\"包装概念、瓶盒展示和品牌资产板。\",\"fields\":[\"brand\",\"package_type\",\"materials\",\"usage_scene\",\"brand_constraints\"]}', 'official', datetime('now'), datetime('now')), ('cinematic-storyboard', NULL, '电影分镜', '{\"summary\":\"短片、剧情或广告镜头序列。\",\"fields\":[\"story\",\"shot_list\",\"camera_language\",\"continuity\",\"aspect_ratio\"]}', 'official', datetime('now'), datetime('now')), ('campaign-poster', NULL, '品牌海报', '{\"summary\":\"新品 KV、横幅和竖版封面。\",\"fields\":[\"campaign\",\"headline_safe_area\",\"hero_subject\",\"cta_area\",\"brand_constraints\"]}', 'official', datetime('now'), datetime('now')), ('ui-mockup-board', NULL, '界面视觉板', '{\"summary\":\"产品界面、卡片、设备场景和概念稿。\",\"fields\":[\"product_flow\",\"device\",\"information_hierarchy\",\"visual_system\"]}', 'official', datetime('now'), datetime('now')), ('academic-figure-board', NULL, '学术图板', '{\"summary\":\"机制图、论文概览和科研海报。\",\"fields\":[\"topic\",\"claims\",\"diagram_structure\",\"label_policy\",\"evidence_constraints\"]}', 'official', datetime('now'), datetime('now')), ('type-layout-poster', NULL, '排版海报', '{\"summary\":\"双语排版、强标题区和编辑视觉。\",\"fields\":[\"copy\",\"language\",\"hierarchy\",\"safe_area\",\"typography_constraints\"]}', 'official', datetime('now'), datetime('now')) ON CONFLICT(id) DO UPDATE SET studio_id = NULL, name = excluded.name, definition_json = excluded.definition_json, source = 'official', updated_at = excluded.updated_at"
+].join(';\n') + ';';
 
 
 
@@ -206,7 +225,8 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
     { version: 16, sql: SCHEMA_V16 },
     { version: 17, sql: SCHEMA_V17 },
     { version: 18, sql: SCHEMA_V18 },
-    { version: 19, sql: SCHEMA_V19 }
+    { version: 19, sql: SCHEMA_V19 },
+    { version: 20, sql: SCHEMA_V20 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
@@ -217,6 +237,9 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
         if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'generation_runs'").get()) db.exec(SCHEMA_V19_RUNS);
         if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dry_run_previews'").get()) db.exec(SCHEMA_V19_PREFLIGHT);
         db.exec(SCHEMA_V19);
+      } else if (migration.version === 20) {
+        const requiredTables = ['generation_runs', 'assets', 'asset_relations', 'run_items', 'delivery_assets', 'events', 'task_types'];
+        if (requiredTables.every((name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)))) db.exec(SCHEMA_V20);
       } else db.exec(migration.sql);
       if (migration.version === 16 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get()) db.exec(SCHEMA_V16_ASSET_BACKFILL);
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());
@@ -225,34 +248,65 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
 }
 
 const transactionDepth = new WeakMap<object, number>();
+const transactionEventNotifications = new WeakMap<object, Set<string>>();
+const eventListeners = new Map<string, Set<() => void>>();
+const pendingEventNotifications = new Set<string>();
+
+export function subscribeStudioEvents(studioId: string, listener: () => void): () => void {
+  const listeners = eventListeners.get(studioId) || new Set<() => void>();
+  listeners.add(listener);
+  eventListeners.set(studioId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (!listeners.size) eventListeners.delete(studioId);
+  };
+}
+
+function notifyStudioEvents(studioId: string): void {
+  if (pendingEventNotifications.has(studioId)) return;
+  pendingEventNotifications.add(studioId);
+  queueMicrotask(() => {
+    pendingEventNotifications.delete(studioId);
+    for (const listener of eventListeners.get(studioId) || []) listener();
+  });
+}
 
 export function withTransaction<T>(db: StudioDatabase, operation: () => T): T {
   const existingDepth = transactionDepth.get(db as unknown as object) || 0;
   if (existingDepth > 0) return operation();
   transactionDepth.set(db as unknown as object, 1);
+  transactionEventNotifications.set(db as unknown as object, new Set());
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = operation();
     db.exec('COMMIT');
+    for (const studioId of transactionEventNotifications.get(db as unknown as object) || []) notifyStudioEvents(studioId);
     return result;
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
   } finally {
     transactionDepth.delete(db as unknown as object);
+    transactionEventNotifications.delete(db as unknown as object);
   }
 }
 
 export function appendStudioEvent(db: StudioDatabase, input: StudioEventInput): number {
-  const result = db.prepare('INSERT INTO events (studio_id, entity_type, entity_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-    input.studioId,
-    input.entityType,
-    input.entityId,
-    input.eventType,
-    JSON.stringify(input.payload || {}),
-    nowIso()
-  );
-  return Number(result.lastInsertRowid);
+  return withTransaction(db, () => {
+    const result = db.prepare('INSERT INTO events (studio_id, entity_type, entity_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(input.studioId, input.entityType, input.entityId, input.eventType, JSON.stringify(input.payload || {}), nowIso());
+    const id = Number(result.lastInsertRowid);
+    const window = db.prepare('SELECT earliest_id, retained_count FROM studio_event_windows WHERE studio_id = ?').get(input.studioId) as { earliest_id: number; retained_count: number } | undefined;
+    if (!window) db.prepare('INSERT INTO studio_event_windows (studio_id, earliest_id, latest_id, retained_count) VALUES (?, ?, ?, 1)').run(input.studioId, id, id);
+    else if (window.retained_count < STUDIO_EVENT_RETENTION) db.prepare('UPDATE studio_event_windows SET latest_id = ?, retained_count = retained_count + 1 WHERE studio_id = ?').run(id, input.studioId);
+    else {
+      db.prepare('DELETE FROM events WHERE studio_id = ? AND id = ?').run(input.studioId, window.earliest_id);
+      const next = db.prepare('SELECT id FROM events WHERE studio_id = ? ORDER BY id LIMIT 1').get(input.studioId) as { id: number };
+      db.prepare('UPDATE studio_event_windows SET earliest_id = ?, latest_id = ?, retained_count = ? WHERE studio_id = ?').run(next.id, id, STUDIO_EVENT_RETENTION, input.studioId);
+    }
+    const pending = transactionEventNotifications.get(db as unknown as object);
+    if (pending) pending.add(input.studioId);
+    return id;
+  });
 }
 
 export function studioSchemaVersion(db: StudioDatabase): number | null {

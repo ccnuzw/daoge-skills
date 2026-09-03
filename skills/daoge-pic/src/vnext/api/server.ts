@@ -3,27 +3,27 @@ import path from 'node:path';
 import http, { IncomingMessage, OutgoingHttpHeaders, Server, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { Readable } from 'node:stream';
-import { closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
+import { closeStudioDatabase, openStudioDatabase, StudioDatabase, subscribeStudioEvents, withTransaction } from '../studio/database';
 import { ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { providerSnapshot } from '../studio/provider-config';
 import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerStatus, resolveActiveProviderConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
 import { createImageProvider } from '../providers/http-adapters';
 import { probeHttpEndpoint } from '../providers/http-safety';
-import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
+import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { StateTransitionError } from '../domain/states';
-import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshot, getAssetImpact, getStudioAsset, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
+import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
-import { completeDeliveryStep, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDelivery, getDelivery, listDeliveries, openDeliveryExportFile, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
+import { completeDeliveryStepAsync, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDeliveryAsync, getDelivery, listDeliveries, openDeliveryExportFileAsync, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
 import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
 import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
-import { listProjectSelectionAssets, setProjectAssetSelected } from '../domain/project-selections';
-import { recoverStudioStartup } from '../runner/startup-recovery';
+import { listProjectSelectionAssets, setProjectAssetSelected, setProjectAssetsSelected } from '../domain/project-selections';
+import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { studioEventWindow } from './events';
-import { sha256 } from '../shared/ids';
 import { validateZipEntries, writeImageZip, ZipEntryInput } from '../media/zip';
-import { MediaArchiveError, MediaValidationError, VerifiedManagedFile } from '../media/archive';
+import { discardStagedImage, MediaArchiveError, MediaValidationError, stageImageStream, VerifiedManagedFile } from '../media/archive';
+import { openImageThumbnail, thumbnailEtag } from '../media/thumbnails';
 import { daemonRestartAvailable, requestDaemonRestart } from '../runtime/restart';
 import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName } from './local-auth';
 import { WorkbenchPresence } from '../runtime/workbench-presence';
@@ -42,6 +42,7 @@ export interface StudioServiceOptions {
   workbenchDir?: string;
   capability?: string;
   workbenchPresence?: WorkbenchPresence;
+  providerProbe?: typeof probeHttpEndpoint;
 }
 
 export interface StartedStudioService {
@@ -88,19 +89,6 @@ async function readBody(request: IncomingMessage): Promise<JsonBody> {
   } catch {
     throw new InvalidCommandError('请求必须是 JSON 对象。');
   }
-}
-
-async function readBinaryBody(request: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_IMAGE_UPLOAD_BYTES) throw new InvalidCommandError('图片超过 100 MB Studio 限制。');
-    chunks.push(buffer);
-  }
-  if (!chunks.length) throw new InvalidCommandError('需要上传图片内容。');
-  return Buffer.concat(chunks);
 }
 
 function headerValue(request: IncomingMessage, name: string): string {
@@ -176,10 +164,54 @@ function publicDeliveryCompletion(value: DeliveryCompletionResult): Record<strin
   return { operationId: value.operationId, stage: value.stage, nextAction: value.nextAction, delivery: value.delivery, files: exported?.files || [] };
 }
 
-export function streamVerifiedFileResponse(response: ServerResponse, opened: VerifiedManagedFile, headers: OutgoingHttpHeaders): void {
+function etagMatches(request: IncomingMessage, etag: string): boolean {
+  const candidates = headerValue(request, 'if-none-match').split(',').map((value) => value.trim());
+  const normalized = (value: string): string => value.replace(/^W\//, '');
+  return candidates.includes('*') || candidates.some((candidate) => normalized(candidate) === normalized(etag));
+}
+
+function notModified(request: IncomingMessage, response: ServerResponse, etag: string, cacheControl: string): boolean {
+  if (!etagMatches(request, etag)) return false;
+  response.writeHead(304, { etag, 'cache-control': cacheControl, 'x-content-type-options': 'nosniff' });
+  response.end();
+  return true;
+}
+
+function requestedRange(request: IncomingMessage, byteSize: number, etag: string): { start: number; end: number } | null | 'invalid' {
+  const value = headerValue(request, 'range');
+  if (!value) return null;
+  if (value.includes(',')) return null;
+  const ifRange = headerValue(request, 'if-range');
+  if (ifRange && ifRange !== etag) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
+  if (!match || (!match[1] && !match[2]) || byteSize <= 0) return 'invalid';
+  let start: number;
+  let end: number;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return 'invalid';
+    start = Math.max(0, byteSize - suffix);
+    end = byteSize - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : byteSize - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= byteSize || end < start) return 'invalid';
+    end = Math.min(end, byteSize - 1);
+  }
+  return { start, end };
+}
+
+export function streamVerifiedFileResponse(request: IncomingMessage, response: ServerResponse, opened: VerifiedManagedFile, headers: OutgoingHttpHeaders, etag: string): void {
+  const range = requestedRange(request, opened.byteSize, etag);
+  if (range === 'invalid') {
+    opened.close();
+    response.writeHead(416, { 'content-range': 'bytes */' + opened.byteSize, etag, 'accept-ranges': 'bytes', 'cache-control': headers['cache-control'] || 'private, no-cache' });
+    response.end();
+    return;
+  }
   let source: Readable;
   try {
-    source = opened.createReadStream();
+    source = opened.createReadStream(undefined, range || undefined);
   } catch (error) {
     opened.close();
     throw error;
@@ -202,7 +234,8 @@ export function streamVerifiedFileResponse(response: ServerResponse, opened: Ver
   source.once('error', fail);
   response.once('close', abort);
   try {
-    response.writeHead(200, headers);
+    const length = range ? range.end - range.start + 1 : opened.byteSize;
+    response.writeHead(range ? 206 : 200, { ...headers, etag, 'accept-ranges': 'bytes', 'content-length': length, ...(range ? { 'content-range': 'bytes ' + range.start + '-' + range.end + '/' + opened.byteSize } : {}) });
     source.pipe(response);
   } catch (error) {
     response.removeListener('close', abort);
@@ -240,6 +273,7 @@ export class LocalStudioService {
   private readonly sessionToken: string;
   private readonly cookieName: string;
   private readonly workbenchPresence: WorkbenchPresence;
+  private readonly providerProbe: typeof probeHttpEndpoint;
   private origin = '';
   private server: Server | null = null;
   private closePromise: Promise<void> | null = null;
@@ -252,12 +286,13 @@ export class LocalStudioService {
     this.db = openStudioDatabase(this.initialized.paths, this.initialized.manifest);
     this.providerDb = openProviderDatabase(this.initialized.paths);
     importLegacyProviderEnvOnce(this.providerDb, this.initialized.paths);
-    this.pollMs = Math.min(5000, Math.max(100, options.ssePollMs || 400));
+    this.pollMs = Math.min(30000, Math.max(100, options.ssePollMs || 15000));
     this.workbenchDir = options.workbenchDir ? path.resolve(options.workbenchDir) : path.resolve(__dirname, '../../workbench');
     this.capability = options.capability || createLocalCapability();
     this.sessionToken = options.sessionToken || createLocalCapability();
     this.cookieName = localSessionCookieName(this.initialized.manifest.studioId, this.capability);
     this.workbenchPresence = options.workbenchPresence || new WorkbenchPresence();
+    this.providerProbe = options.providerProbe || probeHttpEndpoint;
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<StartedStudioService> {
@@ -402,7 +437,7 @@ export class LocalStudioService {
       const deliveryArchiveMatch = /^\/api\/deliveries\/([^/]+)\/archive$/.exec(parsed.pathname);
       if (request.method === 'GET' && deliveryArchiveMatch) return await this.deliveryArchive(response, deliveryArchiveMatch[1], parsed.searchParams.getAll('sequence'));
       const deliveryFileMatch = /^\/api\/deliveries\/([^/]+)\/files\/(\d+)$/.exec(parsed.pathname);
-      if (request.method === 'GET' && deliveryFileMatch) return this.deliveryFile(response, deliveryFileMatch[1], Number(deliveryFileMatch[2]), parsed.searchParams.get('download') === '1');
+      if (request.method === 'GET' && deliveryFileMatch) return await this.deliveryFile(request, response, deliveryFileMatch[1], Number(deliveryFileMatch[2]), parsed.searchParams.get('download') === '1', parsed.searchParams.get('variant') === 'thumbnail');
       const deliveryDetailMatch = /^\/api\/deliveries\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && deliveryDetailMatch) { this.assertDeliveryInStudio(deliveryDetailMatch[1]); return success(response, { delivery: getDelivery(this.db, this.initialized.manifest.studioId, deliveryDetailMatch[1]) }); }
       const batchDetailMatch = /^\/api\/delivery-batches\/([^/]+)$/.exec(parsed.pathname);
@@ -430,7 +465,9 @@ export class LocalStudioService {
       const runItemsMatch = /^\/api\/runs\/([^/]+)\/items$/.exec(parsed.pathname);
       if (request.method === 'GET' && runItemsMatch) return success(response, { items: listRunItemsForQuery(this.db, this.initialized.manifest.studioId, runItemsMatch[1]) });
       const assetFileMatch = /^\/api\/assets\/([^/]+)\/file$/.exec(parsed.pathname);
-      if (request.method === 'GET' && assetFileMatch) return this.assetFile(response, assetFileMatch[1], parsed.searchParams.get('download') === '1');
+      if (request.method === 'GET' && assetFileMatch) return await this.assetFile(request, response, assetFileMatch[1], parsed.searchParams.get('download') === '1');
+      const assetThumbnailMatch = /^\/api\/assets\/([^/]+)\/thumbnail$/.exec(parsed.pathname);
+      if (request.method === 'GET' && assetThumbnailMatch) return await this.assetThumbnail(request, response, assetThumbnailMatch[1]);
       if (request.method === 'GET' && parsed.pathname === '/api/events') return this.events(request, response, parsed);
       if (request.method !== 'POST' && request.method !== 'PUT') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
       if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
@@ -474,13 +511,16 @@ export class LocalStudioService {
       const validation = createImageProvider(config).validateConfig(config);
       if (!validation.valid) throw new InvalidCommandError('Provider 配置不完整：' + validation.missing.join(', '));
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
+      let timedOut = false;
+      const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
       try {
         const headers: Record<string, string> = { accept: 'application/json' };
         if (config.providerId === 'gemini-image') headers['x-goog-api-key'] = config.apiKey;
         else headers.authorization = 'Bearer ' + config.apiKey;
-        const result = await probeHttpEndpoint(config.baseUrl, headers, controller.signal);
+        const result = await this.providerProbe(config.baseUrl, headers, controller.signal);
         return success(response, { connected: result.reachable, status: result.status });
+      } catch {
+        throw new InvalidCommandError(timedOut ? 'Provider 连接测试超时。请检查 Base URL 与网络后重试。' : '无法连接 Provider 端点。请检查 Base URL、网络和访问权限后重试。');
       } finally { clearTimeout(timeout); }
     }
     if (pathname === '/api/sessions/open') {
@@ -508,6 +548,19 @@ export class LocalStudioService {
       executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'projects.selection_asset', () => setProjectAssetSelected(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetId, selected }), { projectId, assetId, selected });
       return success(response, { selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectId) });
     }
+    const projectSelectionBatchMatch = /^\/api\/projects\/([^/]+)\/selection\/batch$/.exec(pathname);
+    if (projectSelectionBatchMatch && request.method === 'POST') {
+      const projectId = projectSelectionBatchMatch[1];
+      this.assertProjectInStudio(projectId);
+      const assetIds = Array.isArray(body.assetIds) ? body.assetIds.map(text).filter(Boolean) : [];
+      const selected = body.selected === true;
+      const keepAssetIds = Array.isArray(body.keepAssetIds) ? body.keepAssetIds.map(text).filter((assetId) => assetIds.includes(assetId)) : [];
+      const updated = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'projects.selection_batch', () => withTransaction(this.db, () => {
+        if (selected && keepAssetIds.length) setReviewDecisions(this.db, { studioId: this.initialized.manifest.studioId, assetIds: keepAssetIds, decision: 'keep', emitEvent: false });
+        return setProjectAssetsSelected(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetIds, selected });
+      }), { projectId, assetIds, selected, keepAssetIds });
+      return success(response, { ...updated.value, selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectId) });
+    }
     if (pathname === '/api/projects') {
       const created = createProject(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), description: text(body.description) || undefined, sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
@@ -533,7 +586,7 @@ export class LocalStudioService {
       const phase = text(body.phase) as DeliveryCompletionPhase;
       this.assertProjectInStudio(projectId);
       for (const assetId of assetIds) this.assertAssetInStudio(assetId);
-      return success(response, publicDeliveryCompletion(completeDeliveryStep(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, operationId: key, phase, projectId, name: text(body.name), assetIds, includeCreativeRecord: body.includeCreativeRecord === true })));
+      return success(response, publicDeliveryCompletion(await completeDeliveryStepAsync(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, operationId: key, phase, projectId, name: text(body.name), assetIds, includeCreativeRecord: body.includeCreativeRecord === true })));
     }
     if (pathname === '/api/deliveries' && request.method === 'POST') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; this.assertProjectInStudio(text(body.projectId)); for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, createDelivery(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), assetIds, includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key })); }
     const deliveryItemsMatch = /^\/api\/deliveries\/([^/]+)\/items$/.exec(pathname);
@@ -543,7 +596,7 @@ export class LocalStudioService {
     const returnToDraftMatch = /^\/api\/deliveries\/([^/]+)\/draft$/.exec(pathname);
     if (returnToDraftMatch && request.method === 'POST') { this.assertDeliveryInStudio(returnToDraftMatch[1]); return success(response, returnDeliveryToDraft(this.db, { studioId: this.initialized.manifest.studioId, deliveryId: returnToDraftMatch[1], idempotencyKey: key })); }
     const exportDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/export$/.exec(pathname);
-    if (exportDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(exportDeliveryMatch[1]); return success(response, publicDeliveryExport(exportDelivery(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, deliveryId: exportDeliveryMatch[1], idempotencyKey: key }))); }
+    if (exportDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(exportDeliveryMatch[1]); return success(response, publicDeliveryExport(await exportDeliveryAsync(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, deliveryId: exportDeliveryMatch[1], idempotencyKey: key }))); }
     if (pathname === '/api/task-types') return success(response, publicValue(createUserTaskType(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), idempotencyKey: key })));
     if (pathname === '/api/style-kits') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, publicValue(createStyleKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds, idempotencyKey: key }))); }
     if (pathname === '/api/brand-kits') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, publicValue(createBrandKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds, idempotencyKey: key }))); }
@@ -684,17 +737,21 @@ export class LocalStudioService {
     const targetId = headerValue(request, 'x-daoge-target-id') || undefined;
     const originalFilename = headerValue(request, 'x-daoge-filename') || undefined;
     this.assertImportTarget(targetType, targetId);
-    const bytes = await readBinaryBody(request);
-    const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'assets.import', () => importStudioAsset(this.db, this.initialized.paths, {
-      studioId: this.initialized.manifest.studioId,
-      bytes,
-      mediaType,
-      originalFilename,
-      targetType,
-      targetId,
-      source: { channel: 'workbench_upload', idempotencyKey: key }
-    }), { contentHash: sha256(bytes), mediaType, targetType, targetId, originalFilename });
-    success(response, publicAsset(receipt.value));
+    const staged = await stageImageStream(this.initialized.paths, request, mediaType, { deferValidation: true });
+    try {
+      const receipt = await executeIdempotentAsync(this.db, this.initialized.manifest.studioId, key, 'assets.import', () => importStagedStudioAssetAsync(this.db, this.initialized.paths, {
+        studioId: this.initialized.manifest.studioId,
+        staged,
+        declaredMediaType: mediaType,
+        originalFilename,
+        targetType,
+        targetId,
+        source: { channel: 'workbench_upload', idempotencyKey: key }
+      }), { contentHash: staged.contentHash, mediaType: staged.mediaType, targetType, targetId, originalFilename });
+      success(response, publicAsset(receipt.value));
+    } finally {
+      discardStagedImage(staged);
+    }
   }
 
   private async writeImageArchive(response: ServerResponse, filename: string, fallback: string, entries: ZipEntryInput[]): Promise<void> {
@@ -733,7 +790,7 @@ export class LocalStudioService {
     });
     const entries: ZipEntryInput[] = [];
     try {
-      for (const [index, asset] of assets.entries()) entries.push({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(asset.mediaType), snapshot: createAssetSnapshot(this.initialized.paths, asset), contentHash: asset.contentHash, byteSize: asset.byteSize, mediaType: asset.mediaType });
+      for (const [index, asset] of assets.entries()) entries.push({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(asset.mediaType), snapshot: await createAssetSnapshotAsync(this.initialized.paths, asset), contentHash: asset.contentHash, byteSize: asset.byteSize, mediaType: asset.mediaType });
     } catch (error) {
       for (const entry of entries) entry.snapshot?.close();
       throw error;
@@ -765,7 +822,7 @@ export class LocalStudioService {
         const contentHash = typeof item.contentHash === 'string' ? item.contentHash : '';
         const byteSize = Number.isSafeInteger(item.byteSize) ? Number(item.byteSize) : -1;
         if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(mediaType) || !/^[a-f0-9]{64}$/.test(contentHash) || byteSize < 0) throw new InvalidCommandError('交付图片的冻结文件身份无效。');
-        entries.push({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(mediaType), snapshot: openDeliveryExportFile(this.initialized.paths, { directoryPath: relativeDirectory, name: file, contentHash, byteSize, mediaType }), contentHash, byteSize, mediaType });
+        entries.push({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(mediaType), snapshot: await openDeliveryExportFileAsync(this.initialized.paths, { directoryPath: relativeDirectory, name: file, contentHash, byteSize, mediaType }), contentHash, byteSize, mediaType });
       }
     } catch (error) {
       for (const entry of entries) entry.snapshot?.close();
@@ -775,7 +832,7 @@ export class LocalStudioService {
     await this.writeImageArchive(response, archiveFilename(delivery.project_name + '-' + delivery.name + '-交付图片', timestamp), 'daoge-pic-delivery-' + timestamp + '.zip', entries);
   }
 
-  private deliveryFile(response: ServerResponse, deliveryId: string, sequence: number, download = false): void {
+  private deliveryFileIdentity(deliveryId: string, sequence: number): { relativeDirectory: string; file: string; mediaType: string; contentHash: string; byteSize: number } {
     const delivery = this.db.prepare('SELECT delivery.id, delivery.status, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; status: string; manifest_json: string } | undefined;
     if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('Exported delivery not found: ' + deliveryId);
     let manifest: Record<string, unknown>;
@@ -789,17 +846,40 @@ export class LocalStudioService {
     const byteSize = entry && Number.isSafeInteger(entry.byteSize) ? Number(entry.byteSize) : -1;
     if (!file) throw new StudioNotFoundError('Exported delivery file not found.');
     if (!/^image\/(png|jpeg|webp|gif)$/.test(mediaType) || !/^[a-f0-9]{64}$/.test(contentHash) || byteSize < 0) throw new InvalidCommandError('Delivery export file identity is invalid.');
-    const opened = openDeliveryExportFile(this.initialized.paths, { directoryPath: relativeDirectory, name: file, contentHash, byteSize, mediaType });
-    const extension = imageExtension(mediaType);
-    streamVerifiedFileResponse(response, opened, { 'content-type': mediaType, 'content-length': opened.byteSize, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-delivery-image.' + extension + '"' } : {}) });
+    return { relativeDirectory, file, mediaType, contentHash, byteSize };
   }
 
-  private assetFile(response: ServerResponse, assetId: string, download = false): void {
+  private async deliveryFile(request: IncomingMessage, response: ServerResponse, deliveryId: string, sequence: number, download = false, thumbnail = false): Promise<void> {
+    const identity = this.deliveryFileIdentity(deliveryId, sequence);
+    const cacheControl = 'private, max-age=31536000, immutable';
+    const etag = thumbnail ? thumbnailEtag(identity.contentHash) : '"daoge-image-' + identity.contentHash + '"';
+    if (notModified(request, response, etag, cacheControl)) return;
+    const source = () => openDeliveryExportFileAsync(this.initialized.paths, { directoryPath: identity.relativeDirectory, name: identity.file, contentHash: identity.contentHash, byteSize: identity.byteSize, mediaType: identity.mediaType });
+    const opened = thumbnail ? await openImageThumbnail(this.initialized.paths, identity.contentHash, source) : await source();
+    const mediaType = thumbnail ? 'image/webp' : identity.mediaType;
+    const extension = imageExtension(mediaType);
+    streamVerifiedFileResponse(request, response, opened, { 'content-type': mediaType, 'cache-control': cacheControl, 'x-content-type-options': 'nosniff', ...(download && !thumbnail ? { 'content-disposition': 'attachment; filename="daoge-pic-delivery-image.' + extension + '"' } : {}) }, etag);
+  }
+
+  private async assetFile(request: IncomingMessage, response: ServerResponse, assetId: string, download = false): Promise<void> {
     const asset = getStudioAsset(this.db, this.initialized.manifest.studioId, assetId);
     if (!asset || asset.deletedAt) throw new StudioNotFoundError('Asset not found: ' + assetId);
-    const snapshot = createAssetSnapshot(this.initialized.paths, asset);
+    const cacheControl = 'private, max-age=31536000, immutable';
+    const etag = '"daoge-image-' + asset.contentHash + '"';
+    if (notModified(request, response, etag, cacheControl)) return;
+    const snapshot = await createAssetSnapshotAsync(this.initialized.paths, asset);
     const extension = imageExtension(asset.mediaType);
-    streamVerifiedFileResponse(response, snapshot, { 'content-type': asset.mediaType, 'content-length': snapshot.byteSize, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-image.' + extension + '"' } : {}) });
+    streamVerifiedFileResponse(request, response, snapshot, { 'content-type': asset.mediaType, 'cache-control': cacheControl, 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-image.' + extension + '"' } : {}) }, etag);
+  }
+
+  private async assetThumbnail(request: IncomingMessage, response: ServerResponse, assetId: string): Promise<void> {
+    const asset = getStudioAsset(this.db, this.initialized.manifest.studioId, assetId);
+    if (!asset || asset.deletedAt) throw new StudioNotFoundError('Asset not found: ' + assetId);
+    const cacheControl = 'private, max-age=31536000, immutable';
+    const etag = thumbnailEtag(asset.contentHash);
+    if (notModified(request, response, etag, cacheControl)) return;
+    const opened = await openImageThumbnail(this.initialized.paths, asset.contentHash, () => createAssetSnapshotAsync(this.initialized.paths, asset));
+    streamVerifiedFileResponse(request, response, opened, { 'content-type': 'image/webp', 'cache-control': cacheControl, 'x-content-type-options': 'nosniff' }, etag);
   }
 
   private events(request: IncomingMessage, response: ServerResponse, parsed: URL): void {
@@ -819,18 +899,27 @@ export class LocalStudioService {
     let sending = false;
     let blocked = false;
     let closed = false;
+    let lastSendAt = 0;
     const detachPresence = this.workbenchPresence.attachActiveConnection();
+    let detachEvents = (): void => undefined;
     const teardown = (): void => {
       if (closed) return;
       closed = true;
       if (timer) clearTimeout(timer);
       timer = null;
       response.removeListener('drain', resume);
+      detachEvents();
       this.activeEventStreams.delete(teardown);
       detachPresence();
     };
-    const schedule = (): void => {
-      if (!closed && !blocked && !timer) timer = setTimeout(() => { timer = null; void send(); }, this.pollMs);
+    const schedule = (delay = this.pollMs): void => {
+      if (!closed && !blocked && !timer) timer = setTimeout(() => { timer = null; void send(); }, delay);
+    };
+    const wake = (): void => {
+      if (closed || blocked) return;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      schedule(Math.max(0, 180 - (Date.now() - lastSendAt)));
     };
     const resume = (): void => {
       blocked = false;
@@ -850,6 +939,7 @@ export class LocalStudioService {
       sending = true;
       try {
         const result = studioEventWindow(this.db, this.initialized.manifest.studioId, cursor);
+        lastSendAt = Date.now();
         if (result.snapshotRequired) {
           write('id: ' + result.snapshotCursor + '\n' + 'event: snapshot-required\n' + 'data: ' + JSON.stringify({ after: cursor, cursor: result.snapshotCursor }) + '\n\n');
           teardown();
@@ -860,6 +950,7 @@ export class LocalStudioService {
           cursor = event.id;
           if (!write('id: ' + event.id + '\n' + 'event: studio-event\n' + 'data: ' + JSON.stringify(event) + '\n\n')) break;
         }
+        if (result.events.length >= 100) schedule(180);
       } catch {
         teardown();
         if (!response.destroyed && !response.writableEnded) response.end();
@@ -868,6 +959,7 @@ export class LocalStudioService {
         schedule();
       }
     };
+    detachEvents = subscribeStudioEvents(this.initialized.manifest.studioId, wake);
     this.activeEventStreams.add(teardown);
     request.once('aborted', teardown);
     request.once('close', teardown);
@@ -895,7 +987,7 @@ export class LocalStudioService {
 export async function startLocalStudioService(options: StudioServiceOptions, port = 0): Promise<StartedStudioService> {
   const service = new LocalStudioService(options);
   try {
-    recoverStudioStartup(service.db, service.initialized.paths, service.initialized.manifest.studioId);
+    await recoverStudioStartupAsync(service.db, service.initialized.paths, service.initialized.manifest.studioId);
     return await service.listen(port);
   } catch (error) {
     await service.close();

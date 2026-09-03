@@ -1,6 +1,6 @@
 {
   "name": "daoge-pic",
-  "version": "5.8.0",
+  "version": "5.9.0",
   "description": "DAOGE Pic vNext conversation-first local image creation Studio.",
   "main": "dist/vnext/cli/daoge.js",
   "bin": {
@@ -39,12 +39,13 @@
     "@types/node": "^22.20.1",
     "@vitejs/plugin-react": "^5.1.2",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.6"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "sharp": "^0.35.4"
   },
   "types": "./dist/vnext/cli/daoge.d.ts"
 }

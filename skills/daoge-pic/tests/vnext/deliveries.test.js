@@ -9,7 +9,7 @@ const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { closeStudioDatabase, openStudioDatabase } = require('../../dist/vnext/studio/database');
 const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan } = require('../../dist/vnext/domain/studio-commands');
 const { assetFilePath, getAssetImpact, importStudioAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
-const { createDelivery, exportDelivery, getDelivery, openDeliveryExportFile, prepareDelivery } = require('../../dist/vnext/domain/deliveries');
+const { createDelivery, exportDelivery, exportDeliveryAsync, getDelivery, openDeliveryExportFile, prepareDelivery } = require('../../dist/vnext/domain/deliveries');
 const { configureProvider } = require('./provider-test-helper');
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
@@ -259,6 +259,30 @@ test('delivery export rejects same-size source mutation before committing any im
     assert.equal(getDelivery(db, initialized.manifest.studioId, draft.id).status, 'ready');
     assert.equal(db.prepare('SELECT COUNT(*) AS total FROM delivery_export_journal WHERE delivery_id = ?').get(draft.id).total, 0);
     assert.deepEqual(fs.readdirSync(path.join(initialized.paths.cacheDir, 'staging')), []);
+  } finally {
+    closeStudioDatabase(db);
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('asynchronous delivery export yields while snapshotting, copying, and validating a large image', async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-async-'));
+  const initialized = initializeStudio({ workspaceRoot });
+  const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  try {
+    const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'async delivery', idempotencyKey: 'async-project' }).value;
+    const largePng = Buffer.alloc(8 * 1024 * 1024, 0);
+    png.copy(largePng);
+    const asset = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: largePng, mediaType: 'image/png', targetType: 'project', targetId: project.id });
+    setReviewDecision(db, { studioId: initialized.manifest.studioId, assetId: asset.id, decision: 'keep' });
+    const draft = createDelivery(db, { studioId: initialized.manifest.studioId, projectId: project.id, name: 'async export', assetIds: [asset.id], idempotencyKey: 'async-delivery' });
+    prepareDelivery(db, { studioId: initialized.manifest.studioId, deliveryId: draft.id, idempotencyKey: 'async-ready' });
+    let eventLoopTurned = false;
+    const exporting = exportDeliveryAsync(db, initialized.paths, { studioId: initialized.manifest.studioId, deliveryId: draft.id, idempotencyKey: 'async-export' });
+    setImmediate(() => { eventLoopTurned = true; });
+    const exported = await exporting;
+    assert.equal(exported.delivery.status, 'exported');
+    assert.equal(eventLoopTurned, true);
   } finally {
     closeStudioDatabase(db);
     fs.rmSync(workspaceRoot, { recursive: true, force: true });

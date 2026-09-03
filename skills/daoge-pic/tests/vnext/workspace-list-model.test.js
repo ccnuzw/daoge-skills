@@ -21,3 +21,11 @@ test('task management groups open work and clamps paginated results', async () =
   assert.equal(page.totalPages, 3);
   assert.equal(page.items.length, 1);
 });
+
+test('search indexes normalize large list text once and preserve filtering semantics', async () => {
+  const { createProjectSearchIndex, filterProjectIndex, createTaskSearchIndex, filterTaskIndex } = await import('../../web/src/workspace-list-model.mjs');
+  const projects = [{ name: 'A 项目', description: '品牌视觉', status: 'active' }, { name: '历史', description: '已归档', status: 'archived' }];
+  const tasks = [{ name: '商品主图', status: 'active' }, { name: '旧任务', status: 'archived' }];
+  assert.deepEqual(filterProjectIndex(createProjectSearchIndex(projects), '品牌', 'active'), [projects[0]]);
+  assert.deepEqual(filterTaskIndex(createTaskSearchIndex(tasks), '任务', 'all'), [tasks[1]]);
+});

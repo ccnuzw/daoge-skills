@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { archiveStagedImage, createVerifiedSnapshot, discardStagedImage, inspectManagedImageFile, ManagedMediaRoot, plannedArchivePath, resolveManagedMediaPath, stageImage, VerifiedManagedFile } from '../media/archive';
+import { archiveStagedImage, archiveStagedImageAsync, createVerifiedSnapshot, createVerifiedSnapshotAsync, discardStagedImage, inspectManagedImageFile, ManagedMediaRoot, MediaValidationError, plannedArchivePath, resolveManagedMediaPath, stageImage, StagedImage, VerifiedManagedFile } from '../media/archive';
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { AssetBucket, ensureCacheDirectory, StudioPaths } from '../studio/workspace';
@@ -246,10 +246,12 @@ export function recoverAssetMediaOperations(db: StudioDatabase, paths: StudioPat
   return recovered;
 }
 
-export function importStudioAsset(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; bytes: Buffer; mediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown> }): StudioAsset {
+export function importStagedStudioAsset(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; staged: StagedImage; declaredMediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown> }): StudioAsset {
   ensureStudio(db, input.studioId);
   recoverAssetMediaOperations(db, paths, input.studioId);
-  const staged = stageImage(paths, input.bytes, input.mediaType);
+  const staged = input.staged;
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(staged.mediaType)) throw new MediaValidationError('Only PNG, JPEG, WebP, and GIF images can be imported.');
+  if (input.declaredMediaType && input.declaredMediaType !== staged.mediaType) throw new MediaValidationError('Declared image type does not match file content.');
   const matches = db.prepare('SELECT id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, deleted_at FROM assets WHERE studio_id = ? AND content_hash = ? ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, created_at').all(input.studioId, staged.contentHash) as unknown as StoredAsset[];
   const active = matches.find((asset) => !asset.deleted_at);
   if (active) {
@@ -277,6 +279,49 @@ export function importStudioAsset(db: StudioDatabase, paths: StudioPaths, input:
   const expected = { mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize };
   withTransaction(db, () => insertMediaOperation(db, { studioId: input.studioId, assetId, operation: 'import', sourcePath: relativePath(paths, staged.stagingPath), targetPath: planned.storagePath, expected, asset: { kind: 'import', ...expected, source }, relation }));
   archiveStagedImage(paths, staged, { assetId, bucket: 'imports' });
+  const operation = db.prepare("SELECT id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE asset_id = ? AND operation = 'import'").get(assetId) as unknown as PendingAssetOperation;
+  markMediaOperationMoved(db, operation.id);
+  withTransaction(db, () => finishImport(db, operation, { kind: 'import', ...expected, source }, relation || null));
+  return { id: assetId, studioId: input.studioId, kind: 'import', mediaType: staged.mediaType, storagePath: planned.storagePath, contentHash: staged.contentHash, byteSize: staged.byteSize, source, deletedAt: null };
+}
+
+export function importStudioAsset(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; bytes: Buffer; mediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown> }): StudioAsset {
+  return importStagedStudioAsset(db, paths, { ...input, staged: stageImage(paths, input.bytes, input.mediaType) });
+}
+
+export async function importStagedStudioAssetAsync(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; staged: StagedImage; declaredMediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown> }): Promise<StudioAsset> {
+  ensureStudio(db, input.studioId);
+  recoverAssetMediaOperations(db, paths, input.studioId);
+  const staged = input.staged;
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(staged.mediaType)) throw new MediaValidationError('Only PNG, JPEG, WebP, and GIF images can be imported.');
+  if (input.declaredMediaType && input.declaredMediaType !== staged.mediaType) throw new MediaValidationError('Declared image type does not match file content.');
+  const matches = db.prepare('SELECT id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, deleted_at FROM assets WHERE studio_id = ? AND content_hash = ? ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, created_at').all(input.studioId, staged.contentHash) as unknown as StoredAsset[];
+  const active = matches.find((asset) => !asset.deleted_at);
+  if (active) {
+    discardStagedImage(staged);
+    withTransaction(db, () => {
+      if (input.targetType && input.targetId) linkAsset(db, active.id, input.targetType, input.targetId, 'attached_to');
+      appendStudioEvent(db, { studioId: input.studioId, entityType: 'asset', entityId: active.id, eventType: 'asset.reused', payload: { source: 'import' } });
+    });
+    return assetFromRow(active);
+  }
+  const deleted = matches[0];
+  if (deleted) {
+    discardStagedImage(staged);
+    const restored = restoreAsset(db, paths, { studioId: input.studioId, assetId: deleted.id });
+    withTransaction(db, () => {
+      if (input.targetType && input.targetId) linkAsset(db, restored.id, input.targetType, input.targetId, 'attached_to');
+      appendStudioEvent(db, { studioId: input.studioId, entityType: 'asset', entityId: restored.id, eventType: 'asset.restored_reused', payload: { source: 'import' } });
+    });
+    return restored;
+  }
+  const assetId = createId('asset');
+  const planned = plannedArchivePath(paths, { assetId, bucket: 'imports', mediaType: staged.mediaType });
+  const source = { ...input.source, originalFilename: input.originalFilename || null, importedAt: nowIso() };
+  const relation = input.targetType && input.targetId ? { targetType: input.targetType, targetId: input.targetId, relationType: 'attached_to' } : undefined;
+  const expected = { mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize };
+  withTransaction(db, () => insertMediaOperation(db, { studioId: input.studioId, assetId, operation: 'import', sourcePath: relativePath(paths, staged.stagingPath), targetPath: planned.storagePath, expected, asset: { kind: 'import', ...expected, source }, relation }));
+  await archiveStagedImageAsync(paths, staged, { assetId, bucket: 'imports' });
   const operation = db.prepare("SELECT id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE asset_id = ? AND operation = 'import'").get(assetId) as unknown as PendingAssetOperation;
   markMediaOperationMoved(db, operation.id);
   withTransaction(db, () => finishImport(db, operation, { kind: 'import', ...expected, source }, relation || null));
@@ -412,6 +457,11 @@ export function createAssetSnapshot(paths: StudioPaths, asset: StudioAsset): Ver
   return createVerifiedSnapshot(sourcePath, { mediaType: asset.mediaType, contentHash: asset.contentHash, byteSize: asset.byteSize, minByteSize: 1, maxByteSize: 100 * 1024 * 1024, requireImage: true }, { snapshotDirectory: ensureCacheDirectory(paths, 'staging') });
 }
 
+export function createAssetSnapshotAsync(paths: StudioPaths, asset: StudioAsset): Promise<VerifiedManagedFile> {
+  const sourcePath = resolveManagedMediaPath(paths, asset.storagePath, rootForAsset(asset));
+  return createVerifiedSnapshotAsync(sourcePath, { mediaType: asset.mediaType, contentHash: asset.contentHash, byteSize: asset.byteSize, minByteSize: 1, maxByteSize: 100 * 1024 * 1024, requireImage: true }, { snapshotDirectory: ensureCacheDirectory(paths, 'staging') });
+}
+
 export function getAssetImpact(db: StudioDatabase, studioId: string, assetId: string): { relationCount: number; reviewCount: number; deliveryCount: number } {
   const asset = getStudioAsset(db, studioId, assetId);
   if (!asset) throw new StudioNotFoundError('Asset not found: ' + assetId);
@@ -468,7 +518,7 @@ export function restoreAsset(db: StudioDatabase, paths: StudioPaths, input: { st
   return { ...asset, storagePath: planned.storagePath, deletedAt: null };
 }
 
-export function setReviewDecision(db: StudioDatabase, input: { studioId: string; assetId: string; decision: ReviewDecisionValue; taskId?: string; roundId?: string; feedback?: Record<string, unknown> }): void {
+export function setReviewDecision(db: StudioDatabase, input: { studioId: string; assetId: string; decision: ReviewDecisionValue; taskId?: string; roundId?: string; feedback?: Record<string, unknown>; emitEvent?: boolean }): void {
   const asset = getStudioAsset(db, input.studioId, input.assetId);
   if (!asset || asset.deletedAt) throw new StudioNotFoundError('Active asset not found: ' + input.assetId);
   if (!['keep', 'review', 'reject', 'derive'].includes(input.decision)) throw new InvalidCommandError('Unsupported review decision.');
@@ -480,6 +530,22 @@ export function setReviewDecision(db: StudioDatabase, input: { studioId: string;
   withTransaction(db, () => {
     const timestamp = nowIso();
     db.prepare('INSERT INTO review_decisions (id, asset_id, task_id, round_id, decision, feedback_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(createId('review'), asset.id, input.taskId || null, input.roundId || null, input.decision, JSON.stringify(input.feedback || {}), timestamp, timestamp);
-    appendStudioEvent(db, { studioId: input.studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.reviewed', payload: { decision: input.decision } });
+    if (input.emitEvent !== false) appendStudioEvent(db, { studioId: input.studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.reviewed', payload: { decision: input.decision } });
+  });
+}
+
+export function setReviewDecisions(db: StudioDatabase, input: { studioId: string; assetIds: string[]; decision: ReviewDecisionValue; feedback?: Record<string, unknown>; emitEvent?: boolean }): number {
+  const assetIds = [...new Set(input.assetIds.map((assetId) => String(assetId || '').trim()).filter(Boolean))];
+  if (!assetIds.length || assetIds.length > 500) throw new InvalidCommandError('Batch review requires 1 to 500 assets.');
+  if (!['keep', 'review', 'reject', 'derive'].includes(input.decision)) throw new InvalidCommandError('Unsupported review decision.');
+  const placeholders = assetIds.map(() => '?').join(',');
+  const active = db.prepare('SELECT id FROM assets WHERE studio_id = ? AND deleted_at IS NULL AND id IN (' + placeholders + ')').all(input.studioId, ...assetIds) as Array<{ id: string }>;
+  if (active.length !== assetIds.length) throw new StudioNotFoundError('One or more active assets were not found in this Studio.');
+  return withTransaction(db, () => {
+    const timestamp = nowIso();
+    const insert = db.prepare('INSERT INTO review_decisions (id, asset_id, task_id, round_id, decision, feedback_json, created_at, updated_at) VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)');
+    for (const assetId of assetIds) insert.run(createId('review'), assetId, input.decision, JSON.stringify(input.feedback || {}), timestamp, timestamp);
+    if (input.emitEvent !== false) appendStudioEvent(db, { studioId: input.studioId, entityType: 'review', entityId: input.studioId, eventType: 'review.batch_updated', payload: { decision: input.decision, count: assetIds.length } });
+    return assetIds.length;
   });
 }

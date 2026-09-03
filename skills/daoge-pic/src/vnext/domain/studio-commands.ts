@@ -183,6 +183,47 @@ export function executeIdempotent<T>(db: StudioDatabase, studioId: string, idemp
   });
 }
 
+const asyncIdempotentOperations = new WeakMap<object, Map<string, Promise<unknown>>>();
+
+export async function executeIdempotentAsync<T>(db: StudioDatabase, studioId: string, idempotencyKey: string, commandName: string, operation: () => Promise<T>, request: unknown = null): Promise<CommandReceipt<T>> {
+  const scopedStudioId = requireValue(studioId, 'studioId');
+  const scopedKey = requireValue(idempotencyKey, 'idempotencyKey');
+  requireValue(commandName, 'commandName');
+  ensureStudio(db, scopedStudioId);
+  const key = scopedStudioId + ':' + scopedKey;
+  const operations = asyncIdempotentOperations.get(db as unknown as object) || new Map<string, Promise<unknown>>();
+  asyncIdempotentOperations.set(db as unknown as object, operations);
+  const pending = operations.get(key);
+  if (pending) {
+    await pending;
+    return executeIdempotentAsync(db, scopedStudioId, scopedKey, commandName, operation, request);
+  }
+  const requestHash = sha256(canonicalJson(request));
+  const run = (async (): Promise<CommandReceipt<T>> => {
+    const existing = db.prepare('SELECT command_name, request_hash, response_json FROM command_receipts WHERE studio_id = ? AND idempotency_key = ?').get(scopedStudioId, scopedKey) as { command_name: string; request_hash: string | null; response_json: string } | undefined;
+    if (existing) {
+      if (existing.command_name !== commandName || (existing.request_hash && existing.request_hash !== requestHash)) throw new VersionConflictError('Idempotency key was already used by a different command or request.');
+      return { value: JSON.parse(existing.response_json) as T, replayed: true };
+    }
+    const value = await operation();
+    return withTransaction(db, () => {
+      const raced = db.prepare('SELECT command_name, request_hash, response_json FROM command_receipts WHERE studio_id = ? AND idempotency_key = ?').get(scopedStudioId, scopedKey) as { command_name: string; request_hash: string | null; response_json: string } | undefined;
+      if (raced) {
+        if (raced.command_name !== commandName || (raced.request_hash && raced.request_hash !== requestHash)) throw new VersionConflictError('Idempotency key was already used by a different command or request.');
+        return { value: JSON.parse(raced.response_json) as T, replayed: true };
+      }
+      db.prepare('INSERT INTO command_receipts (studio_id, idempotency_key, command_name, request_hash, response_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(scopedStudioId, scopedKey, commandName, requestHash, JSON.stringify(value), nowIso());
+      return { value, replayed: false };
+    });
+  })();
+  operations.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (operations.get(key) === run) operations.delete(key);
+  }
+}
+
 export function getStudioSession(db: StudioDatabase, input: { studioId: string; sessionId: string }): StudioSession {
   ensureStudio(db, input.studioId);
   const session = db.prepare('SELECT id, studio_id, conversation_id, active_project_id, active_task_id, active_round_id, version FROM studio_sessions WHERE id = ?').get(requireValue(input.sessionId, 'sessionId')) as StoredSession | undefined;

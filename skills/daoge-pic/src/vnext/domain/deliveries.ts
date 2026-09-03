@@ -1,11 +1,13 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { createAssetSnapshot, getStudioAsset, StudioAsset } from './assets';
+import { pipeline } from 'node:stream/promises';
+import { createAssetSnapshot, createAssetSnapshotAsync, getStudioAsset, StudioAsset } from './assets';
 import { createId, nowIso, sha256 } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { executeIdempotent, InvalidCommandError, StudioNotFoundError } from './studio-commands';
 import { ensureCacheDirectory, StudioPaths } from '../studio/workspace';
-import { createVerifiedSnapshot, openVerifiedManagedFile, VerifiedManagedFile } from '../media/archive';
+import { createVerifiedSnapshot, createVerifiedSnapshotAsync, openVerifiedManagedFile, openVerifiedManagedFileAsync, VerifiedManagedFile } from '../media/archive';
 
 export interface DeliveryAssetSnapshot { assetId: string; sequence: number; source: Record<string, unknown>; review: Record<string, unknown>; asset: { id: string; kind: string; mediaType: string; deletedAt: string | null } | null; }
 export interface Delivery { id: string; projectId: string; name: string; status: 'draft' | 'ready' | 'exported'; manifest: Record<string, unknown>; items?: DeliveryAssetSnapshot[]; }
@@ -45,8 +47,10 @@ function assertProject(db: StudioDatabase, studioId: string, projectId: string):
 function activeAssets(db: StudioDatabase, studioId: string, assetIds: string[]): StudioAsset[] {
   const ids = [...new Set(assetIds)];
   if (!ids.length) throw new InvalidCommandError('A delivery requires at least one active asset.');
+  const rows = db.prepare('SELECT id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, deleted_at FROM assets WHERE studio_id = ? AND id IN (' + ids.map(() => '?').join(',') + ')').all(studioId, ...ids) as Array<{ id: string; studio_id: string; kind: StudioAsset['kind']; media_type: string; storage_path: string; content_hash: string; byte_size: number; source_json: string; deleted_at: string | null }>;
+  const assets = new Map(rows.map((row) => [row.id, { id: row.id, studioId: row.studio_id, kind: row.kind, mediaType: row.media_type, storagePath: row.storage_path, contentHash: row.content_hash, byteSize: row.byte_size, source: parse(row.source_json), deletedAt: row.deleted_at }]));
   return ids.map((id) => {
-    const asset = getStudioAsset(db, studioId, id);
+    const asset = assets.get(id);
     if (!asset || asset.deletedAt) throw new StudioNotFoundError('Active Studio asset not found: ' + id);
     return asset;
   });
@@ -73,12 +77,25 @@ function deliveryItemSnapshot(db: StudioDatabase, project: ProjectRow, asset: St
 
 function replaceDeliveryAssets(db: StudioDatabase, project: ProjectRow, deliveryId: string, assetIds: string[], timestamp: string): DeliveryAssetSnapshot[] {
   const assets = activeAssets(db, project.studio_id, assetIds);
-  const items = assets.map((asset, index) => deliveryItemSnapshot(db, project, asset, index + 1));
+  const ids = assets.map((asset) => asset.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const ownedRows = db.prepare("SELECT DISTINCT relation.asset_id FROM asset_relations relation WHERE relation.asset_id IN (" + placeholders + ") AND ((relation.target_type = 'project' AND relation.target_id = ?) OR (relation.target_type = 'creative_task' AND EXISTS (SELECT 1 FROM creative_tasks task WHERE task.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'creative_round' AND EXISTS (SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id WHERE round.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'run_item' AND relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.id = relation.target_id AND task.project_id = ?)))").all(...ids, project.id, project.id, project.id, project.id) as Array<{ asset_id: string }>;
+  const owned = new Set(ownedRows.map((row) => row.asset_id));
+  const reviewRows = db.prepare("WITH ranked_reviews AS (SELECT review.asset_id, review.id, review.decision, review.feedback_json, review.task_id, review.round_id, review.created_at, ROW_NUMBER() OVER (PARTITION BY review.asset_id ORDER BY review.created_at DESC, review.rowid DESC) AS position FROM review_decisions review LEFT JOIN creative_tasks task ON task.id = review.task_id LEFT JOIN creative_rounds round ON round.id = review.round_id LEFT JOIN creative_tasks round_task ON round_task.id = round.task_id WHERE review.asset_id IN (" + placeholders + ") AND ((review.task_id IS NULL AND review.round_id IS NULL) OR task.project_id = ? OR round_task.project_id = ?)) SELECT asset_id, id, decision, feedback_json, task_id, round_id, created_at FROM ranked_reviews WHERE position = 1").all(...ids, project.id, project.id) as unknown as Array<ReviewSnapshotRow & { asset_id: string }>;
+  const reviews = new Map(reviewRows.map((row) => [row.asset_id, row]));
+  const items = assets.map((asset, index) => {
+    if (!owned.has(asset.id)) throw new InvalidCommandError('Delivery asset does not belong to the selected project: ' + asset.id);
+    const review = reviews.get(asset.id);
+    if (!review || review.decision !== 'keep') throw new InvalidCommandError('Delivery asset requires a current keep review: ' + asset.id);
+    return { assetId: asset.id, sequence: index + 1, source: redacted(asset.source) as Record<string, unknown>, review: { id: review.id, decision: review.decision, feedback: redacted(parse(review.feedback_json)), taskId: review.task_id, roundId: review.round_id, createdAt: review.created_at }, asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt } };
+  });
   db.prepare("DELETE FROM asset_relations WHERE relation_type = 'included_in' AND target_type = 'delivery' AND target_id = ?").run(deliveryId);
   db.prepare('DELETE FROM delivery_assets WHERE delivery_id = ?').run(deliveryId);
+  const insertItem = db.prepare('INSERT INTO delivery_assets (delivery_id, asset_id, sequence, source_snapshot_json, review_snapshot_json, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+  const linkAsset = db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
   for (const item of items) {
-    db.prepare('INSERT INTO delivery_assets (delivery_id, asset_id, sequence, source_snapshot_json, review_snapshot_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(deliveryId, item.assetId, item.sequence, JSON.stringify(item.source), JSON.stringify(item.review), timestamp);
-    db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(createId('assetrel'), item.assetId, 'included_in', 'delivery', deliveryId, '{}', timestamp);
+    insertItem.run(deliveryId, item.assetId, item.sequence, JSON.stringify(item.source), JSON.stringify(item.review), timestamp);
+    linkAsset.run(createId('assetrel'), item.assetId, 'included_in', 'delivery', deliveryId, '{}', timestamp);
   }
   return items;
 }
@@ -104,9 +121,21 @@ function storedDelivery(db: StudioDatabase, studioId: string, deliveryId: string
   return value;
 }
 
+function deliveryItemsByDelivery(db: StudioDatabase, deliveryIds: string[]): Map<string, DeliveryAssetSnapshot[]> {
+  const items = new Map<string, DeliveryAssetSnapshot[]>();
+  if (!deliveryIds.length) return items;
+  const placeholders = deliveryIds.map(() => '?').join(',');
+  const rows = db.prepare('SELECT item.delivery_id, item.asset_id, item.sequence, item.source_snapshot_json, item.review_snapshot_json, asset.kind, asset.media_type, asset.deleted_at FROM delivery_assets item LEFT JOIN assets asset ON asset.id = item.asset_id WHERE item.delivery_id IN (' + placeholders + ') ORDER BY item.delivery_id, item.sequence').all(...deliveryIds) as Array<{ delivery_id: string; asset_id: string; sequence: number; source_snapshot_json: string; review_snapshot_json: string; kind: string | null; media_type: string | null; deleted_at: string | null }>;
+  for (const row of rows) {
+    const current = items.get(row.delivery_id) || [];
+    current.push({ assetId: row.asset_id, sequence: row.sequence, source: redacted(parse(row.source_snapshot_json)) as Record<string, unknown>, review: redacted(parse(row.review_snapshot_json)) as Record<string, unknown>, asset: row.kind && row.media_type ? { id: row.asset_id, kind: row.kind, mediaType: row.media_type, deletedAt: row.deleted_at } : null });
+    items.set(row.delivery_id, current);
+  }
+  return items;
+}
+
 function deliveryItems(db: StudioDatabase, deliveryId: string): DeliveryAssetSnapshot[] {
-  const rows = db.prepare('SELECT item.asset_id, item.sequence, item.source_snapshot_json, item.review_snapshot_json, asset.kind, asset.media_type, asset.deleted_at FROM delivery_assets item LEFT JOIN assets asset ON asset.id = item.asset_id WHERE item.delivery_id = ? ORDER BY item.sequence').all(deliveryId) as Array<{ asset_id: string; sequence: number; source_snapshot_json: string; review_snapshot_json: string; kind: string | null; media_type: string | null; deleted_at: string | null }>;
-  return rows.map((item) => ({ assetId: item.asset_id, sequence: item.sequence, source: redacted(parse(item.source_snapshot_json)) as Record<string, unknown>, review: redacted(parse(item.review_snapshot_json)) as Record<string, unknown>, asset: item.kind && item.media_type ? { id: item.asset_id, kind: item.kind, mediaType: item.media_type, deletedAt: item.deleted_at } : null }));
+  return deliveryItemsByDelivery(db, [deliveryId]).get(deliveryId) || [];
 }
 
 export function getDelivery(db: StudioDatabase, studioId: string, deliveryId: string): Delivery {
@@ -114,7 +143,11 @@ export function getDelivery(db: StudioDatabase, studioId: string, deliveryId: st
   return { ...value, items: deliveryItems(db, value.id) };
 }
 
-export function listDeliveries(db: StudioDatabase, projectId: string): Delivery[] { return (db.prepare('SELECT id, project_id, name, status, manifest_json FROM deliveries WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as unknown as StoredDelivery[]).map((row) => ({ ...delivery(row), items: deliveryItems(db, row.id) })); }
+export function listDeliveries(db: StudioDatabase, projectId: string): Delivery[] {
+  const rows = db.prepare('SELECT id, project_id, name, status, manifest_json FROM deliveries WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as unknown as StoredDelivery[];
+  const items = deliveryItemsByDelivery(db, rows.map((row) => row.id));
+  return rows.map((row) => ({ ...delivery(row), items: items.get(row.id) || [] }));
+}
 
 export function updateDeliveryDraft(db: StudioDatabase, input: { studioId: string; deliveryId: string; assetIds: string[]; includeCreativeRecord?: boolean; idempotencyKey: string }): Delivery {
   const receipt = executeIdempotent(db, input.studioId, input.idempotencyKey, 'deliveries.update', () => {
@@ -256,6 +289,34 @@ function copyVerifiedFileToNewPath(source: VerifiedManagedFile, targetPath: stri
   }
 }
 
+async function inspectRegularFileAsync(filePath: string): Promise<{ contentHash: string; byteSize: number }> {
+  const opened = await openVerifiedManagedFileAsync(filePath);
+  try {
+    return { contentHash: opened.contentHash, byteSize: opened.byteSize };
+  } finally {
+    opened.close();
+  }
+}
+
+async function copyVerifiedFileToNewPathAsync(source: VerifiedManagedFile, targetPath: string): Promise<void> {
+  let target: fs.promises.FileHandle | undefined;
+  try {
+    target = await fsp.open(targetPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
+    const input = fs.createReadStream(source.absolutePath, { fd: source.descriptor, autoClose: false, start: 0, end: source.byteSize - 1 });
+    const output = fs.createWriteStream(targetPath, { fd: target.fd, autoClose: false });
+    await pipeline(input, output);
+    const stat = await target.stat();
+    if (stat.size !== source.byteSize) throw new InvalidCommandError('Delivery export file size does not match its verified snapshot.');
+    await target.sync();
+    await target.close();
+    target = undefined;
+  } catch (error) {
+    if (target) await target.close().catch(() => undefined);
+    await fsp.rm(targetPath, { force: true });
+    throw error;
+  }
+}
+
 function exportedFiles(value: string): ExportedFileSnapshot[] | null {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -280,6 +341,13 @@ function snapshotFiles(directory: string, names: string[]): ExportedFileSnapshot
   });
 }
 
+async function snapshotFilesAsync(directory: string, names: string[]): Promise<ExportedFileSnapshot[]> {
+  return await Promise.all(names.map(async (name) => {
+    if (!simpleExportName(name)) throw new InvalidCommandError('Delivery export file name is invalid.');
+    return { name, ...await inspectRegularFileAsync(path.join(directory, name)) };
+  }));
+}
+
 function validateExactExportDirectory(paths: StudioPaths, pending: PendingDeliveryExport): { directory: string; files: ExportedFileSnapshot[] } {
   const expected = exportedFiles(pending.files_json);
   if (!expected) throw new InvalidCommandError('Delivery export journal file identity is invalid.');
@@ -296,6 +364,22 @@ function validateExactExportDirectory(paths: StudioPaths, pending: PendingDelive
   return { directory, files: expected };
 }
 
+async function validateExactExportDirectoryAsync(paths: StudioPaths, pending: PendingDeliveryExport): Promise<{ directory: string; files: ExportedFileSnapshot[] }> {
+  const expected = exportedFiles(pending.files_json);
+  if (!expected) throw new InvalidCommandError('Delivery export journal file identity is invalid.');
+  const directory = resolveDeliveryDirectory(paths, pending.directory_path, true);
+  const actualNames = (await fsp.readdir(directory)).sort();
+  const expectedNames = expected.map((file) => file.name).sort();
+  if (actualNames.length !== expectedNames.length || actualNames.some((name, index) => name !== expectedNames[index])) throw new InvalidCommandError('Delivery export directory does not match its frozen file set.');
+  await Promise.all(expected.map(async (file) => {
+    const filePath = path.join(directory, file.name);
+    assertNoSymlinkHierarchy(directory, filePath);
+    const actual = await inspectRegularFileAsync(filePath);
+    if (actual.contentHash !== file.contentHash || actual.byteSize !== file.byteSize) throw new InvalidCommandError('Delivery export file identity does not match its journal.');
+  }));
+  return { directory, files: expected };
+}
+
 export function openDeliveryExportFile(paths: StudioPaths, input: { directoryPath: string; name: string; contentHash: string; byteSize: number; mediaType?: string }): VerifiedManagedFile {
   if (!simpleExportName(input.name)) throw new InvalidCommandError('Delivery export file name is invalid.');
   if (!/^[a-f0-9]{64}$/.test(input.contentHash) || !Number.isSafeInteger(input.byteSize) || input.byteSize < 0) throw new InvalidCommandError('Delivery export file identity is invalid.');
@@ -304,6 +388,21 @@ export function openDeliveryExportFile(paths: StudioPaths, input: { directoryPat
     const filePath = path.join(directory, input.name);
     assertNoSymlinkHierarchy(directory, filePath);
     return createVerifiedSnapshot(filePath, { contentHash: input.contentHash, byteSize: input.byteSize, mediaType: input.mediaType, requireImage: Boolean(input.mediaType), maxByteSize: MAX_DELIVERY_EXPORT_BYTES }, { snapshotDirectory: ensureCacheDirectory(paths, 'staging') });
+  } catch (error) {
+    if (error instanceof InvalidCommandError || error instanceof StudioNotFoundError) throw error;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new StudioNotFoundError('Exported delivery file is missing.');
+    throw new InvalidCommandError('Delivery export file is unavailable or does not match its frozen identity.');
+  }
+}
+
+export async function openDeliveryExportFileAsync(paths: StudioPaths, input: { directoryPath: string; name: string; contentHash: string; byteSize: number; mediaType?: string }): Promise<VerifiedManagedFile> {
+  if (!simpleExportName(input.name)) throw new InvalidCommandError('Delivery export file name is invalid.');
+  if (!/^[a-f0-9]{64}$/.test(input.contentHash) || !Number.isSafeInteger(input.byteSize) || input.byteSize < 0) throw new InvalidCommandError('Delivery export file identity is invalid.');
+  try {
+    const directory = resolveDeliveryDirectory(paths, input.directoryPath, true);
+    const filePath = path.join(directory, input.name);
+    assertNoSymlinkHierarchy(directory, filePath);
+    return await createVerifiedSnapshotAsync(filePath, { contentHash: input.contentHash, byteSize: input.byteSize, mediaType: input.mediaType, requireImage: Boolean(input.mediaType), maxByteSize: MAX_DELIVERY_EXPORT_BYTES }, { snapshotDirectory: ensureCacheDirectory(paths, 'staging') });
   } catch (error) {
     if (error instanceof InvalidCommandError || error instanceof StudioNotFoundError) throw error;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new StudioNotFoundError('Exported delivery file is missing.');
@@ -332,6 +431,19 @@ function quarantineInvalidExport(paths: StudioPaths, pending: PendingDeliveryExp
 function finalizeJournaledExport(db: StudioDatabase, paths: StudioPaths, pending: PendingDeliveryExport, input: { studioId: string; deliveryId: string; idempotencyKey: string }): Delivery {
   if (pending.studio_id !== input.studioId || pending.delivery_id !== input.deliveryId) throw new StudioNotFoundError('Delivery not found: ' + input.deliveryId);
   validateExactExportDirectory(paths, pending);
+  const current = storedDelivery(db, input.studioId, pending.delivery_id);
+  const manifest = parse(pending.manifest_json);
+  return executeIdempotent(db, input.studioId, input.idempotencyKey, 'deliveries.export', () => {
+    db.prepare('UPDATE deliveries SET status = ?, manifest_json = ?, updated_at = ? WHERE id = ?').run('exported', JSON.stringify(manifest), nowIso(), current.id);
+    appendStudioEvent(db, { studioId: input.studioId, entityType: 'delivery', entityId: current.id, eventType: 'delivery.exported', payload: { assetCount: Array.isArray(manifest.files) ? manifest.files.length : 0 } });
+    db.prepare('DELETE FROM delivery_export_journal WHERE studio_id = ? AND idempotency_key = ?').run(input.studioId, pending.idempotency_key);
+    return { id: current.id, projectId: current.project_id, name: current.name, status: 'exported' as const, manifest: redacted(manifest) as Record<string, unknown> };
+  }, input).value;
+}
+
+async function finalizeJournaledExportAsync(db: StudioDatabase, paths: StudioPaths, pending: PendingDeliveryExport, input: { studioId: string; deliveryId: string; idempotencyKey: string }): Promise<Delivery> {
+  if (pending.studio_id !== input.studioId || pending.delivery_id !== input.deliveryId) throw new StudioNotFoundError('Delivery not found: ' + input.deliveryId);
+  await validateExactExportDirectoryAsync(paths, pending);
   const current = storedDelivery(db, input.studioId, pending.delivery_id);
   const manifest = parse(pending.manifest_json);
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'deliveries.export', () => {
@@ -442,6 +554,137 @@ export function exportDelivery(db: StudioDatabase, paths: StudioPaths, input: { 
   return { delivery: committed, directory, files: frozenFiles ? frozenFiles.map((file) => file.name) : [] };
 }
 
+const asyncDeliveryExports = new WeakMap<object, Map<string, Promise<DeliveryExportResult>>>();
+
+export async function exportDeliveryAsync(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; deliveryId: string; idempotencyKey: string }): Promise<DeliveryExportResult> {
+  const key = input.studioId + ':' + input.idempotencyKey;
+  const operations = asyncDeliveryExports.get(db as unknown as object) || new Map<string, Promise<DeliveryExportResult>>();
+  asyncDeliveryExports.set(db as unknown as object, operations);
+  const pendingOperation = operations.get(key);
+  if (pendingOperation) {
+    await pendingOperation;
+    return await exportDeliveryAsync(db, paths, input);
+  }
+  const run = exportDeliveryAsyncUnlocked(db, paths, input);
+  operations.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (operations.get(key) === run) operations.delete(key);
+  }
+}
+
+async function exportDeliveryAsyncUnlocked(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; deliveryId: string; idempotencyKey: string }): Promise<DeliveryExportResult> {
+  const replay = db.prepare('SELECT command_name, response_json FROM command_receipts WHERE studio_id = ? AND idempotency_key = ?').get(input.studioId, input.idempotencyKey) as { command_name: string; response_json: string } | undefined;
+  if (replay?.command_name === 'deliveries.export') {
+    const deliveryValue = JSON.parse(replay.response_json) as Delivery;
+    if (deliveryValue.id !== input.deliveryId) throw new InvalidCommandError('Idempotency key belongs to a different delivery export.');
+    const current = storedDelivery(db, input.studioId, input.deliveryId);
+    if (current.status !== 'exported') throw new InvalidCommandError('Replayed delivery export is not committed.');
+    const rawManifest = parse(current.manifest_json);
+    const relative = typeof rawManifest.exportDirectory === 'string' ? rawManifest.exportDirectory : '';
+    if (!Array.isArray(rawManifest.exportFiles)) throw new InvalidCommandError('Replayed delivery export has no frozen file identity set.');
+    const verified = await validateExactExportDirectoryAsync(paths, { idempotency_key: input.idempotencyKey, delivery_id: input.deliveryId, studio_id: input.studioId, directory_path: relative, manifest_json: current.manifest_json, files_json: JSON.stringify(rawManifest.exportFiles) });
+    return { delivery: deliveryValue, directory: verified.directory, files: verified.files.map((file) => file.name) };
+  }
+  const pending = db.prepare('SELECT idempotency_key, delivery_id, studio_id, directory_path, manifest_json, files_json FROM delivery_export_journal WHERE idempotency_key = ? AND studio_id = ?').get(input.idempotencyKey, input.studioId) as PendingDeliveryExport | undefined;
+  if (pending && pending.delivery_id !== input.deliveryId) throw new InvalidCommandError('Idempotency key belongs to a different delivery export.');
+  if (pending && pending.delivery_id === input.deliveryId) {
+    try {
+      const verified = await validateExactExportDirectoryAsync(paths, pending);
+      return { delivery: await finalizeJournaledExportAsync(db, paths, pending, input), directory: verified.directory, files: verified.files.map((file) => file.name) };
+    } catch {
+      recordExportRecoveryRejection(db, pending);
+      quarantineInvalidExport(paths, pending);
+      db.prepare('DELETE FROM delivery_export_journal WHERE studio_id = ? AND idempotency_key = ? AND delivery_id = ?').run(input.studioId, input.idempotencyKey, input.deliveryId);
+    }
+  }
+  const current = storedDelivery(db, input.studioId, input.deliveryId);
+  const value = delivery(current);
+  if (value.status !== 'ready') throw new InvalidCommandError('Only a prepared delivery can be exported.');
+  const project = assertProject(db, input.studioId, value.projectId);
+  const frozenItems = deliveryItems(db, value.id);
+  const assets = frozenItems.map((item) => {
+    const asset = getStudioAsset(db, project.studio_id, item.assetId);
+    if (!asset) throw new StudioNotFoundError('Delivery asset not found: ' + item.assetId);
+    return asset;
+  });
+  const aggregateAssetBytes = assets.reduce((total, asset) => total + asset.byteSize, 0);
+  if (!Number.isSafeInteger(aggregateAssetBytes) || aggregateAssetBytes > MAX_DELIVERY_EXPORT_BYTES) throw new InvalidCommandError('Delivery export exceeds its aggregate byte limit.');
+  const directory = path.join(paths.deliveriesRoot, safeSegment(project.name), safeSegment(value.name) + '-' + value.id.slice(-8));
+  const directoryPath = path.relative(paths.workspaceRoot, directory).split(path.sep).join('/');
+  resolveDeliveryDirectory(paths, directoryPath, false);
+  const temporary = directory + '.tmp-' + process.pid;
+  const backup = directory + '.previous-' + process.pid;
+  await fsp.rm(temporary, { recursive: true, force: true });
+  await fsp.rm(backup, { recursive: true, force: true });
+  await fsp.mkdir(temporary, { recursive: true });
+  assertNoSymlinkHierarchy(paths.deliveriesRoot, temporary);
+  const files: Array<{ sequence: number; file: string; mediaType: string; contentHash: string; byteSize: number }> = [];
+  const includeCreativeRecord = value.manifest.includeCreativeRecord === true;
+  try {
+    for (const [index, asset] of assets.entries()) {
+      const sequence = index + 1;
+      const file = String(sequence).padStart(3, '0') + extensionFor(asset);
+      const snapshot = await createAssetSnapshotAsync(paths, asset);
+      try {
+        const targetPath = path.join(temporary, file);
+        await copyVerifiedFileToNewPathAsync(snapshot, targetPath);
+        const copied = await inspectRegularFileAsync(targetPath);
+        if (copied.contentHash !== snapshot.contentHash || copied.byteSize !== snapshot.byteSize || !snapshot.mediaType) throw new InvalidCommandError('Delivery export copy does not match its verified source snapshot.');
+        files.push({ sequence, file, mediaType: snapshot.mediaType, contentHash: copied.contentHash, byteSize: copied.byteSize });
+      } finally {
+        snapshot.close();
+      }
+    }
+    const record = includeCreativeRecord ? creativeRecord(db, project, value, assets) : null;
+    const exportedAt = nowIso();
+    const manifest = { deliveryId: value.id, projectId: project.id, projectName: project.name, deliveryName: value.name, exportedAt, files };
+    const safeName = escapeHtmlText(value.name);
+    const contactSheet = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>' + safeName + '</title><style>body{margin:32px;background:#f4f4ed;color:#202720;font-family:sans-serif}h1{font-size:22px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}.item{background:#fff;border:1px solid #d7dbd2;padding:8px}.item img{display:block;width:100%;aspect-ratio:1;object-fit:contain;background:#eef0e9}.item span{display:block;margin-top:7px;font-size:11px;color:#596257}</style><h1>' + safeName + '</h1><div class="grid">' + files.map((file) => '<div class="item"><img src="' + file.file + '" alt=""><span>素材 ' + file.sequence + '</span></div>').join('') + '</div>';
+    await fsp.writeFile(path.join(temporary, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
+    if (record) await fsp.writeFile(path.join(temporary, 'creative-record.json'), JSON.stringify(record, null, 2) + '\n', { flag: 'wx' });
+    await fsp.writeFile(path.join(temporary, 'contact-sheet.html'), contactSheet + '\n', { flag: 'wx' });
+    const outputNames = files.map((file) => file.file).concat(['manifest.json', ...(includeCreativeRecord ? ['creative-record.json'] : []), 'contact-sheet.html']);
+    const expectedFiles = await snapshotFilesAsync(temporary, outputNames);
+    const deliveryManifest = { ...value.manifest, frozenItems: frozenItems.map((item) => ({ assetId: item.assetId, sequence: item.sequence, source: item.source, review: item.review })), exportDirectory: directoryPath, exportedAt, files, exportFiles: expectedFiles };
+    withTransaction(db, () => {
+      const inserted = db.prepare('INSERT INTO delivery_export_journal (studio_id, idempotency_key, delivery_id, directory_path, manifest_json, files_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(studio_id, idempotency_key) DO NOTHING').run(project.studio_id, input.idempotencyKey, value.id, directoryPath, JSON.stringify(deliveryManifest), JSON.stringify(expectedFiles), nowIso());
+      if (Number(inserted.changes) !== 1) {
+        const existing = db.prepare('SELECT delivery_id FROM delivery_export_journal WHERE studio_id = ? AND idempotency_key = ?').get(project.studio_id, input.idempotencyKey) as { delivery_id: string } | undefined;
+        if (existing?.delivery_id !== value.id) throw new InvalidCommandError('Idempotency key belongs to a different delivery export.');
+        throw new InvalidCommandError('Delivery export is already in progress for this idempotency key.');
+      }
+    });
+    try {
+      await fsp.lstat(directory);
+      await fsp.rename(directory, backup);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    try {
+      await fsp.rename(temporary, directory);
+      await fsp.rm(backup, { recursive: true, force: true });
+    } catch (error) {
+      try {
+        await fsp.lstat(directory);
+      } catch (missing) {
+        if ((missing as NodeJS.ErrnoException).code === 'ENOENT') {
+          try { await fsp.lstat(backup); await fsp.rename(backup, directory); } catch {}
+        }
+      }
+      throw error;
+    }
+  } catch (error) {
+    await fsp.rm(temporary, { recursive: true, force: true });
+    throw error;
+  }
+  const pendingExport = db.prepare('SELECT idempotency_key, delivery_id, studio_id, directory_path, manifest_json, files_json FROM delivery_export_journal WHERE idempotency_key = ? AND studio_id = ?').get(input.idempotencyKey, input.studioId) as unknown as PendingDeliveryExport;
+  const committed = await finalizeJournaledExportAsync(db, paths, pendingExport, input);
+  const frozenFiles = exportedFiles(pendingExport.files_json);
+  return { delivery: committed, directory, files: frozenFiles ? frozenFiles.map((file) => file.name) : [] };
+}
+
 function deliveryCompletionKey(operationId: string, phase: DeliveryCompletionPhase): string {
   return 'delivery-complete-' + sha256(requireText(operationId, 'Delivery completion operation id')).slice(0, 32) + '-' + phase;
 }
@@ -462,5 +705,24 @@ export function completeDeliveryStep(db: StudioDatabase, paths: StudioPaths, inp
   if (input.phase === 'prepare') return { operationId: input.operationId, stage: current.status, nextAction: current.status === 'ready' ? 'export' : null, delivery: current, files: [] };
   if (current.status === 'exported') return { operationId: input.operationId, stage: 'exported', nextAction: null, delivery: current, files: [] };
   const exported = exportDelivery(db, paths, { studioId: input.studioId, deliveryId: current.id, idempotencyKey: deliveryCompletionKey(input.operationId, 'export') });
+  return { operationId: input.operationId, stage: 'exported', nextAction: null, delivery: exported.delivery, files: exported.files };
+}
+
+export async function completeDeliveryStepAsync(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; operationId: string; phase: DeliveryCompletionPhase; projectId: string; name: string; assetIds: string[]; includeCreativeRecord?: boolean }): Promise<DeliveryCompletionResult> {
+  if (!['draft', 'prepare', 'export'].includes(input.phase)) throw new InvalidCommandError('Unknown delivery completion phase.');
+  const draft = createDelivery(db, {
+    studioId: input.studioId,
+    projectId: input.projectId,
+    name: input.name,
+    assetIds: input.assetIds,
+    includeCreativeRecord: input.includeCreativeRecord,
+    idempotencyKey: deliveryCompletionKey(input.operationId, 'draft')
+  });
+  if (input.phase === 'draft') return { operationId: input.operationId, stage: draft.status, nextAction: 'prepare', delivery: draft, files: [] };
+  let current = getDelivery(db, input.studioId, draft.id);
+  if (current.status === 'draft') current = prepareDelivery(db, { studioId: input.studioId, deliveryId: current.id, idempotencyKey: deliveryCompletionKey(input.operationId, 'prepare') });
+  if (input.phase === 'prepare') return { operationId: input.operationId, stage: current.status, nextAction: current.status === 'ready' ? 'export' : null, delivery: current, files: [] };
+  if (current.status === 'exported') return { operationId: input.operationId, stage: 'exported', nextAction: null, delivery: current, files: [] };
+  const exported = await exportDeliveryAsync(db, paths, { studioId: input.studioId, deliveryId: current.id, idempotencyKey: deliveryCompletionKey(input.operationId, 'export') });
   return { operationId: input.operationId, stage: 'exported', nextAction: null, delivery: exported.delivery, files: exported.files };
 }

@@ -2,13 +2,34 @@ const fs = require('node:fs');
 const { createHash } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { Writable } = require('node:stream');
+const { Readable, Writable } = require('node:stream');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createImageZip, writeImageZip } = require('../../dist/vnext/media/zip');
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
+
+function mutateAfterAsyncRead(filePath, mutate) {
+  const originalOpen = fs.promises.open;
+  let mutated = false;
+  fs.promises.open = async function (openedPath, ...args) {
+    const handle = await originalOpen.call(fs.promises, openedPath, ...args);
+    if (openedPath === filePath && (args[0] & fs.constants.O_ACCMODE) === fs.constants.O_RDONLY) {
+      const read = handle.read.bind(handle);
+      handle.read = async function (...readArgs) {
+        const result = await read(...readArgs);
+        if (!mutated && result.bytesRead && readArgs[3] === 0) {
+          mutated = true;
+          mutate();
+        }
+        return result;
+      };
+    }
+    return handle;
+  };
+  return { get mutated() { return mutated; }, restore() { fs.promises.open = originalOpen; } };
+}
 
 test('small ZIP convenience produces a standards-shaped archive containing streamed entry bytes', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-zip-small-'));
@@ -54,6 +75,26 @@ test('production ZIP writer honors backpressure and never materializes a source-
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('ZIP yields to the event loop while calculating CRC for an in-memory source chunk', async () => {
+  const bytes = Buffer.alloc(4 * 1024 * 1024, 0x5a);
+  let closed = false;
+  let eventLoopTurned = false;
+  const snapshot = {
+    absolutePath: 'memory://crc-fixture',
+    contentHash: createHash('sha256').update(bytes).digest('hex'),
+    byteSize: bytes.length,
+    descriptor: -1,
+    mediaType: null,
+    createReadStream: () => Readable.from([bytes]),
+    close: () => { closed = true; }
+  };
+  const sink = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  setImmediate(() => { eventLoopTurned = true; });
+  await writeImageZip([{ name: 'crc-fixture.bin', snapshot }], sink, { chunkBytes: bytes.length, maxEntryBytes: bytes.length, maxAggregateBytes: bytes.length });
+  assert.equal(eventLoopTurned, true);
+  assert.equal(closed, true);
 });
 
 test('ZIP streams the verified inode when its pathname is replaced with same-size bytes', async () => {
@@ -109,29 +150,21 @@ test('ZIP rejects a same-inode mutation during snapshotting before its first out
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-zip-mutated-during-'));
   const snapshots = path.join(directory, 'snapshots');
   fs.mkdirSync(snapshots);
-  const originalReadSync = fs.readSync;
+  let mutation;
   try {
     const filePath = path.join(directory, 'fixture.bin');
     const original = Buffer.alloc(192 * 1024, 0x41);
     fs.writeFileSync(filePath, original);
     const expectedHash = createHash('sha256').update(original).digest('hex');
-    let mutated = false;
-    fs.readSync = function (...args) {
-      const read = originalReadSync.apply(fs, args);
-      if (!mutated && args[4] === 0) {
-        mutated = true;
-        fs.writeFileSync(filePath, Buffer.alloc(original.length, 0x42));
-      }
-      return read;
-    };
+    mutation = mutateAfterAsyncRead(filePath, () => fs.writeFileSync(filePath, Buffer.alloc(original.length, 0x42)));
     const chunks = [];
     const sink = new Writable({ write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); } });
     await assert.rejects(writeImageZip([{ name: 'fixture.bin', filePath, contentHash: expectedHash, byteSize: original.length }], sink, { snapshotDirectory: snapshots, chunkBytes: 32 * 1024 }), /hash|changed/);
-    assert.equal(mutated, true);
+    assert.equal(mutation.mutated, true);
     assert.equal(chunks.length, 0);
     assert.deepEqual(fs.readdirSync(snapshots), []);
   } finally {
-    fs.readSync = originalReadSync;
+    if (mutation) mutation.restore();
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

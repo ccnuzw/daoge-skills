@@ -4,7 +4,7 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-当前稳定正式版本为 [`5.8.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0)。下列章节按版本隔离发布事实；5.7.0 及更早章节保持历史证据，不得用其哈希、Schema 或旧并发契约解释 5.8.0。
+当前稳定正式版本为 [`5.9.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.0)。下列章节按版本隔离发布事实；5.8.0 及更早章节保持历史证据，不得用其哈希、Schema 或旧并发契约解释 5.9.0。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -120,3 +120,28 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - 验证没有调用任何真实外部图片 Provider，也没有产生计费生成请求；测试 Provider 与 standalone service 只验证本地边界。opener 行为使用可注入 fake opener 与 API/CLI 契约验证，没有调用真实系统默认浏览器，也没有进行桌面/移动真实浏览器视觉验收。
 - `provider.env` 迁移后不再作为运行时配置源；切换 Profile 必须 restart，queue 中不能修改 Run 并发。安装或升级后还需完整重启 Codex，以重建 process-wide Skill registry 并加载 5.8.0。
 - 5.8.0 的发布渠道是 GitHub Release 不可变 `.tgz`；`npm install <GitHub URL>` 只是安装该资产的本地方式，不表示 npm registry 已发布对应包。
+
+## 6. daoge-pic 5.9.0 发布验证证据
+
+本节对应 [`daoge-pic-v5.9.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.0) 的发布源码与 GitHub Release `.tgz` 制品。5.9.0 合并此前工作树中尚未发布的确认对话框、学习中心、Provider 连接测试、视觉修复和本轮 Workbench 性能修复。
+
+### 性能验证
+
+- 500 次运行对比：6 次 SQL，2.71 ms，返回最近 24 次并明确 `runsTruncated`；此前基线为 3006 次 SQL、563 ms。
+- 1000 张选片列表：4 次 SQL，5.73 ms；此前基线为 2003 次 SQL、29.84 ms。
+- 10000 个待执行项领取 1000 项：46.03 ms，写入 20 条事件；此前基线写入 1010 条事件。
+- 64 MiB 异步媒体快照：总耗时 88.33 ms，最大事件循环延迟 0.92 ms；此前同步路径约 77 ms 阻塞。
+- 真实 Chromium smoke：桌面 1440×1000 与移动 390×844 无横向溢出；24 张资产全部使用 thumbnail 响应；全选本页只发 1 个批量选片请求、0 个逐项请求；控制台错误为 0。
+
+### 兼容与安全验证
+
+- 真实 v5.8 工作区副本从 Schema 19 迁移到 Schema 20 用时 10.54 ms；370 个资产、57 个运行和 2000 条保留事件数据结构保持有效。
+- 缩略图、ETag、弱 ETag、单 Range、多段 Range 回退、异步导入、异步交付导出、批量选片和事件通知边界均有回归测试。
+- `npm audit --omit=dev`：0 vulnerabilities；Vite 开发依赖也已升级到无已知漏洞版本。
+- 未调用真实图片 Provider，未产生计费生成请求。
+
+### 最终制品
+
+- `npm run build` 与 `npm test` 已通过；`npm test` 执行 262 项，262 通过。`npm run test:package` 已通过，发布清单包含 98 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- 最终制品 `daoge-pic-5.9.0.tgz` 为 `288686` bytes，SHA-256 为 `d055be3f8ca3e6ebf9561e1e27181c837b949a8ad542cb8734b962417fc61313`；同值记录在 `daoge-pic-5.9.0.tgz.sha256` sidecar 与 GitHub Release。
+- 发布渠道为 GitHub Release 不可变 `daoge-pic-5.9.0.tgz`；安装使用该制品，不跟随 `main` 变化。

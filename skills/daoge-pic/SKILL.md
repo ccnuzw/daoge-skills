@@ -5,7 +5,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.8.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0)。本文件定义 5.8.0 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.9.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.0)。本文件定义 5.9.0 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
@@ -173,7 +173,7 @@ node scripts/daoge.js resume --workspace <path> --run <run-id> --session <sessio
 - `retry` 只允许 `failed`、`blocked` 或 `retry_wait`；可用 `--items` 做单项重试。`outcome_unknown` 不可直接重试。
 - `archive-project` 会拒绝仍有未完成生成的项目，再以事务方式归档项目、任务和轮次。
 - daemon 启动时固定 active Profile 的 `profileId + configVersion`、Provider、模型和端点身份。活动 Profile、模型、端点、密钥、options 或 configVersion 变化后标记 `restartRequired`；重启前拒绝新运行，已有运行不静默切换。Worker 只领取与启动快照 `profileId + configVersion` 匹配的运行。
-- 并发只属于 Generation Run：系统全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Schema v19 保留历史业务数据并回填既有运行。
+- 并发只属于 Generation Run：系统全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Schema v20 保留历史业务数据并补齐性能索引与事件窗口。
 - Provider 安全快照只含 profileId、profileName、configVersion、Provider、模型、端点身份与能力，不含 API Key、完整 URL 或调度设置。计划、Profile 版本或并发变化后必须重新预检。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。仅在当前 Studio 受管理根、相对路径、媒体类型、哈希、大小、资产和操作身份全部一致时恢复；路径越界、符号链接、冲突或歧义必须拒绝并留下脱敏事件。
 - 下载、复制、交付导出和 ZIP 使用受验证 snapshot 流式读取。文件替换、路径穿越、跨 Studio/跨项目访问、超出条目或聚合上限、客户端断连都不能形成错误交付；失败时关闭文件描述符和临时 snapshot。

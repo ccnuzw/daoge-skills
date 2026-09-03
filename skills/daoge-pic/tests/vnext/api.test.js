@@ -126,6 +126,31 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
   }
 });
 
+test('Provider connection test returns an actionable client error when the endpoint probe fails', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Probe Failure Provider' });
+    started = await startLocalStudioService({
+      workspaceRoot,
+      providerProbe: async () => { throw new Error('fixture DNS failure'); }
+    });
+    const profiles = await requestJson(started, '/api/providers');
+    const profile = profiles.body.data.profiles[0];
+    const tested = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/test', { method: 'POST', idempotencyKey: 'provider-test-failure', body: {} });
+    assert.equal(tested.status, 400);
+    assert.deepEqual(tested.body.error, {
+      code: 'invalid_command',
+      message: '无法连接 Provider 端点。请检查 Base URL、网络和访问权限后重试。'
+    });
+    assert.doesNotMatch(JSON.stringify(tested.body), /fixture DNS failure|Studio 本地服务发生未预期错误/);
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('local Provider response echoes are sanitized before database, API, and delivery persistence', async () => {
   const workspaceRoot = temporaryWorkspace();
   const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==';
@@ -289,6 +314,49 @@ test('local Studio service serves the built Workbench and managed image files', 
     assert.equal(rejected.status, 500);
     assert.equal(rejectedBytes.includes(mutated), false);
     assert.deepEqual(fs.readdirSync(path.join(workspaceRoot, 'daoge-studio', 'cache', 'staging')), []);
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('delivery export API awaits the asynchronous large-file export path', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'async-api-project', body: { name: '异步 API 交付' } });
+    const largePng = Buffer.alloc(8 * 1024 * 1024, 0);
+    Buffer.from('iVBORw0KGgo=', 'base64').copy(largePng);
+    const uploaded = await fetchStudio(started, '/api/assets/import', {
+      method: 'POST',
+      headers: { 'content-type': 'image/png', 'idempotency-key': 'async-api-upload', 'x-daoge-target-type': 'project', 'x-daoge-target-id': project.body.data.value.id },
+      body: largePng
+    });
+    const asset = (await uploaded.json()).data;
+    assert.equal(uploaded.status, 200);
+    await requestJson(started, '/api/assets/' + asset.id + '/review', { method: 'POST', idempotencyKey: 'async-api-review', body: { decision: 'keep' } });
+    const delivery = await requestJson(started, '/api/deliveries', { method: 'POST', idempotencyKey: 'async-api-delivery', body: { projectId: project.body.data.value.id, name: '异步导出', assetIds: [asset.id] } });
+    await requestJson(started, '/api/deliveries/' + delivery.body.data.id + '/ready', { method: 'POST', idempotencyKey: 'async-api-ready', body: {} });
+    let turnsWhilePending = 0;
+    let pending = true;
+    const timer = setInterval(() => { if (pending) turnsWhilePending += 1; }, 1);
+    const exported = await requestJson(started, '/api/deliveries/' + delivery.body.data.id + '/export', { method: 'POST', idempotencyKey: 'async-api-export', body: {} });
+    pending = false;
+    clearInterval(timer);
+    assert.equal(exported.status, 200);
+    assert.equal(exported.body.data.delivery.status, 'exported');
+    assert.ok(turnsWhilePending > 0);
+    let completionTurns = 0;
+    pending = true;
+    const completionTimer = setInterval(() => { if (pending) completionTurns += 1; }, 1);
+    const completed = await requestJson(started, '/api/deliveries/complete', { method: 'POST', idempotencyKey: 'async-api-complete', body: { phase: 'export', projectId: project.body.data.value.id, name: '异步完成', assetIds: [asset.id] } });
+    pending = false;
+    clearInterval(completionTimer);
+    assert.equal(completed.status, 200);
+    assert.equal(completed.body.data.stage, 'exported');
+    assert.ok(completionTurns > 0);
   } finally {
     if (started) await started.service.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -580,12 +648,13 @@ test('verified file response closes its source handle when the API client aborts
   const source = new PassThrough();
   let handleCloses = 0;
   const opened = {
+    byteSize: 3,
     createReadStream() { return source; },
     close() { handleCloses += 1; }
   };
   const response = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
   response.writeHead = () => response;
-  streamVerifiedFileResponse(response, opened, { 'content-type': 'image/png' });
+  streamVerifiedFileResponse({ headers: {} }, response, opened, { 'content-type': 'image/png' }, '"test-image"');
   const sourceClosed = once(source, 'close');
   response.destroy();
   await sourceClosed;

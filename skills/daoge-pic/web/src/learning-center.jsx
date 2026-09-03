@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Archive, BadgeCheck, Bookmark, BookOpen, Check, CircleAlert, FileCheck2, FolderKanban, GitFork, ImagePlus, Library, PackageCheck, RefreshCw, Search, ShieldCheck, Sparkles, Workflow, X } from 'lucide-react';
 import { LEARNING_FILTERS, LEARNING_PHASES, LEARNING_TOPICS } from './learning-center-content.mjs';
 
-const TOPIC_ICONS = { project: FolderKanban, plan: FileCheck2, check: Check, run: RefreshCw, asset: ImagePlus, reference: GitFork, library: Library, delivery: PackageCheck, recovery: Archive, safety: ShieldCheck };
+const TOPIC_ICONS = { project: FolderKanban, session: Workflow, provider: Sparkles, plan: FileCheck2, check: Check, run: RefreshCw, history: BookOpen, asset: ImagePlus, reference: GitFork, library: Library, delivery: PackageCheck, recovery: Archive, safety: ShieldCheck };
 
 function topicMatches(topic, query) {
   const haystack = [topic.kicker, topic.title, topic.summary, topic.studio, topic.conversation, ...topic.checkpoints].join(' ').toLowerCase();

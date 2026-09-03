@@ -29,3 +29,36 @@ export function createTrailingTaskQueue(task) {
     }
   };
 }
+
+export function mergeEventRefreshPlans(current, next) {
+  if (!current) return next;
+  return {
+    scope: current.scope === 'all' || next.scope === 'all' ? 'all' : 'context',
+    taskOverview: current.taskOverview || next.taskOverview,
+    creativeRecord: current.creativeRecord || next.creativeRecord,
+    studioOverview: current.studioOverview || next.studioOverview,
+    planVersions: current.planVersions || next.planVersions,
+    refreshContext: current.refreshContext || next.refreshContext,
+    refreshAssets: current.refreshAssets || next.refreshAssets,
+    refreshSelection: Boolean(current.refreshSelection || next.refreshSelection),
+    refreshSharedAssets: Boolean(current.refreshSharedAssets || next.refreshSharedAssets)
+  };
+}
+
+export function createEventRefreshQueue({ refresh, applyPlan }) {
+  let pending = null;
+  const queue = createTrailingTaskQueue(async () => {
+    const plan = pending;
+    pending = null;
+    const refreshed = await refresh(plan);
+    if (refreshed) applyPlan(plan);
+    return refreshed;
+  });
+  return {
+    request(plan) {
+      pending = mergeEventRefreshPlans(pending, plan);
+      return queue.request();
+    },
+    dispose() { queue.dispose(); }
+  };
+}

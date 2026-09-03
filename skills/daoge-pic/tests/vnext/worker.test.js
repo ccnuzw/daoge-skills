@@ -48,12 +48,38 @@ function attachManagedAssets(fixture, input) {
   fixture.db.prepare('UPDATE run_items SET prompt_payload_json = ? WHERE id = ?').run(JSON.stringify({ ...payload, ...input }), item.id);
 }
 
+function attachManagedAssetsToAllItems(fixture, input) {
+  const items = fixture.db.prepare('SELECT id, prompt_payload_json FROM run_items WHERE run_id = ?').all(fixture.run.value.id);
+  for (const item of items) fixture.db.prepare('UPDATE run_items SET prompt_payload_json = ? WHERE id = ?').run(JSON.stringify({ ...JSON.parse(item.prompt_payload_json), ...input }), item.id);
+}
+
 function largePng(fill = 0x41) {
   return Buffer.concat([png, Buffer.alloc(192 * 1024 - png.length, fill)]);
 }
 
 function sameSizeReplacement(bytes, fill = 0x42) {
   return Buffer.concat([bytes.subarray(0, 16), Buffer.alloc(bytes.length - 16, fill)]);
+}
+
+function mutateAfterAsyncRead(filePath, mutate) {
+  const originalOpen = fs.promises.open;
+  let mutated = false;
+  fs.promises.open = async function (openedPath, ...args) {
+    const handle = await originalOpen.call(fs.promises, openedPath, ...args);
+    if (openedPath === filePath && (args[0] & fs.constants.O_ACCMODE) === fs.constants.O_RDONLY) {
+      const read = handle.read.bind(handle);
+      handle.read = async function (...readArgs) {
+        const result = await read(...readArgs);
+        if (!mutated && result.bytesRead && readArgs[3] === 0) {
+          mutated = true;
+          mutate();
+        }
+        return result;
+      };
+    }
+    return handle;
+  };
+  return { get mutated() { return mutated; }, restore() { fs.promises.open = originalOpen; } };
 }
 
 function fakeProvider(generate, classifyError) {
@@ -113,6 +139,81 @@ test('worker starts every claimed batch item before waiting for a slow Provider 
     releaseFirst();
     assert.deepEqual(await execution, { claimed: 2, succeeded: 2, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 });
     assert.equal(getGenerationRun(fixture.db, fixture.run.value.id).status, 'completed');
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('worker shares one verified reference buffer for concurrent items in the same run and releases it after Provider use', async () => {
+  const fixture = setupRun(2);
+  const originalOpen = fs.promises.open;
+  try {
+    const reference = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: largePng(), mediaType: 'image/png' });
+    attachManagedAssetsToAllItems(fixture, { referenceAssetIds: [reference.id] });
+    const referencePath = assetFilePath(fixture.initialized.paths, reference);
+    let sourceOpenCount = 0;
+    fs.promises.open = async function (openedPath, ...args) {
+      if (openedPath === referencePath && (args[0] & fs.constants.O_ACCMODE) === fs.constants.O_RDONLY) sourceOpenCount += 1;
+      return originalOpen.call(fs.promises, openedPath, ...args);
+    };
+    let calls = 0;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let bothStarted;
+    const started = new Promise((resolve) => { bothStarted = resolve; });
+    const buffers = [];
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-shared-media',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async (request) => {
+        calls += 1;
+        buffers.push(request.referenceAssets[0].bytes);
+        if (calls === 2) bothStarted();
+        await gate;
+        return { bytes: png, mediaType: 'image/png', externalRequestId: 'shared-' + calls };
+      }, () => ({ kind: 'unknown_outcome', code: 'unexpected', message: 'unexpected' })),
+      assetResolver: new StudioAssetResolver({ db: fixture.db, paths: fixture.initialized.paths }),
+      assetPersister: { persistGeneratedImage: async ({ result }) => ({ assetId: 'asset-' + result.externalRequestId, mediaType: result.mediaType, byteSize: result.bytes.length, contentHash: 'content-' + result.externalRequestId }) }
+    });
+    const execution = worker.processOnce(2);
+    await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error('concurrent Provider calls did not start')), 2000))]);
+    assert.equal(calls, 2);
+    assert.equal(sourceOpenCount, 1);
+    assert.equal(buffers[0], buffers[1]);
+    release();
+    assert.equal((await execution).succeeded, 2);
+    assert.deepEqual(fs.readdirSync(path.join(fixture.initialized.paths.cacheDir, 'staging')), []);
+  } finally {
+    fs.promises.open = originalOpen;
+    cleanup(fixture);
+  }
+});
+
+test('worker retains resolved media until an abort-ignoring Provider settles', async () => {
+  const fixture = setupRun();
+  try {
+    let releaseProvider;
+    let releaseCalls = 0;
+    const gate = new Promise((resolve) => { releaseProvider = resolve; });
+    const resolver = { resolve: async () => ({ assets: { referenceAssets: [{ assetId: 'asset-reference', mediaType: 'image/png', bytes: png }] }, release: () => { releaseCalls += 1; } }) };
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-media-lifetime',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => { await gate; return { bytes: png, mediaType: 'image/png' }; }, () => ({ kind: 'unknown_outcome', code: 'aborted', message: 'aborted' })),
+      assetResolver: resolver,
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('aborted request must not persist'); } },
+      leaseMs: 1000
+    });
+    const execution = worker.processOnce();
+    await new Promise((resolve) => setImmediate(resolve));
+    worker.shutdown();
+    assert.equal((await execution).unknown, 1);
+    assert.equal(releaseCalls, 0, 'media must remain retained while an abort-ignoring Provider can still consume it');
+    releaseProvider();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(releaseCalls, 1);
   } finally {
     cleanup(fixture);
   }
@@ -439,23 +540,13 @@ test('worker never calls the Provider after a same-size reference replacement be
 
 test('worker never calls the Provider when a mask is mutated in place during snapshotting', async () => {
   const fixture = setupRun();
-  const originalReadSync = fs.readSync;
+  let mutation;
   try {
     const original = largePng();
     const mask = importStudioAsset(fixture.db, fixture.initialized.paths, { studioId: fixture.initialized.manifest.studioId, bytes: original, mediaType: 'image/png' });
     attachManagedAssets(fixture, { maskAssetId: mask.id });
     const filePath = assetFilePath(fixture.initialized.paths, mask);
-    const identity = fs.statSync(filePath);
-    let mutated = false;
-    fs.readSync = function (...args) {
-      const read = originalReadSync.apply(fs, args);
-      const opened = fs.fstatSync(args[0]);
-      if (!mutated && args[4] === 0 && opened.dev === identity.dev && opened.ino === identity.ino) {
-        mutated = true;
-        fs.writeFileSync(filePath, sameSizeReplacement(original));
-      }
-      return read;
-    };
+    mutation = mutateAfterAsyncRead(filePath, () => fs.writeFileSync(filePath, sameSizeReplacement(original)));
     let providerCalls = 0;
     const worker = new GenerationWorker({
       db: fixture.db,
@@ -466,12 +557,12 @@ test('worker never calls the Provider when a mask is mutated in place during sna
       assetPersister: { persistGeneratedImage: async () => { throw new Error('rejected managed assets must not persist'); } }
     });
     assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 1, unknown: 0, cancelled: 0 });
-    assert.equal(mutated, true);
+    assert.equal(mutation.mutated, true);
     assert.equal(providerCalls, 0);
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].error.code, 'managed_asset_resolution_failed');
     assert.deepEqual(fs.readdirSync(path.join(fixture.initialized.paths.cacheDir, 'staging')), []);
   } finally {
-    fs.readSync = originalReadSync;
+    if (mutation) mutation.restore();
     cleanup(fixture);
   }
 });

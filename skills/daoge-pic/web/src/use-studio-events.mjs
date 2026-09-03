@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 
-const MAX_PENDING_EVENTS = 100;
+export const STUDIO_EVENT_BATCH_LIMIT = 100;
+const MAX_PENDING_EVENTS = STUDIO_EVENT_BATCH_LIMIT;
 const EVENT_BATCH_DELAY_MS = 160;
 
 export function studioCursorKey(studioId) {
@@ -9,16 +10,26 @@ export function studioCursorKey(studioId) {
 
 export function studioEventRefreshPlan(events = []) {
   const values = Array.isArray(events) ? events : [];
-  const global = values.some((event) => event?.entityType === 'project' || /^(project|task_type|style_kit|brand_kit|studio)\./.test(event?.eventType || '') || event?.eventType === 'asset.shared');
+  const global = values.some((event) => (event?.entityType === 'project' && event?.eventType !== 'project.selection_updated') || /^(?:task_type|style_kit|brand_kit|studio)\./.test(event?.eventType || ''));
   const detailEvent = (event) => ['task', 'creative_round', 'round', 'generation_run', 'run', 'run_item', 'asset', 'review'].includes(event?.entityType) || /^(task|round|run|run_item|asset|review)\./.test(event?.eventType || '');
   const planEvent = (event) => ['creative_round', 'round'].includes(event?.entityType) || /^(round|plan)\./.test(event?.eventType || '');
+  const assetEvent = (event) => ['asset', 'review'].includes(event?.entityType) || /^(asset|review)\./.test(event?.eventType || '') || ['run.items_updated', 'project.selection_updated'].includes(event?.eventType);
+  const contextEvent = (event) => ['task', 'creative_round', 'round', 'generation_run', 'run', 'run_item', 'delivery', 'delivery_batch'].includes(event?.entityType) || /^(task|round|run|run_item|delivery|delivery_batch)\./.test(event?.eventType || '');
+  const refreshSelection = values.some((event) => event?.eventType === 'project.selection_updated' || /^asset\.(reviewed|trashed|restored|restored_reused)$/.test(event?.eventType || ''));
+  const refreshSharedAssets = values.some((event) => /^asset\.(shared|unshared)_across_projects$/.test(event?.eventType || ''));
+  const refreshContext = global || values.some(contextEvent);
+  const refreshAssets = global || values.some(assetEvent);
   return {
     scope: global ? 'all' : 'context',
+    refreshContext,
+    refreshAssets,
+    refreshSelection,
+    refreshSharedAssets,
     taskOverview: values.some(detailEvent),
     creativeRecord: values.some(detailEvent),
     studioOverview: values.some(detailEvent),
     planVersions: values.some(planEvent),
-    maximumRefreshes: 1 + (values.some(detailEvent) ? 3 : 0) + (values.some(planEvent) ? 1 : 0)
+    maximumRefreshes: (refreshContext ? 1 : 0) + (refreshAssets ? 1 : 0) + (refreshSelection ? 1 : 0) + (refreshSharedAssets ? 1 : 0) + (values.some(detailEvent) ? 1 : 0)
   };
 }
 
@@ -192,5 +203,3 @@ export function useStudioEvents({ studioId, onEventBatch, onSnapshot, onConnecti
     return () => stream.dispose();
   }, [studioId]);
 }
-
-export const STUDIO_EVENT_BATCH_LIMIT = MAX_PENDING_EVENTS;

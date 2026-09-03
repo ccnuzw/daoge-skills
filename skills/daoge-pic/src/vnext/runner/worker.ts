@@ -1,9 +1,9 @@
 import { ImageProvider, ImageRequest, ImageResult, ProviderError } from '../providers/contracts';
 import { safeErrorSummary } from '../shared/safe-error';
 import { redactProviderText, sanitizeProviderImageResult, sanitizeProviderRequestId } from '../providers/response-sanitizer';
-import { ManagedAssetResolver } from '../media/asset-resolver';
+import { ManagedAssetResolver, ResolvedManagedAssets } from '../media/asset-resolver';
 import { InvalidCommandError } from '../domain/studio-commands';
-import { StudioDatabase } from '../studio/database';
+import { appendStudioEvent, StudioDatabase } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
 import { ClaimedRunItem, claimRunItems, getGenerationRun, getGenerationRunItem, markRunItemOutcomeUnknown, promoteDueRetryWaitItems, renewRunItemLease, settleTerminalGenerationRun, transitionRunItem } from './run-commands';
 import { retryDecision, RetryPolicy, DEFAULT_RETRY_POLICY } from './retry-policy';
@@ -105,8 +105,27 @@ export class GenerationWorker {
     const claimedItems = claimRunItems(this.db, { workerId: this.workerId, limit, leaseMs: this.leaseMs, now, providerSnapshot: { profileId: snapshot.profileId, configVersion: snapshot.configVersion } });
     const result: WorkerProcessResult = { claimed: claimedItems.length, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 };
     const affectedRuns = new Set(claimedItems.map((item) => item.runId));
+    const updatesByRun = new Map<string, { studioId: string; count: number }>();
+    let updateTimer: NodeJS.Timeout | null = null;
+    const flushUpdates = (): void => {
+      if (updateTimer) clearTimeout(updateTimer);
+      updateTimer = null;
+      for (const [runId, update] of updatesByRun) appendStudioEvent(this.db, { studioId: update.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.items_updated', payload: { count: update.count } });
+      updatesByRun.clear();
+    };
+    const recordUpdate = (item: ClaimedRunItem): void => {
+      const update = updatesByRun.get(item.runId) || { studioId: item.studioId, count: 0 };
+      update.count += 1;
+      updatesByRun.set(item.runId, update);
+      updateTimer ||= setTimeout(flushUpdates, 160);
+    };
     // A batch lease is a concurrency budget. Processing it serially can let later items expire while an earlier Provider call is still pending.
-    const outcomes = await Promise.allSettled(claimedItems.map((item) => this.processClaimedItem(item)));
+    const outcomes = await Promise.allSettled(claimedItems.map(async (item) => {
+      const outcome = await this.processClaimedItem(item);
+      recordUpdate(item);
+      return outcome;
+    }));
+    flushUpdates();
     for (const outcome of outcomes) if (outcome.status === 'fulfilled') result[outcome.value] += 1;
     for (const runId of affectedRuns) this.settleRun(runId);
     const failure = outcomes.find((outcome) => outcome.status === 'rejected');
@@ -116,7 +135,7 @@ export class GenerationWorker {
 
   private markUnknown(item: ClaimedRunItem, reason: string): 'unknown' {
     try {
-      markRunItemOutcomeUnknown(this.db, { itemId: item.id, requestId: item.requestId, reason, now: this.clock() });
+      markRunItemOutcomeUnknown(this.db, { itemId: item.id, requestId: item.requestId, reason, now: this.clock(), emitEvent: false });
       return 'unknown';
     } catch (error) {
       if (getGenerationRunItem(this.db, item.id)?.status === 'outcome_unknown') return 'unknown';
@@ -131,7 +150,7 @@ export class GenerationWorker {
     if (current.status === 'outcome_unknown') return 'unknown';
     if (current.status !== 'cancel_requested' || !safeToCancel) return this.markUnknown(item, current.status === 'cancel_requested' ? 'cancelled_request_uncertain' : 'lease_ownership_lost');
     try {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'cancelled' });
+      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'cancelled', emitEvent: false });
       return 'cancelled';
     } catch {
       return this.markUnknown(item, 'lease_ownership_lost');
@@ -140,7 +159,7 @@ export class GenerationWorker {
 
   private transitionAfterProvider(item: ClaimedRunItem, safeToCancel: boolean, input: Parameters<typeof transitionRunItem>[1]): ItemProcessingOutcome | null {
     try {
-      transitionRunItem(this.db, input);
+      transitionRunItem(this.db, { ...input, emitEvent: false });
       return null;
     } catch {
       const current = getGenerationRunItem(this.db, item.id);
@@ -156,12 +175,12 @@ export class GenerationWorker {
     const snapshotProfileId = String(run.providerSnapshot.profileId || '');
     const snapshotConfigVersion = Number(run.providerSnapshot.configVersion);
     if (snapshotProfileId !== this.providerConfig.profileId || snapshotConfigVersion !== this.providerConfig.configVersion) {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'provider_profile_version_mismatch' } });
+      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'provider_profile_version_mismatch' }, emitEvent: false });
       return 'blocked';
     }
 
     try {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'requesting' });
+      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'requesting', emitEvent: false });
     } catch (error) {
       const current = getGenerationRunItem(this.db, item.id);
       if (current?.status === 'cancelled') return 'cancelled';
@@ -170,9 +189,17 @@ export class GenerationWorker {
     }
     const controller = new AbortController();
     let request: ImageRequest;
+    let managedAssets: ResolvedManagedAssets | undefined;
+    let providerStarted = false;
+    let mediaReleased = false;
+    const releaseManagedAssets = (): void => {
+      if (mediaReleased) return;
+      mediaReleased = true;
+      managedAssets?.release();
+    };
     try {
-      const managedAssets = this.assetResolver ? this.assetResolver.resolve({ studioId: item.studioId, referenceAssetIds: item.promptPayload.referenceAssetIds, maskAssetId: item.promptPayload.maskAssetId }) : { referenceAssets: [], maskAsset: undefined };
-      request = { requestId: item.requestId, idempotencyKey: 'run-request-' + item.requestId, prompt: promptFromItem(item), output: outputFromItem(item), ...managedAssets };
+      managedAssets = this.assetResolver ? await this.assetResolver.resolve({ studioId: item.studioId, referenceAssetIds: item.promptPayload.referenceAssetIds, maskAssetId: item.promptPayload.maskAssetId }) : { assets: { referenceAssets: [], maskAsset: undefined }, release: () => undefined };
+      request = { requestId: item.requestId, idempotencyKey: 'run-request-' + item.requestId, prompt: promptFromItem(item), output: outputFromItem(item), ...managedAssets.assets };
     } catch {
       const transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'managed_asset_resolution_failed' } });
       return transition || 'blocked';
@@ -215,6 +242,8 @@ export class GenerationWorker {
         }
         return await this.provider.generate(request, { abortSignal: controller.signal });
       });
+      providerStarted = true;
+      void providerOperation.then(releaseManagedAssets, releaseManagedAssets);
       const providerOutcome = await Promise.race([tracked(providerOperation), monitorPromise]);
       if (providerOutcome.kind === 'cancel_requested') return this.settleCancellation(item, false);
       if (providerOutcome.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
@@ -267,6 +296,7 @@ export class GenerationWorker {
     } finally {
       this.activeShutdowns.delete(shutdown);
       clearInterval(renewTimer);
+      if (!providerStarted) releaseManagedAssets();
     }
   }
 

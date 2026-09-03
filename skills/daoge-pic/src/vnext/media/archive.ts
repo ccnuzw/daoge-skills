@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { Readable } from 'node:stream';
@@ -8,6 +9,11 @@ import { assertWorkspacePath, AssetBucket, ensureAssetBucket, ensureCacheDirecto
 
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024;
 const HASH_CHUNK_BYTES = 64 * 1024;
+const HASH_YIELD_BYTES = 256 * 1024;
+
+function nextTurn(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -59,7 +65,7 @@ export interface VerifiedManagedFile {
   contentHash: string;
   byteSize: number;
   descriptor: number;
-  createReadStream(highWaterMark?: number): Readable;
+  createReadStream(highWaterMark?: number, range?: { start: number; end: number }): Readable;
   close(): void;
 }
 
@@ -123,7 +129,7 @@ export function resolveManagedMediaPath(paths: StudioPaths, storedPath: string, 
   return absolute;
 }
 
-function createVerifiedHandle(descriptor: number, absolutePath: string, identity: { mediaType: string | null; contentHash: string; byteSize: number }): VerifiedManagedFile {
+function createVerifiedHandle(descriptor: number, absolutePath: string, identity: { mediaType: string | null; contentHash: string; byteSize: number }, closeDescriptor: () => void = () => fs.closeSync(descriptor)): VerifiedManagedFile {
   let closed = false;
   let streamCreated = false;
   let activeStream: Readable | undefined;
@@ -131,16 +137,24 @@ function createVerifiedHandle(descriptor: number, absolutePath: string, identity
     absolutePath,
     ...identity,
     descriptor,
-    createReadStream(highWaterMark = HASH_CHUNK_BYTES): Readable {
+    createReadStream(highWaterMark = HASH_CHUNK_BYTES, range?: { start: number; end: number }): Readable {
       if (closed) throw new MediaArchiveError('Managed media handle is closed.');
       if (streamCreated) throw new MediaArchiveError('Managed media handle already has a stream.');
-      let offset = 0;
+      if (identity.byteSize === 0) {
+        activeStream = Readable.from([]);
+        streamCreated = true;
+        return activeStream;
+      }
+      const start = range?.start ?? 0;
+      const end = range?.end ?? identity.byteSize - 1;
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end >= identity.byteSize) throw new MediaArchiveError('Managed media stream range is invalid.');
+      let offset = start;
       activeStream = new Readable({
         highWaterMark,
         read(size) {
-          if (offset >= identity.byteSize) return this.push(null);
+          if (offset > end) return this.push(null);
           try {
-            const bytes = Buffer.allocUnsafe(Math.min(Math.max(1, size), highWaterMark, identity.byteSize - offset));
+            const bytes = Buffer.allocUnsafe(Math.min(Math.max(1, size), highWaterMark, end - offset + 1));
             const read = fs.readSync(descriptor, bytes, 0, bytes.length, offset);
             if (!read) return this.destroy(new MediaArchiveError('Verified media snapshot ended before its expected byte size.'));
             offset += read;
@@ -158,7 +172,7 @@ function createVerifiedHandle(descriptor: number, absolutePath: string, identity
       closed = true;
       if (activeStream && !activeStream.destroyed) activeStream.destroy();
       try {
-        fs.closeSync(descriptor);
+        closeDescriptor();
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EBADF') throw error;
       }
@@ -215,6 +229,50 @@ export function openVerifiedManagedFile(filePath: string, expected: ManagedFileE
     return createVerifiedHandle(openDescriptor, path.resolve(filePath), identity);
   } catch (error) {
     if (descriptor !== undefined) fs.closeSync(descriptor);
+    throw error;
+  }
+}
+
+export async function openVerifiedManagedFileAsync(filePath: string, expected: ManagedFileExpectation = {}): Promise<VerifiedManagedFile> {
+  let source: fs.promises.FileHandle | undefined;
+  try {
+    const pathIdentity = await fsp.lstat(filePath);
+    if (!pathIdentity.isFile() || pathIdentity.isSymbolicLink()) throw new MediaArchiveError('Managed media must be a regular file.');
+    source = await fsp.open(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const before = await source.stat();
+    if (!before.isFile() || before.dev !== pathIdentity.dev || before.ino !== pathIdentity.ino) throw new MediaArchiveError('Managed media changed while it was opened.');
+    const minByteSize = expected.minByteSize ?? 0;
+    const maxByteSize = expected.maxByteSize ?? Number.MAX_SAFE_INTEGER;
+    if (!Number.isSafeInteger(before.size) || before.size < minByteSize || before.size > maxByteSize) throw new MediaArchiveError('Managed media size is invalid.');
+    const hash = createHash('sha256');
+    const chunk = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
+    const header = Buffer.alloc(16);
+    let headerBytes = 0;
+    let offset = 0;
+    while (offset < before.size) {
+      const { bytesRead } = await source.read(chunk, 0, Math.min(chunk.length, before.size - offset), offset);
+      if (!bytesRead) break;
+      if (headerBytes < header.length) {
+        const copied = Math.min(bytesRead, header.length - headerBytes);
+        chunk.copy(header, headerBytes, 0, copied);
+        headerBytes += copied;
+      }
+      hash.update(chunk.subarray(0, bytesRead));
+      offset += bytesRead;
+      if (offset % HASH_YIELD_BYTES === 0) await nextTurn();
+    }
+    const after = await source.stat();
+    let afterPath: fs.Stats;
+    try { afterPath = await fsp.lstat(filePath); }
+    catch { throw new MediaArchiveError('Managed media path changed during verification.'); }
+    if (!afterPath.isFile() || afterPath.isSymbolicLink() || afterPath.dev !== before.dev || afterPath.ino !== before.ino || offset !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new MediaArchiveError('Managed media changed during verification.');
+    const identity = { mediaType: detectedMediaType(header.subarray(0, headerBytes)), contentHash: hash.digest('hex'), byteSize: before.size };
+    assertExpectedIdentity(identity, expected);
+    const reader = source;
+    source = undefined;
+    return createVerifiedHandle(reader.fd, path.resolve(filePath), identity, () => { void reader.close().catch(() => undefined); });
+  } catch (error) {
+    if (source) await source.close();
     throw error;
   }
 }
@@ -295,9 +353,109 @@ export function createVerifiedSnapshot(filePath: string, expected: ManagedFileEx
   }
 }
 
+/**
+ * Creates the same unlink-on-open snapshot as createVerifiedSnapshot without
+ * monopolizing the event loop while hashing or copying large media files.
+ */
+export async function createVerifiedSnapshotAsync(filePath: string, expected: ManagedFileExpectation = {}, options: VerifiedSnapshotOptions = {}): Promise<VerifiedManagedFile> {
+  let source: fs.promises.FileHandle | undefined;
+  let snapshot: fs.promises.FileHandle | undefined;
+  let snapshotReader: fs.promises.FileHandle | undefined;
+  let snapshotPath = '';
+  try {
+    const sourcePathIdentity = await fsp.lstat(filePath);
+    if (!sourcePathIdentity.isFile() || sourcePathIdentity.isSymbolicLink()) throw new MediaArchiveError('Managed media must be a regular file.');
+    source = await fsp.open(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const before = await source.stat();
+    if (!before.isFile() || before.dev !== sourcePathIdentity.dev || before.ino !== sourcePathIdentity.ino) throw new MediaArchiveError('Managed media changed while it was opened.');
+    const minByteSize = expected.minByteSize ?? 0;
+    const maxByteSize = expected.maxByteSize ?? Number.MAX_SAFE_INTEGER;
+    if (!Number.isSafeInteger(before.size) || before.size < minByteSize || before.size > maxByteSize) throw new MediaArchiveError('Managed media size is invalid.');
+
+    const requestedDirectory = options.snapshotDirectory || path.join(os.tmpdir(), 'daoge-pic-verified-snapshots');
+    await fsp.mkdir(requestedDirectory, { recursive: true, mode: 0o700 });
+    const requestedStat = await fsp.lstat(requestedDirectory);
+    if (!requestedStat.isDirectory() || requestedStat.isSymbolicLink()) throw new MediaArchiveError('Verified snapshot directory is invalid.');
+    const snapshotDirectory = await fsp.realpath(requestedDirectory);
+    snapshotPath = path.join(snapshotDirectory, createId('snapshot') + '.part');
+    snapshot = await fsp.open(snapshotPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
+
+    const hash = createHash('sha256');
+    const chunk = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
+    const header = Buffer.alloc(16);
+    let headerBytes = 0;
+    let offset = 0;
+    let bytesSinceYield = 0;
+    while (offset < before.size) {
+      const { bytesRead } = await source.read(chunk, 0, Math.min(chunk.length, before.size - offset), offset);
+      if (!bytesRead) break;
+      if (headerBytes < header.length) {
+        const copied = Math.min(bytesRead, header.length - headerBytes);
+        chunk.copy(header, headerBytes, 0, copied);
+        headerBytes += copied;
+      }
+      hash.update(chunk.subarray(0, bytesRead));
+      let written = 0;
+      while (written < bytesRead) {
+        const result = await snapshot.write(chunk, written, bytesRead - written, offset + written);
+        if (!result.bytesWritten) throw new MediaArchiveError('Verified snapshot could not be written completely.');
+        written += result.bytesWritten;
+      }
+      offset += bytesRead;
+      bytesSinceYield += bytesRead;
+      if (bytesSinceYield >= HASH_YIELD_BYTES) {
+        bytesSinceYield = 0;
+        await nextTurn();
+      }
+    }
+    const after = await source.stat();
+    let afterPath: fs.Stats;
+    try { afterPath = await fsp.lstat(filePath); }
+    catch { throw new MediaArchiveError('Managed media path changed while its verified snapshot was created.'); }
+    if (!afterPath.isFile() || afterPath.isSymbolicLink() || afterPath.dev !== before.dev || afterPath.ino !== before.ino) throw new MediaArchiveError('Managed media path changed while its verified snapshot was created.');
+    if (offset !== before.size || after.size !== before.size || after.dev !== before.dev || after.ino !== before.ino || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new MediaArchiveError('Managed media changed while its verified snapshot was created.');
+    const identity = { mediaType: detectedMediaType(header.subarray(0, headerBytes)), contentHash: hash.digest('hex'), byteSize: offset };
+    assertExpectedIdentity(identity, expected);
+    const stagedIdentity = await snapshot.stat();
+    if (!stagedIdentity.isFile() || stagedIdentity.size !== identity.byteSize) throw new MediaArchiveError('Verified snapshot was not written completely.');
+    await snapshot.sync();
+    await snapshot.close();
+    snapshot = undefined;
+    await fsp.chmod(snapshotPath, 0o400);
+    const snapshotPathIdentity = await fsp.lstat(snapshotPath);
+    snapshotReader = await fsp.open(snapshotPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const opened = await snapshotReader.stat();
+    if (!opened.isFile() || opened.dev !== snapshotPathIdentity.dev || opened.ino !== snapshotPathIdentity.ino) throw new MediaArchiveError('Managed media changed while it was opened.');
+    await fsp.unlink(snapshotPath);
+    const reader = snapshotReader;
+    const descriptor = reader.fd;
+    snapshotReader = undefined;
+    await source.close();
+    source = undefined;
+    return createVerifiedHandle(descriptor, snapshotPath, identity, () => { void reader.close().catch(() => undefined); });
+  } catch (error) {
+    if (source) await source.close();
+    if (snapshot) await snapshot.close();
+    if (snapshotReader) await snapshotReader.close();
+    if (snapshotPath) await fsp.rm(snapshotPath, { force: true });
+    throw error;
+  }
+}
+
 export function inspectManagedImageFile(paths: StudioPaths, storedPath: string, root: ManagedMediaRoot, expected?: { mediaType: string; contentHash: string; byteSize: number }): ManagedFileIdentity {
   const absolutePath = resolveManagedMediaPath(paths, storedPath, root);
   const opened = openVerifiedManagedFile(absolutePath, { ...expected, minByteSize: 1, maxByteSize: MAX_IMAGE_BYTES, requireImage: true });
+  try {
+    if (!opened.mediaType) throw new MediaArchiveError('Managed media content type is unsupported.');
+    return { absolutePath: opened.absolutePath, mediaType: opened.mediaType, contentHash: opened.contentHash, byteSize: opened.byteSize };
+  } finally {
+    opened.close();
+  }
+}
+
+export async function inspectManagedImageFileAsync(paths: StudioPaths, storedPath: string, root: ManagedMediaRoot, expected?: { mediaType: string; contentHash: string; byteSize: number }): Promise<ManagedFileIdentity> {
+  const absolutePath = resolveManagedMediaPath(paths, storedPath, root);
+  const opened = await openVerifiedManagedFileAsync(absolutePath, { ...expected, minByteSize: 1, maxByteSize: MAX_IMAGE_BYTES, requireImage: true });
   try {
     if (!opened.mediaType) throw new MediaArchiveError('Managed media content type is unsupported.');
     return { absolutePath: opened.absolutePath, mediaType: opened.mediaType, contentHash: opened.contentHash, byteSize: opened.byteSize };
@@ -321,6 +479,60 @@ export function stageImage(paths: StudioPaths, bytes: Buffer, declaredMediaType?
   const stagingPath = path.join(stagingDir, createId('media') + '.part');
   fs.writeFileSync(stagingPath, bytes, { flag: 'wx' });
   return { stagingPath, ...validated };
+}
+
+export async function stageImageStream(paths: StudioPaths, source: AsyncIterable<Buffer | Uint8Array | string> | Iterable<Buffer | Uint8Array | string>, declaredMediaType?: string, options: { deferValidation?: boolean } = {}): Promise<StagedImage> {
+  const stagingDir = ensureCacheDirectory(paths, 'staging');
+  const stagingPath = path.join(stagingDir, createId('media') + '.part');
+  let handle: fs.promises.FileHandle | undefined;
+  try {
+    handle = await fsp.open(stagingPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
+    const hash = createHash('sha256');
+    const header = Buffer.alloc(16);
+    let headerBytes = 0;
+    let byteSize = 0;
+    for await (const value of source) {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      if (!chunk.length) continue;
+      byteSize += chunk.length;
+      if (byteSize > MAX_IMAGE_BYTES) throw new MediaValidationError('Image exceeds the 100 MB Studio limit.');
+      if (headerBytes < header.length) {
+        const copied = Math.min(chunk.length, header.length - headerBytes);
+        chunk.copy(header, headerBytes, 0, copied);
+        headerBytes += copied;
+      }
+      let consumed = 0;
+      while (consumed < chunk.length) {
+        const part = chunk.subarray(consumed, Math.min(chunk.length, consumed + HASH_YIELD_BYTES));
+        hash.update(part);
+        let written = 0;
+        while (written < part.length) {
+          const result = await handle.write(part, written, part.length - written, byteSize - chunk.length + consumed + written);
+          if (!result.bytesWritten) throw new MediaArchiveError('Staged media could not be written completely.');
+          written += result.bytesWritten;
+        }
+        consumed += part.length;
+        if (consumed < chunk.length) await nextTurn();
+      }
+    }
+    if (!byteSize) throw new MediaValidationError('Image data is required.');
+    const mediaType = detectedMediaType(header.subarray(0, headerBytes));
+    if (!options.deferValidation && !mediaType) throw new MediaValidationError('Only PNG, JPEG, WebP, and GIF images can be imported.');
+    if (!options.deferValidation && declaredMediaType && declaredMediaType !== mediaType) throw new MediaValidationError('Declared image type does not match file content.');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    return { stagingPath, mediaType: mediaType || '', contentHash: hash.digest('hex'), byteSize };
+  } catch (error) {
+    if (handle) await handle.close();
+    await fsp.rm(stagingPath, { force: true });
+    throw error;
+  }
+}
+
+export function stageImageBytesAsync(paths: StudioPaths, bytes: Buffer, declaredMediaType?: string): Promise<StagedImage> {
+  if (!Buffer.isBuffer(bytes)) throw new MediaValidationError('Image data is required.');
+  return stageImageStream(paths, [bytes], declaredMediaType);
 }
 
 export function plannedArchivePath(paths: StudioPaths, input: { assetId: string; bucket: AssetBucket; mediaType: string }): { absolutePath: string; storagePath: string } {
@@ -347,6 +559,27 @@ export function archiveStagedImage(paths: StudioPaths, staged: StagedImage, inpu
     throw error;
   }
   const archived = inspectManagedImageFile(paths, planned.storagePath, input.bucket, { mediaType: validated.mediaType, contentHash: validated.contentHash, byteSize: validated.byteSize });
+  return { absolutePath: archived.absolutePath, storagePath: planned.storagePath, mediaType: archived.mediaType, contentHash: archived.contentHash, byteSize: archived.byteSize };
+}
+
+export async function archiveStagedImageAsync(paths: StudioPaths, staged: StagedImage, input: { assetId: string; bucket: AssetBucket }): Promise<ArchivedImage> {
+  const assetId = assertSafeAssetId(input.assetId);
+  const stagedStoragePath = workspaceStoragePath(paths, staged.stagingPath);
+  const validated = await inspectManagedImageFileAsync(paths, stagedStoragePath, 'staging', { mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize });
+  const planned = plannedArchivePath(paths, { assetId, bucket: input.bucket, mediaType: validated.mediaType });
+  try {
+    await fsp.lstat(planned.absolutePath);
+    throw new MediaArchiveError('An asset already exists at the target path.');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  try {
+    await fsp.rename(validated.absolutePath, planned.absolutePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EXDEV') throw new MediaArchiveError('Studio staging and asset storage must be on the same filesystem for atomic media writes.');
+    throw error;
+  }
+  const archived = await inspectManagedImageFileAsync(paths, planned.storagePath, input.bucket, { mediaType: validated.mediaType, contentHash: validated.contentHash, byteSize: validated.byteSize });
   return { absolutePath: archived.absolutePath, storagePath: planned.storagePath, mediaType: archived.mediaType, contentHash: archived.contentHash, byteSize: archived.byteSize };
 }
 

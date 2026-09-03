@@ -1,10 +1,10 @@
 import path from 'node:path';
 import type { GeneratedAssetPersister, PersistedImageResult } from '../runner/worker';
-import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
+import { StudioDatabase, withTransaction } from '../studio/database';
 import { StudioPaths } from '../studio/workspace';
 import { createId } from '../shared/ids';
 import { restoreAsset } from '../domain/assets';
-import { archiveStagedImage, discardStagedImage, plannedArchivePath, stageImage } from './archive';
+import { archiveStagedImageAsync, discardStagedImage, plannedArchivePath, stageImageBytesAsync } from './archive';
 
 export interface StudioGeneratedAssetPersisterOptions {
   db: StudioDatabase;
@@ -32,14 +32,13 @@ export class StudioGeneratedAssetPersister implements GeneratedAssetPersister {
   }
 
   async persistGeneratedImage(input: { runId: string; itemId: string; result: { bytes: Buffer; mediaType: string; externalRequestId?: string; revisedPrompt?: string; safeMeta?: Record<string, unknown> } }): Promise<PersistedImageResult> {
-    const staged = stageImage(this.paths, input.result.bytes, input.result.mediaType);
+    const staged = await stageImageBytesAsync(this.paths, input.result.bytes, input.result.mediaType);
     const matches = this.db.prepare('SELECT id, media_type, byte_size, content_hash, deleted_at FROM assets WHERE studio_id = ? AND content_hash = ? ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, created_at').all(this.studioId, staged.contentHash) as unknown as StoredAsset[];
     const active = matches.find((asset) => !asset.deleted_at);
     if (active) {
       discardStagedImage(staged);
       withTransaction(this.db, () => {
         this.linkOutput(active.id, input.runId, input.itemId);
-        appendStudioEvent(this.db, { studioId: this.studioId, entityType: 'asset', entityId: active.id, eventType: 'asset.reused', payload: { source: 'generated', runId: input.runId, runItemId: input.itemId } });
       });
       return { assetId: active.id, mediaType: active.media_type, byteSize: active.byte_size, contentHash: active.content_hash };
     }
@@ -49,7 +48,6 @@ export class StudioGeneratedAssetPersister implements GeneratedAssetPersister {
       const restored = restoreAsset(this.db, this.paths, { studioId: this.studioId, assetId: deleted.id });
       withTransaction(this.db, () => {
         this.linkOutput(restored.id, input.runId, input.itemId);
-        appendStudioEvent(this.db, { studioId: this.studioId, entityType: 'asset', entityId: restored.id, eventType: 'asset.generated_restored_reused', payload: { runId: input.runId, runItemId: input.itemId } });
       });
       return { assetId: restored.id, mediaType: restored.mediaType, byteSize: restored.byteSize, contentHash: restored.contentHash };
     }
@@ -68,11 +66,10 @@ export class StudioGeneratedAssetPersister implements GeneratedAssetPersister {
     withTransaction(this.db, () => {
       this.db.prepare('INSERT INTO media_commit_journal (asset_id, studio_id, staged_path, final_storage_path, media_type, content_hash, byte_size, source_json, run_id, run_item_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(assetId, this.studioId, stagedPath, planned.storagePath, staged.mediaType, staged.contentHash, staged.byteSize, JSON.stringify(source), input.runId, input.itemId, timestamp);
     });
-    const archived = archiveStagedImage(this.paths, staged, { assetId, bucket: 'generated' });
+    const archived = await archiveStagedImageAsync(this.paths, staged, { assetId, bucket: 'generated' });
     withTransaction(this.db, () => {
       this.db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(assetId, this.studioId, 'generated', archived.mediaType, archived.storagePath, archived.contentHash, archived.byteSize, JSON.stringify(source), timestamp, timestamp);
       this.linkOutput(assetId, input.runId, input.itemId);
-      appendStudioEvent(this.db, { studioId: this.studioId, entityType: 'asset', entityId: assetId, eventType: 'asset.generated', payload: { runId: input.runId, runItemId: input.itemId, mediaType: archived.mediaType, byteSize: archived.byteSize } });
       this.db.prepare('DELETE FROM media_commit_journal WHERE asset_id = ?').run(assetId);
     });
     return { assetId, mediaType: archived.mediaType, byteSize: archived.byteSize, contentHash: archived.contentHash };

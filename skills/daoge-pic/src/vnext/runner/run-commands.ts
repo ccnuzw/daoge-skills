@@ -1,7 +1,7 @@
 import { createId, nowIso } from '../shared/ids';
 import { assertRunItemTransition, assertRunTransition, RunItemStatus, RunStatus } from '../domain/states';
 import { CommandReceipt, executeIdempotent, InvalidCommandError, StudioNotFoundError, VersionConflictError } from '../domain/studio-commands';
-import { ImageOperation } from '../providers/contracts';
+import { ImageOperation, MAX_IMAGE_REQUEST_MEDIA_BYTES } from '../providers/contracts';
 import { PreflightPlan, PreflightResult, preflightGenerationPlan } from './preflight';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig, SafeProviderStatus } from '../studio/provider-config';
@@ -174,16 +174,24 @@ function resolveRunItemInStudio(db: StudioDatabase, studioId: string, itemId: st
 
 function validateManagedAssets(db: StudioDatabase, studioId: string, result: PreflightResult): PreflightResult {
   const accepted = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+  let aggregateBytes = 0;
   for (const assetId of result.normalizedPlan.referenceAssetIds || []) {
     const asset = getStudioAsset(db, studioId, assetId);
     if (!asset || asset.deletedAt) result.issues.push({ code: 'missing_reference_asset', message: '引用素材不存在、已删除或不属于当前 Studio。', field: 'referenceAssetIds' });
-    else if (!accepted.includes(asset.mediaType)) result.issues.push({ code: 'reference_media_unsupported', message: '引用素材不是支持的图像格式。', field: 'referenceAssetIds' });
+    else {
+      aggregateBytes += asset.byteSize;
+      if (!accepted.includes(asset.mediaType)) result.issues.push({ code: 'reference_media_unsupported', message: '引用素材不是支持的图像格式。', field: 'referenceAssetIds' });
+    }
   }
   if (result.normalizedPlan.maskAssetId) {
     const mask = getStudioAsset(db, studioId, result.normalizedPlan.maskAssetId);
     if (!mask || mask.deletedAt) result.issues.push({ code: 'missing_mask_asset', message: '遮罩素材不存在、已删除或不属于当前 Studio。', field: 'maskAssetId' });
-    else if (mask.mediaType !== 'image/png') result.issues.push({ code: 'mask_must_be_png', message: '遮罩必须是 PNG 格式的受管理资产。', field: 'maskAssetId' });
+    else {
+      aggregateBytes += mask.byteSize;
+      if (mask.mediaType !== 'image/png') result.issues.push({ code: 'mask_must_be_png', message: '遮罩必须是 PNG 格式的受管理资产。', field: 'maskAssetId' });
+    }
   }
+  if (!Number.isSafeInteger(aggregateBytes) || aggregateBytes > MAX_IMAGE_REQUEST_MEDIA_BYTES) result.issues.push({ code: 'reference_media_too_large', message: '参考素材和遮罩合计不能超过 64 MiB。', field: 'referenceAssetIds' });
   return { ...result, valid: result.issues.length === 0 };
 }
 
@@ -248,7 +256,7 @@ export function queueGenerationRun(db: StudioDatabase, input: { studioId: string
     if (!preview || preview.round_id !== round.id || preview.plan_version !== round.plan_version || !storedSnapshotMatches(preview.provider_snapshot_json, snapshot) || !storedSnapshotMatches(preview.plan_snapshot_json, preflight.normalizedPlan)) throw new InvalidCommandError('Dry-run evidence is stale. Re-run preflight before queueing.');
     const id = createId('run');
     const timestamp = nowIso();
-    db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, execution_concurrency, concurrency_source, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)').run(id, round.id, 'queued', JSON.stringify(snapshot), JSON.stringify(preflight.normalizedPlan), preview.execution_concurrency, preview.concurrency_source, timestamp, timestamp);
+    db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, provider_profile_id, provider_config_version, execution_concurrency, concurrency_source, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)').run(id, round.id, 'queued', JSON.stringify(snapshot), JSON.stringify(preflight.normalizedPlan), snapshot.profileId, snapshot.configVersion, preview.execution_concurrency, preview.concurrency_source, timestamp, timestamp);
     const insertItem = db.prepare('INSERT INTO run_items (id, run_id, sequence, status, prompt_payload_json, request_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     for (let sequence = 1; sequence <= preflight.normalizedPlan.itemCount; sequence += 1) {
       const itemId = createId('item');
@@ -276,6 +284,7 @@ export function getGenerationRunItem(db: StudioDatabase, itemId: string): Genera
 }
 
 const ACTIVE_RUN_ITEM_STATUSES: readonly RunItemStatus[] = ['pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested'];
+const MAINTENANCE_BATCH_LIMIT = 1000;
 
 export function settleTerminalGenerationRun(db: StudioDatabase, runId: string, now = new Date()): RunStatus | null {
   const run = getGenerationRun(db, runId);
@@ -296,7 +305,7 @@ export function settleTerminalGenerationRun(db: StudioDatabase, runId: string, n
 }
 
 export function reconcileTerminalRuns(db: StudioDatabase, now = new Date()): number {
-  const rows = db.prepare("SELECT r.id FROM generation_runs r WHERE r.status IN ('running', 'pausing') AND EXISTS (SELECT 1 FROM run_items i WHERE i.run_id = r.id) AND NOT EXISTS (SELECT 1 FROM run_items i WHERE i.run_id = r.id AND i.status IN ('pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested')) ORDER BY r.created_at").all() as Array<{ id: string }> ;
+  const rows = db.prepare("SELECT r.id FROM generation_runs r WHERE r.status IN ('running', 'pausing') AND EXISTS (SELECT 1 FROM run_items i WHERE i.run_id = r.id) AND NOT EXISTS (SELECT 1 FROM run_items i WHERE i.run_id = r.id AND i.status IN ('pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested')) ORDER BY r.created_at LIMIT ?").all(MAINTENANCE_BATCH_LIMIT) as Array<{ id: string }> ;
   let reconciled = 0;
   for (const row of rows) if (settleTerminalGenerationRun(db, row.id, now)) reconciled += 1;
   return reconciled;
@@ -305,15 +314,20 @@ export function reconcileTerminalRuns(db: StudioDatabase, now = new Date()): num
 export function promoteDueRetryWaitItems(db: StudioDatabase, now = new Date()): number {
   return withTransaction(db, () => {
     const timestamp = now.toISOString();
-    const rows = db.prepare("SELECT i.id, i.run_id, i.sequence, i.status, i.retry_at, p.studio_id FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'retry_wait' AND i.retry_at IS NOT NULL AND i.retry_at <= ? AND r.status IN ('queued', 'running') ORDER BY r.created_at, i.sequence").all(timestamp) as Array<{ id: string; run_id: string; sequence: number; status: RunItemStatus; retry_at: string; studio_id: string }>;
+    const rows = db.prepare("SELECT i.id, i.run_id, i.sequence, i.status, i.retry_at, p.studio_id FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'retry_wait' AND i.retry_at IS NOT NULL AND i.retry_at <= ? AND r.status IN ('queued', 'running') ORDER BY r.created_at, i.sequence LIMIT ?").all(timestamp, MAINTENANCE_BATCH_LIMIT) as Array<{ id: string; run_id: string; sequence: number; status: RunItemStatus; retry_at: string; studio_id: string }>;
     let promoted = 0;
+    const promote = db.prepare("UPDATE run_items SET status = 'pending', retry_at = NULL, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'retry_wait' AND retry_at IS NOT NULL AND retry_at <= ?");
+    const promotedByRun = new Map<string, { studioId: string; count: number }>();
     for (const row of rows) {
       assertRunItemTransition(row.status, 'pending');
-      const changed = db.prepare("UPDATE run_items SET status = 'pending', retry_at = NULL, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'retry_wait' AND retry_at IS NOT NULL AND retry_at <= ?").run(timestamp, row.id, timestamp);
+      const changed = promote.run(timestamp, row.id, timestamp);
       if (Number(changed.changes) !== 1) continue;
-      appendStudioEvent(db, { studioId: row.studio_id, entityType: 'run_item', entityId: row.id, eventType: 'run_item.retry_ready', payload: { runId: row.run_id, sequence: row.sequence, retryAt: row.retry_at } });
+      const update = promotedByRun.get(row.run_id) || { studioId: row.studio_id, count: 0 };
+      update.count += 1;
+      promotedByRun.set(row.run_id, update);
       promoted += 1;
     }
+    for (const [runId, update] of promotedByRun) appendStudioEvent(db, { studioId: update.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.retries_ready', payload: { count: update.count } });
     return promoted;
   });
 }
@@ -330,7 +344,7 @@ export function claimRunItems(db: StudioDatabase, input: { workerId: string; lim
   const nowValue = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
   return withTransaction(db, () => {
-    const providerFilter = input.providerSnapshot ? " AND json_extract(r.provider_snapshot_json, '$.profileId') = ? AND json_extract(r.provider_snapshot_json, '$.configVersion') = ?" : '';
+    const providerFilter = input.providerSnapshot ? ' AND r.provider_profile_id = ? AND r.provider_config_version = ?' : '';
     const sql = "WITH ranked_candidates AS (SELECT i.id, i.run_id, i.sequence, i.status, i.prompt_payload_json, i.request_id, i.lease_token, i.lease_expires_at, i.attempts, i.retry_at, r.status AS run_status, r.execution_concurrency, r.round_id, r.created_at AS run_created_at, p.studio_id, ROW_NUMBER() OVER (PARTITION BY i.run_id ORDER BY i.sequence) AS candidate_rank FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'pending' AND r.status IN ('queued', 'running') AND (i.retry_at IS NULL OR i.retry_at <= ?)" + providerFilter + ") SELECT * FROM ranked_candidates WHERE candidate_rank <= MIN(execution_concurrency, ?) ORDER BY run_created_at, run_id, sequence";
     const params: Array<string | number> = [nowValue];
     if (input.providerSnapshot) params.push(input.providerSnapshot.profileId, input.providerSnapshot.configVersion);
@@ -353,7 +367,10 @@ export function claimRunItems(db: StudioDatabase, input: { workerId: string; lim
     }
     const queueIndex = new Map<string, number>();
     const activatedRuns = new Set<string>();
+    const leasedByRun = new Map<string, { studioId: string; count: number }>();
     const claimed: ClaimedRunItem[] = [];
+    const startRun = db.prepare('UPDATE generation_runs SET status = ?, worker_id = ?, started_at = COALESCE(started_at, ?), version = version + 1, updated_at = ? WHERE id = ? AND status = ?');
+    const leaseItem = db.prepare('UPDATE run_items SET status = ?, lease_token = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND status = ?');
     let claimedInPass = true;
     while (claimed.length < availableGlobalSlots && claimedInPass) {
       claimedInPass = false;
@@ -367,19 +384,22 @@ export function claimRunItems(db: StudioDatabase, input: { workerId: string; lim
         if (inFlight >= runConcurrencyLimit(row.execution_concurrency, input.limit)) continue;
         if (row.run_status === 'queued' && !activatedRuns.has(runId)) {
           assertRunTransition('queued', 'running');
-          const started = db.prepare('UPDATE generation_runs SET status = ?, worker_id = ?, started_at = COALESCE(started_at, ?), version = version + 1, updated_at = ? WHERE id = ? AND status = ?').run('running', workerId, nowValue, nowValue, row.run_id, 'queued');
+          const started = startRun.run('running', workerId, nowValue, nowValue, row.run_id, 'queued');
           if (Number(started.changes) === 1) appendStudioEvent(db, { studioId: row.studio_id, entityType: 'generation_run', entityId: row.run_id, eventType: 'run.started', payload: { workerId } });
           activatedRuns.add(runId);
         }
         const leaseToken = createId('lease');
-        const updated = db.prepare('UPDATE run_items SET status = ?, lease_token = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ? WHERE id = ? AND status = ?').run('leased', leaseToken, expiresAt, nowValue, row.id, 'pending');
+        const updated = leaseItem.run('leased', leaseToken, expiresAt, nowValue, row.id, 'pending');
         if (Number(updated.changes) !== 1) continue;
         inFlightByRun.set(runId, inFlight + 1);
         claimedInPass = true;
-        appendStudioEvent(db, { studioId: row.studio_id, entityType: 'run_item', entityId: row.id, eventType: 'run_item.leased', payload: { runId: row.run_id, workerId } });
+        const leased = leasedByRun.get(row.run_id) || { studioId: row.studio_id, count: 0 };
+        leased.count += 1;
+        leasedByRun.set(row.run_id, leased);
         claimed.push({ ...runItemFromRow({ ...row, status: 'leased', lease_token: leaseToken, lease_expires_at: expiresAt, attempts: row.attempts + 1 }), promptPayload: parseObject(row.prompt_payload_json), studioId: row.studio_id });
       }
     }
+    for (const [runId, leased] of leasedByRun) appendStudioEvent(db, { studioId: leased.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.items_leased', payload: { workerId, count: leased.count } });
     return claimed;
   });
 }
@@ -400,7 +420,7 @@ export function renewRunItemLease(db: StudioDatabase, input: { itemId: string; l
   });
 }
 
-export function markRunItemOutcomeUnknown(db: StudioDatabase, input: { itemId: string; requestId: string; reason: string; now?: Date }): GenerationRunItem {
+export function markRunItemOutcomeUnknown(db: StudioDatabase, input: { itemId: string; requestId: string; reason: string; now?: Date; emitEvent?: boolean }): GenerationRunItem {
   return withTransaction(db, () => {
     const itemId = requireValue(input.itemId, 'itemId');
     const requestId = requireValue(input.requestId, 'requestId');
@@ -415,12 +435,12 @@ export function markRunItemOutcomeUnknown(db: StudioDatabase, input: { itemId: s
     const error = { kind: 'unknown_outcome', code: reason };
     db.prepare("UPDATE run_items SET status = 'outcome_unknown', retry_at = NULL, error_json = ?, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?").run(JSON.stringify(error), timestamp, row.id);
     const studio = db.prepare('SELECT p.studio_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ?').get(row.run_id) as { studio_id: string } | undefined;
-    if (studio) appendStudioEvent(db, { studioId: studio.studio_id, entityType: 'run_item', entityId: row.id, eventType: 'run_item.outcome_unknown', payload: { runId: row.run_id, sequence: row.sequence, reason } });
+    if (studio && input.emitEvent !== false) appendStudioEvent(db, { studioId: studio.studio_id, entityType: 'run_item', entityId: row.id, eventType: 'run_item.outcome_unknown', payload: { runId: row.run_id, sequence: row.sequence, reason } });
     return { ...runItemFromRow(row), status: 'outcome_unknown', retryAt: null, leaseToken: null, leaseExpiresAt: null, error: safeErrorDetail(error) };
   });
 }
 
-export function transitionRunItem(db: StudioDatabase, input: { itemId: string; leaseToken: string; status: RunItemStatus; retryAt?: string; error?: Record<string, unknown>; result?: Record<string, unknown>; now?: Date }): GenerationRunItem {
+export function transitionRunItem(db: StudioDatabase, input: { itemId: string; leaseToken: string; status: RunItemStatus; retryAt?: string; error?: Record<string, unknown>; result?: Record<string, unknown>; now?: Date; emitEvent?: boolean }): GenerationRunItem {
   return withTransaction(db, () => {
     const now = input.now || new Date();
     const row = db.prepare('SELECT id, run_id, sequence, status, prompt_payload_json, request_id, lease_token, lease_expires_at, attempts, retry_at FROM run_items WHERE id = ?').get(requireValue(input.itemId, 'itemId')) as StoredRunItem | undefined;
@@ -442,7 +462,7 @@ export function transitionRunItem(db: StudioDatabase, input: { itemId: string; l
       row.id
     );
     const studio = db.prepare('SELECT p.studio_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ?').get(row.run_id) as { studio_id: string } | undefined;
-    if (studio) appendStudioEvent(db, { studioId: studio.studio_id, entityType: 'run_item', entityId: row.id, eventType: 'run_item.' + input.status, payload: { runId: row.run_id, sequence: row.sequence } });
+    if (studio && input.emitEvent !== false) appendStudioEvent(db, { studioId: studio.studio_id, entityType: 'run_item', entityId: row.id, eventType: 'run_item.' + input.status, payload: { runId: row.run_id, sequence: row.sequence } });
     return { ...runItemFromRow(row), status: input.status, retryAt: input.retryAt || null, leaseToken: clearLease ? null : row.lease_token, leaseExpiresAt: clearLease ? null : row.lease_expires_at };
   });
 }
@@ -473,8 +493,8 @@ export function resolveUnknownRunItems(db: StudioDatabase, input: { studioId: st
     for (const item of items) {
       const changed = db.prepare("UPDATE run_items SET status = 'failed', error_json = ?, updated_at = ? WHERE id = ? AND run_id = ? AND status = 'outcome_unknown'").run(JSON.stringify({ code: 'user_resolved_unknown_outcome' }), timestamp, item.id, runId);
       if (Number(changed.changes) !== 1) throw new VersionConflictError('Run item changed while its unknown outcome was being resolved.');
-      appendStudioEvent(db, { studioId: input.studioId, entityType: 'run_item', entityId: item.id, eventType: 'run_item.outcome_resolved', payload: { runId, resolution: 'failed' } });
     }
+    appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.outcomes_resolved', payload: { count: items.length } });
     return { runId, resolvedItemIds: ids };
   }, input);
 }
@@ -500,13 +520,12 @@ export function retryGenerationRunItems(db: StudioDatabase, input: { studioId: s
     const timestamp = nowIso();
     for (const item of candidates) {
       db.prepare("UPDATE run_items SET status = 'pending', request_id = ?, retry_at = NULL, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?").run(createId('request'), timestamp, item.id);
-      appendStudioEvent(db, { studioId: input.studioId, entityType: 'run_item', entityId: item.id, eventType: 'run_item.retried', payload: { runId } });
     }
     if (['paused', 'partial', 'failed'].includes(run.status)) {
       assertRunTransition(run.status, 'queued');
       db.prepare("UPDATE generation_runs SET status = 'queued', worker_id = NULL, version = version + 1, updated_at = ? WHERE id = ?").run(timestamp, runId);
       appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.queued', payload: { retried: true, itemCount: candidates.length } });
-    }
+    } else appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.items_retried', payload: { itemCount: candidates.length } });
     return { runId, retriedItemIds: candidates.map((item) => item.id) };
   }, input);
 }
@@ -541,13 +560,11 @@ export function cancelGenerationRun(db: StudioDatabase, input: { studioId: strin
       if (active) {
         const changed = db.prepare("UPDATE run_items SET status = 'cancel_requested', updated_at = ? WHERE id = ? AND status = ?").run(timestamp, item.id, item.status);
         if (Number(changed.changes) !== 1) throw new VersionConflictError('Run item changed while cancellation was being requested.');
-        appendStudioEvent(db, { studioId: input.studioId, entityType: 'run_item', entityId: item.id, eventType: 'run_item.cancel_requested', payload: { runId: run.id, sequence: item.sequence } });
         continue;
       }
       assertRunItemTransition('cancel_requested', 'cancelled');
       const changed = db.prepare("UPDATE run_items SET status = 'cancelled', retry_at = NULL, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = ?").run(timestamp, item.id, item.status);
       if (Number(changed.changes) !== 1) throw new VersionConflictError('Run item changed while cancellation was being completed.');
-      appendStudioEvent(db, { studioId: input.studioId, entityType: 'run_item', entityId: item.id, eventType: 'run_item.cancelled', payload: { runId: run.id, sequence: item.sequence } });
     }
     const changed = db.prepare('UPDATE generation_runs SET status = ?, version = version + 1, updated_at = ? WHERE id = ? AND status = ? AND version = ?').run('cancelled', timestamp, run.id, run.status, run.version);
     if (Number(changed.changes) !== 1) throw new VersionConflictError('Generation run changed while cancellation was being completed.');
@@ -559,17 +576,23 @@ export function cancelGenerationRun(db: StudioDatabase, input: { studioId: strin
 export function recoverExpiredLeases(db: StudioDatabase, now = new Date()): number {
   return withTransaction(db, () => {
     const timestamp = now.toISOString();
-    const rows = db.prepare("SELECT i.id, i.run_id, i.sequence, i.status, p.studio_id FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status IN ('leased', 'requesting', 'receiving', 'persisting', 'cancel_requested') AND i.lease_expires_at IS NOT NULL AND i.lease_expires_at <= ? ORDER BY r.created_at, i.sequence").all(timestamp) as Array<{ id: string; run_id: string; sequence: number; status: RunItemStatus; studio_id: string }>;
+    const rows = db.prepare("SELECT i.id, i.run_id, i.sequence, i.status, p.studio_id FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status IN ('leased', 'requesting', 'receiving', 'persisting', 'cancel_requested') AND i.lease_expires_at IS NOT NULL AND i.lease_expires_at <= ? ORDER BY r.created_at, i.sequence LIMIT ?").all(timestamp, MAINTENANCE_BATCH_LIMIT) as Array<{ id: string; run_id: string; sequence: number; status: RunItemStatus; studio_id: string }>;
     let recovered = 0;
+    const recover = db.prepare('UPDATE run_items SET status = ?, retry_at = NULL, error_json = ?, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?');
+    const recoveredByRun = new Map<string, { studioId: string; count: number; unknown: number }>();
     for (const row of rows) {
       const nextStatus: RunItemStatus = row.status === 'leased' ? 'pending' : 'outcome_unknown';
       assertRunItemTransition(row.status, nextStatus);
       const error = nextStatus === 'outcome_unknown' ? JSON.stringify({ kind: 'unknown_outcome', code: 'lease_expired' }) : null;
-      const changed = db.prepare('UPDATE run_items SET status = ?, retry_at = NULL, error_json = ?, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?').run(nextStatus, error, timestamp, row.id, row.status, timestamp);
+      const changed = recover.run(nextStatus, error, timestamp, row.id, row.status, timestamp);
       if (Number(changed.changes) !== 1) continue;
-      appendStudioEvent(db, { studioId: row.studio_id, entityType: 'run_item', entityId: row.id, eventType: nextStatus === 'pending' ? 'run_item.lease_recovered' : 'run_item.outcome_unknown', payload: { runId: row.run_id, sequence: row.sequence, reason: 'lease_expired' } });
+      const update = recoveredByRun.get(row.run_id) || { studioId: row.studio_id, count: 0, unknown: 0 };
+      update.count += 1;
+      if (nextStatus === 'outcome_unknown') update.unknown += 1;
+      recoveredByRun.set(row.run_id, update);
       recovered += 1;
     }
+    for (const [runId, update] of recoveredByRun) appendStudioEvent(db, { studioId: update.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.leases_recovered', payload: { count: update.count, unknown: update.unknown } });
     return recovered;
   });
 }
@@ -579,6 +602,8 @@ export function markRunsResumePending(db: StudioDatabase): number {
     const rows = db.prepare("SELECT r.id, r.status, r.version, p.studio_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.status IN ('queued', 'running', 'pausing')").all() as Array<{ id: string; status: RunStatus; version: number; studio_id: string }>;
     const timestamp = nowIso();
     let marked = 0;
+    const recoverItem = db.prepare('UPDATE run_items SET status = ?, retry_at = NULL, error_json = ?, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = ?');
+    const markRun = db.prepare('UPDATE generation_runs SET status = ?, worker_id = NULL, version = version + 1, updated_at = ? WHERE id = ? AND status = ? AND version = ?');
     for (const row of rows) {
       assertRunTransition(row.status, 'resume_pending');
       const items = db.prepare("SELECT id, sequence, status FROM run_items WHERE run_id = ? AND status IN ('leased', 'requesting', 'receiving', 'persisting', 'cancel_requested') ORDER BY sequence").all(row.id) as Array<{ id: string; sequence: number; status: RunItemStatus }>;
@@ -586,13 +611,12 @@ export function markRunsResumePending(db: StudioDatabase): number {
         const nextStatus: RunItemStatus = item.status === 'leased' ? 'pending' : 'outcome_unknown';
         assertRunItemTransition(item.status, nextStatus);
         const error = nextStatus === 'outcome_unknown' ? JSON.stringify({ kind: 'unknown_outcome', code: 'startup_recovery' }) : null;
-        const changed = db.prepare('UPDATE run_items SET status = ?, retry_at = NULL, error_json = ?, lease_token = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = ?').run(nextStatus, error, timestamp, item.id, item.status);
+        const changed = recoverItem.run(nextStatus, error, timestamp, item.id, item.status);
         if (Number(changed.changes) !== 1) throw new VersionConflictError('Run item changed during startup recovery.');
-        appendStudioEvent(db, { studioId: row.studio_id, entityType: 'run_item', entityId: item.id, eventType: nextStatus === 'pending' ? 'run_item.lease_recovered' : 'run_item.outcome_unknown', payload: { runId: row.id, sequence: item.sequence, reason: 'startup_recovery' } });
       }
-      const changed = db.prepare('UPDATE generation_runs SET status = ?, worker_id = NULL, version = version + 1, updated_at = ? WHERE id = ? AND status = ? AND version = ?').run('resume_pending', timestamp, row.id, row.status, row.version);
+      const changed = markRun.run('resume_pending', timestamp, row.id, row.status, row.version);
       if (Number(changed.changes) !== 1) throw new VersionConflictError('Generation run changed during startup recovery.');
-      appendStudioEvent(db, { studioId: row.studio_id, entityType: 'generation_run', entityId: row.id, eventType: 'run.resume_pending', payload: {} });
+      appendStudioEvent(db, { studioId: row.studio_id, entityType: 'generation_run', entityId: row.id, eventType: 'run.resume_pending', payload: { recoveredItemCount: items.length } });
       marked += 1;
     }
     return marked;

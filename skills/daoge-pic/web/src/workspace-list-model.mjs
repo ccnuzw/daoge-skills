@@ -2,22 +2,37 @@ export const PROJECT_PAGE_SIZE = 12;
 export const TASK_OVERVIEW_PAGE_SIZE = 8;
 export const TASK_PAGE_SIZE = 12;
 
+function searchableText(values) {
+  return values.map((value) => String(value || '').toLocaleLowerCase('zh-CN')).join('\n');
+}
+
+export function createProjectSearchIndex(projects) {
+  return projects.map((project) => ({ project, searchable: searchableText([project.name, project.description]) }));
+}
+
+export function createTaskSearchIndex(tasks) {
+  return tasks.map((task) => ({ task, searchable: searchableText([task.name]) }));
+}
+
+export function filterProjectIndex(index, query, status) {
+  const needle = String(query || '').trim().toLocaleLowerCase('zh-CN');
+  return index.filter(({ project }) => status === 'all' || project.status === status).filter(({ searchable }) => !needle || searchable.includes(needle)).map(({ project }) => project);
+}
+
+export function filterTaskIndex(index, query, status) {
+  const needle = String(query || '').trim().toLocaleLowerCase('zh-CN');
+  return index.filter(({ task }) => {
+    if (status === 'open') return !['completed', 'archived'].includes(task.status);
+    return status === 'all' || task.status === status;
+  }).filter(({ searchable }) => !needle || searchable.includes(needle)).map(({ task }) => task);
+}
 
 export function filterProjects(projects, query, status) {
-  const needle = String(query || '').trim().toLocaleLowerCase('zh-CN');
-  return projects.filter((project) => {
-    if (status !== 'all' && project.status !== status) return false;
-    return !needle || [project.name, project.description].some((value) => String(value || '').toLocaleLowerCase('zh-CN').includes(needle));
-  });
+  return filterProjectIndex(createProjectSearchIndex(projects), query, status);
 }
 
 export function filterTasks(tasks, query, status) {
-  const needle = String(query || '').trim().toLocaleLowerCase('zh-CN');
-  return tasks.filter((task) => {
-    if (status === 'open' && ['completed', 'archived'].includes(task.status)) return false;
-    if (status !== 'all' && status !== 'open' && task.status !== status) return false;
-    return !needle || String(task.name || '').toLocaleLowerCase('zh-CN').includes(needle);
-  });
+  return filterTaskIndex(createTaskSearchIndex(tasks), query, status);
 }
 
 export function paginateWorkspaceItems(items, requestedPage, pageSize) {

@@ -50,6 +50,15 @@ test('project visual selection persists as scoped Studio asset relations', async
 
     const listed = await json(started, '/api/projects/' + projectAId + '/selection');
     assert.deepEqual(listed.body.data.selection.assets.map((item) => item.id).sort(), [asset.id, secondAsset.id].sort());
+    const eventCursor = started.service.db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM events').get().id;
+    const cleared = await json(started, '/api/projects/' + projectAId + '/selection/batch', { method: 'POST', key: 'selection-batch-clear', body: { assetIds: [asset.id, secondAsset.id], selected: false } });
+    assert.equal(cleared.status, 200);
+    assert.deepEqual(cleared.body.data.selection.assets, []);
+    assert.equal(started.service.db.prepare("SELECT COUNT(*) AS total FROM events WHERE id > ? AND event_type = 'project.selection_updated'").get(eventCursor).total, 1);
+    const selectedBatch = await json(started, '/api/projects/' + projectAId + '/selection/batch', { method: 'POST', key: 'selection-batch-add', body: { assetIds: [asset.id, secondAsset.id], selected: true, keepAssetIds: [asset.id, secondAsset.id] } });
+    assert.equal(selectedBatch.status, 200);
+    assert.deepEqual(selectedBatch.body.data.selection.assets.map((item) => item.id).sort(), [asset.id, secondAsset.id].sort());
+    assert.equal(started.service.db.prepare("SELECT COUNT(*) AS total FROM review_decisions WHERE asset_id IN (?, ?) AND decision = 'keep'").get(asset.id, secondAsset.id).total, 2);
     await json(started, '/api/assets/' + asset.id + '/trash', { method: 'POST', key: 'selection-trash', body: {} });
     const hidden = await json(started, '/api/projects/' + projectAId + '/selection');
     assert.deepEqual(hidden.body.data.selection.assets.map((item) => item.id), [secondAsset.id]);

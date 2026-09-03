@@ -5,32 +5,12 @@ import { executeIdempotent, InvalidCommandError, StudioNotFoundError } from './s
 export interface TaskType { id: string; studioId: string | null; name: string; source: 'official' | 'user'; definition: Record<string, unknown>; }
 export interface CreativeKit { id: string; studioId: string; name: string; definition: Record<string, unknown>; assetIds: string[]; }
 
-const OFFICIAL_TASK_TYPES: Array<{ id: string; name: string; definition: Record<string, unknown> }> = [
-  { id: 'portrait-kv', name: '人物主视觉', definition: { summary: '头像、人物海报、品牌人物封面。', fields: ['subject', 'wardrobe', 'expression', 'setting', 'composition', 'identity_constraints'] } },
-  { id: 'ecommerce-product', name: '电商商品图', definition: { summary: '商品主图、详情页和卖点视觉。', fields: ['product', 'platform', 'selling_points', 'background', 'angle', 'text_safe_area'] } },
-  { id: 'brand-packaging', name: '品牌包装图', definition: { summary: '包装概念、瓶盒展示和品牌资产板。', fields: ['brand', 'package_type', 'materials', 'usage_scene', 'brand_constraints'] } },
-  { id: 'cinematic-storyboard', name: '电影分镜', definition: { summary: '短片、剧情或广告镜头序列。', fields: ['story', 'shot_list', 'camera_language', 'continuity', 'aspect_ratio'] } },
-  { id: 'campaign-poster', name: '品牌海报', definition: { summary: '新品 KV、横幅和竖版封面。', fields: ['campaign', 'headline_safe_area', 'hero_subject', 'cta_area', 'brand_constraints'] } },
-  { id: 'ui-mockup-board', name: '界面视觉板', definition: { summary: '产品界面、卡片、设备场景和概念稿。', fields: ['product_flow', 'device', 'information_hierarchy', 'visual_system'] } },
-  { id: 'academic-figure-board', name: '学术图板', definition: { summary: '机制图、论文概览和科研海报。', fields: ['topic', 'claims', 'diagram_structure', 'label_policy', 'evidence_constraints'] } },
-  { id: 'type-layout-poster', name: '排版海报', definition: { summary: '双语排版、强标题区和编辑视觉。', fields: ['copy', 'language', 'hierarchy', 'safe_area', 'typography_constraints'] } }
-];
-
 function object(value: string): Record<string, unknown> { try { const parsed = JSON.parse(value) as unknown; return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}; } catch { return {}; } }
 function ensureStudio(db: StudioDatabase, studioId: string): void { if (!db.prepare('SELECT 1 FROM studios WHERE id = ?').get(studioId)) throw new StudioNotFoundError('Studio not found: ' + studioId); }
 function requireText(value: string, label: string): string { const text = String(value || '').trim(); if (!text) throw new InvalidCommandError(label + ' is required.'); return text; }
 
-export function seedOfficialTaskTypes(db: StudioDatabase): void {
-  withTransaction(db, () => {
-    const timestamp = nowIso();
-    const statement = db.prepare('INSERT INTO task_types (id, studio_id, name, definition_json, source, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET studio_id = NULL, name = excluded.name, definition_json = excluded.definition_json, source = excluded.source, updated_at = excluded.updated_at');
-    for (const type of OFFICIAL_TASK_TYPES) statement.run(type.id, type.name, JSON.stringify(type.definition), 'official', timestamp, timestamp);
-  });
-}
-
 export function listTaskTypes(db: StudioDatabase, studioId: string): TaskType[] {
   ensureStudio(db, studioId);
-  seedOfficialTaskTypes(db);
   return (db.prepare("SELECT id, studio_id, name, source, definition_json FROM task_types WHERE source = 'official' OR (source = 'user' AND studio_id = ?) ORDER BY source, name").all(studioId) as Array<{ id: string; studio_id: string | null; name: string; source: TaskType['source']; definition_json: string }>).map((row) => ({ id: row.id, studioId: row.studio_id, name: row.name, source: row.source, definition: object(row.definition_json) }));
 }
 
@@ -65,7 +45,13 @@ function replaceKitAssets(db: StudioDatabase, kit: 'style_kit' | 'brand_kit', ki
 
 function listKits(db: StudioDatabase, studioId: string, table: 'style_kits' | 'brand_kits'): CreativeKit[] {
   ensureStudio(db, studioId);
-  return (db.prepare('SELECT id, studio_id, name, definition_json FROM ' + table + ' WHERE studio_id = ? ORDER BY updated_at DESC').all(studioId) as Array<{ id: string; studio_id: string; name: string; definition_json: string }>).map((row) => kitRow(row, db));
+  const rows = db.prepare('SELECT id, studio_id, name, definition_json FROM ' + table + ' WHERE studio_id = ? ORDER BY updated_at DESC').all(studioId) as Array<{ id: string; studio_id: string; name: string; definition_json: string }>;
+  if (!rows.length) return [];
+  const targetType = table === 'style_kits' ? 'style_kit' : 'brand_kit';
+  const relations = db.prepare("SELECT target_id, asset_id FROM asset_relations WHERE target_type = ? AND relation_type = 'reference_for' AND target_id IN (" + rows.map(() => '?').join(',') + ') ORDER BY target_id, created_at').all(targetType, ...rows.map((row) => row.id)) as Array<{ target_id: string; asset_id: string }>;
+  const assetsByKit = new Map<string, string[]>();
+  for (const relation of relations) { const assets = assetsByKit.get(relation.target_id) || []; assets.push(relation.asset_id); assetsByKit.set(relation.target_id, assets); }
+  return rows.map((row) => ({ id: row.id, studioId: row.studio_id, name: row.name, definition: object(row.definition_json), assetIds: assetsByKit.get(row.id) || [] }));
 }
 
 function createKit(db: StudioDatabase, input: { studioId: string; name: string; definition: Record<string, unknown>; assetIds?: string[]; idempotencyKey: string; table: 'style_kits' | 'brand_kits'; targetType: 'style_kit' | 'brand_kit' }): CreativeKit {

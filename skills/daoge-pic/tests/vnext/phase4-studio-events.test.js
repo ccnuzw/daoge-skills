@@ -114,14 +114,18 @@ test('overflow refresh commits the observed cursor, closes the old stream, and r
 });
 
 test('event refresh classification stays bounded and includes plan invalidation', async () => {
-  const { studioEventRefreshPlan } = await import('../../web/src/use-studio-events.mjs');
+  const { STUDIO_EVENT_BATCH_LIMIT, studioEventRefreshPlan } = await import('../../web/src/use-studio-events.mjs');
+  assert.equal(STUDIO_EVENT_BATCH_LIMIT, 100);
   const plan = studioEventRefreshPlan([
     { entityType: 'project', eventType: 'project.updated' },
     { entityType: 'creative_round', eventType: 'plan.confirmed' },
     { entityType: 'run_item', eventType: 'run_item.retry_wait' },
     ...Array.from({ length: 200 }, () => ({ entityType: 'asset', eventType: 'asset.reviewed' }))
   ]);
-  assert.deepEqual(plan, { scope: 'all', taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, maximumRefreshes: 5 });
+  assert.deepEqual(plan, { scope: 'all', refreshContext: true, refreshAssets: true, refreshSelection: true, refreshSharedAssets: false, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, maximumRefreshes: 4 });
+  assert.deepEqual(studioEventRefreshPlan([{ entityType: 'asset', eventType: 'asset.shared_across_projects' }]), { scope: 'context', refreshContext: false, refreshAssets: true, refreshSelection: false, refreshSharedAssets: true, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: false, maximumRefreshes: 3 });
+  assert.equal(studioEventRefreshPlan([{ entityType: 'delivery', eventType: 'delivery.exported' }]).refreshContext, true);
+  assert.equal(studioEventRefreshPlan([{ entityType: 'project', eventType: 'project.updated' }]).scope, 'all');
 });
 
 test('opening a recovered SSE connection clears only connectionError, not requestError', async () => {

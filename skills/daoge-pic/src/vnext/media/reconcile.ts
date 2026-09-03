@@ -1,9 +1,10 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { createId } from '../shared/ids';
 import { recoverAssetMediaOperations } from '../domain/assets';
-import { archiveStagedImage, inspectManagedImageFile, plannedArchivePath, resolveManagedMediaPath } from './archive';
+import { archiveStagedImage, inspectManagedImageFile, inspectManagedImageFileAsync, plannedArchivePath, resolveManagedMediaPath } from './archive';
 import { assertWorkspacePath, AssetBucket, ensureAssetBucket, StudioPaths } from '../studio/workspace';
 
 const MAX_RECONCILE_ENTRIES = 10_000;
@@ -162,5 +163,65 @@ export function reconcileManagedMedia(db: StudioDatabase, paths: StudioPaths, st
       for (const asset of missing) appendStudioEvent(db, { studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.media_missing', payload: {} });
     });
   }
+  return { quarantinedOrphans, missingRows: missing.length };
+}
+
+export async function reconcileManagedMediaAsync(db: StudioDatabase, paths: StudioPaths, studioId: string): Promise<MediaReconciliationResult> {
+  recoverAssetMediaOperations(db, paths, studioId);
+  const rows = db.prepare('SELECT id, kind, storage_path, media_type, content_hash, byte_size, deleted_at FROM assets WHERE studio_id = ?').all(studioId) as unknown as StoredAsset[];
+  const tracked = new Set(rows.map((row) => row.storage_path));
+  for (const pending of db.prepare('SELECT final_storage_path FROM media_commit_journal WHERE studio_id = ?').all(studioId) as Array<{ final_storage_path: string }>) tracked.add(pending.final_storage_path);
+  for (const pending of db.prepare('SELECT source_path, target_path FROM asset_media_operations WHERE studio_id = ?').all(studioId) as Array<{ source_path: string; target_path: string }>) {
+    tracked.add(pending.source_path);
+    tracked.add(pending.target_path);
+  }
+
+  const missing: StoredAsset[] = [];
+  for (const row of rows) {
+    if (missingAlreadyRecorded(db, studioId, row.id)) continue;
+    try {
+      await inspectManagedImageFileAsync(paths, row.storage_path, assetBucket(row), { mediaType: row.media_type, contentHash: row.content_hash, byteSize: row.byte_size });
+    } catch {
+      missing.push(row);
+    }
+  }
+
+  let quarantinedOrphans = 0;
+  let visited = 0;
+  let limitReached = false;
+  const walk = async (directory: string, bucket: AssetBucket, depth: number): Promise<void> => {
+    if (limitReached) return;
+    if (depth > MAX_RECONCILE_DEPTH) { limitReached = true; return; }
+    let entries: fs.Dirent[];
+    try { entries = await fsp.readdir(directory, { withFileTypes: true }); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    for (const entry of entries) {
+      visited += 1;
+      if (visited > MAX_RECONCILE_ENTRIES) { limitReached = true; return; }
+      const source = path.join(directory, entry.name);
+      const stat = await fsp.lstat(source);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        await walk(source, bucket, depth + 1);
+        if (!(await fsp.readdir(source)).length) await fsp.rmdir(source);
+      } else if (!tracked.has(normalizedRelative(paths, source))) {
+        quarantineOrphan(paths, source, entry.name);
+        quarantinedOrphans += 1;
+        appendStudioEvent(db, { studioId, entityType: 'media', entityId: createId('orphan'), eventType: 'media.orphan_quarantined', payload: { bucket, kind: stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? 'file' : 'other' } });
+      }
+      if (visited % 100 === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  };
+  const assetRootExists = assertWorkspacePath(paths, paths.assetRoot, { requireDirectory: true });
+  if (assetRootExists) {
+    for (const bucket of ['imports', 'generated', 'exports'] as AssetBucket[]) {
+      const bucketPath = path.join(paths.assetRoot, bucket);
+      if (assertWorkspacePath(paths, bucketPath, { requireDirectory: true })) await walk(bucketPath, bucket, 0);
+    }
+  }
+  if (limitReached) appendStudioEvent(db, { studioId, entityType: 'media', entityId: 'managed-media', eventType: 'media.reconcile_limit_reached', payload: { maxEntries: MAX_RECONCILE_ENTRIES, maxDepth: MAX_RECONCILE_DEPTH } });
+  if (missing.length) withTransaction(db, () => { for (const asset of missing) appendStudioEvent(db, { studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.media_missing', payload: {} }); });
   return { quarantinedOrphans, missingRows: missing.length };
 }

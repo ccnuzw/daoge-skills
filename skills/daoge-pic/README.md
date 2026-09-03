@@ -2,18 +2,18 @@
 
 DAOGE Pic 是面向智能体会话的本地图像创作管理平台。会话负责澄清、规划、确认和汇报；本地 Studio Workbench 负责查看项目上下文、Generation History（生成历史）、运行、资产、选择、复核和交付。
 
-> **版本状态**：当前稳定正式版本为 [`5.8.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0)，源码、Skill 契约与固定 GitHub Release 制品使用同一版本。
+> **版本状态**：当前稳定正式版本为 [`5.9.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.0)，源码、Skill 契约与固定 GitHub Release 制品使用同一版本。
 
 vNext 是一次不兼容替换，不读取或迁移旧 `task_spec.json`、`prepare` / `execute` / `ingest` 命令、旧静态工作区、`results.html`、旧目录状态或旧运行记录。
 
 ## 安装版本
 
-安装稳定正式版 `5.8.0` 时，使用 `daoge-pic-v5.8.0` GitHub Release 中的不可变 `.tgz` 制品，避免默认分支后续变化影响安装内容。下列 `npm install` 直接安装 GitHub 资产，不表示包已发布到 npm registry；安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 `daoge-pic` Skill，两步缺一不可。
+安装稳定正式版 `5.9.0` 时，使用 `daoge-pic-v5.9.0` GitHub Release 中的不可变 `.tgz` 制品，避免默认分支后续变化影响安装内容。下列 `npm install` 直接安装 GitHub 资产，不表示包已发布到 npm registry；安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 `daoge-pic` Skill，两步缺一不可。
 
 在项目根目录执行：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.8.0/daoge-pic-5.8.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.9.0/daoge-pic-5.9.0.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
@@ -26,7 +26,7 @@ npx daoge open --workspace /absolute/workspace
 需要全局安装稳定版时，安装同一个 GitHub Release `.tgz`，再由 Node 标准库调用 `npm root -g` 定位已安装包并注册到当前用户的 Codex Skill 目录：
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.8.0/daoge-pic-5.8.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.9.0/daoge-pic-5.9.0.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
@@ -162,4 +162,4 @@ Workbench 用于项目/任务/轮次导航、Generation History、SSE 实时状�
 
 Workbench 不提供自然语言对话，不绕过会话确认，不显示 Provider 密钥，不接受任意绝对文件路径，也不把浏览器状态、目录或 SSE 当业务事实源。
 
-受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.8.0 发布验证与历次稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。
+受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.9.0 发布验证与 5.8.0 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。

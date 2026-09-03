@@ -48,6 +48,29 @@ test('preflight rejects unconfigured providers and unsupported edit plans withou
   assert.deepEqual(unsupported.issues.map((issue) => issue.code), ['missing_reference', 'reference_edit_unsupported']);
 });
 
+test('preflight rejects more than eight unique reference assets', () => {
+  const result = preflightGenerationPlan({ operation: 'edit', itemCount: 1, prompt: 'edit', referenceAssetIds: Array.from({ length: 9 }, (_, index) => 'asset-' + index) }, { providerId: 'openai-images', configured: true, missing: [], model: 'gpt-image-2', endpoint: 'https://images.example.test', capabilities: { generate: true, edit: true, referenceImage: true, mask: true } });
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((issue) => issue.code === 'reference_asset_limit_exceeded'));
+});
+
+test('preflight rejects reference and mask metadata above the aggregate byte budget', () => {
+  const fixture = configuredStudio();
+  try {
+    const timestamp = new Date().toISOString();
+    const insert = fixture.db.prepare("INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, 'import', 'image/png', ?, ?, ?, '{}', ?, ?)");
+    insert.run('large-reference-a', fixture.initialized.manifest.studioId, 'daoge-assets/imports/large-a.png', 'a'.repeat(64), 40 * 1024 * 1024, timestamp, timestamp);
+    insert.run('large-reference-b', fixture.initialized.manifest.studioId, 'daoge-assets/imports/large-b.png', 'b'.repeat(64), 40 * 1024 * 1024, timestamp, timestamp);
+    const confirmed = confirmedRound(fixture, { operation: 'edit', itemCount: 1, prompt: 'large reference budget', referenceAssetIds: ['large-reference-a', 'large-reference-b'] }, 'large-reference');
+    const result = preflightRound(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerStatus: fixture.status });
+    assert.equal(result.valid, false);
+    assert.ok(result.issues.some((issue) => issue.code === 'reference_media_too_large'));
+  } finally {
+    closeStudioDatabase(fixture.db);
+    cleanup(fixture.workspaceRoot);
+  }
+});
+
 
 
 test('preflight validates requested aspect ratios before a Provider call', () => {
@@ -118,10 +141,13 @@ test('fair candidate selection includes the eleventh 1000-item Run without idlin
       fixture.db.prepare('UPDATE generation_runs SET created_at = ? WHERE id = ?').run(new Date(Date.UTC(2026, 0, index + 1)).toISOString(), queued.value.id);
       runs.push(queued.value.id);
     }
+    const eventCursor = fixture.db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM events').get().id;
     const claimed = claimRunItems(fixture.db, { workerId: 'wide-fair-worker', limit: 1000, leaseMs: 30000, now: new Date('2026-02-01T00:00:00.000Z') });
     assert.equal(claimed.length, 1000, 'all available global slots must be used');
     assert.deepEqual(new Set(claimed.map((item) => item.runId)), new Set(runs));
     assert.ok(claimed.some((item) => item.runId === runs[10]), 'the newest large Run must not be excluded by a global candidate window');
+    assert.equal(fixture.db.prepare("SELECT COUNT(*) AS total FROM events WHERE id > ? AND entity_type = 'run_item'").get(eventCursor).total, 0, 'leasing must invalidate each Run instead of emitting one event per item');
+    assert.ok(fixture.db.prepare('SELECT COUNT(*) AS total FROM events WHERE id > ?').get(eventCursor).total <= runs.length * 2, 'a 1000-item claim must emit O(runs) events');
   } finally {
     closeStudioDatabase(fixture.db);
     cleanup(fixture.workspaceRoot);
@@ -290,7 +316,7 @@ test('promotes due automatic retries without changing their stable request ident
     assert.equal(ready.status, 'pending');
     assert.equal(ready.retryAt, null);
     assert.equal(ready.requestId, requestId);
-    assert.equal(fixture.db.prepare("SELECT COUNT(*) AS total FROM events WHERE entity_id = ? AND event_type = 'run_item.retry_ready'").get(claimed.id).total, 1);
+    assert.equal(fixture.db.prepare("SELECT COUNT(*) AS total FROM events WHERE entity_id = ? AND event_type = 'run.retries_ready'").get(queued.value.id).total, 1);
     const [reclaimed] = claimRunItems(fixture.db, { workerId: 'retry-due-worker', limit: 1, leaseMs: 30000, now: new Date('2026-01-01T00:00:10.000Z') });
     assert.equal(reclaimed.requestId, requestId);
     assert.equal(reclaimed.attempts, 2);

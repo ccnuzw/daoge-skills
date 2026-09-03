@@ -58,7 +58,7 @@ function assetDisplayContexts(db: StudioDatabase, assets: StudioAsset[]): Map<st
   const displays = new Map<string, JsonRecord>();
   if (!assets.length) return displays;
   const placeholders = assets.map(() => '?').join(',');
-  const rows = db.prepare("SELECT relation.asset_id, item.sequence AS item_sequence, round.purpose AS round_purpose, task.name AS task_name, (SELECT COUNT(*) FROM creative_rounds prior_round WHERE prior_round.task_id = round.task_id AND (prior_round.created_at < round.created_at OR (prior_round.created_at = round.created_at AND prior_round.id <= round.id))) AS round_sequence, (SELECT COUNT(*) FROM generation_runs prior WHERE prior.round_id = run.round_id AND (prior.created_at < run.created_at OR (prior.created_at = run.created_at AND prior.id <= run.id))) AS run_sequence FROM asset_relations relation JOIN run_items item ON item.id = relation.target_id JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE relation.asset_id IN (" + placeholders + ") AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item' ORDER BY run.created_at, run.id, item.sequence").all(...assets.map((asset) => asset.id)) as Array<{ asset_id: string; item_sequence: number; round_purpose: string; task_name: string; round_sequence: number; run_sequence: number }> ;
+  const rows = db.prepare("WITH round_positions AS (SELECT id, task_id, ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY created_at, id) AS round_sequence FROM creative_rounds), run_positions AS (SELECT id, round_id, ROW_NUMBER() OVER (PARTITION BY round_id ORDER BY created_at, id) AS run_sequence FROM generation_runs), displays AS (SELECT relation.asset_id, item.sequence AS item_sequence, round.purpose AS round_purpose, task.name AS task_name, round_positions.round_sequence, run_positions.run_sequence, ROW_NUMBER() OVER (PARTITION BY relation.asset_id ORDER BY run.created_at, run.id, item.sequence) AS position FROM asset_relations relation JOIN run_items item ON item.id = relation.target_id JOIN generation_runs run ON run.id = item.run_id JOIN run_positions ON run_positions.id = run.id JOIN creative_rounds round ON round.id = run.round_id JOIN round_positions ON round_positions.id = round.id JOIN creative_tasks task ON task.id = round.task_id WHERE relation.asset_id IN (" + placeholders + ") AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item') SELECT asset_id, item_sequence, round_purpose, task_name, round_sequence, run_sequence FROM displays WHERE position = 1 ORDER BY asset_id").all(...assets.map((asset) => asset.id)) as Array<{ asset_id: string; item_sequence: number; round_purpose: string; task_name: string; round_sequence: number; run_sequence: number }>;
   for (const row of rows) if (!displays.has(row.asset_id)) {
     const roundLabel = purposeLabel(row.round_purpose) + '第 ' + row.round_sequence + ' 轮';
     const label = row.task_name + ' · ' + roundLabel + ' · 运行 ' + row.run_sequence + ' · 第 ' + row.item_sequence + ' 张';
@@ -72,10 +72,10 @@ export function listAssetsWithReviewSummaries(db: StudioDatabase, assets: Studio
   if (!assets.length) return [];
   const reviews = new Map<string, JsonRecord>();
   const displays = assetDisplayContexts(db, assets);
-  for (const asset of assets) {
-    const row = projectId ? db.prepare("SELECT review.decision, review.created_at FROM review_decisions review LEFT JOIN creative_tasks task ON task.id = review.task_id LEFT JOIN creative_rounds round ON round.id = review.round_id LEFT JOIN creative_tasks round_task ON round_task.id = round.task_id WHERE review.asset_id = ? AND ((review.task_id IS NULL AND review.round_id IS NULL) OR task.project_id = ? OR round_task.project_id = ?) ORDER BY review.created_at DESC, review.rowid DESC LIMIT 1").get(asset.id, projectId, projectId) as { decision: string; created_at: string } | undefined : db.prepare('SELECT review.decision, review.created_at FROM review_decisions review WHERE review.asset_id = ? ORDER BY review.created_at DESC, review.rowid DESC LIMIT 1').get(asset.id) as { decision: string; created_at: string } | undefined;
-    if (row) reviews.set(asset.id, { decision: row.decision, createdAt: row.created_at });
-  }
+  const placeholders = assets.map(() => '?').join(',');
+  const scope = projectId ? " AND ((review.task_id IS NULL AND review.round_id IS NULL) OR task.project_id = ? OR round_task.project_id = ?)" : '';
+  const rows = db.prepare("WITH ranked_reviews AS (SELECT review.asset_id, review.decision, review.created_at, ROW_NUMBER() OVER (PARTITION BY review.asset_id ORDER BY review.created_at DESC, review.rowid DESC) AS position FROM review_decisions review LEFT JOIN creative_tasks task ON task.id = review.task_id LEFT JOIN creative_rounds round ON round.id = review.round_id LEFT JOIN creative_tasks round_task ON round_task.id = round.task_id WHERE review.asset_id IN (" + placeholders + ")" + scope + ') SELECT asset_id, decision, created_at FROM ranked_reviews WHERE position = 1').all(...assets.map((asset) => asset.id), ...(projectId ? [projectId, projectId] : [])) as Array<{ asset_id: string; decision: string; created_at: string }>;
+  for (const row of rows) reviews.set(row.asset_id, { decision: row.decision, createdAt: row.created_at });
   return assets.map((asset) => ({ ...asset, review: reviews.get(asset.id) || null, display: displays.get(asset.id) || { label: '素材', selectionText: '素材' } }));
 }
 
@@ -87,8 +87,29 @@ export function getTaskCreativeOverview(db: StudioDatabase, studioId: string, ta
 }
 
 function comparisonPlanSummary(value: JsonRecord): JsonRecord { const plan = safeValue(value) as JsonRecord; return { operation: plan.operation === 'edit' ? 'edit' : 'generate', itemCount: Number(plan.itemCount || 0) }; }
-function comparisonLineage(db: StudioDatabase, studioId: string, round: RoundRow): JsonRecord { const value = lineage(db, studioId, round); return { truncated: value.truncated, rounds: value.rounds.map((parent) => ({ id: parent.id, parentRoundId: parent.parentRoundId, purpose: parent.purpose, planVersion: parent.planVersion, status: parent.status, createdAt: parent.createdAt })) }; }
-function reviewedOutputs(db: StudioDatabase, studioId: string, projectId: string, items: JsonRecord[]): Map<string, JsonRecord> { const ids = [...new Set(items.flatMap((item) => Array.isArray(item.outputAssets) ? item.outputAssets.map((asset) => String((asset as JsonRecord).id || '')) : []).filter(Boolean))]; const assets = ids.map((id) => getStudioAsset(db, studioId, id)).filter((asset): asset is StudioAsset => Boolean(asset)); const summaries = listAssetsWithReviewSummaries(db, assets, projectId); return new Map(summaries.map((asset) => [asset.id, { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt, review: asset.review, display: asset.display }])); }
+function comparisonLineage(rounds: Map<string, RoundRow>, round: RoundRow): JsonRecord {
+  const lineageRounds: JsonRecord[] = [];
+  const visited = new Set<string>([round.id]);
+  let parentId = round.parent_round_id;
+  let truncated = false;
+  while (parentId && lineageRounds.length < 32) {
+    const parent = rounds.get(parentId);
+    if (!parent || visited.has(parentId) || parent.task_id !== round.task_id) { truncated = true; break; }
+    visited.add(parent.id);
+    lineageRounds.push(publicRound(parent));
+    parentId = parent.parent_round_id;
+  }
+  if (parentId && lineageRounds.length >= 32) truncated = true;
+  return { truncated, rounds: lineageRounds.map((parent) => ({ id: parent.id, parentRoundId: parent.parentRoundId, purpose: parent.purpose, planVersion: parent.planVersion, status: parent.status, createdAt: parent.createdAt })) };
+}
+function reviewedOutputs(db: StudioDatabase, studioId: string, projectId: string, items: JsonRecord[]): Map<string, JsonRecord> {
+  const ids = [...new Set(items.flatMap((item) => Array.isArray(item.outputAssets) ? item.outputAssets.map((asset) => String((asset as JsonRecord).id || '')) : []).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const placeholders = ids.map(() => '?').join(',');
+  const assets = (db.prepare('SELECT id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, deleted_at FROM assets WHERE studio_id = ? AND id IN (' + placeholders + ')').all(studioId, ...ids) as Array<{ id: string; studio_id: string; kind: StudioAsset['kind']; media_type: string; storage_path: string; content_hash: string; byte_size: number; source_json: string; deleted_at: string | null }>).map((asset) => ({ id: asset.id, studioId: asset.studio_id, kind: asset.kind, mediaType: asset.media_type, storagePath: asset.storage_path, contentHash: asset.content_hash, byteSize: asset.byte_size, source: parseRecord(asset.source_json), deletedAt: asset.deleted_at }));
+  const summaries = listAssetsWithReviewSummaries(db, assets, projectId);
+  return new Map(summaries.map((asset) => [asset.id, { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt, review: asset.review, display: asset.display }]));
+}
 
 export function getTaskStudioOverview(db: StudioDatabase, studioId: string, taskId: string, selectedRoundIds: string[] = []): JsonRecord {
   const task = taskRow(db, studioId, taskId);
@@ -97,18 +118,28 @@ export function getTaskStudioOverview(db: StudioDatabase, studioId: string, task
   if (selected.length > 12) throw new InvalidCommandError('At most 12 rounds can be compared.');
   const byId = new Map(available.map((round) => [round.id, round]));
   for (const id of selected) if (!byId.has(id)) throw new InvalidCommandError('Selected round does not belong to this task.');
-  const comparisons = selected.map((id) => {
-    const round = byId.get(id) as RoundRow;
-    const roundRecord = getRoundCreativeRecord(db, studioId, round.id) as JsonRecord;
-    const runs = (roundRecord.runs || []) as JsonRecord[];
-    const runDetails = runs.map((run) => getRoundCreativeRecord(db, studioId, round.id, String(run.id)) as JsonRecord);
-    const assets = reviewedOutputs(db, studioId, task.project_id, runDetails.flatMap((record) => record.items as JsonRecord[]));
-    return {
-      round: { id: round.id, parentRoundId: round.parent_round_id, purpose: round.purpose, status: round.status, planVersion: round.plan_version, createdAt: round.created_at, updatedAt: round.updated_at, plan: comparisonPlanSummary(parseRecord(round.plan_json)) },
-      lineage: comparisonLineage(db, studioId, round),
-      summary: roundRecord.summary,
-      runs: runDetails.map((record) => ({ id: record.selectedRunId, status: (record.runs as JsonRecord[]).find((run) => run.id === record.selectedRunId)?.status || 'unknown', items: (record.items as JsonRecord[]).map((item) => ({ id: item.id, sequence: item.sequence, status: item.status, attempts: item.attempts, outputAssets: (item.outputAssets as JsonRecord[]).map((asset) => assets.get(String(asset.id)) || asset) })) }))
-    };
+  const selectedRounds = selected.map((id) => byId.get(id) as RoundRow);
+  const selectedPlaceholders = selected.map(() => '?').join(',');
+  const summaries = new Map<string, { runCount: number; resultCount: number }>();
+  const runsByRound = new Map<string, Array<{ id: string; status: string }>>();
+  const itemsByRun = new Map<string, JsonRecord[]>();
+  if (selected.length) {
+    const summaryRows = db.prepare("SELECT run.round_id, COUNT(DISTINCT run.id) AS run_count, COUNT(DISTINCT relation.asset_id) AS result_count FROM generation_runs run LEFT JOIN run_items item ON item.run_id = run.id LEFT JOIN asset_relations relation ON relation.target_id = item.id AND relation.target_type = 'run_item' AND relation.relation_type = 'output_of' WHERE run.round_id IN (" + selectedPlaceholders + ') GROUP BY run.round_id').all(...selected) as Array<{ round_id: string; run_count: number; result_count: number }>;
+    for (const row of summaryRows) summaries.set(row.round_id, { runCount: Number(row.run_count), resultCount: Number(row.result_count) });
+    const runRows = db.prepare("WITH ranked_runs AS (SELECT id, round_id, status, ROW_NUMBER() OVER (PARTITION BY round_id ORDER BY created_at DESC, id DESC) AS position FROM generation_runs WHERE round_id IN (" + selectedPlaceholders + ')) SELECT id, round_id, status FROM ranked_runs WHERE position <= 24 ORDER BY round_id, position').all(...selected) as Array<{ id: string; round_id: string; status: string }>;
+    for (const run of runRows) { const current = runsByRound.get(run.round_id) || []; current.push({ id: run.id, status: run.status }); runsByRound.set(run.round_id, current); }
+    if (runRows.length) {
+      const runPlaceholders = runRows.map(() => '?').join(',');
+      const itemRows = db.prepare('SELECT id, run_id, sequence, status, attempts FROM run_items WHERE run_id IN (' + runPlaceholders + ') ORDER BY run_id, sequence').all(...runRows.map((run) => run.id)) as Array<{ id: string; run_id: string; sequence: number; status: string; attempts: number }>;
+      const outputs = outputAssetsByItem(db, itemRows.map((item) => item.id));
+      for (const item of itemRows) { const current = itemsByRun.get(item.run_id) || []; current.push({ id: item.id, sequence: item.sequence, status: item.status, attempts: item.attempts, outputAssets: outputs.get(item.id) || [] }); itemsByRun.set(item.run_id, current); }
+    }
+  }
+  const assets = reviewedOutputs(db, studioId, task.project_id, [...itemsByRun.values()].flat());
+  const comparisons = selectedRounds.map((round) => {
+    const summary = summaries.get(round.id) || { runCount: 0, resultCount: 0 };
+    const runs = runsByRound.get(round.id) || [];
+    return { round: { id: round.id, parentRoundId: round.parent_round_id, purpose: round.purpose, status: round.status, planVersion: round.plan_version, createdAt: round.created_at, updatedAt: round.updated_at, plan: comparisonPlanSummary(parseRecord(round.plan_json)) }, lineage: comparisonLineage(byId, round), summary, runsTruncated: summary.runCount > runs.length, runs: runs.map((run) => ({ id: run.id, status: run.status, items: (itemsByRun.get(run.id) || []).map((item) => ({ ...item, outputAssets: (item.outputAssets as JsonRecord[]).map((asset) => assets.get(String(asset.id)) || asset) })) })) };
   });
   return { task: { id: task.id, projectId: task.project_id, projectName: task.project_name, name: task.name, status: task.status }, availableRounds: available.map((round) => ({ id: round.id, parentRoundId: round.parent_round_id, purpose: round.purpose, status: round.status, planVersion: round.plan_version, createdAt: round.created_at })), selectedRoundIds: selected, comparisons };
 }

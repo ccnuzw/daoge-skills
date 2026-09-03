@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, MessageSquareText, PanelLeftClose, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
@@ -13,13 +13,18 @@ import { WorkbenchNavigation } from './workbench-navigation.jsx';
 import { deliverySelectionMessage, projectDeliverySelection } from './delivery-workflow.mjs';
 import { bootstrapLocalStudioSession } from './local-auth.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
+import { ConfirmationDialog } from './confirmation-dialog.jsx';
 import { StudioSearch } from './studio-search.jsx';
 import { createLatestRequestGate, useRouteRefresh } from './use-route-refresh.mjs';
 import { studioEventRefreshPlan, useStudioEvents } from './use-studio-events.mjs';
+import { assetOriginalUrl, assetThumbnailUrl } from './asset-media-url.mjs';
+import { ASSET_IMPORT_CONCURRENCY, mapWithConcurrency } from './bounded-concurrency.mjs';
+import { createEventRefreshQueue } from './refresh-coordinator.mjs';
 import { createStudioSearchCoordinator } from './studio-search-model.mjs';
 import { batchOperationSignature, createBatchOperationSnapshot, createDeliveryInteractionGuard, isDeliveryOperationCurrent } from './creator-delivery-model.mjs';
-import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, assetPageOffset, clampAssetPage, normalizeAssetPageSize } from './asset-pagination.mjs';
-import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, filterProjects, filterTasks, paginateWorkspaceItems } from './workspace-list-model.mjs';
+import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, clampAssetPage, normalizeAssetPageSize } from './asset-pagination.mjs';
+import { assetRefreshPath } from './asset-refresh-plan.mjs';
+import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, createProjectSearchIndex, createTaskSearchIndex, filterProjectIndex, filterTaskIndex, paginateWorkspaceItems } from './workspace-list-model.mjs';
 import { ProviderSettings } from './provider-settings.jsx';
 import { workbenchConversationId } from './workbench-session.mjs';
 import './styles.css';
@@ -59,8 +64,6 @@ async function api(path, options = {}) {
   return payload.data;
 }
 
-function assetFileUrl(assetId, download = false) { return '/api/assets/' + encodeURIComponent(assetId) + '/file' + (download ? '?download=1' : ''); }
-
 function projectArchiveUrl(projectId, assetIds) { const params = new URLSearchParams(); for (const assetId of assetIds) params.append('assetId', assetId); return '/api/projects/' + encodeURIComponent(projectId) + '/assets/archive?' + params.toString(); }
 
 function deliveryArchiveUrl(deliveryId, sequences) { const params = new URLSearchParams(); for (const sequence of sequences) params.append('sequence', String(sequence)); return '/api/deliveries/' + encodeURIComponent(deliveryId) + '/archive?' + params.toString(); }
@@ -73,22 +76,6 @@ const ASSET_PAGE_SIZE_KEY = 'daoge-pic:asset-page-size';
 
 const ASSET_SCOPE_LABELS = { round: '当前轮次', task: '当前任务', project: '当前项目', studio: '全部 Studio' };
 
-
-function assetPathForRoute(route, pagination = null) {
-  const params = new URLSearchParams();
-  params.set('scope', route.assetScope);
-  if (route.projectId) params.set('projectId', route.projectId);
-  if (route.assetScope === 'round') { if (!route.roundId) return null; params.set('roundId', route.roundId); }
-  if (route.assetScope === 'task') { if (!route.taskId) return null; params.set('taskId', route.taskId); if (route.projectId) params.set('projectId', route.projectId); }
-  if (route.assetScope === 'project') { if (!route.projectId) return null; params.set('projectId', route.projectId); }
-  if (route.view === 'trash') params.set('deleted', 'only');
-  if (pagination) {
-    params.set('limit', String(pagination.pageSize));
-    params.set('offset', String(assetPageOffset(pagination.page, pagination.pageSize)));
-    if (pagination.filter !== 'all') params.set('kind', pagination.filter);
-  }
-  return '/api/assets?' + params.toString();
-}
 
 function statusLabel(value) { return statusPresentation('generic', value).label; }
 
@@ -103,7 +90,7 @@ function IconButton({ label, children, onClick, disabled = false, tone = 'defaul
 function AssetSelectionStrip({ assets, onRemove, onClear, onPreview, onDownloadArchive }) {
   return <section className="selection-strip">
     <header><div><p className="eyebrow">当前选片</p><h2>{String(assets.length).padStart(2, '0')} 张</h2></div>{assets.length > 0 && <div className="selection-strip-actions"><button type="button" className="outline-button" onClick={onDownloadArchive}><Download size={15} />打包下载 {assets.length} 张</button><IconButton label="清空当前选片" onClick={onClear}><X size={15} /></IconButton></div>}</header>
-    {assets.length ? <div className="selection-strip-items">{assets.map((asset) => <article className="selection-item" key={asset.id}><button type="button" className="selection-preview" onClick={() => onPreview([asset])} aria-label="放大查看已选图片"><img src={'/api/assets/' + encodeURIComponent(asset.id) + '/file'} alt="" /></button><div className="selection-item-copy"><strong title={asset.display?.label || '已选素材'}>{asset.display?.label || '已选素材'}</strong><span>{asset.review?.decision === 'keep' ? '已保留' : asset.review?.decision === 'review' ? '待复核' : asset.review?.decision === 'derive' ? '衍生方向' : '尚未评审'}</span></div><button type="button" className="selection-remove" title="移出当前选片" aria-label="移出当前选片" onClick={() => onRemove(asset.id)}><X size={13} /></button></article>)}</div> : <div className="selection-strip-empty"><Bookmark size={18} /><span>当前没有已选图片</span></div>}
+    {assets.length ? <div className="selection-strip-items">{assets.map((asset) => <article className="selection-item" key={asset.id}><button type="button" className="selection-preview" onClick={() => onPreview([asset])} aria-label="放大查看已选图片"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button><div className="selection-item-copy"><strong title={asset.display?.label || '已选素材'}>{asset.display?.label || '已选素材'}</strong><span>{asset.review?.decision === 'keep' ? '已保留' : asset.review?.decision === 'review' ? '待复核' : asset.review?.decision === 'derive' ? '衍生方向' : '尚未评审'}</span></div><button type="button" className="selection-remove" title="移出当前选片" aria-label="移出当前选片" onClick={() => onRemove(asset.id)}><X size={13} /></button></article>)}</div> : <div className="selection-strip-empty"><Bookmark size={18} /><span>当前没有已选图片</span></div>}
   </section>;
 }
 
@@ -116,8 +103,10 @@ function ProjectIndex({ projects, onOpenProject }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('active');
   const [page, setPage] = useState(1);
-  const filtered = filterProjects(projects, query, status);
-  const pagination = paginateWorkspaceItems(filtered, page, PROJECT_PAGE_SIZE);
+  const deferredQuery = useDeferredValue(query);
+  const projectIndex = useMemo(() => createProjectSearchIndex(projects), [projects]);
+  const filtered = useMemo(() => filterProjectIndex(projectIndex, deferredQuery, status), [projectIndex, deferredQuery, status]);
+  const pagination = useMemo(() => paginateWorkspaceItems(filtered, page, PROJECT_PAGE_SIZE), [filtered, page]);
   useEffect(() => { if (pagination.page !== page) setPage(pagination.page); }, [page, pagination.page]);
   return <section className="project-index-stage"><header><div><p className="eyebrow">Studio 项目</p><h2>继续创作</h2><span>搜索、筛选和分页管理项目，不让历史项目无限向下堆叠。</span></div></header><div className="workspace-list-toolbar"><label className="workspace-list-search"><Search size={15} /><input type="search" value={query} placeholder="搜索项目名称或说明" onChange={(event) => { setQuery(event.target.value); setPage(1); }} />{query && <IconButton label="清空项目搜索" onClick={() => { setQuery(''); setPage(1); }}><X size={14} /></IconButton>}</label><div className="workspace-list-filters" aria-label="项目状态">{[['active', '进行中'], ['archived', '已归档'], ['all', '全部']].map(([value, label]) => <button type="button" key={value} className={status === value ? 'is-active' : ''} onClick={() => { setStatus(value); setPage(1); }}>{label}</button>)}</div></div>{pagination.items.length ? <><div className="project-index-list">{pagination.items.map((project) => <button type="button" key={project.id} onClick={() => onOpenProject(project.id)}><FolderKanban size={18} /><span><b>{project.name}</b><small>{statusLabel(project.status)}{project.description ? ' · ' + project.description : ''}</small></span><span className="project-index-open">打开</span></button>)}</div><ListPager page={pagination.page} totalPages={pagination.totalPages} total={pagination.total} onPageChange={setPage} /></> : <div className="empty-stage"><FolderKanban size={30} strokeWidth={1.15} /><p>{projects.length ? '没有符合当前搜索与状态筛选的项目。' : '在会话中创建项目后，会显示在这里。'}</p></div>}</section>;
 }
@@ -126,8 +115,10 @@ function ManagedTaskList({ tasks, pageSize, actionLabel, emptyMessage, onOpenTas
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('open');
   const [page, setPage] = useState(1);
-  const filtered = filterTasks(tasks, query, status);
-  const pagination = paginateWorkspaceItems(filtered, page, pageSize);
+  const deferredQuery = useDeferredValue(query);
+  const taskIndex = useMemo(() => createTaskSearchIndex(tasks), [tasks]);
+  const filtered = useMemo(() => filterTaskIndex(taskIndex, deferredQuery, status), [taskIndex, deferredQuery, status]);
+  const pagination = useMemo(() => paginateWorkspaceItems(filtered, page, pageSize), [filtered, page, pageSize]);
   useEffect(() => { if (pagination.page !== page) setPage(pagination.page); }, [page, pagination.page]);
   return <><div className="workspace-list-toolbar is-task"><label className="workspace-list-search"><Search size={15} /><input type="search" value={query} placeholder="搜索任务名称" onChange={(event) => { setQuery(event.target.value); setPage(1); }} />{query && <IconButton label="清空任务搜索" onClick={() => { setQuery(''); setPage(1); }}><X size={14} /></IconButton>}</label><div className="workspace-list-filters" aria-label="任务状态">{[['open', '进行中'], ['completed', '已完成'], ['archived', '已归档'], ['all', '全部']].map(([value, label]) => <button type="button" key={value} className={status === value ? 'is-active' : ''} onClick={() => { setStatus(value); setPage(1); }}>{label}</button>)}</div></div>{pagination.items.length ? <><div className="project-task-list is-full">{pagination.items.map((task) => <button type="button" key={task.id} onClick={() => onOpenTask(task.id)}><span><b>{task.name}</b><small>{taskPresentation(task).label}</small></span><span>{actionLabel}</span></button>)}</div><ListPager page={pagination.page} totalPages={pagination.totalPages} total={pagination.total} onPageChange={setPage} /></> : <div className="empty-stage"><FolderKanban size={26} strokeWidth={1.15} /><p>{tasks.length ? '没有符合当前搜索与状态筛选的任务。' : emptyMessage}</p></div>}</>;
 }
@@ -160,7 +151,7 @@ function AssetCard({ asset, selected, selectionBusy, shared, onToggleSelect, onR
   const stateLabel = asset.deletedAt ? '已移入回收站' : asset.review?.decision === 'keep' ? '已保留，可交付' : asset.review?.decision === 'review' ? '待复核' : asset.review?.decision === 'reject' ? '不采用' : selected ? '已加入选片' : '尚未评审';
   return <article className={'asset-card ' + (asset.deletedAt ? 'is-trashed ' : '') + (selected ? 'is-selected' : '')}>
     <div className="asset-preview">
-      {asset.deletedAt ? <div className="trash-preview"><Trash2 size={24} strokeWidth={1.4} /></div> : <button type="button" className="asset-preview-button" onClick={() => onPreview([asset])} aria-label="放大查看素材"><img src={'/api/assets/' + encodeURIComponent(asset.id) + '/file'} alt="" loading="lazy" /></button>}
+      {asset.deletedAt ? <div className="trash-preview"><Trash2 size={24} strokeWidth={1.4} /></div> : <button type="button" className="asset-preview-button" onClick={() => onPreview([asset])} aria-label="放大查看素材"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button>}
       {!asset.deletedAt && <label className="asset-select-control"><input type="checkbox" checked={selected} disabled={selectionBusy} onChange={() => onToggleSelect(asset)} /><span><Bookmark size={13} fill={selected ? 'currentColor' : 'none'} />{selected ? '已选成果' : '选为成果'}</span></label>}
       <div className="asset-card-tools">{!asset.deletedAt && <IconButton label="下载原图" onClick={() => onDownload(asset)}><Download size={16} /></IconButton>}<IconButton label={menuOpen ? '关闭资产操作' : '打开资产操作'} onClick={() => setMenuOpen((value) => !value)}><Ellipsis size={17} /></IconButton></div>
 
@@ -175,7 +166,7 @@ function RunItemRow({ item, onInspect, onRetry }) {
   const recovery = runItemRecovery(item);
   const retryable = ['failed', 'blocked', 'retry_wait'].includes(item.status);
   return <div className="run-item-row">
-    <div className="run-item-summary"><span>第 {item.sequence} 项</span>{item.outputAssets?.length ? <span className="run-item-output">{item.outputAssets.map((asset) => <button type="button" key={asset.id} title="查看结果资产来源" onClick={() => void onInspect(asset.id)}><img src={'/api/assets/' + encodeURIComponent(asset.id) + '/file'} alt="运行结果" /></button>)}</span> : null}</div>
+    <div className="run-item-summary"><span>第 {item.sequence} 项</span>{item.outputAssets?.length ? <span className="run-item-output">{item.outputAssets.map((asset) => <button type="button" key={asset.id} title="查看结果资产来源" onClick={() => void onInspect(asset.id)}><img src={assetThumbnailUrl(asset)} alt="运行结果" loading="lazy" decoding="async" /></button>)}</span> : null}</div>
     <StatusPill value={item.status} scope="run_item" />
     <div className="run-item-details"><span>尝试 {Number.isInteger(item.attempts) ? item.attempts : 0} 次</span>{item.retryAt && <span>重试时间 {item.retryAt}</span>}{recovery.error && <span className="run-item-error">{recovery.error}</span>}{recovery.advice && <span className="run-item-recovery">{recovery.advice}</span>}</div>
     {retryable ? <IconButton label={'重试第 ' + item.sequence + ' 项'} onClick={() => void onRetry(item.id)}><RefreshCw size={15} /></IconButton> : <span />}
@@ -254,6 +245,9 @@ function App() {
   const [planVersionsLoading, setPlanVersionsLoading] = useState(false);
   const [guideDismissed, setGuideDismissed] = useState(() => window.localStorage.getItem('daoge-pic:guide-dismissed') === '1');
   const [providerDetails, setProviderDetails] = useState(null);
+  const [confirmation, setConfirmation] = useState(null);
+  const [confirmationBusy, setConfirmationBusy] = useState(false);
+  const [confirmationError, setConfirmationError] = useState('');
   const [tasks, setTasks] = useState(EMPTY);
   const [rounds, setRounds] = useState(EMPTY);
   const [runs, setRuns] = useState(EMPTY);
@@ -288,11 +282,19 @@ function App() {
   const studioOverviewRequests = useRef(null);
   const planVersionRequests = useRef(null);
   const advancedDetailRequests = useRef(null);
+  const assetRequests = useRef(null);
+  const selectionRequests = useRef(null);
+  const sharedAssetRequests = useRef(null);
+  const eventRefreshQueueRef = useRef(null);
+  const eventRefreshCallbacks = useRef(null);
   taskOverviewRequests.current ||= createLatestRequestGate();
   creativeRecordRequests.current ||= createLatestRequestGate();
   studioOverviewRequests.current ||= createLatestRequestGate();
   planVersionRequests.current ||= createLatestRequestGate();
   advancedDetailRequests.current ||= createLatestRequestGate();
+  assetRequests.current ||= createLatestRequestGate();
+  selectionRequests.current ||= createLatestRequestGate();
+  sharedAssetRequests.current ||= createLatestRequestGate();
   deliveryInteractionRef.current ||= createDeliveryInteractionGuard();
   searchCoordinatorRef.current ||= createStudioSearchCoordinator({
     request: async (query, signal) => (await api('/api/search?q=' + encodeURIComponent(query) + '&limit=12', { signal })).results || [],
@@ -356,21 +358,14 @@ function App() {
       requireCurrent();
       return data;
     };
-    const loadAssets = async (path) => {
-      if (!path) { setAssets(EMPTY); setAssetTotal(0); return; }
-      const data = await load(path);
-      const nextAssets = data.assets || EMPTY;
-      setAssets(nextAssets);
-      setAssetTotal(Number.isInteger(data.total) ? data.total : nextAssets.length);
-    };
     const selectedProject = activeProjectId ? (knownProjects || []).find((project) => project.id === activeProjectId) || null : null;
     if (activeProjectId && !selectedProject) {
-      setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setDeliveries(EMPTY); setDeliveryBatches(EMPTY); setAssets(EMPTY); setAssetTotal(0);
+      setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setDeliveries(EMPTY); setDeliveryBatches(EMPTY);
       setContextError('该链接所指向的项目已不存在，或不属于当前 Studio。');
       return;
     }
     if (!selectedProject) {
-      setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setDeliveries(EMPTY); setDeliveryBatches(EMPTY); setAssets(EMPTY); setAssetTotal(0);
+      setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setDeliveries(EMPTY); setDeliveryBatches(EMPTY);
       setContextError(activeTaskId || activeRoundId || activeRunId ? '请先选择一个项目，再继续查看任务、轮次或运行。' : '');
       return;
     }
@@ -387,15 +382,12 @@ function App() {
     setDeliveryBatches(batchData.batches || []);
     const selectedTask = activeTaskId ? nextTasks.find((task) => task.id === activeTaskId) || null : null;
     if (activeTaskId && !selectedTask) {
-      setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setAssets(EMPTY); setAssetTotal(0);
+      setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY);
       setContextError('该任务不属于当前项目，或已不存在。');
       return;
     }
-    const needsAssets = ['assets', 'trash', 'deliveries'].includes(view);
     if (!selectedTask) {
       setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY);
-      const path = needsAssets ? assetPathForRoute(route, ['assets', 'trash'].includes(view) ? { page: assetPage, pageSize: assetPageSize, filter: assetFilter } : null) : null;
-      await loadAssets(path);
       setContextError(activeRoundId || activeRunId ? '请先选择一个任务，再继续查看轮次或运行。' : '');
       return;
     }
@@ -404,14 +396,12 @@ function App() {
     setRounds(nextRounds);
     const selectedRound = activeRoundId ? nextRounds.find((round) => round.id === activeRoundId) || null : null;
     if (activeRoundId && !selectedRound) {
-      setRuns(EMPTY); setRunItems(EMPTY); setAssets(EMPTY); setAssetTotal(0);
+      setRuns(EMPTY); setRunItems(EMPTY);
       setContextError('该轮次不属于当前任务，或已不存在。');
       return;
     }
-    const assetsPath = needsAssets ? assetPathForRoute(route, ['assets', 'trash'].includes(view) ? { page: assetPage, pageSize: assetPageSize, filter: assetFilter } : null) : null;
     if (!selectedRound || view !== 'runs') {
       setRuns(EMPTY); setRunItems(EMPTY);
-      await loadAssets(assetsPath);
       setContextError(activeRunId ? '请先打开生成运行视图，再继续查看运行。' : '');
       return;
     }
@@ -430,16 +420,73 @@ function App() {
       setRunItems(EMPTY);
       setContextError('');
     }
-    setAssets(EMPTY);
-    setAssetTotal(0);
-  }, [activeProjectId, activeTaskId, activeRoundId, activeRunId, assetScope, assetFilter, assetPage, assetPageSize, view, route]);
+  }, [activeProjectId, activeTaskId, activeRoundId, activeRunId, view]);
+
+  const refreshAssets = useCallback(async () => {
+    if (!['assets', 'trash', 'deliveries'].includes(view)) {
+      assetRequests.current.cancel();
+      setAssets(EMPTY);
+      setAssetTotal(0);
+      return true;
+    }
+    const path = assetRefreshPath(route, ['assets', 'trash'].includes(view) ? { page: assetPage, pageSize: assetPageSize, filter: assetFilter } : null);
+    if (!path) {
+      setAssets(EMPTY);
+      setAssetTotal(0);
+      return true;
+    }
+    const request = assetRequests.current.begin(path);
+    try {
+      const data = await api(path, { signal: request.signal });
+      if (!request.isCurrent()) return false;
+      const nextAssets = data.assets || EMPTY;
+      setAssets(nextAssets);
+      setAssetTotal(Number.isInteger(data.total) ? data.total : nextAssets.length);
+      return true;
+    } catch (nextError) {
+      if (!isAbortError(nextError) && request.isCurrent()) reportRefreshError(nextError);
+      return false;
+    }
+  }, [assetFilter, assetPage, assetPageSize, route, view]);
+
+  const refreshSelection = useCallback(async () => {
+    if (!activeProjectId) {
+      selectionRequests.current.cancel();
+      applyProjectSelection({ assets: EMPTY });
+      return true;
+    }
+    const projectId = activeProjectId;
+    const observedMutationEpoch = selectionMutationEpoch.current;
+    const request = selectionRequests.current.begin(projectId + ':' + observedMutationEpoch);
+    try {
+      const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/selection', { signal: request.signal });
+      if (!request.isCurrent() || selectionProjectIdRef.current !== projectId || observedMutationEpoch !== selectionMutationEpoch.current) return false;
+      applyProjectSelection(data.selection);
+      return true;
+    } catch (nextError) {
+      if (!isAbortError(nextError) && request.isCurrent()) setError(nextError.message || '无法读取当前选片。');
+      return false;
+    }
+  }, [activeProjectId]);
+
+  const refreshSharedAssets = useCallback(async () => {
+    const request = sharedAssetRequests.current.begin('shared-assets');
+    try {
+      const data = await api('/api/shared-assets', { signal: request.signal });
+      if (!request.isCurrent()) return false;
+      setSharedAssets(data.assets || EMPTY);
+      return true;
+    } catch (nextError) {
+      if (!isAbortError(nextError) && request.isCurrent()) setError(nextError.message || '无法读取共享素材。');
+      return false;
+    }
+  }, []);
 
   const reportRefreshError = useCallback((nextError) => {
     if (nextError?.category === 'connection') setConnectionError(nextError.message || '无法连接本地 Studio。');
     else setError(nextError?.message || '无法读取本地 Studio。');
   }, []);
   const { refreshAll, refreshContext: refreshCurrentContext } = useRouteRefresh({
-    contextKey: ['assets', 'trash'].includes(view) ? [assetFilter, assetPage, assetPageSize].join(':') : '',
     route,
     beforeRefresh: openWorkbenchSession,
     refreshGlobal: refreshStudio,
@@ -447,26 +494,45 @@ function App() {
     onError: reportRefreshError,
     onSettled: () => setLoading(false)
   });
-  const refresh = refreshAll;
-  const applyEventRefreshPlan = useCallback((plan) => {
-    setEventRevision((current) => ({
-      taskOverview: current.taskOverview + (plan.taskOverview ? 1 : 0),
-      creativeRecord: current.creativeRecord + (plan.creativeRecord ? 1 : 0),
-      studioOverview: current.studioOverview + (plan.studioOverview ? 1 : 0),
-      planVersions: current.planVersions + (plan.planVersions ? 1 : 0)
-    }));
-  }, []);
-  const refreshForEvents = useCallback(async (events) => {
-    const plan = studioEventRefreshPlan(events);
-    const refreshed = await (plan.scope === 'all' ? refreshAll() : refreshCurrentContext());
-    if (refreshed) applyEventRefreshPlan(plan);
-    return refreshed;
-  }, [refreshAll, refreshCurrentContext, applyEventRefreshPlan]);
-  const refreshSnapshot = useCallback(async () => {
+  const refresh = useCallback(async () => {
     const refreshed = await refreshAll();
+    return refreshed ? refreshAssets() : false;
+  }, [refreshAll, refreshAssets]);
+  useEffect(() => {
+    void refreshAssets();
+    return () => assetRequests.current.cancel();
+  }, [refreshAssets]);
+  const applyEventRefreshPlan = useCallback((plan) => {
+    const detail = view === 'studio-overview' ? 'studioOverview' : view === 'prompts' ? 'planVersions' : view === 'runs' ? 'creativeRecord' : '';
+    setEventRevision((current) => ({
+      taskOverview: current.taskOverview,
+      creativeRecord: current.creativeRecord + (detail === 'creativeRecord' && plan.creativeRecord ? 1 : 0),
+      studioOverview: current.studioOverview + (detail === 'studioOverview' && plan.studioOverview ? 1 : 0),
+      planVersions: current.planVersions + (detail === 'planVersions' && plan.planVersions ? 1 : 0)
+    }));
+  }, [view]);
+  eventRefreshCallbacks.current = {
+    refresh: async (plan) => {
+      const contextRefresh = plan.refreshContext ? (plan.scope === 'all' ? refreshAll() : refreshCurrentContext()) : Promise.resolve(true);
+      const assetRefresh = plan.refreshAssets ? refreshAssets() : Promise.resolve(true);
+      const selectionRefresh = plan.refreshSelection ? refreshSelection() : Promise.resolve(true);
+      const sharedRefresh = plan.refreshSharedAssets && plan.scope !== 'all' ? refreshSharedAssets() : Promise.resolve(true);
+      const refreshed = await Promise.all([contextRefresh, assetRefresh, selectionRefresh, sharedRefresh]);
+      return refreshed.every(Boolean);
+    },
+    applyPlan: applyEventRefreshPlan
+  };
+  eventRefreshQueueRef.current ||= createEventRefreshQueue({
+    refresh: (plan) => eventRefreshCallbacks.current.refresh(plan),
+    applyPlan: (plan) => eventRefreshCallbacks.current.applyPlan(plan)
+  });
+  useEffect(() => () => eventRefreshQueueRef.current?.dispose(), []);
+  const refreshForEvents = useCallback((events) => eventRefreshQueueRef.current.request(studioEventRefreshPlan(events)), []);
+  const refreshSnapshot = useCallback(async () => {
+    const refreshed = await refresh();
     if (refreshed) applyEventRefreshPlan({ taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true });
     return refreshed;
-  }, [refreshAll, applyEventRefreshPlan]);
+  }, [refresh, applyEventRefreshPlan]);
   useStudioEvents({
     studioId: studio?.studioId || null,
     onEventBatch: refreshForEvents,
@@ -498,7 +564,9 @@ function App() {
   const allPageAssetsSelected = visibleAssets.length > 0 && visibleAssets.every((asset) => selectedAssetIds.has(asset.id));
   const pageSelectionBusy = visibleAssets.some((asset) => selectionBusyIds.has(asset.id));
   const sharedAssetIds = useMemo(() => new Set(sharedAssets.map((asset) => asset.id)), [sharedAssets]);
-  const deliveryFlowAssets = deliveryCompletion ? deliveryCompletion.assetIds.map((assetId) => assets.find((asset) => asset.id === assetId) || selectionAssets.find((asset) => asset.id === assetId) || { id: assetId, display: { label: '已冻结交付图片' } }) : selectedAssets;
+  const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+  const selectionAssetById = useMemo(() => new Map(selectionAssets.map((asset) => [asset.id, asset])), [selectionAssets]);
+  const deliveryFlowAssets = deliveryCompletion ? deliveryCompletion.assetIds.map((assetId) => assetById.get(assetId) || selectionAssetById.get(assetId) || { id: assetId, display: { label: '已冻结交付图片' } }) : selectedAssets;
   const selectedTaskStatus = taskPresentation(selectedTask, rounds);
   const runExecutionStatus = runExecutionPresentation(activeRun, runItems);
   const visibleRunItems = useMemo(() => mergeRunHistoryItems(creativeRecord?.items || EMPTY, runItems), [creativeRecord?.items, runItems]);
@@ -539,20 +607,9 @@ function App() {
       setSelectionBusyIds(new Set());
     }
     if (!activeProjectId) return undefined;
-    const projectId = activeProjectId;
-    const controller = new AbortController();
-    const observedMutationEpoch = selectionMutationEpoch.current;
-    void api('/api/projects/' + encodeURIComponent(projectId) + '/selection', { signal: controller.signal }).then((data) => {
-      if (controller.signal.aborted || selectionProjectIdRef.current !== projectId || observedMutationEpoch !== selectionMutationEpoch.current) return;
-      const selection = data.selection || { assets: EMPTY };
-      const nextAssets = selection.assets || EMPTY;
-      const ids = new Set(nextAssets.map((asset) => asset.id));
-      selectedAssetIdsRef.current = ids;
-      setSelectedAssetIds(ids);
-      setSelectionAssets(nextAssets);
-    }).catch((nextError) => { if (!controller.signal.aborted && !isAbortError(nextError)) setError(nextError.message || '无法读取当前选片。'); });
-    return () => controller.abort();
-  }, [activeProjectId, assets]);
+    void refreshSelection();
+    return () => selectionRequests.current.cancel();
+  }, [activeProjectId, refreshSelection]);
 
   useEffect(() => {
     if (!selectedTask) { taskOverviewRequests.current.cancel(); setTaskOverview(null); return undefined; }
@@ -613,8 +670,7 @@ function App() {
     const failed = [];
     try {
       setUploading(true); setUploadProgress({ completed: 0, total: images.length }); setError(''); setNotice('');
-      for (let index = 0; index < images.length; index += 1) {
-        const file = images[index];
+      await mapWithConcurrency(images, async (file, index) => {
         try {
           const response = await fetch('/api/assets/import', {
             method: 'POST',
@@ -631,8 +687,8 @@ function App() {
         } catch (nextError) {
           failed.push({ name: file.name, message: nextError.message || '无法导入图片。' });
         }
-        setUploadProgress({ completed: index + 1, total: images.length });
-      }
+        setUploadProgress((current) => ({ completed: Math.min(images.length, (current?.completed || 0) + 1), total: images.length }));
+      }, ASSET_IMPORT_CONCURRENCY);
       await refresh();
       const succeeded = images.length - failed.length;
       if (succeeded) setNotice('已导入 ' + succeeded + ' 张图片' + (failed.length ? '，' + failed.length + ' 张失败。' : '。'));
@@ -648,12 +704,19 @@ function App() {
       await refresh();
     } catch (nextError) { setError(nextError.message || '无法保存选择。'); }
   };
+  const moveAssetToTrash = async (assetId) => {
+    await api('/api/assets/' + encodeURIComponent(assetId) + '/trash', { method: 'POST', idempotencyKey: uniqueKey('trash'), body: {} });
+    await refresh();
+  };
   const trash = async (assetId) => {
     try {
       const { impact } = await api('/api/assets/' + encodeURIComponent(assetId) + '/impact');
-      if ((impact.deliveryCount || impact.relationCount) && !window.confirm('这张图片仍被选择、资料库或交付引用。移入回收站不会删除已冻结交付，是否继续？')) return;
-      await api('/api/assets/' + encodeURIComponent(assetId) + '/trash', { method: 'POST', idempotencyKey: uniqueKey('trash'), body: {} });
-      await refresh();
+      if (impact.deliveryCount || impact.relationCount) {
+        setConfirmationError('');
+        setConfirmation({ kind: 'trash', assetId });
+        return;
+      }
+      await moveAssetToTrash(assetId);
     } catch (nextError) { setError(nextError.message || '无法移入回收站。'); }
   };
   const restore = async (assetId) => { try { await api('/api/assets/' + encodeURIComponent(assetId) + '/restore', { method: 'POST', idempotencyKey: uniqueKey('restore'), body: {} }); await refresh(); } catch (nextError) { setError(nextError.message || '无法恢复资产。'); } };
@@ -688,7 +751,7 @@ function App() {
     if (selected) nextIds.add(assetId); else nextIds.delete(assetId);
     selectedAssetIdsRef.current = nextIds;
     setSelectedAssetIds(new Set(nextIds));
-    setSelectionAssets((current) => selected ? (current.some((asset) => asset.id === assetId) ? current : [...current, assets.find((asset) => asset.id === assetId)].filter(Boolean)) : current.filter((asset) => asset.id !== assetId));
+    setSelectionAssets((current) => selected ? (current.some((asset) => asset.id === assetId) ? current : [...current, assetById.get(assetId)].filter(Boolean)) : current.filter((asset) => asset.id !== assetId));
     const projectId = selectedProject.id;
     enqueueSelectionWrite(projectId, [assetId], () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/assets/' + encodeURIComponent(assetId), { method: 'POST', idempotencyKey: uniqueKey('asset-selection'), body: { selected } }), '无法保存当前选片。');
   };
@@ -696,14 +759,13 @@ function App() {
   const markAsDeliverable = async (asset) => {
     if (!selectedProject) return;
     if (selectedAssetIdsRef.current.has(asset.id)) { toggleSelection(asset.id); return; }
-    setSelectionBusyIds((current) => new Set(current).add(asset.id));
+    markSelectionBusy([asset.id], true);
     try {
       if (asset.review?.decision !== 'keep') await api('/api/assets/' + encodeURIComponent(asset.id) + '/review', { method: 'POST', idempotencyKey: uniqueKey('delivery-keep'), body: { decision: 'keep' } });
-      await api('/api/projects/' + encodeURIComponent(selectedProject.id) + '/selection/assets/' + encodeURIComponent(asset.id), { method: 'POST', idempotencyKey: uniqueKey('delivery-select'), body: { selected: true } });
-      await refresh();
-    } catch (nextError) { setError(nextError.message || '无法将图片选为成果。'); } finally {
-      setSelectionBusyIds((current) => { const next = new Set(current); next.delete(asset.id); return next; });
-    }
+      const result = await api('/api/projects/' + encodeURIComponent(selectedProject.id) + '/selection/assets/' + encodeURIComponent(asset.id), { method: 'POST', idempotencyKey: uniqueKey('delivery-select'), body: { selected: true } });
+      applyProjectSelection(result.selection);
+      await refreshAssets();
+    } catch (nextError) { setError(nextError.message || '无法将图片选为成果。'); } finally { markSelectionBusy([asset.id], false); }
   };
   const clearSelection = () => {
     if (!selectedProject || !selectionAssets.length) return;
@@ -713,8 +775,12 @@ function App() {
     setSelectionAssets(EMPTY);
     const projectId = selectedProject.id;
     enqueueSelectionWrite(projectId, selected.map((asset) => asset.id), async () => {
-      await Promise.all(selected.map((asset) => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/assets/' + encodeURIComponent(asset.id), { method: 'POST', idempotencyKey: uniqueKey('asset-selection-clear'), body: { selected: false } })));
-      return await api('/api/projects/' + encodeURIComponent(projectId) + '/selection');
+      let latest = { assets: EMPTY };
+      for (let offset = 0; offset < selected.length; offset += 500) {
+        const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('asset-selection-clear'), body: { assetIds: selected.slice(offset, offset + 500).map((asset) => asset.id), selected: false } });
+        latest = data.selection || latest;
+      }
+      return { selection: latest };
     }, '无法清空当前选片。');
   };
   const setPageSelection = async (selected) => {
@@ -725,18 +791,14 @@ function App() {
     const candidateIds = candidates.map((asset) => asset.id);
     markSelectionBusy(candidateIds, true);
     try {
-      await Promise.all(candidates.map(async (asset) => {
-        if (selected && asset.review?.decision !== 'keep') await api('/api/assets/' + encodeURIComponent(asset.id) + '/review', { method: 'POST', idempotencyKey: uniqueKey('page-selection-keep'), body: { decision: 'keep' } });
-        await api('/api/projects/' + encodeURIComponent(projectId) + '/selection/assets/' + encodeURIComponent(asset.id), { method: 'POST', idempotencyKey: uniqueKey('page-selection'), body: { selected } });
-      }));
+      const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('page-selection'), body: { assetIds: candidateIds, selected, keepAssetIds: selected ? candidates.filter((asset) => asset.review?.decision !== 'keep').map((asset) => asset.id) : [] } });
       if (selectionProjectIdRef.current === projectId) {
-        const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/selection');
         applyProjectSelection(data.selection);
-        await refreshCurrentContext();
+        await refreshAssets();
       }
     } catch (nextError) {
       setError(nextError.message || '无法更新本页选片。');
-      if (selectionProjectIdRef.current === projectId) await refreshCurrentContext();
+      if (selectionProjectIdRef.current === projectId) await refreshAssets();
     } finally {
       if (selectionProjectIdRef.current === projectId) markSelectionBusy(candidateIds, false);
     }
@@ -746,7 +808,7 @@ function App() {
   };
   const downloadAsset = (asset) => {
     const link = document.createElement('a');
-    link.href = asset.downloadUrl || assetFileUrl(asset.id, true);
+    link.href = assetOriginalUrl(asset, true);
     link.download = 'daoge-pic-image';
     document.body.appendChild(link);
     link.click();
@@ -775,7 +837,7 @@ function App() {
     } catch (nextError) { setError(nextError.message || '无法更新跨项目共享素材。'); }
   };
   const copyAsset = async (asset) => {
-    const fileUrl = asset.fileUrl || assetFileUrl(asset.id);
+    const fileUrl = asset.fileUrl || assetOriginalUrl(asset);
     try {
       const response = await fetch(fileUrl);
       if (!response.ok) throw new Error('图片暂时无法读取。');
@@ -905,10 +967,30 @@ function App() {
     if (!activeRun) return;
     try { await api('/api/runs/' + encodeURIComponent(activeRun.id) + '/retry', { method: 'POST', idempotencyKey: uniqueKey('retry-item'), body: { itemIds: [itemId] } }); await refresh(); } catch (nextError) { setError(nextError.message || '无法重试该运行项。'); }
   };
-  const archiveCurrentProject = async () => {
+  const openArchiveConfirmation = () => {
     if (!selectedProject || selectedProject.status === 'archived') return;
-    if (!window.confirm('归档后将关闭该项目下的任务与轮次。未完成生成必须先暂停或取消。是否继续？')) return;
-    try { await api('/api/projects/' + encodeURIComponent(selectedProject.id) + '/archive', { method: 'POST', idempotencyKey: uniqueKey('archive-project'), body: {} }); await refresh(); } catch (nextError) { setError(nextError.message || '无法归档项目。'); }
+    setConfirmationError('');
+    setConfirmation({ kind: 'archive', projectId: selectedProject.id, projectName: selectedProject.name });
+  };
+  const dismissConfirmation = () => {
+    if (confirmationBusy) return;
+    setConfirmation(null);
+    setConfirmationError('');
+  };
+  const confirmPendingAction = async () => {
+    if (!confirmation) return;
+    setConfirmationBusy(true);
+    setConfirmationError('');
+    try {
+      if (confirmation.kind === 'trash') await moveAssetToTrash(confirmation.assetId);
+      else {
+        await api('/api/projects/' + encodeURIComponent(confirmation.projectId) + '/archive', { method: 'POST', idempotencyKey: uniqueKey('archive-project'), body: {} });
+        await refresh();
+      }
+      setConfirmation(null);
+    } catch (nextError) {
+      setConfirmationError(nextError.message || (confirmation.kind === 'trash' ? '无法移入回收站。' : '无法归档项目。'));
+    } finally { setConfirmationBusy(false); }
   };
   const openProviderDetails = () => { setProviderDetails({ open: true }); };
   const openAdvancedDetails = async () => {
@@ -965,7 +1047,7 @@ function App() {
     tasks: () => selectedProject ? <ProjectTaskList project={selectedProject} tasks={tasks} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null,
     'studio-overview': () => <section className="overview-stage">
       <div className="overview-head"><div><p className="eyebrow">同一任务内的显式对比</p><h2>{selectedTask ? selectedTask.name : '请选择任务'}</h2><span>{studioOverview?.availableRounds?.length || 0} 个可比较轮次。比较不会推断或启动运行。</span></div>{taskOverview && <div className="overview-metrics"><span>轮次 {taskOverview.summary?.roundCount || 0}</span><span>运行 {taskOverview.summary?.runCount || 0}</span><span>结果 {taskOverview.summary?.resultCount || 0}</span></div>}</div>
-      {selectedTask ? <><div className="compare-selector">{(studioOverview?.availableRounds || rounds).map((round) => <label key={round.id}><input type="checkbox" checked={compareRoundIds.includes(round.id)} onChange={() => toggleComparedRound(round.id)} /><span>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[round.purpose] || round.purpose} · 计划 v{round.planVersion}</span></label>)}</div>{studioOverview?.comparisons?.length ? <div className="comparison-grid">{studioOverview.comparisons.map((comparison) => <article key={comparison.round.id} className="comparison-column"><header><div><p>轮次 {comparison.round.planVersion}</p><h3>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[comparison.round.purpose] || comparison.round.purpose}</h3></div><StatusPill value={comparison.round.status} scope="round" /></header><dl><div><dt>上游</dt><dd>{comparison.lineage?.rounds?.length ? '承接 ' + comparison.lineage.rounds.length + ' 个轮次' : '首个方向'}</dd></div><div><dt>计划</dt><dd>{comparison.round.plan?.operation === 'edit' ? '编辑' : '生成'} · {comparison.round.plan?.itemCount || 0} 项</dd></div><div><dt>产出</dt><dd>{comparison.summary?.resultCount || 0} 个结果</dd></div></dl><div className="comparison-runs">{comparison.runs?.map((run) => <section key={run.id}><button type="button" className="trace-link" onClick={() => navigateRoute({ view: 'runs', projectId: selectedProject?.id, taskId: selectedTask.id, roundId: comparison.round.id, compareRoundIds: [comparison.round.id], runId: run.id })}><b>运行项 {run.items?.length || 0}</b><StatusPill value={run.status} scope="run" /></button><div className="comparison-assets">{run.items?.flatMap((item) => item.outputAssets || []).map((asset) => <button type="button" key={asset.id} title="查看资产来源与评审" onClick={() => void inspectAsset(asset.id)}><img src={'/api/assets/' + encodeURIComponent(asset.id) + '/file'} alt="轮次结果" /><span>{asset.review?.decision === 'keep' ? '保留' : asset.review?.decision === 'review' ? '待复核' : '未评审'}</span></button>)}</div></section>)}</div></article>)}</div> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>勾选一个或多个轮次后，比较计划、运行、结果和当前评审。</p></div>}</> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>请先选择项目和任务，再打开创作总览。</p></div>}
+      {selectedTask ? <><div className="compare-selector">{(studioOverview?.availableRounds || rounds).map((round) => <label key={round.id}><input type="checkbox" checked={compareRoundIds.includes(round.id)} onChange={() => toggleComparedRound(round.id)} /><span>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[round.purpose] || round.purpose} · 计划 v{round.planVersion}</span></label>)}</div>{studioOverview?.comparisons?.length ? <div className="comparison-grid">{studioOverview.comparisons.map((comparison) => <article key={comparison.round.id} className="comparison-column"><header><div><p>轮次 {comparison.round.planVersion}</p><h3>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[comparison.round.purpose] || comparison.round.purpose}</h3></div><StatusPill value={comparison.round.status} scope="round" /></header><dl><div><dt>上游</dt><dd>{comparison.lineage?.rounds?.length ? '承接 ' + comparison.lineage.rounds.length + ' 个轮次' : '首个方向'}</dd></div><div><dt>计划</dt><dd>{comparison.round.plan?.operation === 'edit' ? '编辑' : '生成'} · {comparison.round.plan?.itemCount || 0} 项</dd></div><div><dt>产出</dt><dd>{comparison.summary?.resultCount || 0} 个结果</dd></div></dl>{comparison.runsTruncated && <p className="comparison-truncated">仅显示最近 24 次运行</p>}<div className="comparison-runs">{comparison.runs?.map((run) => <section key={run.id}><button type="button" className="trace-link" onClick={() => navigateRoute({ view: 'runs', projectId: selectedProject?.id, taskId: selectedTask.id, roundId: comparison.round.id, compareRoundIds: [comparison.round.id], runId: run.id })}><b>运行项 {run.items?.length || 0}</b><StatusPill value={run.status} scope="run" /></button><div className="comparison-assets">{run.items?.flatMap((item) => item.outputAssets || []).map((asset) => <button type="button" key={asset.id} title="查看资产来源与评审" onClick={() => void inspectAsset(asset.id)}><img src={assetThumbnailUrl(asset)} alt="轮次结果" loading="lazy" decoding="async" /><span>{asset.review?.decision === 'keep' ? '保留' : asset.review?.decision === 'review' ? '待复核' : '未评审'}</span></button>)}</div></section>)}</div></article>)}</div> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>勾选一个或多个轮次后，比较计划、运行、结果和当前评审。</p></div>}</> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>请先选择项目和任务，再打开创作总览。</p></div>}
     </section>,
     prompts: () => <PromptWorkspace round={selectedRound} planVersions={planVersions} loading={planVersionsLoading} onRefresh={() => void refreshPlanVersions()} />,
     runs: () => <section className="run-stage">
@@ -997,7 +1079,7 @@ function App() {
         <div className="header-actions">
           <StudioSearch query={searchQuery} results={searchResults} loading={searchLoading} error={searchError} onQueryChange={setSearchQuery} onOpenResult={openSearchResult} />
           {provider?.configured ? <button type="button" className="connection-state" onClick={openProviderDetails}><span className="signal-dot" />生成配置已就绪</button> : <button type="button" className="connection-state is-error" onClick={openProviderDetails}><CloudOff size={14} />生成配置未就绪</button>}
-          {!studioView && selectedProject && selectedProject.status !== 'archived' && <IconButton label="归档当前项目" onClick={() => void archiveCurrentProject()}><Archive size={17} /></IconButton>}
+          {!studioView && selectedProject && selectedProject.status !== 'archived' && <IconButton label="归档当前项目" onClick={openArchiveConfirmation}><Archive size={17} /></IconButton>}
           <IconButton label="刷新工作台" onClick={() => void refresh()}><RefreshCw size={17} /></IconButton>
           <input ref={inputRef} className="file-input" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void upload(event.target.files)} />
           {canImport && view !== 'library' && <button type="button" className="command-button" onClick={() => inputRef.current?.click()} disabled={uploading}><ImagePlus size={17} />{uploading && uploadProgress ? '正在导入 ' + uploadProgress.completed + '/' + uploadProgress.total : importLabel}</button>}
@@ -1015,8 +1097,9 @@ function App() {
     </section>
 
     {assetProvenance && <aside className="asset-inspector" aria-label="资产来源与评审记录"><div className="asset-inspector-head"><div><p className="eyebrow">资产检查器</p><h2>{assetProvenance.asset?.kind === 'generated' ? '生成结果来源链' : '导入素材来源链'}</h2></div><IconButton label="关闭资产检查器" onClick={() => setAssetProvenance(null)}><X size={16} /></IconButton></div><div className="asset-inspector-section"><span>来源</span><p>{assetProvenance.asset?.kind === 'generated' ? '由已确认轮次中的运行项保存' : '导入到当前 Studio 的素材'}</p>{assetProvenance.outputs?.map((output) => <button type="button" key={output.runItem.id} className="trace-link" onClick={() => { navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id }); setAssetProvenance(null); }}><span>{output.project.name} / {output.task.name}</span><b>{output.round.purpose} · 运行项 {output.runItem.sequence}</b></button>)}</div><div className="asset-inspector-section"><span>评审历史</span>{assetProvenance.reviews?.length ? assetProvenance.reviews.map((review) => <p key={review.id}><b>{review.decision === 'keep' ? '保留' : review.decision === 'review' ? '待复核' : review.decision === 'reject' ? '不采用' : '衍生方向'}</b> · {review.createdAt}</p>) : <p>尚未记录评审。</p>}</div><div className="asset-inspector-section"><span>交付引用</span>{assetProvenance.deliveries?.length ? assetProvenance.deliveries.map((delivery) => <p key={delivery.id}>{delivery.name} · {delivery.status}</p>) : <p>尚未加入交付草稿。</p>}</div><div className="asset-inspector-section"><span>批次版本</span>{assetProvenance.deliveryBatches?.length ? assetProvenance.deliveryBatches.map((batch) => <p key={batch.versionId}>{batch.name} · v{batch.versionNo} · {batch.status === 'ready' ? '已准备' : batch.status === 'draft' ? '草稿' : '已被新修订版本替代'}</p>) : <p>尚未加入版本化交付批次。</p>}</div></aside>}
-    {previewAssets.length > 0 && <AccessibleDialog className="image-inspector" label={previewAssets.length === 2 ? '双图对比' : '素材放大查看'} onDismiss={() => setPreviewAssets([])}><div className="inspector-toolbar"><span>{previewAssets.length === 2 ? '双图对比' : '素材查看'}</span><div><IconButton label="缩小" disabled={previewZoom <= 0.75} onClick={() => setPreviewZoom((value) => Math.max(0.75, value - 0.25))}><ZoomOut size={16} /></IconButton><IconButton label="放大" disabled={previewZoom >= 2} onClick={() => setPreviewZoom((value) => Math.min(2, value + 0.25))}><ZoomIn size={16} /></IconButton><IconButton label="关闭查看" onClick={() => setPreviewAssets([])}><X size={16} /></IconButton></div></div><div className={'inspector-images ' + (previewAssets.length === 2 ? 'is-compare' : '')}>{previewAssets.map((asset, index) => { const selected = selectedAssetIds.has(asset.id); const busy = selectionBusyIds.has(asset.id); return <figure className={selected ? 'is-selected' : ''} key={asset.id}>{selectedProject && !asset.deletedAt && <label className="inspector-select-control"><input type="checkbox" checked={selected} disabled={busy} onChange={() => void markAsDeliverable(asset)} /><span>{selected ? <Check size={15} /> : <Bookmark size={15} />}{busy ? '正在保存' : selected ? '已选成果' : '选为成果'}</span></label>}<img src={'/api/assets/' + encodeURIComponent(asset.id) + '/file'} alt="" style={{ transform: 'scale(' + previewZoom + ')' }} /><figcaption>{asset.display?.label || (previewAssets.length === 2 ? '对比图 ' + (index + 1) : '素材预览')}</figcaption></figure>; })}</div></AccessibleDialog>}
+    {previewAssets.length > 0 && <AccessibleDialog className="image-inspector" label={previewAssets.length === 2 ? '双图对比' : '素材放大查看'} onDismiss={() => setPreviewAssets([])}><div className="inspector-toolbar"><span>{previewAssets.length === 2 ? '双图对比' : '素材查看'}</span><div><IconButton label="缩小" disabled={previewZoom <= 0.75} onClick={() => setPreviewZoom((value) => Math.max(0.75, value - 0.25))}><ZoomOut size={16} /></IconButton><IconButton label="放大" disabled={previewZoom >= 2} onClick={() => setPreviewZoom((value) => Math.min(2, value + 0.25))}><ZoomIn size={16} /></IconButton><IconButton label="关闭查看" onClick={() => setPreviewAssets([])}><X size={16} /></IconButton></div></div><div className={'inspector-images ' + (previewAssets.length === 2 ? 'is-compare' : '')}>{previewAssets.map((asset, index) => { const selected = selectedAssetIds.has(asset.id); const busy = selectionBusyIds.has(asset.id); return <figure className={selected ? 'is-selected' : ''} key={asset.id}>{selectedProject && !asset.deletedAt && <label className="inspector-select-control"><input type="checkbox" checked={selected} disabled={busy} onChange={() => void markAsDeliverable(asset)} /><span>{selected ? <Check size={15} /> : <Bookmark size={15} />}{busy ? '正在保存' : selected ? '已选成果' : '选为成果'}</span></label>}<img src={assetOriginalUrl(asset)} alt="" style={{ transform: 'scale(' + previewZoom + ')' }} /><figcaption>{asset.display?.label || (previewAssets.length === 2 ? '对比图 ' + (index + 1) : '素材预览')}</figcaption></figure>; })}</div></AccessibleDialog>}
     {providerDetails && <ProviderSettings request={api} onDismiss={() => setProviderDetails(null)} onChanged={refresh} />}
+    {confirmation && <ConfirmationDialog label={confirmation.kind === 'archive' ? '确认归档项目' : '确认移入回收站'} title={confirmation.kind === 'archive' ? '归档“' + confirmation.projectName + '”？' : '将图片移入回收站？'} message={confirmation.kind === 'archive' ? '归档后将关闭该项目下的任务与轮次。未完成生成必须先暂停或取消。是否继续？' : '这张图片仍被选择、资料库或交付引用。移入回收站不会删除已冻结交付，是否继续？'} confirmLabel={confirmation.kind === 'archive' ? '确认归档' : '继续移入'} busy={confirmationBusy} error={confirmationError} onCancel={dismissConfirmation} onConfirm={confirmPendingAction} />}
   </main>;
 }
 

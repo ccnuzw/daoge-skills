@@ -12,7 +12,10 @@ test('Provider settings UI keeps secrets write-only and exposes accessible expli
   assert.match(source, /本地校验/);
   assert.match(source, /连接测试/);
   assert.match(source, /保存并重启/);
-  assert.match(source, /window\.confirm/);
+  assert.doesNotMatch(source, /window\.(?:alert|confirm|prompt)/);
+  assert.match(source, /<ConfirmationDialog/);
+  assert.match(source, /删除 Profile“/);
+  assert.match(source, /清除连接信息会让该 Profile 暂时不可用/);
   assert.match(source, /aria-label="Provider Profile 列表"/);
   assert.match(source, /role="alert"/);
   assert.match(source, /aria-live="polite"/);
