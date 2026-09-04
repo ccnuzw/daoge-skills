@@ -70,6 +70,27 @@ test('four concurrent CLI opens share one opener claim and opener failure releas
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
+test('Session context rejects a stale version rather than overwriting newer navigation', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { model: 'gpt-image-2', apiKey: 'context-version-test-key' });
+    started = await startLocalStudioService({ workspaceRoot });
+    const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'context-occ-session', body: { conversationId: 'context-occ-conversation' } });
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'context-occ-project', body: { name: 'Context OCC' } });
+    const sessionId = session.body.data.id;
+    const projectId = project.body.data.value.id;
+    const first = await requestJson(started, '/api/sessions/' + sessionId + '/context', { method: 'POST', idempotencyKey: 'context-occ-first', body: { projectId, expectedVersion: 1 } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const stale = await requestJson(started, '/api/sessions/' + sessionId + '/context', { method: 'POST', idempotencyKey: 'context-occ-stale', body: { projectId, expectedVersion: 1 } });
+    assert.equal(stale.status, 409, JSON.stringify(stale.body));
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 
 test('four agent conversations retain independent Session context, project ownership, Runs, and fair queue claims', async () => {
   const workspaceRoot = temporaryWorkspace();

@@ -58,8 +58,26 @@ function assetDisplayContexts(db: StudioDatabase, assets: StudioAsset[]): Map<st
   const displays = new Map<string, JsonRecord>();
   if (!assets.length) return displays;
   const placeholders = assets.map(() => '?').join(',');
-  const rows = db.prepare("WITH round_positions AS (SELECT id, task_id, ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY created_at, id) AS round_sequence FROM creative_rounds), run_positions AS (SELECT id, round_id, ROW_NUMBER() OVER (PARTITION BY round_id ORDER BY created_at, id) AS run_sequence FROM generation_runs), displays AS (SELECT relation.asset_id, item.sequence AS item_sequence, round.purpose AS round_purpose, task.name AS task_name, round_positions.round_sequence, run_positions.run_sequence, ROW_NUMBER() OVER (PARTITION BY relation.asset_id ORDER BY run.created_at, run.id, item.sequence) AS position FROM asset_relations relation JOIN run_items item ON item.id = relation.target_id JOIN generation_runs run ON run.id = item.run_id JOIN run_positions ON run_positions.id = run.id JOIN creative_rounds round ON round.id = run.round_id JOIN round_positions ON round_positions.id = round.id JOIN creative_tasks task ON task.id = round.task_id WHERE relation.asset_id IN (" + placeholders + ") AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item') SELECT asset_id, item_sequence, round_purpose, task_name, round_sequence, run_sequence FROM displays WHERE position = 1 ORDER BY asset_id").all(...assets.map((asset) => asset.id)) as Array<{ asset_id: string; item_sequence: number; round_purpose: string; task_name: string; round_sequence: number; run_sequence: number }>;
-  for (const row of rows) if (!displays.has(row.asset_id)) {
+  const rows = db.prepare(
+    "WITH first_outputs AS (" +
+      "SELECT relation.asset_id, item.sequence AS item_sequence, round.id AS round_id, round.task_id, " +
+      "round.created_at AS round_created_at, round.purpose AS round_purpose, task.name AS task_name, " +
+      "run.id AS run_id, run.round_id AS run_round_id, run.created_at AS run_created_at, " +
+      "ROW_NUMBER() OVER (PARTITION BY relation.asset_id ORDER BY run.created_at, run.id, item.sequence) AS position " +
+      "FROM asset_relations relation JOIN run_items item ON item.id = relation.target_id " +
+      "JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id " +
+      "JOIN creative_tasks task ON task.id = round.task_id WHERE relation.asset_id IN (" + placeholders + ") " +
+      "AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item') " +
+    "SELECT first.asset_id, first.item_sequence, first.round_purpose, first.task_name, " +
+      "1 + (SELECT COUNT(*) FROM creative_rounds prior_round WHERE prior_round.task_id = first.task_id " +
+        "AND (prior_round.created_at < first.round_created_at OR " +
+          "(prior_round.created_at = first.round_created_at AND prior_round.id < first.round_id))) AS round_sequence, " +
+      "1 + (SELECT COUNT(*) FROM generation_runs prior_run WHERE prior_run.round_id = first.run_round_id " +
+        "AND (prior_run.created_at < first.run_created_at OR " +
+          "(prior_run.created_at = first.run_created_at AND prior_run.id < first.run_id))) AS run_sequence " +
+    "FROM first_outputs first WHERE first.position = 1 ORDER BY first.asset_id"
+  ).all(...assets.map((asset) => asset.id)) as Array<{ asset_id: string; item_sequence: number; round_purpose: string; task_name: string; round_sequence: number; run_sequence: number }>;
+  for (const row of rows) {
     const roundLabel = purposeLabel(row.round_purpose) + '第 ' + row.round_sequence + ' 轮';
     const label = row.task_name + ' · ' + roundLabel + ' · 运行 ' + row.run_sequence + ' · 第 ' + row.item_sequence + ' 张';
     displays.set(row.asset_id, { label, selectionText: label, taskName: row.task_name, roundPurpose: row.round_purpose, roundSequence: row.round_sequence, runSequence: row.run_sequence, itemSequence: row.item_sequence });

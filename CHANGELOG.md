@@ -2,6 +2,25 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.10.1 - 2026-09-05
+
+5.10.1 完成 vNext 控制面、SQLite、媒体恢复、Provider 内存边界和 Workbench 刷新链路的性能优化，并统一发布 Schema v22。
+
+### 性能与资源边界
+
+- 启动恢复避免重复执行资产媒体操作恢复；terminal run reconciliation 合并为聚合查询和单事务。
+- session plan、dry-run、latest run 改为单行查找；过期 dry-run 批量清理；SQLite 增加运行、预检、运行项、事件和媒体恢复索引。
+- claim 先计算全局可用槽位，再读取 pending 候选；异步媒体校验使用有界并发并保持事件顺序。
+- Provider 错误响应限制为 64 KiB，已知长度响应使用预分配缓冲；单机 Provider 活跃请求上限为 4，避免大响应 Buffer/Base64 副本耗尽内存。
+- daemon worker 子进程跳过已由 control-plane 完成的重复完整性校验；维护任务不再随每次短轮询执行。
+
+### Workbench 与验证
+
+- Workbench session plan 请求在依赖变化或卸载时取消，资产来源展示查询避免对全库轮次和运行做无界窗口扫描。
+- 新增 `npm run bench:perf`，覆盖 1k、10k、100k pending 队列、事件保留和 RSS 基线。
+- `npm test` 执行 288 项且全部通过；`npm run test:package` 发布清单校验通过。
+- 最终制品 `daoge-pic-5.10.1.tgz` 为 `324057` bytes，SHA-256 为 `3c7c64aadcaf010744b1fa3556631d890c8a7b34fae31c0a4622c2881fb8933a`。
+
 ## daoge-pic 5.10.0 - 2026-09-04
 
 5.10.0 完成机器确认闸门、独立协议版本、可恢复 CLI 幂等身份，以及生成与媒体双 worker pool 架构升级。

@@ -5,7 +5,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.10.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.0)。本文件定义 5.10.0 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.10.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.1)。本文件定义 5.10.1 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
@@ -128,8 +128,8 @@ node scripts/daoge.js studio --workspace <path>
 node scripts/daoge.js open --workspace <path> [--force true]
 node scripts/daoge.js provider-list --workspace <path>
 node scripts/daoge.js provider-import-env --workspace <path>
-node scripts/daoge.js provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key <key> [--active true]
-node scripts/daoge.js provider-update --workspace <path> --profile <id> --version <n> --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear>
+node scripts/daoge.js provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key-stdin @- [--active true]
+node scripts/daoge.js provider-update --workspace <path> --profile <id> --version <n> --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear> [--api-key-stdin @-]
 node scripts/daoge.js provider-copy --workspace <path> --profile <id>
 node scripts/daoge.js provider-activate --workspace <path> --profile <id>
 node scripts/daoge.js provider-delete --workspace <path> --profile <id>
@@ -169,7 +169,7 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 
 ## 幂等命令恢复
 
-所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、运行时 `5.10.0`；不兼容协议由 daemon 拒绝。
+所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、运行时 `5.10.1`；不兼容协议由 daemon 拒绝。
 
 ## 运行恢复与媒体边界
 
@@ -179,9 +179,11 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 - `retry` 只允许 `failed`、`blocked` 或 `retry_wait`；可用 `--items` 做单项重试。`outcome_unknown` 不可直接重试。
 - `archive-project` 会拒绝仍有未完成生成的项目，再以事务方式归档项目、任务和轮次。
 - daemon 启动时固定 active Profile 的 `profileId + configVersion`、Provider、模型和端点身份。活动 Profile、模型、端点、密钥、options 或 configVersion 变化后标记 `restartRequired`；重启前拒绝新运行，已有运行不静默切换。Worker 只领取与启动快照 `profileId + configVersion` 匹配的运行。
-- 并发只属于 Generation Run：系统全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Schema v20 保留历史业务数据并补齐性能索引与事件窗口。
-- Provider 安全快照只含 profileId、profileName、configVersion、Provider、模型、端点身份与能力，不含 API Key、完整 URL 或调度设置。计划、Profile 版本或并发变化后必须重新预检。
-- 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。仅在当前 Studio 受管理根、相对路径、媒体类型、哈希、大小、资产和操作身份全部一致时恢复；路径越界、符号链接、冲突或歧义必须拒绝并留下脱敏事件。
+- 并发只属于 Generation Run：持久队列的全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Provider 活跃请求受单机资源预算硬上限 `4` 约束，防止 100 MB 响应的 Buffer/Base64 副本耗尽本地内存。
+- Worker 与 media worker 均有 job watchdog、稳定运行窗口和有界重启；请求租约记录 worker 身份。子进程崩溃、挂起或守护超时不得让调用永久等待，未确认 Provider 结果仍进入 `outcome_unknown`。
+- Schema v22 保留历史业务数据，补齐媒体操作 owner/heartbeat、运行项 lease worker、资产媒体健康状态、运行/预检/事件与媒体恢复索引，以及完整性校验。Studio DB 强制 WAL 与 `synchronous=FULL`。
+- 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。活动 journal 由 owner heartbeat 保护，恢复只处理过期遗留项；同哈希竞争收敛到唯一资产，交付同一冻结目录的并发导出收敛到同一结果。
+- 缺失媒体持久标记为不可用，不得作为参考图、遮罩或交付候选；对账确认恢复后才重新可用。过期 staging `.part` 文件只在不属于活动 journal 时清理。
 - 参考图和遮罩只能引用当前项目资产，或具备当前 Studio 明确 `shared_across_projects` 关系的共享素材；计划写入、确认、预检、排队和 Worker 读取前都必须重复校验。其他项目未共享素材不得因同属 Studio 而被引用。
 - 下载、复制、交付导出和 ZIP 使用受验证 snapshot 流式读取。文件替换、路径穿越、跨 Studio/跨项目访问、超出条目或聚合上限、客户端断连都不能形成错误交付；失败时关闭文件描述符和临时 snapshot。
 

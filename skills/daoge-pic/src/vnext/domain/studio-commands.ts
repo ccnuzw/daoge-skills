@@ -259,7 +259,7 @@ export function openOrAttachStudioSession(db: StudioDatabase, input: { studioId:
 }
 
 
-export function updateStudioSessionContext(db: StudioDatabase, input: { studioId: string; sessionId?: string; projectId?: string; taskId?: string; roundId?: string }): StudioSession | null {
+export function updateStudioSessionContext(db: StudioDatabase, input: { studioId: string; sessionId?: string; projectId?: string; taskId?: string; roundId?: string; expectedVersion?: unknown }): StudioSession | null {
   if (!input.sessionId) return null;
   const session = db.prepare('SELECT id, studio_id, conversation_id, active_project_id, active_task_id, active_round_id, version FROM studio_sessions WHERE id = ?').get(requireValue(input.sessionId, 'sessionId')) as StoredSession | undefined;
   if (!session || session.studio_id !== input.studioId) throw new StudioNotFoundError('Studio session not found: ' + input.sessionId);
@@ -278,8 +278,12 @@ export function updateStudioSessionContext(db: StudioDatabase, input: { studioId
     projectId = round.project_id;
   }
   if (projectId) resolveProjectInStudio(db, input.studioId, projectId);
+  if (input.expectedVersion !== undefined && (!Number.isSafeInteger(input.expectedVersion) || Number(input.expectedVersion) < 1)) throw new InvalidCommandError('Session context expectedVersion must be a positive integer.');
   const timestamp = nowIso();
-  db.prepare('UPDATE studio_sessions SET active_project_id = ?, active_task_id = ?, active_round_id = ?, version = version + 1, updated_at = ? WHERE id = ?').run(projectId, taskId, roundId, timestamp, session.id);
+  const updated = input.expectedVersion === undefined
+    ? db.prepare('UPDATE studio_sessions SET active_project_id = ?, active_task_id = ?, active_round_id = ?, version = version + 1, updated_at = ? WHERE id = ?').run(projectId, taskId, roundId, timestamp, session.id)
+    : db.prepare('UPDATE studio_sessions SET active_project_id = ?, active_task_id = ?, active_round_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?').run(projectId, taskId, roundId, timestamp, session.id, Number(input.expectedVersion));
+  if (Number(updated.changes) !== 1) throw new VersionConflictError('Studio session context changed; refresh before writing again.');
   appendStudioEvent(db, { studioId: input.studioId, entityType: 'studio_session', entityId: session.id, eventType: 'session.context_updated', payload: { projectId, taskId, roundId } });
   return { ...sessionFromRow(session), activeProjectId: projectId, activeTaskId: taskId, activeRoundId: roundId, version: session.version + 1 };
 }

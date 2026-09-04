@@ -3,7 +3,7 @@ import { safeErrorSummary } from '../shared/safe-error';
 import { redactProviderText, sanitizeProviderImageResult, sanitizeProviderRequestId } from '../providers/response-sanitizer';
 import { ManagedAssetResolver, ResolvedManagedAssets } from '../media/asset-resolver';
 import { InvalidCommandError } from '../domain/studio-commands';
-import { appendStudioEvent, StudioDatabase } from '../studio/database';
+import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
 import { ClaimedRunItem, claimRunItems, getGenerationRun, getGenerationRunItem, markRunItemOutcomeUnknown, promoteDueRetryWaitItems, renewRunItemLease, settleTerminalGenerationRun, transitionRunItem } from './run-commands';
 import { retryDecision, RetryPolicy, DEFAULT_RETRY_POLICY } from './retry-policy';
@@ -26,6 +26,7 @@ export interface WorkerOptions {
   providerConfig: ResolvedProviderConfig;
   assetPersister: GeneratedAssetPersister;
   assetResolver?: ManagedAssetResolver;
+  manageRetries?: boolean;
   leaseMs?: number;
   retryPolicy?: RetryPolicy;
   now?: () => Date;
@@ -70,6 +71,7 @@ export class GenerationWorker {
   private readonly providerConfig: ResolvedProviderConfig;
   private readonly assetPersister: GeneratedAssetPersister;
   private readonly assetResolver?: ManagedAssetResolver;
+  private readonly manageRetries: boolean;
   private readonly leaseMs: number;
   private readonly policy: RetryPolicy;
   private readonly clock: () => Date;
@@ -83,6 +85,7 @@ export class GenerationWorker {
     this.providerConfig = options.providerConfig;
     this.assetPersister = options.assetPersister;
     this.assetResolver = options.assetResolver;
+    this.manageRetries = options.manageRetries !== false;
     this.leaseMs = options.leaseMs || 30000;
     this.policy = options.retryPolicy || DEFAULT_RETRY_POLICY;
     this.clock = options.now || (() => new Date());
@@ -97,12 +100,12 @@ export class GenerationWorker {
   }
 
 
-  async processOnce(limit = 1): Promise<WorkerProcessResult> {
+  async processOnce(limit = 1, globalLimit = limit): Promise<WorkerProcessResult> {
     if (this.stopping) return { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 };
     const snapshot = providerSnapshot(this.providerConfig);
     const now = this.clock();
-    promoteDueRetryWaitItems(this.db, now);
-    const claimedItems = claimRunItems(this.db, { workerId: this.workerId, limit, leaseMs: this.leaseMs, now, providerSnapshot: { profileId: snapshot.profileId, configVersion: snapshot.configVersion } });
+    if (this.manageRetries) promoteDueRetryWaitItems(this.db, now);
+    const claimedItems = claimRunItems(this.db, { workerId: this.workerId, limit, globalLimit, leaseMs: this.leaseMs, now, providerSnapshot: { profileId: snapshot.profileId, configVersion: snapshot.configVersion } });
     const result: WorkerProcessResult = { claimed: claimedItems.length, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 };
     const affectedRuns = new Set(claimedItems.map((item) => item.runId));
     const updatesByRun = new Map<string, { studioId: string; count: number }>();

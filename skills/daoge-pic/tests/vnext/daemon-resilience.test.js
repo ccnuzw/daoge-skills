@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { configureProvider } = require('./provider-test-helper');
-const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
+const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, updateStudioSessionContext, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
 const { createDryRunPreview, queueGenerationRun, claimRunItems, getGenerationRun, listGenerationRunItems, resolveUnknownRunItems, transitionRunItem, resumeGenerationRun } = require('../../dist/vnext/runner/run-commands');
 const { GenerationWorker } = require('../../dist/vnext/runner/worker');
 const { LocalStudioService, startLocalStudioService } = require('../../dist/vnext/api/server');
@@ -29,6 +29,34 @@ test('media worker pool is an independently addressable child-process pool', asy
     assert.notEqual(pool.processIds()[0], process.pid);
   } finally {
     await pool.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('generation and media worker pools respawn crashed children and drain queued work', async () => {
+  const { WorkerProcessPool } = require('../../dist/vnext/runtime/worker-pool');
+  const { MediaProcessPool } = require('../../dist/vnext/runtime/media-worker-pool');
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-worker-respawn-'));
+  let generationPool;
+  let mediaPool;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Worker Respawn Provider' });
+    generationPool = new WorkerProcessPool(workspaceRoot, 1);
+    mediaPool = new MediaProcessPool(workspaceRoot, 1);
+    await waitFor(() => generationPool.processIds().length === 1 && mediaPool.processIds().length === 1, 'worker pool children');
+    const generationPid = generationPool.processIds()[0];
+    const mediaPid = mediaPool.processIds()[0];
+    process.kill(generationPid, 'SIGKILL');
+    process.kill(mediaPid, 'SIGKILL');
+    await waitFor(() => generationPool.processIds()[0] && generationPool.processIds()[0] !== generationPid && mediaPool.processIds()[0] && mediaPool.processIds()[0] !== mediaPid, 'respawned worker pool children');
+    const generationTick = await generationPool.processOnce(1);
+    assert.equal(generationTick.claimed, 0);
+    const mediaResult = await mediaPool.run({ type: 'reconcile', studioId: initialized.manifest.studioId });
+    assert.equal(mediaResult.type, 'reconcile');
+  } finally {
+    if (generationPool) await generationPool.close();
+    if (mediaPool) await mediaPool.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
@@ -180,6 +208,7 @@ test('daemon restart preserves a 100-item queue and never replays external reque
     resolveUnknownRunItems(reopened, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.id, itemIds: unknownItems.map((item) => item.id), idempotencyKey: 'manual-reconciliation-no-result' });
     assert.throws(() => resumeGenerationRun(reopened, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.id, idempotencyKey: 'resume-without-session' }), InvalidCommandError);
     const session = openOrAttachStudioSession(reopened, { studioId: fixture.initialized.manifest.studioId, conversationId: 'recovery-confirmation' });
+    updateStudioSessionContext(reopened, { studioId: fixture.initialized.manifest.studioId, sessionId: session.id, roundId: fixture.run.roundId });
     const explicitlyResumed = resumeGenerationRun(reopened, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.id, sessionId: session.id, idempotencyKey: 'user-approved-safe-resume' });
     assert.equal(explicitlyResumed.value.status, 'queued');
 
@@ -271,7 +300,7 @@ test('controlled restart preserves its port and Workbench authorization only ins
       assert.equal(fs.statSync(runtimePath).mode & 0o777, 0o600);
     }
     assert.equal((await fetch(first.url + '/api/studio')).status, 401);
-    assert.equal((await fetch(first.url + '/api/studio', { headers: { authorization: 'Bearer ' + first.capability } })).status, 200);
+    assert.equal((await fetch(first.url + '/api/studio', { headers: { authorization: 'Bearer ' + first.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0' } })).status, 200);
     const studioOutput = spawnSync(process.execPath, [cliEntry, 'studio', '--workspace', workspaceRoot], { encoding: 'utf8' });
     assert.equal(studioOutput.status, 0, studioOutput.stderr);
     assert.equal(studioOutput.stdout.includes(first.capability), false);
@@ -299,9 +328,9 @@ test('controlled restart preserves its port and Workbench authorization only ins
     assert.equal(restartedOwner.pid, first.pid);
     assert.notEqual(restartedOwner.ownerId, firstOwner.ownerId, 'controlled restart must release and reacquire the SQLite mutex');
     assert.equal((await fetch(restarted.url + '/api/studio', { headers: { cookie } })).status, 200);
-    const normalClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
+    const normalClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
     assert.deepEqual((await normalClaim.json()).data, { claimed: false, reused: true, reason: 'recent-workbench' }, 'controlled restart must retain recent Workbench presence in daemon memory');
-    const forcedClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
+    const forcedClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
     assert.deepEqual((await forcedClaim.json()).data, { claimed: true, reused: false, reason: 'forced-opener-claim' });
     assert.equal((await fetch(restarted.url + '/api/projects', { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:9', 'content-type': 'application/json', 'idempotency-key': 'hostile-local-page' }, body: JSON.stringify({ name: 'blocked' }) })).status, 403);
     await stopDaemon(daemon);

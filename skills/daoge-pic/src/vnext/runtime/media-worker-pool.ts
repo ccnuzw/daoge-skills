@@ -39,7 +39,7 @@ export type MediaJob =
   | { type: 'thumbnail'; contentHash: string; source: MediaSource }
   | { type: 'zip'; entries: MediaZipEntry[]; maxEntries: number; maxAggregateBytes: number; maxEntryBytes: number }
   | { type: 'archive-staged'; staged: StagedMedia; assetId: string; bucket: 'imports' | 'generated' | 'exports' }
-  | { type: 'reconcile'; studioId: string };
+  | { type: 'reconcile'; studioId: string; recoverAssetOperations?: boolean };
 
 export type MediaJobResult =
   | { type: 'thumbnail'; contentHash: string; path: string }
@@ -53,6 +53,7 @@ interface PendingJob {
   resolve: (result: MediaJobResult) => void;
   reject: (error: Error) => void;
   signal?: AbortSignal;
+  timeout: NodeJS.Timeout | undefined;
   abort: () => void;
 }
 
@@ -60,11 +61,19 @@ interface WorkerSlot {
   child: ChildProcess;
   ready: boolean;
   active: PendingJob | null;
+  entry: string;
+  restartTimer: NodeJS.Timeout | null;
+  healthyTimer: NodeJS.Timeout | undefined;
+  restartAttempts: number;
+  failed: boolean;
 }
+const MAX_MEDIA_WORKER_POOL_SIZE = 4;
+const MAX_MEDIA_QUEUE_LENGTH = 256;
+const MEDIA_HEALTHY_WINDOW_MS = 30 * 1000;
+const MEDIA_JOB_TIMEOUT_MS = 15 * 60 * 1000;
 
-function defaultPoolSize(): number {
-  const parallelism = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
-  return Math.max(1, parallelism - 1);
+function defaultPoolSize(parallelism = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length): number {
+  return Math.max(1, Math.min(MAX_MEDIA_WORKER_POOL_SIZE, parallelism - 1));
 }
 
 function abortError(): Error {
@@ -81,7 +90,7 @@ export class MediaProcessPool {
 
   constructor(private readonly workspaceRoot: string, size = defaultPoolSize()) {
     const entry = path.resolve(__dirname, '../runner/media-worker-process.js');
-    const workerCount = Math.max(1, Math.floor(size) || 1);
+    const workerCount = Math.max(1, Math.min(MAX_MEDIA_WORKER_POOL_SIZE, Math.floor(size) || 1));
     for (let index = 0; index < workerCount; index += 1) this.slots.push(this.startSlot(entry));
   }
 
@@ -92,6 +101,7 @@ export class MediaProcessPool {
   run<T extends MediaJobResult>(job: MediaJob, signal?: AbortSignal): Promise<T> {
     if (this.stopping) return Promise.reject(new Error('Media worker pool is shutting down.'));
     if (signal?.aborted) return Promise.reject(abortError());
+    if (this.queue.length >= MAX_MEDIA_QUEUE_LENGTH) return Promise.reject(new Error('Media worker queue is full; retry after current work completes.'));
     return new Promise<T>((resolve, reject) => {
       const pending: PendingJob = {
         id: 'media-' + process.pid + '-' + (++this.sequence),
@@ -99,6 +109,7 @@ export class MediaProcessPool {
         resolve: resolve as (result: MediaJobResult) => void,
         reject,
         signal,
+        timeout: undefined,
         abort: () => this.abort(pending)
       };
       signal?.addEventListener('abort', pending.abort, { once: true });
@@ -113,6 +124,10 @@ export class MediaProcessPool {
     const error = new Error('Media worker pool is shutting down.');
     for (const pending of this.queue.splice(0)) this.finish(pending, error);
     const exits = this.slots.map((slot) => new Promise<void>((resolve) => {
+      if (slot.restartTimer) {
+        clearTimeout(slot.restartTimer);
+        slot.restartTimer = null;
+      }
       const timeout = setTimeout(() => { slot.child.kill('SIGKILL'); resolve(); }, 3000);
       slot.child.once('exit', () => { clearTimeout(timeout); resolve(); });
       if (slot.active) {
@@ -126,12 +141,14 @@ export class MediaProcessPool {
     await Promise.all(exits);
   }
 
-  private startSlot(entry: string): WorkerSlot {
+  private startSlot(entry: string, restartAttempts = 0): WorkerSlot {
     const child = fork(entry, ['--workspace', this.workspaceRoot], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
-    const slot: WorkerSlot = { child, ready: false, active: null };
+    const slot: WorkerSlot = { child, ready: false, active: null, entry, restartTimer: null, healthyTimer: undefined, restartAttempts, failed: false };
     child.on('message', (message: { type?: unknown; jobId?: unknown; result?: MediaJobResult; message?: unknown }) => {
       if (message?.type === 'ready') {
         slot.ready = true;
+        clearTimeout(slot.healthyTimer);
+        slot.healthyTimer = setTimeout(() => { slot.restartAttempts = 0; slot.healthyTimer = undefined; }, MEDIA_HEALTHY_WINDOW_MS);
         this.dispatch();
         return;
       }
@@ -157,6 +174,7 @@ export class MediaProcessPool {
         continue;
       }
       slot.active = pending;
+      pending.timeout = setTimeout(() => this.failSlot(slot, new Error('Media worker job watchdog expired.')), MEDIA_JOB_TIMEOUT_MS);
       try {
         slot.child.send?.({ type: 'media-job', jobId: pending.id, job: pending.job }, (error) => {
           if (error && slot.active === pending) {
@@ -184,17 +202,32 @@ export class MediaProcessPool {
   }
 
   private failSlot(slot: WorkerSlot, error: Error): void {
+    if (slot.failed) return;
+    slot.failed = true;
     slot.ready = false;
+    clearTimeout(slot.healthyTimer);
+    slot.healthyTimer = undefined;
     if (slot.active) {
       this.finish(slot.active, error);
       slot.active = null;
     }
-    if (this.slots.every((candidate) => !candidate.ready && !candidate.active)) {
-      for (const pending of this.queue.splice(0)) this.finish(pending, error);
-    }
+    if (this.stopping) return;
+    if (slot.child.exitCode === null && slot.child.signalCode === null) slot.child.kill(error.message === 'Media worker job watchdog expired.' ? 'SIGKILL' : 'SIGTERM');
+    if (slot.restartAttempts >= 8) return;
+    const delay = Math.min(30000, 100 * 2 ** Math.min(slot.restartAttempts, 8));
+    const nextAttempts = slot.restartAttempts + 1;
+    slot.restartTimer = setTimeout(() => {
+      slot.restartTimer = null;
+      if (this.stopping) return;
+      const index = this.slots.indexOf(slot);
+      if (index < 0) return;
+      this.slots[index] = this.startSlot(slot.entry, nextAttempts);
+    }, delay);
   }
 
   private finish(pending: PendingJob, error?: unknown, result?: MediaJobResult): void {
+    clearTimeout(pending.timeout);
+    pending.timeout = undefined;
     pending.signal?.removeEventListener('abort', pending.abort);
     if (error) pending.reject(error instanceof Error ? error : new Error('Media worker failed.'));
     else if (result) pending.resolve(result);

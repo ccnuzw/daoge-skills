@@ -75,7 +75,7 @@ async function execute(paths: StudioPaths, db: StudioDatabase, job: MediaJob, si
   if (job.type === 'thumbnail') return thumbnail(paths, job, signal);
   if (job.type === 'zip') return zip(paths, job, signal);
   if (job.type === 'archive-staged') return archiveStaged(paths, job);
-  return { type: 'reconcile', result: await reconcileManagedMediaAsync(db, paths, job.studioId) };
+  return { type: 'reconcile', result: await reconcileManagedMediaAsync(db, paths, job.studioId, { recoverAssetOperations: job.recoverAssetOperations }) };
 }
 
 function abortError(): Error {
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   if (!workspaceRoot) throw new Error('Media worker process requires --workspace.');
   const initialized = initializeStudio({ workspaceRoot });
   const paths = initialized.paths;
-  const db = openStudioDatabase(paths, initialized.manifest);
+  const db = openStudioDatabase(paths, initialized.manifest, { skipIntegrityCheck: true });
   let stopping = false;
   const jobs = new Map<string, AbortController>();
   const shutdown = (): void => {

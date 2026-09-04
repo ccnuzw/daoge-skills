@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
-const { appendStudioEvent, closeStudioDatabase, openStudioDatabase, STUDIO_EVENT_RETENTION, studioSchemaVersion, subscribeStudioEvents, withTransaction } = require('../../dist/vnext/studio/database');
+const { appendStudioEvent, closeStudioDatabase, openStudioDatabase, pruneStudioEphemeralRecords, STUDIO_EVENT_RETENTION, studioSchemaVersion, subscribeStudioEvents, withTransaction } = require('../../dist/vnext/studio/database');
 const { studioEventWindow } = require('../../dist/vnext/api/events');
 const { listProjectSelectionAssets, setProjectAssetsSelected } = require('../../dist/vnext/domain/project-selections');
 const { listDeliveries } = require('../../dist/vnext/domain/deliveries');
@@ -13,6 +13,8 @@ const { listAssetsWithReviewSummaries } = require('../../dist/vnext/domain/creat
 const { setReviewDecisions } = require('../../dist/vnext/domain/assets');
 const { getTaskStudioOverview } = require('../../dist/vnext/domain/creative-records');
 const { listTaskTypes } = require('../../dist/vnext/domain/libraries');
+const { getDryRunPreview } = require('../../dist/vnext/runner/run-commands');
+const { getLatestRun } = require('../../dist/vnext/domain/queries');
 
 function counted(db) {
   let calls = 0;
@@ -45,11 +47,11 @@ function setup(count) {
   return { workspaceRoot, db, studioId, assets };
 }
 
-test('v20 uses covering indexes and keeps Workbench list query counts constant as records grow', () => {
+test('v22 uses covering indexes and keeps Workbench list query counts constant as records grow', () => {
   const small = setup(1);
   const large = setup(64);
   try {
-    assert.equal(studioSchemaVersion(large.db), 20);
+    assert.equal(studioSchemaVersion(large.db), 22);
     const assetPlan = large.db.prepare("EXPLAIN QUERY PLAN SELECT id FROM assets WHERE studio_id = ? AND deleted_at IS NULL AND kind = ? ORDER BY created_at DESC, id DESC LIMIT 24").all(large.studioId, 'import').map((row) => row.detail).join('\n');
     const selectionPlan = large.db.prepare("EXPLAIN QUERY PLAN SELECT asset.id FROM asset_relations selection JOIN assets asset ON asset.id = selection.asset_id WHERE selection.relation_type = 'selected_for' AND selection.target_type = 'project' AND selection.target_id = ? AND asset.studio_id = ? ORDER BY selection.created_at, selection.asset_id").all('project-performance', large.studioId).map((row) => row.detail).join('\n');
     assert.match(assetPlan, /idx_assets_studio_visibility_kind_created/);
@@ -151,6 +153,56 @@ test('task comparisons preserve explicit rounds while bounding run history and q
     assert.equal(result.comparisons[0].runs.length, 24);
     assert.equal(result.comparisons[0].runsTruncated, true);
     assert.ok(overview.calls() <= 9, 'comparison reads must remain bounded by batches, not runs');
+  } finally {
+    closeStudioDatabase(fixture.db);
+    fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('latest run and dry-run lookup stay single-row and use round-order indexes', () => {
+  const fixture = setup(1);
+  try {
+    const timestamp = '2026-09-03T00:00:00.000Z';
+    fixture.db.prepare("INSERT INTO creative_tasks (id, project_id, name, intent_json, status, created_at, updated_at) VALUES ('lookup-task', 'project-performance', 'Lookup task', '{}', 'active', ?, ?)").run(timestamp, timestamp);
+    fixture.db.prepare("INSERT INTO creative_rounds (id, task_id, purpose, plan_json, status, created_at, updated_at) VALUES ('lookup-round', 'lookup-task', 'exploration', '{}', 'active', ?, ?)").run(timestamp, timestamp);
+    const insertRun = fixture.db.prepare("INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, execution_concurrency, concurrency_source, version, created_at, updated_at) VALUES (?, 'lookup-round', 'completed', '{}', '{}', 4, 'default', 1, ?, ?)");
+    for (let index = 0; index < 64; index += 1) insertRun.run('lookup-run-' + String(index).padStart(2, '0'), timestamp, timestamp);
+    const latest = counted(fixture.db);
+    assert.equal(getLatestRun(latest.db, fixture.studioId, 'lookup-round').id, 'lookup-run-63');
+    assert.equal(latest.calls(), 1);
+    const runPlan = fixture.db.prepare('EXPLAIN QUERY PLAN SELECT id FROM generation_runs WHERE round_id = ? ORDER BY created_at DESC, id DESC LIMIT 1').all('lookup-round').map((row) => row.detail).join('\n');
+    assert.match(runPlan, /idx_runs_round_created/);
+
+    const insertPreview = fixture.db.prepare("INSERT INTO dry_run_previews (id, round_id, plan_version, provider_snapshot_json, plan_snapshot_json, item_count, execution_concurrency, concurrency_source, created_at) VALUES (?, 'lookup-round', 1, '{}', '{}', 1, 4, 'default', ?)");
+    for (let index = 0; index < 64; index += 1) insertPreview.run('lookup-preview-' + String(index).padStart(2, '0'), timestamp);
+    const preview = counted(fixture.db);
+    assert.equal(getDryRunPreview(preview.db, fixture.studioId, 'lookup-round', 'lookup-preview-63').id, 'lookup-preview-63');
+    assert.equal(preview.calls(), 1);
+  } finally {
+    closeStudioDatabase(fixture.db);
+    fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('ephemeral record pruning deletes a batch with constant statement count', () => {
+  const fixture = setup(1);
+  try {
+    const oldTimestamp = '2026-01-01T00:00:00.000Z';
+    fixture.db.prepare("INSERT INTO creative_tasks (id, project_id, name, intent_json, status, created_at, updated_at) VALUES ('prune-task', 'project-performance', 'Prune task', '{}', 'active', ?, ?)").run(oldTimestamp, oldTimestamp);
+    fixture.db.prepare("INSERT INTO creative_rounds (id, task_id, purpose, plan_json, status, created_at, updated_at) VALUES ('prune-round', 'prune-task', 'exploration', '{}', 'active', ?, ?)").run(oldTimestamp, oldTimestamp);
+    const insertPreview = fixture.db.prepare("INSERT INTO dry_run_previews (id, round_id, plan_version, provider_snapshot_json, plan_snapshot_json, item_count, execution_concurrency, concurrency_source, created_at) VALUES (?, (SELECT id FROM creative_rounds LIMIT 1), 1, '{}', '{}', 1, 4, 'default', ?)");
+    const insertItem = fixture.db.prepare("INSERT INTO dry_run_items (id, preview_id, sequence, prompt_payload_json, created_at) VALUES (?, ?, 1, '{}', ?)");
+    for (let index = 0; index < 4; index += 1) {
+      const previewId = 'old-preview-' + index;
+      insertPreview.run(previewId, oldTimestamp);
+      insertItem.run('old-dry-item-' + index, previewId, oldTimestamp);
+    }
+    fixture.db.prepare("INSERT INTO command_receipts (studio_id, idempotency_key, command_name, request_hash, response_json, created_at) VALUES (?, 'old-receipt', 'bench', NULL, '{}', ?)").run(fixture.studioId, oldTimestamp);
+    const pruned = counted(fixture.db);
+    assert.deepEqual(pruneStudioEphemeralRecords(pruned.db, new Date('2026-09-04T00:00:00.000Z')), { receipts: 1, dryRuns: 4 });
+    assert.equal(pruned.calls(), 4);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS total FROM dry_run_items').get().total, 0);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS total FROM dry_run_previews').get().total, 0);
   } finally {
     closeStudioDatabase(fixture.db);
     fs.rmSync(fixture.workspaceRoot, { recursive: true, force: true });

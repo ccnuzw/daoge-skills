@@ -144,9 +144,23 @@ function ensurePrivateFile(filePath: string, dependencies: SensitiveAccessDepend
 
 
 function writeAtomically(filePath: string, content: string): void {
-  const tempPath = filePath + '.tmp-' + process.pid + '-' + Date.now();
-  fs.writeFileSync(tempPath, content, 'utf8');
-  fs.renameSync(tempPath, filePath);
+  const tempPath = filePath + '.tmp-' + process.pid + '-' + createId('write');
+  let descriptor: number | null = null;
+  try {
+    descriptor = fs.openSync(tempPath, 'wx', 0o600);
+    fs.writeFileSync(descriptor, content, 'utf8');
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+    fs.renameSync(tempPath, filePath);
+    try {
+      const directory = fs.openSync(path.dirname(filePath), fs.constants.O_RDONLY);
+      try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+    } catch { /* Some filesystems do not expose directory fsync. */ }
+  } finally {
+    if (descriptor !== null) try { fs.closeSync(descriptor); } catch {}
+    try { fs.rmSync(tempPath, { force: true }); } catch {}
+  }
 }
 
 export function resolveWorkspaceRoot(workspaceRoot: string): string {

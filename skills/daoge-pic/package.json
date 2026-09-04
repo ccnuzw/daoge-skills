@@ -1,6 +1,6 @@
 {
   "name": "daoge-pic",
-  "version": "5.10.0",
+  "version": "5.10.1",
   "description": "DAOGE Pic vNext conversation-first local image creation Studio.",
   "main": "dist/vnext/cli/daoge.js",
   "bin": {
@@ -11,6 +11,7 @@
     "scripts/daoge.js",
     "references/provider.env.example",
     "docs/daoge_pic_vnext_upgrade_spec_zh.md",
+    "docs/vnext_verification_evidence_zh.md",
     "README.md",
     "SKILL.md",
     "protocol-version.json",
@@ -24,6 +25,7 @@
     "build:vnext": "node -e \"require('node:fs').rmSync('dist/vnext', { recursive: true, force: true })\" && tsc -p tsconfig.vnext.json",
     "build:workbench": "vite build --config vite.workbench.config.mjs",
     "build": "npm run build:vnext && npm run build:workbench",
+    "bench:perf": "npm run build:vnext && node scripts/bench-perf.js",
     "test:vnext": "npm run build && node --test tests/vnext/*.test.js",
     "test": "npm run test:vnext",
     "test:package": "npm run build && node scripts/package-smoke.js",

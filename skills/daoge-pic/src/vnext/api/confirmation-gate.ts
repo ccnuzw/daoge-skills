@@ -35,6 +35,12 @@ interface StoredConsent extends ConfirmationConsent {
   challengeHash: string;
 }
 
+interface IssuedToken {
+  claims: ConfirmationTokenClaims;
+  expiresAt: number;
+  operationKey?: string;
+}
+
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
 const CONSENT_TTL_MS = 30 * 60 * 1000;
 const TOKEN_PREFIX = 'dgpct1';
@@ -93,7 +99,7 @@ export function canonicalValue(value: unknown): string {
 export class ConfirmationGate {
   private readonly challenges = new Map<string, StoredChallenge>();
   private readonly consents = new Map<string, StoredConsent>();
-  private readonly issuedTokens = new Map<string, { claims: ConfirmationTokenClaims; expiresAt: number }>();
+  private readonly issuedTokens = new Map<string, IssuedToken>();
 
   constructor(private readonly secret: string = randomBytes(32).toString('base64url'), private readonly now: () => Date = () => new Date()) {
     if (secret.length < 32) throw new Error('Confirmation gate secret must have high entropy.');
@@ -101,15 +107,23 @@ export class ConfirmationGate {
 
   createChallenge(input: { roundId: string; sessionId: string; conversationId: string; planHash: string; expectedVersion: number }): ConfirmationChallenge {
     this.purgeExpired();
+    const roundId = assertTokenPart(input.roundId, 'roundId');
+    const sessionId = assertTokenPart(input.sessionId, 'sessionId');
+    const conversationId = assertTokenPart(input.conversationId, 'conversationId');
+    const normalizedPlanHash = assertTokenPart(input.planHash, 'planHash');
+    const existing = this.challenges.get(roundId);
+    if (existing && existing.sessionId === sessionId && existing.conversationId === conversationId && existing.planHash === normalizedPlanHash && existing.expectedVersion === input.expectedVersion) {
+      return { challenge: existing.challenge, roundId: existing.roundId, sessionId: existing.sessionId, conversationId: existing.conversationId, planHash: existing.planHash, expectedVersion: existing.expectedVersion, expiresAt: existing.expiresAt };
+    }
     const challenge = 'confirm-' + randomBytes(32).toString('base64url');
     const expiresAt = new Date(this.now().getTime() + CHALLENGE_TTL_MS);
     const stored: StoredChallenge = {
       challenge,
       challengeHash: digest(challenge),
-      roundId: assertTokenPart(input.roundId, 'roundId'),
-      sessionId: assertTokenPart(input.sessionId, 'sessionId'),
-      conversationId: assertTokenPart(input.conversationId, 'conversationId'),
-      planHash: assertTokenPart(input.planHash, 'planHash'),
+      roundId,
+      sessionId,
+      conversationId,
+      planHash: normalizedPlanHash,
       expectedVersion: input.expectedVersion,
       expiresAt: expiresAt.toISOString()
     };
@@ -123,11 +137,16 @@ export class ConfirmationGate {
     if (!challenge) return null;
     return { challenge: challenge.challenge, roundId: challenge.roundId, sessionId: challenge.sessionId, conversationId: challenge.conversationId, planHash: challenge.planHash, expectedVersion: challenge.expectedVersion, expiresAt: challenge.expiresAt };
   }
+  validateChallenge(input: { roundId: string; challenge: string; sessionId: string; planHash: string }): boolean {
+    this.purgeExpired();
+    const stored = this.challenges.get(input.roundId);
+    return Boolean(stored && safeEqual(stored.challengeHash, digest(input.challenge)) && stored.sessionId === input.sessionId && stored.planHash === input.planHash);
+  }
 
   confirm(input: { roundId: string; challenge: string; sessionId: string; planHash: string }): ConfirmationConsent {
     this.purgeExpired();
     const stored = this.challenges.get(input.roundId);
-    if (!stored || !safeEqual(stored.challengeHash, digest(input.challenge)) || stored.sessionId !== input.sessionId || stored.planHash !== input.planHash) throw new Error('Confirmation challenge is invalid, expired, or no longer matches the plan.');
+    if (!this.validateChallenge(input) || !stored) throw new Error('Confirmation challenge is invalid, expired, or no longer matches the plan.');
     const confirmedAt = this.now();
     const consent: StoredConsent = {
       roundId: stored.roundId,
@@ -162,13 +181,35 @@ export class ConfirmationGate {
 
   verifyToken(token: string, expected: { roundId: string; preflightId: string; planHash: string; conversationId: string }): boolean {
     this.purgeExpired();
+    return Boolean(this.issuedToken(token, expected));
+  }
+
+  reserveToken(token: string, expected: { roundId: string; preflightId: string; planHash: string; conversationId: string }, operationKey: string): { replayed: boolean } {
+    this.purgeExpired();
+    const issued = this.issuedToken(token, expected);
+    if (!issued) throw new Error('The confirmation token is invalid, expired, or already reserved by another operation.');
+    const normalizedOperationKey = assertTokenPart(operationKey, 'operationKey');
+    if (issued.operationKey) {
+      if (issued.operationKey === normalizedOperationKey) return { replayed: true };
+      throw new Error('The confirmation token has already authorized another execution operation.');
+    }
+    issued.operationKey = normalizedOperationKey;
+    return { replayed: false };
+  }
+
+  releaseToken(token: string, operationKey: string): void {
+    const issued = this.issuedTokens.get(digest(String(token || '')));
+    if (issued?.operationKey === operationKey) issued.operationKey = undefined;
+  }
+
+  private issuedToken(token: string, expected: { roundId: string; preflightId: string; planHash: string; conversationId: string }): IssuedToken | null {
     const parts = String(token || '').split('.');
-    if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX) return false;
+    if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX) return null;
     const claims = decodeClaims(parts[1]);
-    if (!claims || !safeEqual(parts[2], sign(this.secret, claims))) return false;
-    if (claims.roundId !== expected.roundId || claims.preflightId !== expected.preflightId || claims.planHash !== expected.planHash || claims.conversationId !== expected.conversationId) return false;
+    if (!claims || !safeEqual(parts[2], sign(this.secret, claims))) return null;
+    if (claims.roundId !== expected.roundId || claims.preflightId !== expected.preflightId || claims.planHash !== expected.planHash || claims.conversationId !== expected.conversationId) return null;
     const issued = this.issuedTokens.get(digest(token));
-    return Boolean(issued && issued.expiresAt > this.now().getTime());
+    return issued && issued.expiresAt > this.now().getTime() ? issued : null;
   }
 
   private purgeExpired(): void {

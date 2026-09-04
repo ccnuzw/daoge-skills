@@ -63,16 +63,40 @@ export class StudioGeneratedAssetPersister implements GeneratedAssetPersister {
     };
     const timestamp = new Date().toISOString();
     const stagedPath = path.relative(this.paths.workspaceRoot, staged.stagingPath).split(path.sep).join('/');
+    const ownerId = 'generated-' + process.pid + '-' + assetId;
     withTransaction(this.db, () => {
-      this.db.prepare('INSERT INTO media_commit_journal (asset_id, studio_id, staged_path, final_storage_path, media_type, content_hash, byte_size, source_json, run_id, run_item_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(assetId, this.studioId, stagedPath, planned.storagePath, staged.mediaType, staged.contentHash, staged.byteSize, JSON.stringify(source), input.runId, input.itemId, timestamp);
+      this.db.prepare('INSERT INTO media_commit_journal (asset_id, studio_id, staged_path, final_storage_path, media_type, content_hash, byte_size, source_json, run_id, run_item_id, owner_id, heartbeat_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(assetId, this.studioId, stagedPath, planned.storagePath, staged.mediaType, staged.contentHash, staged.byteSize, JSON.stringify(source), input.runId, input.itemId, ownerId, timestamp, timestamp);
     });
     const archived = await archiveStagedImageAsync(this.paths, staged, { assetId, bucket: 'generated' });
-    withTransaction(this.db, () => {
-      this.db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(assetId, this.studioId, 'generated', archived.mediaType, archived.storagePath, archived.contentHash, archived.byteSize, JSON.stringify(source), timestamp, timestamp);
-      this.linkOutput(assetId, input.runId, input.itemId);
-      this.db.prepare('DELETE FROM media_commit_journal WHERE asset_id = ?').run(assetId);
-    });
-    return { assetId, mediaType: archived.mediaType, byteSize: archived.byteSize, contentHash: archived.contentHash };
+    let persisted: StoredAsset | null = null;
+    try {
+      withTransaction(this.db, () => {
+        const existing = this.db.prepare('SELECT id, media_type, byte_size, content_hash, deleted_at FROM assets WHERE studio_id = ? AND content_hash = ? AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1').get(this.studioId, archived.contentHash) as StoredAsset | undefined;
+        if (existing) {
+          this.linkOutput(existing.id, input.runId, input.itemId);
+          this.db.prepare('DELETE FROM media_commit_journal WHERE asset_id = ? AND studio_id = ?').run(assetId, this.studioId);
+          persisted = existing;
+          return;
+        }
+        this.db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(assetId, this.studioId, 'generated', archived.mediaType, archived.storagePath, archived.contentHash, archived.byteSize, JSON.stringify(source), timestamp, timestamp);
+        this.linkOutput(assetId, input.runId, input.itemId);
+        this.db.prepare('DELETE FROM media_commit_journal WHERE asset_id = ? AND studio_id = ?').run(assetId, this.studioId);
+        persisted = { id: assetId, media_type: archived.mediaType, byte_size: archived.byteSize, content_hash: archived.contentHash, deleted_at: null };
+      });
+    } catch (error) {
+      if (!(error instanceof Error) || !/UNIQUE constraint failed: assets\.studio_id, assets\.content_hash/.test(error.message)) throw error;
+      const winner = this.db.prepare('SELECT id, media_type, byte_size, content_hash, deleted_at FROM assets WHERE studio_id = ? AND content_hash = ? AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1').get(this.studioId, archived.contentHash) as StoredAsset | undefined;
+      if (!winner) throw error;
+      withTransaction(this.db, () => {
+        this.linkOutput(winner.id, input.runId, input.itemId);
+        this.db.prepare('DELETE FROM media_commit_journal WHERE asset_id = ? AND studio_id = ?').run(assetId, this.studioId);
+      });
+      persisted = winner;
+    }
+    const committed = persisted as StoredAsset | null;
+    if (!committed) throw new Error('Generated media commit did not produce an asset.');
+    if (committed.id !== assetId) discardStagedImage({ stagingPath: archived.absolutePath, mediaType: archived.mediaType, contentHash: archived.contentHash, byteSize: archived.byteSize });
+    return { assetId: committed.id, mediaType: committed.media_type, byteSize: committed.byte_size, contentHash: committed.content_hash };
   }
 
   private linkOutput(assetId: string, runId: string, itemId: string): void {

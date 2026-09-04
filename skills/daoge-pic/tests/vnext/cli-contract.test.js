@@ -26,6 +26,8 @@ test('CLI launcher and direct dist entry expose the same help contract', () => {
   assert.match(launcher.stdout, /daoge preflight .*--concurrency <1..1000>/);
   assert.doesNotMatch(launcher.stdout, /worker-concurrency|daoge config/);
   assert.doesNotMatch(launcher.stdout, /daoge run .*--concurrency/);
+  assert.doesNotMatch(launcher.stdout, /--api-key <|--api-key> <|--api-key \u003ckey\u003e/);
+  assert.match(launcher.stdout, /--api-key-stdin @-/);
 });
 
 test('CLI module exports main without executing it during import', () => {
@@ -78,6 +80,14 @@ test('CLI accepts one stdin JSON marker and rejects multiple markers', () => {
   assert.throws(() => parseCommand(['plan', '--workspace', '/tmp/daoge-stdin', '--round', 'round-1', '--version', '2', '--plan', '@-', '--operation-name', 'unsafe operation']), /安全字符/);
   const marker = plan.request.body.plan;
   assert.throws(() => materializeStdinJson({ intent: marker, plan: marker }), /最多只能使用一个/);
+});
+
+test('CLI never accepts provider secrets as argv values and only permits secret stdin replacement', () => {
+  assert.throws(() => parseCommand(['provider-create', '--workspace', '/tmp/daoge-provider-secret', '--name', 'Provider', '--provider', 'openai-images', '--model', 'gpt-image-2', '--base-url', 'https://images.example.test', '--api-key', 'secret']), /未知或不适用于/);
+  const create = parseCommand(['provider-create', '--workspace', '/tmp/daoge-provider-secret', '--name', 'Provider', '--provider', 'openai-images', '--model', 'gpt-image-2', '--base-url', 'https://images.example.test', '--api-key-stdin', '@-']);
+  assert.equal(create.request.body.apiKey.__daogeSecretStdin, true);
+  assert.throws(() => parseCommand(['provider-update', '--workspace', '/tmp/daoge-provider-secret', '--profile', 'profile-1', '--version', '1', '--base-url-action', 'keep', '--api-key-action', 'replace']), /--api-key-stdin/);
+  assert.throws(() => parseCommand(['provider-update', '--workspace', '/tmp/daoge-provider-secret', '--profile', 'profile-1', '--version', '1', '--base-url-action', 'keep', '--api-key-action', 'keep', '--api-key-stdin', '@-']), /只能与/);
 });
 
 test('CLI refuses a mismatched manifest before creating daemon runtime state', () => {

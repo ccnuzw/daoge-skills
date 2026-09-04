@@ -481,6 +481,14 @@ export function exportDelivery(db: StudioDatabase, paths: StudioPaths, input: { 
   }
   const current = storedDelivery(db, input.studioId, input.deliveryId);
   const value = delivery(current);
+  if (value.status === 'exported') {
+    const rawManifest = parse(current.manifest_json);
+    const relative = typeof rawManifest.exportDirectory === 'string' ? rawManifest.exportDirectory : '';
+    if (!Array.isArray(rawManifest.exportFiles)) throw new InvalidCommandError('Exported delivery has no frozen file identity set.');
+    const verified = validateExactExportDirectory(paths, { idempotency_key: input.idempotencyKey, delivery_id: input.deliveryId, studio_id: input.studioId, directory_path: relative, manifest_json: current.manifest_json, files_json: JSON.stringify(rawManifest.exportFiles) });
+    const receipt = executeIdempotent(db, input.studioId, input.idempotencyKey, 'deliveries.export', () => value, input).value;
+    return { delivery: receipt, directory: verified.directory, files: verified.files.map((file) => file.name) };
+  }
   if (value.status !== 'ready') throw new InvalidCommandError('Only a prepared delivery can be exported.');
   const project = assertProject(db, input.studioId, value.projectId);
   const frozenItems = deliveryItems(db, value.id);
@@ -557,7 +565,7 @@ export function exportDelivery(db: StudioDatabase, paths: StudioPaths, input: { 
 const asyncDeliveryExports = new WeakMap<object, Map<string, Promise<DeliveryExportResult>>>();
 
 export async function exportDeliveryAsync(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; deliveryId: string; idempotencyKey: string }): Promise<DeliveryExportResult> {
-  const key = input.studioId + ':' + input.idempotencyKey;
+  const key = input.studioId + ':' + input.deliveryId;
   const operations = asyncDeliveryExports.get(db as unknown as object) || new Map<string, Promise<DeliveryExportResult>>();
   asyncDeliveryExports.set(db as unknown as object, operations);
   const pendingOperation = operations.get(key);
@@ -601,6 +609,14 @@ async function exportDeliveryAsyncUnlocked(db: StudioDatabase, paths: StudioPath
   }
   const current = storedDelivery(db, input.studioId, input.deliveryId);
   const value = delivery(current);
+  if (value.status === 'exported') {
+    const rawManifest = parse(current.manifest_json);
+    const relative = typeof rawManifest.exportDirectory === 'string' ? rawManifest.exportDirectory : '';
+    if (!Array.isArray(rawManifest.exportFiles)) throw new InvalidCommandError('Exported delivery has no frozen file identity set.');
+    const verified = await validateExactExportDirectoryAsync(paths, { idempotency_key: input.idempotencyKey, delivery_id: input.deliveryId, studio_id: input.studioId, directory_path: relative, manifest_json: current.manifest_json, files_json: JSON.stringify(rawManifest.exportFiles) });
+    const receipt = executeIdempotent(db, input.studioId, input.idempotencyKey, 'deliveries.export', () => value, input).value;
+    return { delivery: receipt, directory: verified.directory, files: verified.files.map((file) => file.name) };
+  }
   if (value.status !== 'ready') throw new InvalidCommandError('Only a prepared delivery can be exported.');
   const project = assertProject(db, input.studioId, value.projectId);
   const frozenItems = deliveryItems(db, value.id);
@@ -614,8 +630,9 @@ async function exportDeliveryAsyncUnlocked(db: StudioDatabase, paths: StudioPath
   const directory = path.join(paths.deliveriesRoot, safeSegment(project.name), safeSegment(value.name) + '-' + value.id.slice(-8));
   const directoryPath = path.relative(paths.workspaceRoot, directory).split(path.sep).join('/');
   resolveDeliveryDirectory(paths, directoryPath, false);
-  const temporary = directory + '.tmp-' + process.pid;
-  const backup = directory + '.previous-' + process.pid;
+  const operationId = createId('delivery-export');
+  const temporary = directory + '.tmp-' + operationId;
+  const backup = directory + '.previous-' + operationId;
   await fsp.rm(temporary, { recursive: true, force: true });
   await fsp.rm(backup, { recursive: true, force: true });
   await fsp.mkdir(temporary, { recursive: true });

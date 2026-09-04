@@ -15,7 +15,8 @@ const metadata = [{ filename: 'daoge-pic-5.5.0.tgz', files: [
   { path: 'README.md' },
   { path: 'protocol-version.json' },
   { path: 'references/provider.env.example' },
-  { path: 'docs/daoge_pic_vnext_upgrade_spec_zh.md' }
+  { path: 'docs/daoge_pic_vnext_upgrade_spec_zh.md' },
+  { path: 'docs/vnext_verification_evidence_zh.md' }
 ] }];
 
 test('package smoke parser accepts npm JSON with no leading newline and surrounding warnings', () => {

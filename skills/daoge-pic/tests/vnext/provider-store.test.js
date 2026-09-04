@@ -112,3 +112,25 @@ test('Provider.db rejects symbolic links', { skip: process.platform === 'win32' 
     assert.throws(() => openProviderDatabase(initialized.paths), /symbolic link|real file/);
   } finally { cleanup(root); }
 });
+test('rejects a future Provider database schema and releases the failed connection', () => {
+  const root = workspace();
+  let db;
+  try {
+    const initialized = initializeStudio({ workspaceRoot: root });
+    db = openProviderDatabase(initialized.paths);
+    db.prepare('INSERT INTO provider_schema (version, applied_at) VALUES (?, ?)').run(999, '2026-09-04T00:00:00.000Z');
+    closeProviderDatabase(db);
+    db = null;
+    assert.throws(() => openProviderDatabase(initialized.paths), /Provider database schema is newer/);
+    const DatabaseSync = require('node:sqlite').DatabaseSync;
+    db = new DatabaseSync(initialized.paths.providerDatabasePath);
+    db.prepare('DELETE FROM provider_schema WHERE version = 999').run();
+    closeProviderDatabase(db);
+    db = null;
+    db = openProviderDatabase(initialized.paths);
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM provider_schema').get().version, 1);
+  } finally {
+    closeProviderDatabase(db);
+    cleanup(root);
+  }
+});

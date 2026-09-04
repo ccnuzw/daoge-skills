@@ -12,11 +12,12 @@ export interface RuntimeRecord { pid: number; url: string; capability?: string; 
 
 type JsonObject = Record<string, unknown>;
 const STDIN_JSON_MARKER = Object.freeze({ __daogeJsonStdin: true });
+const STDIN_SECRET_MARKER = Object.freeze({ __daogeSecretStdin: true });
 const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
 type LocalAction = 'status' | 'studio' | 'open' | 'restart';
-type FlagKind = 'text' | 'json' | 'positive-integer' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose';
+type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
   action?: LocalAction;
@@ -189,7 +190,7 @@ async function api(record: RuntimeRecord, method: HttpMethod, pathname: string, 
   if (method !== 'GET' && !idempotencyKey && !operationName) throw new Error('写入操作需要 idempotency key 或 operation name。');
   const response = await fetch(record.url + pathname, {
     method,
-    headers: { accept: 'application/json', authorization: 'Bearer ' + record.capability, ...(method !== 'GET' ? { 'content-type': 'application/json', 'x-daoge-skill-protocol': SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION, ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}), ...(operationName ? { 'x-daoge-operation-name': operationName } : {}) } : {}) },
+    headers: { accept: 'application/json', authorization: 'Bearer ' + record.capability, 'x-daoge-skill-protocol': SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION, ...(method !== 'GET' ? { 'content-type': 'application/json', ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}), ...(operationName ? { 'x-daoge-operation-name': operationName } : {}) } : {}) },
     body: method === 'GET' ? undefined : JSON.stringify(body)
   });
   const payload = await response.json() as { ok?: boolean; data?: unknown; error?: { message?: string } };
@@ -230,8 +231,8 @@ const commandSchemas: Record<string, CommandSchema> = {
   status: { action: 'status', flags: {} }, studio: { action: 'studio', flags: {} }, open: { action: 'open', flags: { '--force': { kind: 'boolean' } } }, restart: { action: 'restart', flags: {} },
   'provider-list': { method: 'GET', flags: {}, pathname: () => '/api/providers' },
   'provider-import-env': { method: 'POST', flags: {}, pathname: () => '/api/providers/import-env', body: () => ({}) },
-  'provider-create': { method: 'POST', flags: { '--name': { kind: 'text', required: true }, '--provider': { kind: 'text', required: true }, '--model': { kind: 'text', required: true }, '--base-url': { kind: 'text', required: true }, '--api-key': { kind: 'text', required: true }, '--options': { kind: 'json' }, '--active': { kind: 'boolean' } }, pathname: () => '/api/providers', body: (v) => ({ name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: v['--base-url'], apiKey: v['--api-key'], options: v['--options'], active: v['--active'] === true }) },
-  'provider-update': { method: 'PUT', flags: { '--profile': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--name': { kind: 'text' }, '--provider': { kind: 'text' }, '--model': { kind: 'text' }, '--base-url-action': { kind: 'text', required: true }, '--base-url': { kind: 'text' }, '--api-key-action': { kind: 'text', required: true }, '--api-key': { kind: 'text' }, '--options': { kind: 'json' } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile'), body: (v) => ({ expectedConfigVersion: v['--version'], name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: { action: v['--base-url-action'], ...(v['--base-url'] ? { value: v['--base-url'] } : {}) }, apiKey: { action: v['--api-key-action'], ...(v['--api-key'] ? { value: v['--api-key'] } : {}) }, options: v['--options'] }) },
+  'provider-create': { method: 'POST', flags: { '--name': { kind: 'text', required: true }, '--provider': { kind: 'text', required: true }, '--model': { kind: 'text', required: true }, '--base-url': { kind: 'text', required: true }, '--api-key-stdin': { kind: 'secret-stdin', required: true }, '--options': { kind: 'json' }, '--active': { kind: 'boolean' } }, pathname: () => '/api/providers', body: (v) => ({ name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: v['--base-url'], apiKey: v['--api-key-stdin'], options: v['--options'], active: v['--active'] === true }) },
+  'provider-update': { method: 'PUT', flags: { '--profile': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--name': { kind: 'text' }, '--provider': { kind: 'text' }, '--model': { kind: 'text' }, '--base-url-action': { kind: 'text', required: true }, '--base-url': { kind: 'text' }, '--api-key-action': { kind: 'text', required: true }, '--api-key-stdin': { kind: 'secret-stdin' }, '--options': { kind: 'json' } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile'), body: (v) => ({ expectedConfigVersion: v['--version'], name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: { action: v['--base-url-action'], ...(v['--base-url'] ? { value: v['--base-url'] } : {}) }, apiKey: { action: v['--api-key-action'], ...(v['--api-key-stdin'] ? { value: v['--api-key-stdin'] } : {}) }, options: v['--options'] }) },
   'provider-copy': { method: 'POST', flags: { '--profile': { kind: 'text', required: true }, '--name': { kind: 'text' } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/copy', body: (v) => ({ name: v['--name'] }) },
   'provider-activate': { method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/activate', body: () => ({}) },
   'provider-delete': { method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/delete', body: () => ({}) },
@@ -276,6 +277,10 @@ function validateFlag(name: string, raw: string, kind: FlagKind): unknown {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(name + ' 必须是 JSON 对象。');
     return parsed;
   }
+  if (kind === 'secret-stdin') {
+    if (value !== '@-') throw new Error(name + ' 只能使用 @-，密钥必须通过 stdin 提供。');
+    return STDIN_SECRET_MARKER;
+  }
   if (kind === 'list') { const values = [...new Set(raw.split(',').map((item) => item.trim()).filter(Boolean))]; if (!values.length) throw new Error(name + ' 必须包含至少一个 ID。'); return values; }
   if (kind === 'boolean') { if (value !== 'true' && value !== 'false') throw new Error(name + ' 只能是 true 或 false。'); return value === 'true'; }
   if (kind === 'purpose') { if (!['exploration', 'refinement', 'variation', 'edit', 'fill'].includes(value)) throw new Error(name + ' 不是支持的创作目的。'); return value; }
@@ -296,25 +301,38 @@ function explicitOperationName(raw: string): string {
 export function materializeStdinJson(body: JsonObject): JsonObject {
   let markerCount = 0;
   const count = (value: unknown): void => {
-    if (value === STDIN_JSON_MARKER) { markerCount += 1; return; }
+    if (value === STDIN_JSON_MARKER || value === STDIN_SECRET_MARKER) { markerCount += 1; return; }
     if (Array.isArray(value)) { for (const item of value) count(item); return; }
     if (value && typeof value === 'object') for (const item of Object.values(value as JsonObject)) count(item);
   };
   count(body);
   if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
+  let stdinRaw: string | null = null;
+  const loadRaw = (): string => {
+    if (stdinRaw !== null) return stdinRaw;
+    const raw = fs.readFileSync(0, 'utf8');
+    if (Buffer.byteLength(raw, 'utf8') > MAX_STDIN_JSON_BYTES) throw new Error('stdin 内容不能超过 8 MiB。');
+    stdinRaw = raw;
+    return raw;
+  };
   let stdinValue: JsonObject | null = null;
   const load = (): JsonObject => {
     if (stdinValue) return stdinValue;
-    const raw = fs.readFileSync(0, 'utf8');
-    if (Buffer.byteLength(raw, 'utf8') > MAX_STDIN_JSON_BYTES) throw new Error('stdin JSON 不能超过 8 MiB。');
+    const raw = loadRaw();
     let parsed: unknown;
     try { parsed = JSON.parse(raw) as unknown; } catch { throw new Error('stdin 必须是有效 JSON 对象。'); }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('stdin 必须是 JSON 对象。');
     stdinValue = parsed as JsonObject;
     return stdinValue;
   };
+  const loadSecret = (): string => {
+    const secret = loadRaw().trim();
+    if (!secret) throw new Error('stdin 密钥不能为空。');
+    return secret;
+  };
   const replace = (value: unknown): unknown => {
     if (value === STDIN_JSON_MARKER) return load();
+    if (value === STDIN_SECRET_MARKER) return loadSecret();
     if (Array.isArray(value)) return value.map(replace);
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as JsonObject).map(([key, item]) => [key, replace(item)]));
     return value;
@@ -344,6 +362,12 @@ function parseCommand(args: string[]): ParsedCommand {
     if (raw === undefined) { if (flagSchema.required) throw new Error('需要 ' + flagName + '。'); continue; }
     values[flagName] = validateFlag(flagName, raw, flagSchema.kind);
   }
+  if (name === 'provider-update') {
+    const action = values['--api-key-action'];
+    const hasSecret = values['--api-key-stdin'] !== undefined;
+    if (action === 'replace' && !hasSecret) throw new Error('替换 API Key 必须使用 --api-key-stdin @-。');
+    if (action !== 'replace' && hasSecret) throw new Error('--api-key-stdin 只能与 --api-key-action replace 一起使用。');
+  }
   const root = workspaceRoot(rawValues['--workspace']);
   const markerCount = Object.values(values).filter((value) => value === STDIN_JSON_MARKER).length;
   if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
@@ -361,8 +385,8 @@ function usage(): string {
     'daoge open --workspace <path> [--force true]  # 默认复用唯一 Workbench；force 仅用于用户明确要求新标签',
     'daoge provider-list --workspace <path>',
     'daoge provider-import-env --workspace <path>  # 显式导入工作区 daoge-studio/provider.env',
-    'daoge provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key <key> [--active true]',
-    'daoge provider-update --workspace <path> --profile <id> --version <n> --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear>',
+    'daoge provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key-stdin @- [--active true]  # 密钥只从 stdin 读取',
+    'daoge provider-update --workspace <path> --profile <id> --version <n> --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear> [--api-key-stdin @-]  # replace 时密钥只从 stdin 读取',
     'daoge provider-copy|provider-activate|provider-delete|provider-validate|provider-test --workspace <path> --profile <id>',
     'daoge restart --workspace <path>  # 优雅重启本工作区 Studio',
     'daoge session --workspace <path> --conversation <id>',

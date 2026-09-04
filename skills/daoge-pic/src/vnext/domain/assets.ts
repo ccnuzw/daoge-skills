@@ -47,11 +47,13 @@ interface PendingAssetOperation {
   expected_size: number | null;
   expected_media_type: string | null;
   phase: 'prepared' | 'moved';
+  owner_id: string | null;
+  heartbeat_at: string | null;
 }
-
 interface PendingImportAsset { kind: AssetKind; mediaType: string; contentHash: string; byteSize: number; source: Record<string, unknown>; }
 interface AssetRelationInput { targetType: string; targetId: string; relationType: string; metadata?: Record<string, unknown>; }
 interface ExpectedMediaIdentity { mediaType: string; contentHash: string; byteSize: number; }
+
 
 function parseObject(value: string | null | undefined): Record<string, unknown> {
   try {
@@ -100,8 +102,19 @@ function linkAsset(db: StudioDatabase, assetId: string, targetType: string, targ
   db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(asset_id, relation_type, target_type, target_id) DO UPDATE SET metadata_json = excluded.metadata_json').run(createId('assetrel'), assetId, relationType, targetType, targetId, JSON.stringify(metadata), nowIso());
 }
 
-function insertMediaOperation(db: StudioDatabase, input: { studioId: string; assetId: string; operation: PendingAssetOperation['operation']; sourcePath: string; targetPath: string; expected: ExpectedMediaIdentity; asset?: PendingImportAsset; relation?: AssetRelationInput }): void {
-  db.prepare('INSERT INTO asset_media_operations (id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(createId('assetop'), input.studioId, input.assetId, input.operation, input.sourcePath, input.targetPath, input.asset ? JSON.stringify(input.asset) : null, input.relation ? JSON.stringify(input.relation) : null, input.expected.contentHash, input.expected.byteSize, input.expected.mediaType, 'prepared', nowIso());
+function insertMediaOperation(db: StudioDatabase, input: { studioId: string; assetId: string; operation: PendingAssetOperation['operation']; sourcePath: string; targetPath: string; expected: ExpectedMediaIdentity; asset?: PendingImportAsset; relation?: AssetRelationInput; ownerId?: string }): void {
+  const timestamp = nowIso();
+  db.prepare('INSERT INTO asset_media_operations (id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase, owner_id, heartbeat_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(createId('assetop'), input.studioId, input.assetId, input.operation, input.sourcePath, input.targetPath, input.asset ? JSON.stringify(input.asset) : null, input.relation ? JSON.stringify(input.relation) : null, input.expected.contentHash, input.expected.byteSize, input.expected.mediaType, 'prepared', input.ownerId || null, timestamp, timestamp);
+}
+
+const MEDIA_OPERATION_STALE_MS = 5 * 60 * 1000;
+function mediaOperationIsStale(entry: PendingAssetOperation, now = Date.now()): boolean {
+  if (!entry.heartbeat_at) return true;
+  const heartbeat = Date.parse(entry.heartbeat_at);
+  return !Number.isFinite(heartbeat) || heartbeat + MEDIA_OPERATION_STALE_MS <= now;
+}
+function touchMediaOperation(db: StudioDatabase, operationId: string): void {
+  db.prepare('UPDATE asset_media_operations SET heartbeat_at = ? WHERE id = ?').run(nowIso(), operationId);
 }
 
 function assertNoPendingMediaOperation(db: StudioDatabase, studioId: string, assetId: string): void {
@@ -122,15 +135,23 @@ function markMediaOperationMoved(db: StudioDatabase, operationId: string): void 
   withTransaction(db, () => { db.prepare("UPDATE asset_media_operations SET phase = 'moved' WHERE id = ?").run(operationId); });
 }
 
-function finishImport(db: StudioDatabase, entry: PendingAssetOperation, asset: PendingImportAsset, relation: AssetRelationInput | null): void {
-  const existing = db.prepare('SELECT id FROM assets WHERE id = ? AND studio_id = ?').get(entry.asset_id, entry.studio_id) as { id: string } | undefined;
-  if (!existing) {
+function finishImport(db: StudioDatabase, entry: PendingAssetOperation, asset: PendingImportAsset, relation: AssetRelationInput | null): { assetId: string; duplicate: boolean } {
+  const existingById = db.prepare('SELECT id FROM assets WHERE id = ? AND studio_id = ?').get(entry.asset_id, entry.studio_id) as { id: string } | undefined;
+  const existingByHash = db.prepare('SELECT id FROM assets WHERE studio_id = ? AND content_hash = ? AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1').get(entry.studio_id, asset.contentHash) as { id: string } | undefined;
+  if (existingByHash && existingByHash.id !== entry.asset_id) {
+    if (relation) linkAsset(db, existingByHash.id, relation.targetType, relation.targetId, relation.relationType, relation.metadata || {});
+    appendStudioEvent(db, { studioId: entry.studio_id, entityType: 'asset', entityId: existingByHash.id, eventType: 'asset.reused', payload: { source: 'import', concurrent: true } });
+    db.prepare('DELETE FROM asset_media_operations WHERE id = ?').run(entry.id);
+    return { assetId: existingByHash.id, duplicate: true };
+  }
+  if (!existingById) {
     const timestamp = nowIso();
     db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(entry.asset_id, entry.studio_id, asset.kind, asset.mediaType, entry.target_path, asset.contentHash, asset.byteSize, JSON.stringify(asset.source), timestamp, timestamp);
     appendStudioEvent(db, { studioId: entry.studio_id, entityType: 'asset', entityId: entry.asset_id, eventType: 'asset.imported', payload: { mediaType: asset.mediaType, byteSize: asset.byteSize, recovered: true } });
   }
   if (relation) linkAsset(db, entry.asset_id, relation.targetType, relation.targetId, relation.relationType, relation.metadata || {});
   db.prepare('DELETE FROM asset_media_operations WHERE id = ?').run(entry.id);
+  return { assetId: entry.asset_id, duplicate: false };
 }
 
 function storedAssetForOperation(db: StudioDatabase, entry: PendingAssetOperation): StoredAsset | null {
@@ -188,9 +209,10 @@ function recordRecoveryRejection(db: StudioDatabase, entry: PendingAssetOperatio
 }
 
 export function recoverAssetMediaOperations(db: StudioDatabase, paths: StudioPaths, studioId: string): number {
-  const operations = db.prepare('SELECT id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE studio_id = ? ORDER BY created_at').all(studioId) as unknown as PendingAssetOperation[];
+  const operations = db.prepare('SELECT id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase, owner_id, heartbeat_at FROM asset_media_operations WHERE studio_id = ? ORDER BY created_at').all(studioId) as unknown as PendingAssetOperation[];
   let recovered = 0;
   for (const entry of operations) {
+    if (!mediaOperationIsStale(entry)) continue;
     try {
       if (entry.phase !== 'prepared' && entry.phase !== 'moved') throw new InvalidCommandError('Media recovery journal phase is invalid.');
       const stored = storedAssetForOperation(db, entry);
@@ -213,10 +235,11 @@ export function recoverAssetMediaOperations(db: StudioDatabase, paths: StudioPat
         markMediaOperationMoved(db, entry.id);
         inspectManagedImageFile(paths, entry.target_path, roots.target, expected);
       }
+      let duplicateImport = false;
       withTransaction(db, () => {
         if (entry.operation === 'import') {
           if (!importMetadata) throw new InvalidCommandError('Import recovery journal metadata is missing.');
-          finishImport(db, entry, importMetadata.asset, importMetadata.relation);
+          duplicateImport = finishImport(db, entry, importMetadata.asset, importMetadata.relation).duplicate;
           return;
         }
         const current = storedAssetForOperation(db, entry);
@@ -237,6 +260,7 @@ export function recoverAssetMediaOperations(db: StudioDatabase, paths: StudioPat
         }
         db.prepare('DELETE FROM asset_media_operations WHERE id = ?').run(entry.id);
       });
+      if (duplicateImport) fs.rmSync(target, { force: true });
       recovered += 1;
     } catch (error) {
       const reason = error instanceof Error && /identity|metadata|changed|duplicate/i.test(error.message) ? 'identity_mismatch' : 'invalid_or_missing_media';
@@ -247,8 +271,6 @@ export function recoverAssetMediaOperations(db: StudioDatabase, paths: StudioPat
 }
 
 export function importStagedStudioAsset(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; staged: StagedImage; declaredMediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown> }): StudioAsset {
-  ensureStudio(db, input.studioId);
-  recoverAssetMediaOperations(db, paths, input.studioId);
   const staged = input.staged;
   if (!/^image\/(png|jpeg|webp|gif)$/.test(staged.mediaType)) throw new MediaValidationError('Only PNG, JPEG, WebP, and GIF images can be imported.');
   if (input.declaredMediaType && input.declaredMediaType !== staged.mediaType) throw new MediaValidationError('Declared image type does not match file content.');
@@ -289,9 +311,8 @@ export function importStudioAsset(db: StudioDatabase, paths: StudioPaths, input:
   return importStagedStudioAsset(db, paths, { ...input, staged: stageImage(paths, input.bytes, input.mediaType) });
 }
 
-export async function importStagedStudioAssetAsync(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; staged: StagedImage; declaredMediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown>; archiveStagedImage?: (staged: StagedImage, input: { assetId: string; bucket: 'imports' }) => Promise<ArchivedImage> }): Promise<StudioAsset> {
+async function importStagedStudioAssetAsyncUnlocked(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; staged: StagedImage; declaredMediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown>; archiveStagedImage?: (staged: StagedImage, input: { assetId: string; bucket: 'imports' }) => Promise<ArchivedImage> }): Promise<StudioAsset> {
   ensureStudio(db, input.studioId);
-  recoverAssetMediaOperations(db, paths, input.studioId);
   const staged = input.staged;
   if (!/^image\/(png|jpeg|webp|gif)$/.test(staged.mediaType)) throw new MediaValidationError('Only PNG, JPEG, WebP, and GIF images can be imported.');
   if (input.declaredMediaType && input.declaredMediaType !== staged.mediaType) throw new MediaValidationError('Declared image type does not match file content.');
@@ -320,13 +341,32 @@ export async function importStagedStudioAssetAsync(db: StudioDatabase, paths: St
   const source = { ...input.source, originalFilename: input.originalFilename || null, importedAt: nowIso() };
   const relation = input.targetType && input.targetId ? { targetType: input.targetType, targetId: input.targetId, relationType: 'attached_to' } : undefined;
   const expected = { mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize };
-  withTransaction(db, () => insertMediaOperation(db, { studioId: input.studioId, assetId, operation: 'import', sourcePath: relativePath(paths, staged.stagingPath), targetPath: planned.storagePath, expected, asset: { kind: 'import', ...expected, source }, relation }));
+  const ownerId = 'import-' + process.pid + '-' + assetId;
+  withTransaction(db, () => insertMediaOperation(db, { studioId: input.studioId, assetId, operation: 'import', sourcePath: relativePath(paths, staged.stagingPath), targetPath: planned.storagePath, expected, asset: { kind: 'import', ...expected, source }, relation, ownerId }));
   if (input.archiveStagedImage) await input.archiveStagedImage(staged, { assetId, bucket: 'imports' });
   else await archiveStagedImageAsync(paths, staged, { assetId, bucket: 'imports' });
-  const operation = db.prepare("SELECT id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE asset_id = ? AND operation = 'import'").get(assetId) as unknown as PendingAssetOperation;
+  const operation = db.prepare("SELECT id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase, owner_id, heartbeat_at FROM asset_media_operations WHERE asset_id = ? AND operation = 'import'").get(assetId) as unknown as PendingAssetOperation;
+  touchMediaOperation(db, operation.id);
   markMediaOperationMoved(db, operation.id);
-  withTransaction(db, () => finishImport(db, operation, { kind: 'import', ...expected, source }, relation || null));
+  let finished: { assetId: string; duplicate: boolean };
+  withTransaction(db, () => { finished = finishImport(db, operation, { kind: 'import', ...expected, source }, relation || null); });
+  if (finished!.duplicate) {
+    fs.rmSync(planned.absolutePath, { force: true });
+    const winner = getStudioAsset(db, input.studioId, finished!.assetId);
+    if (winner) return winner;
+  }
   return { id: assetId, studioId: input.studioId, kind: 'import', mediaType: staged.mediaType, storagePath: planned.storagePath, contentHash: staged.contentHash, byteSize: staged.byteSize, source, deletedAt: null };
+}
+
+const activeAssetImports = new WeakMap<object, Map<string, Promise<StudioAsset>>>();
+export async function importStagedStudioAssetAsync(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; staged: StagedImage; declaredMediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown>; archiveStagedImage?: (staged: StagedImage, input: { assetId: string; bucket: 'imports' }) => Promise<ArchivedImage> }): Promise<StudioAsset> {
+  const operations = activeAssetImports.get(db as unknown as object) || new Map<string, Promise<StudioAsset>>();
+  activeAssetImports.set(db as unknown as object, operations);
+  const previous = operations.get(input.studioId);
+  if (previous) await previous;
+  const run = importStagedStudioAssetAsyncUnlocked(db, paths, input);
+  operations.set(input.studioId, run);
+  try { return await run; } finally { if (operations.get(input.studioId) === run) operations.delete(input.studioId); }
 }
 
 function assetVisibilitySql(prefix: string, input: { includeDeleted?: boolean; deletedOnly?: boolean }): string {
@@ -407,6 +447,10 @@ function scopedAssetCondition(scope: AssetScope, input: { projectId?: string; ta
   return { sql: "EXISTS (SELECT 1 FROM asset_relations relation WHERE relation.asset_id = a.id AND ((relation.target_type = 'project' AND relation.target_id = ?) OR (relation.target_type = 'creative_task' AND EXISTS (SELECT 1 FROM creative_tasks task WHERE task.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'creative_round' AND EXISTS (SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id WHERE round.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'run_item' AND relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.id = relation.target_id AND task.project_id = ?))))", values: [projectId, projectId, projectId, projectId] };
 }
 
+export function isStudioAssetMediaAvailable(db: StudioDatabase, studioId: string, assetId: string): boolean {
+  const row = db.prepare("SELECT media_state FROM assets WHERE studio_id = ? AND id = ?").get(studioId, assetId) as { media_state?: string } | undefined;
+  return Boolean(row && (!row.media_state || row.media_state === 'available'));
+}
 function assertScopedAssetHierarchy(db: StudioDatabase, studioId: string, input: { scope: AssetScope; projectId?: string; taskId?: string; roundId?: string }): void {
   if (input.scope === 'studio') return;
   if (input.scope === 'project') {

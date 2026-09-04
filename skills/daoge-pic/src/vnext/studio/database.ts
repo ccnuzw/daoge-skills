@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 20;
+export const STUDIO_SCHEMA_VERSION = 22;
 export const STUDIO_EVENT_RETENTION = 2000;
 
 const SCHEMA_V1 = [
@@ -157,11 +157,38 @@ const SCHEMA_V20 = [
   "CREATE TRIGGER IF NOT EXISTS studio_event_windows_after_delete AFTER DELETE ON events BEGIN UPDATE studio_event_windows SET earliest_id = (SELECT id FROM events WHERE studio_id = OLD.studio_id ORDER BY id LIMIT 1), latest_id = (SELECT id FROM events WHERE studio_id = OLD.studio_id ORDER BY id DESC LIMIT 1), retained_count = retained_count - 1 WHERE studio_id = OLD.studio_id AND EXISTS (SELECT 1 FROM events WHERE studio_id = OLD.studio_id); DELETE FROM studio_event_windows WHERE studio_id = OLD.studio_id AND NOT EXISTS (SELECT 1 FROM events WHERE studio_id = OLD.studio_id); END",
   "INSERT INTO task_types (id, studio_id, name, definition_json, source, created_at, updated_at) VALUES ('portrait-kv', NULL, '人物主视觉', '{\"summary\":\"头像、人物海报、品牌人物封面。\",\"fields\":[\"subject\",\"wardrobe\",\"expression\",\"setting\",\"composition\",\"identity_constraints\"]}', 'official', datetime('now'), datetime('now')), ('ecommerce-product', NULL, '电商商品图', '{\"summary\":\"商品主图、详情页和卖点视觉。\",\"fields\":[\"product\",\"platform\",\"selling_points\",\"background\",\"angle\",\"text_safe_area\"]}', 'official', datetime('now'), datetime('now')), ('brand-packaging', NULL, '品牌包装图', '{\"summary\":\"包装概念、瓶盒展示和品牌资产板。\",\"fields\":[\"brand\",\"package_type\",\"materials\",\"usage_scene\",\"brand_constraints\"]}', 'official', datetime('now'), datetime('now')), ('cinematic-storyboard', NULL, '电影分镜', '{\"summary\":\"短片、剧情或广告镜头序列。\",\"fields\":[\"story\",\"shot_list\",\"camera_language\",\"continuity\",\"aspect_ratio\"]}', 'official', datetime('now'), datetime('now')), ('campaign-poster', NULL, '品牌海报', '{\"summary\":\"新品 KV、横幅和竖版封面。\",\"fields\":[\"campaign\",\"headline_safe_area\",\"hero_subject\",\"cta_area\",\"brand_constraints\"]}', 'official', datetime('now'), datetime('now')), ('ui-mockup-board', NULL, '界面视觉板', '{\"summary\":\"产品界面、卡片、设备场景和概念稿。\",\"fields\":[\"product_flow\",\"device\",\"information_hierarchy\",\"visual_system\"]}', 'official', datetime('now'), datetime('now')), ('academic-figure-board', NULL, '学术图板', '{\"summary\":\"机制图、论文概览和科研海报。\",\"fields\":[\"topic\",\"claims\",\"diagram_structure\",\"label_policy\",\"evidence_constraints\"]}', 'official', datetime('now'), datetime('now')), ('type-layout-poster', NULL, '排版海报', '{\"summary\":\"双语排版、强标题区和编辑视觉。\",\"fields\":[\"copy\",\"language\",\"hierarchy\",\"safe_area\",\"typography_constraints\"]}', 'official', datetime('now'), datetime('now')) ON CONFLICT(id) DO UPDATE SET studio_id = NULL, name = excluded.name, definition_json = excluded.definition_json, source = 'official', updated_at = excluded.updated_at"
 ].join(';\n') + ';';
+const SCHEMA_V21 = [
+  "ALTER TABLE asset_media_operations ADD COLUMN owner_id TEXT",
+  "ALTER TABLE asset_media_operations ADD COLUMN heartbeat_at TEXT",
+  "ALTER TABLE media_commit_journal ADD COLUMN owner_id TEXT",
+  "ALTER TABLE media_commit_journal ADD COLUMN heartbeat_at TEXT",
+  "ALTER TABLE assets ADD COLUMN media_state TEXT NOT NULL DEFAULT 'available' CHECK (media_state IN ('available', 'missing', 'quarantined', 'verification_failed'))",
+  "ALTER TABLE assets ADD COLUMN missing_at TEXT",
+  "ALTER TABLE assets ADD COLUMN last_verified_at TEXT",
+  "ALTER TABLE run_items ADD COLUMN lease_worker_id TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_asset_media_operations_recovery ON asset_media_operations(studio_id, heartbeat_at, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_media_commit_journal_recovery ON media_commit_journal(studio_id, heartbeat_at, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_run_items_worker_lease ON run_items(lease_worker_id, status, lease_expires_at)",
+  "CREATE INDEX IF NOT EXISTS idx_command_receipts_created ON command_receipts(created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_dry_run_previews_created ON dry_run_previews(created_at)"
+].join(';\n') + ';';
+const SCHEMA_V22 = [
+  "CREATE INDEX IF NOT EXISTS idx_runs_round_created ON generation_runs(round_id, created_at DESC, id DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_rounds_task_created ON creative_rounds(task_id, created_at, id)",
+  "CREATE INDEX IF NOT EXISTS idx_run_items_run_sequence ON run_items(run_id, sequence)",
+  "CREATE INDEX IF NOT EXISTS idx_dry_run_previews_round_created ON dry_run_previews(round_id, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_events_studio_entity_type ON events(studio_id, entity_type, entity_id, event_type)",
+  "CREATE INDEX IF NOT EXISTS idx_asset_media_operations_studio_created ON asset_media_operations(studio_id, created_at)"
+].join(';\n') + ';';
 
 
 
 export type StudioDatabase = DatabaseSyncType;
 type DatabaseSyncConstructor = new (path: string) => StudioDatabase;
+
+export interface OpenStudioDatabaseOptions {
+  skipIntegrityCheck?: boolean;
+}
 
 export interface StudioEventInput {
   studioId: string;
@@ -189,23 +216,86 @@ function loadDatabaseSync(): DatabaseSyncConstructor {
   return withoutSqliteExperimentalWarning(() => require('node:sqlite').DatabaseSync as DatabaseSyncConstructor);
 }
 
-export function openStudioDatabase(paths: StudioPaths, manifest: StudioManifest): StudioDatabase {
+function assertSupportedStudioSchema(db: StudioDatabase): void {
+  const migrationsTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get();
+  if (migrationsTable) {
+    const migration = db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number | null };
+    if (migration.version !== null && Number(migration.version) > STUDIO_SCHEMA_VERSION) throw new Error('Studio database schema is newer than this DAOGE Pic runtime supports.');
+  }
+  const studiosTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'studios'").get();
+  if (studiosTable) {
+    const studio = db.prepare('SELECT MAX(schema_version) AS version FROM studios').get() as { version: number | null };
+    if (studio.version !== null && Number(studio.version) > STUDIO_SCHEMA_VERSION) throw new Error('Studio manifest schema is newer than this DAOGE Pic runtime supports.');
+  }
+}
+const REQUIRED_SCHEMA_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  studios: ['id', 'workspace_root', 'schema_version'],
+  studio_sessions: ['id', 'studio_id', 'version'],
+  generation_runs: ['id', 'round_id', 'provider_profile_id', 'provider_config_version'],
+  run_items: ['id', 'run_id', 'status', 'lease_worker_id'],
+  assets: ['id', 'studio_id', 'storage_path', 'content_hash', 'media_state', 'missing_at', 'last_verified_at'],
+  asset_media_operations: ['id', 'studio_id', 'phase', 'owner_id', 'heartbeat_at'],
+  media_commit_journal: ['asset_id', 'studio_id', 'owner_id', 'heartbeat_at'],
+  delivery_export_journal: ['studio_id', 'idempotency_key', 'delivery_id'],
+  events: ['id', 'studio_id', 'event_type'],
+  schema_migrations: ['version', 'applied_at']
+};
+
+function assertStudioSchemaIntegrity(db: StudioDatabase): void {
+  const migrations = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>;
+  if (migrations.length !== STUDIO_SCHEMA_VERSION || migrations.some((row, index) => Number(row.version) !== index + 1)) throw new Error('Studio database migration ledger is incomplete or non-contiguous.');
+  for (const [table, columns] of Object.entries(REQUIRED_SCHEMA_COLUMNS)) {
+    const actual = new Set((db.prepare('PRAGMA table_info(' + table + ')').all() as Array<{ name: string }>).map((row) => row.name));
+    if (columns.some((column) => !actual.has(column))) throw new Error('Studio database schema is missing required columns in ' + table + '.');
+  }
+  const quickCheck = db.prepare('PRAGMA quick_check').all() as Array<Record<string, unknown>>;
+  if (quickCheck.some((row) => Object.values(row)[0] !== 'ok')) throw new Error('Studio database quick integrity check failed.');
+  if (db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Studio database foreign-key integrity check failed.');
+}
+
+const COMMAND_RECEIPT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const DRY_RUN_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export function pruneStudioEphemeralRecords(db: StudioDatabase, now = new Date()): { receipts: number; dryRuns: number } {
+  const receiptCutoff = new Date(now.getTime() - COMMAND_RECEIPT_RETENTION_MS).toISOString();
+  const dryRunCutoff = new Date(now.getTime() - DRY_RUN_RETENTION_MS).toISOString();
+  return withTransaction(db, () => {
+    const dryRuns = db.prepare('SELECT id FROM dry_run_previews WHERE created_at < ? LIMIT 1000').all(dryRunCutoff) as Array<{ id: string }>;
+    if (dryRuns.length) {
+      const placeholders = dryRuns.map(() => '?').join(', ');
+      const ids = dryRuns.map((row) => row.id);
+      db.prepare('DELETE FROM dry_run_items WHERE preview_id IN (' + placeholders + ')').run(...ids);
+      db.prepare('DELETE FROM dry_run_previews WHERE id IN (' + placeholders + ')').run(...ids);
+    }
+    const receipts = db.prepare('DELETE FROM command_receipts WHERE created_at < ?').run(receiptCutoff);
+    return { receipts: Number(receipts.changes), dryRuns: dryRuns.length };
+  });
+}
+
+export function openStudioDatabase(paths: StudioPaths, manifest: StudioManifest, options: OpenStudioDatabaseOptions = {}): StudioDatabase {
   fs.mkdirSync(paths.studioDir, { recursive: true });
   const DatabaseSync = loadDatabaseSync();
   const db = new DatabaseSync(paths.databasePath);
-  db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
-  migrateStudioDatabase(db);
-  const timestamp = nowIso();
-  db.prepare('INSERT INTO studios (id, workspace_root, schema_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workspace_root = excluded.workspace_root, schema_version = excluded.schema_version, updated_at = excluded.updated_at').run(manifest.studioId, paths.workspaceRoot, STUDIO_SCHEMA_VERSION, manifest.createdAt, timestamp);
-  return db;
+  try {
+    db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+    assertSupportedStudioSchema(db);
+    migrateStudioDatabase(db);
+    assertSupportedStudioSchema(db);
+    const timestamp = nowIso();
+    db.prepare('INSERT INTO studios (id, workspace_root, schema_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workspace_root = excluded.workspace_root, schema_version = excluded.schema_version, updated_at = excluded.updated_at').run(manifest.studioId, paths.workspaceRoot, STUDIO_SCHEMA_VERSION, manifest.createdAt, timestamp);
+    if (!options.skipIntegrityCheck) assertStudioSchemaIntegrity(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
-
 export function closeStudioDatabase(db: StudioDatabase | null | undefined): void {
   if (db) db.close();
 }
 
 export function migrateStudioDatabase(db: StudioDatabase): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
+  assertSupportedStudioSchema(db);
   const migrations = [
     { version: 1, sql: SCHEMA_V1 },
     { version: 2, sql: SCHEMA_V2 },
@@ -226,7 +316,9 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
     { version: 17, sql: SCHEMA_V17 },
     { version: 18, sql: SCHEMA_V18 },
     { version: 19, sql: SCHEMA_V19 },
-    { version: 20, sql: SCHEMA_V20 }
+    { version: 20, sql: SCHEMA_V20 },
+      { version: 21, sql: SCHEMA_V21 },
+      { version: 22, sql: SCHEMA_V22 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
@@ -240,6 +332,12 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
       } else if (migration.version === 20) {
         const requiredTables = ['generation_runs', 'assets', 'asset_relations', 'run_items', 'delivery_assets', 'events', 'task_types'];
         if (requiredTables.every((name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)))) db.exec(SCHEMA_V20);
+      } else if (migration.version === 21) {
+        const requiredTables = ['asset_media_operations', 'media_commit_journal', 'assets', 'run_items', 'command_receipts', 'dry_run_previews'];
+        if (requiredTables.every((name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)))) db.exec(SCHEMA_V21);
+      } else if (migration.version === 22) {
+        const requiredTables = ['generation_runs', 'run_items', 'dry_run_previews', 'events', 'asset_media_operations'];
+        if (requiredTables.every((name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)))) db.exec(SCHEMA_V22);
       } else db.exec(migration.sql);
       if (migration.version === 16 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get()) db.exec(SCHEMA_V16_ASSET_BACKFILL);
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());
@@ -300,8 +398,7 @@ export function appendStudioEvent(db: StudioDatabase, input: StudioEventInput): 
     else if (window.retained_count < STUDIO_EVENT_RETENTION) db.prepare('UPDATE studio_event_windows SET latest_id = ?, retained_count = retained_count + 1 WHERE studio_id = ?').run(id, input.studioId);
     else {
       db.prepare('DELETE FROM events WHERE studio_id = ? AND id = ?').run(input.studioId, window.earliest_id);
-      const next = db.prepare('SELECT id FROM events WHERE studio_id = ? ORDER BY id LIMIT 1').get(input.studioId) as { id: number };
-      db.prepare('UPDATE studio_event_windows SET earliest_id = ?, latest_id = ?, retained_count = ? WHERE studio_id = ?').run(next.id, id, STUDIO_EVENT_RETENTION, input.studioId);
+      db.prepare('UPDATE studio_event_windows SET latest_id = ?, retained_count = ? WHERE studio_id = ?').run(id, STUDIO_EVENT_RETENTION, input.studioId);
     }
     const pending = transactionEventNotifications.get(db as unknown as object);
     if (pending) pending.add(input.studioId);

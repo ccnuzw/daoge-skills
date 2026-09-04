@@ -320,3 +320,14 @@ test('bounded response reading cancels a chunked N+1 body despite a forged Conte
 test('base64 image size is rejected from its encoded length before decoding', () => {
   assert.throws(() => decodeBoundedBase64('AAAA', 1), /size limit/);
 });
+test('Provider download aborts while DNS resolution remains pending', async () => {
+  const controller = new AbortController();
+  const pending = downloadHttpResource('https://public.example/provider.png', {
+    signal: controller.signal,
+    maxBytes: 1024,
+    resolveHost: async () => await new Promise(() => {}),
+    request: async () => { throw new Error('request must not run before DNS resolution'); }
+  });
+  setTimeout(() => controller.abort(new Error('test abort')), 10);
+  await assert.rejects(Promise.race([pending, new Promise((_, reject) => setTimeout(() => reject(new Error('DNS abort did not settle')), 250))]), /test abort/);
+});

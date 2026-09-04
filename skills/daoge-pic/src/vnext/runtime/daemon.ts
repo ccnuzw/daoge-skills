@@ -93,6 +93,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
   let timer: NodeJS.Timeout | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   let inFlightTick: Promise<void> | null = null;
+  let lastMaintenanceAt = 0;
   let stopping = false;
   let closePromise: Promise<void> | null = null;
   const close = (): Promise<void> => {
@@ -161,7 +162,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     const sessionToken = options.sessionToken || createLocalCapability();
     mediaWorkerPool = new MediaProcessPool(initialized.paths.workspaceRoot);
     service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, capability, sessionToken, workbenchPresence: options.workbenchPresence, mediaWorkerPool });
-    workerDb = openStudioDatabase(initialized.paths, initialized.manifest);
+    workerDb = openStudioDatabase(initialized.paths, initialized.manifest, { skipIntegrityCheck: true });
     workerProviderDb = openProviderDatabase(initialized.paths);
     importLegacyProviderEnvOnce(workerProviderDb, initialized.paths);
     await recoverStudioStartupAsync(workerDb, initialized.paths, initialized.manifest.studioId, new Date(), { mediaWorkerPool });
@@ -194,9 +195,16 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     const tick = async (): Promise<void> => {
       if (stopping) return;
       try {
-        const recoveredLeases = recoverExpiredLeases(daemonDb);
-        const promotedRetries = promoteDueRetryWaitItems(daemonDb);
-        const reconciledRuns = reconcileTerminalRuns(daemonDb);
+        let recoveredLeases = 0;
+        let promotedRetries = 0;
+        let reconciledRuns = 0;
+        const maintenanceNow = Date.now();
+        if (maintenanceNow - lastMaintenanceAt >= 1000) {
+          recoveredLeases = recoverExpiredLeases(daemonDb);
+          promotedRetries = promoteDueRetryWaitItems(daemonDb);
+          reconciledRuns = reconcileTerminalRuns(daemonDb);
+          lastMaintenanceAt = maintenanceNow;
+        }
         const currentConfig = resolveActiveProviderConfig(daemonProviderDb);
         const currentSnapshot = currentConfig ? providerSnapshot(currentConfig) : null;
         if (!configChangeReported && JSON.stringify(currentSnapshot) !== JSON.stringify(workerSnapshot)) {

@@ -4,7 +4,7 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-当前稳定正式版本为 [`5.10.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.0)。下列章节按版本隔离发布事实；5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.0。
+当前稳定正式版本为 [`5.10.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.1)。下列章节按版本隔离发布事实；5.10.0、5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.1。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -171,20 +171,37 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 
 ### 确认闸门与协议
 
-- `confirm_token` 由 daemon 在 Workbench Cookie 完成人工确认后签发，绑定 `plan_hash + preflight_id + conversation_id`；Bearer Skill/CLI 的确认请求返回 403。
-- challenge、consent 和已签发 token 只存在 daemon 内存；daemon 重启后必须重新确认。confirm session 必须与 pending challenge 的 session 明确一致。
+- `confirm_token` 由 daemon 在 Workbench Cookie 完成人工确认后签发，绑定 `plan_hash + preflight_id + conversation_id`；同一 token 只能预留一个幂等运行操作，换用不同幂等键重放会被拒绝；Bearer Skill/CLI 的确认请求返回 403。
+- challenge、consent 和已签发 token 只存在 daemon 内存；daemon 重启后必须重新确认，恢复运行还必须绑定所属轮次的当前 Studio Session。confirm session 必须与 pending challenge 的 session 明确一致。
 - 协议声明为 `daoge-pic-skill-protocol 2.0.0`，支持范围 `>=2.0.0 <3.0.0`；2.0.5 客户端被接受，1.9.0 读写请求均被拒绝。
 
 ### Worker、幂等与 Workbench
 
 - generation worker pool 处理 Provider 请求与生成结果持久化；独立 media worker pool 处理 sharp 缩略图、ZIP、归档校验和启动媒体对账，control-plane 保持 API/SSE 响应。
-- operation-name 使用规范化 JSON payload 派生 key；相同对象的不同键顺序重放同一幂等收据。每次 CLI 命令最多一个 `@-` stdin JSON 标记。
+- operation-name 使用规范化 JSON payload 派生 key；相同对象的不同键顺序重放同一幂等收据。每次 CLI 命令最多一个 `@-` stdin 标记，Provider 密钥只能通过 stdin 写入，不能作为 argv 值。
 - Workbench 实际启动 smoke 通过；只读会话摘要与人工确认闸门具有独立文案，空会话显示无活动轮次状态，最近运行随事件刷新。
 
 ### 最终制品
 
-- `npm test`：271 项通过，0 失败、0 取消、0 跳过。
-- `npm run test:package`：发布清单 113 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- `npm test`：281 项通过，0 失败、0 取消、0 跳过。
+- `npm run test:package`：发布清单 114 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
 - `npm audit --omit=dev --offline`：0 vulnerabilities；在线 registry audit endpoint 当次返回 503。
-- 最终制品 `daoge-pic-5.10.0.tgz` 为 `305783` bytes，npm shasum 为 `378db79a198c08c796e8c9138f4a61ef331be3cc`，SHA-256 为 `8096b6bc9ed4b19e76b77398bebbd2f35e2596844dec22d56db9e752cfce025c`；同值记录在 `daoge-pic-5.10.0.tgz.sha256` sidecar 与 GitHub Release。
+- 最终制品 `daoge-pic-5.10.0.tgz` 的 SHA-256 记录在包外的 `daoge-pic-5.10.0.tgz.sha256` sidecar 与 GitHub Release，包大小与 npm shasum 见发布元数据；本文件随制品发布，不重复嵌入会改变自身内容的哈希。
+- 未调用真实图片 Provider，未产生计费生成请求。
+
+## 9. daoge-pic 5.10.1 发布验证证据
+
+本节对应 `daoge-pic-v5.10.1` GitHub Release `.tgz` 制品，记录 Schema v22、控制面查询优化、媒体校验并发边界、Provider 响应内存边界和可重复性能基准。
+
+### 性能与运行边界
+
+- Schema v22 新增运行、预检、运行项、事件和媒体恢复索引；启动恢复不重复执行资产媒体操作恢复，terminal reconciliation 合并为聚合查询和单事务。
+- claim 先计算全局可用槽位，再读取 pending 候选；Provider 活跃请求由单机资源预算限制为 4，持久队列仍保留 `1..1000` 的逻辑并发契约。
+- `npm run bench:perf` 覆盖 1k、10k、100k pending 项；100k 场景领取 1000 项，实测 claim 约 142 ms，RSS 约 86 MiB。
+
+### 最终制品
+
+- `npm test`：288 项通过，0 失败、0 取消、0 跳过。
+- `npm run test:package`：发布清单 114 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- 最终制品 `daoge-pic-5.10.1.tgz` 的 SHA-256 记录在包外的 `daoge-pic-5.10.1.tgz.sha256` sidecar 与 GitHub Release；本文件随制品发布，不重复嵌入会改变自身内容的哈希。
 - 未调用真实图片 Provider，未产生计费生成请求。

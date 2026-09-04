@@ -5,14 +5,14 @@ import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/da
 import { createId } from '../shared/ids';
 import { recoverAssetMediaOperations } from '../domain/assets';
 import { archiveStagedImage, inspectManagedImageFile, inspectManagedImageFileAsync, plannedArchivePath, resolveManagedMediaPath } from './archive';
-import { assertWorkspacePath, AssetBucket, ensureAssetBucket, StudioPaths } from '../studio/workspace';
+import { assertWorkspacePath, AssetBucket, ensureAssetBucket, ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 
 const MAX_RECONCILE_ENTRIES = 10_000;
 const MAX_RECONCILE_DEPTH = 32;
+const MAX_RECONCILE_VERIFY_CONCURRENCY = 4;
 
-interface StoredAsset { id: string; kind: 'import' | 'generated' | 'export'; storage_path: string; media_type: string; content_hash: string; byte_size: number; deleted_at: string | null; }
-interface PendingMedia { asset_id: string; studio_id: string; staged_path: string; final_storage_path: string; media_type: string; content_hash: string; byte_size: number; source_json: string; run_id: string; run_item_id: string; }
-
+interface StoredAsset { id: string; kind: 'import' | 'generated' | 'export'; storage_path: string; media_type: string; content_hash: string; byte_size: number; deleted_at: string | null; media_state?: 'available' | 'missing' | 'quarantined' | 'verification_failed'; }
+interface PendingMedia { asset_id: string; studio_id: string; staged_path: string; final_storage_path: string; media_type: string; content_hash: string; byte_size: number; source_json: string; run_id: string; run_item_id: string; owner_id?: string | null; heartbeat_at?: string | null; }
 export interface MediaReconciliationResult { quarantinedOrphans: number; missingRows: number; }
 
 function normalizedRelative(paths: StudioPaths, value: string): string {
@@ -33,11 +33,11 @@ function generatedRunBelongsToStudio(db: StudioDatabase, studioId: string, runId
 }
 
 export function recoverGeneratedMediaCommits(db: StudioDatabase, paths: StudioPaths, studioId: string): number {
-  const pending = db.prepare('SELECT asset_id, studio_id, staged_path, final_storage_path, media_type, content_hash, byte_size, source_json, run_id, run_item_id FROM media_commit_journal WHERE studio_id = ? ORDER BY created_at').all(studioId) as unknown as PendingMedia[];
+  const pending = db.prepare('SELECT asset_id, studio_id, staged_path, final_storage_path, media_type, content_hash, byte_size, source_json, run_id, run_item_id, owner_id, heartbeat_at FROM media_commit_journal WHERE studio_id = ? ORDER BY created_at').all(studioId) as unknown as PendingMedia[];
   let recovered = 0;
   for (const entry of pending) {
+    if (entry.heartbeat_at && Number.isFinite(Date.parse(entry.heartbeat_at)) && Date.parse(entry.heartbeat_at) + 5 * 60 * 1000 > Date.now()) continue;
     try {
-      if (!/^image\/(png|jpeg|webp|gif)$/.test(entry.media_type) || !/^[a-f0-9]{64}$/.test(entry.content_hash) || !Number.isSafeInteger(entry.byte_size) || entry.byte_size <= 0) throw new Error('invalid_identity');
       if (entry.studio_id !== studioId || !generatedRunBelongsToStudio(db, studioId, entry.run_id, entry.run_item_id)) throw new Error('invalid_run_chain');
       const expected = { mediaType: entry.media_type, contentHash: entry.content_hash, byteSize: entry.byte_size };
       const planned = plannedArchivePath(paths, { assetId: entry.asset_id, bucket: 'generated', mediaType: entry.media_type });
@@ -102,25 +102,40 @@ function quarantineOrphan(paths: StudioPaths, source: string, originalName: stri
   throw new Error('Unable to allocate a collision-safe orphan quarantine name.');
 }
 
-export function reconcileManagedMedia(db: StudioDatabase, paths: StudioPaths, studioId: string): MediaReconciliationResult {
-  recoverAssetMediaOperations(db, paths, studioId);
-  const rows = db.prepare('SELECT id, kind, storage_path, media_type, content_hash, byte_size, deleted_at FROM assets WHERE studio_id = ?').all(studioId) as unknown as StoredAsset[];
+const STAGING_FILE_TTL_MS = 6 * 60 * 60 * 1000;
+function cleanupStagingFiles(paths: StudioPaths, tracked: Set<string>): void {
+  const staging = ensureCacheDirectory(paths, 'staging');
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(staging, { withFileTypes: true }); } catch { return; }
+  const cutoff = Date.now() - STAGING_FILE_TTL_MS;
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.part')) continue;
+    const source = path.join(staging, entry.name);
+    if (tracked.has(normalizedRelative(paths, source))) continue;
+    try { if (fs.statSync(source).mtimeMs < cutoff) fs.rmSync(source, { force: true }); } catch {}
+  }
+}
+export function reconcileManagedMedia(db: StudioDatabase, paths: StudioPaths, studioId: string, options: { recoverAssetOperations?: boolean } = {}): MediaReconciliationResult {
+  if (options.recoverAssetOperations !== false) recoverAssetMediaOperations(db, paths, studioId);
+  const rows = db.prepare('SELECT id, kind, storage_path, media_type, content_hash, byte_size, deleted_at, media_state FROM assets WHERE studio_id = ?').all(studioId) as unknown as StoredAsset[];
   const tracked = new Set(rows.map((row) => row.storage_path));
-  for (const pending of db.prepare('SELECT final_storage_path FROM media_commit_journal WHERE studio_id = ?').all(studioId) as Array<{ final_storage_path: string }>) tracked.add(pending.final_storage_path);
+  for (const pending of db.prepare('SELECT staged_path, final_storage_path FROM media_commit_journal WHERE studio_id = ?').all(studioId) as Array<{ staged_path: string; final_storage_path: string }>) { tracked.add(pending.staged_path); tracked.add(pending.final_storage_path); }
   for (const pending of db.prepare('SELECT source_path, target_path FROM asset_media_operations WHERE studio_id = ?').all(studioId) as Array<{ source_path: string; target_path: string }>) {
     tracked.add(pending.source_path);
     tracked.add(pending.target_path);
   }
+  cleanupStagingFiles(paths, tracked);
 
-  const missing = rows.filter((row) => {
-    if (missingAlreadyRecorded(db, studioId, row.id)) return false;
+  const missing: StoredAsset[] = [];
+  const verified: StoredAsset[] = [];
+  for (const row of rows) {
     try {
       inspectManagedImageFile(paths, row.storage_path, assetBucket(row), { mediaType: row.media_type, contentHash: row.content_hash, byteSize: row.byte_size });
-      return false;
+      verified.push(row);
     } catch {
-      return true;
+      missing.push(row);
     }
-  });
+  }
 
   let quarantinedOrphans = 0;
   let visited = 0;
@@ -158,33 +173,52 @@ export function reconcileManagedMedia(db: StudioDatabase, paths: StudioPaths, st
     }
   }
   if (limitReached) appendStudioEvent(db, { studioId, entityType: 'media', entityId: 'managed-media', eventType: 'media.reconcile_limit_reached', payload: { maxEntries: MAX_RECONCILE_ENTRIES, maxDepth: MAX_RECONCILE_DEPTH } });
-  if (missing.length) {
+  if (missing.length || verified.length) {
     withTransaction(db, () => {
-      for (const asset of missing) appendStudioEvent(db, { studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.media_missing', payload: {} });
+      const timestamp = new Date().toISOString();
+      for (const asset of verified) {
+        db.prepare("UPDATE assets SET media_state = 'available', missing_at = NULL, last_verified_at = ?, updated_at = ? WHERE id = ? AND studio_id = ?").run(timestamp, timestamp, asset.id, studioId);
+        if (asset.media_state === 'missing') appendStudioEvent(db, { studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.media_restored', payload: {} });
+      }
+      for (const asset of missing) {
+        db.prepare("UPDATE assets SET media_state = 'missing', missing_at = COALESCE(missing_at, ?), updated_at = ? WHERE id = ? AND studio_id = ?").run(timestamp, timestamp, asset.id, studioId);
+        if (asset.media_state !== 'missing') appendStudioEvent(db, { studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.media_missing', payload: {} });
+      }
     });
   }
-  return { quarantinedOrphans, missingRows: missing.length };
+  return { quarantinedOrphans, missingRows: missing.filter((asset) => asset.media_state !== 'missing').length };
 }
 
-export async function reconcileManagedMediaAsync(db: StudioDatabase, paths: StudioPaths, studioId: string): Promise<MediaReconciliationResult> {
-  recoverAssetMediaOperations(db, paths, studioId);
-  const rows = db.prepare('SELECT id, kind, storage_path, media_type, content_hash, byte_size, deleted_at FROM assets WHERE studio_id = ?').all(studioId) as unknown as StoredAsset[];
+export async function reconcileManagedMediaAsync(db: StudioDatabase, paths: StudioPaths, studioId: string, options: { recoverAssetOperations?: boolean } = {}): Promise<MediaReconciliationResult> {
+  if (options.recoverAssetOperations !== false) recoverAssetMediaOperations(db, paths, studioId);
+  const rows = db.prepare('SELECT id, kind, storage_path, media_type, content_hash, byte_size, deleted_at, media_state FROM assets WHERE studio_id = ?').all(studioId) as unknown as StoredAsset[];
   const tracked = new Set(rows.map((row) => row.storage_path));
-  for (const pending of db.prepare('SELECT final_storage_path FROM media_commit_journal WHERE studio_id = ?').all(studioId) as Array<{ final_storage_path: string }>) tracked.add(pending.final_storage_path);
+  for (const pending of db.prepare('SELECT staged_path, final_storage_path FROM media_commit_journal WHERE studio_id = ?').all(studioId) as Array<{ staged_path: string; final_storage_path: string }>) { tracked.add(pending.staged_path); tracked.add(pending.final_storage_path); }
   for (const pending of db.prepare('SELECT source_path, target_path FROM asset_media_operations WHERE studio_id = ?').all(studioId) as Array<{ source_path: string; target_path: string }>) {
     tracked.add(pending.source_path);
     tracked.add(pending.target_path);
   }
+  cleanupStagingFiles(paths, tracked);
 
   const missing: StoredAsset[] = [];
-  for (const row of rows) {
-    if (missingAlreadyRecorded(db, studioId, row.id)) continue;
-    try {
-      await inspectManagedImageFileAsync(paths, row.storage_path, assetBucket(row), { mediaType: row.media_type, contentHash: row.content_hash, byteSize: row.byte_size });
-    } catch {
-      missing.push(row);
+  const verified: StoredAsset[] = [];
+  const verification = new Array<boolean>(rows.length);
+  let nextRow = 0;
+  const verifyBatch = async (): Promise<void> => {
+    while (true) {
+      const index = nextRow++;
+      const row = rows[index];
+      if (!row) return;
+      try {
+        await inspectManagedImageFileAsync(paths, row.storage_path, assetBucket(row), { mediaType: row.media_type, contentHash: row.content_hash, byteSize: row.byte_size });
+        verification[index] = true;
+      } catch {
+        verification[index] = false;
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(MAX_RECONCILE_VERIFY_CONCURRENCY, rows.length) }, () => verifyBatch()));
+  for (let index = 0; index < rows.length; index += 1) (verification[index] ? verified : missing).push(rows[index]);
 
   let quarantinedOrphans = 0;
   let visited = 0;
@@ -222,6 +256,16 @@ export async function reconcileManagedMediaAsync(db: StudioDatabase, paths: Stud
     }
   }
   if (limitReached) appendStudioEvent(db, { studioId, entityType: 'media', entityId: 'managed-media', eventType: 'media.reconcile_limit_reached', payload: { maxEntries: MAX_RECONCILE_ENTRIES, maxDepth: MAX_RECONCILE_DEPTH } });
-  if (missing.length) withTransaction(db, () => { for (const asset of missing) appendStudioEvent(db, { studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.media_missing', payload: {} }); });
-  return { quarantinedOrphans, missingRows: missing.length };
+  if (missing.length || verified.length) withTransaction(db, () => {
+    const timestamp = new Date().toISOString();
+    for (const asset of verified) {
+      db.prepare("UPDATE assets SET media_state = 'available', missing_at = NULL, last_verified_at = ?, updated_at = ? WHERE id = ? AND studio_id = ?").run(timestamp, timestamp, asset.id, studioId);
+      if (asset.media_state === 'missing') appendStudioEvent(db, { studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.media_restored', payload: {} });
+    }
+    for (const asset of missing) {
+      db.prepare("UPDATE assets SET media_state = 'missing', missing_at = COALESCE(missing_at, ?), updated_at = ? WHERE id = ? AND studio_id = ?").run(timestamp, timestamp, asset.id, studioId);
+      if (asset.media_state !== 'missing') appendStudioEvent(db, { studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.media_missing', payload: {} });
+    }
+  });
+  return { quarantinedOrphans, missingRows: missing.filter((asset) => asset.media_state !== 'missing').length };
 }

@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 
 export type HttpFetch = typeof fetch;
 
-export type HostResolver = (hostname: string) => Promise<readonly string[]>;
+export type HostResolver = (hostname: string, signal?: AbortSignal) => Promise<readonly string[]>;
 
 export interface PinnedHttpResponse {
   response: Response;
@@ -30,6 +30,7 @@ export interface DownloadedResource {
 }
 
 const DEFAULT_MAX_REDIRECTS = 5;
+const DNS_TIMEOUT_MS = 10_000;
 
 export const defaultHostResolver: HostResolver = async (hostname) => {
   const addresses = await lookup(hostname, { all: true, verbatim: true });
@@ -47,8 +48,17 @@ function declaredLength(response: Response): number | null {
   const length = Number(value);
   return Number.isSafeInteger(length) ? length : null;
 }
+async function readChunkWithAbort(reader: ReadableStreamDefaultReader<Uint8Array>, signal?: AbortSignal): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (!signal) return reader.read();
+  if (signal.aborted) throw signal.reason || new Error('Response read aborted.');
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason || new Error('Response read aborted.'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    reader.read().then((result) => { signal.removeEventListener('abort', onAbort); resolve(result); }, (error) => { signal.removeEventListener('abort', onAbort); reject(error); });
+  });
+}
 
-export async function readBoundedResponse(response: Response, maxBytes: number, limitMessage: string): Promise<Buffer> {
+export async function readBoundedResponse(response: Response, maxBytes: number, limitMessage: string, signal?: AbortSignal): Promise<Buffer> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error('A non-negative response size limit is required.');
   const length = declaredLength(response);
   if (length !== null && length > maxBytes) {
@@ -56,13 +66,13 @@ export async function readBoundedResponse(response: Response, maxBytes: number, 
     throw new Error(limitMessage);
   }
   if (!response.body) return Buffer.alloc(0);
-
   const reader = response.body.getReader();
+  const output = length === null ? null : Buffer.allocUnsafe(length);
   const chunks: Buffer[] = [];
   let total = 0;
   try {
     while (true) {
-      const result = await reader.read();
+      const result = await readChunkWithAbort(reader, signal);
       if (result.done) break;
       const chunk = result.value;
       if (chunk.byteLength > maxBytes - total) {
@@ -70,12 +80,13 @@ export async function readBoundedResponse(response: Response, maxBytes: number, 
         throw new Error(limitMessage);
       }
       total += chunk.byteLength;
-      chunks.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+      if (output) Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).copy(output, total - chunk.byteLength);
+      else chunks.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
     }
   } finally {
     reader.releaseLock();
   }
-  return Buffer.concat(chunks, total);
+  return output ? output.subarray(0, total) : Buffer.concat(chunks, total);
 }
 
 function ipv4Bytes(address: string): number[] | null {
@@ -193,7 +204,7 @@ function sameAddress(left: string, right: string): boolean {
 
 interface SafeUrlTarget { url: URL; addresses: readonly string[]; }
 
-async function assertSafeUrl(value: string, resolver: HostResolver): Promise<SafeUrlTarget> {
+async function assertSafeUrl(value: string, resolver: HostResolver, signal: AbortSignal): Promise<SafeUrlTarget> {
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -212,8 +223,14 @@ async function assertSafeUrl(value: string, resolver: HostResolver): Promise<Saf
 
   let addresses: readonly string[];
   try {
-    addresses = await resolver(hostname);
-  } catch {
+    const timeout = AbortSignal.timeout(DNS_TIMEOUT_MS);
+    const resolutionSignal = AbortSignal.any([signal, timeout]);
+    addresses = await Promise.race([
+      resolver(hostname, resolutionSignal),
+      new Promise<readonly string[]>((_, reject) => resolutionSignal.addEventListener('abort', () => reject(resolutionSignal.reason || new Error('DNS resolution aborted.')), { once: true }))
+    ]);
+  } catch (error) {
+    if (signal.aborted) throw error;
     throw new Error('Provider image host DNS resolution failed.');
   }
   if (!addresses.length) throw new Error('Provider image host DNS resolution returned no addresses.');
@@ -261,7 +278,7 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
 
   let current = value;
   for (let redirects = 0; ; redirects += 1) {
-    const target = await assertSafeUrl(current, resolver);
+    const target = await assertSafeUrl(current, resolver, options.signal);
     let result: PinnedHttpResponse;
     try {
       result = await request(target.url, target.addresses, {
@@ -302,12 +319,12 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
       error.status = response.status;
       throw error;
     }
-    const bytes = await readBoundedResponse(response, options.maxBytes, 'Provider image download exceeds the configured size limit.');
+    const bytes = await readBoundedResponse(response, options.maxBytes, 'Provider image download exceeds the configured size limit.', options.signal);
     return { bytes, contentType: response.headers.get('content-type') };
   }
 }
 export async function probeHttpEndpoint(value: string, headers: Readonly<Record<string, string>>, signal: AbortSignal): Promise<{ reachable: boolean; status: number }> {
-  const target = await assertSafeUrl(value, defaultHostResolver);
+  const target = await assertSafeUrl(value, defaultHostResolver, signal);
   const result = await pinnedHttpTransport(target.url, target.addresses, { headers, signal });
   try {
     assertPublicAddress(hostnameWithoutBrackets(result.remoteAddress));

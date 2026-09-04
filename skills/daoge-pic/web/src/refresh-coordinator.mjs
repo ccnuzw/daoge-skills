@@ -8,11 +8,13 @@ export function createTrailingTaskQueue(task) {
     queued = true;
     if (inFlight) return inFlight;
     const run = (async () => {
+      let result;
       try {
         while (queued && !disposed) {
           queued = false;
-          await task();
+          result = await task();
         }
+        return result;
       } finally {
         inFlight = null;
       }

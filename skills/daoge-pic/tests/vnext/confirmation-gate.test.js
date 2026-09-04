@@ -16,6 +16,20 @@ test('confirmation gate issues only a plan/preflight/conversation-bound token af
   assert.equal(gate.verifyToken(token, { roundId: 'round-1', preflightId: 'dryrun-1', planHash: hash, conversationId: 'conversation-2' }), false);
 });
 
+test('confirmation tokens reserve exactly one idempotent execution operation', () => {
+  const gate = new ConfirmationGate('c'.repeat(32));
+  const hash = planHash({ operation: 'generate', itemCount: 1, prompt: 'one-shot' });
+  const challenge = gate.createChallenge({ roundId: 'round-reserve', sessionId: 'session-reserve', conversationId: 'conversation-reserve', planHash: hash, expectedVersion: 1 });
+  gate.confirm({ roundId: 'round-reserve', challenge: challenge.challenge, sessionId: 'session-reserve', planHash: hash });
+  const token = gate.issueToken({ roundId: 'round-reserve', preflightId: 'dryrun-reserve', planHash: hash, conversationId: 'conversation-reserve' });
+  const expected = { roundId: 'round-reserve', preflightId: 'dryrun-reserve', planHash: hash, conversationId: 'conversation-reserve' };
+  assert.deepEqual(gate.reserveToken(token, expected, 'run-once'), { replayed: false });
+  assert.deepEqual(gate.reserveToken(token, expected, 'run-once'), { replayed: true });
+  assert.throws(() => gate.reserveToken(token, expected, 'run-again'), /another execution operation/);
+  gate.releaseToken(token, 'run-once');
+  assert.deepEqual(gate.reserveToken(token, expected, 'run-after-failure'), { replayed: false });
+});
+
 test('confirmation gate rejects stale, mismatched, and expired user challenges', () => {
   let now = new Date('2026-09-04T00:00:00.000Z');
   const gate = new ConfirmationGate('b'.repeat(32), () => now);

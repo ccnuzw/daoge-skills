@@ -139,3 +139,12 @@ test('opening a recovered SSE connection clears only connectionError, not reques
   assert.deepEqual(value.connectionErrors, ['']);
   stream.dispose();
 });
+test('event refresh queue returns a failed refresh so event cursors are not acknowledged', async () => {
+  const { createEventRefreshQueue } = await import('../../web/src/refresh-coordinator.mjs');
+  const applied = [];
+  const queue = createEventRefreshQueue({ refresh: async () => false, applyPlan: (plan) => applied.push(plan) });
+  const result = await queue.request({ scope: 'context', refreshContext: true, refreshAssets: false, refreshSelection: false, refreshSharedAssets: false, taskOverview: false, creativeRecord: false, studioOverview: false, planVersions: false });
+  assert.equal(result, false);
+  assert.deepEqual(applied, []);
+  queue.dispose();
+});

@@ -1,5 +1,5 @@
 function studioHeaders(started, headers = {}) {
-  return { authorization: 'Bearer ' + started.access.bearerToken, ...headers };
+  return { authorization: 'Bearer ' + started.access.bearerToken, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', ...headers };
 }
 
 function fetchStudio(started, pathname, options = {}) {
@@ -32,7 +32,7 @@ async function workbenchCookie(started) {
 async function requestJsonAsWorkbench(started, pathname, options = {}) {
   const cookie = options.cookie || await workbenchCookie(started);
   const method = options.method || (options.body === undefined ? 'GET' : 'POST');
-  const response = await fetch(started.url + pathname, { method, headers: { accept: 'application/json', cookie, ...(options.body !== undefined ? { 'content-type': options.contentType || 'application/json' } : {}), ...(options.idempotencyKey || options.key ? { 'idempotency-key': options.idempotencyKey || options.key } : {}), ...(method !== 'GET' ? { origin: started.url } : {}), ...(options.headers || {}) }, body: options.body === undefined ? undefined : JSON.stringify(options.body), signal: options.signal });
+  const response = await fetch(started.url + pathname, { method, headers: { accept: 'application/json', 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', cookie, ...(options.body !== undefined ? { 'content-type': options.contentType || 'application/json' } : {}), ...(options.idempotencyKey || options.key ? { 'idempotency-key': options.idempotencyKey || options.key } : {}), ...(method !== 'GET' ? { origin: started.url } : {}), ...(options.headers || {}) }, body: options.body === undefined ? undefined : JSON.stringify(options.body), signal: options.signal });
   return { status: response.status, headers: response.headers, body: await response.json() };
 }
 

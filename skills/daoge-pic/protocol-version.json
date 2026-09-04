@@ -1,7 +1,7 @@
 {
   "protocol": "daoge-pic-skill-protocol",
   "version": "2.0.0",
-  "runtimeCompatibility": ">=5.10.0 <6.0.0",
+  "runtimeCompatibility": ">=5.10.1 <6.0.0",
   "gates": ["human-confirmation-challenge", "daemon-confirm-token", "preflight-binding"],
   "transport": ["json", "stdin-json-marker"],
   "idempotency": ["operation-name", "idempotency-key"]

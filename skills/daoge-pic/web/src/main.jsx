@@ -42,6 +42,7 @@ async function api(path, options = {}) {
       method: options.method || 'GET',
       headers: {
         accept: 'application/json',
+        'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0',
         ...(options.body ? { 'content-type': 'application/json' } : {}),
         ...(options.idempotencyKey ? { 'idempotency-key': options.idempotencyKey } : {})
       },
@@ -275,6 +276,9 @@ function App() {
   const deliveryOperationEpoch = useRef(0);
   const activeProjectIdRef = useRef(null);
   const contextSignature = useRef('');
+  const contextWriteQueue = useRef(Promise.resolve());
+  const sessionRef = useRef(null);
+  const desiredContextRef = useRef(null);
   const restoredSessionContext = useRef(false);
   const selectedAssetIdsRef = useRef(new Set());
   const selectionBusyIdsRef = useRef(new Set());
@@ -309,6 +313,7 @@ function App() {
   const routeView = rendererForWorkbenchView(view);
   const studioView = isStudioView(view);
   activeProjectIdRef.current = activeProjectId;
+  sessionRef.current = session;
 
   const navigateRoute = useCallback((changes, replace = false) => {
     const next = updateWorkbenchRoute(route, changes);
@@ -548,10 +553,11 @@ function App() {
   useEffect(() => {
     if (!session) { setSessionPlanStatus(null); return undefined; }
     const controller = new AbortController();
-    void api('/api/sessions/' + encodeURIComponent(session.id) + '/plan-status', { signal: controller.signal }).then(setSessionPlanStatus).catch((nextError) => {
-      if (!isAbortError(nextError)) setError(nextError.message || '无法读取当前会话计划状态。');
-    });
-  }, [session?.id, eventRevision.planVersions, eventRevision.creativeRecord, eventRevision.runs]);
+     void api('/api/sessions/' + encodeURIComponent(session.id) + '/plan-status', { signal: controller.signal }).then(setSessionPlanStatus).catch((nextError) => {
+       if (!isAbortError(nextError)) setError(nextError.message || '无法读取当前会话计划状态。');
+     });
+     return () => controller.abort();
+   }, [session?.id, eventRevision.planVersions, eventRevision.creativeRecord, eventRevision.runs]);
 
   const selectedProject = useMemo(() => activeProjectId ? projects.find((project) => project.id === activeProjectId) || null : null, [projects, activeProjectId]);
   const selectedTask = useMemo(() => activeTaskId ? tasks.find((task) => task.id === activeTaskId) || null : null, [tasks, activeTaskId]);
@@ -670,10 +676,23 @@ function App() {
 
   useEffect(() => {
     if (!session || !selectedProject || (activeTaskId && !selectedTask) || (activeRoundId && !selectedRound)) return;
-    const signature = [selectedProject.id, selectedTask?.id || '', selectedRound?.id || ''].join(':');
-    if (signature === contextSignature.current) return;
-    contextSignature.current = signature;
-    void api('/api/sessions/' + encodeURIComponent(session.id) + '/context', { method: 'POST', idempotencyKey: uniqueKey('session-context'), body: { projectId: selectedProject.id, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null } }).then(setSession).catch((nextError) => setError(nextError.message || '无法保存工作上下文。'));
+    const desired = { signature: [selectedProject.id, selectedTask?.id || '', selectedRound?.id || ''].join(':'), projectId: selectedProject.id, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null };
+    if (desired.signature === contextSignature.current) return;
+    contextSignature.current = desired.signature;
+    desiredContextRef.current = desired;
+    contextWriteQueue.current = contextWriteQueue.current.catch(() => undefined).then(async () => {
+      const current = sessionRef.current;
+      const target = desiredContextRef.current;
+      if (!current || !target || target.signature !== contextSignature.current) return;
+      try {
+        const next = await api('/api/sessions/' + encodeURIComponent(current.id) + '/context', { method: 'POST', idempotencyKey: uniqueKey('session-context'), body: { projectId: target.projectId, taskId: target.taskId, roundId: target.roundId, expectedVersion: current.version } });
+        sessionRef.current = next;
+        setSession(next);
+      } catch (nextError) {
+        contextSignature.current = '';
+        setError(nextError.message || '无法保存工作上下文。');
+      }
+    });
   }, [session, selectedProject, selectedTask, selectedRound, activeTaskId, activeRoundId]);
 
   const upload = async (files) => {
@@ -771,13 +790,11 @@ function App() {
   const markAsDeliverable = async (asset) => {
     if (!selectedProject) return;
     if (selectedAssetIdsRef.current.has(asset.id)) { toggleSelection(asset.id); return; }
-    markSelectionBusy([asset.id], true);
-    try {
+    const projectId = selectedProject.id;
+    enqueueSelectionWrite(projectId, [asset.id], async () => {
       if (asset.review?.decision !== 'keep') await api('/api/assets/' + encodeURIComponent(asset.id) + '/review', { method: 'POST', idempotencyKey: uniqueKey('delivery-keep'), body: { decision: 'keep' } });
-      const result = await api('/api/projects/' + encodeURIComponent(selectedProject.id) + '/selection/assets/' + encodeURIComponent(asset.id), { method: 'POST', idempotencyKey: uniqueKey('delivery-select'), body: { selected: true } });
-      applyProjectSelection(result.selection);
-      await refreshAssets();
-    } catch (nextError) { setError(nextError.message || '无法将图片选为成果。'); } finally { markSelectionBusy([asset.id], false); }
+      return api('/api/projects/' + encodeURIComponent(projectId) + '/selection/assets/' + encodeURIComponent(asset.id), { method: 'POST', idempotencyKey: uniqueKey('delivery-select'), body: { selected: true } });
+    }, '无法将图片选为成果。');
   };
   const clearSelection = () => {
     if (!selectedProject || !selectionAssets.length) return;
@@ -795,25 +812,13 @@ function App() {
       return { selection: latest };
     }, '无法清空当前选片。');
   };
-  const setPageSelection = async (selected) => {
+  const setPageSelection = (selected) => {
     if (!selectedProject || !visibleAssets.length || pageSelectionBusy) return;
     const candidates = visibleAssets.filter((asset) => selectedAssetIdsRef.current.has(asset.id) !== selected);
     if (!candidates.length) return;
     const projectId = selectedProject.id;
     const candidateIds = candidates.map((asset) => asset.id);
-    markSelectionBusy(candidateIds, true);
-    try {
-      const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('page-selection'), body: { assetIds: candidateIds, selected, keepAssetIds: selected ? candidates.filter((asset) => asset.review?.decision !== 'keep').map((asset) => asset.id) : [] } });
-      if (selectionProjectIdRef.current === projectId) {
-        applyProjectSelection(data.selection);
-        await refreshAssets();
-      }
-    } catch (nextError) {
-      setError(nextError.message || '无法更新本页选片。');
-      if (selectionProjectIdRef.current === projectId) await refreshAssets();
-    } finally {
-      if (selectionProjectIdRef.current === projectId) markSelectionBusy(candidateIds, false);
-    }
+    enqueueSelectionWrite(projectId, candidateIds, () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('page-selection'), body: { assetIds: candidateIds, selected, keepAssetIds: selected ? candidates.filter((asset) => asset.review?.decision !== 'keep').map((asset) => asset.id) : [] } }), '无法更新本页选片。');
   };
   const inspectAsset = async (assetId) => {
     try { const data = await api('/api/assets/' + encodeURIComponent(assetId) + '/provenance'); setAssetProvenance(data.provenance || null); } catch (nextError) { setError(nextError.message || '无法读取素材来源与评审记录。'); }

@@ -10,11 +10,11 @@ import { providerSnapshot } from '../studio/provider-config';
 import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerStatus, resolveActiveProviderConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
 import { createImageProvider } from '../providers/http-adapters';
 import { probeHttpEndpoint } from '../providers/http-safety';
-import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
-import { cancelGenerationRun, createDryRunPreview, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
+import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getRound, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
+import { cancelGenerationRun, createDryRunPreview, getDryRunPreview, getGenerationRun, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { StateTransitionError } from '../domain/states';
 import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
-import { listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
+import { getLatestRun, listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { completeDeliveryStepAsync, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDeliveryAsync, getDelivery, listDeliveries, openDeliveryExportFileAsync, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
 import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
@@ -35,8 +35,19 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_ARCHIVE_IMAGE_COUNT = 100;
 const MAX_ARCHIVE_BYTES = 150 * 1024 * 1024;
+const MAX_BATCH_IDS = 500;
 
 type JsonBody = Record<string, unknown>;
+
+function boundedIds(value: unknown, label: string, options: { optional?: boolean; max?: number } = {}): string[] | undefined {
+  if (value === undefined && options.optional) return undefined;
+  if (!Array.isArray(value)) throw new InvalidCommandError(label + ' 必须是字符串数组。');
+  const max = options.max || MAX_BATCH_IDS;
+  if (value.length > max) throw new InvalidCommandError(label + ' 不能超过 ' + max + ' 项。');
+  const ids = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
+  if (ids.length !== value.length) throw new InvalidCommandError(label + ' 只能包含非空字符串。');
+  return [...new Set(ids)];
+}
 
 export interface StudioServiceOptions {
   workspaceRoot: string;
@@ -105,9 +116,12 @@ function text(value: unknown): string {
   return String(value || '').trim();
 }
 
-function assertProtocolCompatibility(request: IncomingMessage): void {
+function assertProtocolCompatibility(request: IncomingMessage, requireHeader = false): void {
   const protocol = headerValue(request, 'x-daoge-skill-protocol');
-  if (!protocol) return;
+  if (!protocol) {
+    if (requireHeader) throw new InvalidCommandError('Skill 请求必须声明 daoge-pic-skill-protocol 版本。');
+    return;
+  }
   const prefix = SKILL_PROTOCOL_NAME + '/';
   const version = protocol.startsWith(prefix) ? protocol.slice(prefix.length) : '';
   if (!isSupportedProtocolVersion(version)) throw new InvalidCommandError('Skill 协议不兼容；daemon 支持 ' + SUPPORTED_PROTOCOL_RANGE + '。');
@@ -297,9 +311,11 @@ export class LocalStudioService {
   private readonly confirmationGate: ConfirmationGate;
   private readonly ownsMediaWorkerPool: boolean;
   private readonly activeEventStreams = new Set<() => void>();
+  private readonly activeRequests = new Set<Promise<void>>();
   private origin = '';
   private server: Server | null = null;
   private closePromise: Promise<void> | null = null;
+  private acceptingRequests = true;
 
   constructor(options: StudioServiceOptions) {
     if (options.capability && !/^[A-Za-z0-9_-]{43,}$/.test(options.capability)) throw new Error('Studio capability must be a high-entropy base64url token.');
@@ -323,7 +339,13 @@ export class LocalStudioService {
   async listen(port = 0, host = '127.0.0.1'): Promise<StartedStudioService> {
     if (this.server) throw new Error('Studio service is already listening.');
     if (host !== '127.0.0.1' && host !== '::1') throw new Error('Studio service must listen on a loopback address.');
-    const server = http.createServer((request, response) => { void this.handle(request, response); });
+    this.acceptingRequests = true;
+    const server = http.createServer((request, response) => {
+      if (!this.acceptingRequests) { response.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); response.end(JSON.stringify({ ok: false, error: { code: 'shutting_down', message: 'Studio 本地服务正在关闭。' } })); return; }
+      const operation = this.handle(request, response);
+      this.activeRequests.add(operation);
+      void operation.then(() => this.activeRequests.delete(operation), () => this.activeRequests.delete(operation));
+    });
     try {
       await new Promise<void>((resolve, reject) => {
         const onError = (error: Error): void => { server.removeListener('listening', onListening); reject(error); };
@@ -374,26 +396,18 @@ export class LocalStudioService {
   async close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closePromise = (async () => {
+      this.acceptingRequests = false;
       for (const teardown of [...this.activeEventStreams]) teardown();
       const server = this.server;
       this.server = null;
-      if (server) await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const timeout = setTimeout(() => {
-          server.closeAllConnections();
-          server.unref();
-          finish();
-        }, 1000);
-        const finish = (error?: Error): void => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeout);
-          if (error) reject(error);
-          else resolve();
-        };
-        server.close(finish);
+      const requestDrain = Promise.allSettled([...this.activeRequests]);
+      let serverClosed: Promise<void> = Promise.resolve();
+      if (server) {
+        serverClosed = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
         server.closeAllConnections();
-      });
+        await Promise.race([serverClosed, new Promise<void>((resolve) => setTimeout(resolve, 2000))]);
+      }
+      await requestDrain;
       if (this.ownsMediaWorkerPool) await this.mediaWorkerPool.close();
       closeStudioDatabase(this.db);
       closeProviderDatabase(this.providerDb);
@@ -420,7 +434,7 @@ export class LocalStudioService {
       }
       const authentication = authenticateLocalRequest(request, this.capability, this.cookieName, this.sessionToken);
       if (!authentication) throw new LocalAccessError(401, 'unauthorized', '需要有效的本地 Studio 授权。');
-      assertProtocolCompatibility(request);
+      assertProtocolCompatibility(request, authentication === 'bearer');
       if (request.method === 'POST' || request.method === 'PUT') assertLocalWriteOrigin(request, this.origin, authentication);
       if (authentication === 'cookie') this.workbenchPresence.recordAuthenticatedConnection();
       if (request.method === 'POST' && (parsed.pathname === '/api/workbench/open-claim' || parsed.pathname === '/api/workbench/open-claim/release')) {
@@ -445,7 +459,7 @@ export class LocalStudioService {
       if (request.method === 'GET' && sessionPlanMatch) {
         const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionPlanMatch[1] });
         const round = session.activeRoundId ? this.db.prepare('SELECT round.id, round.purpose, round.plan_json, round.plan_version, round.status, task.id AS task_id, task.name AS task_name, project.id AS project_id, project.name AS project_name FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?').get(session.activeRoundId, this.initialized.manifest.studioId) as { id: string; purpose: string; plan_json: string; plan_version: number; status: string; task_id: string; task_name: string; project_id: string; project_name: string } | undefined : undefined;
-        const latestRun = round ? listRuns(this.db, this.initialized.manifest.studioId, round.id)[0] || null : null;
+         const latestRun = round ? getLatestRun(this.db, this.initialized.manifest.studioId, round.id) : null;
         const consent = round ? this.confirmationGate.consentFor(round.id) : null;
         const pendingConfirmation = round ? this.confirmationGate.getChallenge(round.id) : null;
         return success(response, { session: { id: session.id, conversationId: session.conversationId }, context: round ? { project: { id: round.project_id, name: round.project_name }, task: { id: round.task_id, name: round.task_name }, round: { id: round.id, purpose: round.purpose, planVersion: round.plan_version, status: round.status, plan: publicValue(JSON.parse(round.plan_json)) } } : null, confirmation: consent ? { confirmed: true, confirmedAt: consent.confirmedAt, expiresAt: consent.expiresAt } : { confirmed: false }, pendingConfirmation: pendingConfirmation ? { challenge: pendingConfirmation.challenge, sessionId: pendingConfirmation.sessionId, expectedVersion: pendingConfirmation.expectedVersion, expiresAt: pendingConfirmation.expiresAt } : null, latestRun });
@@ -470,9 +484,9 @@ export class LocalStudioService {
       const assetProvenanceMatch = /^\/api\/assets\/([^/]+)\/provenance$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetProvenanceMatch) return success(response, { provenance: getAssetProvenance(this.db, this.initialized.manifest.studioId, assetProvenanceMatch[1]) });
       const projectArchiveMatch = /^\/api\/projects\/([^/]+)\/assets\/archive$/.exec(parsed.pathname);
-      if (request.method === 'GET' && projectArchiveMatch) return await this.projectAssetArchive(request, response, projectArchiveMatch[1], parsed.searchParams.getAll('assetId'));
+      if (request.method === 'GET' && projectArchiveMatch) { const assetIds = parsed.searchParams.getAll('assetId'); if (assetIds.length > MAX_BATCH_IDS) throw new InvalidCommandError('assetId 不能超过 ' + MAX_BATCH_IDS + ' 项。'); return await this.projectAssetArchive(request, response, projectArchiveMatch[1], assetIds); }
       const deliveryArchiveMatch = /^\/api\/deliveries\/([^/]+)\/archive$/.exec(parsed.pathname);
-      if (request.method === 'GET' && deliveryArchiveMatch) return await this.deliveryArchive(request, response, deliveryArchiveMatch[1], parsed.searchParams.getAll('sequence'));
+      if (request.method === 'GET' && deliveryArchiveMatch) { const sequences = parsed.searchParams.getAll('sequence'); if (sequences.length > MAX_BATCH_IDS) throw new InvalidCommandError('sequence 不能超过 ' + MAX_BATCH_IDS + ' 项。'); return await this.deliveryArchive(request, response, deliveryArchiveMatch[1], sequences); }
       const deliveryFileMatch = /^\/api\/deliveries\/([^/]+)\/files\/(\d+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && deliveryFileMatch) return await this.deliveryFile(request, response, deliveryFileMatch[1], Number(deliveryFileMatch[2]), parsed.searchParams.get('download') === '1', parsed.searchParams.get('variant') === 'thumbnail');
       const deliveryDetailMatch = /^\/api\/deliveries\/([^/]+)$/.exec(parsed.pathname);
@@ -571,7 +585,8 @@ export class LocalStudioService {
       if (text(body.projectId)) this.assertProjectInStudio(text(body.projectId));
       if (text(body.taskId)) this.assertTaskInStudio(text(body.taskId));
       if (text(body.roundId)) this.assertRoundInStudio(text(body.roundId));
-      return success(response, executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'sessions.context', () => updateStudioSessionContext(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined }), { sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined }).value);
+      const context = { studioId: this.initialized.manifest.studioId, sessionId: sessionContextMatch[1], projectId: text(body.projectId) || undefined, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined, expectedVersion: body.expectedVersion };
+      return success(response, executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'sessions.context', () => updateStudioSessionContext(this.db, context), context).value);
     }
     const archiveProjectMatch = /^\/api\/projects\/([^/]+)\/archive$/.exec(pathname);
     if (archiveProjectMatch) { this.assertProjectInStudio(archiveProjectMatch[1]); return success(response, archiveProject(this.db, { studioId: this.initialized.manifest.studioId, projectId: archiveProjectMatch[1], idempotencyKey: key })); }
@@ -589,9 +604,9 @@ export class LocalStudioService {
     if (projectSelectionBatchMatch && request.method === 'POST') {
       const projectId = projectSelectionBatchMatch[1];
       this.assertProjectInStudio(projectId);
-      const assetIds = Array.isArray(body.assetIds) ? body.assetIds.map(text).filter(Boolean) : [];
+      const assetIds = boundedIds(body.assetIds, 'assetIds') || [];
       const selected = body.selected === true;
-      const keepAssetIds = Array.isArray(body.keepAssetIds) ? body.keepAssetIds.map(text).filter((assetId) => assetIds.includes(assetId)) : [];
+      const keepAssetIds = (boundedIds(body.keepAssetIds, 'keepAssetIds', { optional: true }) || []).filter((assetId) => assetIds.includes(assetId));
       const updated = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'projects.selection_batch', () => withTransaction(this.db, () => {
         if (selected && keepAssetIds.length) setReviewDecisions(this.db, { studioId: this.initialized.manifest.studioId, assetIds: keepAssetIds, decision: 'keep', emitEvent: false });
         return setProjectAssetsSelected(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetIds, selected });
@@ -603,14 +618,14 @@ export class LocalStudioService {
       return success(response, created);
     }
     if (pathname === '/api/delivery-batches' && request.method === 'POST') {
-      const deliveryIds = Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [];
+      const deliveryIds = boundedIds(body.deliveryIds, 'deliveryIds') || [];
       this.assertProjectInStudio(text(body.projectId));
       for (const deliveryId of deliveryIds) this.assertDeliveryInStudio(deliveryId);
       return success(response, createDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), deliveryIds, idempotencyKey: key }));
     }
     const batchRevisionMatch = /^\/api\/delivery-batches\/([^/]+)\/revisions$/.exec(pathname);
     if (batchRevisionMatch && request.method === 'POST') {
-      const deliveryIds = Array.isArray(body.deliveryIds) ? body.deliveryIds.filter((item): item is string => typeof item === 'string') : [];
+      const deliveryIds = boundedIds(body.deliveryIds, 'deliveryIds') || [];
       this.assertDeliveryBatchInStudio(batchRevisionMatch[1]);
       for (const deliveryId of deliveryIds) this.assertDeliveryInStudio(deliveryId);
       return success(response, reviseDeliveryBatch(this.db, { studioId: this.initialized.manifest.studioId, batchId: batchRevisionMatch[1], deliveryIds, idempotencyKey: key }));
@@ -618,16 +633,16 @@ export class LocalStudioService {
     const batchReadyMatch = /^\/api\/delivery-batch-versions\/([^/]+)\/ready$/.exec(pathname);
     if (batchReadyMatch && request.method === 'POST') { this.assertDeliveryBatchVersionInStudio(batchReadyMatch[1]); return success(response, prepareDeliveryBatchVersion(this.db, { studioId: this.initialized.manifest.studioId, versionId: batchReadyMatch[1], idempotencyKey: key })); }
     if (pathname === '/api/deliveries/complete' && request.method === 'POST') {
-      const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : [];
+      const assetIds = boundedIds(body.assetIds, 'assetIds') || [];
       const projectId = text(body.projectId);
       const phase = text(body.phase) as DeliveryCompletionPhase;
       this.assertProjectInStudio(projectId);
       for (const assetId of assetIds) this.assertAssetInStudio(assetId);
       return success(response, publicDeliveryCompletion(await completeDeliveryStepAsync(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, operationId: key, phase, projectId, name: text(body.name), assetIds, includeCreativeRecord: body.includeCreativeRecord === true })));
     }
-    if (pathname === '/api/deliveries' && request.method === 'POST') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; this.assertProjectInStudio(text(body.projectId)); for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, createDelivery(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), assetIds, includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key })); }
+    if (pathname === '/api/deliveries' && request.method === 'POST') { const assetIds = boundedIds(body.assetIds, 'assetIds') || []; this.assertProjectInStudio(text(body.projectId)); for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, createDelivery(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), assetIds, includeCreativeRecord: body.includeCreativeRecord === true, idempotencyKey: key })); }
     const deliveryItemsMatch = /^\/api\/deliveries\/([^/]+)\/items$/.exec(pathname);
-    if (deliveryItemsMatch && request.method === 'PUT') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; this.assertDeliveryInStudio(deliveryItemsMatch[1]); for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, updateDeliveryDraft(this.db, { studioId: this.initialized.manifest.studioId, deliveryId: deliveryItemsMatch[1], assetIds, includeCreativeRecord: typeof body.includeCreativeRecord === 'boolean' ? body.includeCreativeRecord : undefined, idempotencyKey: key })); }
+    if (deliveryItemsMatch && request.method === 'PUT') { const assetIds = boundedIds(body.assetIds, 'assetIds') || []; this.assertDeliveryInStudio(deliveryItemsMatch[1]); for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, updateDeliveryDraft(this.db, { studioId: this.initialized.manifest.studioId, deliveryId: deliveryItemsMatch[1], assetIds, includeCreativeRecord: typeof body.includeCreativeRecord === 'boolean' ? body.includeCreativeRecord : undefined, idempotencyKey: key })); }
     const readyDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/ready$/.exec(pathname);
     if (readyDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(readyDeliveryMatch[1]); return success(response, prepareDelivery(this.db, { studioId: this.initialized.manifest.studioId, deliveryId: readyDeliveryMatch[1], idempotencyKey: key })); }
     const returnToDraftMatch = /^\/api\/deliveries\/([^/]+)\/draft$/.exec(pathname);
@@ -635,8 +650,8 @@ export class LocalStudioService {
     const exportDeliveryMatch = /^\/api\/deliveries\/([^/]+)\/export$/.exec(pathname);
     if (exportDeliveryMatch && request.method === 'POST') { this.assertDeliveryInStudio(exportDeliveryMatch[1]); return success(response, publicDeliveryExport(await exportDeliveryAsync(this.db, this.initialized.paths, { studioId: this.initialized.manifest.studioId, deliveryId: exportDeliveryMatch[1], idempotencyKey: key }))); }
     if (pathname === '/api/task-types') return success(response, publicValue(createUserTaskType(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), idempotencyKey: key })));
-    if (pathname === '/api/style-kits') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, publicValue(createStyleKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds, idempotencyKey: key }))); }
-    if (pathname === '/api/brand-kits') { const assetIds = Array.isArray(body.assetIds) ? body.assetIds.filter((item): item is string => typeof item === 'string') : []; for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, publicValue(createBrandKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds, idempotencyKey: key }))); }
+    if (pathname === '/api/style-kits') { const assetIds = boundedIds(body.assetIds, 'assetIds', { optional: true }) || []; for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, publicValue(createStyleKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds, idempotencyKey: key }))); }
+    if (pathname === '/api/brand-kits') { const assetIds = boundedIds(body.assetIds, 'assetIds', { optional: true }) || []; for (const assetId of assetIds) this.assertAssetInStudio(assetId); return success(response, publicValue(createBrandKit(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), definition: record(body.definition), assetIds, idempotencyKey: key }))); }
     if (pathname === '/api/tasks') {
       this.assertProjectInStudio(text(body.projectId));
       if (text(body.sessionId)) this.assertSessionInStudio(text(body.sessionId));
@@ -661,71 +676,112 @@ export class LocalStudioService {
       this.assertRoundInStudio(challengeMatch[1]);
       const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: text(body.sessionId) });
       if (session.activeRoundId !== challengeMatch[1]) throw new InvalidCommandError('确认挑战必须绑定当前会话的活动轮次。');
-      const round = listRounds(this.db, this.initialized.manifest.studioId, String(session.activeTaskId || '')).find((candidate) => candidate.id === challengeMatch[1]);
-      if (!round || round.status !== 'awaiting_confirmation') throw new InvalidCommandError('轮次必须先进入待确认状态。');
+      const round = getRound(this.db, this.initialized.manifest.studioId, challengeMatch[1]);
       const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, challengeMatch[1]);
-      if (!currentPlan || currentPlan.planVersion !== round.planVersion || currentPlan.state !== 'awaiting_confirmation') throw new InvalidCommandError('当前待确认计划不可用，请重新准备计划。');
+      const planStateAllowed = Boolean(round && currentPlan && currentPlan.planVersion === round.planVersion && ((round.status === 'awaiting_confirmation' && currentPlan.state === 'awaiting_confirmation') || (round.status === 'active' && currentPlan.state === 'confirmed')));
+      if (!round || !currentPlan || !planStateAllowed) throw new InvalidCommandError('当前轮次没有可确认的计划。');
       return success(response, this.confirmationGate.createChallenge({ roundId: round.id, sessionId: session.id, conversationId: session.conversationId, planHash: planHash(currentPlan.plan), expectedVersion: round.version }));
     }
     const confirmMatch = /^\/api\/rounds\/([^/]+)\/confirm$/.exec(pathname);
     if (confirmMatch) {
       this.assertRoundInStudio(confirmMatch[1]);
       if (authentication !== 'cookie') throw new LocalAccessError(403, 'forbidden', '创作确认必须由已授权 Workbench 中的真实用户完成。');
-      const challenge = this.confirmationGate.getChallenge(confirmMatch[1]);
-      if (!challenge || text(body.sessionId) !== challenge.sessionId) throw new InvalidCommandError('确认会话必须与待处理确认挑战绑定的会话一致。');
-      const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: challenge.sessionId });
-      const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, confirmMatch[1]);
-      const currentPlanHash = currentPlan ? planHash(currentPlan.plan) : '';
-      let consent;
-      try {
-        consent = this.confirmationGate.confirm({ roundId: confirmMatch[1], challenge: text(body.challenge), sessionId: session.id, planHash: currentPlanHash });
-      } catch {
-        throw new InvalidCommandError('确认挑战无效、已过期或与当前计划不一致。');
+      const roundId = confirmMatch[1];
+      const sessionId = text(body.sessionId);
+      const expectedVersion = numberValue(body.expectedVersion);
+      const challengeValue = text(body.challenge);
+      const internalPlanKey = 'confirm-plan-' + createHash('sha256').update(key).digest('hex');
+      const confirmed = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'rounds.confirm_user', () => {
+        const challenge = this.confirmationGate.getChallenge(roundId);
+        if (!challenge || challenge.sessionId !== sessionId) throw new InvalidCommandError('确认会话必须与待处理确认挑战绑定的会话一致。');
+        const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId });
+        if (session.conversationId !== challenge.conversationId || !this.confirmationGate.validateChallenge({ roundId, challenge: challengeValue, sessionId, planHash: challenge.planHash })) throw new InvalidCommandError('确认挑战无效、已过期或与当前计划不一致。');
+        const currentRound = getRound(this.db, this.initialized.manifest.studioId, roundId);
+        const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, roundId);
+        if (!currentRound || !currentPlan || currentRound.version !== challenge.expectedVersion || currentPlan.planVersion !== currentRound.planVersion || challenge.planHash !== planHash(currentPlan.plan) || currentRound.version !== expectedVersion) throw new InvalidCommandError('确认挑战无效、已过期或与当前计划不一致。');
+        if (currentRound.status === 'awaiting_confirmation') return confirmRoundPlan(this.db, { studioId: this.initialized.manifest.studioId, roundId, expectedVersion, idempotencyKey: internalPlanKey }).value;
+        if (currentRound.status === 'active' && currentPlan.state === 'confirmed') return currentRound;
+        throw new InvalidCommandError('当前轮次没有可确认的计划。');
+      }, { roundId, sessionId, expectedVersion, challenge: challengeValue });
+      let consent = this.confirmationGate.consentFor(roundId, sessionId);
+      if (!consent) {
+        const challenge = this.confirmationGate.getChallenge(roundId);
+        if (!challenge) throw new InvalidCommandError('确认状态已失效，请重新发起确认挑战。');
+        try {
+          consent = this.confirmationGate.confirm({ roundId, challenge: challengeValue, sessionId, planHash: challenge.planHash });
+        } catch {
+          throw new InvalidCommandError('确认挑战无效、已过期或与当前计划不一致。');
+        }
       }
-      const confirmed = confirmRoundPlan(this.db, { studioId: this.initialized.manifest.studioId, roundId: confirmMatch[1], expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
       return success(response, { ...confirmed, confirmation: consent });
     }
     const preflightMatch = /^\/api\/rounds\/([^/]+)\/preflight$/.exec(pathname);
     if (preflightMatch) {
       this.assertRoundInStudio(preflightMatch[1]);
+      this.assertConfirmedRoundSession(preflightMatch[1], text(body.sessionId));
       const config = resolveActiveProviderConfig(this.providerDb);
       const status = providerStatus(this.providerDb);
       if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerStatus: status }) });
       const receipt = createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: status, executionConcurrency: body.executionConcurrency, concurrencySource: body.concurrencySource, idempotencyKey: key });
       if (!receipt.value.preview) return success(response, receipt);
-      const consent = this.confirmationGate.consentFor(preflightMatch[1], text(body.sessionId) || undefined);
-      const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, preflightMatch[1]);
-      if (!consent || !currentPlan || consent.planHash !== planHash(currentPlan.plan)) throw new InvalidCommandError('预检前必须在 Workbench 完成与当前计划匹配的用户确认。');
+      const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: text(body.sessionId) });
+      const consent = this.confirmationGate.consentFor(preflightMatch[1], session.id);
+      if (!consent) throw new InvalidCommandError('预检前必须在 Workbench 完成与当前计划匹配的用户确认。');
       const frozenPlanHash = planHash(receipt.value.preview.planSnapshot);
       const confirmToken = this.confirmationGate.issueToken({ roundId: preflightMatch[1], preflightId: receipt.value.preview.id, planHash: frozenPlanHash, conversationId: consent.conversationId });
       return success(response, { ...receipt, value: { ...receipt.value, confirmToken } });
     }
     if (pathname === '/api/runs') {
       const roundId = text(body.roundId);
-      const preflightId = text(body.preflightId);
-      this.assertRoundInStudio(roundId);
-      if (preflightId) this.assertDryRunInStudio(preflightId);
+       const preflightId = text(body.preflightId);
+       this.assertRoundInStudio(roundId);
+       if (preflightId) this.assertDryRunInStudio(preflightId);
       if (body.requestedConcurrency !== undefined || body.executionConcurrency !== undefined || body.concurrencySource !== undefined) throw new InvalidCommandError('并发必须在预检时确定；请重新预检。');
       const config = resolveActiveProviderConfig(this.providerDb);
       if (!config) throw new InvalidCommandError('当前工作区没有可用的图片生成配置。');
       const runtime = this.runtimeStatus();
       if (runtime.restartRequired) throw new InvalidCommandError('Provider 配置已变更，必须先重启 Studio 后再提交生成。');
-      const preview = listDryRunPreviews(this.db, this.initialized.manifest.studioId, roundId).find((candidate) => candidate.id === preflightId);
+       const preview = preflightId ? getDryRunPreview(this.db, this.initialized.manifest.studioId, roundId, preflightId) : null;
       if (!preview) throw new InvalidCommandError('预检证据不存在或不属于当前轮次。');
       const consent = this.confirmationGate.consentFor(roundId);
-      const tokenValid = Boolean(consent && this.confirmationGate.verifyToken(text(body.confirmToken), { roundId, preflightId, planHash: planHash(preview.planSnapshot), conversationId: consent.conversationId }));
+      if (!consent) throw new InvalidCommandError('运行需要当前会话的用户确认。');
+      const tokenValid = this.confirmationGate.verifyToken(text(body.confirmToken), { roundId, preflightId, planHash: planHash(preview.planSnapshot), conversationId: consent.conversationId });
       if (!tokenValid) throw new InvalidCommandError('运行需要 daemon 签发且与计划、预检和会话绑定的 confirm_token。');
-      const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId, providerConfig: config, providerStatus: providerStatus(this.providerDb), preflightId: preflightId || undefined, idempotencyKey: key });
-      return success(response, queued);
+      const token = text(body.confirmToken);
+      const tokenClaims = { roundId, preflightId, planHash: planHash(preview.planSnapshot), conversationId: consent.conversationId };
+      let reservation: { replayed: boolean };
+      try {
+        reservation = this.confirmationGate.reserveToken(token, tokenClaims, key);
+      } catch {
+        throw new InvalidCommandError('confirm_token 已经授权过其他运行操作，不能使用不同的幂等键重放。');
+      }
+      try {
+        const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId, providerConfig: config, providerStatus: providerStatus(this.providerDb), preflightId, idempotencyKey: key });
+        return success(response, queued);
+      } catch (error) {
+        if (!reservation.replayed) this.confirmationGate.releaseToken(token, key);
+        throw error;
+      }
     }
     const pauseMatch = /^\/api\/runs\/([^/]+)\/pause$/.exec(pathname);
     if (pauseMatch) { this.assertRunInStudio(pauseMatch[1]); return success(response, pauseGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: pauseMatch[1], idempotencyKey: key })); }
     const resolveUnknownMatch = /^\/api\/runs\/([^/]+)\/outcomes\/resolve$/.exec(pathname);
-    if (resolveUnknownMatch) { const itemIds = Array.isArray(body.itemIds) ? body.itemIds.filter((item): item is string => typeof item === 'string') : []; this.assertRunInStudio(resolveUnknownMatch[1]); for (const itemId of itemIds) this.assertRunItemInStudio(itemId); return success(response, resolveUnknownRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: resolveUnknownMatch[1], itemIds, idempotencyKey: key })); }
+    if (resolveUnknownMatch) { const itemIds = boundedIds(body.itemIds, 'itemIds') || []; this.assertRunInStudio(resolveUnknownMatch[1]); for (const itemId of itemIds) this.assertRunItemInStudio(itemId); return success(response, resolveUnknownRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: resolveUnknownMatch[1], itemIds, idempotencyKey: key })); }
     const retryMatch = /^\/api\/runs\/([^/]+)\/retry$/.exec(pathname);
-    if (retryMatch) { const itemIds = Array.isArray(body.itemIds) ? body.itemIds.filter((item): item is string => typeof item === 'string') : undefined; this.assertRunInStudio(retryMatch[1]); for (const itemId of itemIds || []) this.assertRunItemInStudio(itemId); return success(response, retryGenerationRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: retryMatch[1], itemIds, idempotencyKey: key })); }
+    if (retryMatch) { const itemIds = boundedIds(body.itemIds, 'itemIds', { optional: true }); this.assertRunInStudio(retryMatch[1]); for (const itemId of itemIds || []) this.assertRunItemInStudio(itemId); return success(response, retryGenerationRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: retryMatch[1], itemIds, idempotencyKey: key })); }
     const resumeMatch = /^\/api\/runs\/([^/]+)\/resume$/.exec(pathname);
-    if (resumeMatch) { this.assertRunInStudio(resumeMatch[1]); if (text(body.sessionId)) this.assertSessionInStudio(text(body.sessionId)); return success(response, resumeGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: resumeMatch[1], sessionId: text(body.sessionId) || undefined, idempotencyKey: key })); }
+    if (resumeMatch) {
+      this.assertRunInStudio(resumeMatch[1]);
+      if (authentication !== 'cookie') throw new LocalAccessError(403, 'forbidden', '运行恢复必须由已授权 Workbench 中的真实用户完成。');
+      const sessionId = text(body.sessionId);
+      this.assertResumeSession(resumeMatch[1], sessionId);
+      const config = resolveActiveProviderConfig(this.providerDb);
+      const run = getGenerationRun(this.db, resumeMatch[1]);
+      const runProfileId = typeof run?.providerSnapshot.profileId === 'string' ? run.providerSnapshot.profileId : '';
+      const runConfigVersion = Number(run?.providerSnapshot.configVersion);
+      if (!config || runProfileId !== config.profileId || runConfigVersion !== config.configVersion) throw new InvalidCommandError('Provider 配置已变化，旧运行不能静默切换；请恢复原 Profile 或创建新轮次。');
+      return success(response, resumeGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: resumeMatch[1], sessionId, idempotencyKey: key }));
+    }
     const cancelMatch = /^\/api\/runs\/([^/]+)\/cancel$/.exec(pathname);
     if (cancelMatch) { this.assertRunInStudio(cancelMatch[1]); return success(response, cancelGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: cancelMatch[1], idempotencyKey: key })); }
     const reviewMatch = /^\/api\/assets\/([^/]+)\/review$/.exec(pathname);
@@ -784,6 +840,30 @@ export class LocalStudioService {
 
   private assertDeliveryInStudio(deliveryId: string): void {
     this.assertScopedId(deliveryId, 'Delivery', 'SELECT 1 FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?');
+  }
+  private assertConfirmedRoundSession(roundId: string, sessionId: string): void {
+    const normalizedSessionId = text(sessionId);
+    if (!normalizedSessionId) throw new InvalidCommandError('预检需要明确的 Studio Session。');
+    const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: normalizedSessionId });
+    if (session.activeRoundId !== roundId) throw new InvalidCommandError('预检必须绑定当前会话的活动轮次。');
+    const round = getRound(this.db, this.initialized.manifest.studioId, roundId);
+    const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, roundId);
+    if (!round || round.status !== 'active' || !currentPlan || currentPlan.planVersion !== round.planVersion || currentPlan.state !== 'confirmed') throw new InvalidCommandError('预检前必须先确认当前创作计划。');
+    const consent = this.confirmationGate.consentFor(roundId, normalizedSessionId);
+    if (!consent || consent.conversationId !== session.conversationId || consent.planHash !== planHash(currentPlan.plan)) throw new InvalidCommandError('预检前必须在 Workbench 完成与当前计划匹配的用户确认。');
+  }
+
+  private assertResumeSession(runId: string, sessionId: string): void {
+    const normalizedSessionId = text(sessionId);
+    if (!normalizedSessionId) throw new InvalidCommandError('恢复运行需要明确的 Studio Session。');
+    const run = this.db.prepare('SELECT run.round_id FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?').get(runId, this.initialized.manifest.studioId) as { round_id: string } | undefined;
+    if (!run) throw new StudioNotFoundError('Generation run not found: ' + runId);
+    const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: normalizedSessionId });
+    if (session.activeRoundId !== run.round_id) throw new InvalidCommandError('恢复运行必须绑定所属创作轮次的当前 Studio Session。');
+    const round = getRound(this.db, this.initialized.manifest.studioId, run.round_id);
+    const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, run.round_id);
+    const consent = this.confirmationGate.consentFor(run.round_id, normalizedSessionId);
+    if (!round || round.status !== 'active' || !currentPlan || currentPlan.planVersion !== round.planVersion || currentPlan.state !== 'confirmed' || !consent || consent.conversationId !== session.conversationId || consent.planHash !== planHash(currentPlan.plan)) throw new InvalidCommandError('恢复运行前必须在 Workbench 重新确认当前创作计划。');
   }
 
   private assertImportTarget(targetType?: string, targetId?: string): void {

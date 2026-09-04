@@ -1,7 +1,7 @@
-import { getStudioAsset, StudioAsset } from '../domain/assets';
+import { ImageRequest, MAX_IMAGE_REQUEST_CACHED_MEDIA_BYTES, MAX_IMAGE_REQUEST_MEDIA_BYTES, MAX_IMAGE_REQUEST_REFERENCE_ASSETS } from '../providers/contracts';
 import { inspectProjectAssetAccess, ProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { InvalidCommandError, StudioNotFoundError } from '../domain/studio-commands';
-import { ImageRequest, MAX_IMAGE_REQUEST_CACHED_MEDIA_BYTES, MAX_IMAGE_REQUEST_MEDIA_BYTES, MAX_IMAGE_REQUEST_REFERENCE_ASSETS } from '../providers/contracts';
+import { getStudioAsset, isStudioAssetMediaAvailable, StudioAsset } from '../domain/assets';
 import { StudioDatabase } from '../studio/database';
 import { ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 import { createVerifiedSnapshotAsync, MediaArchiveError, resolveManagedMediaPath, VerifiedManagedFile } from './archive';
@@ -90,7 +90,7 @@ export class StudioAssetResolver implements ManagedAssetResolver {
 
   private getActiveAsset(studioId: string, assetId: string, access: ProjectAssetAccess | undefined): StudioAsset {
     const asset = getStudioAsset(this.db, studioId, assetId);
-    if (!asset || asset.deletedAt) throw new StudioNotFoundError('Active managed asset not found: ' + assetId);
+    if (!asset || asset.deletedAt || !isStudioAssetMediaAvailable(this.db, studioId, assetId)) throw new StudioNotFoundError('Active managed asset not found or unavailable: ' + assetId);
     if (!projectAssetReferenceAllowed(access)) throw new InvalidCommandError('参考素材必须属于当前项目或已明确共享到跨项目素材。');
     return asset;
   }

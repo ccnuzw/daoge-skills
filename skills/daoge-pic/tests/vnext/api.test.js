@@ -94,7 +94,16 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     const rejectedSkillConfirm = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { method: 'POST', idempotencyKey: 'skill-confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
     assert.equal(rejectedSkillConfirm.status, 403);
     const cookie = await workbenchCookie(started);
+    const rejectedInvalidChallenge = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { cookie, idempotencyKey: 'invalid-confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge + '-tampered' } });
+    assert.equal(rejectedInvalidChallenge.status, 400);
+    assert.equal(started.service.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key = 'invalid-confirm'").get().total, 0);
+    assert.equal(started.service.db.prepare('SELECT status FROM creative_rounds WHERE id = ?').get(round.body.data.value.id).status, 'awaiting_confirmation');
     const confirmed = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { cookie, idempotencyKey: 'confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
+    const replayedConfirmation = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { cookie, idempotencyKey: 'confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
+    assert.equal(replayedConfirmation.status, 200, JSON.stringify(replayedConfirmation.body));
+    assert.deepEqual(replayedConfirmation.body.data.value, confirmed.body.data.value);
+    assert.deepEqual(replayedConfirmation.body.data.confirmation, confirmed.body.data.confirmation);
+    assert.equal(replayedConfirmation.body.data.replayed, true);
     const rejectedPreflight = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { cookie, idempotencyKey: 'preflight-over-limit', body: { executionConcurrency: 1001, sessionId } });
     assert.equal(rejectedPreflight.status, 400);
     const preflight = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { cookie, idempotencyKey: 'preflight', body: { executionConcurrency: 1000, sessionId } });
@@ -124,6 +133,10 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     assert.equal(queued.body.data.value.executionConcurrency, 1000);
     assert.equal(started.service.db.prepare('SELECT COUNT(*) AS total FROM generation_runs').get().total, 1);
     assert.equal(started.service.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key = 'queue'").get().total, 1);
+    const replayedWithDifferentKey = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-replay-with-different-key', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, confirmToken: preflight.body.data.value.confirmToken } });
+    assert.equal(replayedWithDifferentKey.status, 400);
+    assert.match(replayedWithDifferentKey.body.error.message, /不同的幂等键/);
+    assert.equal(started.service.db.prepare('SELECT COUNT(*) AS total FROM generation_runs').get().total, 1);
     assert.equal(JSON.stringify(queued.body).includes('api-secret-never-in-http-response'), false);
     const runId = queued.body.data.value.id;
     const publicItems = await requestJson(started, '/api/runs/' + runId + '/items');
@@ -137,6 +150,120 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     assert.deepEqual(invalidTransition.body.error, { code: 'invalid_state_transition', message: 'Invalid run transition: paused -> pausing', details: { entity: 'run', from: 'paused', to: 'pausing' } });
   } finally {
     if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('active rounds can be reconfirmed after daemon restart', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let first;
+  let second;
+  try {
+    initializeStudio({ workspaceRoot });
+    first = await startLocalStudioService({ workspaceRoot });
+    const session = await requestJson(first, '/api/sessions/open', { method: 'POST', idempotencyKey: 'restart-session', body: { conversationId: 'restart-reconfirm-conversation' } });
+    const sessionId = session.body.data.id;
+    const project = await requestJson(first, '/api/projects', { method: 'POST', idempotencyKey: 'restart-project', body: { name: '重启确认项目', sessionId } });
+    const task = await requestJson(first, '/api/tasks', { method: 'POST', idempotencyKey: 'restart-task', body: { projectId: project.body.data.value.id, name: '重启确认任务', sessionId } });
+    const round = await requestJson(first, '/api/rounds', { method: 'POST', idempotencyKey: 'restart-round', body: { taskId: task.body.data.value.id, purpose: 'exploration', sessionId } });
+    const roundId = round.body.data.value.id;
+    const prepared = await requestJson(first, '/api/rounds/' + roundId + '/prepare', { method: 'POST', idempotencyKey: 'restart-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'restart reconfirm fixture' } } });
+    const challenge = await requestJson(first, '/api/rounds/' + roundId + '/confirmation-challenge', { method: 'POST', idempotencyKey: 'restart-challenge-one', body: { sessionId } });
+    const cookie = await workbenchCookie(first);
+    const confirmed = await requestJsonAsWorkbench(first, '/api/rounds/' + roundId + '/confirm', { cookie, idempotencyKey: 'restart-confirm-one', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
+    assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
+    await first.service.close();
+    first = null;
+    second = await startLocalStudioService({ workspaceRoot });
+    const rechallenge = await requestJson(second, '/api/rounds/' + roundId + '/confirmation-challenge', { method: 'POST', idempotencyKey: 'restart-challenge-two', body: { sessionId } });
+    assert.equal(rechallenge.status, 200, JSON.stringify(rechallenge.body));
+    const newCookie = await workbenchCookie(second);
+    const reconfirmed = await requestJsonAsWorkbench(second, '/api/rounds/' + roundId + '/confirm', { cookie: newCookie, idempotencyKey: 'restart-confirm-two', body: { expectedVersion: confirmed.body.data.value.version, sessionId, challenge: rechallenge.body.data.challenge } });
+    assert.equal(reconfirmed.status, 200, JSON.stringify(reconfirmed.body));
+    assert.equal(reconfirmed.body.data.value.status, 'active');
+  } finally {
+    if (first) await first.service.close();
+    if (second) await second.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('preflight rejection before confirmation leaves no dry-run or receipt side effects', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Preflight Gate Provider' });
+    started = await startLocalStudioService({ workspaceRoot });
+    const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'preflight-gate-session', body: { conversationId: 'preflight-gate-conversation' } });
+    const sessionId = session.body.data.id;
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'preflight-gate-project', body: { name: '预检门禁项目', sessionId } });
+    const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'preflight-gate-task', body: { projectId: project.body.data.value.id, name: '预检门禁任务', sessionId } });
+    const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: 'preflight-gate-round', body: { taskId: task.body.data.value.id, purpose: 'exploration', sessionId } });
+    const roundId = round.body.data.value.id;
+    const prepared = await requestJson(started, '/api/rounds/' + roundId + '/prepare', { method: 'POST', idempotencyKey: 'preflight-gate-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'preflight gate fixture' } } });
+    const before = {
+      previews: started.service.db.prepare('SELECT COUNT(*) AS total FROM dry_run_previews').get().total,
+      items: started.service.db.prepare('SELECT COUNT(*) AS total FROM dry_run_items').get().total,
+      receipts: started.service.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key = 'preflight-gate-rejected'").get().total
+    };
+    const rejected = await requestJson(started, '/api/rounds/' + roundId + '/preflight', { method: 'POST', idempotencyKey: 'preflight-gate-rejected', body: { sessionId, executionConcurrency: 1 } });
+    assert.equal(rejected.status, 400);
+    const after = {
+      previews: started.service.db.prepare('SELECT COUNT(*) AS total FROM dry_run_previews').get().total,
+      items: started.service.db.prepare('SELECT COUNT(*) AS total FROM dry_run_items').get().total,
+      receipts: started.service.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key = 'preflight-gate-rejected'").get().total
+    };
+    assert.deepEqual(after, before);
+    assert.equal(prepared.body.data.value.status, 'awaiting_confirmation');
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('run resume requires a Workbench re-confirmation bound to the run round after restart', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let first;
+  let second;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Resume Gate Provider' });
+    first = await startLocalStudioService({ workspaceRoot });
+    const session = await requestJson(first, '/api/sessions/open', { method: 'POST', idempotencyKey: 'resume-gate-session', body: { conversationId: 'resume-gate-conversation' } });
+    const sessionId = session.body.data.id;
+    const project = await requestJson(first, '/api/projects', { method: 'POST', idempotencyKey: 'resume-gate-project', body: { name: '恢复门禁项目', sessionId } });
+    const task = await requestJson(first, '/api/tasks', { method: 'POST', idempotencyKey: 'resume-gate-task', body: { projectId: project.body.data.value.id, name: '恢复门禁任务', sessionId } });
+    const round = await requestJson(first, '/api/rounds', { method: 'POST', idempotencyKey: 'resume-gate-round', body: { taskId: task.body.data.value.id, purpose: 'exploration', sessionId } });
+    const roundId = round.body.data.value.id;
+    const prepared = await requestJson(first, '/api/rounds/' + roundId + '/prepare', { method: 'POST', idempotencyKey: 'resume-gate-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'resume gate fixture' } } });
+    const challenge = await requestJson(first, '/api/rounds/' + roundId + '/confirmation-challenge', { method: 'POST', idempotencyKey: 'resume-gate-challenge', body: { sessionId } });
+    const cookie = await workbenchCookie(first);
+    const confirmed = await requestJsonAsWorkbench(first, '/api/rounds/' + roundId + '/confirm', { cookie, idempotencyKey: 'resume-gate-confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
+    const preflight = await requestJsonAsWorkbench(first, '/api/rounds/' + roundId + '/preflight', { cookie, idempotencyKey: 'resume-gate-preflight', body: { sessionId } });
+    const queued = await requestJson(first, '/api/runs', { method: 'POST', idempotencyKey: 'resume-gate-run', body: { roundId, preflightId: preflight.body.data.value.preview.id, confirmToken: preflight.body.data.value.confirmToken } });
+    assert.equal(queued.status, 200, JSON.stringify(queued.body));
+    await first.service.close();
+    first = null;
+
+    second = await startLocalStudioService({ workspaceRoot });
+    const newCookie = await workbenchCookie(second);
+    const runId = queued.body.data.value.id;
+    const rejectedBearer = await requestJson(second, '/api/runs/' + runId + '/resume', { method: 'POST', idempotencyKey: 'resume-gate-bearer', body: { sessionId } });
+    assert.equal(rejectedBearer.status, 403);
+    const rejectedWithoutReconfirmation = await requestJsonAsWorkbench(second, '/api/runs/' + runId + '/resume', { cookie: newCookie, method: 'POST', idempotencyKey: 'resume-gate-no-reconfirm', body: { sessionId } });
+    assert.equal(rejectedWithoutReconfirmation.status, 400);
+    assert.equal(second.service.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key = 'resume-gate-no-reconfirm'").get().total, 0);
+
+    const rechallenge = await requestJson(second, '/api/rounds/' + roundId + '/confirmation-challenge', { method: 'POST', idempotencyKey: 'resume-gate-rechallenge', body: { sessionId } });
+    const reconfirmed = await requestJsonAsWorkbench(second, '/api/rounds/' + roundId + '/confirm', { cookie: newCookie, idempotencyKey: 'resume-gate-reconfirm', body: { expectedVersion: confirmed.body.data.value.version, sessionId, challenge: rechallenge.body.data.challenge } });
+    assert.equal(reconfirmed.status, 200, JSON.stringify(reconfirmed.body));
+    const resumed = await requestJsonAsWorkbench(second, '/api/runs/' + runId + '/resume', { cookie: newCookie, method: 'POST', idempotencyKey: 'resume-gate-approved', body: { sessionId } });
+    assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+    assert.equal(resumed.body.data.value.status, 'queued');
+  } finally {
+    if (first) await first.service.close();
+    if (second) await second.service.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });

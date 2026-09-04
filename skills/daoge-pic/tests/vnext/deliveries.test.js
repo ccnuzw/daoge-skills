@@ -68,6 +68,30 @@ test('rejects a same-Studio export key for another delivery without replacing it
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
+test('concurrent export keys for one delivery converge on one frozen delivery', async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-concurrent-'));
+  const initialized = initializeStudio({ workspaceRoot });
+  const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  try {
+    const project = createProject(db, { studioId: initialized.manifest.studioId, name: '并发导出', idempotencyKey: 'concurrent-project' }).value;
+    const asset = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: project.id });
+    setReviewDecision(db, { studioId: initialized.manifest.studioId, assetId: asset.id, decision: 'keep' });
+    const draft = createDelivery(db, { studioId: initialized.manifest.studioId, projectId: project.id, name: '同一交付', assetIds: [asset.id], idempotencyKey: 'concurrent-delivery' });
+    prepareDelivery(db, { studioId: initialized.manifest.studioId, deliveryId: draft.id, idempotencyKey: 'concurrent-ready' });
+    const [first, second] = await Promise.all([
+      exportDeliveryAsync(db, initialized.paths, { studioId: initialized.manifest.studioId, deliveryId: draft.id, idempotencyKey: 'concurrent-export-a' }),
+      exportDeliveryAsync(db, initialized.paths, { studioId: initialized.manifest.studioId, deliveryId: draft.id, idempotencyKey: 'concurrent-export-b' })
+    ]);
+    assert.equal(first.delivery.status, 'exported');
+    assert.equal(second.delivery.status, 'exported');
+    assert.equal(first.directory, second.directory);
+    assert.equal(fs.existsSync(path.join(first.directory, 'manifest.json')), true);
+  } finally {
+    closeStudioDatabase(db);
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 
 test('exports managed assets with a contact sheet and redacted creative record', () => {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-'));

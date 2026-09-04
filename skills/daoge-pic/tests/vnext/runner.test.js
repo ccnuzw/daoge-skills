@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { configureProvider } = require('./provider-test-helper');
-const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
+const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, updateStudioSessionContext, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
 const { preflightGenerationPlan } = require('../../dist/vnext/runner/preflight');
 const { createDryRunPreview, listDryRunPreviews, preflightRound, queueGenerationRun, retryGenerationRunItems, getGenerationRun, listGenerationRunItems, claimRunItems, transitionRunItem, markRunsResumePending, promoteDueRetryWaitItems, resolveUnknownRunItems, resumeGenerationRun, reconcileTerminalRuns, recoverExpiredLeases } = require('../../dist/vnext/runner/run-commands');
 
@@ -47,6 +47,19 @@ test('preflight rejects unconfigured providers and unsupported edit plans withou
   assert.equal(unsupported.valid, false);
   assert.deepEqual(unsupported.issues.map((issue) => issue.code), ['missing_reference', 'reference_edit_unsupported']);
 });
+test('preflight rejects malformed plan shapes without throwing or coercing operations', () => {
+  const provider = { providerId: 'openai-images', configured: true, missing: [], model: 'gpt-image-2', endpoint: 'https://images.example.test', capabilities: { generate: true, edit: true, referenceImage: true, mask: true } };
+  const invalidOperation = preflightGenerationPlan({ operation: 'unknown', itemCount: 1, prompt: 'safe' }, provider);
+  assert.equal(invalidOperation.valid, false);
+  assert.ok(invalidOperation.issues.some((issue) => issue.code === 'invalid_operation'));
+  const invalidReferences = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'safe', referenceAssetIds: {} }, provider);
+  assert.equal(invalidReferences.valid, false);
+  assert.ok(invalidReferences.issues.some((issue) => issue.code === 'invalid_reference_assets'));
+  const invalidMask = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'safe', maskAssetId: {} }, provider);
+  assert.equal(invalidMask.valid, false);
+  assert.ok(invalidMask.issues.some((issue) => issue.code === 'invalid_mask_asset_id'));
+});
+
 
 test('preflight rejects more than eight unique reference assets', () => {
   const result = preflightGenerationPlan({ operation: 'edit', itemCount: 1, prompt: 'edit', referenceAssetIds: Array.from({ length: 9 }, (_, index) => 'asset-' + index) }, { providerId: 'openai-images', configured: true, missing: [], model: 'gpt-image-2', endpoint: 'https://images.example.test', capabilities: { generate: true, edit: true, referenceImage: true, mask: true } });
@@ -107,6 +120,21 @@ test('persists a no-call dry-run preview and rejects stale Provider snapshots be
     const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'fresh-preview' });
     assert.equal(queued.value.status, 'queued');
   } finally { cleanup(fixture.workspaceRoot); }
+});
+
+test('dry-run command rejects an unconfirmed round without durable evidence', () => {
+  const fixture = configuredStudio();
+  try {
+    const round = createRoundDraft(fixture.db, { studioId: fixture.initialized.manifest.studioId, taskId: fixture.task.value.id, purpose: 'exploration', idempotencyKey: 'unconfirmed-draft' });
+    const prepared = prepareRoundForConfirmation(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: round.value.id, plan: { operation: 'generate', itemCount: 1, prompt: 'must confirm first' }, expectedVersion: round.value.version, idempotencyKey: 'unconfirmed-prepare' });
+    assert.equal(prepared.value.status, 'awaiting_confirmation');
+    assert.throws(() => createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: round.value.id, providerConfig: fixture.config, providerStatus: fixture.status, idempotencyKey: 'unconfirmed-preflight' }), /confirmed creative round/);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS total FROM dry_run_previews').get().total, 0);
+    assert.equal(fixture.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key = 'unconfirmed-preflight'").get().total, 0);
+  } finally {
+    closeStudioDatabase(fixture.db);
+    cleanup(fixture.workspaceRoot);
+  }
 });
 
 test('freezes default and serial concurrency during preflight and shares global capacity fairly', () => {
@@ -215,6 +243,26 @@ test('counts aggregate in-flight capacity across workers even when an earlier ru
   }
 });
 
+test('separate worker claim batches share the configured global capacity', () => {
+  const fixture = configuredStudio();
+  try {
+    const first = confirmedRound(fixture, { operation: 'generate', itemCount: 4, prompt: 'global batch one' }, 'global-one');
+    const second = confirmedRound(fixture, { operation: 'generate', itemCount: 4, prompt: 'global batch two' }, 'global-two');
+    const firstPreview = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: fixture.config, providerStatus: fixture.status, executionConcurrency: 4, idempotencyKey: 'global-one-preview' });
+    const secondPreview = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: fixture.config, providerStatus: fixture.status, executionConcurrency: 4, idempotencyKey: 'global-two-preview' });
+    queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: first.value.id, providerConfig: fixture.config, providerStatus: fixture.status, preflightId: firstPreview.value.preview.id, idempotencyKey: 'global-one-run' });
+    queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: second.value.id, providerConfig: fixture.config, providerStatus: fixture.status, preflightId: secondPreview.value.preview.id, idempotencyKey: 'global-two-run' });
+    const firstBatch = claimRunItems(fixture.db, { workerId: 'global-worker-one', limit: 2, globalLimit: 4, leaseMs: 30_000, now: new Date('2026-01-01T00:00:00.000Z') });
+    const secondBatch = claimRunItems(fixture.db, { workerId: 'global-worker-two', limit: 2, globalLimit: 4, leaseMs: 30_000, now: new Date('2026-01-01T00:00:00.000Z') });
+    assert.equal(firstBatch.length, 2);
+    assert.equal(secondBatch.length, 2);
+    assert.equal(fixture.db.prepare("SELECT COUNT(*) AS total FROM run_items WHERE status IN ('leased', 'requesting', 'receiving', 'persisting', 'cancel_requested')").get().total, 4);
+  } finally {
+    closeStudioDatabase(fixture.db);
+    cleanup(fixture.workspaceRoot);
+  }
+});
+
 test('projects sanitized run item error codes without Provider messages', () => {
   const fixture = configuredStudio();
   try {
@@ -266,6 +314,7 @@ test('queues a confirmed plan with a safe provider snapshot and leases durable r
     assert.deepEqual(resolved.value.resolvedItemIds, [claimed[0].id]);
     assert.throws(() => resumeGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, idempotencyKey: 'resume-without-session' }), InvalidCommandError);
     const session = openOrAttachStudioSession(fixture.db, { studioId: fixture.initialized.manifest.studioId, conversationId: 'runner-resume-confirmation' });
+    updateStudioSessionContext(fixture.db, { studioId: fixture.initialized.manifest.studioId, sessionId: session.id, roundId: confirmed.value.id });
     assert.equal(resumeGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, sessionId: session.id, idempotencyKey: 'resume-after-resolution' }).value.status, 'queued');
   } finally {
     closeStudioDatabase(fixture.db);

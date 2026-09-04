@@ -5,6 +5,7 @@ import { decodeBoundedBase64, downloadHttpResource, HostResolver, HttpFetch, Pin
 
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 4 * Math.ceil(MAX_DOWNLOAD_BYTES / 3) + 1024 * 1024;
+const MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 
 interface HttpError extends Error { status?: number; }
 interface ImagePayload { b64?: string; url?: string; revisedPrompt?: string; mediaType?: string; }
@@ -109,8 +110,8 @@ function requestBody(config: ResolvedProviderConfig, request: ImageRequest): Rec
   return body;
 }
 
-async function readJson(response: Response, maxBytes = MAX_RESPONSE_BYTES): Promise<Record<string, unknown>> {
-  const buffer = await readBoundedResponse(response, maxBytes, 'Provider response exceeds the configured size limit.');
+async function readJson(response: Response, signal: AbortSignal, maxBytes = MAX_RESPONSE_BYTES): Promise<Record<string, unknown>> {
+  const buffer = await readBoundedResponse(response, maxBytes, 'Provider response exceeds the configured size limit.', signal);
   const text = buffer.toString('utf8');
   try { return JSON.parse(text) as Record<string, unknown>; } catch { return { message: text.slice(0, 4096) }; }
 }
@@ -204,7 +205,7 @@ class HttpImageProvider implements ImageProvider {
     else headers.authorization = 'Bearer ' + this.config.apiKey;
     const target = endpoint(this.config.baseUrl, this.config.providerId, this.config.model);
     const response = await credentialedFetch(this.transport, target, { method: 'POST', headers, body: JSON.stringify(requestBody(this.config, request)), signal });
-    const json = await readJson(response);
+     const json = await readJson(response, signal, response.ok ? MAX_RESPONSE_BYTES : MAX_ERROR_RESPONSE_BYTES);
     if (!response.ok) throw errorWithStatus(response.status, String((json.error as Record<string, unknown> | undefined)?.message || json.message || 'Provider request failed.'));
     const payload = extractPayload(json, this.config.providerId);
     if (!payload) throw new Error('Provider response did not include image bytes.');
@@ -238,7 +239,7 @@ class HttpImageProvider implements ImageProvider {
     } else {
       throw errorWithStatus(422, 'The selected Provider does not support this managed reference or mask edit.');
     }
-    const json = await readJson(response);
+    const json = await readJson(response, signal, response.ok ? MAX_RESPONSE_BYTES : MAX_ERROR_RESPONSE_BYTES);
     if (!response.ok) throw errorWithStatus(response.status, String((json.error as Record<string, unknown> | undefined)?.message || json.message || 'Provider edit request failed.'));
     const payload = extractPayload(json, this.config.providerId);
     if (!payload) throw new Error('Provider edit response did not include image bytes.');
