@@ -2,18 +2,20 @@
 
 DAOGE Pic 是面向智能体会话的本地图像创作管理平台。会话负责澄清、规划、确认和汇报；本地 Studio Workbench 负责查看项目上下文、Generation History（生成历史）、运行、资产、选择、复核和交付。
 
-> **版本状态**：当前稳定正式版本为 [`5.9.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.1)，源码、Skill 契约与固定 GitHub Release 制品使用同一版本。
+> **版本状态**：当前稳定正式版本为 [`5.10.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.0)，源码、Skill 契约与固定 GitHub Release 制品使用同一版本。
 
 vNext 是一次不兼容替换，不读取或迁移旧 `task_spec.json`、`prepare` / `execute` / `ingest` 命令、旧静态工作区、`results.html`、旧目录状态或旧运行记录。
 
+
+本次架构协议为 `daoge-pic-skill-protocol 2.0.0`，独立于制品版本 `5.10.0`。daemon 负责机器闸门：运行必须携带绑定当前 `plan_hash`、`preflight_id`、`conversation_id` 的 `confirm_token`；确认挑战只能通过 Workbench 授权 Cookie 提交，Bearer Skill/CLI 无法伪造人工确认。默认执行工作移至自适应 child-process worker pool，control-plane 保持 API/SSE/队列与恢复；缩略图、ZIP、归档校验和启动媒体对账也由独立 media worker pool 承担。大计划支持 `--plan @-` stdin JSON；每次命令最多一个 `@-`，由 stdin 一次性读取。`--operation-name <verb:scope>` 由 daemon 派生稳定幂等 key，和高级 `--idempotency-key` 互斥。Workbench 另有只读当前会话计划摘要面板与独立人工确认闸门。
 ## 安装版本
 
-安装稳定正式版 `5.9.1` 时，使用 `daoge-pic-v5.9.1` GitHub Release 中的不可变 `.tgz` 制品，避免默认分支后续变化影响安装内容。下列 `npm install` 直接安装 GitHub 资产，不表示包已发布到 npm registry；安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 `daoge-pic` Skill，两步缺一不可。
+安装稳定正式版 `5.10.0` 时，使用 `daoge-pic-v5.10.0` GitHub Release 中的不可变 `.tgz` 制品，避免默认分支后续变化影响安装内容。下列 `npm install` 直接安装 GitHub 资产，不表示包已发布到 npm registry；安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 `daoge-pic` Skill，两步缺一不可。
 
 在项目根目录执行：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.9.1/daoge-pic-5.9.1.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.0/daoge-pic-5.10.0.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
@@ -26,7 +28,7 @@ npx daoge open --workspace /absolute/workspace
 需要全局安装稳定版时，安装同一个 GitHub Release `.tgz`，再由 Node 标准库调用 `npm root -g` 定位已安装包并注册到当前用户的 Codex Skill 目录：
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.9.1/daoge-pic-5.9.1.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.0/daoge-pic-5.10.0.tgz"
 node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
 ```
 
@@ -105,8 +107,8 @@ Provider API 凭据请求拒绝重定向。远程图片下载继续逐跳执行 
 并发只属于 Generation Run。系统全局硬上限固定 `1000` 且不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，越界直接拒绝：
 
 ```bash
-node scripts/daoge.js preflight --workspace /absolute/workspace --round <round-id> --concurrency 12
-node scripts/daoge.js run --workspace /absolute/workspace --round <round-id> --preflight <dry-run-id>
+node scripts/daoge.js preflight --workspace /absolute/workspace --round <round-id> --session <session-id> --concurrency 12
+node scripts/daoge.js run --workspace /absolute/workspace --round <round-id> --preflight <dry-run-id> --confirm-token <daemon-token>
 ```
 
 预检冻结 `executionConcurrency`（以及解释用 `concurrencySource`）；改变并发必须重新预检，`run` 阶段不能另改。daemon 启动时固定 active Profile 的 `profileId + configVersion`；配置变化后拒绝新运行，直到受控 `restart`，已有运行不会静默切换。
@@ -127,20 +129,22 @@ Workbench 的 **Generation History（生成历史）** 按当前轮次列出全�
 
 ## 幂等恢复
 
-所有通过 CLI 发出的 `POST` / `PUT` mutation 都接受可选的全局参数：
+所有通过 CLI 发出的 `POST` / `PUT` mutation 都支持命名操作，恢复场景仍接受高级参数：
 
 ```bash
+--operation-name <verb:scope>
 --idempotency-key <stable-key>
 ```
 
-若同一操作在网络断开、CLI 中断或响应不明后需要恢复，必须用**完全相同的命令、参数和同一个 key**重试，例如：
+`operation-name` 由 daemon 与路由、规范化后的 payload 派生稳定 key；同一对象 JSON 的键顺序不会改变幂等身份。`operation-name` 与 `idempotency-key` 互斥。高级 key 仍不能用于不同命令或不同 payload。未显式提供任一参数时，CLI 会为本次调用生成随机 key，不能用于跨进程恢复；需要跨进程恢复时首选 `--operation-name`，或在首次调用前保存显式 `--idempotency-key`。`status`、`studio`、`open`、`restart` 与只读 `provider-list` 不发送该参数。
+
+大计划使用 `--plan @-` 从 stdin 传输：
 
 ```bash
-node scripts/daoge.js resume --workspace /absolute/workspace --run <run-id> --session <session-id> --idempotency-key <same-key>
-node scripts/daoge.js resume --workspace /absolute/workspace --run <run-id> --session <session-id> --idempotency-key <same-key>
+some-agent | node scripts/daoge.js plan --workspace /absolute/workspace --round <round-id> --version <n> --plan @- --operation-name plan:round-id:v<n>
 ```
 
-同一个 key 不能用于不同命令或不同 payload；冲突会被拒绝。未显式提供时，CLI 会为本次 mutation 生成新 key，因此只有显式保存并复用 key 才能把跨进程重试识别为同一操作。`status`、`studio`、`open`、`restart` 与只读 `provider-list` 不发送该参数。
+每次命令最多一个 `@-`；stdin 必须是单个 JSON 对象，最大 8 MiB。不要把 `--intent @- --plan @-` 当作两个输入，它们不会分别读取 stdin。
 
 ## 恢复、媒体与交付
 
@@ -162,4 +166,4 @@ Workbench 用于项目/任务/轮次导航、Generation History、SSE 实时状�
 
 Workbench 不提供自然语言对话，不绕过会话确认，不显示 Provider 密钥，不接受任意绝对文件路径，也不把浏览器状态、目录或 SSE 当业务事实源。
 
-受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.9.1 发布验证与 5.9.0 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。
+受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.10.0 发布验证与 5.9.1 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。

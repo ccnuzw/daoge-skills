@@ -6,10 +6,13 @@ import { openWorkbenchUrl } from './open-workbench';
 import { MAX_GLOBAL_CONCURRENCY, MIN_EXECUTION_CONCURRENCY } from '../studio/runtime-settings';
 import { healthStudioId, signalVerifiedDaemon } from './legacy-daemon';
 import { readStudioManifest, studioPaths } from '../studio/workspace';
+import { SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
 
 export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; heartbeatAt: string; }
 
 type JsonObject = Record<string, unknown>;
+const STDIN_JSON_MARKER = Object.freeze({ __daogeJsonStdin: true });
+const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
 type LocalAction = 'status' | 'studio' | 'open' | 'restart';
@@ -26,7 +29,7 @@ interface ParsedCommand {
   name: string;
   workspaceRoot: string;
   action?: LocalAction;
-  request?: { method: HttpMethod; pathname: string; body: JsonObject; idempotencyKey?: string };
+  request?: { method: HttpMethod; pathname: string; body: JsonObject; idempotencyKey?: string; operationName?: string };
   force?: boolean;
 }
 
@@ -181,12 +184,12 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
   throw new Error('Studio daemon 未能在 6 秒内启动。请检查 daoge-studio/runtime/daemon.log。');
 }
 
-async function api(record: RuntimeRecord, method: HttpMethod, pathname: string, body: JsonObject, idempotencyKey?: string): Promise<unknown> {
+async function api(record: RuntimeRecord, method: HttpMethod, pathname: string, body: JsonObject, idempotencyKey?: string, operationName?: string): Promise<unknown> {
   if (!record.capability) throw new Error('Studio daemon 缺少本地访问 capability，必须先安全迁移。');
-  if (method !== 'GET' && !idempotencyKey) throw new Error('写入操作需要明确的 idempotency key。');
+  if (method !== 'GET' && !idempotencyKey && !operationName) throw new Error('写入操作需要 idempotency key 或 operation name。');
   const response = await fetch(record.url + pathname, {
     method,
-    headers: { accept: 'application/json', authorization: 'Bearer ' + record.capability, ...(method !== 'GET' ? { 'content-type': 'application/json', 'idempotency-key': idempotencyKey as string } : {}) },
+    headers: { accept: 'application/json', authorization: 'Bearer ' + record.capability, ...(method !== 'GET' ? { 'content-type': 'application/json', 'x-daoge-skill-protocol': SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION, ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}), ...(operationName ? { 'x-daoge-operation-name': operationName } : {}) } : {}) },
     body: method === 'GET' ? undefined : JSON.stringify(body)
   });
   const payload = await response.json() as { ok?: boolean; data?: unknown; error?: { message?: string } };
@@ -217,7 +220,7 @@ export async function openOrReuseWorkbench(record: RuntimeRecord, force = false,
 }
 
 function textValue(values: Record<string, unknown>, name: string): string { return values[name] as string; }
-function jsonValue(values: Record<string, unknown>, name: string): JsonObject { return (values[name] as JsonObject | undefined) || {}; }
+function jsonValue(values: Record<string, unknown>, name: string): unknown { return values[name] || {}; }
 function listValue(values: Record<string, unknown>, name: string): string[] { return (values[name] as string[] | undefined) || []; }
 function numberValue(values: Record<string, unknown>, name: string): number { return values[name] as number; }
 function booleanValue(values: Record<string, unknown>, name: string): boolean { return values[name] === true; }
@@ -252,9 +255,9 @@ const commandSchemas: Record<string, CommandSchema> = {
   'delivery-batch-ready': { method: 'POST', flags: { '--version': { kind: 'text', required: true } }, pathname: (v) => '/api/delivery-batch-versions/' + encoded(v, '--version') + '/ready', body: () => ({}) },
   round: { method: 'POST', flags: { '--task': { kind: 'text', required: true }, '--purpose': { kind: 'purpose', required: true }, '--parent': { kind: 'text' }, '--session': { kind: 'text' } }, pathname: () => '/api/rounds', body: (v) => ({ taskId: textValue(v, '--task'), purpose: textValue(v, '--purpose'), parentRoundId: v['--parent'], sessionId: v['--session'] }) },
   plan: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--plan': { kind: 'json', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/prepare', body: (v) => ({ expectedVersion: numberValue(v, '--version'), plan: jsonValue(v, '--plan') }) },
-  confirm: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/confirm', body: (v) => ({ expectedVersion: numberValue(v, '--version') }) },
-  preflight: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--concurrency': { kind: 'execution-concurrency' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/preflight', body: (v) => ({ executionConcurrency: v['--concurrency'] }) },
-  run: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--preflight': { kind: 'text', required: true } }, pathname: () => '/api/runs', body: (v) => ({ roundId: textValue(v, '--round'), preflightId: textValue(v, '--preflight') }) },
+  'confirm-challenge': { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/confirmation-challenge', body: (v) => ({ sessionId: textValue(v, '--session') }) },
+  preflight: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true }, '--concurrency': { kind: 'execution-concurrency' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/preflight', body: (v) => ({ sessionId: textValue(v, '--session'), executionConcurrency: v['--concurrency'] }) },
+  run: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--preflight': { kind: 'text', required: true }, '--confirm-token': { kind: 'text', required: true } }, pathname: () => '/api/runs', body: (v) => ({ roundId: textValue(v, '--round'), preflightId: textValue(v, '--preflight'), confirmToken: textValue(v, '--confirm-token') }) },
   pause: { method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/pause', body: () => ({}) },
   resume: { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/resume', body: (v) => ({ sessionId: textValue(v, '--session') }) },
   cancel: { method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/cancel', body: () => ({}) },
@@ -266,7 +269,13 @@ function validateFlag(name: string, raw: string, kind: FlagKind): unknown {
   const value = raw.trim();
   if (!value) throw new Error('需要 ' + name + '。');
   if (kind === 'text') return value;
-  if (kind === 'json') { let parsed: unknown; try { parsed = JSON.parse(raw) as unknown; } catch { throw new Error(name + ' 必须是有效 JSON 对象。'); } if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(name + ' 必须是 JSON 对象。'); return parsed; }
+  if (kind === 'json') {
+    if (value === '@-') return STDIN_JSON_MARKER;
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw) as unknown; } catch { throw new Error(name + ' 必须是有效 JSON 对象，或使用 @- 从 stdin 读取。'); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(name + ' 必须是 JSON 对象。');
+    return parsed;
+  }
   if (kind === 'list') { const values = [...new Set(raw.split(',').map((item) => item.trim()).filter(Boolean))]; if (!values.length) throw new Error(name + ' 必须包含至少一个 ID。'); return values; }
   if (kind === 'boolean') { if (value !== 'true' && value !== 'false') throw new Error(name + ' 只能是 true 或 false。'); return value === 'true'; }
   if (kind === 'purpose') { if (!['exploration', 'refinement', 'variation', 'edit', 'fill'].includes(value)) throw new Error(name + ' 不是支持的创作目的。'); return value; }
@@ -279,12 +288,46 @@ function explicitIdempotencyKey(raw: string): string {
   return raw;
 }
 
+function explicitOperationName(raw: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(raw)) throw new Error('--operation-name 必须为 1 到 128 个安全字符（字母、数字、点、下划线、冒号或连字符）。');
+  return raw;
+}
+
+export function materializeStdinJson(body: JsonObject): JsonObject {
+  let markerCount = 0;
+  const count = (value: unknown): void => {
+    if (value === STDIN_JSON_MARKER) { markerCount += 1; return; }
+    if (Array.isArray(value)) { for (const item of value) count(item); return; }
+    if (value && typeof value === 'object') for (const item of Object.values(value as JsonObject)) count(item);
+  };
+  count(body);
+  if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
+  let stdinValue: JsonObject | null = null;
+  const load = (): JsonObject => {
+    if (stdinValue) return stdinValue;
+    const raw = fs.readFileSync(0, 'utf8');
+    if (Buffer.byteLength(raw, 'utf8') > MAX_STDIN_JSON_BYTES) throw new Error('stdin JSON 不能超过 8 MiB。');
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw) as unknown; } catch { throw new Error('stdin 必须是有效 JSON 对象。'); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('stdin 必须是 JSON 对象。');
+    stdinValue = parsed as JsonObject;
+    return stdinValue;
+  };
+  const replace = (value: unknown): unknown => {
+    if (value === STDIN_JSON_MARKER) return load();
+    if (Array.isArray(value)) return value.map(replace);
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as JsonObject).map(([key, item]) => [key, replace(item)]));
+    return value;
+  };
+  return replace(body) as JsonObject;
+}
+
 function parseCommand(args: string[]): ParsedCommand {
   const name = args[0] || '';
   const schema = commandSchemas[name];
   if (!schema) throw new Error('未知 vNext 命令。\n' + usage());
   const mutation = Boolean(schema.method && schema.method !== 'GET');
-  const allowed = new Set(['--workspace', ...Object.keys(schema.flags), ...(mutation ? ['--idempotency-key'] : [])]);
+  const allowed = new Set(['--workspace', ...Object.keys(schema.flags), ...(mutation ? ['--idempotency-key', '--operation-name'] : [])]);
   const rawValues: Record<string, string> = {};
   for (let index = 1; index < args.length; index += 2) {
     const flagName = args[index];
@@ -294,6 +337,7 @@ function parseCommand(args: string[]): ParsedCommand {
     if (raw === undefined || raw.startsWith('--')) throw new Error('需要 ' + flagName + '。');
     rawValues[flagName] = raw;
   }
+  if (rawValues['--idempotency-key'] && rawValues['--operation-name']) throw new Error('--idempotency-key 与 --operation-name 不能同时使用。');
   const values: Record<string, unknown> = {};
   for (const [flagName, flagSchema] of Object.entries(schema.flags)) {
     const raw = rawValues[flagName];
@@ -301,10 +345,13 @@ function parseCommand(args: string[]): ParsedCommand {
     values[flagName] = validateFlag(flagName, raw, flagSchema.kind);
   }
   const root = workspaceRoot(rawValues['--workspace']);
+  const markerCount = Object.values(values).filter((value) => value === STDIN_JSON_MARKER).length;
+  if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
   if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true } : {}) };
   const method = schema.method as HttpMethod;
-  const idempotencyKey = method === 'GET' ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
-  return { name, workspaceRoot: root, request: { method, pathname: (schema.pathname as (input: Record<string, unknown>) => string)(values), body: schema.body ? schema.body(values) : {}, idempotencyKey } };
+  const operationName = method === 'GET' || rawValues['--idempotency-key'] ? undefined : rawValues['--operation-name'] ? explicitOperationName(rawValues['--operation-name']) : undefined;
+  const idempotencyKey = method === 'GET' || operationName ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
+  return { name, workspaceRoot: root, request: { method, pathname: (schema.pathname as (input: Record<string, unknown>) => string)(values), body: schema.body ? schema.body(values) : {}, idempotencyKey, operationName } };
 }
 
 function usage(): string {
@@ -335,17 +382,17 @@ function usage(): string {
     'daoge delivery-batch-revise --workspace <path> --batch <id> --deliveries <delivery-id,...>',
     'daoge delivery-batch-ready --workspace <path> --version <version-id>  # 冻结批次版本',
     'daoge round --workspace <path> --task <id> --purpose <exploration|refinement|variation|edit|fill> [--session <id>]',
-    'daoge plan --workspace <path> --round <id> --version <n> --plan <json>',
-    'daoge confirm --workspace <path> --round <id> --version <n>',
-    'daoge preflight --workspace <path> --round <id> [--concurrency <1..1000>]  # 默认 4；串行使用 1',
-    'daoge run --workspace <path> --round <id> --preflight <dry-run-id>',
+    'daoge plan --workspace <path> --round <id> --version <n> --plan <json|@->  # @- 从 stdin 读取 JSON',
+    'daoge confirm-challenge --workspace <path> --round <id> --session <session-id>  # 只创建 Workbench 人工确认挑战',
+    'daoge preflight --workspace <path> --round <id> --session <session-id> [--concurrency <1..1000>]  # 只接受已人工确认会话',
+    'daoge run --workspace <path> --round <id> --preflight <dry-run-id> --confirm-token <daemon-token>',
     'daoge pause --workspace <path> --run <id>',
     'daoge resume --workspace <path> --run <id> --session <session-id>',
     'daoge cancel --workspace <path> --run <id>',
     'daoge retry --workspace <path> --run <id> [--items <item-id,...>]',
     'daoge resolve-unknown --workspace <path> --run <id> --items <item-id,...>',
     'daoge status --workspace <path>',
-    '所有 POST/PUT 命令均可追加 [--idempotency-key <key>]，恢复重试时复用同一 key。'
+    'POST/PUT 可使用 --operation-name <verb:scope> 由 daemon 派生稳定 key；高级恢复仍可使用 --idempotency-key <key>，两者互斥。'
   ].join('\n');
 }
 
@@ -375,7 +422,7 @@ export async function main(): Promise<void> {
     return;
   }
   const request = parsed.request as NonNullable<ParsedCommand['request']>;
-  const result = await api(record, request.method, request.pathname, request.body, request.idempotencyKey);
+  const result = await api(record, request.method, request.pathname, materializeStdinJson(request.body), request.idempotencyKey, request.operationName);
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
 

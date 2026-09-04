@@ -13,6 +13,7 @@ const metadata = [{ filename: 'daoge-pic-5.5.0.tgz', files: [
   { path: 'scripts/daoge.js' },
   { path: 'SKILL.md' },
   { path: 'README.md' },
+  { path: 'protocol-version.json' },
   { path: 'references/provider.env.example' },
   { path: 'docs/daoge_pic_vnext_upgrade_spec_zh.md' }
 ] }];

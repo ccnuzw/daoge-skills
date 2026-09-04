@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService, streamVerifiedFileResponse } = require('../../dist/vnext/api/server');
-const { fetchStudio, requestJson } = require('./local-studio-test-helper');
+const { fetchStudio, requestJson, requestJsonAsWorkbench, workbenchCookie } = require('./local-studio-test-helper');
 const { configureProvider } = require('./provider-test-helper');
 const { resolveActiveProviderConfig } = require('../../dist/vnext/studio/provider-store');
 const { createImageProvider } = require('../../dist/vnext/providers/http-adapters');
@@ -78,32 +78,47 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     const profilesAfterUpdate = await requestJson(started, '/api/providers');
     assert.equal(JSON.stringify(profilesAfterUpdate.body).includes('replacement-secret-never-returned'), false);
 
-    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'project', body: { name: 'API 项目' } });
-    const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'task', body: { projectId: project.body.data.value.id, name: 'API 任务' } });
-    const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: 'round', body: { taskId: task.body.data.value.id, purpose: 'exploration' } });
+    const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'session', body: { conversationId: 'api-confirmation-conversation' } });
+    const sessionId = session.body.data.id;
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'project', body: { name: 'API 项目', sessionId } });
+    const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'task', body: { projectId: project.body.data.value.id, name: 'API 任务', sessionId } });
+    const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: 'round', body: { taskId: task.body.data.value.id, purpose: 'exploration', sessionId } });
     const queuedBeforeConfirm = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-before-confirm', body: { roundId: round.body.data.value.id } });
     assert.equal(queuedBeforeConfirm.status, 400);
     assert.equal(queuedBeforeConfirm.body.error.code, 'invalid_command');
-
     const prepared = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/prepare', { method: 'POST', idempotencyKey: 'prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'API fixture image' } } });
-    const confirmed = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { method: 'POST', idempotencyKey: 'confirm', body: { expectedVersion: prepared.body.data.value.version } });
-    const rejectedPreflight = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { method: 'POST', idempotencyKey: 'preflight-over-limit', body: { executionConcurrency: 1001 } });
+    assert.equal(prepared.status, 200, JSON.stringify(prepared.body));
+
+    const challenge = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/confirmation-challenge', { method: 'POST', idempotencyKey: 'challenge', body: { sessionId } });
+    assert.equal(challenge.status, 200, JSON.stringify(challenge.body));
+    const rejectedSkillConfirm = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { method: 'POST', idempotencyKey: 'skill-confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
+    assert.equal(rejectedSkillConfirm.status, 403);
+    const cookie = await workbenchCookie(started);
+    const confirmed = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { cookie, idempotencyKey: 'confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
+    const rejectedPreflight = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { cookie, idempotencyKey: 'preflight-over-limit', body: { executionConcurrency: 1001, sessionId } });
     assert.equal(rejectedPreflight.status, 400);
-    const preflight = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { method: 'POST', idempotencyKey: 'preflight', body: { executionConcurrency: 1000 } });
+    const preflight = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { cookie, idempotencyKey: 'preflight', body: { executionConcurrency: 1000, sessionId } });
+    assert.equal(preflight.status, 200, JSON.stringify(preflight.body));
     assert.equal(confirmed.status, 200);
     assert.equal(preflight.body.data.value.preflight.valid, true);
     assert.equal(preflight.body.data.value.preview.executionConcurrency, 1000);
+    assert.match(preflight.body.data.value.confirmToken, /^dgpct1\./);
     const history = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/plan-versions');
     assert.equal(history.body.data.planVersions[0].state, 'confirmed');
     const dryRuns = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/dry-runs');
+    const missingToken = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-without-token', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id } });
+    assert.equal(missingToken.status, 400);
+    assert.match(missingToken.body.error.message, /confirm_token/);
+    const wrongPreflightToken = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-wrong-token-binding', body: { roundId: round.body.data.value.id, preflightId: 'dryrun-wrong-binding', confirmToken: preflight.body.data.value.confirmToken } });
+    assert.equal(wrongPreflightToken.status, 404);
     assert.equal(dryRuns.body.data.dryRuns[0].id, preflight.body.data.value.preview.id);
-    const rejectedConcurrency = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-over-limit', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, executionConcurrency: 1 } });
+    const rejectedConcurrency = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue-over-limit', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, executionConcurrency: 1, confirmToken: preflight.body.data.value.confirmToken } });
     assert.equal(rejectedConcurrency.status, 400);
-    const runRequest = { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'queue' }, body: JSON.stringify({ roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id }) };
+    const runRequest = { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'queue' }, body: JSON.stringify({ roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, confirmToken: preflight.body.data.value.confirmToken }) };
     const lostResponse = await fetchStudio(started, '/api/runs', runRequest);
     assert.equal(lostResponse.status, 200);
     await lostResponse.body.cancel();
-    const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id } });
+    const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, confirmToken: preflight.body.data.value.confirmToken } });
     assert.equal(queued.status, 200);
     assert.equal(queued.body.data.value.status, 'queued');
     assert.equal(queued.body.data.value.executionConcurrency, 1000);
@@ -179,17 +194,24 @@ test('local Provider response echoes are sanitized before database, API, and del
     configureProvider(initialized, { name: 'Echo Provider', baseUrl, apiKey, model: 'echo-model' });
     started = await startLocalStudioService({ workspaceRoot });
 
-    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'echo-project', body: { name: '回显净化项目' } });
+    const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'echo-session', body: { conversationId: 'echo-confirmation-conversation' } });
+    const sessionId = session.body.data.id;
+    const cookie = await workbenchCookie(started);
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'echo-project', body: { name: '回显净化项目', sessionId } });
     const projectId = project.body.data.value.id;
-    const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'echo-task', body: { projectId, name: '回显净化任务' } });
+    const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'echo-task', body: { projectId, name: '回显净化任务', sessionId } });
     const taskId = task.body.data.value.id;
     const queueRun = async (prefix) => {
-      const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: prefix + '-round', body: { taskId, purpose: 'exploration' } });
+      const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: prefix + '-round', body: { taskId, purpose: 'exploration', sessionId } });
       const roundId = round.body.data.value.id;
       const prepared = await requestJson(started, '/api/rounds/' + roundId + '/prepare', { method: 'POST', idempotencyKey: prefix + '-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'provider echo fixture' } } });
-      await requestJson(started, '/api/rounds/' + roundId + '/confirm', { method: 'POST', idempotencyKey: prefix + '-confirm', body: { expectedVersion: prepared.body.data.value.version } });
-      const preview = await requestJson(started, '/api/rounds/' + roundId + '/preflight', { method: 'POST', idempotencyKey: prefix + '-preflight', body: { executionConcurrency: 1 } });
-      const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: prefix + '-run', body: { roundId, preflightId: preview.body.data.value.preview.id } });
+      assert.equal(prepared.status, 200, JSON.stringify(prepared.body));
+      const challenge = await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/confirmation-challenge', { cookie, idempotencyKey: prefix + '-challenge', body: { sessionId } });
+      assert.equal(challenge.status, 200, JSON.stringify(challenge.body));
+      await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/confirm', { cookie, idempotencyKey: prefix + '-confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
+      const preview = await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/preflight', { cookie, idempotencyKey: prefix + '-preflight', body: { executionConcurrency: 1, sessionId } });
+      assert.equal(preview.status, 200, JSON.stringify(preview.body));
+      const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: prefix + '-run', body: { roundId, preflightId: preview.body.data.value.preview.id, confirmToken: preview.body.data.value.confirmToken } });
       return { roundId, runId: queued.body.data.value.id };
     };
 
@@ -531,6 +553,26 @@ test('session open replays the same request and rejects idempotency key reuse fo
     const conflicting = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'session-open-replay', body: { conversationId: 'conversation-two' } });
     assert.equal(conflicting.status, 409);
     assert.equal(conflicting.body.error.code, 'version_conflict');
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('daemon derives stable idempotency from operation-name without caller UUID storage', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ workspaceRoot });
+    const request = (body = { name: '命名操作项目', description: '稳定 payload' }) => fetchStudio(started, '/api/projects', { method: 'POST', headers: { 'content-type': 'application/json', 'x-daoge-operation-name': 'project:create:named-fixture' }, body: JSON.stringify(body) }).then(async (response) => ({ status: response.status, body: await response.json() }));
+    const first = await request();
+    const replay = await request({ description: '稳定 payload', name: '命名操作项目' });
+    assert.equal(first.status, 200);
+    assert.equal(replay.status, 200);
+    assert.equal(first.body.data.value.id, replay.body.data.value.id);
+    assert.equal(replay.body.data.replayed, true);
+    assert.equal(started.service.db.prepare("SELECT COUNT(*) AS total FROM projects WHERE name = '命名操作项目'").get().total, 1);
   } finally {
     if (started) await started.service.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });

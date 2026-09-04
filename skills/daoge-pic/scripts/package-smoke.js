@@ -51,8 +51,8 @@ function isSensitivePackagePath(file) {
 }
 
 function assertPackagePaths(paths) {
-  const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'references/provider.env.example', 'docs/daoge_pic_vnext_upgrade_spec_zh.md'];
-  const allowed = /^(dist\/|scripts\/daoge\.js$|references\/provider\.env\.example$|docs\/daoge_pic_vnext_upgrade_spec_zh\.md$|README\.md$|SKILL\.md$|LICENSE$|package\.json$)/;
+  const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'protocol-version.json', 'references/provider.env.example', 'docs/daoge_pic_vnext_upgrade_spec_zh.md'];
+  const allowed = /^(dist\/|scripts\/daoge\.js$|references\/provider\.env\.example$|docs\/daoge_pic_vnext_upgrade_spec_zh\.md$|README\.md$|SKILL\.md$|protocol-version\.json$|LICENSE$|package\.json$)/;
   const missing = required.filter((file) => !paths.includes(file));
   const unexpected = paths.filter((file) => !allowed.test(file));
   const maps = paths.filter((file) => file.endsWith('.map'));
@@ -79,7 +79,7 @@ function main({ runCommand = run, removeSync = fs.rmSync } = {}) {
     fs.writeFileSync(path.join(consumerRoot, 'package.json'), JSON.stringify({ private: true }, null, 2) + '\n');
     runCommand('npm', ['install', tarballPath, '--ignore-scripts'], { cwd: consumerRoot });
     const installedRoot = path.join(consumerRoot, 'node_modules', 'daoge-pic');
-    const runtimeRequired = ['scripts/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'references/provider.env.example'];
+    const runtimeRequired = ['scripts/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'protocol-version.json', 'references/provider.env.example'];
     const runtimeMissing = runtimeRequired.filter((file) => !fs.existsSync(path.join(installedRoot, file)));
     if (runtimeMissing.length) throw new Error(JSON.stringify({ runtimeMissing }, null, 2));
     const installedBin = path.join(consumerRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'daoge.cmd' : 'daoge');

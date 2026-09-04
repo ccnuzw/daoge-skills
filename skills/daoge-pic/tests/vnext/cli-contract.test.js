@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 
 const { openWorkbenchUrl } = require('../../dist/vnext/cli/open-workbench');
 const { signalVerifiedDaemon } = require('../../dist/vnext/cli/legacy-daemon');
-const { main, parseCommand } = require('../../dist/vnext/cli/daoge');
+const { main, parseCommand, materializeStdinJson } = require('../../dist/vnext/cli/daoge');
 const { matchesDaemonProcess } = require('../../dist/vnext/cli/process-identity');
 
 const skillRoot = path.resolve(__dirname, '../..');
@@ -59,13 +59,25 @@ test('CLI command schemas reject unknown flags and malformed values before works
 
 test('CLI parser preserves an explicit safe idempotency key for every mutation', () => {
   const key = 'recovery.run:attempt-01';
-  const parsed = parseCommand(['run', '--workspace', '/tmp/daoge-cli-key', '--round', 'round-1', '--preflight', 'preview-1', '--idempotency-key', key]);
+  const parsed = parseCommand(['run', '--workspace', '/tmp/daoge-cli-key', '--round', 'round-1', '--preflight', 'preview-1', '--confirm-token', 'dgpct1.claim.signature', '--idempotency-key', key]);
   assert.equal(parsed.request.idempotencyKey, key);
-  assert.throws(() => parseCommand(['run', '--workspace', '/tmp/daoge-cli-key', '--round', 'round-1', '--preflight', 'preview-1', '--idempotency-key', 'unsafe key']), /安全字符/);
+  assert.equal(parsed.request.body.confirmToken, 'dgpct1.claim.signature');
+  assert.throws(() => parseCommand(['run', '--workspace', '/tmp/daoge-cli-key', '--round', 'round-1', '--preflight', 'preview-1', '--idempotency-key', key]), /需要 --confirm-token/);
+  assert.throws(() => parseCommand(['run', '--workspace', '/tmp/daoge-cli-key', '--round', 'round-1', '--preflight', 'preview-1', '--confirm-token', 'dgpct1.claim.signature', '--idempotency-key', 'unsafe key']), /安全字符/);
   assert.throws(() => parseCommand(['status', '--workspace', '/tmp/daoge-cli-key', '--idempotency-key', key]), /未知或不适用/);
   assert.equal(parseCommand(['open', '--workspace', '/tmp/daoge-cli-key']).force, false);
   assert.equal(parseCommand(['open', '--workspace', '/tmp/daoge-cli-key', '--force', 'true']).force, true);
   assert.throws(() => parseCommand(['open', '--workspace', '/tmp/daoge-cli-key', '--force', 'yes']), /只能是 true 或 false/);
+});
+
+test('CLI accepts one stdin JSON marker and rejects multiple markers', () => {
+  const plan = parseCommand(['plan', '--workspace', '/tmp/daoge-stdin', '--round', 'round-1', '--version', '2', '--plan', '@-', '--operation-name', 'plan:round-1:v2']);
+  assert.equal(plan.request.operationName, 'plan:round-1:v2');
+  assert.equal(plan.request.idempotencyKey, undefined);
+  assert.equal(plan.request.body.plan.__daogeJsonStdin, true);
+  assert.throws(() => parseCommand(['plan', '--workspace', '/tmp/daoge-stdin', '--round', 'round-1', '--version', '2', '--plan', '@-', '--operation-name', 'unsafe operation']), /安全字符/);
+  const marker = plan.request.body.plan;
+  assert.throws(() => materializeStdinJson({ intent: marker, plan: marker }), /最多只能使用一个/);
 });
 
 test('CLI refuses a mismatched manifest before creating daemon runtime state', () => {

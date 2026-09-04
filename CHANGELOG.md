@@ -2,6 +2,34 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.10.0 - 2026-09-04
+
+5.10.0 完成机器确认闸门、独立协议版本、可恢复 CLI 幂等身份，以及生成与媒体双 worker pool 架构升级。
+
+### 安全与协议
+
+- 新增 `challenge -> consent -> confirm_token` 机器闸门，令牌绑定 `plan_hash + preflight_id + conversation_id`；人工确认只接受已授权 Workbench Cookie。
+- 协议版本独立为 `daoge-pic-skill-protocol 2.0.0`，daemon 按 `>=2.0.0 <3.0.0` 判断读写 API 兼容性。
+- confirmation consent 仅驻留 daemon 内存；重启后必须重新确认，confirm 请求的 session 必须与待处理 challenge 显式一致。
+
+### Worker 与媒体
+
+- Provider 请求与生成持久化进入自适应 generation worker pool；缩略图、ZIP、导入归档校验和启动媒体对账进入独立 media worker pool。
+- 两类 worker pool 按本机并行度分配子进程；control-plane 保持 API、SSE、队列与恢复职责，Studio SQLite 使用 WAL。
+- ZIP、缩略图和导入继续使用受验证 snapshot、哈希、大小、媒体类型与受管理路径边界。
+
+### CLI 与 Workbench
+
+- 新增 `--operation-name`，daemon 对 method、route、operation-name 与规范化 payload 派生稳定幂等键；JSON 键顺序不影响恢复身份。
+- 大 JSON 支持单个 `@-` stdin 标记，最大 8 MiB；明确跨进程恢复必须使用 operation-name 或保存显式 idempotency-key。
+- Workbench 增加只读会话计划摘要、无活动轮次空状态、独立人工确认闸门和最近运行 SSE 刷新。
+
+### 验证
+
+- `npm test` 执行 271 项且全部通过；`npm run test:package` 与 `npm audit --omit=dev --offline` 通过。
+- 发布清单包含 113 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- 最终制品 `daoge-pic-5.10.0.tgz` 为 `305783` bytes，SHA-256 为 `8096b6bc9ed4b19e76b77398bebbd2f35e2596844dec22d56db9e752cfce025c`。
+
 ## daoge-pic 5.9.1 - 2026-09-03
 
 5.9.1 修复参考素材跨项目越界问题，收紧参考图和遮罩的项目访问边界。

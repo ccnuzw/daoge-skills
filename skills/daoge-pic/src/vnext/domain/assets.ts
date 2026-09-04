@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { archiveStagedImage, archiveStagedImageAsync, createVerifiedSnapshot, createVerifiedSnapshotAsync, discardStagedImage, inspectManagedImageFile, ManagedMediaRoot, MediaValidationError, plannedArchivePath, resolveManagedMediaPath, stageImage, StagedImage, VerifiedManagedFile } from '../media/archive';
+import { archiveStagedImage, archiveStagedImageAsync, ArchivedImage, createVerifiedSnapshot, createVerifiedSnapshotAsync, discardStagedImage, inspectManagedImageFile, ManagedMediaRoot, MediaValidationError, plannedArchivePath, resolveManagedMediaPath, stageImage, StagedImage, VerifiedManagedFile } from '../media/archive';
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { AssetBucket, ensureCacheDirectory, StudioPaths } from '../studio/workspace';
@@ -289,7 +289,7 @@ export function importStudioAsset(db: StudioDatabase, paths: StudioPaths, input:
   return importStagedStudioAsset(db, paths, { ...input, staged: stageImage(paths, input.bytes, input.mediaType) });
 }
 
-export async function importStagedStudioAssetAsync(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; staged: StagedImage; declaredMediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown> }): Promise<StudioAsset> {
+export async function importStagedStudioAssetAsync(db: StudioDatabase, paths: StudioPaths, input: { studioId: string; staged: StagedImage; declaredMediaType?: string; originalFilename?: string; targetType?: string; targetId?: string; source?: Record<string, unknown>; archiveStagedImage?: (staged: StagedImage, input: { assetId: string; bucket: 'imports' }) => Promise<ArchivedImage> }): Promise<StudioAsset> {
   ensureStudio(db, input.studioId);
   recoverAssetMediaOperations(db, paths, input.studioId);
   const staged = input.staged;
@@ -321,7 +321,8 @@ export async function importStagedStudioAssetAsync(db: StudioDatabase, paths: St
   const relation = input.targetType && input.targetId ? { targetType: input.targetType, targetId: input.targetId, relationType: 'attached_to' } : undefined;
   const expected = { mediaType: staged.mediaType, contentHash: staged.contentHash, byteSize: staged.byteSize };
   withTransaction(db, () => insertMediaOperation(db, { studioId: input.studioId, assetId, operation: 'import', sourcePath: relativePath(paths, staged.stagingPath), targetPath: planned.storagePath, expected, asset: { kind: 'import', ...expected, source }, relation }));
-  await archiveStagedImageAsync(paths, staged, { assetId, bucket: 'imports' });
+  if (input.archiveStagedImage) await input.archiveStagedImage(staged, { assetId, bucket: 'imports' });
+  else await archiveStagedImageAsync(paths, staged, { assetId, bucket: 'imports' });
   const operation = db.prepare("SELECT id, studio_id, asset_id, operation, source_path, target_path, asset_json, relation_json, expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE asset_id = ? AND operation = 'import'").get(assetId) as unknown as PendingAssetOperation;
   markMediaOperationMoved(db, operation.id);
   withTransaction(db, () => finishImport(db, operation, { kind: 'import', ...expected, source }, relation || null));

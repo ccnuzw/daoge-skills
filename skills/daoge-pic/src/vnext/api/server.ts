@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import http, { IncomingMessage, OutgoingHttpHeaders, Server, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { Readable } from 'node:stream';
@@ -21,11 +22,13 @@ import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, ge
 import { listProjectSelectionAssets, setProjectAssetSelected, setProjectAssetsSelected } from '../domain/project-selections';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { studioEventWindow } from './events';
-import { validateZipEntries, writeImageZip, ZipEntryInput } from '../media/zip';
-import { discardStagedImage, MediaArchiveError, MediaValidationError, stageImageStream, VerifiedManagedFile } from '../media/archive';
-import { openImageThumbnail, thumbnailEtag } from '../media/thumbnails';
+import { discardStagedImage, MediaArchiveError, MediaValidationError, openVerifiedManagedFileAsync, stageImageStream, VerifiedManagedFile } from '../media/archive';
+import { thumbnailEtag } from '../media/thumbnails';
+import { MediaJobResult, MediaProcessPool, MediaSource, MediaZipEntry } from '../runtime/media-worker-pool';
 import { daemonRestartAvailable, requestDaemonRestart } from '../runtime/restart';
-import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName } from './local-auth';
+import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName, LocalAuthentication } from './local-auth';
+import { ConfirmationGate, canonicalValue, planHash } from './confirmation-gate';
+import { isSupportedProtocolVersion, protocolStatus, SKILL_PROTOCOL_NAME, SUPPORTED_PROTOCOL_RANGE } from '../shared/protocol';
 import { WorkbenchPresence } from '../runtime/workbench-presence';
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -43,6 +46,7 @@ export interface StudioServiceOptions {
   capability?: string;
   workbenchPresence?: WorkbenchPresence;
   providerProbe?: typeof probeHttpEndpoint;
+  mediaWorkerPool?: MediaProcessPool;
 }
 
 export interface StartedStudioService {
@@ -65,11 +69,12 @@ function success(response: ServerResponse, body: unknown): void {
 }
 
 function idempotencyKey(request: IncomingMessage, body: JsonBody): string {
-  const header = request.headers['idempotency-key'];
-  const candidate = Array.isArray(header) ? header[0] : header;
-  const key = String(candidate || body.idempotencyKey || '').trim();
-  if (!key) throw new InvalidCommandError('写入操作需要 idempotency-key。');
-  return key;
+  const explicit = headerValue(request, 'idempotency-key') || text(body.idempotencyKey);
+  const operationName = headerValue(request, 'x-daoge-operation-name');
+  if (explicit && operationName) throw new InvalidCommandError('idempotency-key 与 operation-name 不能同时使用。');
+  if (explicit) return explicit;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(operationName)) throw new InvalidCommandError('写入操作需要 idempotency-key 或安全的 operation-name。');
+  return 'operation:' + createHash('sha256').update(request.method || 'POST').update('\0').update(request.url || '/').update('\0').update(operationName).update('\0').update(canonicalValue(body)).digest('hex');
 }
 
 async function readBody(request: IncomingMessage): Promise<JsonBody> {
@@ -98,6 +103,14 @@ function headerValue(request: IncomingMessage, name: string): string {
 
 function text(value: unknown): string {
   return String(value || '').trim();
+}
+
+function assertProtocolCompatibility(request: IncomingMessage): void {
+  const protocol = headerValue(request, 'x-daoge-skill-protocol');
+  if (!protocol) return;
+  const prefix = SKILL_PROTOCOL_NAME + '/';
+  const version = protocol.startsWith(prefix) ? protocol.slice(prefix.length) : '';
+  if (!isSupportedProtocolVersion(version)) throw new InvalidCommandError('Skill 协议不兼容；daemon 支持 ' + SUPPORTED_PROTOCOL_RANGE + '。');
 }
 
 function numberValue(value: unknown): number {
@@ -143,6 +156,10 @@ function publicAsset(asset: StudioAsset & { review?: unknown; display?: unknown 
   if (asset.review !== undefined) result.review = publicValue(asset.review);
   if (asset.display !== undefined) result.display = publicValue(asset.display);
   return result;
+}
+function assetMediaSource(asset: StudioAsset): Extract<MediaSource, { kind: 'asset' }> {
+  const bucket = asset.deletedAt ? 'trash' : asset.kind === 'import' ? 'imports' : asset.kind === 'generated' ? 'generated' : 'exports';
+  return { kind: 'asset', storagePath: asset.storagePath, bucket, contentHash: asset.contentHash, byteSize: asset.byteSize, mediaType: asset.mediaType };
 }
 
 function publicDeliveryExport(value: DeliveryExportResult): Record<string, unknown> {
@@ -201,11 +218,11 @@ function requestedRange(request: IncomingMessage, byteSize: number, etag: string
   return { start, end };
 }
 
-export function streamVerifiedFileResponse(request: IncomingMessage, response: ServerResponse, opened: VerifiedManagedFile, headers: OutgoingHttpHeaders, etag: string): void {
+export function streamVerifiedFileResponse(request: IncomingMessage, response: ServerResponse, opened: VerifiedManagedFile, headers: OutgoingHttpHeaders, etag: string, onClosed?: () => void): void {
   const range = requestedRange(request, opened.byteSize, etag);
   if (range === 'invalid') {
     opened.close();
-    response.writeHead(416, { 'content-range': 'bytes */' + opened.byteSize, etag, 'accept-ranges': 'bytes', 'cache-control': headers['cache-control'] || 'private, no-cache' });
+    onClosed?.();
     response.end();
     return;
   }
@@ -214,6 +231,7 @@ export function streamVerifiedFileResponse(request: IncomingMessage, response: S
     source = opened.createReadStream(undefined, range || undefined);
   } catch (error) {
     opened.close();
+    onClosed?.();
     throw error;
   }
   let handleClosed = false;
@@ -222,6 +240,7 @@ export function streamVerifiedFileResponse(request: IncomingMessage, response: S
     handleClosed = true;
     response.removeListener('close', abort);
     opened.close();
+    onClosed?.();
   };
   const abort = (): void => {
     if (!source.destroyed) source.destroy();
@@ -267,6 +286,7 @@ export class LocalStudioService {
   readonly initialized: InitializeStudioResult;
   readonly db: StudioDatabase;
   readonly providerDb: ProviderDatabase;
+  readonly mediaWorkerPool: MediaProcessPool;
   private readonly pollMs: number;
   private readonly workbenchDir: string;
   private readonly capability: string;
@@ -274,10 +294,12 @@ export class LocalStudioService {
   private readonly cookieName: string;
   private readonly workbenchPresence: WorkbenchPresence;
   private readonly providerProbe: typeof probeHttpEndpoint;
+  private readonly confirmationGate: ConfirmationGate;
+  private readonly ownsMediaWorkerPool: boolean;
+  private readonly activeEventStreams = new Set<() => void>();
   private origin = '';
   private server: Server | null = null;
   private closePromise: Promise<void> | null = null;
-  private readonly activeEventStreams = new Set<() => void>();
 
   constructor(options: StudioServiceOptions) {
     if (options.capability && !/^[A-Za-z0-9_-]{43,}$/.test(options.capability)) throw new Error('Studio capability must be a high-entropy base64url token.');
@@ -286,6 +308,8 @@ export class LocalStudioService {
     this.db = openStudioDatabase(this.initialized.paths, this.initialized.manifest);
     this.providerDb = openProviderDatabase(this.initialized.paths);
     importLegacyProviderEnvOnce(this.providerDb, this.initialized.paths);
+    this.mediaWorkerPool = options.mediaWorkerPool || new MediaProcessPool(this.initialized.paths.workspaceRoot, 1);
+    this.ownsMediaWorkerPool = !options.mediaWorkerPool;
     this.pollMs = Math.min(30000, Math.max(100, options.ssePollMs || 15000));
     this.workbenchDir = options.workbenchDir ? path.resolve(options.workbenchDir) : path.resolve(__dirname, '../../workbench');
     this.capability = options.capability || createLocalCapability();
@@ -293,6 +317,7 @@ export class LocalStudioService {
     this.cookieName = localSessionCookieName(this.initialized.manifest.studioId, this.capability);
     this.workbenchPresence = options.workbenchPresence || new WorkbenchPresence();
     this.providerProbe = options.providerProbe || probeHttpEndpoint;
+    this.confirmationGate = new ConfirmationGate();
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<StartedStudioService> {
@@ -369,6 +394,7 @@ export class LocalStudioService {
         server.close(finish);
         server.closeAllConnections();
       });
+      if (this.ownsMediaWorkerPool) await this.mediaWorkerPool.close();
       closeStudioDatabase(this.db);
       closeProviderDatabase(this.providerDb);
     })();
@@ -379,6 +405,7 @@ export class LocalStudioService {
     try {
       const parsed = new URL(request.url || '/', this.origin || 'http://127.0.0.1');
       assertLocalHost(request, new URL(this.origin).host);
+      assertProtocolCompatibility(request);
       if (request.method === 'GET' && !parsed.pathname.startsWith('/api/')) return this.workbench(response, parsed.pathname);
       if (request.method === 'GET' && parsed.pathname === '/api/health') return success(response, { service: 'daoge-pic-vnext', studioId: this.initialized.manifest.studioId });
       if (parsed.pathname === '/api/auth/bootstrap') {
@@ -393,6 +420,7 @@ export class LocalStudioService {
       }
       const authentication = authenticateLocalRequest(request, this.capability, this.cookieName, this.sessionToken);
       if (!authentication) throw new LocalAccessError(401, 'unauthorized', '需要有效的本地 Studio 授权。');
+      assertProtocolCompatibility(request);
       if (request.method === 'POST' || request.method === 'PUT') assertLocalWriteOrigin(request, this.origin, authentication);
       if (authentication === 'cookie') this.workbenchPresence.recordAuthenticatedConnection();
       if (request.method === 'POST' && (parsed.pathname === '/api/workbench/open-claim' || parsed.pathname === '/api/workbench/open-claim/release')) {
@@ -403,7 +431,7 @@ export class LocalStudioService {
         if (parsed.pathname.endsWith('/release')) return success(response, { released: this.workbenchPresence.release(claimToken) });
         return success(response, this.workbenchPresence.claim(claimToken, body.force === true));
       }
-      if (request.method === 'GET' && parsed.pathname === '/api/studio') return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion });
+      if (request.method === 'GET' && parsed.pathname === '/api/studio') return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion, protocol: protocolStatus() });
       if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { profiles: listProviderProfiles(this.providerDb), status: providerStatus(this.providerDb), runtime: this.runtimeStatus() });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
@@ -413,6 +441,15 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/shared-assets') return success(response, { assets: listSharedStudioAssets(this.db, this.initialized.manifest.studioId).map(publicAsset) });
       const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && sessionMatch) return success(response, { session: getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionMatch[1] }) });
+      const sessionPlanMatch = /^\/api\/sessions\/([^/]+)\/plan-status$/.exec(parsed.pathname);
+      if (request.method === 'GET' && sessionPlanMatch) {
+        const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionPlanMatch[1] });
+        const round = session.activeRoundId ? this.db.prepare('SELECT round.id, round.purpose, round.plan_json, round.plan_version, round.status, task.id AS task_id, task.name AS task_name, project.id AS project_id, project.name AS project_name FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?').get(session.activeRoundId, this.initialized.manifest.studioId) as { id: string; purpose: string; plan_json: string; plan_version: number; status: string; task_id: string; task_name: string; project_id: string; project_name: string } | undefined : undefined;
+        const latestRun = round ? listRuns(this.db, this.initialized.manifest.studioId, round.id)[0] || null : null;
+        const consent = round ? this.confirmationGate.consentFor(round.id) : null;
+        const pendingConfirmation = round ? this.confirmationGate.getChallenge(round.id) : null;
+        return success(response, { session: { id: session.id, conversationId: session.conversationId }, context: round ? { project: { id: round.project_id, name: round.project_name }, task: { id: round.task_id, name: round.task_name }, round: { id: round.id, purpose: round.purpose, planVersion: round.plan_version, status: round.status, plan: publicValue(JSON.parse(round.plan_json)) } } : null, confirmation: consent ? { confirmed: true, confirmedAt: consent.confirmedAt, expiresAt: consent.expiresAt } : { confirmed: false }, pendingConfirmation: pendingConfirmation ? { challenge: pendingConfirmation.challenge, sessionId: pendingConfirmation.sessionId, expectedVersion: pendingConfirmation.expectedVersion, expiresAt: pendingConfirmation.expiresAt } : null, latestRun });
+      }
       if (request.method === 'GET' && parsed.pathname === '/api/assets') {
         const scope = assetScope(parsed.searchParams.get('scope'));
         const deletedFilter = parsed.searchParams.get('deleted');
@@ -433,9 +470,9 @@ export class LocalStudioService {
       const assetProvenanceMatch = /^\/api\/assets\/([^/]+)\/provenance$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetProvenanceMatch) return success(response, { provenance: getAssetProvenance(this.db, this.initialized.manifest.studioId, assetProvenanceMatch[1]) });
       const projectArchiveMatch = /^\/api\/projects\/([^/]+)\/assets\/archive$/.exec(parsed.pathname);
-      if (request.method === 'GET' && projectArchiveMatch) return await this.projectAssetArchive(response, projectArchiveMatch[1], parsed.searchParams.getAll('assetId'));
+      if (request.method === 'GET' && projectArchiveMatch) return await this.projectAssetArchive(request, response, projectArchiveMatch[1], parsed.searchParams.getAll('assetId'));
       const deliveryArchiveMatch = /^\/api\/deliveries\/([^/]+)\/archive$/.exec(parsed.pathname);
-      if (request.method === 'GET' && deliveryArchiveMatch) return await this.deliveryArchive(response, deliveryArchiveMatch[1], parsed.searchParams.getAll('sequence'));
+      if (request.method === 'GET' && deliveryArchiveMatch) return await this.deliveryArchive(request, response, deliveryArchiveMatch[1], parsed.searchParams.getAll('sequence'));
       const deliveryFileMatch = /^\/api\/deliveries\/([^/]+)\/files\/(\d+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && deliveryFileMatch) return await this.deliveryFile(request, response, deliveryFileMatch[1], Number(deliveryFileMatch[2]), parsed.searchParams.get('download') === '1', parsed.searchParams.get('variant') === 'thumbnail');
       const deliveryDetailMatch = /^\/api\/deliveries\/([^/]+)$/.exec(parsed.pathname);
@@ -473,13 +510,13 @@ export class LocalStudioService {
       if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
       assertJsonContentType(request);
       const body = await readBody(request);
-      return await this.write(request, response, parsed.pathname, body);
+      return await this.write(request, response, parsed.pathname, body, authentication);
     } catch (error) {
       this.sendError(response, error);
     }
   }
 
-  private async write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody): Promise<void> {
+  private async write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody, authentication: LocalAuthentication): Promise<void> {
     const key = idempotencyKey(request, body);
     if (pathname === '/api/restart' && request.method === 'POST') {
       if (!daemonRestartAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法从 Workbench 重启。');
@@ -619,11 +656,34 @@ export class LocalStudioService {
       const prepared = prepareRoundForConfirmation(this.db, { studioId: this.initialized.manifest.studioId, roundId: prepareMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
       return success(response, prepared);
     }
+    const challengeMatch = /^\/api\/rounds\/([^/]+)\/confirmation-challenge$/.exec(pathname);
+    if (challengeMatch) {
+      this.assertRoundInStudio(challengeMatch[1]);
+      const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: text(body.sessionId) });
+      if (session.activeRoundId !== challengeMatch[1]) throw new InvalidCommandError('确认挑战必须绑定当前会话的活动轮次。');
+      const round = listRounds(this.db, this.initialized.manifest.studioId, String(session.activeTaskId || '')).find((candidate) => candidate.id === challengeMatch[1]);
+      if (!round || round.status !== 'awaiting_confirmation') throw new InvalidCommandError('轮次必须先进入待确认状态。');
+      const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, challengeMatch[1]);
+      if (!currentPlan || currentPlan.planVersion !== round.planVersion || currentPlan.state !== 'awaiting_confirmation') throw new InvalidCommandError('当前待确认计划不可用，请重新准备计划。');
+      return success(response, this.confirmationGate.createChallenge({ roundId: round.id, sessionId: session.id, conversationId: session.conversationId, planHash: planHash(currentPlan.plan), expectedVersion: round.version }));
+    }
     const confirmMatch = /^\/api\/rounds\/([^/]+)\/confirm$/.exec(pathname);
     if (confirmMatch) {
       this.assertRoundInStudio(confirmMatch[1]);
+      if (authentication !== 'cookie') throw new LocalAccessError(403, 'forbidden', '创作确认必须由已授权 Workbench 中的真实用户完成。');
+      const challenge = this.confirmationGate.getChallenge(confirmMatch[1]);
+      if (!challenge || text(body.sessionId) !== challenge.sessionId) throw new InvalidCommandError('确认会话必须与待处理确认挑战绑定的会话一致。');
+      const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: challenge.sessionId });
+      const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, confirmMatch[1]);
+      const currentPlanHash = currentPlan ? planHash(currentPlan.plan) : '';
+      let consent;
+      try {
+        consent = this.confirmationGate.confirm({ roundId: confirmMatch[1], challenge: text(body.challenge), sessionId: session.id, planHash: currentPlanHash });
+      } catch {
+        throw new InvalidCommandError('确认挑战无效、已过期或与当前计划不一致。');
+      }
       const confirmed = confirmRoundPlan(this.db, { studioId: this.initialized.manifest.studioId, roundId: confirmMatch[1], expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
-      return success(response, confirmed);
+      return success(response, { ...confirmed, confirmation: consent });
     }
     const preflightMatch = /^\/api\/rounds\/([^/]+)\/preflight$/.exec(pathname);
     if (preflightMatch) {
@@ -631,17 +691,31 @@ export class LocalStudioService {
       const config = resolveActiveProviderConfig(this.providerDb);
       const status = providerStatus(this.providerDb);
       if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerStatus: status }) });
-      return success(response, createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: status, executionConcurrency: body.executionConcurrency, concurrencySource: body.concurrencySource, idempotencyKey: key }));
+      const receipt = createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: status, executionConcurrency: body.executionConcurrency, concurrencySource: body.concurrencySource, idempotencyKey: key });
+      if (!receipt.value.preview) return success(response, receipt);
+      const consent = this.confirmationGate.consentFor(preflightMatch[1], text(body.sessionId) || undefined);
+      const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, preflightMatch[1]);
+      if (!consent || !currentPlan || consent.planHash !== planHash(currentPlan.plan)) throw new InvalidCommandError('预检前必须在 Workbench 完成与当前计划匹配的用户确认。');
+      const frozenPlanHash = planHash(receipt.value.preview.planSnapshot);
+      const confirmToken = this.confirmationGate.issueToken({ roundId: preflightMatch[1], preflightId: receipt.value.preview.id, planHash: frozenPlanHash, conversationId: consent.conversationId });
+      return success(response, { ...receipt, value: { ...receipt.value, confirmToken } });
     }
     if (pathname === '/api/runs') {
-      this.assertRoundInStudio(text(body.roundId));
-      if (text(body.preflightId)) this.assertDryRunInStudio(text(body.preflightId));
+      const roundId = text(body.roundId);
+      const preflightId = text(body.preflightId);
+      this.assertRoundInStudio(roundId);
+      if (preflightId) this.assertDryRunInStudio(preflightId);
       if (body.requestedConcurrency !== undefined || body.executionConcurrency !== undefined || body.concurrencySource !== undefined) throw new InvalidCommandError('并发必须在预检时确定；请重新预检。');
       const config = resolveActiveProviderConfig(this.providerDb);
       if (!config) throw new InvalidCommandError('当前工作区没有可用的图片生成配置。');
       const runtime = this.runtimeStatus();
       if (runtime.restartRequired) throw new InvalidCommandError('Provider 配置已变更，必须先重启 Studio 后再提交生成。');
-      const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId: text(body.roundId), providerConfig: config, providerStatus: providerStatus(this.providerDb), preflightId: text(body.preflightId) || undefined, idempotencyKey: key });
+      const preview = listDryRunPreviews(this.db, this.initialized.manifest.studioId, roundId).find((candidate) => candidate.id === preflightId);
+      if (!preview) throw new InvalidCommandError('预检证据不存在或不属于当前轮次。');
+      const consent = this.confirmationGate.consentFor(roundId);
+      const tokenValid = Boolean(consent && this.confirmationGate.verifyToken(text(body.confirmToken), { roundId, preflightId, planHash: planHash(preview.planSnapshot), conversationId: consent.conversationId }));
+      if (!tokenValid) throw new InvalidCommandError('运行需要 daemon 签发且与计划、预检和会话绑定的 confirm_token。');
+      const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId, providerConfig: config, providerStatus: providerStatus(this.providerDb), preflightId: preflightId || undefined, idempotencyKey: key });
       return success(response, queued);
     }
     const pauseMatch = /^\/api\/runs\/([^/]+)\/pause$/.exec(pathname);
@@ -722,13 +796,12 @@ export class LocalStudioService {
       run_item: 'SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?',
       style_kit: 'SELECT 1 FROM style_kits WHERE id = ? AND studio_id = ?',
       brand_kit: 'SELECT 1 FROM brand_kits WHERE id = ? AND studio_id = ?',
-      delivery: 'SELECT 1 FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?'
+      delivery: 'SELECT delivery.id FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?'
     };
     const query = queries[targetType];
     if (!query) throw new InvalidCommandError('不支持该导入关系目标。');
     if (!this.db.prepare(query).get(targetId, this.initialized.manifest.studioId)) throw new StudioNotFoundError('未找到当前 Studio 中的导入关系目标。');
   }
-
   private async importAsset(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const key = headerValue(request, 'idempotency-key');
     if (!key) throw new InvalidCommandError('导入图片需要 idempotency-key。');
@@ -746,7 +819,8 @@ export class LocalStudioService {
         originalFilename,
         targetType,
         targetId,
-        source: { channel: 'workbench_upload', idempotencyKey: key }
+        source: { channel: 'workbench_upload', idempotencyKey: key },
+        archiveStagedImage: (stagedImage, archiveInput) => this.mediaWorkerPool.run<Extract<MediaJobResult, { type: 'archive-staged' }>>({ type: 'archive-staged', staged: stagedImage, assetId: archiveInput.assetId, bucket: archiveInput.bucket })
       }), { contentHash: staged.contentHash, mediaType: staged.mediaType, targetType, targetId, originalFilename });
       success(response, publicAsset(receipt.value));
     } finally {
@@ -754,29 +828,28 @@ export class LocalStudioService {
     }
   }
 
-  private async writeImageArchive(response: ServerResponse, filename: string, fallback: string, entries: ZipEntryInput[]): Promise<void> {
+  private async writeImageArchive(request: IncomingMessage, response: ServerResponse, filename: string, fallback: string, entries: MediaZipEntry[]): Promise<void> {
     if (!entries.length) throw new InvalidCommandError('请至少选择一张图片进行打包下载。');
     if (entries.length > MAX_ARCHIVE_IMAGE_COUNT) throw new InvalidCommandError('单次打包最多支持 ' + MAX_ARCHIVE_IMAGE_COUNT + ' 张图片。');
-    try {
-      validateZipEntries(entries, { maxEntries: MAX_ARCHIVE_IMAGE_COUNT, maxAggregateBytes: MAX_ARCHIVE_BYTES, maxEntryBytes: MAX_IMAGE_UPLOAD_BYTES });
-    } catch {
-      for (const entry of entries) entry.snapshot?.close();
-      throw new InvalidCommandError('打包图片文件不可用或超过大小限制。');
-    }
     const controller = new AbortController();
     const abort = (): void => controller.abort();
     response.once('close', abort);
+    let archivePath = '';
     try {
-      await writeImageZip(entries, response, { maxEntries: MAX_ARCHIVE_IMAGE_COUNT, maxAggregateBytes: MAX_ARCHIVE_BYTES, maxEntryBytes: MAX_IMAGE_UPLOAD_BYTES, snapshotDirectory: ensureCacheDirectory(this.initialized.paths, 'staging'), signal: controller.signal, beforeWrite: () => response.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': archiveContentDisposition(filename, fallback), 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' }) });
+      const result = await this.mediaWorkerPool.run<Extract<MediaJobResult, { type: 'zip' }>>({ type: 'zip', entries, maxEntries: MAX_ARCHIVE_IMAGE_COUNT, maxAggregateBytes: MAX_ARCHIVE_BYTES, maxEntryBytes: MAX_IMAGE_UPLOAD_BYTES }, controller.signal);
+      archivePath = result.path;
+      const opened = await openVerifiedManagedFileAsync(archivePath, { contentHash: result.contentHash, byteSize: result.byteSize, minByteSize: 1, maxByteSize: MAX_ARCHIVE_BYTES + MAX_ARCHIVE_IMAGE_COUNT * 1024 + 64 * 1024 });
       response.removeListener('close', abort);
-      if (!response.destroyed && !response.writableEnded) response.end();
+      streamVerifiedFileResponse(request, response, opened, { 'content-type': 'application/zip', 'content-disposition': archiveContentDisposition(filename, fallback), 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' }, '"daoge-zip-' + result.contentHash + '"', () => { fs.rmSync(archivePath, { force: true }); });
     } catch (error) {
       response.removeListener('close', abort);
+      if (archivePath) fs.rmSync(archivePath, { force: true });
+      if (!response.destroyed && !response.headersSent) throw error;
       if (!response.destroyed) response.destroy(error instanceof Error ? error : undefined);
     }
   }
 
-  private async projectAssetArchive(response: ServerResponse, projectId: string, requestedAssetIds: string[]): Promise<void> {
+  private async projectAssetArchive(request: IncomingMessage, response: ServerResponse, projectId: string, requestedAssetIds: string[]): Promise<void> {
     this.assertProjectInStudio(projectId);
     const project = this.db.prepare('SELECT name FROM projects WHERE id = ? AND studio_id = ?').get(projectId, this.initialized.manifest.studioId) as { name: string } | undefined;
     if (!project) throw new StudioNotFoundError('项目不存在：' + projectId);
@@ -788,18 +861,11 @@ export class LocalStudioService {
       if (!asset) throw new StudioNotFoundError('项目中未找到要打包的图片。');
       return asset;
     });
-    const entries: ZipEntryInput[] = [];
-    try {
-      for (const [index, asset] of assets.entries()) entries.push({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(asset.mediaType), snapshot: await createAssetSnapshotAsync(this.initialized.paths, asset), contentHash: asset.contentHash, byteSize: asset.byteSize, mediaType: asset.mediaType });
-    } catch (error) {
-      for (const entry of entries) entry.snapshot?.close();
-      throw error;
-    }
+    const entries: MediaZipEntry[] = assets.map((asset, index) => ({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(asset.mediaType), source: assetMediaSource(asset) }));
     const timestamp = archiveTimestamp();
-    await this.writeImageArchive(response, archiveFilename(project.name + '-项目资产', timestamp), 'daoge-pic-project-assets-' + timestamp + '.zip', entries);
+    await this.writeImageArchive(request, response, archiveFilename(project.name + '-项目资产', timestamp), 'daoge-pic-project-assets-' + timestamp + '.zip', entries);
   }
-
-  private async deliveryArchive(response: ServerResponse, deliveryId: string, requestedSequences: string[]): Promise<void> {
+  private async deliveryArchive(request: IncomingMessage, response: ServerResponse, deliveryId: string, requestedSequences: string[]): Promise<void> {
     this.assertDeliveryInStudio(deliveryId);
     const delivery = this.db.prepare('SELECT delivery.id, delivery.name, delivery.status, delivery.manifest_json, project.name AS project_name FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; name: string; status: string; manifest_json: string; project_name: string } | undefined;
     if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('已完成交付不存在：' + deliveryId);
@@ -814,24 +880,17 @@ export class LocalStudioService {
     }))] : [];
     const selected = sequences.length ? files.filter((item) => sequences.includes(Number(item.sequence))) : files;
     if (!selected.length) throw new StudioNotFoundError('未找到要打包的交付图片。');
-    const entries: ZipEntryInput[] = [];
-    try {
-      for (const [index, item] of selected.entries()) {
-        const file = typeof item.file === 'string' ? item.file : '';
-        const mediaType = typeof item.mediaType === 'string' ? item.mediaType : '';
-        const contentHash = typeof item.contentHash === 'string' ? item.contentHash : '';
-        const byteSize = Number.isSafeInteger(item.byteSize) ? Number(item.byteSize) : -1;
-        if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(mediaType) || !/^[a-f0-9]{64}$/.test(contentHash) || byteSize < 0) throw new InvalidCommandError('交付图片的冻结文件身份无效。');
-        entries.push({ name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(mediaType), snapshot: await openDeliveryExportFileAsync(this.initialized.paths, { directoryPath: relativeDirectory, name: file, contentHash, byteSize, mediaType }), contentHash, byteSize, mediaType });
-      }
-    } catch (error) {
-      for (const entry of entries) entry.snapshot?.close();
-      throw error;
-    }
+    const entries: MediaZipEntry[] = selected.map((item, index) => {
+      const file = typeof item.file === 'string' ? item.file : '';
+      const mediaType = typeof item.mediaType === 'string' ? item.mediaType : '';
+      const contentHash = typeof item.contentHash === 'string' ? item.contentHash : '';
+      const byteSize = Number.isSafeInteger(item.byteSize) ? Number(item.byteSize) : -1;
+      if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(mediaType) || !/^[a-f0-9]{64}$/.test(contentHash) || byteSize < 0) throw new InvalidCommandError('交付图片的冻结文件身份无效。');
+      return { name: 'image-' + String(index + 1).padStart(3, '0') + '.' + imageExtension(mediaType), source: { kind: 'delivery', directoryPath: relativeDirectory, name: file, contentHash, byteSize, mediaType } };
+    });
     const timestamp = archiveTimestamp();
-    await this.writeImageArchive(response, archiveFilename(delivery.project_name + '-' + delivery.name + '-交付图片', timestamp), 'daoge-pic-delivery-' + timestamp + '.zip', entries);
+    await this.writeImageArchive(request, response, archiveFilename(delivery.project_name + '-' + delivery.name + '-交付图片', timestamp), 'daoge-pic-delivery-' + timestamp + '.zip', entries);
   }
-
   private deliveryFileIdentity(deliveryId: string, sequence: number): { relativeDirectory: string; file: string; mediaType: string; contentHash: string; byteSize: number } {
     const delivery = this.db.prepare('SELECT delivery.id, delivery.status, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; status: string; manifest_json: string } | undefined;
     if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('Exported delivery not found: ' + deliveryId);
@@ -854,11 +913,16 @@ export class LocalStudioService {
     const cacheControl = 'private, max-age=31536000, immutable';
     const etag = thumbnail ? thumbnailEtag(identity.contentHash) : '"daoge-image-' + identity.contentHash + '"';
     if (notModified(request, response, etag, cacheControl)) return;
-    const source = () => openDeliveryExportFileAsync(this.initialized.paths, { directoryPath: identity.relativeDirectory, name: identity.file, contentHash: identity.contentHash, byteSize: identity.byteSize, mediaType: identity.mediaType });
-    const opened = thumbnail ? await openImageThumbnail(this.initialized.paths, identity.contentHash, source) : await source();
-    const mediaType = thumbnail ? 'image/webp' : identity.mediaType;
-    const extension = imageExtension(mediaType);
-    streamVerifiedFileResponse(request, response, opened, { 'content-type': mediaType, 'cache-control': cacheControl, 'x-content-type-options': 'nosniff', ...(download && !thumbnail ? { 'content-disposition': 'attachment; filename="daoge-pic-delivery-image.' + extension + '"' } : {}) }, etag);
+    const source: MediaSource = { kind: 'delivery', directoryPath: identity.relativeDirectory, name: identity.file, contentHash: identity.contentHash, byteSize: identity.byteSize, mediaType: identity.mediaType };
+    if (thumbnail) {
+      const result = await this.mediaWorkerPool.run<Extract<MediaJobResult, { type: 'thumbnail' }>>({ type: 'thumbnail', contentHash: identity.contentHash, source });
+      const opened = await openVerifiedManagedFileAsync(result.path, { mediaType: 'image/webp', minByteSize: 1, maxByteSize: 2 * 1024 * 1024, requireImage: true });
+      streamVerifiedFileResponse(request, response, opened, { 'content-type': 'image/webp', 'cache-control': cacheControl, 'x-content-type-options': 'nosniff' }, etag);
+      return;
+    }
+    const opened = await openDeliveryExportFileAsync(this.initialized.paths, { directoryPath: identity.relativeDirectory, name: identity.file, contentHash: identity.contentHash, byteSize: identity.byteSize, mediaType: identity.mediaType });
+    const extension = imageExtension(identity.mediaType);
+    streamVerifiedFileResponse(request, response, opened, { 'content-type': identity.mediaType, 'cache-control': cacheControl, 'x-content-type-options': 'nosniff', ...(download ? { 'content-disposition': 'attachment; filename="daoge-pic-delivery-image.' + extension + '"' } : {}) }, etag);
   }
 
   private async assetFile(request: IncomingMessage, response: ServerResponse, assetId: string, download = false): Promise<void> {
@@ -878,7 +942,8 @@ export class LocalStudioService {
     const cacheControl = 'private, max-age=31536000, immutable';
     const etag = thumbnailEtag(asset.contentHash);
     if (notModified(request, response, etag, cacheControl)) return;
-    const opened = await openImageThumbnail(this.initialized.paths, asset.contentHash, () => createAssetSnapshotAsync(this.initialized.paths, asset));
+    const result = await this.mediaWorkerPool.run<Extract<MediaJobResult, { type: 'thumbnail' }>>({ type: 'thumbnail', contentHash: asset.contentHash, source: assetMediaSource(asset) });
+    const opened = await openVerifiedManagedFileAsync(result.path, { mediaType: 'image/webp', minByteSize: 1, maxByteSize: 2 * 1024 * 1024, requireImage: true });
     streamVerifiedFileResponse(request, response, opened, { 'content-type': 'image/webp', 'cache-control': cacheControl, 'x-content-type-options': 'nosniff' }, etag);
   }
 
@@ -987,7 +1052,7 @@ export class LocalStudioService {
 export async function startLocalStudioService(options: StudioServiceOptions, port = 0): Promise<StartedStudioService> {
   const service = new LocalStudioService(options);
   try {
-    await recoverStudioStartupAsync(service.db, service.initialized.paths, service.initialized.manifest.studioId);
+    await recoverStudioStartupAsync(service.db, service.initialized.paths, service.initialized.manifest.studioId, new Date(), { mediaWorkerPool: service.mediaWorkerPool });
     return await service.listen(port);
   } catch (error) {
     await service.close();

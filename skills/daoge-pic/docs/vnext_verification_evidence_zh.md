@@ -4,7 +4,7 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-当前稳定正式版本为 [`5.9.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.1)。下列章节按版本隔离发布事实；5.9.0 及更早章节保持历史证据，不得用其哈希、Schema 或旧并发契约解释 5.9.1。
+当前稳定正式版本为 [`5.10.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.0)。下列章节按版本隔离发布事实；5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.0。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -163,4 +163,28 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - `npm audit --omit=dev`：0 vulnerabilities。
 - 最终制品 `daoge-pic-5.9.1.tgz` 为 `290741` bytes，SHA-256 为 `7046e652ff7f143f29df182b526b1a2948b24e8f6a5f19578d4917f6a0c442ec`；同值记录在 `daoge-pic-5.9.1.tgz.sha256` sidecar 与 GitHub Release。
 - 发布清单包含 100 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- 未调用真实图片 Provider，未产生计费生成请求。
+
+## 8. daoge-pic 5.10.0 发布验证证据
+
+本节对应 `daoge-pic-v5.10.0` GitHub Release `.tgz` 制品，记录机器确认闸门、独立协议、稳定操作身份以及 generation/media worker pool 的发布验证。
+
+### 确认闸门与协议
+
+- `confirm_token` 由 daemon 在 Workbench Cookie 完成人工确认后签发，绑定 `plan_hash + preflight_id + conversation_id`；Bearer Skill/CLI 的确认请求返回 403。
+- challenge、consent 和已签发 token 只存在 daemon 内存；daemon 重启后必须重新确认。confirm session 必须与 pending challenge 的 session 明确一致。
+- 协议声明为 `daoge-pic-skill-protocol 2.0.0`，支持范围 `>=2.0.0 <3.0.0`；2.0.5 客户端被接受，1.9.0 读写请求均被拒绝。
+
+### Worker、幂等与 Workbench
+
+- generation worker pool 处理 Provider 请求与生成结果持久化；独立 media worker pool 处理 sharp 缩略图、ZIP、归档校验和启动媒体对账，control-plane 保持 API/SSE 响应。
+- operation-name 使用规范化 JSON payload 派生 key；相同对象的不同键顺序重放同一幂等收据。每次 CLI 命令最多一个 `@-` stdin JSON 标记。
+- Workbench 实际启动 smoke 通过；只读会话摘要与人工确认闸门具有独立文案，空会话显示无活动轮次状态，最近运行随事件刷新。
+
+### 最终制品
+
+- `npm test`：271 项通过，0 失败、0 取消、0 跳过。
+- `npm run test:package`：发布清单 113 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- `npm audit --omit=dev --offline`：0 vulnerabilities；在线 registry audit endpoint 当次返回 503。
+- 最终制品 `daoge-pic-5.10.0.tgz` 为 `305783` bytes，npm shasum 为 `378db79a198c08c796e8c9138f4a61ef331be3cc`，SHA-256 为 `8096b6bc9ed4b19e76b77398bebbd2f35e2596844dec22d56db9e752cfce025c`；同值记录在 `daoge-pic-5.10.0.tgz.sha256` sidecar 与 GitHub Release。
 - 未调用真实图片 Provider，未产生计费生成请求。

@@ -5,9 +5,21 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.9.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.9.1)。本文件定义 5.9.1 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.10.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.0)。本文件定义 5.10.0 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
+
+## 机器强制执行边界
+
+本 Skill 协议版本为 `2.0.0`，与制品版本独立；daemon `/api/studio` 返回协议协商信息，不兼容的调用必须拒绝。以下规则不依赖 Skill 自律：
+
+- 运行必须携带 daemon 签发的 `confirm_token`。令牌绑定 `plan_hash + preflight_id + conversation_id`，Skill 无法生成或修改；缺失、伪造、过期、跨计划、跨预检或跨 conversation 一律拒绝，不触发 Provider。
+- 确认挑战只可由当前 Workbench 的授权 Cookie 提交；Bearer CLI 只能创建计划、读取状态或提交非确认控制操作。真实用户确认后 daemon 才把轮次激活。
+- 预检必须验证当前会话确认与当前计划哈希，随后签发运行令牌；运行仍重复校验预检、计划与会话绑定。
+- 默认 worker 池由独立 child process 执行 Provider HTTP、sharp、hash 和媒体持久化；control-plane 负责 API、SSE、SQLite 队列与恢复。生成 worker 与 media worker 按本机并行度自适应，生成运行仍受全局容量保护。
+- 大 JSON 可通过 CLI 的 `--plan @-` 等 stdin 标记传输；每次命令最多一个 `@-`，stdin 仅读取一次且必须是 JSON 对象，最大 8 MiB。`some-agent | node scripts/daoge.js plan ... --plan @-` 是推荐传输方式。`--operation-name <verb:scope>` 由 daemon 派生稳定幂等键；跨进程恢复首选 operation-name，或保存显式 idempotency-key；不提供任一参数时 CLI 生成的随机 key 不具备跨进程恢复语义。
+- Workbench 提供只读“当前会话计划摘要”，显示项目、任务、轮次、确认状态与最近运行；无活动轮次时显示明确空状态。摘要不改变事实源。人工确认是旁侧独立的“确认闸门”，不是只读摘要的一部分。
+- 人工确认与 consent 只存在 daemon 内存中；daemon 重启或进程更换后必须重新发起确认挑战并再次确认。一次签发的 token 在其有效期内可用于同一绑定预检；具体运行仍由幂等 key 防重放。
 
 ## 执行型启动协议（MUST）
 
@@ -141,10 +153,10 @@ node scripts/daoge.js delivery-batch --workspace <path> --project <project-id> -
 node scripts/daoge.js delivery-batch-revise --workspace <path> --batch <batch-id> --deliveries <delivery-id,...>
 node scripts/daoge.js delivery-batch-ready --workspace <path> --version <version-id>
 node scripts/daoge.js round --workspace <path> --task <task-id> --purpose <exploration|refinement|variation|edit|fill> [--parent <round-id>] [--session <session-id>]
-node scripts/daoge.js plan --workspace <path> --round <round-id> --version <n> --plan <json>
-node scripts/daoge.js confirm --workspace <path> --round <round-id> --version <n>
-node scripts/daoge.js preflight --workspace <path> --round <round-id> [--concurrency <1..1000>]
-node scripts/daoge.js run --workspace <path> --round <round-id> --preflight <dry-run-id>
+node scripts/daoge.js plan --workspace <path> --round <round-id> --version <n> --plan <json|@->
+node scripts/daoge.js confirm-challenge --workspace <path> --round <round-id> --session <session-id>
+node scripts/daoge.js preflight --workspace <path> --round <round-id> --session <session-id> [--concurrency <1..1000>]
+node scripts/daoge.js run --workspace <path> --round <round-id> --preflight <dry-run-id> --confirm-token <daemon-token>
 node scripts/daoge.js pause --workspace <path> --run <run-id>
 node scripts/daoge.js resume --workspace <path> --run <run-id> --session <session-id>
 node scripts/daoge.js cancel --workspace <path> --run <run-id>
@@ -157,13 +169,7 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 
 ## 幂等命令恢复
 
-每个 CLI `POST` / `PUT` mutation 都接受可选全局参数 `--idempotency-key <stable-key>`。同一操作在网络断开、CLI 中断或响应不明后恢复时，复用**完全相同的命令、参数和 key**：
-
-```bash
-node scripts/daoge.js resume --workspace <path> --run <run-id> --session <session-id> --idempotency-key <same-key>
-```
-
-同一个 key 不得用于不同命令或不同 payload；冲突必须拒绝。未显式提供时 CLI 为本次 mutation 生成新 key，因此需要跨进程恢复的操作必须在首次调用前保存 key。`status`、`studio`、`open`、`restart` 与只读 `provider-list` 不发送该参数。
+所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、运行时 `5.10.0`；不兼容协议由 daemon 拒绝。
 
 ## 运行恢复与媒体边界
 

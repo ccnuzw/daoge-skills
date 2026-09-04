@@ -13,7 +13,7 @@ const MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
 const MAX_INPUT_PIXELS = 64 * 1024 * 1024;
 const pending = new Map<string, Promise<void>>();
 
-function thumbnailPath(paths: StudioPaths, contentHash: string): string {
+export function resolveImageThumbnailPath(paths: StudioPaths, contentHash: string): string {
   if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new MediaArchiveError('Thumbnail source identity is invalid.');
   return path.join(ensureCacheDirectory(paths, 'thumbs'), 'v' + THUMBNAIL_VERSION + '-' + contentHash + '.webp');
 }
@@ -58,7 +58,7 @@ async function generateThumbnail(filePath: string, sourceFactory: () => Promise<
 }
 
 export async function openImageThumbnail(paths: StudioPaths, contentHash: string, sourceFactory: () => Promise<VerifiedManagedFile>): Promise<VerifiedManagedFile> {
-  const filePath = thumbnailPath(paths, contentHash);
+  const filePath = resolveImageThumbnailPath(paths, contentHash);
   const cached = await existingThumbnail(filePath);
   if (cached) return cached;
   let operation = pending.get(filePath);

@@ -19,6 +19,19 @@ const skillRoot = path.resolve(__dirname, '../..');
 const daemonEntry = path.join(skillRoot, 'dist', 'vnext', 'cli', 'daemon.js');
 const cliEntry = path.join(skillRoot, 'dist', 'vnext', 'cli', 'daoge.js');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
+test('media worker pool is an independently addressable child-process pool', async () => {
+  const { MediaProcessPool } = require('../../dist/vnext/runtime/media-worker-pool');
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-media-pool-'));
+  const pool = new MediaProcessPool(workspaceRoot, 1);
+  try {
+    for (let attempt = 0; attempt < 50 && !pool.processIds().length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(pool.processIds().length, 1);
+    assert.notEqual(pool.processIds()[0], process.pid);
+  } finally {
+    await pool.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
 
 function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-daemon-resilience-'));

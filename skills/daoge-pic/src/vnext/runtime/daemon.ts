@@ -2,10 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LocalStudioService } from '../api/server';
 import { createLocalCapability } from '../api/local-auth';
-import { StudioGeneratedAssetPersister } from '../media/generated-assets';
-import { StudioAssetResolver } from '../media/asset-resolver';
-import { createImageProvider } from '../providers/http-adapters';
-import { GenerationWorker } from '../runner/worker';
 import { promoteDueRetryWaitItems, reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { createId, nowIso } from '../shared/ids';
@@ -17,6 +13,8 @@ import { ensureRuntimeDirectory, initializeStudio, studioPaths } from '../studio
 import { installDaemonRestartHandler } from './restart';
 import { WorkbenchPresence } from './workbench-presence';
 import { acquireDaemonLock } from './daemon-lock';
+import { WorkerProcessPool } from './worker-pool';
+import { MediaProcessPool } from './media-worker-pool';
 
 export interface StudioDaemonOptions {
   workspaceRoot: string;
@@ -36,8 +34,9 @@ interface RuntimeRecord {
   startedAt: string;
   heartbeatAt: string;
   provider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null;
+  workerPool: { mode: 'child_process'; size: number; pids: number[] } | null;
+  mediaWorkerPool: { mode: 'child_process'; size: number; pids: number[] } | null;
 }
-
 function writeAtomically(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporary = filePath + '.' + process.pid + '.tmp';
@@ -88,12 +87,13 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
   let service: LocalStudioService | null = null;
   let workerDb: StudioDatabase | null = null;
   let workerProviderDb: ProviderDatabase | null = null;
-  let worker: GenerationWorker | null = null;
-  let stopping = false;
+  let workerPool: WorkerProcessPool | null = null;
+  let mediaWorkerPool: MediaProcessPool | null = null;
   let restartRequested = false;
   let timer: NodeJS.Timeout | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   let inFlightTick: Promise<void> | null = null;
+  let stopping = false;
   let closePromise: Promise<void> | null = null;
   const close = (): Promise<void> => {
     if (closePromise) return closePromise;
@@ -102,11 +102,14 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     clearInterval(heartbeatTimer);
     closePromise = (async (): Promise<void> => {
       const failures: unknown[] = [];
-      if (worker) {
-        worker.shutdown();
-        worker = null;
+      if (mediaWorkerPool) {
+        await settleShutdownStep(mediaWorkerPool.close(), 'Daemon media worker pool', failures);
+        mediaWorkerPool = null;
       }
-      if (inFlightTick) await settleShutdownStep(inFlightTick, 'Daemon worker tick', failures);
+      if (workerPool) {
+        await settleShutdownStep(workerPool.close(), 'Daemon worker pool', failures);
+        workerPool = null;
+      }
       if (service) {
         await settleShutdownStep(service.close(), 'Studio HTTP service', failures);
         service = null;
@@ -156,20 +159,21 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     const initialized = initializeStudio({ workspaceRoot: paths.workspaceRoot });
     const capability = options.capability || createLocalCapability();
     const sessionToken = options.sessionToken || createLocalCapability();
-    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, capability, sessionToken, workbenchPresence: options.workbenchPresence });
+    mediaWorkerPool = new MediaProcessPool(initialized.paths.workspaceRoot);
+    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, capability, sessionToken, workbenchPresence: options.workbenchPresence, mediaWorkerPool });
     workerDb = openStudioDatabase(initialized.paths, initialized.manifest);
     workerProviderDb = openProviderDatabase(initialized.paths);
     importLegacyProviderEnvOnce(workerProviderDb, initialized.paths);
-    await recoverStudioStartupAsync(workerDb, initialized.paths, initialized.manifest.studioId);
+    await recoverStudioStartupAsync(workerDb, initialized.paths, initialized.manifest.studioId, new Date(), { mediaWorkerPool });
 
     const daemonService = service;
     const daemonDb = workerDb;
     const daemonProviderDb = workerProviderDb;
     let startedUrl = '';
     let activeProvider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null = null;
-    const workerId = createId('worker');
     const startedAt = nowIso();
-    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider });
+    const workerId = createId('worker_pool');
+    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider, workerPool: workerPool ? { mode: 'child_process', size: workerPool.processIds().length, pids: workerPool.processIds() } : null, mediaWorkerPool: mediaWorkerPool ? { mode: 'child_process', size: mediaWorkerPool.processIds().length, pids: mediaWorkerPool.processIds() } : null });
     const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
 
     const requestedPort = options.port === 0 ? 0 : options.port || rememberedPort(portPath);
@@ -180,21 +184,11 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     // A daemon uses one in-memory Provider identity for its lifetime. Configuration changes require a restart and cannot silently alter an in-flight run.
     const workerConfig = resolveActiveProviderConfig(daemonProviderDb);
     const workerStatus = providerStatus(daemonProviderDb);
-    const workerProvider = workerConfig ? createImageProvider(workerConfig) : null;
-    const workerReady = Boolean(workerConfig && workerProvider && workerStatus.configured && workerProvider.validateConfig(workerConfig).valid);
+    const workerReady = Boolean(workerConfig && workerStatus.configured);
     const workerSnapshot = workerConfig ? providerSnapshot(workerConfig) : null;
     activeProvider = workerSnapshot ? { profileId: workerSnapshot.profileId, configVersion: workerSnapshot.configVersion, providerId: workerSnapshot.providerId, model: workerSnapshot.model, endpoint: workerSnapshot.endpoint } : null;
     let configChangeReported = false;
-    const assetPersister = new StudioGeneratedAssetPersister({ db: daemonDb, paths: initialized.paths, studioId: initialized.manifest.studioId });
-    const assetResolver = new StudioAssetResolver({ db: daemonDb, paths: initialized.paths });
-    worker = workerConfig && workerProvider && workerReady ? new GenerationWorker({
-      db: daemonDb,
-      workerId,
-      provider: workerProvider,
-      providerConfig: workerConfig,
-      assetPersister,
-      assetResolver
-    }) : null;
+    workerPool = workerReady ? new WorkerProcessPool(initialized.paths.workspaceRoot) : null;
     heartbeat();
     heartbeatTimer = setInterval(heartbeat, 5000);
     const tick = async (): Promise<void> => {
@@ -209,8 +203,8 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
           configChangeReported = true;
           appendStudioEvent(daemonDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_changed', payload: { restartRequired: true } });
         }
-        if (worker) {
-          const result = await worker.processOnce(MAX_GLOBAL_CONCURRENCY);
+        if (workerPool) {
+          const result = await workerPool.processOnce(MAX_GLOBAL_CONCURRENCY);
           scheduleTick(result.claimed || recoveredLeases || promotedRetries || reconciledRuns ? 30 : pollMs);
           return;
         }

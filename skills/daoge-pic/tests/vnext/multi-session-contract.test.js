@@ -10,7 +10,7 @@ const { openOrReuseWorkbench } = require('../../dist/vnext/cli/daoge');
 const { WorkbenchPresence } = require('../../dist/vnext/runtime/workbench-presence');
 const { claimRunItems } = require('../../dist/vnext/runner/run-commands');
 const { configureProvider } = require('./provider-test-helper');
-const { requestJson } = require('./local-studio-test-helper');
+const { requestJson, requestJsonAsWorkbench, workbenchCookie } = require('./local-studio-test-helper');
 
 function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-multi-session-'));
@@ -86,6 +86,7 @@ test('four agent conversations retain independent Session context, project owner
     }).then((response) => response.body.data)));
     assert.equal(new Set(sessions.map((session) => session.id)).size, 4);
 
+    const cookie = await workbenchCookie(started);
     const contexts = [];
     for (let index = 0; index < sessions.length; index += 1) {
       const prefix = 'agent-' + index;
@@ -98,9 +99,13 @@ test('four agent conversations retain independent Session context, project owner
       const context = await requestJson(started, '/api/sessions/' + sessions[index].id + '/context', { method: 'POST', idempotencyKey: prefix + '-context', body: { projectId, taskId, roundId } });
       assert.equal(context.status, 200);
       const prepared = await requestJson(started, '/api/rounds/' + roundId + '/prepare', { method: 'POST', idempotencyKey: prefix + '-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'isolated prompt ' + index } } });
-      await requestJson(started, '/api/rounds/' + roundId + '/confirm', { method: 'POST', idempotencyKey: prefix + '-confirm', body: { expectedVersion: prepared.body.data.value.version } });
-      const preview = await requestJson(started, '/api/rounds/' + roundId + '/preflight', { method: 'POST', idempotencyKey: prefix + '-preflight', body: { executionConcurrency: 1 } });
-      const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: prefix + '-run', body: { roundId, preflightId: preview.body.data.value.preview.id } });
+      assert.equal(prepared.status, 200, JSON.stringify(prepared.body));
+      const challenge = await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/confirmation-challenge', { cookie, idempotencyKey: prefix + '-challenge', body: { sessionId: sessions[index].id } });
+      assert.equal(challenge.status, 200, JSON.stringify(challenge.body));
+      await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/confirm', { cookie, idempotencyKey: prefix + '-confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId: sessions[index].id, challenge: challenge.body.data.challenge } });
+      const preview = await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/preflight', { cookie, idempotencyKey: prefix + '-preflight', body: { executionConcurrency: 1, sessionId: sessions[index].id } });
+      assert.equal(preview.status, 200, JSON.stringify(preview.body));
+      const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: prefix + '-run', body: { roundId, preflightId: preview.body.data.value.preview.id, confirmToken: preview.body.data.value.confirmToken } });
       contexts.push({ sessionId: sessions[index].id, projectId, taskId, roundId, runId: queued.body.data.value.id });
     }
 

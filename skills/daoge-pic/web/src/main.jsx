@@ -1,6 +1,6 @@
 import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, MessageSquareText, PanelLeftClose, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, LockKeyhole, MessageSquareText, PanelLeftClose, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
 import { mergeRunHistoryItems, runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
 import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectRound, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
@@ -248,9 +248,13 @@ function App() {
   const [confirmation, setConfirmation] = useState(null);
   const [confirmationBusy, setConfirmationBusy] = useState(false);
   const [confirmationError, setConfirmationError] = useState('');
+  const [generationConfirmation, setGenerationConfirmation] = useState(null);
+  const [generationConfirmationBusy, setGenerationConfirmationBusy] = useState(false);
+  const [generationConfirmationError, setGenerationConfirmationError] = useState('');
   const [tasks, setTasks] = useState(EMPTY);
   const [rounds, setRounds] = useState(EMPTY);
   const [runs, setRuns] = useState(EMPTY);
+  const [sessionPlanStatus, setSessionPlanStatus] = useState(null);
   const [runItems, setRunItems] = useState(EMPTY);
   const [session, setSession] = useState(null);
   const [route, setRoute] = useState(() => parseWorkbenchRoute(window.location.search));
@@ -262,7 +266,7 @@ function App() {
   const [connectionError, setConnectionError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
-  const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0 });
+  const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0 });
   const inputRef = useRef(null);
   const searchCoordinatorRef = useRef(null);
   const batchBusyRef = useRef(false);
@@ -508,7 +512,8 @@ function App() {
       taskOverview: current.taskOverview,
       creativeRecord: current.creativeRecord + (detail === 'creativeRecord' && plan.creativeRecord ? 1 : 0),
       studioOverview: current.studioOverview + (detail === 'studioOverview' && plan.studioOverview ? 1 : 0),
-      planVersions: current.planVersions + (detail === 'planVersions' && plan.planVersions ? 1 : 0)
+      planVersions: current.planVersions + (detail === 'planVersions' && plan.planVersions ? 1 : 0),
+      runs: current.runs + (plan.refreshContext ? 1 : 0)
     }));
   }, [view]);
   eventRefreshCallbacks.current = {
@@ -530,7 +535,7 @@ function App() {
   const refreshForEvents = useCallback((events) => eventRefreshQueueRef.current.request(studioEventRefreshPlan(events)), []);
   const refreshSnapshot = useCallback(async () => {
     const refreshed = await refresh();
-    if (refreshed) applyEventRefreshPlan({ taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true });
+    if (refreshed) applyEventRefreshPlan({ taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, refreshContext: true });
     return refreshed;
   }, [refresh, applyEventRefreshPlan]);
   useStudioEvents({
@@ -540,6 +545,13 @@ function App() {
     onConnectionError: setConnectionError,
     onRequestError: setError
   });
+  useEffect(() => {
+    if (!session) { setSessionPlanStatus(null); return undefined; }
+    const controller = new AbortController();
+    void api('/api/sessions/' + encodeURIComponent(session.id) + '/plan-status', { signal: controller.signal }).then(setSessionPlanStatus).catch((nextError) => {
+      if (!isAbortError(nextError)) setError(nextError.message || '无法读取当前会话计划状态。');
+    });
+  }, [session?.id, eventRevision.planVersions, eventRevision.creativeRecord, eventRevision.runs]);
 
   const selectedProject = useMemo(() => activeProjectId ? projects.find((project) => project.id === activeProjectId) || null : null, [projects, activeProjectId]);
   const selectedTask = useMemo(() => activeTaskId ? tasks.find((task) => task.id === activeTaskId) || null : null, [tasks, activeTaskId]);
@@ -962,10 +974,52 @@ function App() {
       setBatchBusy(false);
     }
   };
-  const controlRun = async (operation) => { if (!activeRun) return; try { await api('/api/runs/' + activeRun.id + '/' + operation, { method: 'POST', idempotencyKey: uniqueKey(operation), body: {} }); await refresh(); } catch (nextError) { setError(nextError.message || '无法更新生成运行。'); } };
-  const retryRunItem = async (itemId) => {
-    if (!activeRun) return;
-    try { await api('/api/runs/' + encodeURIComponent(activeRun.id) + '/retry', { method: 'POST', idempotencyKey: uniqueKey('retry-item'), body: { itemIds: [itemId] } }); await refresh(); } catch (nextError) { setError(nextError.message || '无法重试该运行项。'); }
+  const openGenerationConfirmation = async () => {
+    if (!selectedRound || selectedRound.status !== 'awaiting_confirmation') return;
+    setGenerationConfirmationBusy(true);
+    setGenerationConfirmationError('');
+    try {
+      let status = sessionPlanStatus;
+      if (!status?.pendingConfirmation || status.context?.round?.id !== selectedRound.id) {
+        if (!session) throw new Error('当前 Workbench 尚未建立只读会话状态。');
+        status = await api('/api/sessions/' + encodeURIComponent(session.id) + '/plan-status');
+        setSessionPlanStatus(status);
+      }
+      if (!status.pendingConfirmation) throw new Error('请先由当前智能体会话发起确认挑战。');
+      setGenerationConfirmation({ challenge: status.pendingConfirmation, round: selectedRound });
+    } catch (nextError) {
+      setError(nextError.message || '无法读取本次生成确认挑战。');
+    } finally {
+      setGenerationConfirmationBusy(false);
+    }
+  };
+  const dismissGenerationConfirmation = () => {
+    if (generationConfirmationBusy) return;
+    setGenerationConfirmation(null);
+    setGenerationConfirmationError('');
+  };
+  const confirmAndQueueGeneration = async () => {
+    if (!generationConfirmation) return;
+    setGenerationConfirmationBusy(true);
+    setGenerationConfirmationError('');
+    try {
+      const confirmationSessionId = generationConfirmation.challenge.sessionId;
+      await api('/api/rounds/' + encodeURIComponent(generationConfirmation.round.id) + '/confirm', { method: 'POST', idempotencyKey: uniqueKey('user-confirm'), body: { expectedVersion: generationConfirmation.challenge.expectedVersion, sessionId: confirmationSessionId, challenge: generationConfirmation.challenge.challenge } });
+      const preflight = await api('/api/rounds/' + encodeURIComponent(generationConfirmation.round.id) + '/preflight', { method: 'POST', idempotencyKey: uniqueKey('user-preflight'), body: { sessionId: confirmationSessionId } });
+      if (!preflight.value?.preflight?.valid || !preflight.value?.preview || !preflight.value?.confirmToken) throw new Error('预检未通过，未创建生成运行。');
+      const queued = await api('/api/runs', { method: 'POST', idempotencyKey: uniqueKey('user-run'), body: { roundId: generationConfirmation.round.id, preflightId: preflight.value.preview.id, confirmToken: preflight.value.confirmToken } });
+      const roundId = generationConfirmation.round.id;
+      setGenerationConfirmation(null);
+      setNotice('计划已由当前用户确认，并通过 daemon 闸门创建生成运行。');
+      await refresh();
+      navigateRoute({ view: 'runs', roundId, compareRoundIds: [roundId], runId: queued.value?.id || null });
+      return true;
+    } catch (nextError) {
+      setGenerationConfirmationError(nextError.message || '确认或启动生成失败。');
+      return false;
+    } finally {
+      setGenerationConfirmationBusy(false);
+    }
   };
   const openArchiveConfirmation = () => {
     if (!selectedProject || selectedProject.status === 'archived') return;
@@ -1049,7 +1103,7 @@ function App() {
       <div className="overview-head"><div><p className="eyebrow">同一任务内的显式对比</p><h2>{selectedTask ? selectedTask.name : '请选择任务'}</h2><span>{studioOverview?.availableRounds?.length || 0} 个可比较轮次。比较不会推断或启动运行。</span></div>{taskOverview && <div className="overview-metrics"><span>轮次 {taskOverview.summary?.roundCount || 0}</span><span>运行 {taskOverview.summary?.runCount || 0}</span><span>结果 {taskOverview.summary?.resultCount || 0}</span></div>}</div>
       {selectedTask ? <><div className="compare-selector">{(studioOverview?.availableRounds || rounds).map((round) => <label key={round.id}><input type="checkbox" checked={compareRoundIds.includes(round.id)} onChange={() => toggleComparedRound(round.id)} /><span>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[round.purpose] || round.purpose} · 计划 v{round.planVersion}</span></label>)}</div>{studioOverview?.comparisons?.length ? <div className="comparison-grid">{studioOverview.comparisons.map((comparison) => <article key={comparison.round.id} className="comparison-column"><header><div><p>轮次 {comparison.round.planVersion}</p><h3>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[comparison.round.purpose] || comparison.round.purpose}</h3></div><StatusPill value={comparison.round.status} scope="round" /></header><dl><div><dt>上游</dt><dd>{comparison.lineage?.rounds?.length ? '承接 ' + comparison.lineage.rounds.length + ' 个轮次' : '首个方向'}</dd></div><div><dt>计划</dt><dd>{comparison.round.plan?.operation === 'edit' ? '编辑' : '生成'} · {comparison.round.plan?.itemCount || 0} 项</dd></div><div><dt>产出</dt><dd>{comparison.summary?.resultCount || 0} 个结果</dd></div></dl>{comparison.runsTruncated && <p className="comparison-truncated">仅显示最近 24 次运行</p>}<div className="comparison-runs">{comparison.runs?.map((run) => <section key={run.id}><button type="button" className="trace-link" onClick={() => navigateRoute({ view: 'runs', projectId: selectedProject?.id, taskId: selectedTask.id, roundId: comparison.round.id, compareRoundIds: [comparison.round.id], runId: run.id })}><b>运行项 {run.items?.length || 0}</b><StatusPill value={run.status} scope="run" /></button><div className="comparison-assets">{run.items?.flatMap((item) => item.outputAssets || []).map((asset) => <button type="button" key={asset.id} title="查看资产来源与评审" onClick={() => void inspectAsset(asset.id)}><img src={assetThumbnailUrl(asset)} alt="轮次结果" loading="lazy" decoding="async" /><span>{asset.review?.decision === 'keep' ? '保留' : asset.review?.decision === 'review' ? '待复核' : '未评审'}</span></button>)}</div></section>)}</div></article>)}</div> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>勾选一个或多个轮次后，比较计划、运行、结果和当前评审。</p></div>}</> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>请先选择项目和任务，再打开创作总览。</p></div>}
     </section>,
-    prompts: () => <PromptWorkspace round={selectedRound} planVersions={planVersions} loading={planVersionsLoading} onRefresh={() => void refreshPlanVersions()} />,
+    prompts: () => <><PromptWorkspace round={selectedRound} planVersions={planVersions} loading={planVersionsLoading} onRefresh={() => void refreshPlanVersions()} />{selectedRound?.status === 'awaiting_confirmation' && <section className="human-confirmation-gate"><div><p className="eyebrow">人工确认闸门 · 可写操作</p><h3>等待当前用户确认计划</h3><span>这是独立于只读摘要的写入闸门。Skill 只能创建挑战；只有此 Workbench 标签中的确认动作能激活计划、签发预检绑定令牌并允许创建运行。</span></div><button type="button" className="command-button" onClick={() => void openGenerationConfirmation()} disabled={!session || generationConfirmationBusy}><LockKeyhole size={16} />{generationConfirmationBusy ? '正在准备确认' : '审阅并确认生成'}</button></section>}</>,
     runs: () => <section className="run-stage">
       <div className="run-focus"><div><p className="eyebrow">{selectedRound ? ({ exploration: '探索轮次', refinement: '优化轮次', variation: '变体轮次', edit: '编辑轮次', fill: '补图轮次' })[selectedRound.purpose] : '请先选择轮次'}</p><h2>{activeRun ? '已选择生成运行' : selectedRound ? '请选择生成运行' : '尚未选择轮次'}</h2></div>{activeRun && <StatusPill presentation={runExecutionStatus} />}</div>
       {selectedRound && <label className="run-history-select"><span>运行历史</span><select value={activeRunId || ''} onChange={(event) => navigateRoute({ runId: event.target.value || null })}><option value="">请选择生成运行</option>{runs.map((run) => <option value={run.id} key={run.id}>{runHistoryOption(run)}</option>)}</select></label>}
@@ -1088,7 +1142,7 @@ function App() {
 
        {!studioView && <WorkspaceContextBar project={selectedProject} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} assetScope={assetScope} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectRound={(roundId) => navigateRoute(selectRound(route, roundId))} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} />}
       {connectionError && <div className="connection-error-strip" role="alert" aria-live="assertive"><CloudOff size={16} /><span>{connectionError}</span></div>}
-      {contextError && <div className="context-strip" role="alert" aria-live="assertive"><CircleAlert size={16} /><span>{contextError}</span></div>}
+      {sessionPlanStatus && <aside className={'session-plan-panel ' + (!sessionPlanStatus.context ? 'is-empty' : '')} aria-label="当前会话只读计划摘要"><div><p className="eyebrow">当前会话 · 只读摘要</p>{sessionPlanStatus.context ? <><h3>{sessionPlanStatus.context.project.name} / {sessionPlanStatus.context.task.name}</h3><span>{sessionPlanStatus.context.round.purpose} · 计划 v{sessionPlanStatus.context.round.planVersion}</span></> : <><h3>当前会话没有活动轮次</h3><span>请在会话中绑定项目、任务和轮次；此处只显示已绑定的计划事实。</span></>}</div>{sessionPlanStatus.context && <div className="session-plan-state"><StatusPill value={sessionPlanStatus.context.round.status} scope="round" /><span>{sessionPlanStatus.confirmation.confirmed ? '当前计划已由用户确认' : '当前计划尚未人工确认'}</span>{sessionPlanStatus.latestRun && <span>最近运行：{statusLabel(sessionPlanStatus.latestRun.status)}</span>}</div>}</aside>}
       {error && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={16} /><span>{error}</span><IconButton label="关闭请求错误" onClick={() => setError('')}><X size={15} /></IconButton></div>}
       {notice && <div className="notice-strip" role="status" aria-live="polite"><Check size={16} /><span>{notice}</span><IconButton label="关闭通知" onClick={() => setNotice('')}><X size={15} /></IconButton></div>}
        {view === 'projects' && !guideDismissed && <button type="button" className="guide-nudge" onClick={() => navigateRoute({ view: 'guide' })}>首次使用 Studio？从学习中心了解计划、生成、选片与交付。</button>}
@@ -1097,6 +1151,7 @@ function App() {
     </section>
 
     {assetProvenance && <aside className="asset-inspector" aria-label="资产来源与评审记录"><div className="asset-inspector-head"><div><p className="eyebrow">资产检查器</p><h2>{assetProvenance.asset?.kind === 'generated' ? '生成结果来源链' : '导入素材来源链'}</h2></div><IconButton label="关闭资产检查器" onClick={() => setAssetProvenance(null)}><X size={16} /></IconButton></div><div className="asset-inspector-section"><span>来源</span><p>{assetProvenance.asset?.kind === 'generated' ? '由已确认轮次中的运行项保存' : '导入到当前 Studio 的素材'}</p>{assetProvenance.outputs?.map((output) => <button type="button" key={output.runItem.id} className="trace-link" onClick={() => { navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id }); setAssetProvenance(null); }}><span>{output.project.name} / {output.task.name}</span><b>{output.round.purpose} · 运行项 {output.runItem.sequence}</b></button>)}</div><div className="asset-inspector-section"><span>评审历史</span>{assetProvenance.reviews?.length ? assetProvenance.reviews.map((review) => <p key={review.id}><b>{review.decision === 'keep' ? '保留' : review.decision === 'review' ? '待复核' : review.decision === 'reject' ? '不采用' : '衍生方向'}</b> · {review.createdAt}</p>) : <p>尚未记录评审。</p>}</div><div className="asset-inspector-section"><span>交付引用</span>{assetProvenance.deliveries?.length ? assetProvenance.deliveries.map((delivery) => <p key={delivery.id}>{delivery.name} · {delivery.status}</p>) : <p>尚未加入交付草稿。</p>}</div><div className="asset-inspector-section"><span>批次版本</span>{assetProvenance.deliveryBatches?.length ? assetProvenance.deliveryBatches.map((batch) => <p key={batch.versionId}>{batch.name} · v{batch.versionNo} · {batch.status === 'ready' ? '已准备' : batch.status === 'draft' ? '草稿' : '已被新修订版本替代'}</p>) : <p>尚未加入版本化交付批次。</p>}</div></aside>}
+    {generationConfirmation && <ConfirmationDialog label="确认创作计划并开始生成" title={'确认计划 v' + generationConfirmation.round.planVersion + ' 并启动生成？'} message="此操作代表当前用户已审阅计划。daemon 会把确认绑定到当前 conversation、计划哈希和随后生成的预检证据；Skill 无法自行伪造该令牌。" confirmLabel="确认并开始生成" busy={generationConfirmationBusy} error={generationConfirmationError} tone="warning" onCancel={dismissGenerationConfirmation} onConfirm={confirmAndQueueGeneration} />}
     {previewAssets.length > 0 && <AccessibleDialog className="image-inspector" label={previewAssets.length === 2 ? '双图对比' : '素材放大查看'} onDismiss={() => setPreviewAssets([])}><div className="inspector-toolbar"><span>{previewAssets.length === 2 ? '双图对比' : '素材查看'}</span><div><IconButton label="缩小" disabled={previewZoom <= 0.75} onClick={() => setPreviewZoom((value) => Math.max(0.75, value - 0.25))}><ZoomOut size={16} /></IconButton><IconButton label="放大" disabled={previewZoom >= 2} onClick={() => setPreviewZoom((value) => Math.min(2, value + 0.25))}><ZoomIn size={16} /></IconButton><IconButton label="关闭查看" onClick={() => setPreviewAssets([])}><X size={16} /></IconButton></div></div><div className={'inspector-images ' + (previewAssets.length === 2 ? 'is-compare' : '')}>{previewAssets.map((asset, index) => { const selected = selectedAssetIds.has(asset.id); const busy = selectionBusyIds.has(asset.id); return <figure className={selected ? 'is-selected' : ''} key={asset.id}>{selectedProject && !asset.deletedAt && <label className="inspector-select-control"><input type="checkbox" checked={selected} disabled={busy} onChange={() => void markAsDeliverable(asset)} /><span>{selected ? <Check size={15} /> : <Bookmark size={15} />}{busy ? '正在保存' : selected ? '已选成果' : '选为成果'}</span></label>}<img src={assetOriginalUrl(asset)} alt="" style={{ transform: 'scale(' + previewZoom + ')' }} /><figcaption>{asset.display?.label || (previewAssets.length === 2 ? '对比图 ' + (index + 1) : '素材预览')}</figcaption></figure>; })}</div></AccessibleDialog>}
     {providerDetails && <ProviderSettings request={api} onDismiss={() => setProviderDetails(null)} onChanged={refresh} />}
     {confirmation && <ConfirmationDialog label={confirmation.kind === 'archive' ? '确认归档项目' : '确认移入回收站'} title={confirmation.kind === 'archive' ? '归档“' + confirmation.projectName + '”？' : '将图片移入回收站？'} message={confirmation.kind === 'archive' ? '归档后将关闭该项目下的任务与轮次。未完成生成必须先暂停或取消。是否继续？' : '这张图片仍被选择、资料库或交付引用。移入回收站不会删除已冻结交付，是否继续？'} confirmLabel={confirmation.kind === 'archive' ? '确认归档' : '继续移入'} busy={confirmationBusy} error={confirmationError} onCancel={dismissConfirmation} onConfirm={confirmPendingAction} />}
