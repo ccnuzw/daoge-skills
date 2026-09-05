@@ -979,6 +979,25 @@ function App() {
       setBatchBusy(false);
     }
   };
+  const retryRunItem = async (itemId) => {
+    if (!activeRun) return;
+    try {
+      await api('/api/runs/' + encodeURIComponent(activeRun.id) + '/retry', { method: 'POST', idempotencyKey: uniqueKey('retry-run-item'), body: { itemIds: [itemId] } });
+      await refresh();
+    } catch (nextError) { setError(nextError.message || '无法重试该生成项。'); }
+  };
+  const controlRun = async (action) => {
+    if (!activeRun) return;
+    if (action === 'resume') {
+      setError('恢复运行需要在当前智能体会话中重新确认。');
+      return;
+    }
+    const path = action === 'pause' ? '/pause' : action === 'cancel' ? '/cancel' : '/retry';
+    try {
+      await api('/api/runs/' + encodeURIComponent(activeRun.id) + path, { method: 'POST', idempotencyKey: uniqueKey('run-' + action), body: {} });
+      await refresh();
+    } catch (nextError) { setError(nextError.message || '无法更新生成运行。'); }
+  };
   const openGenerationConfirmation = async () => {
     if (!selectedRound || selectedRound.status !== 'awaiting_confirmation') return;
     setGenerationConfirmationBusy(true);

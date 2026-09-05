@@ -18,6 +18,7 @@ test('Provider settings UI keeps secrets write-only and exposes accessible expli
   assert.match(source, /清除连接信息会让该 Profile 暂时不可用/);
   assert.match(source, /aria-label="Provider Profile 列表"/);
   assert.match(source, /role="alert"/);
+  assert.match(source, /providerConcurrency\.target/);
   assert.match(source, /aria-live="polite"/);
   assert.doesNotMatch(source, /localStorage|sessionStorage/);
 });

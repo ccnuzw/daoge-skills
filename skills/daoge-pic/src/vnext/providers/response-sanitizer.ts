@@ -62,8 +62,10 @@ export function sanitizeProviderMetadata(value: Readonly<Record<string, unknown>
 export function sanitizeProviderImageResult(result: ImageResult, sensitive: ProviderSensitiveValues): ImageResult {
   const externalRequestId = sanitizeProviderRequestId(result.externalRequestId, sensitive);
   const revisedPrompt = typeof result.revisedPrompt === 'string' ? redactProviderText(result.revisedPrompt, sensitive) : undefined;
+  if (!Buffer.isBuffer(result.bytes) && typeof result.filePath !== 'string') throw new Error('Provider result did not include image data.');
   return {
-    bytes: result.bytes,
+    ...(Buffer.isBuffer(result.bytes) ? { bytes: result.bytes } : {}),
+    ...(typeof result.filePath === 'string' ? { filePath: result.filePath, ...(Number.isSafeInteger(result.byteSize) ? { byteSize: result.byteSize } : {}) } : {}),
     mediaType: result.mediaType,
     ...(externalRequestId ? { externalRequestId } : {}),
     ...(revisedPrompt !== undefined ? { revisedPrompt } : {}),

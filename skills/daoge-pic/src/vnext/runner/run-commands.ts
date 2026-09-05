@@ -98,6 +98,7 @@ function parsePlan(value: string): PreflightPlan {
     operation: plan.operation === 'edit' ? 'edit' : 'generate',
     itemCount: Number(plan.itemCount),
     prompt: String(plan.prompt || ''),
+    itemPrompts: Array.isArray(plan.itemPrompts) ? plan.itemPrompts.filter((prompt): prompt is string => typeof prompt === 'string') : undefined,
     referenceAssetIds: Array.isArray(plan.referenceAssetIds) ? plan.referenceAssetIds.filter((assetId): assetId is string => typeof assetId === 'string') : [],
     maskAssetId: typeof plan.maskAssetId === 'string' ? plan.maskAssetId : undefined,
     output: typeof plan.output === 'object' && plan.output && !Array.isArray(plan.output) ? plan.output as Record<string, unknown> : {}
@@ -115,6 +116,16 @@ function stableJson(value: unknown): string {
 
 function storedSnapshotMatches(serialized: string, expected: unknown): boolean {
   try { return stableJson(JSON.parse(serialized)) === stableJson(expected); } catch { return false; }
+}
+
+function promptPayloadForSequence(plan: PreflightPlan, sequence: number): Record<string, unknown> {
+  const { itemPrompts, ...sharedPlan } = plan;
+  const scene = itemPrompts?.[sequence - 1];
+  return {
+    ...sharedPlan,
+    prompt: scene ? sharedPlan.prompt + '\n\nSpecific scene direction for this image: ' + scene : sharedPlan.prompt,
+    sequence
+  };
 }
 
 function runFromRow(row: StoredRun): GenerationRun {
@@ -242,7 +253,7 @@ export function createDryRunPreview(db: StudioDatabase, input: { studioId: strin
     const frozenConcurrency = resolveExecutionConcurrency(input.executionConcurrency, input.concurrencySource);
     db.prepare('INSERT INTO dry_run_previews (id, round_id, plan_version, provider_snapshot_json, plan_snapshot_json, item_count, execution_concurrency, concurrency_source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, round.id, round.plan_version, JSON.stringify(provider), JSON.stringify(preflight.normalizedPlan), preflight.normalizedPlan.itemCount, frozenConcurrency.executionConcurrency, frozenConcurrency.concurrencySource, timestamp);
     const insertItem = db.prepare('INSERT INTO dry_run_items (id, preview_id, sequence, prompt_payload_json, created_at) VALUES (?, ?, ?, ?, ?)');
-    for (let sequence = 1; sequence <= preflight.normalizedPlan.itemCount; sequence += 1) insertItem.run(createId('dryitem'), id, sequence, JSON.stringify({ ...preflight.normalizedPlan, sequence }), timestamp);
+    for (let sequence = 1; sequence <= preflight.normalizedPlan.itemCount; sequence += 1) insertItem.run(createId('dryitem'), id, sequence, JSON.stringify(promptPayloadForSequence(preflight.normalizedPlan, sequence)), timestamp);
     appendStudioEvent(db, { studioId: input.studioId, entityType: 'dry_run_preview', entityId: id, eventType: 'dry_run.created', payload: { roundId: round.id, planVersion: round.plan_version, itemCount: preflight.normalizedPlan.itemCount, ...frozenConcurrency } });
     return { preview: { id, roundId: round.id, planVersion: round.plan_version, providerSnapshot: provider, planSnapshot: preflight.normalizedPlan, itemCount: preflight.normalizedPlan.itemCount, ...frozenConcurrency, createdAt: timestamp }, preflight };
   }, { studioId: input.studioId, roundId: input.roundId, provider: providerSnapshot(input.providerConfig), concurrency: resolveExecutionConcurrency(input.executionConcurrency, input.concurrencySource) });
@@ -275,7 +286,7 @@ export function queueGenerationRun(db: StudioDatabase, input: { studioId: string
     for (let sequence = 1; sequence <= preflight.normalizedPlan.itemCount; sequence += 1) {
       const itemId = createId('item');
       const requestId = createId('request');
-      insertItem.run(itemId, id, sequence, 'pending', JSON.stringify({ ...preflight.normalizedPlan, sequence }), requestId, timestamp, timestamp);
+      insertItem.run(itemId, id, sequence, 'pending', JSON.stringify(promptPayloadForSequence(preflight.normalizedPlan, sequence)), requestId, timestamp, timestamp);
     }
     const frozen = { executionConcurrency: Number(preview.execution_concurrency), concurrencySource: preview.concurrency_source };
     appendStudioEvent(db, { studioId: round.studio_id, entityType: 'generation_run', entityId: id, eventType: 'run.queued', payload: { roundId: round.id, itemCount: preflight.normalizedPlan.itemCount, ...frozen } });

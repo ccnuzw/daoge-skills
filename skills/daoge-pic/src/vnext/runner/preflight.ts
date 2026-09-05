@@ -6,6 +6,7 @@ export interface PreflightPlan {
   operation: ImageOperation;
   itemCount: number;
   prompt: string;
+  itemPrompts?: string[];
   referenceAssetIds?: string[];
   maskAssetId?: string;
   output?: Record<string, unknown>;
@@ -37,6 +38,7 @@ function capabilitiesFromStatus(status: SafeProviderStatus): ImageProviderCapabi
 }
 
 const MAX_PLAN_PROMPT_CHARS = 64 * 1024;
+const MAX_ITEM_PROMPT_CHARS = 8 * 1024;
 const MAX_PLAN_JSON_BYTES = 256 * 1024;
 const MAX_ASSET_ID_CHARS = 256;
 
@@ -49,6 +51,18 @@ export function preflightGenerationPlan(plan: PreflightPlan | unknown, providerS
   const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
   if (input.prompt !== undefined && typeof input.prompt !== 'string') issues.push({ code: 'invalid_prompt', message: '提示词必须是字符串。', field: 'prompt' });
   if (prompt.length > MAX_PLAN_PROMPT_CHARS) issues.push({ code: 'prompt_too_large', message: '提示词不能超过 64 KiB。', field: 'prompt' });
+  const rawItemPrompts = input.itemPrompts;
+  let itemPrompts: string[] | undefined;
+  if (rawItemPrompts !== undefined) {
+    if (!Array.isArray(rawItemPrompts)) issues.push({ code: 'invalid_item_prompts', message: '逐图提示词必须是字符串数组。', field: 'itemPrompts' });
+    else {
+      const normalizedItemPrompts = rawItemPrompts.map((value) => typeof value === 'string' ? value.trim() : '');
+      if (normalizedItemPrompts.some((value) => !value)) issues.push({ code: 'invalid_item_prompt', message: '每条逐图提示词都必须是非空字符串。', field: 'itemPrompts' });
+      else if (normalizedItemPrompts.some((value) => value.length > MAX_ITEM_PROMPT_CHARS)) issues.push({ code: 'item_prompt_too_large', message: '单条逐图提示词不能超过 8 KiB。', field: 'itemPrompts' });
+      else itemPrompts = normalizedItemPrompts;
+      if (rawItemPrompts.length !== itemCount) issues.push({ code: 'item_prompt_count_mismatch', message: '逐图提示词数量必须与生成数量一致。', field: 'itemPrompts' });
+    }
+  }
   const rawReferences = input.referenceAssetIds;
   const referencesValid = rawReferences === undefined || Array.isArray(rawReferences);
   if (!referencesValid) issues.push({ code: 'invalid_reference_assets', message: '参考素材必须是字符串数组。', field: 'referenceAssetIds' });
@@ -58,7 +72,7 @@ export function preflightGenerationPlan(plan: PreflightPlan | unknown, providerS
   if (input.maskAssetId !== undefined && input.maskAssetId !== null && !maskAssetId) issues.push({ code: 'invalid_mask_asset_id', message: '遮罩素材 ID 必须是非空短字符串。', field: 'maskAssetId' });
   const output = input.output === undefined ? {} : input.output && typeof input.output === 'object' && !Array.isArray(input.output) ? input.output as Record<string, unknown> : null;
   if (output === null) issues.push({ code: 'invalid_output', message: '输出规格必须是 JSON 对象。', field: 'output' });
-  const normalizedPlan: PreflightPlan = { operation, itemCount, prompt, referenceAssetIds, ...(maskAssetId ? { maskAssetId } : {}), output: output || {} };
+  const normalizedPlan: PreflightPlan = { operation, itemCount, prompt, ...(itemPrompts ? { itemPrompts } : {}), referenceAssetIds, ...(maskAssetId ? { maskAssetId } : {}), output: output || {} };
   try {
     if (Buffer.byteLength(JSON.stringify(input), 'utf8') > MAX_PLAN_JSON_BYTES) issues.push({ code: 'plan_too_large', message: '创作计划不能超过 256 KiB。', field: 'plan' });
   } catch { issues.push({ code: 'invalid_plan', message: '创作计划不是可序列化的 JSON 对象。', field: 'plan' }); }

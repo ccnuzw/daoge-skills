@@ -2,9 +2,10 @@ import { InvalidCommandError } from '../domain/studio-commands';
 
 export const MIN_EXECUTION_CONCURRENCY = 1;
 export const MAX_GLOBAL_CONCURRENCY = 1000;
-export const MAX_WORKER_BATCH_CONCURRENCY = 64;
-// Provider responses are buffered before persistence; keep the process-level ceiling bounded even when a durable run requests 1000 items.
-export const MAX_ACTIVE_PROVIDER_REQUESTS = 4;
+// This is the bounded Provider target. The governor may temporarily run below it.
+export const MAX_PROVIDER_CONCURRENCY = 100;
+// Keep one child from monopolizing the daemon while the parent distributes the global target.
+export const MAX_WORKER_BATCH_CONCURRENCY = MAX_PROVIDER_CONCURRENCY;
 export const DEFAULT_EXECUTION_CONCURRENCY = 4;
 export type ConcurrencySource = 'default' | 'explicit' | 'serial';
 

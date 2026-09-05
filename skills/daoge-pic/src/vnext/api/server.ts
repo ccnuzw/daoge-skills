@@ -6,7 +6,7 @@ import { URL } from 'node:url';
 import { Readable } from 'node:stream';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase, subscribeStudioEvents, withTransaction } from '../studio/database';
 import { ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
-import { providerSnapshot } from '../studio/provider-config';
+import { ProviderCapabilities, ProviderId, providerSnapshot } from '../studio/provider-config';
 import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerStatus, resolveActiveProviderConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
 import { createImageProvider } from '../providers/http-adapters';
 import { probeHttpEndpoint } from '../providers/http-safety';
@@ -26,6 +26,7 @@ import { discardStagedImage, MediaArchiveError, MediaValidationError, openVerifi
 import { thumbnailEtag } from '../media/thumbnails';
 import { MediaJobResult, MediaProcessPool, MediaSource, MediaZipEntry } from '../runtime/media-worker-pool';
 import { daemonRestartAvailable, requestDaemonRestart } from '../runtime/restart';
+import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
 import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName, LocalAuthentication } from './local-auth';
 import { ConfirmationGate, canonicalValue, planHash } from './confirmation-gate';
 import { isSupportedProtocolVersion, protocolStatus, SKILL_PROTOCOL_NAME, SUPPORTED_PROTOCOL_RANGE } from '../shared/protocol';
@@ -280,6 +281,17 @@ export function streamVerifiedFileResponse(request: IncomingMessage, response: S
 
 interface ActiveDaemonRuntime {
   provider?: { profileId?: unknown; configVersion?: unknown; providerId?: unknown; model?: unknown; endpoint?: unknown } | null;
+  providerConcurrency?: ProviderConcurrencySnapshot | null;
+}
+interface SafeProviderSnapshot {
+  profileId: string;
+  profileName: string;
+  configVersion: number;
+  providerId: ProviderId;
+  model: string;
+  referenceEnabled: boolean;
+  endpoint: string | null;
+  capabilities: ProviderCapabilities;
 }
 
 function readActiveDaemonRuntime(runtimeDir: string): ActiveDaemonRuntime | null {
@@ -378,7 +390,7 @@ export class LocalStudioService {
     };
   }
 
-  private runtimeStatus(): { desired: ReturnType<typeof providerSnapshot> | null; active: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null; restartRequired: boolean } {
+  private runtimeStatus(): { desired: SafeProviderSnapshot | null; active: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null; restartRequired: boolean; providerConcurrency: ProviderConcurrencySnapshot | null } {
     const record = readActiveDaemonRuntime(this.initialized.paths.runtimeDir);
     const active = record?.provider && typeof record.provider.profileId === 'string' && Number.isInteger(record.provider.configVersion) && typeof record.provider.providerId === 'string' && typeof record.provider.model === 'string' ? {
       profileId: record.provider.profileId,
@@ -390,7 +402,7 @@ export class LocalStudioService {
     const config = resolveActiveProviderConfig(this.providerDb);
     const desired = config ? providerSnapshot(config) : null;
     const desiredIdentity = desired ? { profileId: desired.profileId, configVersion: desired.configVersion, providerId: desired.providerId, model: desired.model, endpoint: desired.endpoint } : null;
-    return { desired, active, restartRequired: Boolean(record && JSON.stringify(active) !== JSON.stringify(desiredIdentity)) };
+    return { desired, active, restartRequired: Boolean(record && JSON.stringify(active) !== JSON.stringify(desiredIdentity)), providerConcurrency: record?.providerConcurrency || null };
   }
 
   async close(): Promise<void> {

@@ -1,5 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { once } from 'node:events';
+import fsp from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import http, { IncomingMessage } from 'node:http';
 import https from 'node:https';
 import { isIP, LookupFunction } from 'node:net';
@@ -87,6 +89,242 @@ export async function readBoundedResponse(response: Response, maxBytes: number, 
     reader.releaseLock();
   }
   return output ? output.subarray(0, total) : Buffer.concat(chunks, total);
+}
+export async function readResponseToFile(response: Response, destination: string, maxBytes: number, limitMessage: string, signal?: AbortSignal): Promise<number> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error('A non-negative response size limit is required.');
+  const length = declaredLength(response);
+  if (length !== null && length > maxBytes) {
+    await cancelBody(response);
+    throw new Error(limitMessage);
+  }
+  if (!response.body) throw new Error('Response did not include a body.');
+  const handle = await fsp.open(destination, 'wx', 0o600);
+  const reader = response.body.getReader();
+  let total = 0;
+  try {
+    while (true) {
+      const result = await readChunkWithAbort(reader, signal);
+      if (result.done) break;
+      const chunk = result.value;
+      if (chunk.byteLength > maxBytes - total) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error(limitMessage);
+      }
+      total += chunk.byteLength;
+      let offset = 0;
+      while (offset < chunk.byteLength) {
+        const written = await handle.write(chunk, offset, chunk.byteLength - offset);
+        if (!written.bytesWritten) throw new Error('Response could not be written completely.');
+        offset += written.bytesWritten;
+      }
+    }
+    await handle.sync();
+    await handle.close();
+    reader.releaseLock();
+    return total;
+  } catch (error) {
+    reader.releaseLock();
+    await handle.close().catch(() => undefined);
+    await fsp.rm(destination, { force: true });
+    throw error;
+  }
+}
+
+
+type JsonImageCapture = 'base64' | 'url' | 'mediaType' | 'revisedPrompt';
+
+export interface JsonImageFileResponse {
+  filePath?: string;
+  byteSize?: number;
+  url?: string;
+  mediaType?: string;
+  revisedPrompt?: string;
+}
+
+function jsonCaptureForKey(value: string): JsonImageCapture | null {
+  const key = value.trim();
+  if (key === 'b64_json' || key === 'base64' || key === 'data') return 'base64';
+  if (key === 'url') return 'url';
+  if (key === 'mimeType' || key === 'mime_type' || key === 'mediaType') return 'mediaType';
+  if (key === 'revised_prompt' || key === 'revisedPrompt') return 'revisedPrompt';
+  return null;
+}
+
+function decodeJsonEscape(value: string): string {
+  if (value === 'n') return '\n';
+  if (value === 'r') return '\r';
+  if (value === 't') return '\t';
+  if (value === 'b') return '\b';
+  if (value === 'f') return '\f';
+  if (value === '/' || value === '\\' || value === '"') return value;
+  return value;
+}
+
+class Base64FileWriter {
+  private carry = '';
+  private total = 0;
+
+  constructor(private readonly handle: FileHandle, private readonly maxBytes: number) {}
+
+  get byteSize(): number { return this.total; }
+
+  async append(value: string): Promise<void> {
+    if (!value) return;
+    const combined = this.carry + value;
+    const firstPadding = combined.indexOf('=');
+    const content = firstPadding < 0 ? combined : combined.slice(0, firstPadding);
+    const padding = firstPadding < 0 ? '' : combined.slice(firstPadding);
+    if (!/^[A-Za-z0-9+/]*$/.test(content) || (padding && !/^=+$/.test(padding))) throw new Error('Provider response included invalid base64 image data.');
+    if (firstPadding >= 0) {
+      this.carry = combined;
+      return;
+    }
+    const completeLength = combined.length - (combined.length % 4);
+    if (completeLength) await this.writeDecoded(combined.slice(0, completeLength));
+    this.carry = combined.slice(completeLength);
+  }
+
+  async finish(): Promise<void> {
+    const value = this.carry;
+    const firstPadding = value.indexOf('=');
+    const content = firstPadding < 0 ? value : value.slice(0, firstPadding);
+    const padding = firstPadding < 0 ? '' : value.slice(firstPadding);
+    if (!/^[A-Za-z0-9+/]*$/.test(content) || (padding && !/^=+$/.test(padding))) throw new Error('Provider response included invalid base64 image data.');
+    if (content.length % 4 === 1 || (padding && value.length % 4 !== 0) || padding.length > 2) throw new Error('Provider response included invalid base64 image data.');
+    if (value) await this.writeDecoded(value);
+    this.carry = '';
+  }
+
+  private async writeDecoded(value: string): Promise<void> {
+    const bytes = Buffer.from(value, 'base64');
+    if (!bytes.length) return;
+    if (this.total > this.maxBytes - bytes.length) throw new Error('Provider base64 image exceeds the configured size limit.');
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = await this.handle.write(bytes, offset, bytes.length - offset);
+      if (!written.bytesWritten) throw new Error('Provider image could not be written completely.');
+      offset += written.bytesWritten;
+    }
+    this.total += bytes.length;
+  }
+}
+
+export async function readJsonImageResponseToFile(response: Response, destination: string, maxBytes: number, maxDecodedBytes: number, signal?: AbortSignal): Promise<JsonImageFileResponse> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || !Number.isSafeInteger(maxDecodedBytes) || maxDecodedBytes < 0) throw new Error('Non-negative response size limits are required.');
+  const length = declaredLength(response);
+  if (length !== null && length > maxBytes) {
+    await cancelBody(response);
+    throw new Error('Provider response exceeds the configured size limit.');
+  }
+  if (!response.body) throw new Error('Provider response did not include a body.');
+  const handle = await fsp.open(destination, 'wx', 0o600);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let inString = false;
+  let escaped = false;
+  let pendingString: string | null = null;
+  let expectingValue = false;
+  let nextCapture: JsonImageCapture | null = null;
+  let activeCapture: JsonImageCapture | null = null;
+  let current = '';
+  let base64Chunk = '';
+  let base64Writer: Base64FileWriter | null = null;
+  let base64Found = false;
+  let url: string | undefined;
+  let mediaType: string | undefined;
+  let revisedPrompt: string | undefined;
+  const flushBase64 = async (): Promise<void> => {
+    if (!base64Writer || !base64Chunk) return;
+    await base64Writer.append(base64Chunk);
+    base64Chunk = '';
+  };
+  const consume = async (text: string): Promise<void> => {
+    for (const character of text) {
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          if (activeCapture === 'base64') throw new Error('Provider response included invalid base64 image data.');
+          current += decodeJsonEscape(character);
+          continue;
+        }
+        if (character === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (character === '"') {
+          inString = false;
+          if (activeCapture === 'base64') {
+            await flushBase64();
+            await base64Writer?.finish();
+            base64Found = true;
+          } else if (activeCapture === 'url' && !url) url = current;
+          else if (activeCapture === 'mediaType' && !mediaType) mediaType = current;
+          else if (activeCapture === 'revisedPrompt' && !revisedPrompt) revisedPrompt = current;
+          else pendingString = current;
+          activeCapture = null;
+          current = '';
+          expectingValue = false;
+          nextCapture = null;
+          continue;
+        }
+        if (activeCapture === 'base64') {
+          base64Chunk += character;
+          if (base64Chunk.length >= 65536) await flushBase64();
+        } else if (current.length < 16384) current += character;
+        continue;
+      }
+      if (character === '"') {
+        inString = true;
+        current = '';
+        const capture = expectingValue ? nextCapture : null;
+        activeCapture = capture === 'base64' && base64Writer ? null : capture;
+        if (activeCapture === 'base64') base64Writer = new Base64FileWriter(handle, maxDecodedBytes);
+        expectingValue = false;
+        continue;
+      }
+      if (/\s/.test(character)) continue;
+      if (character === ':' && pendingString !== null) {
+        expectingValue = true;
+        nextCapture = jsonCaptureForKey(pendingString);
+        pendingString = null;
+        continue;
+      }
+      if (expectingValue) {
+        expectingValue = false;
+        nextCapture = null;
+      }
+      pendingString = null;
+    }
+  };
+  try {
+    while (true) {
+      const result = await readChunkWithAbort(reader, signal);
+      if (result.done) break;
+      total += result.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error('Provider response exceeds the configured size limit.');
+      }
+      await consume(decoder.decode(result.value, { stream: true }));
+    }
+    await consume(decoder.decode());
+    if (inString || escaped) throw new Error('Provider response JSON was incomplete.');
+    await flushBase64();
+    const completedWriter = base64Writer as Base64FileWriter | null;
+    if (completedWriter) await completedWriter.finish();
+    await handle.sync();
+    await handle.close();
+    reader.releaseLock();
+    if (base64Found && completedWriter) return { filePath: destination, byteSize: completedWriter.byteSize, mediaType, revisedPrompt };
+    await fsp.rm(destination, { force: true });
+    return { url, mediaType, revisedPrompt };
+  } catch (error) {
+    reader.releaseLock();
+    await handle.close().catch(() => undefined);
+    await fsp.rm(destination, { force: true });
+    throw error;
+  }
 }
 
 function ipv4Bytes(address: string): number[] | null {
@@ -321,6 +559,47 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
     }
     const bytes = await readBoundedResponse(response, options.maxBytes, 'Provider image download exceeds the configured size limit.', options.signal);
     return { bytes, contentType: response.headers.get('content-type') };
+  }
+}
+export async function downloadHttpResourceToFile(value: string, destination: string, options: SafeDownloadOptions): Promise<{ filePath: string; byteSize: number; contentType: string | null }> {
+  const request = options.request || pinnedHttpTransport;
+  const resolver = options.resolveHost || defaultHostResolver;
+  const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  if (!Number.isInteger(maxRedirects) || maxRedirects < 0) throw new Error('A non-negative redirect limit is required.');
+  let current = value;
+  for (let redirects = 0; ; redirects += 1) {
+    const target = await assertSafeUrl(current, resolver, options.signal);
+    let result: PinnedHttpResponse;
+    try {
+      result = await request(target.url, target.addresses, { headers: { accept: 'image/png, image/jpeg, image/webp' }, signal: options.signal });
+    } catch (error) {
+      if (options.signal.aborted) throw error;
+      throw new Error('Provider image download request failed.');
+    }
+    const { response, remoteAddress } = result;
+    try {
+      assertPublicAddress(hostnameWithoutBrackets(remoteAddress));
+      if (!target.addresses.some((address) => sameAddress(address, remoteAddress))) throw new Error('Provider image connection remote address did not match the pinned DNS result.');
+    } catch (error) {
+      await cancelBody(response);
+      throw error;
+    }
+    if (response.status >= 300 && response.status < 400) {
+      const location = redirectLocation(response);
+      await cancelBody(response);
+      if (!location) throw new Error('Provider image download redirect did not include a location.');
+      if (redirects >= maxRedirects) throw new Error('Provider image download exceeded the redirect limit.');
+      try { current = new URL(location, target.url).toString(); } catch { throw new Error('Provider image download redirect location is invalid.'); }
+      continue;
+    }
+    if (!response.ok) {
+      await cancelBody(response);
+      const error = new Error('http ' + response.status + ': Provider image download failed.') as Error & { status?: number };
+      error.status = response.status;
+      throw error;
+    }
+    const byteSize = await readResponseToFile(response, destination, options.maxBytes, 'Provider image download exceeds the configured size limit.', options.signal);
+    return { filePath: destination, byteSize, contentType: response.headers.get('content-type') };
   }
 }
 export async function probeHttpEndpoint(value: string, headers: Readonly<Record<string, string>>, signal: AbortSignal): Promise<{ reachable: boolean; status: number }> {

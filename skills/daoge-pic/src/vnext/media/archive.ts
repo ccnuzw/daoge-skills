@@ -534,6 +534,17 @@ export function stageImageBytesAsync(paths: StudioPaths, bytes: Buffer, declared
   if (!Buffer.isBuffer(bytes)) throw new MediaValidationError('Image data is required.');
   return stageImageStream(paths, [bytes], declaredMediaType);
 }
+export async function stageImageFileAsync(paths: StudioPaths, sourcePath: string, declaredMediaType?: string): Promise<StagedImage> {
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  const handle = await fsp.open(sourcePath, flags);
+  const stream = handle.createReadStream({ autoClose: false });
+  try {
+    return await stageImageStream(paths, stream, declaredMediaType);
+  } finally {
+    stream.destroy();
+    await handle.close().catch(() => undefined);
+  }
+}
 
 export function plannedArchivePath(paths: StudioPaths, input: { assetId: string; bucket: AssetBucket; mediaType: string }): { absolutePath: string; storagePath: string } {
   const assetId = assertSafeAssetId(input.assetId);

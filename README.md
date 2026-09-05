@@ -2,7 +2,7 @@
 
 面向中文工作流的 DAOGE Skill 系列。每个 Skill 都是可独立安装、独立使用、独立演进的能力包：Skill 负责把自然语言需求转化为可执行的标准流程，附带的脚本、参考资料和本地工作台负责让关键过程可检查、可恢复、可交付。
 
-> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.10.1](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.1)。
+> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.10.2](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.2)。
 
 当前仓库包含两项彼此独立的能力：
 
@@ -132,7 +132,7 @@ node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 
 ## 发布与反馈
 
-每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.10.1](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.1)。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章维护；最终制品哈希由 GitHub Release 和 sidecar 在包外记录，不属于运行时包。
+每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.10.2](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.2)。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
 
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。

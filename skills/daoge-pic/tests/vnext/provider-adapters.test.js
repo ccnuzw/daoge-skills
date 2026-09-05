@@ -1,9 +1,11 @@
+const fs = require('node:fs');
 const http = require('node:http');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createImageProvider } = require('../../dist/vnext/providers/http-adapters');
 const { sanitizeProviderMetadata, sanitizeProviderRequestId } = require('../../dist/vnext/providers/response-sanitizer');
+const { cleanupProviderResult } = require('../../dist/vnext/media/generated-assets');
 const { decodeBoundedBase64, downloadHttpResource, readBoundedResponse } = require('../../dist/vnext/providers/http-safety');
 
 const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==';
@@ -61,6 +63,29 @@ for (const providerId of ['openai-images', 'gemini-image', 'gemini-openai-compat
     }
   });
 }
+test('large Provider Base64 results stream to a temporary file instead of returning a large Buffer', async () => {
+  const large = Buffer.concat([png, Buffer.alloc(2 * 1024 * 1024 - png.length, 0x41)]);
+  let result = null;
+  await withServer((request, response) => {
+    request.resume();
+    request.on('end', () => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ data: [{ b64_json: large.toString('base64') }] }));
+    });
+  }, async (baseUrl) => {
+    const provider = createImageProvider({ providerId: 'openai-images', baseUrl, apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false });
+    result = await provider.generate({ requestId: 'large-response', idempotencyKey: 'large-response-key', prompt: 'large response', output: {}, referenceAssets: [] }, { abortSignal: new AbortController().signal });
+  });
+  try {
+    assert.equal(result.bytes, undefined);
+    assert.equal(typeof result.filePath, 'string');
+    assert.equal(result.byteSize, large.length);
+    assert.equal(fs.statSync(result.filePath).size, large.length);
+  } finally {
+    if (result) await cleanupProviderResult(result);
+  }
+  assert.equal(fs.existsSync(result.filePath), false);
+});
 
 
 test('vNext OpenAI adapter sends managed reference and mask bytes as multipart editing input', async () => {

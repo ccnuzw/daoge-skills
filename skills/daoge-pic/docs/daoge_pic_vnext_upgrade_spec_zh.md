@@ -1,6 +1,6 @@
 # DAOGE Pic vNext 升级规格
 
-文档类别：vNext 长期权威产品与架构规格。当前稳定正式版本为 [`5.10.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.1)；实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
+文档类别：vNext 长期权威产品与架构规格。当前稳定正式版本为 [`5.10.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.2)；实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
 
 ## 1. 定位与结论
 
@@ -243,6 +243,8 @@ daemon 启动时固定 active Profile 配置。active Profile、model、endpoint
 并发只属于 Generation Run，不属于 Provider/Profile、项目、任务、轮次或工作区长期设置。系统全局硬上限固定 `1000`，不可配置；未指定默认 `4`，会话要求串行时解析为 `1`，显式值只接受 `1..1000`，超出必须拒绝且不得静默截断。
 
 每次预检冻结非空 `executionConcurrency`，可附仅用于解释的 `concurrencySource`（`default`、`explicit`、`serial`）。并发在预检前或预检时解析并绑定证据；改变并发必须重新预检。Run 从预检证据复制冻结值，queue 时不得另改；运行中不得修改。实际每 Run 不超过冻结值，全局不超过 `1000`。
+
+Provider 活跃请求使用 daemon 内部自适应 Governor，安全目标上限为 `100`，初始目标为 `16`。Governor 按 Provider 成功、429、临时/未知结果以及 Worker RSS 和外部 Buffer 内存样本调整目标；健康窗口逐步增加，限流或资源压力减半并进入冷却。运行状态只显示脱敏的目标、活动配额、冷却原因和资源样本，不显示密钥、完整端点或绝对路径。Provider JSON/Base64 响应和公开图片 URL 优先流式写入受控临时文件，只有小于 `1 MiB` 的结果保留为内存 Buffer。
 
 必须移除可配置 workspace worker concurrency、`config --worker-concurrency`、相关 runtime-settings API/业务读取及其 restartRequired。Provider 变化仍要求重启。Schema v19 必须保留现有业务数据与已完成 Run 历史，并把既有可用请求值回填到 `executionConcurrency`，其余历史默认 `4`。
 
@@ -506,7 +508,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-016 | Provider 图片 URL 下载逐跳执行 SSRF 校验、DNS 固定、远端地址确认、重定向和大小限制；携带 Provider 凭据的 API 请求不得跟随重定向。 |
 | PIC-VN-AC-017 | 导入、生成、回收、恢复、交付与 ZIP 在崩溃、文件替换、符号链接、断连或 journal 冲突时不得把身份不明媒体提交为正式资产；恢复与读取只接受受管理根目录内身份匹配的 journal/snapshot。 |
 | PIC-VN-AC-018 | Provider Profile 支持 CRUD、复制、唯一 active、本地校验、显式连接测试、write-only secret 更新与受控重启；同进程重启保持既有 Workbench 授权但不放宽 localhost/Origin 边界；Worker 只领取 profileId + configVersion 匹配的运行。 |
-| PIC-VN-AC-019 | 每次 Run 在预检冻结 1..1000 的 executionConcurrency；默认 4、串行 1、1001 拒绝，queue 与运行中都不能改写，系统全局不超过 1000。 |
+| PIC-VN-AC-019 | 每次 Run 在预检冻结 1..1000 的 executionConcurrency；默认 4、串行 1、1001 拒绝，queue 与运行中都不能改写，系统全局不超过 1000；Provider 活跃请求由安全目标 100 的自适应 Governor 控制，429、临时故障和资源压力会降速。 |
 | PIC-VN-AC-020 | 执行型触发在稳定 workspace 中先普通 `open`，再建立独立 Session/项目上下文并开始澄清；咨询/开发型不自动启动。每个独立会话都可调用普通 open，daemon 只允许首个实际 opener并让其他会话返回 reused；失败回退不泄露 bootstrap/claim 秘密；force 仅显式用户动作；零 active Provider 仍可启动且不会自动测试连接；首次汇报区分 opened/reused 并包含职责、Provider readiness、当前上下文和下一步。 |
 | PIC-VN-AC-021 | 同一稳定 workspace 的 3–4 个并发会话最终复用唯一 daemon/PID 和单一活动 Workbench；真实 conversation Session 的 project/task/round、项目与 Run 归属互相隔离，Workbench per-tab UI Session 与 agent Sessions 分离，用户当前 route 不被后台 context 更新抢占；所有 Runs 仍共享 daemon Worker 与全局公平队列。 |
 
@@ -521,7 +523,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 5. Task Type Library、Style Kit、Brand Kit 与外部资产导入。
 6. 全量 E2E、100 项恢复场景、真实 Provider 受控探测和安全检查。
 
-`5.10.1` 稳定正式版已按本规格完成旧新体验的干净切换；后续版本也不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
+`5.10.2` 稳定正式版已按本规格完成旧新体验的干净切换；后续版本也不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
 
 ## 17. 明确非目标
 
@@ -538,4 +540,4 @@ vNext 第一版不包含：
 
 ## 18. 规格解释
 
-本规格定义 `5.10.1` 稳定正式版的目标产品与目标架构；具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。
+本规格定义 `5.10.2` 稳定正式版的目标产品与目标架构；具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。

@@ -117,21 +117,21 @@ test('README and authoritative specification preserve the same session-first sta
   assert.doesNotMatch(`${skill}\n${readme}\n${spec}`, /先澄清目标[^\n]*\n(?:.*\n){0,3}.*open --workspace/);
 });
 
-test('5.10.1 is the stable GitHub Release contract while 5.10.0 and 5.9.1 remain immutable history', () => {
+test('5.10.2 is the stable GitHub Release contract while 5.10.1, 5.10.0 and 5.9.1 remain immutable history', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const currentDocs = `${skill}\n${readme}\n${spec}`;
 
-  assert.equal(packageJson.version, '5.10.1');
-  assert.equal(packageLock.version, '5.10.1');
-  assert.equal(packageLock.packages[''].version, '5.10.1');
+  assert.equal(packageJson.version, '5.10.2');
+  assert.equal(packageLock.version, '5.10.2');
+  assert.equal(packageLock.packages[''].version, '5.10.2');
   for (const document of [skill, readme, evidence]) {
-    assert.match(document, /5\.10\.1/);
+    assert.match(document, /5\.10\.2/);
   }
-  assert.match(`${skill}\n${readme}`, /稳定正式版本[^。\n]{0,120}5\.10\.1/);
-  assert.doesNotMatch(`${skill}\n${readme}`, /5\.10\.1[^。\n]{0,80}尚未发布/);
+  assert.match(`${skill}\n${readme}`, /稳定正式版本[^。\n]{0,120}5\.10\.2/);
+  assert.doesNotMatch(`${skill}\n${readme}`, /5\.10\.2[^。\n]{0,80}尚未发布/);
   assert.doesNotMatch(`${skill}\n${readme}`, /稳定正式发布(?:仍)?(?:为|是)[^。\n]*5\.9\.1/);
-  assert.match(readme, /daoge-pic-v5\.10\.1\/daoge-pic-5\.10\.1\.tgz/);
+  assert.match(readme, /daoge-pic-v5\.10\.2\/daoge-pic-5\.10\.2\.tgz/);
   assert.match(readme, /GitHub[^。\n]*资产[^。\n]*不表示[^。\n]*npm registry/);
 
   assert.match(evidence, /## 1\. daoge-pic 5\.7\.0 已发布历史证据[\s\S]*daoge-pic-5\.7\.0\.tgz[\s\S]*1fb70265f4a0e7e5858be3dec7cf21ad8706c720fede7c1712e74a36678110fe/);
@@ -143,4 +143,8 @@ test('5.10.1 is the stable GitHub Release contract while 5.10.0 and 5.9.1 remain
    assert.match(releaseEvidence, /daoge-pic-v5\.10\.1[\s\S]*GitHub Release[\s\S]*Schema v22[\s\S]*bench:perf/);
    assert.match(releaseEvidence, /288 项通过[\s\S]*未调用真实图片 Provider/);
    assert.doesNotMatch(releaseEvidence, /5\.10\.1 仍为尚未发布候选|不宣称 GitHub Release/);
+  const optimizedEvidence = markdownSection(evidence, '## 10. daoge-pic 5.10.2 并发升级验证证据');
+  assert.match(optimizedEvidence, /daoge-pic-v5\.10\.2[\s\S]*Provider 并发 Governor[\s\S]*流式落盘/);
+  assert.match(optimizedEvidence, /294 项通过[\s\S]*未调用真实图片 Provider/);
+  assert.match(optimizedEvidence, /itemPrompts[\s\S]*运行项重试入口/);
 });

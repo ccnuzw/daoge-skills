@@ -7,8 +7,8 @@ import { MAX_GLOBAL_CONCURRENCY, MIN_EXECUTION_CONCURRENCY } from '../studio/run
 import { healthStudioId, signalVerifiedDaemon } from './legacy-daemon';
 import { readStudioManifest, studioPaths } from '../studio/workspace';
 import { SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
-
-export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; heartbeatAt: string; }
+import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
+export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; heartbeatAt: string; providerConcurrency?: ProviderConcurrencySnapshot | null; }
 
 type JsonObject = Record<string, unknown>;
 const STDIN_JSON_MARKER = Object.freeze({ __daogeJsonStdin: true });
@@ -61,7 +61,7 @@ function readRuntime(workspaceRoot: string): RuntimeRecord | null {
 }
 function publicRuntime(record: RuntimeRecord | null): Record<string, unknown> | null {
   if (!record) return null;
-  return { pid: record.pid, url: record.url, workspaceRoot: record.workspaceRoot, heartbeatAt: record.heartbeatAt };
+  return { pid: record.pid, url: record.url, workspaceRoot: record.workspaceRoot, heartbeatAt: record.heartbeatAt, providerConcurrency: record.providerConcurrency || null };
 }
 
 function workbenchBootstrapUrl(record: RuntimeRecord): string {

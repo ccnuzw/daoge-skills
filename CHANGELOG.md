@@ -2,6 +2,27 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.10.2 - 2026-09-05
+
+5.10.2 修复 v5.10.1 将 Provider 实际并发错误限制为 4 的回归，并将高并发运行改为自适应、可观测和流式持久化。
+
+### 并发与稳定性
+
+- Provider 安全目标并发上限提升为 `100`，初始目标 `16`；健康窗口逐步升速，429、临时/未知结果和 Worker 资源压力触发降速与冷却。
+- Worker 池由父进程统一分发动态 Provider 配额，保留 Generation Run 的逻辑并发 `1..1000` 和 SQLite 全局租约边界。
+- Worker 子进程回传 Provider 健康结果、RSS 和外部 Buffer 指标；Provider API 与 CLI runtime 快照提供脱敏并发状态。
+
+### Provider 内存路径
+
+- Provider JSON/Base64 响应和公开图片 URL 改为受控临时文件流式处理；不超过 `1 MiB` 的小结果才保留为 Buffer。
+- 生成资产持久化复用流式 staging、哈希、大小和媒体类型校验，并在取消、租约丢失和重复资产路径清理 Provider 临时文件。
+- 批量生成支持与 `itemCount` 对齐的逐图提示词 `itemPrompts`，单条最多 `8 KiB`，并在 dry-run/Run Item payload 中冻结。
+- Workbench Generation History 增加 failed、blocked、retry_wait 运行项的单项重试入口，沿用未知结果不自动重放和幂等边界。
+
+### 验证
+- 最终制品 `daoge-pic-5.10.2.tgz` 为 `330962` bytes，SHA-256 为 `4b3b7b289371645cb652118c3319dda9ce7b5b0f4aeec01e4c494ecaded6f1ed`。
+- `npm test` 执行 294 项且全部通过；`npm run test:package` 构建与安装 smoke 通过，发布清单 116 个文件。
+
 ## daoge-pic 5.10.1 - 2026-09-05
 
 5.10.1 完成 vNext 控制面、SQLite、媒体恢复、Provider 内存边界和 Workbench 刷新链路的性能优化，并统一发布 Schema v22。

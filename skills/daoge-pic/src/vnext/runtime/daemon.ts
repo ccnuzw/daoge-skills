@@ -15,7 +15,7 @@ import { WorkbenchPresence } from './workbench-presence';
 import { acquireDaemonLock } from './daemon-lock';
 import { WorkerProcessPool } from './worker-pool';
 import { MediaProcessPool } from './media-worker-pool';
-
+import type { ProviderConcurrencySnapshot } from './provider-concurrency';
 export interface StudioDaemonOptions {
   workspaceRoot: string;
   capability?: string;
@@ -34,6 +34,7 @@ interface RuntimeRecord {
   startedAt: string;
   heartbeatAt: string;
   provider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null;
+  providerConcurrency: ProviderConcurrencySnapshot | null;
   workerPool: { mode: 'child_process'; size: number; pids: number[] } | null;
   mediaWorkerPool: { mode: 'child_process'; size: number; pids: number[] } | null;
 }
@@ -174,7 +175,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     let activeProvider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null = null;
     const startedAt = nowIso();
     const workerId = createId('worker_pool');
-    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider, workerPool: workerPool ? { mode: 'child_process', size: workerPool.processIds().length, pids: workerPool.processIds() } : null, mediaWorkerPool: mediaWorkerPool ? { mode: 'child_process', size: mediaWorkerPool.processIds().length, pids: mediaWorkerPool.processIds() } : null });
+    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider, providerConcurrency: workerPool ? workerPool.concurrencySnapshot() : null, workerPool: workerPool ? { mode: 'child_process', size: workerPool.processIds().length, pids: workerPool.processIds() } : null, mediaWorkerPool: mediaWorkerPool ? { mode: 'child_process', size: mediaWorkerPool.processIds().length, pids: mediaWorkerPool.processIds() } : null });
     const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
 
     const requestedPort = options.port === 0 ? 0 : options.port || rememberedPort(portPath);
@@ -213,6 +214,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
         }
         if (workerPool) {
           const result = await workerPool.processOnce(MAX_GLOBAL_CONCURRENCY);
+          heartbeat();
           scheduleTick(result.claimed || recoveredLeases || promotedRetries || reconciledRuns ? 30 : pollMs);
           return;
         }

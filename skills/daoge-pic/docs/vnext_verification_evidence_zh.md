@@ -4,7 +4,7 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-当前稳定正式版本为 [`5.10.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.1)。下列章节按版本隔离发布事实；5.10.0、5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.1。
+当前稳定正式版本为 [`5.10.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.2)。下列章节按版本隔离发布事实；5.10.1、5.10.0、5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.2。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -205,3 +205,30 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - `npm run test:package`：发布清单 114 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
 - 最终制品 `daoge-pic-5.10.1.tgz` 的 SHA-256 记录在包外的 `daoge-pic-5.10.1.tgz.sha256` sidecar 与 GitHub Release；本文件随制品发布，不重复嵌入会改变自身内容的哈希。
 - 未调用真实图片 Provider，未产生计费生成请求。
+## 10. daoge-pic 5.10.2 并发升级验证证据
+
+本节对应当前 `daoge-pic-v5.10.2` 源码变更，记录 Provider 并发 Governor、响应流式落盘、健康指标和临时文件清理边界。5.10.1 的四路历史行为仅保留在上一节，不再作为当前运行契约。
+
+### 并发与资源边界
+
+- Provider 安全目标并发上限为 `100`，初始目标为 `16`；健康窗口按 25% 增长，429 进入 30 秒冷却并减半，临时/未知结果按 25% 降速。
+- Worker 池父进程统一分发 Provider 配额，子进程只接受父级容量；Generation Run 的逻辑并发和 SQLite 全局 `1000` 租约边界保持不变。
+- Worker 子进程回传 Provider 成功、429、临时/未知结果以及 RSS/外部 Buffer 样本；`/api/providers` runtime 只返回脱敏的目标、活动配额、原因和资源峰值。
+
+### Provider 媒体路径
+
+- JSON/Base64 Provider 响应按流解析并增量解码到受控临时文件；公开图片 URL 按既有 SSRF、DNS 固定和大小校验逐跳流式落盘。
+- 不超过 `1 MiB` 的小结果保持兼容 Buffer；较大结果以临时文件身份进入 staging，生成资产持久化完成、取消或租约丢失后清理临时目录。
+
+### 批量功能
+
+- 逐图提示词 `itemPrompts` 在预检校验数量、非空值和单条 `8 KiB` 上限，并在 dry-run 与 queued Run Item payload 中按序冻结。
+- Generation History 的 failed、blocked、retry_wait 运行项重试入口通过 Workbench 回归，沿用稳定 request identity 和未知结果不自动重放边界。
+
+### 最终机器验证
+
+- `npm test`：294 项通过，0 失败、0 取消、0 跳过；覆盖自适应 Governor、Provider 大 Base64 响应流式落盘、临时文件清理、Worker 池对本地模拟 Provider 的超过四路并发、租约恢复和现有全量回归。
+- `npm run test:package`：构建 TypeScript 与 Vite Workbench 成功；发布清单 116 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- 最终制品通过 package smoke 校验；制品大小和 SHA-256 只记录在包外 `daoge-pic-5.10.2.tgz.sha256` sidecar 与变更记录中，不嵌入会改变自身内容的本文件。
+- 高并发回归使用本地模拟 Provider，单 Worker 池首轮实际超过四路并发；未调用真实图片 Provider，不产生计费生成请求。
+- `npm run bench:perf`：Schema v22 下 1000/10000/100000 pending 队列分别领取 1000 项；100000 项 claim 为 `132.28 ms`，进程 RSS 为 `86.6 MiB`。

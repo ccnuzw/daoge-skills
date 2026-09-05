@@ -60,6 +60,44 @@ test('generation and media worker pools respawn crashed children and drain queue
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
+test('generation Worker pool can exceed four active Provider requests under a healthy target', async () => {
+  const { WorkerProcessPool } = require('../../dist/vnext/runtime/worker-pool');
+  const workspaceRoot = temporaryWorkspace();
+  let active = 0;
+  let maxActive = 0;
+  const server = http.createServer(async (request, response) => {
+    request.resume();
+    await new Promise((resolve) => request.once('end', resolve));
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await wait(50);
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ data: [{ b64_json: png.toString('base64') }] }));
+    active -= 1;
+  });
+  await new Promise((resolve, reject) => server.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve()));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const fixture = createQueuedHundredItemRun(workspaceRoot, 'http://127.0.0.1:' + address.port + '/v1');
+  closeStudioDatabase(fixture.db);
+  fixture.db = null;
+  const pool = new WorkerProcessPool(workspaceRoot, 1);
+  try {
+    await wait(100);
+    let result = { claimed: 0 };
+    for (let attempt = 0; attempt < 20 && result.claimed === 0; attempt += 1) {
+      result = await pool.processOnce(100);
+      if (result.claimed === 0) await wait(50);
+    }
+    assert.ok(result.claimed > 4);
+    assert.ok(maxActive > 4, 'the Provider should receive more than four simultaneous requests');
+    assert.equal(pool.concurrencySnapshot().max, 100);
+  } finally {
+    await pool.close();
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
 
 function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-daemon-resilience-'));

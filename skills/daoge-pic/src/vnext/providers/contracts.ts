@@ -42,7 +42,9 @@ export interface ImageRequestContext {
 }
 
 export interface ImageResult {
-  bytes: Buffer;
+  bytes?: Buffer;
+  filePath?: string;
+  byteSize?: number;
   mediaType: string;
   externalRequestId?: string;
   revisedPrompt?: string;

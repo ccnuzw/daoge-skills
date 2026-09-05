@@ -285,7 +285,7 @@ test('projects sanitized run item error codes without Provider messages', () => 
 test('queues a confirmed plan with a safe provider snapshot and leases durable run items', () => {
   const fixture = configuredStudio();
   try {
-    const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: 'minimal studio product shot', output: { aspectRatio: '1:1' } });
+    const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: 'minimal studio product shot', itemPrompts: ['four boys play beach volleyball', 'four boys perform as a school band'], output: { aspectRatio: '1:1' } });
     const config = fixture.config;
     assert.ok(config);
     const status = fixture.status;
@@ -302,7 +302,10 @@ test('queues a confirmed plan with a safe provider snapshot and leases durable r
     assert.equal(claimed.length, 2);
     assert.deepEqual(claimed.map((item) => item.status), ['leased', 'leased']);
     assert.equal(getGenerationRun(fixture.db, queued.value.id).status, 'running');
-    assert.equal(claimed[0].promptPayload.prompt, 'minimal studio product shot');
+    assert.deepEqual(claimed.map((item) => item.promptPayload.prompt), [
+      'minimal studio product shot\n\nSpecific scene direction for this image: four boys play beach volleyball',
+      'minimal studio product shot\n\nSpecific scene direction for this image: four boys perform as a school band'
+    ]);
 
     transitionRunItem(fixture.db, { itemId: claimed[0].id, leaseToken: claimed[0].leaseToken, status: 'requesting', now: new Date('2026-01-01T00:00:00.000Z') });
     assert.equal(markRunsResumePending(fixture.db), 1);

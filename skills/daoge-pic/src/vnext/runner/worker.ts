@@ -1,5 +1,7 @@
 import { ImageProvider, ImageRequest, ImageResult, ProviderError } from '../providers/contracts';
 import { safeErrorSummary } from '../shared/safe-error';
+import { ProviderOutcome } from '../runtime/provider-concurrency';
+import { cleanupProviderResult } from '../media/generated-assets';
 import { redactProviderText, sanitizeProviderImageResult, sanitizeProviderRequestId } from '../providers/response-sanitizer';
 import { ManagedAssetResolver, ResolvedManagedAssets } from '../media/asset-resolver';
 import { InvalidCommandError } from '../domain/studio-commands';
@@ -30,6 +32,7 @@ export interface WorkerOptions {
   leaseMs?: number;
   retryPolicy?: RetryPolicy;
   now?: () => Date;
+  onProviderOutcome?: (outcome: ProviderOutcome) => void;
 }
 
 export interface WorkerProcessResult {
@@ -75,6 +78,7 @@ export class GenerationWorker {
   private readonly leaseMs: number;
   private readonly policy: RetryPolicy;
   private readonly clock: () => Date;
+  private readonly onProviderOutcome: (outcome: ProviderOutcome) => void;
   private stopping = false;
   private readonly activeShutdowns = new Set<() => void>();
 
@@ -89,9 +93,13 @@ export class GenerationWorker {
     this.leaseMs = options.leaseMs || 30000;
     this.policy = options.retryPolicy || DEFAULT_RETRY_POLICY;
     this.clock = options.now || (() => new Date());
+    this.onProviderOutcome = options.onProviderOutcome || (() => undefined);
     if (this.provider.id !== this.providerConfig.providerId) {
       throw new InvalidCommandError('A worker can only process the Provider configuration it was started with.');
     }
+  }
+  private recordProviderOutcome(outcome: ProviderOutcome): void {
+    try { this.onProviderOutcome(outcome); } catch { /* health reporting must not affect item processing */ }
   }
   shutdown(): void {
     if (this.stopping) return;
@@ -185,14 +193,12 @@ export class GenerationWorker {
     try {
       transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'requesting', emitEvent: false });
     } catch (error) {
-      const current = getGenerationRunItem(this.db, item.id);
-      if (current?.status === 'cancelled') return 'cancelled';
-      if (current?.status === 'cancel_requested') return this.settleCancellation(item, true);
       throw error;
     }
     const controller = new AbortController();
     let request: ImageRequest;
     let managedAssets: ResolvedManagedAssets | undefined;
+    let imageResult: ImageResult | null = null;
     let providerStarted = false;
     let mediaReleased = false;
     const releaseManagedAssets = (): void => {
@@ -248,7 +254,10 @@ export class GenerationWorker {
         return await this.provider.generate(request, { abortSignal: controller.signal });
       });
       providerStarted = true;
-      void providerOperation.then(releaseManagedAssets, releaseManagedAssets);
+      void providerOperation.then((result) => {
+        if (monitorEvent) void cleanupProviderResult(result).catch(() => undefined);
+        releaseManagedAssets();
+      }, releaseManagedAssets);
       const providerOutcome = await Promise.race([tracked(providerOperation), monitorPromise]);
       if (providerOutcome.kind === 'cancel_requested') return this.settleCancellation(item, false);
       if (providerOutcome.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
@@ -259,6 +268,7 @@ export class GenerationWorker {
         if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
         if (event?.kind === 'shutdown') return this.markUnknown(item, 'daemon_shutdown');
         const classified: ProviderError = this.provider.classifyError(providerOutcome.reason);
+        this.recordProviderOutcome(classified.kind === 'rate_limited' ? 'rate_limited' : classified.kind === 'transient' ? 'transient' : classified.kind === 'unknown_outcome' ? 'unknown' : 'other_failure');
         const decision = retryDecision(classified, item.attempts, this.clock(), this.policy);
         const summary = safeErrorSummary(redactProviderText(classified.message, this.providerConfig));
         const error = { kind: sanitizeProviderRequestId(classified.kind, this.providerConfig) || 'unknown_outcome', code: sanitizeProviderRequestId(classified.code, this.providerConfig) || 'provider_error', ...(summary ? { summary } : {}) };
@@ -273,8 +283,8 @@ export class GenerationWorker {
         const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error });
         return transition || 'blocked';
       }
-
-      const imageResult = sanitizeProviderImageResult(providerOutcome.value, this.providerConfig);
+      this.recordProviderOutcome('success');
+      imageResult = sanitizeProviderImageResult(providerOutcome.value, this.providerConfig);
       let event = monitorEvent || observeLease();
       if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
       if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
@@ -286,7 +296,7 @@ export class GenerationWorker {
       transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'persisting' });
       if (transition) return transition;
 
-      const persistenceOperation = Promise.resolve().then(() => this.assetPersister.persistGeneratedImage({ runId: item.runId, itemId: item.id, result: imageResult }));
+      const persistenceOperation = Promise.resolve().then(() => this.assetPersister.persistGeneratedImage({ runId: item.runId, itemId: item.id, result: imageResult as ImageResult }));
       const persistenceOutcome = await tracked(persistenceOperation);
       event = monitorEvent || observeLease();
       if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
@@ -301,6 +311,7 @@ export class GenerationWorker {
     } finally {
       this.activeShutdowns.delete(shutdown);
       clearInterval(renewTimer);
+      if (imageResult) await cleanupProviderResult(imageResult).catch(() => undefined);
       if (!providerStarted) releaseManagedAssets();
     }
   }

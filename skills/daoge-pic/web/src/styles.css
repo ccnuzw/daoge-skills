@@ -152,3 +152,4 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 @media (max-width:720px) { .session-plan-panel { grid-template-columns:1fr; gap:9px; }.session-plan-state { justify-content:flex-start; } }
 .session-plan-panel.is-empty { grid-template-columns:1fr; border-left-color:#8b927f; background:#fafbf7; }
 .session-plan-panel.is-empty h3 { color:#596154; }
+.provider-runtime-status { display:grid; gap:4px; margin:0 0 18px; border:1px solid #b7c9ba; border-left:3px solid #4f7d5c; padding:11px 13px; background:#e7f0e4; color:#31563c; font-size:12px; }.provider-runtime-status strong { color:#24452f; font-size:11px; letter-spacing:.04em; }.provider-runtime-status span,.provider-runtime-status small { color:#58705d; font-size:11px; }

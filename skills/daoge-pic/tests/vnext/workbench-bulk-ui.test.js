@@ -45,3 +45,11 @@ test('Workbench confirmations use the shared accessible modal instead of native 
   assert.match(confirmation, /<AccessibleDialog/);
   assert.match(confirmation, /confirmation-dialog-actions/);
 });
+
+test('run history binds every rendered retry control to a defined handler', () => {
+  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  assert.match(main, /const retryRunItem = async \(itemId\) => \{/);
+  assert.match(main, /\/api\/runs\/'.*'\/retry/);
+  assert.match(main, /onRetry=\{retryRunItem\}/);
+  assert.match(main, /const controlRun = async \(action\) => \{/);
+});

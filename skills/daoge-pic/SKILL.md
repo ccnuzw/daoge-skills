@@ -5,7 +5,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.10.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.1)。本文件定义 5.10.1 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.10.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.2)。本文件定义 5.10.2 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
@@ -169,7 +169,7 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 
 ## 幂等命令恢复
 
-所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、运行时 `5.10.1`；不兼容协议由 daemon 拒绝。
+所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、运行时 `5.10.2`；不兼容协议由 daemon 拒绝。
 
 ## 运行恢复与媒体边界
 
@@ -179,7 +179,7 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 - `retry` 只允许 `failed`、`blocked` 或 `retry_wait`；可用 `--items` 做单项重试。`outcome_unknown` 不可直接重试。
 - `archive-project` 会拒绝仍有未完成生成的项目，再以事务方式归档项目、任务和轮次。
 - daemon 启动时固定 active Profile 的 `profileId + configVersion`、Provider、模型和端点身份。活动 Profile、模型、端点、密钥、options 或 configVersion 变化后标记 `restartRequired`；重启前拒绝新运行，已有运行不静默切换。Worker 只领取与启动快照 `profileId + configVersion` 匹配的运行。
-- 并发只属于 Generation Run：持久队列的全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Provider 活跃请求受单机资源预算硬上限 `4` 约束，防止 100 MB 响应的 Buffer/Base64 副本耗尽本地内存。
+- 并发只属于 Generation Run：持久队列的全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Provider 活跃请求安全目标上限为 `100`，daemon 通过自适应 Governor 按成功率、429、临时故障和 Worker RSS/外部内存样本动态升降；目标初始为 `16`，异常时退避，健康时逐步升至 `100`。大响应优先流式写入临时文件，只有不超过 `1 MiB` 的 Provider 图片结果保留为内存 Buffer。
 - Worker 与 media worker 均有 job watchdog、稳定运行窗口和有界重启；请求租约记录 worker 身份。子进程崩溃、挂起或守护超时不得让调用永久等待，未确认 Provider 结果仍进入 `outcome_unknown`。
 - Schema v22 保留历史业务数据，补齐媒体操作 owner/heartbeat、运行项 lease worker、资产媒体健康状态、运行/预检/事件与媒体恢复索引，以及完整性校验。Studio DB 强制 WAL 与 `synchronous=FULL`。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。活动 journal 由 owner heartbeat 保护，恢复只处理过期遗留项；同哈希竞争收敛到唯一资产，交付同一冻结目录的并发导出收敛到同一结果。

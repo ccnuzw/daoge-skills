@@ -1,14 +1,18 @@
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { ImageOperation, ImageProvider, ImageProviderCapabilities, ImageRequest, ImageRequestContext, ImageResult, ProviderError, ProviderValidationResult, staticCapabilitiesForProvider } from './contracts';
 import { ProviderId, ResolvedProviderConfig } from '../studio/provider-config';
 import { OutputTransport, resolveOutputSpec } from './output-spec';
-import { decodeBoundedBase64, downloadHttpResource, HostResolver, HttpFetch, PinnedHttpTransport, readBoundedResponse } from './http-safety';
+import { HostResolver, HttpFetch, PinnedHttpTransport, downloadHttpResourceToFile, readJsonImageResponseToFile, readBoundedResponse } from './http-safety';
 
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 4 * Math.ceil(MAX_DOWNLOAD_BYTES / 3) + 1024 * 1024;
 const MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
+const MAX_IN_MEMORY_IMAGE_BYTES = 1024 * 1024;
 
 interface HttpError extends Error { status?: number; }
-interface ImagePayload { b64?: string; url?: string; revisedPrompt?: string; mediaType?: string; }
+interface ImageSource { bytes?: Buffer; filePath?: string; byteSize?: number; mediaType: string; revisedPrompt?: string; }
 
 export interface HttpAdapterDependencies {
   fetch?: HttpFetch;
@@ -116,36 +120,34 @@ async function readJson(response: Response, signal: AbortSignal, maxBytes = MAX_
   try { return JSON.parse(text) as Record<string, unknown>; } catch { return { message: text.slice(0, 4096) }; }
 }
 
-function extractPayload(json: Record<string, unknown>, providerId: ProviderId): ImagePayload | null {
-  if (providerId === 'gemini-image') {
-    const candidates = Array.isArray(json.candidates) ? json.candidates as Array<Record<string, unknown>> : [];
-    for (const candidate of candidates) {
-      const content = candidate.content as Record<string, unknown> | undefined;
-      const parts = Array.isArray(content?.parts) ? content?.parts as Array<Record<string, unknown>> : [];
-      for (const part of parts) {
-        const inline = (part.inlineData || part.inline_data) as Record<string, unknown> | undefined;
-        if (typeof inline?.data === 'string') return { b64: inline.data, mediaType: imageMediaType(inline.mimeType || inline.mime_type), revisedPrompt: typeof part.text === 'string' ? part.text : undefined };
-      }
+async function imageSourceFromResponse(response: Response, signal: AbortSignal, transport: HttpTransport): Promise<ImageSource> {
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'daoge-pic-provider-'));
+  const filePath = path.join(directory, 'result.part');
+  try {
+    const parsed = await readJsonImageResponseToFile(response, filePath, MAX_RESPONSE_BYTES, MAX_DOWNLOAD_BYTES, signal);
+    let mediaType = imageMediaType(parsed.mediaType || 'image/png');
+    let byteSize = Number(parsed.byteSize) || 0;
+    if (!parsed.filePath) {
+      if (!parsed.url) throw new Error('Provider response did not include image bytes.');
+      const downloaded = await downloadHttpResourceToFile(parsed.url, filePath, { signal, maxBytes: MAX_DOWNLOAD_BYTES, request: transport.downloadRequest, resolveHost: transport.resolveHost, maxRedirects: transport.maxDownloadRedirects });
+      mediaType = imageMediaType(downloaded.contentType);
+      byteSize = downloaded.byteSize;
     }
-    return null;
+    if (!byteSize) {
+      const stat = await fsp.stat(filePath);
+      byteSize = stat.size;
+    }
+    if (!byteSize) throw new Error('Provider response returned empty image bytes.');
+    if (byteSize <= MAX_IN_MEMORY_IMAGE_BYTES) {
+      const bytes = await fsp.readFile(filePath);
+      await fsp.rm(directory, { recursive: true, force: true });
+      return { bytes, byteSize: bytes.length, mediaType, revisedPrompt: parsed.revisedPrompt };
+    }
+    return { filePath, byteSize, mediaType, revisedPrompt: parsed.revisedPrompt };
+  } catch (error) {
+    await fsp.rm(directory, { recursive: true, force: true });
+    throw error;
   }
-  const data = Array.isArray(json.data) ? json.data as Array<Record<string, unknown>> : [];
-  const first = data[0] || json;
-  if (typeof first.b64_json === 'string') return { b64: first.b64_json, revisedPrompt: typeof first.revised_prompt === 'string' ? first.revised_prompt : undefined };
-  if (typeof first.base64 === 'string') return { b64: first.base64, revisedPrompt: typeof first.revised_prompt === 'string' ? first.revised_prompt : undefined };
-  if (typeof first.url === 'string') return { url: first.url, revisedPrompt: typeof first.revised_prompt === 'string' ? first.revised_prompt : undefined };
-  return null;
-}
-
-async function download(url: string, signal: AbortSignal, transport: HttpTransport): Promise<{ bytes: Buffer; mediaType: string }> {
-  const result = await downloadHttpResource(url, {
-    signal,
-    maxBytes: MAX_DOWNLOAD_BYTES,
-    request: transport.downloadRequest,
-    resolveHost: transport.resolveHost,
-    maxRedirects: transport.maxDownloadRedirects
-  });
-  return { bytes: result.bytes, mediaType: imageMediaType(result.contentType) };
 }
 
 function errorWithStatus(status: number, message: string): HttpError {
@@ -205,14 +207,11 @@ class HttpImageProvider implements ImageProvider {
     else headers.authorization = 'Bearer ' + this.config.apiKey;
     const target = endpoint(this.config.baseUrl, this.config.providerId, this.config.model);
     const response = await credentialedFetch(this.transport, target, { method: 'POST', headers, body: JSON.stringify(requestBody(this.config, request)), signal });
-     const json = await readJson(response, signal, response.ok ? MAX_RESPONSE_BYTES : MAX_ERROR_RESPONSE_BYTES);
-    if (!response.ok) throw errorWithStatus(response.status, String((json.error as Record<string, unknown> | undefined)?.message || json.message || 'Provider request failed.'));
-    const payload = extractPayload(json, this.config.providerId);
-    if (!payload) throw new Error('Provider response did not include image bytes.');
-    const source = payload.b64 ? { bytes: decodeBoundedBase64(payload.b64, MAX_DOWNLOAD_BYTES), mediaType: payload.mediaType || 'image/png' } : await download(String(payload.url), signal, this.transport);
-    if (!source.bytes.length) throw new Error('Provider response returned empty image bytes.');
+    const json = response.ok ? null : await readJson(response, signal, MAX_ERROR_RESPONSE_BYTES);
+    if (!response.ok) throw errorWithStatus(response.status, String((json?.error as Record<string, unknown> | undefined)?.message || json?.message || 'Provider request failed.'));
+    const source = await imageSourceFromResponse(response, signal, this.transport);
     const providerRequestId = response.headers.get('x-request-id') || response.headers.get('request-id') || undefined;
-    return { bytes: source.bytes, mediaType: source.mediaType, revisedPrompt: payload.revisedPrompt, externalRequestId: providerRequestId, safeMeta: { responseModel: this.config.model, outputFormat: source.mediaType, requestPath: requestPathFor(this.config), responseStatus: response.status, ...(providerRequestId ? { providerRequestId } : {}) } };
+    return { ...source, externalRequestId: providerRequestId, safeMeta: { responseModel: this.config.model, outputFormat: source.mediaType, requestPath: requestPathFor(this.config), responseStatus: response.status, ...(providerRequestId ? { providerRequestId } : {}) } };
   }
   async edit(request: ImageRequest, context: ImageRequestContext): Promise<ImageResult> {
     const validation = validateConfig(this.config);
@@ -239,13 +238,10 @@ class HttpImageProvider implements ImageProvider {
     } else {
       throw errorWithStatus(422, 'The selected Provider does not support this managed reference or mask edit.');
     }
-    const json = await readJson(response, signal, response.ok ? MAX_RESPONSE_BYTES : MAX_ERROR_RESPONSE_BYTES);
-    if (!response.ok) throw errorWithStatus(response.status, String((json.error as Record<string, unknown> | undefined)?.message || json.message || 'Provider edit request failed.'));
-    const payload = extractPayload(json, this.config.providerId);
-    if (!payload) throw new Error('Provider edit response did not include image bytes.');
-    const source = payload.b64 ? { bytes: decodeBoundedBase64(payload.b64, MAX_DOWNLOAD_BYTES), mediaType: payload.mediaType || 'image/png' } : await download(String(payload.url), signal, this.transport);
-    if (!source.bytes.length) throw new Error('Provider edit response returned empty image bytes.');
-    return { bytes: source.bytes, mediaType: source.mediaType, revisedPrompt: payload.revisedPrompt, externalRequestId: response.headers.get('x-request-id') || response.headers.get('request-id') || undefined, safeMeta: { responseModel: this.config.model, outputFormat: source.mediaType, managedReferenceCount: request.referenceAssets.length, usedMask: Boolean(request.maskAsset) } };
+    const json = response.ok ? null : await readJson(response, signal, MAX_ERROR_RESPONSE_BYTES);
+    if (!response.ok) throw errorWithStatus(response.status, String((json?.error as Record<string, unknown> | undefined)?.message || json?.message || 'Provider edit request failed.'));
+    const source = await imageSourceFromResponse(response, signal, this.transport);
+    return { ...source, externalRequestId: response.headers.get('x-request-id') || response.headers.get('request-id') || undefined, safeMeta: { responseModel: this.config.model, outputFormat: source.mediaType, managedReferenceCount: request.referenceAssets.length, usedMask: Boolean(request.maskAsset) } };
   }
   classifyError(error: unknown): ProviderError { return classify(error); }
 }
