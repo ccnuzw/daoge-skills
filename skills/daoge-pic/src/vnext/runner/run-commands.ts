@@ -186,6 +186,11 @@ function resolveRunItemInStudio(db: StudioDatabase, studioId: string, itemId: st
   return row;
 }
 
+function assertRoundHasNoGenerationRun(db: StudioDatabase, roundId: string): void {
+  const existing = db.prepare('SELECT id, status FROM generation_runs WHERE round_id = ? ORDER BY created_at, id LIMIT 1').get(roundId) as { id: string; status: RunStatus } | undefined;
+  if (existing) throw new VersionConflictError('当前轮次已创建生成运行 ' + existing.id + '（' + existing.status + '）。请在 Generation History 查看；如需再次生成，请创建新的变体、优化或补图轮次。');
+}
+
 function validateManagedAssets(db: StudioDatabase, studioId: string, projectId: string, result: PreflightResult): PreflightResult {
   const accepted = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
   const referenceAssetIds = result.normalizedPlan.referenceAssetIds || [];
@@ -244,6 +249,7 @@ export function createDryRunPreview(db: StudioDatabase, input: { studioId: strin
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'rounds.dry_run', () => {
     const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
     if (round.status !== 'active') throw new InvalidCommandError('Only a confirmed creative round can be dry-run.');
+    assertRoundHasNoGenerationRun(db, round.id);
     if (input.providerConfig.providerId !== input.providerStatus.providerId) throw new InvalidCommandError('Provider configuration changed during dry-run.');
     const preflight = validateManagedAssets(db, input.studioId, round.project_id, preflightGenerationPlan(parseObject(round.plan_json), input.providerStatus));
     if (!preflight.valid) return { preview: null, preflight };
@@ -273,6 +279,7 @@ export function queueGenerationRun(db: StudioDatabase, input: { studioId: string
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'runs.queue', () => {
     const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
     if (round.status !== 'active') throw new InvalidCommandError('The creative round must be confirmed before a run can be queued.');
+    assertRoundHasNoGenerationRun(db, round.id);
     const preflight = validateManagedAssets(db, round.studio_id, round.project_id, preflightGenerationPlan(parseObject(round.plan_json), input.providerStatus));
     if (!preflight.valid) throw new InvalidCommandError('Generation preflight failed: ' + preflight.issues.map((issue) => issue.code).join(', '));
     const snapshot = providerSnapshot(input.providerConfig);

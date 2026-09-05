@@ -5,7 +5,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.10.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.2)。本文件定义 5.10.2 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)。本文件定义 5.10.3 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
@@ -14,12 +14,13 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 本 Skill 协议版本为 `2.0.0`，与制品版本独立；daemon `/api/studio` 返回协议协商信息，不兼容的调用必须拒绝。以下规则不依赖 Skill 自律：
 
 - 运行必须携带 daemon 签发的 `confirm_token`。令牌绑定 `plan_hash + preflight_id + conversation_id`，Skill 无法生成或修改；缺失、伪造、过期、跨计划、跨预检或跨 conversation 一律拒绝，不触发 Provider。
-- 确认挑战只可由当前 Workbench 的授权 Cookie 提交；Bearer CLI 只能创建计划、读取状态或提交非确认控制操作。真实用户确认后 daemon 才把轮次激活。
-- 预检必须验证当前会话确认与当前计划哈希，随后签发运行令牌；运行仍重复校验预检、计划与会话绑定。
+- 确认挑战只可由当前 Workbench 的授权 Cookie 提交；Workbench 的确认闸门只激活计划，不执行预检、不创建 Generation Run。真实用户确认后，由当前智能体会话继续受控执行。
+- 预检与创建运行只接受 Bearer Skill/CLI，必须验证当前会话确认与当前计划哈希；预检随后签发运行令牌，运行仍重复校验预检、计划与会话绑定。
+- 每个创作轮次只允许当前已确认计划创建一个 Generation Run。预检和入队前都必须检查已有运行；发现已有运行时返回该运行的可操作冲突，不创建第二份预检证据或运行。再次生成必须新建 `variation`、`refinement` 或 `fill` 轮次，失败项继续使用原运行的受控重试。
 - 默认 worker 池由独立 child process 执行 Provider HTTP、sharp、hash 和媒体持久化；control-plane 负责 API、SSE、SQLite 队列与恢复。生成 worker 与 media worker 按本机并行度自适应，生成运行仍受全局容量保护。
 - 大 JSON 可通过 CLI 的 `--plan @-` 等 stdin 标记传输；每次命令最多一个 `@-`，stdin 仅读取一次且必须是 JSON 对象，最大 8 MiB。`some-agent | node scripts/daoge.js plan ... --plan @-` 是推荐传输方式。`--operation-name <verb:scope>` 由 daemon 派生稳定幂等键；跨进程恢复首选 operation-name，或保存显式 idempotency-key；不提供任一参数时 CLI 生成的随机 key 不具备跨进程恢复语义。
 - Workbench 提供只读“当前会话计划摘要”，显示项目、任务、轮次、确认状态与最近运行；无活动轮次时显示明确空状态。摘要不改变事实源。人工确认是旁侧独立的“确认闸门”，不是只读摘要的一部分。
-- 人工确认与 consent 只存在 daemon 内存中；daemon 重启或进程更换后必须重新发起确认挑战并再次确认。一次签发的 token 在其有效期内可用于同一绑定预检；具体运行仍由幂等 key 防重放。
+- 人工确认与 consent 只存在 daemon 内存中；daemon 重启或进程更换后必须重新发起确认挑战并再次确认。一次签发的 token 在其有效期内可用于同一绑定预检；具体运行由幂等 key 防重放，并由轮次级唯一运行门禁防止不同预检或不同入口造成重复批次。
 
 ## 执行型启动协议（MUST）
 
@@ -63,8 +64,8 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 2. 再澄清目标、受众、数量、画幅、风格、限制条件、参考素材与交付用途，并把确认事实写入当前领域上下文。参考素材只能来自当前项目或已明确共享到跨项目素材。
 3. 给出用户可审阅的版本化计划：operation、提示词、数量、输出规格、引用素材、父轮次/父资产与风险。
 4. 未得到用户明确确认前，不得发起任何外部 Provider 调用。
-5. 确认后执行预检。预检只验证当前配置快照、能力、素材、规格、依赖与运行项计划，不调用 Provider、不计费、不创建正式生成资产。
-6. 预检证据仍与计划和 daemon 内存配置匹配时才创建运行；运行由 daemon 内持久 Worker 和 SQLite 队列处理，浏览器或终端关闭不影响已开始的工作。
+5. Workbench 完成确认后，先读取当前会话计划摘要和 Generation History。若当前轮次已有运行，必须显式选择并汇报该运行，不得再次预检或入队；没有运行时才执行预检。预检只验证当前配置快照、能力、素材、规格、依赖与运行项计划，不调用 Provider、不计费、不创建正式生成资产。
+6. 预检证据仍与计划和 daemon 内存配置匹配时才创建该轮次唯一运行；运行由 daemon 内持久 Worker 和 SQLite 队列处理，浏览器或终端关闭不影响已开始的工作。用户要求再次生成时新建衍生轮次，不复用原轮次创建第二批。
 7. 用会话汇报状态、异常与恢复选择。Workbench 用于查看实时结果、Generation History、导入素材、保留/复核/淘汰、回收、恢复和交付。
 
 不得把用户需求写成遗留 JSON 任务文件，不得扫描目录推断业务状态，不得直接写 SQLite、manifest、journal、运行文件或 SSE 状态。
@@ -169,7 +170,7 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 
 ## 幂等命令恢复
 
-所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、运行时 `5.10.2`；不兼容协议由 daemon 拒绝。
+所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、运行时 `5.10.3`；不兼容协议由 daemon 拒绝。
 
 ## 运行恢复与媒体边界
 

@@ -1,6 +1,6 @@
 # DAOGE Pic vNext 升级规格
 
-文档类别：vNext 长期权威产品与架构规格。当前稳定正式版本为 [`5.10.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.2)；实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
+文档类别：vNext 长期权威产品与架构规格。当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)；实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
 
 ## 1. 定位与结论
 
@@ -277,6 +277,8 @@ Provider adapter 必须声明 generate、edit 和 capabilities。Skill 必须按
 
 Generation Run 是脱离浏览器和终端窗口的本地后台会话。运行 worker 必须由 Studio 数据库驱动，不能由 Workbench 页面、stdout 或目录扫描驱动。
 
+Workbench 的人工确认闸门只能把当前计划激活，不得执行预检或创建 Generation Run。预检与入队只接受当前智能体会话的 Bearer 调用。一个 Creative Round 的已确认计划只能创建一个初始 Generation Run；不同预检、幂等键、客户端或并发请求必须在事务边界内收敛或明确拒绝，不能产生第二批 Provider 调用。失败项通过原运行重试；用户明确要求再次生成时创建 `variation`、`refinement` 或 `fill` 子轮次。
+
 | 状态 | 语义 | 允许的下一状态 |
 | --- | --- | --- |
 | draft | Skill 正在起草，用户尚未确认。 | awaiting_confirmation、cancelled |
@@ -343,7 +345,7 @@ outcome_unknown 表示外部请求已发出但本地未获得稳定结果，例�
 
 Skill 必须支持在不调用外部 Provider 的情况下完成预检与干跑。预检必须验证当前 Provider 配置、能力兼容性、素材可用性、轮次计划、输出约束、依赖关系和运行项数量。
 
-干跑必须创建可审计的计划与运行项预览，但不得产生外部调用、计费副作用或正式生成资产。预检失败必须在会话中用创作语言说明影响与建议动作，并允许用户修正后重新确认。
+确认完成后，Skill 必须先读取当前会话摘要与该轮次的 Generation History。已有运行时不得创建新预检或新运行，而是选择并汇报已有运行。没有运行时，干跑才创建可审计的计划与运行项预览；它不得产生外部调用、计费副作用或正式生成资产。预检失败必须在会话中用创作语言说明影响与建议动作，并允许用户修正后重新确认。
 
 ## 9. 实时更新与会话恢复
 
@@ -511,6 +513,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-019 | 每次 Run 在预检冻结 1..1000 的 executionConcurrency；默认 4、串行 1、1001 拒绝，queue 与运行中都不能改写，系统全局不超过 1000；Provider 活跃请求由安全目标 100 的自适应 Governor 控制，429、临时故障和资源压力会降速。 |
 | PIC-VN-AC-020 | 执行型触发在稳定 workspace 中先普通 `open`，再建立独立 Session/项目上下文并开始澄清；咨询/开发型不自动启动。每个独立会话都可调用普通 open，daemon 只允许首个实际 opener并让其他会话返回 reused；失败回退不泄露 bootstrap/claim 秘密；force 仅显式用户动作；零 active Provider 仍可启动且不会自动测试连接；首次汇报区分 opened/reused 并包含职责、Provider readiness、当前上下文和下一步。 |
 | PIC-VN-AC-021 | 同一稳定 workspace 的 3–4 个并发会话最终复用唯一 daemon/PID 和单一活动 Workbench；真实 conversation Session 的 project/task/round、项目与 Run 归属互相隔离，Workbench per-tab UI Session 与 agent Sessions 分离，用户当前 route 不被后台 context 更新抢占；所有 Runs 仍共享 daemon Worker 与全局公平队列。 |
+| PIC-VN-AC-022 | Workbench 只提交人工计划确认，预检与入队只接受 Skill/CLI；同一轮次即使由不同预检、幂等键、旧页面或并发入口提交也最多创建一个 Generation Run，重复请求在调用 Provider 前被拒绝并指向已有运行，再次生成必须创建新轮次。 |
 
 ## 16. 实施与发布约束
 
@@ -523,7 +526,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 5. Task Type Library、Style Kit、Brand Kit 与外部资产导入。
 6. 全量 E2E、100 项恢复场景、真实 Provider 受控探测和安全检查。
 
-`5.10.2` 稳定正式版已按本规格完成旧新体验的干净切换；后续版本也不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
+`5.10.3` 稳定正式版已按本规格收敛人工计划确认与唯一运行入口；后续版本也不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
 
 ## 17. 明确非目标
 
@@ -540,4 +543,4 @@ vNext 第一版不包含：
 
 ## 18. 规格解释
 
-本规格定义 `5.10.2` 稳定正式版的目标产品与目标架构；具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。
+本规格定义 `5.10.3` 稳定正式版的目标产品与目标架构；具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。

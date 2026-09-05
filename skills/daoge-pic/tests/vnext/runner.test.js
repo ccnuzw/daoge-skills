@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { configureProvider } = require('./provider-test-helper');
-const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, updateStudioSessionContext, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
+const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, updateStudioSessionContext, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError, VersionConflictError } = require('../../dist/vnext/domain/studio-commands');
 const { preflightGenerationPlan } = require('../../dist/vnext/runner/preflight');
 const { createDryRunPreview, listDryRunPreviews, preflightRound, queueGenerationRun, retryGenerationRunItems, getGenerationRun, listGenerationRunItems, claimRunItems, transitionRunItem, markRunsResumePending, promoteDueRetryWaitItems, resolveUnknownRunItems, resumeGenerationRun, reconcileTerminalRuns, recoverExpiredLeases } = require('../../dist/vnext/runner/run-commands');
 
@@ -110,15 +110,20 @@ test('persists a no-call dry-run preview and rejects stale Provider snapshots be
     const config = fixture.config;
     const status = fixture.status;
     const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run-1' });
+    const parallelDryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run-2' });
     assert.equal(dryRun.value.preflight.valid, true);
     assert.equal(dryRun.value.preview.itemCount, 3);
-    assert.equal(listDryRunPreviews(fixture.db, fixture.initialized.manifest.studioId, confirmed.value.id).length, 1);
+    assert.equal(listDryRunPreviews(fixture.db, fixture.initialized.manifest.studioId, confirmed.value.id).length, 2);
     assert.equal(fixture.db.prepare('SELECT COUNT(*) AS total FROM generation_runs').get().total, 0);
     const changedConfig = { ...config, model: config.model + '-changed' };
     assert.throws(() => queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: changedConfig, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'stale-preview' }), InvalidCommandError);
     fixture.db.prepare('UPDATE dry_run_previews SET plan_snapshot_json = ? WHERE id = ?').run(JSON.stringify({ output: { aspectRatio: '1:1' }, referenceAssetIds: [], prompt: 'dry run evidence', itemCount: 3, operation: 'generate' }), dryRun.value.preview.id);
     const queued = queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'fresh-preview' });
     assert.equal(queued.value.status, 'queued');
+    assert.throws(() => queueGenerationRun(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: parallelDryRun.value.preview.id, idempotencyKey: 'duplicate-run' }), VersionConflictError);
+    assert.throws(() => createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'duplicate-preflight' }), VersionConflictError);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS total FROM generation_runs').get().total, 1);
+    assert.equal(fixture.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key IN ('duplicate-run', 'duplicate-preflight')").get().total, 0);
   } finally { cleanup(fixture.workspaceRoot); }
 });
 

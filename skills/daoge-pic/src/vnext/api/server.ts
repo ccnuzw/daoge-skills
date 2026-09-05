@@ -729,6 +729,7 @@ export class LocalStudioService {
     }
     const preflightMatch = /^\/api\/rounds\/([^/]+)\/preflight$/.exec(pathname);
     if (preflightMatch) {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '预检必须由当前智能体会话在用户确认后提交。');
       this.assertRoundInStudio(preflightMatch[1]);
       this.assertConfirmedRoundSession(preflightMatch[1], text(body.sessionId));
       const config = resolveActiveProviderConfig(this.providerDb);
@@ -744,6 +745,7 @@ export class LocalStudioService {
       return success(response, { ...receipt, value: { ...receipt.value, confirmToken } });
     }
     if (pathname === '/api/runs') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '生成运行必须由当前智能体会话在用户确认后提交。');
       const roundId = text(body.roundId);
        const preflightId = text(body.preflightId);
        this.assertRoundInStudio(roundId);

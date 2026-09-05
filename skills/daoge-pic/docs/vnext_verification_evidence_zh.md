@@ -4,7 +4,7 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-当前稳定正式版本为 [`5.10.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.2)。下列章节按版本隔离发布事实；5.10.1、5.10.0、5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.2。
+当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)。下列章节按版本隔离发布事实；5.10.2、5.10.1、5.10.0、5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.3。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -232,3 +232,14 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - 最终制品通过 package smoke 校验；制品大小和 SHA-256 只记录在包外 `daoge-pic-5.10.2.tgz.sha256` sidecar 与变更记录中，不嵌入会改变自身内容的本文件。
 - 高并发回归使用本地模拟 Provider，单 Worker 池首轮实际超过四路并发；未调用真实图片 Provider，不产生计费生成请求。
 - `npm run bench:perf`：Schema v22 下 1000/10000/100000 pending 队列分别领取 1000 项；100000 项 claim 为 `132.28 ms`，进程 RSS 为 `86.6 MiB`。
+
+## 11. daoge-pic 5.10.3 重复运行防护验证证据
+
+本节对应当前 `daoge-pic-v5.10.3` 源码变更，记录确认入口收敛与轮次级重复运行防护。5.10.2 的并发与媒体路径证据保留在上一节，不替代本版本验证。
+
+- Workbench 人工确认闸门只提交 `/confirm`，不再从浏览器执行预检或创建运行；确认成功后明确引导用户返回当前智能体会话。
+- `/preflight` 与 `/api/runs` 的写入只接受 Bearer Skill/CLI，旧 Workbench 页面或其他 Cookie 客户端不能创建第二批。
+- 同一轮次可在首个运行入队前保留并行预检证据，但首个运行创建后，其他预检证据、幂等键或入口均在事务内收到 `409` 冲突；再次预检也不会写入预检或幂等回执。失败项继续在原运行内重试，再次生成使用新的变体、优化或补图轮次。
+- 定向确认、API、运行、多会话和学习中心回归共 45 项通过；`npm test` 共 295 项通过，0 失败、0 取消、0 跳过。
+- `npm run test:package` 构建 TypeScript 与 Vite Workbench 成功；发布清单 116 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
+- 本次验证未调用真实图片 Provider，未产生计费生成请求。

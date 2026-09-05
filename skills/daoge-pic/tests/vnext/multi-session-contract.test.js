@@ -124,7 +124,7 @@ test('four agent conversations retain independent Session context, project owner
       const challenge = await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/confirmation-challenge', { cookie, idempotencyKey: prefix + '-challenge', body: { sessionId: sessions[index].id } });
       assert.equal(challenge.status, 200, JSON.stringify(challenge.body));
       await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/confirm', { cookie, idempotencyKey: prefix + '-confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId: sessions[index].id, challenge: challenge.body.data.challenge } });
-      const preview = await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/preflight', { cookie, idempotencyKey: prefix + '-preflight', body: { executionConcurrency: 1, sessionId: sessions[index].id } });
+      const preview = await requestJson(started, '/api/rounds/' + roundId + '/preflight', { method: 'POST', idempotencyKey: prefix + '-preflight', body: { executionConcurrency: 1, sessionId: sessions[index].id } });
       assert.equal(preview.status, 200, JSON.stringify(preview.body));
       const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: prefix + '-run', body: { roundId, preflightId: preview.body.data.value.preview.id, confirmToken: preview.body.data.value.confirmToken } });
       contexts.push({ sessionId: sessions[index].id, projectId, taskId, roundId, runId: queued.body.data.value.id });
