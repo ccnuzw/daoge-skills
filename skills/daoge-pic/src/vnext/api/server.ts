@@ -338,10 +338,19 @@ export class LocalStudioService {
     if (options.capability && !/^[A-Za-z0-9_-]{43,}$/.test(options.capability)) throw new Error('Studio capability must be a high-entropy base64url token.');
     if (options.sessionToken && !/^[A-Za-z0-9_-]{43,}$/.test(options.sessionToken)) throw new Error('Studio session token must be a high-entropy base64url token.');
     this.initialized = options.initialized || initializeStudio({ workspaceRoot: options.workspaceRoot, hardenAccess: false });
-    this.db = openStudioDatabase(this.initialized.paths, this.initialized.manifest);
-    this.providerDb = openProviderDatabase(this.initialized.paths);
-    hardenStudioAccess(this.initialized.paths);
-    importLegacyProviderEnvOnce(this.providerDb, this.initialized.paths);
+    const db = openStudioDatabase(this.initialized.paths, this.initialized.manifest);
+    let providerDb: ProviderDatabase | null = null;
+    try {
+      providerDb = openProviderDatabase(this.initialized.paths);
+      hardenStudioAccess(this.initialized.paths);
+      importLegacyProviderEnvOnce(providerDb, this.initialized.paths);
+    } catch (error) {
+      closeProviderDatabase(providerDb);
+      closeStudioDatabase(db);
+      throw error;
+    }
+    this.db = db;
+    this.providerDb = providerDb;
     this.mediaWorkerPool = options.mediaWorkerPool || new MediaProcessPool(this.initialized.paths.workspaceRoot, 1);
     this.ownsMediaWorkerPool = !options.mediaWorkerPool;
     this.pollMs = Math.min(30000, Math.max(100, options.ssePollMs || 15000));

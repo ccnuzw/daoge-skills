@@ -2,8 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
-const helperPath = path.join(__dirname, '../../web/src/local-auth.mjs');
+const helperFilePath = path.join(__dirname, '../../web/src/local-auth.mjs');
+const helperPath = pathToFileURL(helperFilePath).href;
 
 test('Workbench exchanges fragment capability for an HttpOnly server session and removes the fragment', async () => {
   const { bootstrapLocalStudioSession } = await import(helperPath);
@@ -55,7 +57,7 @@ test('Workbench retains the fragment when authorization cannot be completed', as
 
 test('Workbench mounts App only after authorization and exposes a retryable failure page', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../web/src/main.jsx'), 'utf8');
-  const auth = fs.readFileSync(helperPath, 'utf8');
+  const auth = fs.readFileSync(helperFilePath, 'utf8');
   assert.match(main, /if \(authorized\) return <App \/>;/);
   assert.match(main, /className="local-auth-failure"/);
   assert.match(main, /重试授权/);

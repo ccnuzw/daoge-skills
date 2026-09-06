@@ -9,7 +9,7 @@ test('asset cards keep preview controls separate from expanded actions and selec
   const source = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
   const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
   const assetCard = source.slice(source.indexOf('function AssetCard('), source.indexOf('class WorkbenchErrorBoundary'));
-  const previewEnd = assetCard.search(/\n    <\/div>\n    \{menuOpen && <div className="asset-action-menu"/);
+  const previewEnd = assetCard.search(/\r?\n    <\/div>\r?\n    \{menuOpen && <div className="asset-action-menu"/);
   assert.ok(previewEnd > 0);
   assert.match(assetCard.slice(0, previewEnd), /className="asset-select-control"/);
   assert.match(assetCard.slice(0, previewEnd), /className="asset-card-tools"/);

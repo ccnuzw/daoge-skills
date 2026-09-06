@@ -35,7 +35,7 @@ export interface StudioPaths {
 export interface SensitiveAccessDependencies {
   platform?: NodeJS.Platform;
   powershellPath?: string;
-  run?: (command: string, args: readonly string[], options: { timeout: number; maxBuffer: number }) => void;
+  run?: (command: string, args: readonly string[], options: { timeout: number; maxBuffer: number }) => unknown;
 }
 
 export interface InitializeStudioOptions {
@@ -117,11 +117,21 @@ function ensureWorkspaceDirectory(paths: StudioPaths, directory: string): void {
 export interface SensitivePathEntry { targetPath: string; directory: boolean; }
 
 function runWindowsAclScript(script: string, dependencies: SensitiveAccessDependencies): void {
-  const run = dependencies.run || ((command: string, commandArgs: readonly string[], options: { timeout: number; maxBuffer: number }): void => {
-    execFileSync(command, commandArgs, { stdio: 'ignore', windowsHide: true, ...options });
+  const run = dependencies.run || ((command: string, commandArgs: readonly string[], options: { timeout: number; maxBuffer: number }): string => {
+    return execFileSync(command, commandArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...options });
   });
   try {
-    run(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 10000, maxBuffer: 1024 * 1024 });
+    const output = run(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 10000, maxBuffer: 1024 * 1024 });
+    if (typeof output === 'string' && output.trim()) {
+      const parsed = JSON.parse(output.trim()) as { expected?: unknown; results?: unknown };
+      const expected = Array.isArray(parsed.expected) ? parsed.expected.map(String).sort() : [];
+      const results = Array.isArray(parsed.results) ? parsed.results as Array<{ protected?: unknown; rules?: unknown }> : [];
+      if (expected.length !== 3 || !results.length || results.some((result) => {
+        const rules = Array.isArray(result.rules) ? result.rules as Array<{ sid?: unknown; inherited?: unknown; allow?: unknown; fullControl?: unknown }> : [];
+        const actual = rules.map((rule) => String(rule.sid || '')).sort();
+        return result.protected !== true || rules.length !== 3 || actual.join('|') !== expected.join('|') || rules.some((rule) => rule.inherited !== false || rule.allow !== true || rule.fullControl !== true);
+      })) throw new Error('Sensitive Studio ACL verification failed.');
+    }
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { signal?: string; killed?: boolean };
     if (failure.code === 'ETIMEDOUT' || failure.killed || failure.signal === 'SIGTERM') throw new Error('windows_acl_timeout: Windows ACL update exceeded 10 seconds. Use a writable local NTFS directory and retry.');
@@ -142,7 +152,9 @@ function windowsAclScript(entries: readonly SensitivePathEntry[]): string {
     '$allow = [System.Security.AccessControl.AccessControlType]::Allow',
     "$identities = @([System.Security.Principal.WindowsIdentity]::GetCurrent().User, [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))",
     '$expected = @($identities | ForEach-Object { $_.Value } | Sort-Object)',
-    "foreach ($item in $targets) { $target = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String([string]$item.encoded)); $acl = Get-Acl -LiteralPath $target; $acl.SetAccessRuleProtection($true, $false); @($acl.Access) | ForEach-Object { [void]$acl.RemoveAccessRuleSpecific($_) }; $inheritance = if ([bool]$item.directory) { $directoryInheritance } else { $noInheritance }; foreach ($identity in $identities) { $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, $rights, $inheritance, $propagation, $allow); [void]$acl.AddAccessRule($rule) }; Set-Acl -LiteralPath $target -AclObject $acl; $verify = Get-Acl -LiteralPath $target; $rules = @($verify.Access); $actual = @($rules | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } | Sort-Object); if (!$verify.AreAccessRulesProtected -or $rules.Count -ne 3 -or @($rules | Where-Object { $_.IsInherited -or $_.AccessControlType -ne $allow -or ($_.FileSystemRights -band $rights) -ne $rights }).Count -ne 0 -or (Compare-Object $expected $actual)) { throw 'Sensitive Studio ACL verification failed.' } }"
+    '$results = @()',
+    "foreach ($item in $targets) { $target = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String([string]$item.encoded)); $acl = Get-Acl -LiteralPath $target; $acl.SetAccessRuleProtection($true, $false); @($acl.Access) | ForEach-Object { [void]$acl.RemoveAccessRuleSpecific($_) }; $inheritance = if ([bool]$item.directory) { $directoryInheritance } else { $noInheritance }; foreach ($identity in $identities) { $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, $rights, $inheritance, $propagation, $allow); [void]$acl.AddAccessRule($rule) }; Set-Acl -LiteralPath $target -AclObject $acl; $verify = Get-Acl -LiteralPath $target; $ruleData = @($verify.Access | ForEach-Object { [PSCustomObject]@{ sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; inherited = [bool]$_.IsInherited; allow = $_.AccessControlType -eq $allow; fullControl = ($_.FileSystemRights -band $rights) -eq $rights } }); $results += [PSCustomObject]@{ protected = [bool]$verify.AreAccessRulesProtected; rules = $ruleData } }",
+    '[PSCustomObject]@{ expected = @($expected); results = @($results) } | ConvertTo-Json -Compress -Depth 6'
   ].join('; ');
 }
 

@@ -155,8 +155,8 @@ test('Studio initialization applies one verified Windows ACL batch', () => {
     assert.equal(calls.length, 1);
     const script = Buffer.from(calls[0].args[4], 'base64').toString('utf16le');
     assert.match(script, /ConvertFrom-Json/);
-    assert.match(script, /Sensitive Studio ACL verification failed/);
-    assert.match(script, /Compare-Object \$expected \$actual/);
+    assert.match(script, /ConvertTo-Json -Compress -Depth 6/);
+    assert.match(script, /fullControl/);
     assert.equal(script.includes(initialized.paths.studioDir), false);
   } finally { cleanup(workspaceRoot); }
 });
