@@ -46,7 +46,12 @@ jobs:
           $diagnosticRoot = Join-Path $env:RUNNER_TEMP "daoge-diagnostics"
           New-Item -ItemType Directory -Force -Path $diagnosticRoot | Out-Null
           npm test 2>&1 | Tee-Object -FilePath (Join-Path $diagnosticRoot "tests.txt")
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            $tail = (Get-Content (Join-Path $diagnosticRoot "tests.txt") -Tail 120 | ForEach-Object { $_.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A') }) -join '%0A'
+            Write-Output "::error title=Windows runtime regression failed::$tail"
+            exit $testExit
+          }
       - name: Verify package install, cmd shim, junction, and sharp
         if: always()
         shell: pwsh
@@ -54,7 +59,12 @@ jobs:
           $diagnosticRoot = Join-Path $env:RUNNER_TEMP "daoge-diagnostics"
           New-Item -ItemType Directory -Force -Path $diagnosticRoot | Out-Null
           npm run test:package 2>&1 | Tee-Object -FilePath (Join-Path $diagnosticRoot "package.txt")
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packageExit = $LASTEXITCODE
+          if ($packageExit -ne 0) {
+            $tail = (Get-Content (Join-Path $diagnosticRoot "package.txt") -Tail 120 | ForEach-Object { $_.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A') }) -join '%0A'
+            Write-Output "::error title=Windows package smoke failed::$tail"
+            exit $packageExit
+          }
       - name: Capture redacted runtime and workspace diagnostics
         if: always()
         shell: pwsh
