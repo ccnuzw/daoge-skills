@@ -131,8 +131,8 @@ test('Windows sensitive paths apply one SID-based private ACL update without an 
     assert.match(script, /S-1-5-18/);
     assert.match(script, /S-1-5-32-544/);
     assert.match(script, /SetAccessRuleProtection\(\$true, \$false\)/);
-    assert.match(script, /Set-Acl -LiteralPath \$target -AclObject \$acl/);
-    assert.doesNotMatch(script, /icacls|\/reset|DOMAIN\\current-user/i);
+    assert.match(script, /System\.IO\.(?:Directory|File)\]::SetAccessControl/);
+    assert.doesNotMatch(script, /Get-Acl|Set-Acl|icacls|\/reset|DOMAIN\\current-user/i);
   }
   assert.match(fileScript, /InheritanceFlags\]::None/);
   assert.match(directoryScript, /InheritanceFlags\]::ContainerInherit -bor .*ObjectInherit/);
@@ -190,7 +190,7 @@ test('Windows private ACL contains only the current SID, SYSTEM, and Administrat
       "$ErrorActionPreference = 'Stop'",
       '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
       "$target = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + encodedTarget + "'))",
-      '$acl = Get-Acl -LiteralPath $target',
+      '$acl = [System.IO.Directory]::GetAccessControl($target)',
       '$rules = @($acl.Access | ForEach-Object { [PSCustomObject]@{ sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; inherited = $_.IsInherited; type = $_.AccessControlType.ToString(); rights = $_.FileSystemRights.ToString() } })',
       "[PSCustomObject]@{ protected = $acl.AreAccessRulesProtected; current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; rules = $rules } | ConvertTo-Json -Compress -Depth 4"
     ].join('; ');

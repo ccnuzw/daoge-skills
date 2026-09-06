@@ -105,7 +105,7 @@ Studio 在工作区内维护：
 
 `studio.json` 只记录 Studio 身份、manifest schema 与规范工作区根。已有 manifest 的 `workspaceRoot` 必须与本次请求的规范根严格相同；不匹配时拒绝使用。`studio.db` 是项目、任务、轮次、计划、运行、资产关系、评审和交付的业务事实源；它只保存脱敏 Provider 历史快照，不保存 Profile 或秘密。
 
-完整 Provider 配置只保存在精确路径 `<workspace>/daoge-studio/Provider.db`。这是受本地权限保护的明文敏感 SQLite，不是加密数据库；拒绝符号链接。Unix 使用 `0600`；Windows 必须按当前用户 SID、SYSTEM 与 Administrators 构造完整私有 DACL，并通过单次 `Set-Acl` 应用，任何 ACL 读取或写入失败都必须拒绝继续，不得先用 `icacls /reset` 暴露继承权限，也不得按可本地化用户名授权。数据库使用 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。它支持多个 Profile，第一阶段最多一个 active，也允许零 active。新工作区不创建 `provider.env`；既有工作区首次升级时一次性导入，之后运行时只读 `Provider.db`，不覆盖或删除旧文件。`references/provider.env.example` 仅是显式 import-env 输入格式。
+完整 Provider 配置只保存在精确路径 `<workspace>/daoge-studio/Provider.db`。这是受本地权限保护的明文敏感 SQLite，不是加密数据库；拒绝符号链接。Unix 使用 `0600`；Windows 必须按当前用户 SID、SYSTEM 与 Administrators 构造完整私有 DACL，并通过系统 .NET `FileSystemSecurity` API 在一个 PowerShell 进程中批量应用和复核，不依赖可冲突的 PowerShell 安全模块。任何 ACL 读取、写入或复核失败都必须拒绝继续，不得先用 `icacls /reset` 暴露继承权限，也不得按可本地化用户名授权。数据库使用 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。
 
 Workbench 提供 Profile 列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试和保存并重启。API Key 与完整 Base URL 是 write-only，更新必须明确 `keep`、`replace` 或 `clear`；GET 只返回安全摘要。页面打开、加载或保存不得自动连接 Provider。
 

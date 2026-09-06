@@ -118,7 +118,7 @@ Skill 先分类请求。用户明确使用 daoge-pic / 刀哥生图，或要求�
 
 ## Provider 配置与下载安全
 
-完整 Provider 配置只保存在 `<workspace>/daoge-studio/Provider.db`。它是受本地文件权限保护的**明文敏感 SQLite**（并非加密）：拒绝符号链接，Unix 权限 `0600`；Windows 以当前用户 SID、SYSTEM 与 Administrators 构造完整私有 DACL，并通过单次 `Set-Acl` 应用，失败时拒绝继续。数据库固定 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。支持多个 Profile，第一阶段最多一个 active，也允许零 active：
+完整 Provider 配置只保存在 `<workspace>/daoge-studio/Provider.db`。它是受本地文件权限保护的**明文敏感 SQLite**（并非加密）：拒绝符号链接，Unix 权限 `0600`；Windows 以当前用户 SID、SYSTEM 与 Administrators 构造完整私有 DACL，并通过系统 .NET `FileSystemSecurity` API 批量应用和复核，不依赖 PowerShell 安全模块，失败时拒绝继续。数据库固定 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。支持多个 Profile，第一阶段最多一个 active，也允许零 active：
 
 - `openai-images`
 - `gemini-image`
