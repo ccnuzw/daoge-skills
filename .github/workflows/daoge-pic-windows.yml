@@ -41,10 +41,22 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Run Windows runtime and ACL regression suite
-        run: npm test
+        shell: pwsh
+        run: |
+          $diagnosticRoot = Join-Path $env:RUNNER_TEMP "daoge-diagnostics"
+          New-Item -ItemType Directory -Force -Path $diagnosticRoot | Out-Null
+          npm test 2>&1 | Tee-Object -FilePath (Join-Path $diagnosticRoot "tests.txt")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify package install, cmd shim, junction, and sharp
-        run: npm run test:package
+        if: always()
+        shell: pwsh
+        run: |
+          $diagnosticRoot = Join-Path $env:RUNNER_TEMP "daoge-diagnostics"
+          New-Item -ItemType Directory -Force -Path $diagnosticRoot | Out-Null
+          npm run test:package 2>&1 | Tee-Object -FilePath (Join-Path $diagnosticRoot "package.txt")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Capture redacted runtime and workspace diagnostics
+        if: always()
         shell: pwsh
         run: |
           $diagnosticRoot = Join-Path $env:RUNNER_TEMP "daoge-diagnostics"
