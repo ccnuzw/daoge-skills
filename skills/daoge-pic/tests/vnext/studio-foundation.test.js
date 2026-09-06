@@ -1,15 +1,17 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { initializeStudio, studioPaths, ensureAssetBucket, ensureDeliveriesDirectory, enforceSensitiveAccess } = require('../../dist/vnext/studio/workspace');
+const { attachStudio, initializeStudio, studioPaths, ensureAssetBucket, ensureDeliveriesDirectory, enforceSensitiveAccess, sameWorkspaceRoot } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase, appendStudioEvent, migrateStudioDatabase, studioSchemaVersion } = require('../../dist/vnext/studio/database');
 const { openOrAttachStudioSession, archiveProject, createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan, listRoundPlanVersions, VersionConflictError } = require('../../dist/vnext/domain/studio-commands');
 const { stageImage, archiveStagedImage, validateImageBytes, MediaValidationError } = require('../../dist/vnext/media/archive');
 const { assertRunTransition, assertRunItemTransition, StateTransitionError } = require('../../dist/vnext/domain/states');
 const { searchStudio } = require('../../dist/vnext/domain/queries');
+const { encodedPowerShellArguments, windowsPowerShellExecutable } = require('../../dist/vnext/shared/windows');
 
 
 
@@ -44,6 +46,30 @@ test('initializes a Studio without creating provider.env, Provider.db, assets, o
   } finally { cleanup(workspaceRoot); }
 });
 
+test('worker attachment requires an initialized database and never rewrites workspace metadata', () => {
+  const workspaceRoot = temporaryWorkspace();
+  let db;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    assert.throws(() => attachStudio(workspaceRoot), /database is missing/);
+    db = openStudioDatabase(initialized.paths, initialized.manifest);
+    closeStudioDatabase(db);
+    db = null;
+    const manifestBefore = fs.readFileSync(initialized.paths.manifestPath);
+    const gitignorePath = path.join(workspaceRoot, '.gitignore');
+    const gitignoreBefore = fs.readFileSync(gitignorePath);
+    const attached = attachStudio(workspaceRoot);
+    const workerDb = openStudioDatabase(attached.paths, attached.manifest, { skipIntegrityCheck: true, attachOnly: true });
+    closeStudioDatabase(workerDb);
+    assert.equal(attached.createdManifest, false);
+    assert.deepEqual(fs.readFileSync(initialized.paths.manifestPath), manifestBefore);
+    assert.deepEqual(fs.readFileSync(gitignorePath), gitignoreBefore);
+  } finally {
+    closeStudioDatabase(db);
+    cleanup(workspaceRoot);
+  }
+});
+
 
 test('existing manifests must declare the exact resolved workspace root', () => {
   const workspaceRoot = temporaryWorkspace();
@@ -59,13 +85,18 @@ test('existing manifests must declare the exact resolved workspace root', () => 
   }
 });
 
+test('Windows workspace identity accepts case-equivalent paths but rejects different roots', () => {
+  assert.equal(sameWorkspaceRoot('C:\\Users\\Example\\DAOGE', 'c:\\users\\example\\daoge', 'win32'), true);
+  assert.equal(sameWorkspaceRoot('C:\\Users\\Example\\DAOGE', 'C:\\Users\\Example\\Other', 'win32'), false);
+});
+
 test('initialization preserves and hardens an existing provider.env only as migration input', () => {
   const workspaceRoot = temporaryWorkspace();
   try {
     const initialized = initializeStudio({ workspaceRoot });
     const existing = 'IMAGE_PROVIDER=openai-images\nOPENAI_API_KEY=existing-secret\n';
     fs.writeFileSync(initialized.paths.providerEnvPath, existing, { mode: 0o666 });
-    const attached = initializeStudio({ workspaceRoot });
+    const attached = initializeStudio({ workspaceRoot, hardenAccess: true });
     assert.equal(fs.readFileSync(attached.paths.providerEnvPath, 'utf8'), existing);
     if (process.platform !== 'win32') {
       assert.equal(fs.statSync(attached.paths.providerEnvPath).mode & 0o777, 0o600);
@@ -74,46 +105,101 @@ test('initialization preserves and hardens an existing provider.env only as migr
   } finally { cleanup(workspaceRoot); }
 });
 
-test('Windows sensitive paths reset explicit Everyone/Users ACEs before removing inheritance and granting only trusted principals', () => {
+test('Windows sensitive paths apply one SID-based private ACL update without an intermediate reset', () => {
   const calls = [];
+  const powershellPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
   enforceSensitiveAccess('C:\\workspace with spaces\\Provider.db', false, {
     platform: 'win32',
-    username: 'DOMAIN\\current-user',
-    run: (command, args) => calls.push({ command, args })
+    powershellPath,
+    run: (command, args, options) => calls.push({ command, args, options })
   });
   enforceSensitiveAccess('C:\\workspace with spaces\\runtime', true, {
     platform: 'win32',
-    username: 'DOMAIN\\current-user',
-    run: (command, args) => calls.push({ command, args })
+    powershellPath,
+    run: (command, args, options) => calls.push({ command, args, options })
   });
-  assert.deepEqual(calls, [
-    { command: 'icacls', args: ['C:\\workspace with spaces\\Provider.db', '/reset'] },
-    { command: 'icacls', args: ['C:\\workspace with spaces\\Provider.db', '/inheritance:r'] },
-    { command: 'icacls', args: ['C:\\workspace with spaces\\Provider.db', '/grant:r', 'DOMAIN\\current-user:F', '*S-1-5-18:F', '*S-1-5-32-544:F'] },
-    { command: 'icacls', args: ['C:\\workspace with spaces\\runtime', '/reset'] },
-    { command: 'icacls', args: ['C:\\workspace with spaces\\runtime', '/inheritance:r'] },
-    { command: 'icacls', args: ['C:\\workspace with spaces\\runtime', '/grant:r', 'DOMAIN\\current-user:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'] }
-  ]);
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.equal(call.command, powershellPath);
+    assert.deepEqual(call.args.slice(0, 4), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand']);
+    assert.deepEqual(call.options, { timeout: 10000, maxBuffer: 1024 * 1024 });
+  }
+  const fileScript = Buffer.from(calls[0].args[4], 'base64').toString('utf16le');
+  const directoryScript = Buffer.from(calls[1].args[4], 'base64').toString('utf16le');
+  for (const script of [fileScript, directoryScript]) {
+    assert.match(script, /WindowsIdentity\]::GetCurrent\(\)\.User/);
+    assert.match(script, /S-1-5-18/);
+    assert.match(script, /S-1-5-32-544/);
+    assert.match(script, /SetAccessRuleProtection\(\$true, \$false\)/);
+    assert.match(script, /Set-Acl -LiteralPath \$target -AclObject \$acl/);
+    assert.doesNotMatch(script, /icacls|\/reset|DOMAIN\\current-user/i);
+  }
+  assert.match(fileScript, /InheritanceFlags\]::None/);
+  assert.match(directoryScript, /InheritanceFlags\]::ContainerInherit -bor .*ObjectInherit/);
+  assert.equal(fileScript.includes('C:\\workspace with spaces\\Provider.db'), false);
 });
 
-test('Windows sensitive path hardening stops immediately when any ACL step fails', () => {
-  const expected = [
-    { command: 'icacls', args: ['C:\\workspace\\Provider.db', '/reset'] },
-    { command: 'icacls', args: ['C:\\workspace\\Provider.db', '/inheritance:r'] },
-    { command: 'icacls', args: ['C:\\workspace\\Provider.db', '/grant:r', 'current-user:F', '*S-1-5-18:F', '*S-1-5-32-544:F'] }
-  ];
-  for (let failureIndex = 0; failureIndex < expected.length; failureIndex += 1) {
-    const calls = [];
+test('Studio initialization applies one verified Windows ACL batch', () => {
+  const workspaceRoot = temporaryWorkspace();
+  const calls = [];
+  try {
+    const initialized = initializeStudio({
+      workspaceRoot,
+      hardenAccess: true,
+      sensitiveAccess: {
+        platform: 'win32',
+        powershellPath: 'powershell.exe',
+        run: (command, args) => calls.push({ command, args })
+      }
+    });
+    assert.equal(calls.length, 1);
+    const script = Buffer.from(calls[0].args[4], 'base64').toString('utf16le');
+    assert.match(script, /ConvertFrom-Json/);
+    assert.match(script, /Sensitive Studio ACL verification failed/);
+    assert.match(script, /Compare-Object \$expected \$actual/);
+    assert.equal(script.includes(initialized.paths.studioDir), false);
+  } finally { cleanup(workspaceRoot); }
+});
+
+test('Windows sensitive path hardening leaves execution to one fail-closed ACL operation', () => {
+  const calls = [];
+  assert.throws(() => enforceSensitiveAccess('C:\\workspace\\Provider.db', false, {
+    platform: 'win32',
+    powershellPath: 'powershell.exe',
+    run: (command, args) => { calls.push({ command, args }); throw new Error('access denied'); }
+  }), /Cannot secure sensitive Studio path with Windows ACLs/);
+  assert.equal(calls.length, 1);
+});
+
+test('Windows ACL hardening distinguishes timeout and missing PowerShell failures', () => {
+  for (const [code, expected] of [['ETIMEDOUT', /windows_acl_timeout/], ['ENOENT', /windows_powershell_missing/]]) {
     assert.throws(() => enforceSensitiveAccess('C:\\workspace\\Provider.db', false, {
       platform: 'win32',
-      username: 'current-user',
-      run: (command, args) => {
-        calls.push({ command, args });
-        if (calls.length - 1 === failureIndex) throw new Error('access denied');
-      }
-    }), /Cannot secure sensitive Studio path with Windows ACLs/);
-    assert.deepEqual(calls, expected.slice(0, failureIndex + 1));
+      powershellPath: 'powershell.exe',
+      run: () => { const error = new Error(code); error.code = code; throw error; }
+    }), expected);
   }
+});
+
+test('Windows private ACL contains only the current SID, SYSTEM, and Administrators', { skip: process.platform !== 'win32' }, () => {
+  const workspaceRoot = temporaryWorkspace();
+  try {
+    const initialized = initializeStudio({ workspaceRoot, hardenAccess: true });
+    const encodedTarget = Buffer.from(initialized.paths.studioDir, 'utf8').toString('base64');
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+      "$target = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + encodedTarget + "'))",
+      '$acl = Get-Acl -LiteralPath $target',
+      '$rules = @($acl.Access | ForEach-Object { [PSCustomObject]@{ sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; inherited = $_.IsInherited; type = $_.AccessControlType.ToString(); rights = $_.FileSystemRights.ToString() } })',
+      "[PSCustomObject]@{ protected = $acl.AreAccessRulesProtected; current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; rules = $rules } | ConvertTo-Json -Compress -Depth 4"
+    ].join('; ');
+    const output = execFileSync(windowsPowerShellExecutable(), encodedPowerShellArguments(script), { encoding: 'utf8', windowsHide: true });
+    const acl = JSON.parse(output.trim());
+    assert.equal(acl.protected, true);
+    assert.deepEqual(acl.rules.map((rule) => rule.sid).sort(), [acl.current, 'S-1-5-18', 'S-1-5-32-544'].sort());
+    assert.equal(acl.rules.every((rule) => rule.inherited === false && rule.type === 'Allow' && rule.rights.includes('FullControl')), true);
+  } finally { cleanup(workspaceRoot); }
 });
 
 

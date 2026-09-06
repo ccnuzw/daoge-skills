@@ -1,4 +1,5 @@
 import { matchesDaemonProcess, ProcessArgumentsQuery, queryProcessArguments } from './process-identity';
+import { sameWorkspaceRoot } from '../studio/workspace';
 
 export interface RecordedDaemonIdentity {
   pid: number;
@@ -50,7 +51,7 @@ export async function signalVerifiedDaemon(
   dependencies: DaemonSignalDependencies = {}
 ): Promise<void> {
   if (record.pid !== expected.lockPid) throw new Error('daemon runtime 与 owner record PID 不匹配，拒绝发送终止信号。');
-  if (record.workspaceRoot !== expected.workspaceRoot) throw new Error('daemon runtime 工作区不匹配，拒绝发送终止信号。');
+  if (!sameWorkspaceRoot(record.workspaceRoot, expected.workspaceRoot)) throw new Error('daemon runtime 工作区不匹配，拒绝发送终止信号。');
   if (!loopbackRuntimeUrl(record.url)) throw new Error('daemon runtime 地址不是可信 loopback URL，拒绝发送终止信号。');
   const studioId = await healthStudioId(record.url, dependencies.fetch || fetch);
   if (studioId !== expected.studioId) throw new Error('daemon 健康端点未确认当前 Studio 身份，拒绝发送终止信号。');

@@ -22,10 +22,17 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQ
 test('media worker pool is an independently addressable child-process pool', async () => {
   const { MediaProcessPool } = require('../../dist/vnext/runtime/media-worker-pool');
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-media-pool-'));
+  const initialized = initializeStudio({ workspaceRoot });
+  const database = openStudioDatabase(initialized.paths, initialized.manifest);
+  closeStudioDatabase(database);
   const pool = new MediaProcessPool(workspaceRoot, 1);
   try {
-    for (let attempt = 0; attempt < 50 && !pool.processIds().length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(pool.processIds().length, 1);
+    assert.deepEqual(pool.processIds(), []);
+    assert.equal(pool.healthSnapshot().state, 'idle');
+    const reconciliation = pool.run({ type: 'reconcile', studioId: initialized.manifest.studioId });
+    await waitFor(() => pool.processIds().length === 1, 'lazy media worker child');
+    assert.equal((await reconciliation).type, 'reconcile');
+    assert.equal(pool.healthSnapshot().state, 'ready');
     assert.notEqual(pool.processIds()[0], process.pid);
   } finally {
     await pool.close();
@@ -42,14 +49,25 @@ test('generation and media worker pools respawn crashed children and drain queue
   try {
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { name: 'Worker Respawn Provider' });
+    const database = openStudioDatabase(initialized.paths, initialized.manifest);
+    closeStudioDatabase(database);
     generationPool = new WorkerProcessPool(workspaceRoot, 1);
     mediaPool = new MediaProcessPool(workspaceRoot, 1);
-    await waitFor(() => generationPool.processIds().length === 1 && mediaPool.processIds().length === 1, 'worker pool children');
+    assert.deepEqual(generationPool.processIds(), []);
+    assert.deepEqual(mediaPool.processIds(), []);
+    assert.equal(generationPool.healthSnapshot().state, 'idle');
+    assert.equal(mediaPool.healthSnapshot().state, 'idle');
+    await generationPool.processOnce(1);
+    const initialMedia = mediaPool.run({ type: 'reconcile', studioId: initialized.manifest.studioId });
+    await waitFor(() => generationPool.processIds().length === 1 && mediaPool.processIds().length === 1, 'lazy worker pool children');
+    await initialMedia;
     const generationPid = generationPool.processIds()[0];
     const mediaPid = mediaPool.processIds()[0];
     process.kill(generationPid, 'SIGKILL');
     process.kill(mediaPid, 'SIGKILL');
     await waitFor(() => generationPool.processIds()[0] && generationPool.processIds()[0] !== generationPid && mediaPool.processIds()[0] && mediaPool.processIds()[0] !== mediaPid, 'respawned worker pool children');
+    assert.ok(generationPool.healthSnapshot().restartCount >= 1);
+    assert.ok(mediaPool.healthSnapshot().restartCount >= 1);
     const generationTick = await generationPool.processOnce(1);
     assert.equal(generationTick.claimed, 0);
     const mediaResult = await mediaPool.run({ type: 'reconcile', studioId: initialized.manifest.studioId });
@@ -352,11 +370,11 @@ test('controlled restart preserves its port and Workbench authorization only ins
     const setCookie = bootstrap.headers.get('set-cookie');
     assert.ok(setCookie);
     const cookie = setCookie.split(';', 1)[0];
-    const restart = await fetch(first.url + '/api/restart', { method: 'POST', headers: { cookie, origin: first.url, 'content-type': 'application/json', 'idempotency-key': 'workbench-restart' }, body: '{}' });
-    assert.equal(restart.status, 200);
-    await waitFor(() => {
-      try { return JSON.parse(fs.readFileSync(runtimePath, 'utf8')).startedAt !== first.startedAt; } catch { return false; }
-    }, 'controlled daemon restart');
+    const restart = spawnSync(process.execPath, [cliEntry, 'restart', '--workspace', workspaceRoot], { encoding: 'utf8', timeout: 15000 });
+    assert.equal(restart.status, 0, restart.stderr);
+    const restartResult = JSON.parse(restart.stdout);
+    assert.equal(restartResult.previousPid, first.pid);
+    assert.equal(restartResult.daemon.pid, first.pid);
     const restarted = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
     const restartedOwner = JSON.parse(fs.readFileSync(ownerRecordPath, 'utf8'));
     assert.equal(restarted.pid, first.pid);

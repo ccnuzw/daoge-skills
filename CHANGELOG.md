@@ -2,6 +2,40 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.10.4（待发布）
+
+5.10.4 候选集中完成 Windows 安装、工作区、进程、权限、冷启动和 Workbench 恢复优化。当前稳定 GitHub Release 仍为 5.10.3；只有创建并验证 `daoge-pic-v5.10.4` Release 后才能移除“待发布”标记。
+
+### Windows 初始化与安全
+
+- Node.js 下限固定为 `22.13.0`；daemon 身份查询从 WMIC 改为系统 Windows PowerShell/CIM，并同时设置 CIM 与 Node 外层超时。
+- 新工作区在任何 Studio 文件创建前拒绝 UNC、同步盘/系统目录、非本地固定磁盘、非 NTFS 与已有 junction/symlink；`open --allow-nested-studio true` 不能越过这些存储约束。
+- 敏感目录、manifest、SQLite 与现有 sidecar 由 daemon owner 在一个 PowerShell 进程中批量设置并复核 DACL；只允许当前用户 SID、SYSTEM 与 Administrators。ACL 超时、PowerShell 缺失和权限拒绝均失败关闭。
+- 交付路径保留安全 Unicode、限制组件长度、规避 Windows 设备保留名，并给项目与交付目录追加短 ID。
+- `rundll32.exe` 无法启动或立即非零退出时回退到无 shell 的 `explorer.exe`；最终失败提示运行 doctor，不泄露 bootstrap URL 或 capability。
+
+### 冷启动与 Worker 恢复
+
+- 新增只附加模式。Generation/media Worker 不再创建目录、写 `.gitignore`、执行 schema migration 或修改 ACL；daemon control-plane 复用一组 Studio/Provider 数据库连接。
+- 空 Studio 不启动 media Worker；真实媒体恢复/作业才按需创建。Generation pool 首次 tick 只启动一个 Worker，持续满载时逐个扩容。
+- 两类池公开脱敏 `idle/starting/ready/degraded/failed/stopping` 健康状态、有界重启次数和安全错误摘要；达到上限后熔断，队列不会永久等待。
+
+### 安装、诊断与 Workbench
+
+- 新增 `register-skill --scope project|user`，跨平台创建 fail-if-exists link/junction，并拒绝父级 symlink/junction 路径穿越；README 与发布模板不再要求长 Node 注册脚本。
+- 新增不调用 Provider 的 `doctor --workspace <path> [--json true] [--redacted true]`，检查目录、原子 rename、SQLite 排他锁、权限、`sharp`，并在 Windows 检查磁盘/文件系统、CIM 和浏览器关联。
+- package smoke 改在独立临时 pack 目录运行，不删除仓库同名正式制品；临时 consumer 路径包含中文和空格，并执行真实 bin、注册、doctor 与 `sharp`。
+- Workbench 新增运行健康横幅、安全重启、状态刷新和脱敏诊断复制；受控重启依次显示安全关闭、重连、权威快照恢复和已恢复。
+
+### 验证与候选制品
+
+- macOS `npm test`：315 项，313 通过、0 失败、2 项 Windows 实机用例跳过。`npm run test:package`：122 个发布文件，全部清单、安装、bin、注册、doctor 与 `sharp` 检查通过。
+- 浏览器实测 1440×1000 与 375×812，无横向溢出，移动端健康操作为 44px；实际 daemon 故障注入完整观察到故障、安全关闭和恢复状态。
+- `npm run bench:perf`：空 Studio control-plane `41.81 ms`、需求前 media process `0`；100000 pending 队列领取 1000 项 `128.03 ms`，RSS `105.6 MiB`。
+- Windows Actions 扩为 `windows-2022`、`windows-2025` × Node.js `22.13.0`、`24`，并在每组上传脱敏 doctor 与性能证据。分支推送前不把本地 macOS 结果冒充 Windows runner 结果。
+- 本地候选制品 `daoge-pic-5.10.4.tgz` 为 `350241` bytes，SHA-256 为 `a3c8e6e2dfcdac35f9577c6d7685c3164380818769918a0b57491c50cfd50dd5`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
+- 所有验证未调用真实图片 Provider，未产生计费生成请求。
+
 ## daoge-pic 5.10.3 - 2026-09-05
 
 5.10.3 修复 Workbench 与智能体会话可对同一计划分别预检和入队而产生重复批次的问题，并把确认、预检与运行创建收敛为单一职责。

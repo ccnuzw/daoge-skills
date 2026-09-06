@@ -15,7 +15,7 @@ function secretUpdate(action, value) {
   return action === 'replace' ? { action, value } : { action };
 }
 
-export function ProviderSettings({ request, onDismiss, onChanged }) {
+export function ProviderSettings({ request, onDismiss, onChanged, onRestarting }) {
   const [data, setData] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [mode, setMode] = useState('idle');
@@ -73,6 +73,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
       await onChanged();
       if (restart) {
         await request('/api/restart', { method: 'POST', idempotencyKey: crypto.randomUUID(), body: {} });
+        onRestarting?.();
         setFeedback('配置已保存，Studio 正在优雅重启；当前页面授权会在连接恢复后继续有效。');
       } else setFeedback('Profile 已保存。若活动配置有变化，请使用“保存并重启”使新运行生效。');
     } catch (nextError) { setError(nextError.message || '无法保存 Provider Profile。'); }

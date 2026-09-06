@@ -29,15 +29,18 @@ function harness(options = {}) {
   const connectionErrors = [];
   const batches = [];
   let snapshots = 0;
+  let reconnects = 0;
   const callbacks = {
     onEventBatch: async (events) => { batches.push(events); return options.batchResult ?? true; },
     onSnapshot: async () => { snapshots += 1; return options.snapshotResult ?? true; },
     onRequestError: (value) => requestErrors.push(value),
-    onConnectionError: (value) => connectionErrors.push(value)
+    onConnectionError: (value) => connectionErrors.push(value),
+    onReconnected: () => { reconnects += 1; }
   };
   return {
     stored, sources, timers, requestErrors, connectionErrors, batches,
     snapshotCount: () => snapshots,
+    reconnectCount: () => reconnects,
     async create() {
       const { createStudioEventStream } = await import('../../web/src/use-studio-events.mjs');
       return createStudioEventStream({
@@ -137,6 +140,7 @@ test('opening a recovered SSE connection clears only connectionError, not reques
   value.sources[1].open();
   assert.equal(value.requestErrors.length, 1);
   assert.deepEqual(value.connectionErrors, ['']);
+  assert.equal(value.reconnectCount(), 1);
   stream.dispose();
 });
 test('event refresh queue returns a failed refresh so event cursors are not acknowledged', async () => {

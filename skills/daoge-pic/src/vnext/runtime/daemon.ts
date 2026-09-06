@@ -5,9 +5,9 @@ import { createLocalCapability } from '../api/local-auth';
 import { promoteDueRetryWaitItems, reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { createId, nowIso } from '../shared/ids';
-import { appendStudioEvent, closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
+import { appendStudioEvent } from '../studio/database';
 import { providerSnapshot } from '../studio/provider-config';
-import { closeProviderDatabase, importLegacyProviderEnvOnce, openProviderDatabase, ProviderDatabase, providerStatus, resolveActiveProviderConfig } from '../studio/provider-store';
+import { providerStatus, resolveActiveProviderConfig } from '../studio/provider-store';
 import { MAX_GLOBAL_CONCURRENCY } from '../studio/runtime-settings';
 import { ensureRuntimeDirectory, initializeStudio, studioPaths } from '../studio/workspace';
 import { installDaemonRestartHandler } from './restart';
@@ -15,6 +15,7 @@ import { WorkbenchPresence } from './workbench-presence';
 import { acquireDaemonLock } from './daemon-lock';
 import { WorkerProcessPool } from './worker-pool';
 import { MediaProcessPool } from './media-worker-pool';
+import type { ProcessPoolHealth } from './worker-pool';
 import type { ProviderConcurrencySnapshot } from './provider-concurrency';
 export interface StudioDaemonOptions {
   workspaceRoot: string;
@@ -35,8 +36,8 @@ interface RuntimeRecord {
   heartbeatAt: string;
   provider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null;
   providerConcurrency: ProviderConcurrencySnapshot | null;
-  workerPool: { mode: 'child_process'; size: number; pids: number[] } | null;
-  mediaWorkerPool: { mode: 'child_process'; size: number; pids: number[] } | null;
+  workerPool: { mode: 'child_process'; size: number; pids: number[]; health: ProcessPoolHealth } | null;
+  mediaWorkerPool: { mode: 'child_process'; size: number; pids: number[]; health: ProcessPoolHealth } | null;
 }
 function writeAtomically(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -86,8 +87,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
   });
 
   let service: LocalStudioService | null = null;
-  let workerDb: StudioDatabase | null = null;
-  let workerProviderDb: ProviderDatabase | null = null;
+
   let workerPool: WorkerProcessPool | null = null;
   let mediaWorkerPool: MediaProcessPool | null = null;
   let restartRequested = false;
@@ -116,14 +116,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
         await settleShutdownStep(service.close(), 'Studio HTTP service', failures);
         service = null;
       }
-      if (workerDb) {
-        try { closeStudioDatabase(workerDb); } catch (error) { failures.push(error); }
-        workerDb = null;
-      }
-      if (workerProviderDb) {
-        try { closeProviderDatabase(workerProviderDb); } catch (error) { failures.push(error); }
-        workerProviderDb = null;
-      }
+
       try {
         const current = JSON.parse(fs.readFileSync(runtimePath, 'utf8')) as { pid?: number };
         if (current.pid === process.pid) fs.rmSync(runtimePath);
@@ -158,24 +151,21 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
   process.on('SIGHUP', stop);
 
   try {
-    const initialized = initializeStudio({ workspaceRoot: paths.workspaceRoot });
+    const initialized = initializeStudio({ workspaceRoot: paths.workspaceRoot, hardenAccess: false });
     const capability = options.capability || createLocalCapability();
     const sessionToken = options.sessionToken || createLocalCapability();
-    mediaWorkerPool = new MediaProcessPool(initialized.paths.workspaceRoot);
-    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, capability, sessionToken, workbenchPresence: options.workbenchPresence, mediaWorkerPool });
-    workerDb = openStudioDatabase(initialized.paths, initialized.manifest, { skipIntegrityCheck: true });
-    workerProviderDb = openProviderDatabase(initialized.paths);
-    importLegacyProviderEnvOnce(workerProviderDb, initialized.paths);
-    await recoverStudioStartupAsync(workerDb, initialized.paths, initialized.manifest.studioId, new Date(), { mediaWorkerPool });
+    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, initialized, capability, sessionToken, workbenchPresence: options.workbenchPresence });
+    mediaWorkerPool = service.mediaWorkerPool;
+    await recoverStudioStartupAsync(service.db, initialized.paths, initialized.manifest.studioId, new Date(), { mediaWorkerPool });
 
     const daemonService = service;
-    const daemonDb = workerDb;
-    const daemonProviderDb = workerProviderDb;
+    const daemonDb = service.db;
+    const daemonProviderDb = service.providerDb;
     let startedUrl = '';
     let activeProvider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null = null;
     const startedAt = nowIso();
     const workerId = createId('worker_pool');
-    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider, providerConcurrency: workerPool ? workerPool.concurrencySnapshot() : null, workerPool: workerPool ? { mode: 'child_process', size: workerPool.processIds().length, pids: workerPool.processIds() } : null, mediaWorkerPool: mediaWorkerPool ? { mode: 'child_process', size: mediaWorkerPool.processIds().length, pids: mediaWorkerPool.processIds() } : null });
+    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider, providerConcurrency: workerPool ? workerPool.concurrencySnapshot() : null, workerPool: workerPool ? { mode: 'child_process', size: workerPool.processIds().length, pids: workerPool.processIds(), health: workerPool.healthSnapshot() } : null, mediaWorkerPool: mediaWorkerPool ? { mode: 'child_process', size: mediaWorkerPool.processIds().length, pids: mediaWorkerPool.processIds(), health: mediaWorkerPool.healthSnapshot() } : null });
     const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
 
     const requestedPort = options.port === 0 ? 0 : options.port || rememberedPort(portPath);

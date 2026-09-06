@@ -1,6 +1,6 @@
 {
   "name": "daoge-pic",
-  "version": "5.10.3",
+  "version": "5.10.4",
   "description": "DAOGE Pic vNext conversation-first local image creation Studio.",
   "main": "dist/vnext/cli/daoge.js",
   "bin": {
@@ -36,7 +36,7 @@
   "license": "MIT",
   "type": "commonjs",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

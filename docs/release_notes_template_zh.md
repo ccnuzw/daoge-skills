@@ -33,23 +33,24 @@
 
 ## 安装
 
-以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 Skill；两步缺一不可。
+以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，内置 `register-skill` 创建 link/junction 供 Codex 发现 Skill；两步缺一不可。
 
-项目级安装（在项目根目录执行）：
+项目级安装：
 
 ```bash
 npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
-node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+npx daoge register-skill --scope project --workspace /absolute/workspace
+npx daoge doctor --workspace /absolute/workspace
 ```
 
 全局安装：
 
 ```bash
 npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
-node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+daoge register-skill --scope user
 ```
 
-注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
+Windows PowerShell 使用 `npm.cmd`、`npx.cmd` 与 `daoge.cmd`。注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
 
 ## 升级建议
 
@@ -91,23 +92,24 @@ node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:
 
 ## 安装
 
-以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 Skill；两步缺一不可。
+以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，内置 `register-skill` 创建 link/junction 供 Codex 发现 Skill；两步缺一不可。
 
-项目级安装（在项目根目录执行）：
+项目级安装：
 
 ```bash
 npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
-node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+npx daoge register-skill --scope project --workspace /absolute/workspace
+npx daoge doctor --workspace /absolute/workspace
 ```
 
 全局安装：
 
 ```bash
 npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
-node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+daoge register-skill --scope user
 ```
 
-注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
+Windows PowerShell 使用 `npm.cmd`、`npx.cmd` 与 `daoge.cmd`。注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
 
 ## 升级建议
 
@@ -144,23 +146,24 @@ node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:
 
 ## 安装
 
-以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，link/junction 注册让 Codex 发现 Skill；两步缺一不可。
+以下命令固定使用本版本 GitHub Release 的不可变 `.tgz`，不会跟随 `main`。npm 安装提供 `daoge` CLI 和运行时，内置 `register-skill` 创建 link/junction 供 Codex 发现 Skill；两步缺一不可。
 
-项目级安装（在项目根目录执行）：
+项目级安装：
 
 ```bash
 npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
-node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+npx daoge register-skill --scope project --workspace /absolute/workspace
+npx daoge doctor --workspace /absolute/workspace
 ```
 
 全局安装：
 
 ```bash
 npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v<VERSION>/daoge-pic-<VERSION>.tgz"
-node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+daoge register-skill --scope user
 ```
 
-注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
+Windows PowerShell 使用 `npm.cmd`、`npx.cmd` 与 `daoge.cmd`。注册命令在目标已存在时失败，不删除或覆盖已有 Skill 目录。安装和注册完成后重启 Codex。
 
 ## 升级前建议
 

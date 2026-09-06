@@ -81,8 +81,10 @@ export function createStudioEventStream({
     nextSource.onmessage = receive;
     nextSource.onopen = () => {
       if (disposed || source !== nextSource) return;
+      const reconnected = reconnectAttempt > 0;
       reconnectAttempt = 0;
       callbacks().onConnectionError?.('');
+      if (reconnected) void callbacks().onReconnected?.();
     };
     nextSource.onerror = () => {
       if (disposed || source !== nextSource) return;
@@ -186,9 +188,9 @@ export function createStudioEventStream({
   };
 }
 
-export function useStudioEvents({ studioId, onEventBatch, onSnapshot, onConnectionError, onRequestError }) {
-  const callbacks = useRef({ onEventBatch, onSnapshot, onConnectionError, onRequestError });
-  callbacks.current = { onEventBatch, onSnapshot, onConnectionError, onRequestError };
+export function useStudioEvents({ studioId, onEventBatch, onSnapshot, onConnectionError, onReconnected, onRequestError }) {
+  const callbacks = useRef({ onEventBatch, onSnapshot, onConnectionError, onReconnected, onRequestError });
+  callbacks.current = { onEventBatch, onSnapshot, onConnectionError, onReconnected, onRequestError };
 
   useEffect(() => {
     if (!studioId) return undefined;

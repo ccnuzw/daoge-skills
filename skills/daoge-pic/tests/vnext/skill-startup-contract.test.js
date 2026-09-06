@@ -117,23 +117,21 @@ test('README and authoritative specification preserve the same session-first sta
   assert.doesNotMatch(`${skill}\n${readme}\n${spec}`, /先澄清目标[^\n]*\n(?:.*\n){0,3}.*open --workspace/);
 });
 
-test('5.10.3 is the stable GitHub Release contract while 5.10.2 and earlier releases remain immutable history', () => {
+test('5.10.4 is the release contract while 5.10.3 and earlier releases remain immutable history', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const currentDocs = `${skill}\n${readme}\n${spec}`;
 
-  assert.equal(packageJson.version, '5.10.3');
-  assert.equal(packageLock.version, '5.10.3');
-  assert.equal(packageLock.packages[''].version, '5.10.3');
+  assert.equal(packageJson.version, '5.10.4');
+  assert.equal(packageLock.version, '5.10.4');
+  assert.equal(packageLock.packages[''].version, '5.10.4');
   for (const document of [skill, readme, evidence]) {
-    assert.match(document, /5\.10\.3/);
+    assert.match(document, /5\.10\.4/);
   }
+  assert.match(`${skill}\n${readme}`, /待发布[^。\n]{0,120}5\.10\.4|5\.10\.4[^。\n]{0,120}候选/);
   assert.match(`${skill}\n${readme}`, /稳定正式版本[^。\n]{0,120}5\.10\.3/);
-  assert.doesNotMatch(`${skill}\n${readme}`, /5\.10\.3[^。\n]{0,80}尚未发布/);
-  assert.doesNotMatch(`${skill}\n${readme}`, /稳定正式发布(?:仍)?(?:为|是)[^。\n]*5\.9\.1/);
-  assert.match(readme, /daoge-pic-v5\.10\.3\/daoge-pic-5\.10\.3\.tgz/);
+  assert.doesNotMatch(`${skill}\n${readme}`, /5\.10\.4[^。\n]{0,80}(?:已发布|稳定正式版本)/);
   assert.match(readme, /GitHub[^。\n]*资产[^。\n]*不表示[^。\n]*npm registry/);
-
   assert.match(evidence, /## 1\. daoge-pic 5\.7\.0 已发布历史证据[\s\S]*daoge-pic-5\.7\.0\.tgz[\s\S]*1fb70265f4a0e7e5858be3dec7cf21ad8706c720fede7c1712e74a36678110fe/);
   const historicalEvidence = markdownSection(evidence, '## 7. daoge-pic 5.9.1 发布验证证据');
   assert.match(historicalEvidence, /daoge-pic-v5\.9\.1[\s\S]*GitHub Release[^\n]*\.tgz/);

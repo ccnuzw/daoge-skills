@@ -1,13 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { encodedPowerShellArguments, windowsPowerShellExecutable } from '../shared/windows';
 
 export type ProcessArgumentsQuery = (pid: number) => readonly string[] | null;
 
 export interface ProcessQueryDependencies {
   platform?: NodeJS.Platform;
   readFile?: (filePath: string) => Buffer;
-  execFile?: (command: string, args: readonly string[]) => string;
+  execFile?: (command: string, args: readonly string[], options: { timeout: number; maxBuffer: number }) => string;
+  powershellPath?: string;
 }
 
 function parsePosixCommandLine(commandLine: string): string[] | null {
@@ -71,17 +73,24 @@ export function queryProcessArguments(pid: number, dependencies: ProcessQueryDep
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const platform = dependencies.platform || process.platform;
   const readFile = dependencies.readFile || ((filePath: string): Buffer => fs.readFileSync(filePath));
-  const execFile = dependencies.execFile || ((command: string, args: readonly string[]): string => execFileSync(command, args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }));
+  const execFile = dependencies.execFile || ((command: string, args: readonly string[], options: { timeout: number; maxBuffer: number }): string => execFileSync(command, args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'], ...options }));
   try {
     if (platform === 'linux') {
       const fields = readFile('/proc/' + pid + '/cmdline').toString('utf8').split('\0').filter(Boolean);
       return fields.length ? fields : null;
     }
-    if (platform === 'darwin') return parsePosixCommandLine(execFile('ps', ['-p', String(pid), '-ww', '-o', 'command=']));
+    if (platform === 'darwin') return parsePosixCommandLine(execFile('ps', ['-p', String(pid), '-ww', '-o', 'command='], { timeout: 5000, maxBuffer: 1024 * 1024 }));
     if (platform === 'win32') {
-      const output = execFile('wmic.exe', ['process', 'where', 'ProcessId=' + pid, 'get', 'CommandLine', '/value']);
-      const line = output.split(/\r?\n/).find((candidate) => candidate.startsWith('CommandLine='));
-      return line ? parseWindowsCommandLine(line.slice('CommandLine='.length)) : null;
+      const script = [
+        "$ErrorActionPreference = 'Stop'",
+        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+        "$process = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = " + pid + "' -OperationTimeoutSec 3",
+        'if ($null -eq $process -or $null -eq $process.CommandLine) { exit 3 }',
+        '$process.CommandLine | ConvertTo-Json -Compress'
+      ].join('; ');
+      const output = execFile(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 5000, maxBuffer: 1024 * 1024 }).trim();
+      const commandLine = JSON.parse(output) as unknown;
+      return typeof commandLine === 'string' ? parseWindowsCommandLine(commandLine) : null;
     }
     return null;
   } catch {

@@ -5,7 +5,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)。本文件定义 5.10.3 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)，当前源码与候选制品版本为 `5.10.4`。本文件定义候选实现的会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源；GitHub Release 创建前不得把候选写成已发布版本。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
@@ -40,11 +40,15 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
    ```
 
    `open` 原子地确保同工作区唯一健康 daemon，然后向 daemon 申请短期 opener claim。只有首个 claim 持有者调用系统默认浏览器；其他并发会话在活动 Workbench、最近已授权连接或未过期 claim 存在时返回 `opened:false, reused:true`，不重复调用 opener。启动和打开只属于本地准备，不是外部 Provider 调用，不需要生成确认，也不得自动执行 Provider 连接测试。
+
+   请求根没有 `studio.json` 时，CLI 必须只向上检查祖先目录；若发现有效的父级 Studio，必须在创建 daemon、manifest 或 Workbench 前拒绝隐式初始化，避免产生数据不互通的嵌套 Studio。只有用户明确要求独立的嵌套 Studio 时，才可执行 `open --allow-nested-studio true`；Skill 不得自行推断或添加该参数。
 4. `open` 返回 `opened:true, reused:false` 时汇报已打开；返回 `opened:false, reused:true` 时汇报已复用。随后才创建或恢复**以当前真实 conversation ID 建立的独立 Studio Session**，再创建或恢复项目、任务和轮次上下文，然后开始创作澄清、计划与领域写入。不得颠倒这一顺序，创作澄清不可早于 `open`。
 
 ### 跨会话复用
 
 同一稳定工作区的每个独立智能体会话都可在首次执行型触发调用普通 `open`；去重由共享 daemon 的内存 presence/open-claim 协议保证，不依赖会话间互相知道状态。已存在活动 Workbench、最近认证连接或未过期 claim 时，CLI 安全返回复用结果且不调用 OS opener。`open --force true` 只允许在用户明确要求新开标签时使用；Skill 的普通启动不得 force。协议不承诺 OS opener 能识别或聚焦既有标签，daemon 只保证普通 open 最多触发一个实际 opener。
+
+`--force true` 只控制是否新开浏览器标签，不改变 Studio 身份；`--allow-nested-studio true` 只确认用户确实要在已有父级 Studio 内创建另一个隔离 Studio。两者不得混用为工作区恢复手段。
 
 ### 打开失败与安全访问
 
@@ -72,7 +76,11 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 ## 工作区、Schema 与密钥
 
+运行时必须是 Node.js `22.13.0` 或更高版本，确保 `node:sqlite` 无需实验开关。Windows 必须使用当前用户拥有的本地 NTFS 工作区；不得把 OneDrive/同步盘、UNC/网络共享、移动盘、WSL 挂载路径或 junction/symlink 根作为 Studio 工作区。PowerShell 执行策略阻止 npm `.ps1` shim 时使用对应 `.cmd`，不得要求用户放宽全局执行策略。
+
 每次必须使用稳定工作区根目录，传入 `--workspace <path>` 或明确设置 `DAOGE_WORKSPACE_ROOT`。没有稳定根目录时停止并向用户索取，不得回退到任意当前目录。
+
+请求根已有 manifest 时必须严格复用其身份。请求根没有 manifest 但祖先目录存在有效 Studio 时，CLI 默认拒绝初始化且不得产生子目录副作用；应改用父级稳定工作区。跨 Studio 数据继续保持隔离，不做自动合并或共享。
 
 Studio 在工作区内维护：
 
@@ -97,7 +105,7 @@ Studio 在工作区内维护：
 
 `studio.json` 只记录 Studio 身份、manifest schema 与规范工作区根。已有 manifest 的 `workspaceRoot` 必须与本次请求的规范根严格相同；不匹配时拒绝使用。`studio.db` 是项目、任务、轮次、计划、运行、资产关系、评审和交付的业务事实源；它只保存脱敏 Provider 历史快照，不保存 Profile 或秘密。
 
-完整 Provider 配置只保存在精确路径 `<workspace>/daoge-studio/Provider.db`。这是受本地权限保护的明文敏感 SQLite（Unix `0600`，Windows 私有 ACL），不是加密数据库；拒绝符号链接并使用 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。它支持多个 Profile，第一阶段最多一个 active，也允许零 active。新工作区不创建 `provider.env`；既有工作区首次升级时一次性导入，之后运行时只读 `Provider.db`，不覆盖或删除旧文件。`references/provider.env.example` 仅是显式 import-env 输入格式。
+完整 Provider 配置只保存在精确路径 `<workspace>/daoge-studio/Provider.db`。这是受本地权限保护的明文敏感 SQLite，不是加密数据库；拒绝符号链接。Unix 使用 `0600`；Windows 必须按当前用户 SID、SYSTEM 与 Administrators 构造完整私有 DACL，并通过单次 `Set-Acl` 应用，任何 ACL 读取或写入失败都必须拒绝继续，不得先用 `icacls /reset` 暴露继承权限，也不得按可本地化用户名授权。数据库使用 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。它支持多个 Profile，第一阶段最多一个 active，也允许零 active。新工作区不创建 `provider.env`；既有工作区首次升级时一次性导入，之后运行时只读 `Provider.db`，不覆盖或删除旧文件。`references/provider.env.example` 仅是显式 import-env 输入格式。
 
 Workbench 提供 Profile 列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试和保存并重启。API Key 与完整 Base URL 是 write-only，更新必须明确 `keep`、`replace` 或 `clear`；GET 只返回安全摘要。页面打开、加载或保存不得自动连接 Provider。
 
@@ -107,10 +115,10 @@ Workbench 提供 Profile 列表、新建、编辑、复制、激活、删除、�
 
 ```bash
 node scripts/daoge.js studio --workspace <path>
-node scripts/daoge.js open --workspace <path>
+node scripts/daoge.js open --workspace <path> [--allow-nested-studio true]
 ```
 
-`open` 必须先通过已授权本地 API 获取 daemon 内存 opener claim，再由唯一持有者使用跨平台安全 opener：macOS `open`、Linux `xdg-open`、Windows `rundll32.exe url.dll,FileProtocolHandler`；不得通过 shell 字符串拼接 URL。不支持的平台明确失败，且必须释放自己的 claim。`open --force true` 仅绕过活动/最近 presence，不得抢占另一个未过期 claim。
+`open` 必须先完成工作区身份检查，再通过已授权本地 API 获取 daemon 内存 opener claim，并由唯一持有者使用跨平台安全 opener：macOS `open`、Linux `xdg-open`、Windows 先用 `rundll32.exe url.dll,FileProtocolHandler`，该进程无法启动时回退到无 shell 的 `explorer.exe`；不得通过 shell 字符串拼接 URL。健康 daemon 的 CLI `restart` 必须通过已授权本地 API 在原进程内完成受控重启，不得在 Windows 上用强制 `SIGTERM` 代替正常关闭。异常进程恢复所需的 Windows daemon 身份必须通过系统 Windows PowerShell 的 CIM `Win32_Process` 查询，不得依赖可选且已弃用的 `wmic.exe`。所有 opener 均失败或平台不支持时明确失败并释放自己的 claim。`open --force true` 仅绕过活动/最近 presence，不得抢占另一个未过期 claim；`open --allow-nested-studio true` 仅在用户明确要求创建独立嵌套 Studio 时使用。
 
 每个 daemon 生成高熵 local capability。Workbench 只可通过 URL fragment bootstrap 换取 `HttpOnly`、`SameSite=Strict` Cookie，随后立即清除 fragment；CLI 使用 Bearer capability。Open claim token 由 CLI 生成，只以哈希形式短暂保存在 daemon 内存，不进入响应、数据库、事件、日志或 runtime 文件。同一进程受控重启复用最近 Workbench presence；独立 daemon 进程重置。Workbench 的 UI Session 使用每标签页 `sessionStorage` 身份，reload 复用而标签间不共享；它不代表任何智能体会话，也不得让其他会话的 Session context 更新抢占当前 route。除最小健康检查外，API、媒体、ZIP 和 SSE 都要求当前 Studio 授权，写入还校验 Host、Origin 和 Content-Type，任意 localhost 页面不得因重启获得权限。不得输出、记录、复制或分享 capability、bootstrap URL、Cookie、session token、claim token 或 runtime 私密字段；`status` 只能返回脱敏 daemon 信息。
 
@@ -119,14 +127,17 @@ node scripts/daoge.js open --workspace <path>
 统一入口：
 
 ```bash
-node scripts/daoge.js <command> --workspace <stable-workspace>
+node scripts/daoge.js <command> [--workspace <stable-workspace>]
 ```
 
 CLI 必须在启动 daemon 或初始化工作区前拒绝未知命令、缺失必需参数和无效数值。公开命令完整列表如下；`delivery-complete` **不是**公开 CLI 命令。
 
 ```bash
+node scripts/daoge.js register-skill --scope project --workspace <path>
+node scripts/daoge.js register-skill --scope user
+node scripts/daoge.js doctor --workspace <path> [--json true] [--redacted true]
 node scripts/daoge.js studio --workspace <path>
-node scripts/daoge.js open --workspace <path> [--force true]
+node scripts/daoge.js open --workspace <path> [--force true] [--allow-nested-studio true]
 node scripts/daoge.js provider-list --workspace <path>
 node scripts/daoge.js provider-import-env --workspace <path>
 node scripts/daoge.js provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key-stdin @- [--active true]
@@ -170,7 +181,7 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 
 ## 幂等命令恢复
 
-所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、运行时 `5.10.3`；不兼容协议由 daemon 拒绝。
+所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、候选运行时 `5.10.4`；不兼容协议由 daemon 拒绝。
 
 ## 运行恢复与媒体边界
 
@@ -181,7 +192,7 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 - `archive-project` 会拒绝仍有未完成生成的项目，再以事务方式归档项目、任务和轮次。
 - daemon 启动时固定 active Profile 的 `profileId + configVersion`、Provider、模型和端点身份。活动 Profile、模型、端点、密钥、options 或 configVersion 变化后标记 `restartRequired`；重启前拒绝新运行，已有运行不静默切换。Worker 只领取与启动快照 `profileId + configVersion` 匹配的运行。
 - 并发只属于 Generation Run：持久队列的全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Provider 活跃请求安全目标上限为 `100`，daemon 通过自适应 Governor 按成功率、429、临时故障和 Worker RSS/外部内存样本动态升降；目标初始为 `16`，异常时退避，健康时逐步升至 `100`。大响应优先流式写入临时文件，只有不超过 `1 MiB` 的 Provider 图片结果保留为内存 Buffer。
-- Worker 与 media worker 均有 job watchdog、稳定运行窗口和有界重启；请求租约记录 worker 身份。子进程崩溃、挂起或守护超时不得让调用永久等待，未确认 Provider 结果仍进入 `outcome_unknown`。
+- daemon owner 负责工作区创建、数据库迁移与敏感路径权限强化；Windows 将当前批次中的敏感目录、manifest、SQLite 及 sidecar 在一个 PowerShell 进程中设置并复核 DACL，ACL 最长等待 10 秒。Generation/media Worker 只附加已完成初始化的 manifest 与数据库，不写 `.gitignore`、不迁移 schema、不修改 ACL。Worker 池按需求从零启动，generation pool 在持续满载时逐个扩容；两类池都公开脱敏健康状态、job watchdog、稳定窗口、有界重启和最终熔断，调用不得永久等待。
 - Schema v22 保留历史业务数据，补齐媒体操作 owner/heartbeat、运行项 lease worker、资产媒体健康状态、运行/预检/事件与媒体恢复索引，以及完整性校验。Studio DB 强制 WAL 与 `synchronous=FULL`。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。活动 journal 由 owner heartbeat 保护，恢复只处理过期遗留项；同哈希竞争收敛到唯一资产，交付同一冻结目录的并发导出收敛到同一结果。
 - 缺失媒体持久标记为不可用，不得作为参考图、遮罩或交付候选；对账确认恢复后才重新可用。过期 staging `.part` 文件只在不属于活动 journal 时清理。
@@ -203,6 +214,8 @@ Workbench 的普通“完成交付”通过内部 `/api/deliveries/complete` API
 ## Workbench 边界与可访问性
 
 Workbench 可用于：项目/任务/轮次导航、Generation History、SSE 实时状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。参考图选择只显示当前项目资产与明确共享素材。
+
+Workbench 顶部必须持续显示 daemon 与 Worker 池的脱敏健康状态。受控重启依次呈现“正在安全关闭”“正在重连”“已恢复”；重连后先刷新权威快照。池连续恢复失败时可执行授权的安全重启，并可复制不含 Provider 密钥、完整 URL、capability 或工作区路径的诊断摘要。
 
 Workbench 必须在 SSE cursor 失效或本地事件批次溢出时先完成快照恢复，再推进 cursor；失败时从上次成功位置重试，不把页面状态当事实源。
 

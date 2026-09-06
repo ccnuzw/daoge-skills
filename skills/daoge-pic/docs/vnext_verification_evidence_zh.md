@@ -4,7 +4,7 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)。下列章节按版本隔离发布事实；5.10.2、5.10.1、5.10.0、5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.3。
+当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)，当前源码与本地候选制品版本为 `5.10.4`。下列章节按版本隔离发布事实；候选验证不等于 GitHub Release 已发布，5.10.3 及更早章节保持历史证据。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -243,3 +243,30 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - 定向确认、API、运行、多会话和学习中心回归共 45 项通过；`npm test` 共 295 项通过，0 失败、0 取消、0 跳过。
 - `npm run test:package` 构建 TypeScript 与 Vite Workbench 成功；发布清单 116 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
 - 本次验证未调用真实图片 Provider，未产生计费生成请求。
+
+## 12. daoge-pic 5.10.4 Windows 候选验证证据
+
+本节对应待发布的 `5.10.4` 源码与本地候选制品，不声明 GitHub Release 已创建。`5.10.3` 及更早章节是不可改写的历史证据。
+
+### Windows 初始化与运行边界
+
+- Node.js 下限固定为 `22.13.0`。Windows daemon 身份改用系统 Windows PowerShell/CIM，CIM `OperationTimeoutSec` 与 Node 外层超时同时生效；不依赖 WMIC。
+- daemon owner 独占工作区创建、schema migration、旧 Provider 导入和权限强化。敏感目录、manifest、SQLite 与现有 sidecar 在一个 PowerShell 进程中批量设置并复核 DACL；Generation/media Worker 只附加既有数据库。
+- 空 Studio 不启动 media Worker；存在媒体恢复或实际媒体作业时才按需创建。Generation pool 首次 tick 从一个 Worker 开始，持续满载时逐个扩容。两类池公开脱敏健康、重启次数、最终熔断与安全错误摘要。
+- 新工作区在任何 Studio 文件创建前检查 Windows 本地固定 NTFS、UNC、同步盘/系统目录和已有 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 ACL、CIM、`sharp` 与默认浏览器关联。
+
+### 安装、路径与 Workbench 恢复
+
+- 发布包提供 `register-skill --scope project|user`，以 fail-if-exists 方式创建 link/junction，并拒绝经父级 symlink/junction 写出注册根。package smoke 在独立临时 pack 目录工作，不再删除仓库同名正式制品。
+- 安装 smoke 在含中文和空格的临时路径安装候选包，执行真实 bin、内置注册命令、doctor 与 `sharp` 加载。Windows 使用 `cmd.exe` 实际调用 npm 生成的 `daoge.cmd`。
+- 交付路径保留安全 Unicode、限制组件长度、规避 Windows `CON/PRN/AUX/NUL/COM1..9/LPT1..9`，并给项目与交付目录追加稳定短 ID。
+- Workbench 健康横幅显示 Worker 待命、启动、正常、恢复、熔断；受控重启显示安全关闭、重连和已恢复，重连后刷新权威快照。用户可刷新状态、安全重启故障池并复制不含密钥、完整 URL、capability 或路径的诊断摘要。
+
+### 已执行验证
+
+- macOS 本地 `npm test`：315 项，313 通过、0 失败、0 取消、2 项仅 Windows 实机用例跳过；跳过项为真实最终 DACL 与真实 CIM/长 Unicode 路径诊断。
+- 本地 `npm run test:package`：构建 TypeScript 与 Vite Workbench 成功；发布清单 122 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 的真实 bin、注册链接、doctor 与 `sharp` 均通过。
+- 浏览器实测 1440×1000 与 375×812：健康横幅无横向溢出，移动端操作按钮高度 44px；实际 daemon 故障注入后观察到“后台处理池需要重启 → 正在安全关闭后台任务 → Studio 已恢复”，页面 URL 与授权继续复用。
+- `npm run bench:perf`：Schema v22 空 Studio control-plane 构造 `41.81 ms`，需求前 media process 为 `0`；100000 pending 队列领取 1000 项为 `128.03 ms`，RSS `105.6 MiB`。
+- Windows Actions 已配置 `windows-2022`、`windows-2025` × Node.js `22.13.0`、`24` 四组矩阵，执行完整回归、真实 DACL/CIM/长路径、cmd shim、junction、安装、daemon 恢复、`sharp` 与脱敏诊断/性能证据上传。该矩阵只有在分支推送后运行；本地 macOS 结果不得冒充 Windows runner 结果。
+- 所有本地回归和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。

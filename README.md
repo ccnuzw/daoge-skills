@@ -2,7 +2,7 @@
 
 面向中文工作流的 DAOGE Skill 系列。每个 Skill 都是可独立安装、独立使用、独立演进的能力包：Skill 负责把自然语言需求转化为可执行的标准流程，附带的脚本、参考资料和本地工作台负责让关键过程可检查、可恢复、可交付。
 
-> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.10.3](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)。
+> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.10.3](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)；`main` 正在验证待发布的 [`5.10.4`](./docs/daoge_pic_5.10.4_release_notes_zh.md)，不得把源码候选误写成已存在的 GitHub Release。
 
 当前仓库包含两项彼此独立的能力：
 
@@ -33,33 +33,47 @@ daoge-pic
 
 可以只安装一个 Skill，也可以按需安装多个。`daoge-docs` 通过 `npx skills add` 安装；`daoge-pic` 稳定版必须使用对应 GitHub Release 的不可变 `.tgz` 制品。对 `daoge-pic` 而言，npm 安装负责提供 `daoge` CLI 和运行时，link/junction 步骤负责把同一个已安装包注册为 Codex Skill；两步缺一不可。
 
+`daoge-pic` 实际运行下限为 Node.js `22.13.0`，因为 CLI 直接使用无需实验开关的 `node:sqlite`。Windows 建议使用同一普通用户在本地 NTFS 目录完成项目级安装和运行；PowerShell 执行策略阻止 `.ps1` shim 时使用 `npm.cmd`、`npx.cmd` 或 `daoge.cmd`，不要放宽全局执行策略。Studio 工作区不得放在 OneDrive/同步盘、UNC/网络共享、移动盘、WSL 挂载路径或 junction/symlink 根上。
+
 安装 `daoge-docs`：
 
 ```bash
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
 ```
 
-在项目根目录安装 `daoge-pic` 稳定正式版 `5.10.3`（固定使用 `daoge-pic-v5.10.3` Release 中的不可变制品，不会随 `main` 变化）：
+当前稳定版仍为 `5.10.3`；其安装方式以对应 GitHub Release 为准。待 `5.10.4` 完成 Windows 验证并发布后，项目级安装使用同一正式制品和内置注册命令：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.3/daoge-pic-5.10.3.tgz"
-node -e "const fs=require('node:fs'),path=require('node:path');const source=path.resolve('node_modules/daoge-pic'),dest=path.resolve('.agents/skills/daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npx daoge register-skill --scope project --workspace /absolute/workspace
+npx daoge doctor --workspace /absolute/workspace
 ```
 
-第二条命令跨 macOS、Linux 和 Windows 创建项目级 Skill 注册：Windows 使用 junction，其他平台使用目录符号链接。它只在 `.agents/skills/daoge-pic` 不存在时创建，不会删除或覆盖已有目录；若目标已存在，请先确认它的来源并自行选择其他项目或安装位置，不要直接覆盖。完成后重启 Codex，使新增 Skill 被重新发现。项目本地安装后的 CLI 可通过 `npx daoge` 或 `./node_modules/.bin/daoge` 调用，例如：
+Windows PowerShell 使用 `.cmd` shim，不需要放宽执行策略：
+
+```powershell
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
+npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
+```
+
+`register-skill` 跨 macOS、Linux 和 Windows 创建项目级 Skill 注册：Windows 使用 junction，其他平台使用目录符号链接。目标已存在时直接失败，不删除或覆盖已有目录。`doctor` 不调用图片 Provider；它在初始化 Studio 前检查目录、SQLite、权限、原生 `sharp`，并在 Windows 检查本地固定 NTFS 磁盘、CIM/PowerShell 和默认浏览器关联。
+
+需要全局安装时：
 
 ```bash
-npx daoge open --workspace /absolute/workspace
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+daoge register-skill --scope user
 ```
 
-需要全局安装时，安装同一个 Release 制品，再用 Node 标准库定位 npm 全局包目录并注册到当前用户的 Codex Skill 目录：
+Windows PowerShell：
 
-```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.3/daoge-pic-5.10.3.tgz"
-node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{execFileSync}=require('node:child_process');const source=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'daoge-pic'),dest=path.join(os.homedir(),'.codex','skills','daoge-pic');if(fs.existsSync(dest))throw new Error('Skill destination already exists: '+dest);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir')"
+```powershell
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+daoge.cmd register-skill --scope user
 ```
 
-全局注册命令同样采用 fail-if-exists，不删除或覆盖 `~/.codex/skills/daoge-pic`。完成后重启 Codex，使其重建 Skill registry；CLI 可直接运行 `daoge open --workspace /absolute/workspace`。
+完成注册后重启 Codex，使其重建 Skill registry。`5.10.4` GitHub Release 创建前，上述 URL 只描述待发布流程，不表示资产已存在；源码维护者可改为安装本仓库生成并校验的本地候选 tgz。
 
 如需直接试用 `main` 分支的开发源码，可使用 `npx skills add` 明确安装 Skill 路径；该方式不等同于固定版本的 GitHub Release 制品：
 

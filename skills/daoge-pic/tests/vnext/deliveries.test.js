@@ -11,6 +11,7 @@ const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirm
 const { assetFilePath, getAssetImpact, importStudioAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
 const { createDelivery, exportDelivery, exportDeliveryAsync, getDelivery, openDeliveryExportFile, prepareDelivery } = require('../../dist/vnext/domain/deliveries');
 const { configureProvider } = require('./provider-test-helper');
+const { portablePathSegment } = require('../../dist/vnext/shared/windows');
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
 
@@ -20,6 +21,33 @@ function frozenFileSnapshots(directory) {
     return { name, contentHash: createHash('sha256').update(bytes).digest('hex'), byteSize: bytes.length };
   });
 }
+
+test('delivery path segments preserve Unicode and avoid Windows device names and long components', () => {
+  assert.equal(portablePathSegment('品牌 主视觉'), '品牌-主视觉');
+  for (const reserved of ['CON', 'con.txt', 'PRN', 'AUX', 'NUL', 'COM1', 'LPT9']) assert.equal(portablePathSegment(reserved).startsWith('_'), true, reserved);
+  assert.equal(portablePathSegment('name. '), 'name');
+  assert.equal([...portablePathSegment('长'.repeat(100))].length, 48);
+});
+
+test('delivery export uses unique Windows-safe project and delivery directories', () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-windows-name-'));
+  const initialized = initializeStudio({ workspaceRoot });
+  const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  try {
+    const project = createProject(db, { studioId: initialized.manifest.studioId, name: 'CON', idempotencyKey: 'reserved-project' }).value;
+    const asset = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: project.id });
+    setReviewDecision(db, { studioId: initialized.manifest.studioId, assetId: asset.id, decision: 'keep' });
+    const draft = createDelivery(db, { studioId: initialized.manifest.studioId, projectId: project.id, name: 'NUL.txt', assetIds: [asset.id], idempotencyKey: 'reserved-delivery' });
+    prepareDelivery(db, { studioId: initialized.manifest.studioId, deliveryId: draft.id, idempotencyKey: 'reserved-ready' });
+    const exported = exportDelivery(db, initialized.paths, { studioId: initialized.manifest.studioId, deliveryId: draft.id, idempotencyKey: 'reserved-export' });
+    assert.match(path.basename(path.dirname(exported.directory)), /^_CON-/);
+    assert.match(path.basename(exported.directory), /^_NUL\.txt-/);
+    assert.equal(fs.existsSync(path.join(exported.directory, 'manifest.json')), true);
+  } finally {
+    closeStudioDatabase(db);
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
 
 
 test('recovers a committed delivery directory before its idempotency receipt is written', () => {

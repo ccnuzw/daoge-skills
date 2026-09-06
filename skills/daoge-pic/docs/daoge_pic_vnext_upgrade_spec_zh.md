@@ -1,6 +1,6 @@
 # DAOGE Pic vNext 升级规格
 
-文档类别：vNext 长期权威产品与架构规格。当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)；实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
+文档类别：vNext 长期权威产品与架构规格。当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)，当前源码目标版本为待发布的 `5.10.4`；实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
 
 ## 1. 定位与结论
 
@@ -58,10 +58,10 @@ Skill 必须先分类触发：
 执行型启动顺序是强制协议：
 
 1. 解析当前会话已绑定的稳定工作区；已有明确绑定时复用。没有可从会话或宿主上下文获得的绑定时，只询问这一不可推导的前置条件，禁止使用临时目录、Skill 安装目录或任意 cwd。
-2. 每个独立智能体会话在该工作区首次执行时都可运行普通 `node scripts/daoge.js open --workspace <path>`。`open` 必须确保 `daemon-lock.sqlite` 的长期 SQLite 排他事务所代表的同工作区唯一健康 daemon；`daemon.lock` 仅作为锁持有者发布的身份记录供受控 CLI 验证。随后通过已授权本地 API 原子申请短期 opener claim。活动 Workbench、最近认证连接或未过期 claim 存在时返回 reused 且不得调用 opener；只有首个持有者实际请求默认浏览器。它只是本地准备，不是 Provider 调用，不需要生成确认，也不得自动测试 Provider 连接。
+2. 每个独立智能体会话在该工作区首次执行时都可运行普通 `node scripts/daoge.js open --workspace <path>`。`open` 必须先完成工作区身份检查：请求根没有 manifest 但祖先目录存在有效 Studio 时，在创建 daemon、manifest 或 Workbench 前拒绝隐式初始化并要求复用父级；只有用户明确要求独立嵌套 Studio 时，才允许 `open --allow-nested-studio true`。随后确保 `daemon-lock.sqlite` 的长期 SQLite 排他事务所代表的同工作区唯一健康 daemon；`daemon.lock` 仅作为锁持有者发布的身份记录供受控 CLI 验证。Windows 对运行中 daemon 的身份查询必须使用系统 Windows PowerShell 的 CIM `Win32_Process`，不得依赖可选且已弃用的 `wmic.exe`。再通过已授权本地 API 原子申请短期 opener claim。活动 Workbench、最近认证连接或未过期 claim 存在时返回 reused 且不得调用 opener；只有首个持有者实际请求默认浏览器。Windows 首选 `rundll32.exe url.dll,FileProtocolHandler`，进程无法启动时回退到无 shell 的 `explorer.exe`。它只是本地准备，不是 Provider 调用，不需要生成确认，也不得自动测试 Provider 连接。
 3. CLI 必须安全输出 `{opened:true,reused:false}` 或 `{opened:false,reused:true}` 以及非敏感 reason。随后才以当前真实 conversation ID 创建或恢复独立 Studio Session，再建立或恢复该会话自己的项目、任务与轮次上下文，然后开始创作澄清、计划和领域写入。
 
-跨会话去重必须由 daemon 内存 presence/open-claim 实现，不能依赖会话间共享“已经调用过 open”的事实。Claim token 由 CLI 生成，daemon 仅存哈希且不得写响应、DB、事件、日志或 runtime；失败只释放自己的 claim，TTL 到期可恢复。同进程受控 restart 保留最近 presence，独立 daemon 进程重置。`open --force true` 只用于用户明确要求新标签，可绕过 presence 但不得抢占未过期 claim；普通 Skill 启动不得 force。不得声称 OS opener 能识别或强制聚焦现有标签页。
+跨会话去重必须由 daemon 内存 presence/open-claim 实现，不能依赖会话间共享“已经调用过 open”的事实。Claim token 由 CLI 生成，daemon 仅存哈希且不得写响应、DB、事件、日志或 runtime；失败只释放自己的 claim，TTL 到期可恢复。同进程受控 restart 保留最近 presence，独立 daemon 进程重置。`open --force true` 只用于用户明确要求新标签，可绕过 presence 但不得抢占未过期 claim；普通 Skill 启动不得 force。`open --allow-nested-studio true` 只表示用户明确接受创建数据隔离的嵌套 Studio，不得由 Skill 自动添加，也不得用于恢复或合并数据。不得声称 OS opener 能识别或强制聚焦现有标签页。
 
 如果自动打开失败但 daemon 健康，Skill 必须只提供安全重试命令 `node scripts/daoge.js open --workspace <path>`；安装包语境可使用 `npx daoge open --workspace <path>`。不得在回复中回显、记录或要求复制 bootstrap URL、capability、Cookie、session token 或 runtime 私密字段，裸 origin 不得作为主要访问方式。
 
@@ -186,7 +186,7 @@ Skill 必须使用智能体当前绑定的稳定工作区根目录。Skill 禁�
 
 目录仅在首次实际需要写入时创建。初始化不得创建无业务用途的大量空目录。
 
-初始化在产生持久副作用前必须校验已有 `studio.json` 的 schema、Studio 身份与规范化 `workspaceRoot` 严格匹配当前请求根目录。新工作区不创建 `provider.env`；Provider.db、资产与缓存按需创建。
+初始化在产生持久副作用前必须校验已有 `studio.json` 的 schema、Studio 身份与规范化 `workspaceRoot` 严格匹配当前请求根目录。请求根没有 manifest 时只向上检查祖先目录；发现有效父级 Studio 后默认拒绝创建嵌套 Studio。Windows 还必须在任何 Studio 文件创建前拒绝 UNC、已知同步盘/系统目录、非本地固定磁盘、非 NTFS 与已有 junction/symlink 组件。用户明确执行 `open --allow-nested-studio true` 只可越过父级 Studio 约束，不得越过 Windows 存储安全约束。
 
 ### 6.3 目录职责
 
@@ -220,7 +220,7 @@ Skill 必须使用智能体当前绑定的稳定工作区根目录。Skill 禁�
 
     <当前工作区>/daoge-studio/Provider.db
 
-Provider.db 是受本地文件权限保护的明文敏感 SQLite，不得宣称加密。它必须拒绝符号链接，Unix 使用 `0600`，Windows 使用仅当前用户、SYSTEM 与 Administrators 的私有 ACL；SQLite 固定 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。Provider.db 及其辅助文件必须进入 `.gitignore`，并排除导出、交付、诊断与打包。
+Provider.db 是受本地文件权限保护的明文敏感 SQLite，不得宣称加密。Unix 使用 `0600`；Windows 由 daemon owner 在一个有界超时的 PowerShell 进程中，批量为敏感目录、manifest、SQLite 和已存在 sidecar 构造、应用并复核只含当前用户 SID、SYSTEM 与 Administrators 的完整私有 DACL。不得按可本地化用户名授权，不得执行 `icacls /reset`。ACL 超时、系统 PowerShell 缺失、读取或写入失败必须具有稳定错误码并保持失败关闭。SQLite 固定 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。
 
 数据库保存多 Profile 的完整 `name`、`providerId`、`model`、完整 `baseUrl`、`apiKey`、`options`、`configVersion`、`active` 与时间戳。第一阶段同一工作区最多一个 active Profile，也允许零 active。`studio.db` 只保存脱敏历史快照，不保存 Profile 或秘密。
 
@@ -236,7 +236,7 @@ Workbench 必须提供 Profile 列表、新建、编辑、复制、激活、删�
 
 ### 7.4 daemon 快照与重启
 
-daemon 启动时固定 active Profile 配置。active Profile、model、endpoint、key、options 或 configVersion 变化后必须标记 `restartRequired`，重启前拒绝新运行；已有运行不得静默切换。安全快照增加 `profileId`、`profileName`、`configVersion`，不含 API Key 或完整 URL；Worker 按 `profileId + configVersion` 领取，不得只靠 providerId、model 或 endpoint。Workbench 发起同一 daemon 进程内的受控重启时，必须只在内存中复用既有 capability 与 HttpOnly 会话 token，使已授权旧页面在端口恢复后继续可用；独立 daemon 进程仍生成新授权，Host、Origin、Cookie 与 capability 边界不得放宽，任意 localhost 页面不得借重启获得授权。
+daemon 启动时固定 active Profile 配置。active Profile、model、endpoint、key、options 或 configVersion 变化后必须标记 `restartRequired`，重启前拒绝新运行；已有运行不得静默切换。安全快照增加 `profileId`、`profileName`、`configVersion`，不含 API Key 或完整 URL。daemon owner 独占目录创建、schema migration、旧配置导入和权限强化；Generation/media Worker 只能附加已初始化的 manifest、Studio DB 与 Provider DB，不得修改 `.gitignore`、schema 或 ACL。Worker 池从零按需启动；generation pool 持续满载时逐个扩容。
 
 ### 7.5 Generation Run 并发
 
@@ -244,7 +244,7 @@ daemon 启动时固定 active Profile 配置。active Profile、model、endpoint
 
 每次预检冻结非空 `executionConcurrency`，可附仅用于解释的 `concurrencySource`（`default`、`explicit`、`serial`）。并发在预检前或预检时解析并绑定证据；改变并发必须重新预检。Run 从预检证据复制冻结值，queue 时不得另改；运行中不得修改。实际每 Run 不超过冻结值，全局不超过 `1000`。
 
-Provider 活跃请求使用 daemon 内部自适应 Governor，安全目标上限为 `100`，初始目标为 `16`。Governor 按 Provider 成功、429、临时/未知结果以及 Worker RSS 和外部 Buffer 内存样本调整目标；健康窗口逐步增加，限流或资源压力减半并进入冷却。运行状态只显示脱敏的目标、活动配额、冷却原因和资源样本，不显示密钥、完整端点或绝对路径。Provider JSON/Base64 响应和公开图片 URL 优先流式写入受控临时文件，只有小于 `1 MiB` 的结果保留为内存 Buffer。
+Provider 活跃请求使用 daemon 内部自适应 Governor，安全目标上限为 `100`，初始目标为 `16`。Governor 按 Provider 成功、429、临时/未知结果以及 Worker RSS 和外部 Buffer 内存样本调整目标。Generation/media pool 必须公开不含 PID、路径或秘密的 `idle/starting/ready/degraded/failed/stopping` 健康状态、有界重启计数和安全错误摘要；达到最终重启上限后熔断到 `failed`，不得无限重启或让等待任务永久挂起。Provider JSON/Base64 响应和公开图片 URL 优先流式写入受控临时文件。
 
 必须移除可配置 workspace worker concurrency、`config --worker-concurrency`、相关 runtime-settings API/业务读取及其 restartRequired。Provider 变化仍要求重启。Schema v19 必须保留现有业务数据与已完成 Run 历史，并把既有可用请求值回填到 `executionConcurrency`，其余历史默认 `4`。
 
@@ -349,16 +349,16 @@ Skill 必须支持在不调用外部 Provider 的情况下完成预检与干跑�
 
 ## 9. 实时更新与会话恢复
 
-本地服务必须通过 SSE 向 Workbench 推送持久事件。事件必须有严格递增 ID，Workbench 断线后必须以最后事件 ID 或状态版本重新连接。
+本地服务必须通过 SSE 向 Workbench 推送持久事件。事件必须有严格递增 ID，Workbench 断线后必须从最后成功 cursor 恢复。
 
 连接恢复顺序必须为：
 
-1. Workbench 读取当前项目、任务、轮次和运行会话状态快照。
-2. Workbench 携带最后已处理事件 ID 请求补发。
-3. 服务返回缺失事件；若事件窗口不可用，则返回新的状态快照。
-4. Workbench 仅更新受影响区域，例如新资产流、运行进度、问题或选择状态。
+1. 保留用户当前页面与非权威交互状态，并明确显示正在重连。
+2. 连接恢复后刷新当前 Studio、项目、任务、轮次和运行的权威快照。
+3. 携带最后已处理事件 ID 请求缺失事件；事件窗口不可用时，以服务端快照 cursor 替换本地 cursor。
+4. 只有快照或事件刷新成功后才推进 cursor，并显示已恢复；失败时保留上次成功位置退避重试。
 
-Workbench 不得依赖全页刷新、扫描目录或客户端推测来显示最新生成结果。
+Workbench 不得依赖目录扫描或客户端推测来显示最新生成结果。运行健康横幅必须显示 daemon/Worker 状态，并提供授权的安全重启、状态刷新和脱敏诊断复制；诊断不得包含 Provider 密钥、完整 URL、capability、Cookie、绝对路径或媒体内容。
 
 浏览器本地仅保存非权威交互状态，例如当前项目、筛选条件、页面位置和抽屉开关。项目选片集合是 Studio 业务状态：它以资产关系表达、由 Studio API 恢复，并且独立于当前浏览器、筛选范围和页面刷新。
 
@@ -453,13 +453,13 @@ Studio 全局导航固定为项目、创作资料库、共享素材、学习中�
 
 | 层级 | 选择 | 约束 |
 | --- | --- | --- |
-| 运行时 | Node.js 22 LTS 与 TypeScript 编译产物。 | 发布时必须可直接运行。 |
+| 运行时 | Node.js `22.13.0` 或更高版本与 TypeScript 编译产物。 | 必须使用默认可用的 `node:sqlite`；Windows 使用系统 Windows PowerShell/CIM 和本地固定 NTFS DACL，不依赖 WMIC。 |
 | 本地服务 | Node 原生 HTTP 与 SSE 或等价轻量路由层。 | 禁止因 Workbench 引入完整云端 Web 应用依赖。 |
 | 业务数据 | SQLite WAL、FTS5、版本化 SQL migration。 | studio.db 是唯一业务事实源。 |
 | 数据访问 | 小型 typed repository 与 schema 校验。 | 禁止由页面或目录直接写入业务事实。 |
-| 运行引擎 | SQLite 持久队列、daemon 内持久 Worker、租约和心跳。 | 同 workspace 仅一个 daemon 持有独立 `runtime/daemon-lock.sqlite` 的长期 `BEGIN EXCLUSIVE` 事务；OS/SQLite 在进程崩溃时自动释放。`daemon.lock` 只是 PID/ownerId 身份记录，不承担互斥。并发 CLI 最终复用同一实例。不同 Session/项目的 Runs 共享 Worker、每 Run 冻结并发与全局 1000 公平队列，不另设 Session/Provider/项目并发。 |
-| 实时通道 | SSE 与持久事件 outbox。 | 必须支持断线补偿。 |
-| Workbench | React 与 Vite 构建出的静态 bundle。 | 不提供第二个聊天入口。 |
+| 运行引擎 | SQLite 持久队列、daemon owner、按需 child-process Worker、租约和心跳。 | 同 workspace 仅一个 daemon；Worker 不执行工作区初始化。Provider 目标并发最高 100，队列逻辑并发最高 1000。 |
+| 实时通道 | SSE 与持久事件 outbox。 | 必须支持 cursor、快照、断线补偿与重启恢复反馈。 |
+| Workbench | React 与 Vite 构建出的静态 bundle。 | 不提供第二个聊天入口；运行诊断必须脱敏。 |
 | 图片处理 | Node crypto；缩略图与预览可使用可选图像处理依赖。 | 缩略图失败不得破坏正式资产。 |
 | Provider | Image Provider plugin。 | Provider 能力必须显式声明。 |
 | 测试 | Node 内置测试运行器、真实浏览器 harness、模拟 Provider 与故障注入。 | 浏览器驱动由验证环境提供，不预设或承诺安装 Vitest/Playwright；必须验证状态恢复、可访问交互和外部副作用。 |
@@ -514,6 +514,9 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-020 | 执行型触发在稳定 workspace 中先普通 `open`，再建立独立 Session/项目上下文并开始澄清；咨询/开发型不自动启动。每个独立会话都可调用普通 open，daemon 只允许首个实际 opener并让其他会话返回 reused；失败回退不泄露 bootstrap/claim 秘密；force 仅显式用户动作；零 active Provider 仍可启动且不会自动测试连接；首次汇报区分 opened/reused 并包含职责、Provider readiness、当前上下文和下一步。 |
 | PIC-VN-AC-021 | 同一稳定 workspace 的 3–4 个并发会话最终复用唯一 daemon/PID 和单一活动 Workbench；真实 conversation Session 的 project/task/round、项目与 Run 归属互相隔离，Workbench per-tab UI Session 与 agent Sessions 分离，用户当前 route 不被后台 context 更新抢占；所有 Runs 仍共享 daemon Worker 与全局公平队列。 |
 | PIC-VN-AC-022 | Workbench 只提交人工计划确认，预检与入队只接受 Skill/CLI；同一轮次即使由不同预检、幂等键、旧页面或并发入口提交也最多创建一个 Generation Run，重复请求在调用 Provider 前被拒绝并指向已有运行，再次生成必须创建新轮次。 |
+| PIC-VN-AC-023 | 请求根没有 manifest 且祖先目录存在有效 Studio 时，CLI 在任何子 Studio、daemon 或 Workbench 副作用前拒绝隐式初始化；仅用户显式执行 `open --allow-nested-studio true` 才可创建隔离的嵌套 Studio，既有准确工作区继续正常复用。 |
+| PIC-VN-AC-024 | Windows 在创建任何 Studio 文件前拒绝 UNC、同步盘/系统目录、非固定磁盘、非 NTFS 与 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 DACL、CIM、sharp 与浏览器关联。 |
+| PIC-VN-AC-025 | daemon owner 是唯一目录/schema/ACL 初始化者；空 Studio 不创建 Worker，Generation/media pool 按需启动并提供脱敏健康、有限重启与最终熔断。Workbench 对受控重启显示关闭、重连、快照恢复与已恢复，并能复制脱敏诊断。 |
 
 ## 16. 实施与发布约束
 
@@ -526,7 +529,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 5. Task Type Library、Style Kit、Brand Kit 与外部资产导入。
 6. 全量 E2E、100 项恢复场景、真实 Provider 受控探测和安全检查。
 
-`5.10.3` 稳定正式版已按本规格收敛人工计划确认与唯一运行入口；后续版本也不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
+`5.10.3` 稳定正式版已按本规格收敛人工计划确认与唯一运行入口；`5.10.4` 候选继续强化 Windows 工作区、进程、安装、诊断与恢复边界。后续版本也不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
 
 ## 17. 明确非目标
 
@@ -543,4 +546,4 @@ vNext 第一版不包含：
 
 ## 18. 规格解释
 
-本规格定义 `5.10.3` 稳定正式版的目标产品与目标架构；具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。
+本规格定义 vNext 稳定产品与目标架构；当前源码目标版本为 `5.10.4`，具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。
