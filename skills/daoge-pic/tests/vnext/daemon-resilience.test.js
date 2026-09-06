@@ -311,20 +311,20 @@ test('standalone service startup performs explicit idempotent recovery without c
     closeStudioDatabase(fixture.db);
     fixture.db = null;
 
-    constructed = new LocalStudioService({ workspaceRoot });
+    constructed = new LocalStudioService({ hardenAccess: false, workspaceRoot });
     assert.equal(listGenerationRunItems(constructed.db, fixture.run.id)[0].status, 'requesting');
     assert.equal(getGenerationRun(constructed.db, fixture.run.id).status, 'running');
     await constructed.close();
     constructed = null;
 
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     assert.equal(listGenerationRunItems(started.service.db, fixture.run.id)[0].status, 'outcome_unknown');
     assert.equal(getGenerationRun(started.service.db, fixture.run.id).status, 'resume_pending');
     assert.equal(provider.count(), 0);
     await started.service.close();
     started = null;
 
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     assert.equal(listGenerationRunItems(started.service.db, fixture.run.id)[0].status, 'outcome_unknown');
     assert.equal(getGenerationRun(started.service.db, fixture.run.id).status, 'resume_pending');
   } finally {

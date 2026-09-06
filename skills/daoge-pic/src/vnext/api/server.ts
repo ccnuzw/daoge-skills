@@ -53,6 +53,7 @@ function boundedIds(value: unknown, label: string, options: { optional?: boolean
 
 export interface StudioServiceOptions {
   workspaceRoot: string;
+  hardenAccess?: boolean;
   initialized?: InitializeStudioResult;
   sessionToken?: string;
   ssePollMs?: number;
@@ -342,7 +343,7 @@ export class LocalStudioService {
     let providerDb: ProviderDatabase | null = null;
     try {
       providerDb = openProviderDatabase(this.initialized.paths);
-      hardenStudioAccess(this.initialized.paths);
+      if (options.hardenAccess !== false) hardenStudioAccess(this.initialized.paths);
       importLegacyProviderEnvOnce(providerDb, this.initialized.paths);
     } catch (error) {
       closeProviderDatabase(providerDb);

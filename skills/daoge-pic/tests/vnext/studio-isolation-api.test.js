@@ -21,7 +21,7 @@ test('public project, task, round, run, and run-item APIs reject foreign Studio 
   let started;
   try {
     const initialized = initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const db = started.service.db;
     const timestamp = '2026-01-01T00:00:00.000Z';
     db.prepare('INSERT INTO studios (id, workspace_root, schema_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run('studio_foreign_matrix', workspaceRoot + '-foreign', initialized.manifest.schemaVersion, timestamp, timestamp);

@@ -16,7 +16,7 @@ test('runtime exposes protocol version separately from artifact version and reje
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const studio = await requestJson(started, '/api/studio');
     assert.deepEqual(studio.body.data.protocol, { name: 'daoge-pic-skill-protocol', version: '2.0.0', runtimeVersion: '5.10.4', supportedRange: '>=2.0.0 <3.0.0' });
     assert.equal(studio.body.data.runtime.mode, 'standalone');

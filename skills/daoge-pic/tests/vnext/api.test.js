@@ -61,7 +61,7 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
   try {
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { name: 'API Provider', model: 'gpt-image-2', apiKey: 'api-secret-never-in-http-response' });
-    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot, ssePollMs: 20 });
 
     const health = await requestJson(started, '/api/health');
     assert.equal(health.status, 200);
@@ -172,7 +172,7 @@ test('active rounds can be reconfirmed after daemon restart', async () => {
   let second;
   try {
     initializeStudio({ workspaceRoot });
-    first = await startLocalStudioService({ workspaceRoot });
+    first = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const session = await requestJson(first, '/api/sessions/open', { method: 'POST', idempotencyKey: 'restart-session', body: { conversationId: 'restart-reconfirm-conversation' } });
     const sessionId = session.body.data.id;
     const project = await requestJson(first, '/api/projects', { method: 'POST', idempotencyKey: 'restart-project', body: { name: '重启确认项目', sessionId } });
@@ -186,7 +186,7 @@ test('active rounds can be reconfirmed after daemon restart', async () => {
     assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
     await first.service.close();
     first = null;
-    second = await startLocalStudioService({ workspaceRoot });
+    second = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const rechallenge = await requestJson(second, '/api/rounds/' + roundId + '/confirmation-challenge', { method: 'POST', idempotencyKey: 'restart-challenge-two', body: { sessionId } });
     assert.equal(rechallenge.status, 200, JSON.stringify(rechallenge.body));
     const newCookie = await workbenchCookie(second);
@@ -206,7 +206,7 @@ test('preflight rejection before confirmation leaves no dry-run or receipt side 
   try {
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { name: 'Preflight Gate Provider' });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'preflight-gate-session', body: { conversationId: 'preflight-gate-conversation' } });
     const sessionId = session.body.data.id;
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'preflight-gate-project', body: { name: '预检门禁项目', sessionId } });
@@ -241,7 +241,7 @@ test('run resume requires a Workbench re-confirmation bound to the run round aft
   try {
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { name: 'Resume Gate Provider' });
-    first = await startLocalStudioService({ workspaceRoot });
+    first = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const session = await requestJson(first, '/api/sessions/open', { method: 'POST', idempotencyKey: 'resume-gate-session', body: { conversationId: 'resume-gate-conversation' } });
     const sessionId = session.body.data.id;
     const project = await requestJson(first, '/api/projects', { method: 'POST', idempotencyKey: 'resume-gate-project', body: { name: '恢复门禁项目', sessionId } });
@@ -258,7 +258,7 @@ test('run resume requires a Workbench re-confirmation bound to the run round aft
     await first.service.close();
     first = null;
 
-    second = await startLocalStudioService({ workspaceRoot });
+    second = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const newCookie = await workbenchCookie(second);
     const runId = queued.body.data.value.id;
     const rejectedBearer = await requestJson(second, '/api/runs/' + runId + '/resume', { method: 'POST', idempotencyKey: 'resume-gate-bearer', body: { sessionId } });
@@ -286,10 +286,8 @@ test('Provider connection test returns an actionable client error when the endpo
   try {
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { name: 'Probe Failure Provider' });
-    started = await startLocalStudioService({
-      workspaceRoot,
-      providerProbe: async () => { throw new Error('fixture DNS failure'); }
-    });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot,
+    providerProbe: async () => { throw new Error('fixture DNS failure'); } });
     const profiles = await requestJson(started, '/api/providers');
     const profile = profiles.body.data.profiles[0];
     const tested = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/test', { method: 'POST', idempotencyKey: 'provider-test-failure', body: {} });
@@ -331,7 +329,7 @@ test('local Provider response echoes are sanitized before database, API, and del
     baseUrl = 'http://127.0.0.1:' + address.port + '/private/provider-base';
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { name: 'Echo Provider', baseUrl, apiKey, model: 'echo-model' });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
 
     const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'echo-session', body: { conversationId: 'echo-confirmation-conversation' } });
     const sessionId = session.body.data.id;
@@ -411,7 +409,7 @@ test('asset API returns filtered pages with the full scoped total', async () => 
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'asset-page-project', body: { name: '分页项目' } });
     const projectId = project.body.data.value.id;
     const studioId = started.service.initialized.manifest.studioId;
@@ -438,7 +436,7 @@ test('local Studio service serves the built Workbench and managed image files', 
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const page = await fetch(started.url + '/');
     assert.equal(page.status, 200);
     assert.match(await page.text(), /<div id=\"root\"><\/div>/);
@@ -486,7 +484,7 @@ test('delivery export API awaits the asynchronous large-file export path', async
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'async-api-project', body: { name: '异步 API 交付' } });
     const largePng = Buffer.alloc(8 * 1024 * 1024, 0);
     Buffer.from('iVBORw0KGgo=', 'base64').copy(largePng);
@@ -530,7 +528,7 @@ test('local Studio gates APIs with capability, exact origin, content type, Host,
   let controller;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot, ssePollMs: 20 });
 
     assert.equal((await fetch(started.url + '/api/health')).status, 200);
     const missing = await fetch(started.url + '/api/studio');
@@ -643,7 +641,7 @@ test('asset write endpoints replay idempotency receipts without duplicate events
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
     const upload = async (body = image) => {
       const response = await fetchStudio(started, '/api/assets/import', { method: 'POST', headers: { 'content-type': 'image/png', 'idempotency-key': 'upload-replay' }, body });
@@ -680,7 +678,7 @@ test('session open replays the same request and rejects idempotency key reuse fo
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const options = { method: 'POST', idempotencyKey: 'session-open-replay', body: { conversationId: 'conversation-one' } };
     const opened = await requestJson(started, '/api/sessions/open', options);
     const replayed = await requestJson(started, '/api/sessions/open', options);
@@ -703,7 +701,7 @@ test('daemon derives stable idempotency from operation-name without caller UUID 
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const request = (body = { name: '命名操作项目', description: '稳定 payload' }) => fetchStudio(started, '/api/projects', { method: 'POST', headers: { 'content-type': 'application/json', 'x-daoge-operation-name': 'project:create:named-fixture' }, body: JSON.stringify(body) }).then(async (response) => ({ status: response.status, body: await response.json() }));
     const first = await request();
     const replay = await request({ description: '稳定 payload', name: '命名操作项目' });
@@ -725,7 +723,7 @@ test('local Studio service closes even while a Workbench SSE stream remains open
   let controller;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot, ssePollMs: 20 });
     controller = new AbortController();
     const sse = await fetchStudio(started, '/api/events?after=0', { headers: { accept: 'text/event-stream' }, signal: controller.signal });
     assert.equal(sse.status, 200);
@@ -749,7 +747,7 @@ test('SSE replays Studio events after a cursor without a page refresh', async ()
   let controller;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot, ssePollMs: 20 });
     controller = new AbortController();
     const sse = await fetchStudio(started, '/api/events?after=0', { headers: { accept: 'text/event-stream' }, signal: controller.signal });
     assert.equal(sse.status, 200);
@@ -775,7 +773,7 @@ test('SSE honors Last-Event-ID and requests a snapshot for an unavailable event 
   let controller;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot, ssePollMs: 20 });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot, ssePollMs: 20 });
     await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'window-project', body: { name: '事件窗口项目' } });
     const earliest = await requestJson(started, '/api/events?after=0');
     const firstId = earliest.body.data.events[0].id;
@@ -814,9 +812,9 @@ test('local Studio releases its database after a fixed port bind failure', async
     await new Promise((resolve, reject) => blocker.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve()));
     const address = blocker.address();
     assert.ok(address && typeof address !== 'string');
-    await assert.rejects(startLocalStudioService({ workspaceRoot }, address.port), /EADDRINUSE/);
+    await assert.rejects(startLocalStudioService({ hardenAccess: false, workspaceRoot }, address.port), /EADDRINUSE/);
     await new Promise((resolve, reject) => blocker.close((error) => error ? reject(error) : resolve()));
-    started = await startLocalStudioService({ workspaceRoot }, address.port);
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot }, address.port);
     assert.equal((await requestJson(started, '/api/health')).status, 200);
   } finally {
     if (blocker.listening) await new Promise((resolve) => blocker.close(() => resolve()));

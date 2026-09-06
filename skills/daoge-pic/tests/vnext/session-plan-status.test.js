@@ -16,7 +16,7 @@ test('Workbench session plan endpoint is read-only and projects current context 
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'session', body: { conversationId: 'readonly-plan-conversation' } });
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'project', body: { name: '只读计划项目', sessionId: session.body.data.id } });
     const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'task', body: { projectId: project.body.data.value.id, name: '只读计划任务', sessionId: session.body.data.id } });

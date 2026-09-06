@@ -19,7 +19,7 @@ test('P1 delivery HTTP API carries project selection through keep-only draft, re
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const project = await json(started, '/api/projects', { method: 'POST', key: 'delivery-project', body: { name: 'HTTP 交付项目' } });
     const projectId = project.body.data.value.id;
     const uploadResponse = await fetchStudio(started, '/api/assets/import', { method: 'POST', headers: { 'content-type': 'image/png', 'idempotency-key': 'delivery-upload', 'x-daoge-target-type': 'project', 'x-daoge-target-id': projectId }, body: png });

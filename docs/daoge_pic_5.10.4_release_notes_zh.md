@@ -48,6 +48,6 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 - `npm run bench:perf`：空 Studio control-plane 41.81 ms，需求前 media process 为 0；100000 pending 队列领取 1000 项为 128.03 ms，RSS 105.6 MiB。
 - 浏览器实测 1440×1000 与 375×812；无横向溢出，移动端健康操作高度 44px，实际 daemon 重启完整显示恢复阶段。
 - Windows Actions 已配置 Windows Server 2022/2025 × Node.js 22.13.0/24；分支推送前不把本地 macOS 结果写成 Windows runner 已通过。
-- 本地候选制品：`daoge-pic-5.10.4.tgz`，350,750 bytes。
-- SHA-256：`4f5abffcf10a2fb60b3831f8c38f53914f53717c3006c217767cdfd60782444b`。
+- 本地候选制品：`daoge-pic-5.10.4.tgz`，350,776 bytes。
+- SHA-256：`2662d9332ec30a5857d045d20e9dea32e8637193470eda657f7bfdb61e0cef87`。
 - 验证未调用真实图片 Provider，未产生计费生成请求。
