@@ -94,7 +94,7 @@ function main({ runCommand = run, makeTemp = fs.mkdtempSync, removeSync = fs.rmS
     const installedBin = path.join(consumerRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'daoge.cmd' : 'daoge');
     if (!fs.existsSync(installedBin)) throw new Error('npm did not create the packaged daoge bin shim.');
     const help = process.platform === 'win32'
-      ? runCommand(process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe', ['/d', '/s', '/c', 'call "%DAOGE_SMOKE_BIN%" --help'], { cwd: consumerRoot, env: { ...process.env, DAOGE_SMOKE_BIN: installedBin } })
+      ? runCommand(process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe', ['/d', '/s', '/c', 'daoge.cmd --help'], { cwd: path.dirname(installedBin), env: process.env })
       : runCommand(installedBin, ['--help'], { cwd: consumerRoot });
     if (!help.stdout.includes('DAOGE Pic vNext Studio')) throw new Error('Installed daoge bin shim did not execute the packaged entry.');
     const registration = path.join(consumerRoot, '.agents', 'skills', 'daoge-pic');

@@ -124,19 +124,22 @@ function runWindowsAclScript(script: string, dependencies: SensitiveAccessDepend
     const output = run(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 10000, maxBuffer: 1024 * 1024 });
     if (typeof output === 'string' && output.trim()) {
       const parsed = JSON.parse(output.trim()) as { expected?: unknown; results?: unknown };
-      const expected = Array.isArray(parsed.expected) ? parsed.expected.map(String).sort() : [];
-      const results = Array.isArray(parsed.results) ? parsed.results as Array<{ protected?: unknown; rules?: unknown }> : [];
+      const values = <T>(value: T | T[] | null | undefined): T[] => Array.isArray(value) ? value : value === null || value === undefined ? [] : [value];
+      const expected = values(parsed.expected as string | string[] | null | undefined).map(String).sort();
+      const results = values(parsed.results as { protected?: unknown; rules?: unknown } | Array<{ protected?: unknown; rules?: unknown }> | null | undefined);
       if (expected.length !== 3 || !results.length || results.some((result) => {
-        const rules = Array.isArray(result.rules) ? result.rules as Array<{ sid?: unknown; inherited?: unknown; allow?: unknown; fullControl?: unknown }> : [];
+        const rules = values(result.rules as { sid?: unknown; inherited?: unknown; allow?: unknown; fullControl?: unknown } | Array<{ sid?: unknown; inherited?: unknown; allow?: unknown; fullControl?: unknown }> | null | undefined);
         const actual = rules.map((rule) => String(rule.sid || '')).sort();
         return result.protected !== true || rules.length !== 3 || actual.join('|') !== expected.join('|') || rules.some((rule) => rule.inherited !== false || rule.allow !== true || rule.fullControl !== true);
-      })) throw new Error('Sensitive Studio ACL verification failed.');
+      })) throw new Error('Sensitive Studio ACL verification failed: ' + JSON.stringify(parsed));
     }
   } catch (error) {
-    const failure = error as NodeJS.ErrnoException & { signal?: string; killed?: boolean };
+    const failure = error as NodeJS.ErrnoException & { signal?: string; killed?: boolean; stderr?: string | Buffer };
     if (failure.code === 'ETIMEDOUT' || failure.killed || failure.signal === 'SIGTERM') throw new Error('windows_acl_timeout: Windows ACL update exceeded 10 seconds. Use a writable local NTFS directory and retry.');
     if (failure.code === 'ENOENT') throw new Error('windows_powershell_missing: System Windows PowerShell is required to secure Studio data.');
-    throw new Error('windows_acl_denied: Cannot secure sensitive Studio path with Windows ACLs. Use a writable local NTFS directory and retry.');
+    if (failure.message.startsWith('Sensitive Studio ACL verification failed:')) throw new Error('windows_acl_verification_failed: ' + failure.message.slice(43, 2048));
+    const detail = String(failure.stderr || '').replace(/[A-Za-z]:\\[^\r\n]+/g, '[redacted-path]').replace(/[A-Za-z0-9+/=]{80,}/g, '[redacted-data]').replace(/\s+/g, ' ').trim().slice(0, 600);
+    throw new Error('windows_acl_denied: Cannot secure sensitive Studio path with Windows ACLs. Use a writable local NTFS directory and retry.' + (detail ? ' PowerShell: ' + detail : ''));
   }
 }
 
