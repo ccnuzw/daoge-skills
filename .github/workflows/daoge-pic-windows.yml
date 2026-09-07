@@ -76,7 +76,7 @@ jobs:
           npm run bench:perf | Set-Content -Encoding UTF8 (Join-Path $diagnosticRoot "performance.txt")
       - name: Upload redacted Windows evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daoge-pic-${{ matrix.os }}-node-${{ matrix.node }}
           path: ${{ runner.temp }}/daoge-diagnostics
