@@ -268,6 +268,6 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - macOS 本地 `npm test`：315 项，313 通过、0 失败、0 取消、2 项仅 Windows 实机用例跳过；跳过项为真实最终 DACL 与真实 WMI/长 Unicode 路径诊断。
 - 本地 `npm run test:package`：构建 TypeScript 与 Vite Workbench 成功；发布清单 122 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 的真实 bin、注册链接、doctor 与 `sharp` 均通过。
 - 浏览器实测 1440×1000 与 375×812：健康横幅无横向溢出，移动端操作按钮高度 44px；实际 daemon 故障注入后观察到“后台处理池需要重启 → 正在安全关闭后台任务 → Studio 已恢复”，页面 URL 与授权继续复用。
-- `npm run bench:perf`：Schema v22 空 Studio control-plane 构造 `41.81 ms`，需求前 media process 为 `0`；100000 pending 队列领取 1000 项为 `128.03 ms`，RSS `105.6 MiB`。
-- Windows Actions 覆盖 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组矩阵，执行完整回归、真实 DACL/WMI/长路径、cmd shim、junction、安装、daemon 恢复、`sharp` 与脱敏诊断/性能证据上传。该矩阵只有在分支推送后运行；本地 macOS 结果不得冒充 Windows runner 结果。
+- 本地 `npm run bench:perf`：Schema v22 空 Studio control-plane 构造 `41.90 ms`，需求前 media process 为 `0`；100000 pending 队列领取 1000 项为 `132.48 ms`，RSS `107.7 MiB`。
+- [Windows Actions 运行 34082076215](https://github.com/ccnuzw/daoge-skills/actions/runs/34082076215) 在 commit `f93b6ce49b3ca03a6632ab919450a51083318162` 上完成 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组矩阵，四组均成功。每组 `npm test` 共 315 项，311 通过、0 失败、0 取消、4 项 Windows symlink 用例按平台条件跳过；每组 `npm run test:package` 均为 122 个文件且 `unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，真实 bin、注册、doctor 与 `sharp` 全部通过。四份脱敏 doctor 报告均为 `ok: true`，原子 rename、SQLite 排他锁、私有 DACL、NTFS/固定磁盘、默认浏览器和 `sharp` 检查全部通过；空 Studio 的 media process 均为 `0`，100000 项队列领取 1000 项耗时范围为 `157.55–231.35 ms`。
 - 所有本地回归和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。
