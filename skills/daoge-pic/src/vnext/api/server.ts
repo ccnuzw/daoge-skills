@@ -5,7 +5,7 @@ import http, { IncomingMessage, OutgoingHttpHeaders, Server, ServerResponse } fr
 import { URL } from 'node:url';
 import { Readable } from 'node:stream';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase, subscribeStudioEvents, withTransaction } from '../studio/database';
-import { ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
+import { hardenStudioAccess, ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { ProviderCapabilities, ProviderId, providerSnapshot } from '../studio/provider-config';
 import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerStatus, resolveActiveProviderConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
 import { createImageProvider } from '../providers/http-adapters';
@@ -25,8 +25,9 @@ import { studioEventWindow } from './events';
 import { discardStagedImage, MediaArchiveError, MediaValidationError, openVerifiedManagedFileAsync, stageImageStream, VerifiedManagedFile } from '../media/archive';
 import { thumbnailEtag } from '../media/thumbnails';
 import { MediaJobResult, MediaProcessPool, MediaSource, MediaZipEntry } from '../runtime/media-worker-pool';
-import { daemonRestartAvailable, requestDaemonRestart } from '../runtime/restart';
+import { daemonRestartAvailable, daemonShutdownAvailable, requestDaemonRestart, requestDaemonShutdown } from '../runtime/restart';
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
+import type { ProcessPoolHealth } from '../runtime/worker-pool';
 import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName, LocalAuthentication } from './local-auth';
 import { ConfirmationGate, canonicalValue, planHash } from './confirmation-gate';
 import { isSupportedProtocolVersion, protocolStatus, SKILL_PROTOCOL_NAME, SUPPORTED_PROTOCOL_RANGE } from '../shared/protocol';
@@ -52,6 +53,8 @@ function boundedIds(value: unknown, label: string, options: { optional?: boolean
 
 export interface StudioServiceOptions {
   workspaceRoot: string;
+  hardenAccess?: boolean;
+  initialized?: InitializeStudioResult;
   sessionToken?: string;
   ssePollMs?: number;
   workbenchDir?: string;
@@ -280,8 +283,11 @@ export function streamVerifiedFileResponse(request: IncomingMessage, response: S
 }
 
 interface ActiveDaemonRuntime {
+  startedAt?: unknown;
   provider?: { profileId?: unknown; configVersion?: unknown; providerId?: unknown; model?: unknown; endpoint?: unknown } | null;
   providerConcurrency?: ProviderConcurrencySnapshot | null;
+  workerPool?: { health?: ProcessPoolHealth } | null;
+  mediaWorkerPool?: { health?: ProcessPoolHealth } | null;
 }
 interface SafeProviderSnapshot {
   profileId: string;
@@ -332,10 +338,20 @@ export class LocalStudioService {
   constructor(options: StudioServiceOptions) {
     if (options.capability && !/^[A-Za-z0-9_-]{43,}$/.test(options.capability)) throw new Error('Studio capability must be a high-entropy base64url token.');
     if (options.sessionToken && !/^[A-Za-z0-9_-]{43,}$/.test(options.sessionToken)) throw new Error('Studio session token must be a high-entropy base64url token.');
-    this.initialized = initializeStudio({ workspaceRoot: options.workspaceRoot });
-    this.db = openStudioDatabase(this.initialized.paths, this.initialized.manifest);
-    this.providerDb = openProviderDatabase(this.initialized.paths);
-    importLegacyProviderEnvOnce(this.providerDb, this.initialized.paths);
+    this.initialized = options.initialized || initializeStudio({ workspaceRoot: options.workspaceRoot, hardenAccess: false });
+    const db = openStudioDatabase(this.initialized.paths, this.initialized.manifest);
+    let providerDb: ProviderDatabase | null = null;
+    try {
+      providerDb = openProviderDatabase(this.initialized.paths);
+      if (options.hardenAccess !== false) hardenStudioAccess(this.initialized.paths);
+      importLegacyProviderEnvOnce(providerDb, this.initialized.paths);
+    } catch (error) {
+      closeProviderDatabase(providerDb);
+      closeStudioDatabase(db);
+      throw error;
+    }
+    this.db = db;
+    this.providerDb = providerDb;
     this.mediaWorkerPool = options.mediaWorkerPool || new MediaProcessPool(this.initialized.paths.workspaceRoot, 1);
     this.ownsMediaWorkerPool = !options.mediaWorkerPool;
     this.pollMs = Math.min(30000, Math.max(100, options.ssePollMs || 15000));
@@ -390,7 +406,7 @@ export class LocalStudioService {
     };
   }
 
-  private runtimeStatus(): { desired: SafeProviderSnapshot | null; active: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null; restartRequired: boolean; providerConcurrency: ProviderConcurrencySnapshot | null } {
+  private runtimeStatus() {
     const record = readActiveDaemonRuntime(this.initialized.paths.runtimeDir);
     const active = record?.provider && typeof record.provider.profileId === 'string' && Number.isInteger(record.provider.configVersion) && typeof record.provider.providerId === 'string' && typeof record.provider.model === 'string' ? {
       profileId: record.provider.profileId,
@@ -402,7 +418,18 @@ export class LocalStudioService {
     const config = resolveActiveProviderConfig(this.providerDb);
     const desired = config ? providerSnapshot(config) : null;
     const desiredIdentity = desired ? { profileId: desired.profileId, configVersion: desired.configVersion, providerId: desired.providerId, model: desired.model, endpoint: desired.endpoint } : null;
-    return { desired, active, restartRequired: Boolean(record && JSON.stringify(active) !== JSON.stringify(desiredIdentity)), providerConcurrency: record?.providerConcurrency || null };
+    return {
+      desired,
+      active,
+      restartRequired: Boolean(record && JSON.stringify(active) !== JSON.stringify(desiredIdentity)),
+      providerConcurrency: record?.providerConcurrency || null,
+      daemon: {
+        mode: record ? 'daemon' : 'standalone',
+        startedAt: typeof record?.startedAt === 'string' ? record.startedAt : null,
+        workerPool: record?.workerPool?.health || null,
+        mediaWorkerPool: record?.mediaWorkerPool?.health || this.mediaWorkerPool.healthSnapshot()
+      }
+    };
   }
 
   async close(): Promise<void> {
@@ -457,7 +484,10 @@ export class LocalStudioService {
         if (parsed.pathname.endsWith('/release')) return success(response, { released: this.workbenchPresence.release(claimToken) });
         return success(response, this.workbenchPresence.claim(claimToken, body.force === true));
       }
-      if (request.method === 'GET' && parsed.pathname === '/api/studio') return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion, protocol: protocolStatus() });
+      if (request.method === 'GET' && parsed.pathname === '/api/studio') {
+        const runtime = this.runtimeStatus().daemon;
+        return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion, protocol: protocolStatus(), runtime });
+      }
       if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { profiles: listProviderProfiles(this.providerDb), status: providerStatus(this.providerDb), runtime: this.runtimeStatus() });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
@@ -548,6 +578,13 @@ export class LocalStudioService {
       if (!daemonRestartAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法从 Workbench 重启。');
       success(response, { restarting: true });
       setImmediate(() => requestDaemonRestart());
+      return;
+    }
+    if (pathname === '/api/shutdown' && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '只有当前 Skill/CLI 可以关闭 Studio daemon。');
+      if (!daemonShutdownAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法关闭。');
+      success(response, { shuttingDown: true });
+      setImmediate(() => requestDaemonShutdown());
       return;
     }
     if (pathname === '/api/providers/import-env' && request.method === 'POST') return success(response, importProviderEnvProfile(this.providerDb, this.initialized.paths, key));

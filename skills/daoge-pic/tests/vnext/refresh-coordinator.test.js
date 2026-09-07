@@ -1,4 +1,5 @@
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -9,7 +10,7 @@ function deferred() {
 }
 
 test('trailing refresh queue coalesces an event burst into one current and one trailing refresh', async () => {
-  const { createTrailingTaskQueue } = await import(path.join(__dirname, '../../web/src/refresh-coordinator.mjs'));
+  const { createTrailingTaskQueue } = await import(pathToFileURL(path.join(__dirname, '../../web/src/refresh-coordinator.mjs')).href);
   const first = deferred();
   let calls = 0;
   const queue = createTrailingTaskQueue(async () => {
@@ -26,7 +27,7 @@ test('trailing refresh queue coalesces an event burst into one current and one t
 });
 
 test('trailing refresh queue drops queued work after disposal', async () => {
-  const { createTrailingTaskQueue } = await import(path.join(__dirname, '../../web/src/refresh-coordinator.mjs'));
+  const { createTrailingTaskQueue } = await import(pathToFileURL(path.join(__dirname, '../../web/src/refresh-coordinator.mjs')).href);
   const first = deferred();
   let calls = 0;
   const queue = createTrailingTaskQueue(async () => {

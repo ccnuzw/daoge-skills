@@ -1,7 +1,9 @@
 import path from 'node:path';
 import os from 'node:os';
-import { ChildProcess, fork } from 'node:child_process';
+import { spawn, ChildProcess } from 'node:child_process';
 import type { MediaReconciliationResult } from '../media/reconcile';
+import { safeErrorSummary } from '../shared/safe-error';
+import type { ProcessPoolHealth, ProcessPoolState } from './worker-pool';
 
 export interface MediaSourceIdentity {
   contentHash: string;
@@ -87,19 +89,32 @@ export class MediaProcessPool {
   private readonly queue: PendingJob[] = [];
   private stopping = false;
   private sequence = 0;
+  private activated = false;
+  private exhausted = false;
+  private restartCount = 0;
+  private lastError: string | null = null;
+  private readonly entry: string;
+  private readonly maxSize: number;
 
   constructor(private readonly workspaceRoot: string, size = defaultPoolSize()) {
-    const entry = path.resolve(__dirname, '../runner/media-worker-process.js');
-    const workerCount = Math.max(1, Math.min(MAX_MEDIA_WORKER_POOL_SIZE, Math.floor(size) || 1));
-    for (let index = 0; index < workerCount; index += 1) this.slots.push(this.startSlot(entry));
+    this.entry = path.resolve(__dirname, '../runner/media-worker-process.js');
+    this.maxSize = Math.max(1, Math.min(MAX_MEDIA_WORKER_POOL_SIZE, Math.floor(size) || 1));
   }
 
   processIds(): number[] {
     return this.slots.flatMap((slot) => typeof slot.child.pid === 'number' && slot.child.pid > 0 ? [slot.child.pid] : []);
   }
+  healthSnapshot(): ProcessPoolHealth {
+    const readyCount = this.slots.filter((slot) => slot.ready).length;
+    const busyCount = this.slots.filter((slot) => slot.active).length;
+    const state: ProcessPoolState = this.stopping ? 'stopping' : this.exhausted ? 'failed' : !this.activated ? 'idle' : readyCount === 0 ? 'starting' : this.slots.some((slot) => slot.failed || slot.restartAttempts > 0) ? 'degraded' : 'ready';
+    return { state, targetSize: this.maxSize, processCount: this.processIds().length, readyCount, busyCount, queuedCount: this.queue.length, restartCount: this.restartCount, lastError: this.lastError };
+  }
 
   run<T extends MediaJobResult>(job: MediaJob, signal?: AbortSignal): Promise<T> {
     if (this.stopping) return Promise.reject(new Error('Media worker pool is shutting down.'));
+    if (this.exhausted) return Promise.reject(new Error('Media worker pool is unavailable until the Studio daemon restarts.'));
+    this.activated = true;
     if (signal?.aborted) return Promise.reject(abortError());
     if (this.queue.length >= MAX_MEDIA_QUEUE_LENGTH) return Promise.reject(new Error('Media worker queue is full; retry after current work completes.'));
     return new Promise<T>((resolve, reject) => {
@@ -114,6 +129,7 @@ export class MediaProcessPool {
       };
       signal?.addEventListener('abort', pending.abort, { once: true });
       this.queue.push(pending);
+      this.ensureCapacity();
       this.dispatch();
     });
   }
@@ -141,15 +157,27 @@ export class MediaProcessPool {
     await Promise.all(exits);
   }
 
+  private ensureCapacity(): void {
+    if (this.stopping || this.exhausted) return;
+    const active = this.slots.filter((slot) => slot.active).length;
+    const target = Math.min(this.maxSize, Math.max(1, this.queue.length + active));
+    while (this.slots.length < target) this.slots.push(this.startSlot(this.entry));
+  }
+
   private startSlot(entry: string, restartAttempts = 0): WorkerSlot {
-    const child = fork(entry, ['--workspace', this.workspaceRoot], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    const child = spawn(process.execPath, [entry, '--workspace', this.workspaceRoot], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
     const slot: WorkerSlot = { child, ready: false, active: null, entry, restartTimer: null, healthyTimer: undefined, restartAttempts, failed: false };
     child.on('message', (message: { type?: unknown; jobId?: unknown; result?: MediaJobResult; message?: unknown }) => {
       if (message?.type === 'ready') {
         slot.ready = true;
+        this.lastError = null;
         clearTimeout(slot.healthyTimer);
         slot.healthyTimer = setTimeout(() => { slot.restartAttempts = 0; slot.healthyTimer = undefined; }, MEDIA_HEALTHY_WINDOW_MS);
         this.dispatch();
+        return;
+      }
+      if (message?.type === 'fatal') {
+        this.failSlot(slot, new Error(typeof message.message === 'string' ? message.message : 'Media worker failed during startup.'));
         return;
       }
       const pending = slot.active;
@@ -205,6 +233,7 @@ export class MediaProcessPool {
     if (slot.failed) return;
     slot.failed = true;
     slot.ready = false;
+    this.lastError = safeErrorSummary(error.message) || 'Media worker process failed.';
     clearTimeout(slot.healthyTimer);
     slot.healthyTimer = undefined;
     if (slot.active) {
@@ -213,9 +242,16 @@ export class MediaProcessPool {
     }
     if (this.stopping) return;
     if (slot.child.exitCode === null && slot.child.signalCode === null) slot.child.kill(error.message === 'Media worker job watchdog expired.' ? 'SIGKILL' : 'SIGTERM');
-    if (slot.restartAttempts >= 8) return;
+    if (slot.restartAttempts >= 8) {
+      const index = this.slots.indexOf(slot);
+      if (index >= 0) this.slots.splice(index, 1);
+      this.exhausted = true;
+      for (const pending of this.queue.splice(0)) this.finish(pending, new Error('Media worker pool is unavailable after repeated child-process failures.'));
+      return;
+    }
     const delay = Math.min(30000, 100 * 2 ** Math.min(slot.restartAttempts, 8));
     const nextAttempts = slot.restartAttempts + 1;
+    this.restartCount += 1;
     slot.restartTimer = setTimeout(() => {
       slot.restartTimer = null;
       if (this.stopping) return;

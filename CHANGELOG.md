@@ -2,6 +2,41 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.10.4（待发布）
+
+5.10.4 候选集中完成 Windows 安装、工作区、进程、权限、冷启动和 Workbench 恢复优化。当前稳定 GitHub Release 仍为 5.10.3；只有创建并验证 `daoge-pic-v5.10.4` Release 后才能移除“待发布”标记。
+
+### Windows 初始化与安全
+
+- Node.js 下限固定为 `22.17.0`；Node `22.13.x` 内置 SQLite 未启用 FTS5，Node `22.16.0` 携带的 libuv 1.49.2 又会在 Windows Server 2025 返回不一致的路径/句柄文件身份；`22.17.0` 的 libuv 1.51.0 修复 Windows stat 结构字段顺序与卷序列号一致性。daemon 身份查询从 WMIC 改为系统 Windows PowerShell 中有界的 .NET WMI 查询，不依赖 PowerShell 模块，并同时设置 WMI 与 Node 外层超时。
+- 新工作区在任何 Studio 文件创建前拒绝 UNC、同步盘/系统目录、非本地固定磁盘、非 NTFS 与已有 junction/symlink；`open --allow-nested-studio true` 不能越过这些存储约束。
+- 敏感目录、manifest、SQLite 与现有 sidecar 由 daemon owner 在一个 PowerShell 进程中批量设置并复核 DACL；只允许当前用户 SID、SYSTEM 与 Administrators。ACL 超时、PowerShell 缺失和权限拒绝均失败关闭。
+- Windows 外部 `SIGTERM` 会直接终止 Node 进程，不能承诺执行异步清理；当前 runtime 的安全关闭改走仅 Bearer Skill/CLI 可调用的本地 HTTP 控制端点，并在关闭前继续核对 owner PID、Studio、进程入口与工作区。测试套件限制跨文件并发为 1，避免冷启动 PowerShell 与 daemon 恢复在 runner 高负载下互相挤占。
+- 交付路径保留安全 Unicode、限制组件长度、规避 Windows 设备保留名，并给项目与交付目录追加短 ID。
+- `rundll32.exe` 无法启动或立即非零退出时回退到无 shell 的 `explorer.exe`；最终失败提示运行 doctor，不泄露 bootstrap URL 或 capability。
+
+### 冷启动与 Worker 恢复
+
+- 新增只附加模式。Generation/media Worker 不再创建目录、写 `.gitignore`、执行 schema migration 或修改 ACL；daemon control-plane 复用一组 Studio/Provider 数据库连接。
+- 空 Studio 不启动 media Worker；真实媒体恢复/作业才按需创建。Generation pool 首次 tick 只启动一个 Worker，持续满载时逐个扩容。
+- 两类池公开脱敏 `idle/starting/ready/degraded/failed/stopping` 健康状态、有界重启次数和安全错误摘要；达到上限后熔断，队列不会永久等待。
+
+### 安装、诊断与 Workbench
+
+- 新增 `register-skill --scope project|user`，跨平台创建 fail-if-exists link/junction，并拒绝父级 symlink/junction 路径穿越；README 与发布模板不再要求长 Node 注册脚本。
+- 新增不调用 Provider 的 `doctor --workspace <path> [--json true] [--redacted true]`，检查目录、原子 rename、SQLite 排他锁、权限、`sharp`，并在 Windows 通过 .NET DriveInfo/Registry 检查磁盘、文件系统和浏览器关联。
+- package smoke 改在独立临时 pack 目录运行，不删除仓库同名正式制品；临时 consumer 路径包含中文和空格，并执行真实 bin、注册、doctor 与 `sharp`。
+- Workbench 新增运行健康横幅、安全重启、状态刷新和脱敏诊断复制；受控重启依次显示安全关闭、重连、权威快照恢复和已恢复。
+
+### 验证与候选制品
+
+- macOS `npm test`：315 项，313 通过、0 失败、2 项 Windows 实机用例跳过。`npm run test:package`：122 个发布文件，全部清单、安装、bin、注册、doctor 与 `sharp` 检查通过。
+- 浏览器实测 1440×1000 与 375×812，无横向溢出，移动端健康操作为 44px；实际 daemon 故障注入完整观察到故障、安全关闭和恢复状态。
+- `npm run bench:perf`：空 Studio control-plane `41.90 ms`、需求前 media process `0`；100000 pending 队列领取 1000 项 `132.48 ms`，RSS `107.7 MiB`。
+- [Windows Actions 运行 34082076215](https://github.com/ccnuzw/daoge-skills/actions/runs/34082076215) 在 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组全部通过；每组 315 项回归为 311 通过、0 失败、4 项 Windows symlink 用例按平台条件跳过，122 文件安装包、真实 `.cmd`、junction、`sharp` 与 12 项脱敏 doctor 检查全部通过。
+- 本地候选制品 `daoge-pic-5.10.4.tgz` 为 `352074` bytes，SHA-256 为 `242770191caf72f261f558d0b81313c92a21af42cb2586ceb9ce1aec097e0c43`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
+- 所有验证未调用真实图片 Provider，未产生计费生成请求。
+
 ## daoge-pic 5.10.3 - 2026-09-05
 
 5.10.3 修复 Workbench 与智能体会话可对同一计划分别预检和入队而产生重复批次的问题，并把确认、预检与运行创建收敛为单一职责。

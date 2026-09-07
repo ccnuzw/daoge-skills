@@ -44,7 +44,7 @@ test('four concurrent CLI opens share one opener claim and opener failure releas
   const presence = new WorkbenchPresence({ now: () => now, claimTtlMs: 1_000, recentPresenceTtlMs: 5_000 });
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot, workbenchPresence: presence });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot, workbenchPresence: presence });
     const record = { pid: process.pid, url: started.url, capability: started.access.bearerToken, workspaceRoot, heartbeatAt: new Date().toISOString() };
     const outputs = await Promise.all(Array.from({ length: 4 }, () => openOrReuseWorkbench(record, false, async () => { openerCalls += 1; })));
     assert.equal(openerCalls, 1);
@@ -76,7 +76,7 @@ test('Session context rejects a stale version rather than overwriting newer navi
   try {
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { model: 'gpt-image-2', apiKey: 'context-version-test-key' });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'context-occ-session', body: { conversationId: 'context-occ-conversation' } });
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'context-occ-project', body: { name: 'Context OCC' } });
     const sessionId = session.body.data.id;
@@ -98,7 +98,7 @@ test('four agent conversations retain independent Session context, project owner
   try {
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { model: 'gpt-image-2', apiKey: 'multi-session-test-key' });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
 
     const sessions = await Promise.all(Array.from({ length: 4 }, (_, index) => requestJson(started, '/api/sessions/open', {
       method: 'POST',

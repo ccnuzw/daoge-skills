@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const { parsePackJson, assertPackagePaths, main } = require('../../scripts/package-smoke');
@@ -50,17 +52,29 @@ test('package smoke allowlist rejects maps and retired source paths', () => {
   assert.doesNotThrow(() => assertPackagePaths(paths));
 });
 
-test('package smoke removes the tarball when package path validation throws', () => {
-  const filename = 'daoge-pic-invalid.tgz';
+test('package smoke packs in a temporary directory and never removes a same-named release artifact', () => {
+  const skillRoot = path.resolve(__dirname, '../..');
+  const filename = `daoge-pic-protected-${process.pid}-${Date.now()}.tgz`;
+  const protectedArtifact = path.join(skillRoot, filename);
+  const workRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-package-smoke-contract-'));
   const invalidMetadata = [{ ...metadata[0], filename, files: [...metadata[0].files, { path: 'notes.txt' }] }];
-  const removed = [];
+  const calls = [];
+  fs.writeFileSync(protectedArtifact, 'immutable release artifact');
 
-  assert.throws(() => main({
-    runCommand: () => ({ stdout: JSON.stringify(invalidMetadata) }),
-    removeSync: (target, options) => removed.push({ target, options })
-  }), /notes\.txt/);
-  assert.deepEqual(removed, [{
-    target: path.resolve(__dirname, '../..', filename),
-    options: { force: true }
-  }]);
+  try {
+    assert.throws(() => main({
+      runCommand: (command, args, options) => {
+        calls.push({ command, args, options });
+        return { stdout: JSON.stringify(invalidMetadata) };
+      },
+      makeTemp: () => workRoot
+    }), /notes\.txt/);
+    assert.equal(fs.readFileSync(protectedArtifact, 'utf8'), 'immutable release artifact');
+    assert.equal(fs.existsSync(workRoot), false);
+    assert.deepEqual(calls[0].args.slice(-2), ['--pack-destination', path.join(workRoot, 'pack')]);
+    assert.equal(calls[0].options.cwd, skillRoot);
+  } finally {
+    fs.rmSync(protectedArtifact, { force: true });
+    fs.rmSync(workRoot, { recursive: true, force: true });
+  }
 });

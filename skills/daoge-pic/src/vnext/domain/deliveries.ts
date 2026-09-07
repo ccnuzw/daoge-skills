@@ -8,6 +8,7 @@ import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/da
 import { executeIdempotent, InvalidCommandError, StudioNotFoundError } from './studio-commands';
 import { ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 import { createVerifiedSnapshot, createVerifiedSnapshotAsync, openVerifiedManagedFile, openVerifiedManagedFileAsync, VerifiedManagedFile } from '../media/archive';
+import { portablePathSegment } from '../shared/windows';
 
 export interface DeliveryAssetSnapshot { assetId: string; sequence: number; source: Record<string, unknown>; review: Record<string, unknown>; asset: { id: string; kind: string; mediaType: string; deletedAt: string | null } | null; }
 export interface Delivery { id: string; projectId: string; name: string; status: 'draft' | 'ready' | 'exported'; manifest: Record<string, unknown>; items?: DeliveryAssetSnapshot[]; }
@@ -25,7 +26,6 @@ const MAX_DELIVERY_EXPORT_BYTES = 1024 * 1024 * 1024;
 function parse(value: string): Record<string, unknown> { try { const parsed = JSON.parse(value) as unknown; return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}; } catch { return {}; } }
 function delivery(row: StoredDelivery): Delivery { return { id: row.id, projectId: row.project_id, name: row.name, status: row.status, manifest: redacted(parse(row.manifest_json)) as Record<string, unknown> }; }
 function requireText(value: string, label: string): string { const text = String(value || '').trim(); if (!text) throw new InvalidCommandError(label + ' is required.'); return text; }
-function safeSegment(value: string): string { const normalized = String(value || '').normalize('NFKD').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 72); return normalized || 'delivery'; }
 function extensionFor(asset: StudioAsset): string { if (asset.mediaType === 'image/jpeg') return '.jpg'; if (asset.mediaType === 'image/webp') return '.webp'; if (asset.mediaType === 'image/gif') return '.gif'; return '.png'; }
 
 function redacted(value: unknown): unknown {
@@ -499,7 +499,7 @@ export function exportDelivery(db: StudioDatabase, paths: StudioPaths, input: { 
   });
   const aggregateAssetBytes = assets.reduce((total, asset) => total + asset.byteSize, 0);
   if (!Number.isSafeInteger(aggregateAssetBytes) || aggregateAssetBytes > MAX_DELIVERY_EXPORT_BYTES) throw new InvalidCommandError('Delivery export exceeds its aggregate byte limit.');
-  const directory = path.join(paths.deliveriesRoot, safeSegment(project.name), safeSegment(value.name) + '-' + value.id.slice(-8));
+  const directory = path.join(paths.deliveriesRoot, portablePathSegment(project.name, 'project') + '-' + project.id.slice(-8), portablePathSegment(value.name, 'delivery') + '-' + value.id.slice(-8));
   const directoryPath = path.relative(paths.workspaceRoot, directory).split(path.sep).join('/');
   resolveDeliveryDirectory(paths, directoryPath, false);
   const temporary = directory + '.tmp-' + process.pid;
@@ -627,7 +627,7 @@ async function exportDeliveryAsyncUnlocked(db: StudioDatabase, paths: StudioPath
   });
   const aggregateAssetBytes = assets.reduce((total, asset) => total + asset.byteSize, 0);
   if (!Number.isSafeInteger(aggregateAssetBytes) || aggregateAssetBytes > MAX_DELIVERY_EXPORT_BYTES) throw new InvalidCommandError('Delivery export exceeds its aggregate byte limit.');
-  const directory = path.join(paths.deliveriesRoot, safeSegment(project.name), safeSegment(value.name) + '-' + value.id.slice(-8));
+  const directory = path.join(paths.deliveriesRoot, portablePathSegment(project.name, 'project') + '-' + project.id.slice(-8), portablePathSegment(value.name, 'delivery') + '-' + value.id.slice(-8));
   const directoryPath = path.relative(paths.workspaceRoot, directory).split(path.sep).join('/');
   resolveDeliveryDirectory(paths, directoryPath, false);
   const operationId = createId('delivery-export');

@@ -17,7 +17,7 @@ test('Workbench Session context is readable, validates hierarchy, and never sele
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const opened = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'context-session-open', body: { conversationId: 'workbench-test-context' } });
     assert.equal(opened.status, 200);
     const session = opened.body.data;

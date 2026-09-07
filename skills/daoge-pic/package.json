@@ -1,6 +1,6 @@
 {
   "name": "daoge-pic",
-  "version": "5.10.3",
+  "version": "5.10.4",
   "description": "DAOGE Pic vNext conversation-first local image creation Studio.",
   "main": "dist/vnext/cli/daoge.js",
   "bin": {
@@ -26,7 +26,7 @@
     "build:workbench": "vite build --config vite.workbench.config.mjs",
     "build": "npm run build:vnext && npm run build:workbench",
     "bench:perf": "npm run build:vnext && node scripts/bench-perf.js",
-    "test:vnext": "npm run build && node --test tests/vnext/*.test.js",
+    "test:vnext": "npm run build && node --test --test-concurrency=1 tests/vnext/*.test.js",
     "test": "npm run test:vnext",
     "test:package": "npm run build && node scripts/package-smoke.js",
     "prepack": "npm run build"
@@ -36,7 +36,7 @@
   "license": "MIT",
   "type": "commonjs",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

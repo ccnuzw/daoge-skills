@@ -188,6 +188,7 @@ type DatabaseSyncConstructor = new (path: string) => StudioDatabase;
 
 export interface OpenStudioDatabaseOptions {
   skipIntegrityCheck?: boolean;
+  attachOnly?: boolean;
 }
 
 export interface StudioEventInput {
@@ -272,12 +273,32 @@ export function pruneStudioEphemeralRecords(db: StudioDatabase, now = new Date()
 }
 
 export function openStudioDatabase(paths: StudioPaths, manifest: StudioManifest, options: OpenStudioDatabaseOptions = {}): StudioDatabase {
-  fs.mkdirSync(paths.studioDir, { recursive: true });
+  if (options.attachOnly) {
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(paths.databasePath); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('Studio database is missing; initialize the daemon before attaching a worker.');
+      throw error;
+    }
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('Studio database must be an existing regular file.');
+  } else {
+    fs.mkdirSync(paths.studioDir, { recursive: true });
+  }
   const DatabaseSync = loadDatabaseSync();
   const db = new DatabaseSync(paths.databasePath);
   try {
-    db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+    db.exec(options.attachOnly
+      ? 'PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;'
+      : 'PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
     assertSupportedStudioSchema(db);
+    if (options.attachOnly) {
+      const journal = db.prepare('PRAGMA journal_mode').get() as { journal_mode?: unknown } | undefined;
+      if (String(journal?.journal_mode || '').toLowerCase() !== 'wal') throw new Error('Studio database requires WAL mode before a worker can attach.');
+      const current = db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number | null };
+      if (Number(current.version) !== STUDIO_SCHEMA_VERSION) throw new Error('Studio database requires daemon migration before a worker can attach.');
+      if (!options.skipIntegrityCheck) assertStudioSchemaIntegrity(db);
+      return db;
+    }
     migrateStudioDatabase(db);
     assertSupportedStudioSchema(db);
     const timestamp = nowIso();

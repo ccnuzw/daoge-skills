@@ -153,3 +153,18 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 .session-plan-panel.is-empty { grid-template-columns:1fr; border-left-color:#8b927f; background:#fafbf7; }
 .session-plan-panel.is-empty h3 { color:#596154; }
 .provider-runtime-status { display:grid; gap:4px; margin:0 0 18px; border:1px solid #b7c9ba; border-left:3px solid #4f7d5c; padding:11px 13px; background:#e7f0e4; color:#31563c; font-size:12px; }.provider-runtime-status strong { color:#24452f; font-size:11px; letter-spacing:.04em; }.provider-runtime-status span,.provider-runtime-status small { color:#58705d; font-size:11px; }
+
+/* Operational health stays visible without competing with the creative workspace. */
+.runtime-health-banner { position:relative; z-index:2; display:grid; grid-template-columns:38px minmax(0,1fr) auto; align-items:center; gap:12px; max-width:1560px; margin:14px auto 0; border:1px solid #b8c7b9; border-left:4px solid #456e53; padding:11px 12px; background:#f7faf4; color:#2c4535; box-shadow:0 8px 20px rgba(37,55,42,.05); }
+.runtime-health-banner.is-working,.runtime-health-banner.is-warning { border-color:#d1b782; border-left-color:#806128; background:#f6ecd9; color:#59431f; }
+.runtime-health-banner.is-danger { border-color:#c79d94; border-left-color:#913f35; background:#f5e2de; color:#6e2f28; }
+.runtime-health-icon { display:grid; width:36px; height:36px; place-items:center; border:1px solid currentColor; opacity:.82; }
+.runtime-health-banner strong,.runtime-health-banner span { display:block; }
+.runtime-health-banner strong { margin-bottom:3px; font-size:12px; letter-spacing:.02em; }
+.runtime-health-banner span { color:#5a6b5e; font-size:11px; line-height:1.5; }
+.runtime-health-banner.is-warning span,.runtime-health-banner.is-working span { color:#715a31; }
+.runtime-health-banner.is-danger span { color:#7b4a43; }
+.runtime-health-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; }
+.runtime-health-actions .outline-button { min-height:36px; padding:0 10px; white-space:nowrap; }
+@media (max-width:920px) { .runtime-health-banner { grid-template-columns:38px minmax(0,1fr); }.runtime-health-actions { grid-column:1 / -1; justify-content:flex-start; padding-left:50px; } }
+@media (max-width:560px) { .runtime-health-banner { grid-template-columns:32px minmax(0,1fr); margin-top:10px; padding:10px; }.runtime-health-icon { width:32px; height:32px; }.runtime-health-actions { display:grid; grid-template-columns:1fr; padding-left:0; }.runtime-health-actions .outline-button { width:100%; min-height:44px; justify-content:center; } }

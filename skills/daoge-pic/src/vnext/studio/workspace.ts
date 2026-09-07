@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createId, nowIso } from '../shared/ids';
+import { encodedPowerShellArguments, windowsPowerShellExecutable } from '../shared/windows';
 
 export const STUDIO_MANIFEST_VERSION = 1;
 export const ASSET_BUCKETS = ['imports', 'generated', 'exports', 'trash'] as const;
@@ -34,14 +34,21 @@ export interface StudioPaths {
 
 export interface SensitiveAccessDependencies {
   platform?: NodeJS.Platform;
-  username?: string;
-  run?: (command: string, args: readonly string[]) => void;
+  powershellPath?: string;
+  run?: (command: string, args: readonly string[], options: { timeout: number; maxBuffer: number }) => unknown;
 }
 
 export interface InitializeStudioOptions {
   workspaceRoot: string;
   writeGitignore?: boolean;
+  hardenAccess?: boolean;
   sensitiveAccess?: SensitiveAccessDependencies;
+}
+
+export interface AttachStudioResult {
+  paths: StudioPaths;
+  manifest: StudioManifest;
+  createdManifest: false;
 }
 
 export interface InitializeStudioResult {
@@ -107,39 +114,85 @@ function ensureWorkspaceDirectory(paths: StudioPaths, directory: string): void {
   }
 }
 
-export function enforceSensitiveAccess(targetPath: string, directory: boolean, dependencies: SensitiveAccessDependencies = {}): void {
+export interface SensitivePathEntry { targetPath: string; directory: boolean; }
+
+function runWindowsAclScript(script: string, dependencies: SensitiveAccessDependencies): void {
+  const run = dependencies.run || ((command: string, commandArgs: readonly string[], options: { timeout: number; maxBuffer: number }): string => {
+    return execFileSync(command, commandArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...options });
+  });
+  try {
+    const output = run(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 20000, maxBuffer: 1024 * 1024 });
+    if (typeof output === 'string' && output.trim()) {
+      const parsed = JSON.parse(output.trim()) as { expected?: unknown; results?: unknown };
+      const values = <T>(value: T | T[] | null | undefined): T[] => Array.isArray(value) ? value : value === null || value === undefined ? [] : [value];
+      const expected = values(parsed.expected as string | string[] | null | undefined).map(String).sort();
+      const results = values(parsed.results as { protected?: unknown; rules?: unknown } | Array<{ protected?: unknown; rules?: unknown }> | null | undefined);
+      if (expected.length !== 3 || !results.length || results.some((result) => {
+        const rules = values(result.rules as { sid?: unknown; inherited?: unknown; allow?: unknown; fullControl?: unknown } | Array<{ sid?: unknown; inherited?: unknown; allow?: unknown; fullControl?: unknown }> | null | undefined);
+        const actual = rules.map((rule) => String(rule.sid || '')).sort();
+        return result.protected !== true || rules.length !== 3 || actual.join('|') !== expected.join('|') || rules.some((rule) => rule.inherited !== false || rule.allow !== true || rule.fullControl !== true);
+      })) throw new Error('Sensitive Studio ACL verification failed: ' + JSON.stringify(parsed));
+    }
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { signal?: string; killed?: boolean; stderr?: string | Buffer };
+    if (failure.code === 'ETIMEDOUT' || failure.killed || failure.signal === 'SIGTERM') throw new Error('windows_acl_timeout: Windows ACL update exceeded 20 seconds. Use a writable local NTFS directory and retry.');
+    if (failure.code === 'ENOENT') throw new Error('windows_powershell_missing: System Windows PowerShell is required to secure Studio data.');
+    if (failure.message.startsWith('Sensitive Studio ACL verification failed:')) throw new Error('windows_acl_verification_failed: ' + failure.message.slice(43, 2048));
+    const detail = String(failure.stderr || '').replace(/[A-Za-z]:\\[^\r\n]+/g, '[redacted-path]').replace(/[A-Za-z0-9+/=]{80,}/g, '[redacted-data]').replace(/\s+/g, ' ').trim().slice(0, 600);
+    throw new Error('windows_acl_denied: Cannot secure sensitive Studio path with Windows ACLs. Use a writable local NTFS directory and retry.' + (detail ? ' PowerShell: ' + detail : ''));
+  }
+}
+
+function windowsAclScript(entries: readonly SensitivePathEntry[]): string {
+  const targetJson = Buffer.from(JSON.stringify(entries.map((entry) => ({ encoded: Buffer.from(entry.targetPath, 'utf8').toString('base64'), directory: entry.directory }))), 'utf8').toString('base64');
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "$targets = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + targetJson + "')) | ConvertFrom-Json",
+    '$directoryInheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit',
+    '$noInheritance = [System.Security.AccessControl.InheritanceFlags]::None',
+    '$propagation = [System.Security.AccessControl.PropagationFlags]::None',
+    '$rights = [System.Security.AccessControl.FileSystemRights]::FullControl',
+    '$allow = [System.Security.AccessControl.AccessControlType]::Allow',
+    "$identities = @([System.Security.Principal.WindowsIdentity]::GetCurrent().User, [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))",
+    '$expected = @($identities | ForEach-Object { $_.Value } | Sort-Object)',
+    '$results = @()',
+    "foreach ($item in $targets) { $target = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String([string]$item.encoded)); $isDirectory = [bool]$item.directory; $acl = if ($isDirectory) { [System.IO.Directory]::GetAccessControl($target) } else { [System.IO.File]::GetAccessControl($target) }; $acl.SetAccessRuleProtection($true, $false); @($acl.Access) | ForEach-Object { [void]$acl.RemoveAccessRuleSpecific($_) }; $inheritance = if ($isDirectory) { $directoryInheritance } else { $noInheritance }; foreach ($identity in $identities) { $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($identity, $rights, $inheritance, $propagation, $allow); [void]$acl.AddAccessRule($rule) }; if ($isDirectory) { [System.IO.Directory]::SetAccessControl($target, $acl) } else { [System.IO.File]::SetAccessControl($target, $acl) }; $verify = if ($isDirectory) { [System.IO.Directory]::GetAccessControl($target) } else { [System.IO.File]::GetAccessControl($target) }; $ruleData = @($verify.Access | ForEach-Object { [PSCustomObject]@{ sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; inherited = [bool]$_.IsInherited; allow = $_.AccessControlType -eq $allow; fullControl = ($_.FileSystemRights -band $rights) -eq $rights } }); $results += [PSCustomObject]@{ protected = [bool]$verify.AreAccessRulesProtected; rules = $ruleData } }",
+    '[PSCustomObject]@{ expected = @($expected); results = @($results) } | ConvertTo-Json -Compress -Depth 6'
+  ].join('; ');
+}
+
+export function enforceSensitiveAccessBatch(entries: readonly SensitivePathEntry[], dependencies: SensitiveAccessDependencies = {}): void {
+  if (!entries.length) return;
   const platform = dependencies.platform || process.platform;
   if (platform !== 'win32') {
-    fs.chmodSync(targetPath, directory ? 0o700 : 0o600);
+    for (const entry of entries) fs.chmodSync(entry.targetPath, entry.directory ? 0o700 : 0o600);
     return;
   }
-  const username = String(dependencies.username || os.userInfo().username).trim();
-  if (!username) throw new Error('Cannot secure sensitive Studio path: the current Windows user is unknown.');
-  const suffix = directory ? '(OI)(CI)F' : 'F';
-  const aclCommands: readonly (readonly string[])[] = [
-    [targetPath, '/reset'],
-    [targetPath, '/inheritance:r'],
-    [targetPath, '/grant:r', username + ':' + suffix, '*S-1-5-18:' + suffix, '*S-1-5-32-544:' + suffix]
-  ];
-  try {
-    const run = dependencies.run || ((command: string, commandArgs: readonly string[]): void => { execFileSync(command, commandArgs, { stdio: 'ignore', windowsHide: true }); });
-    for (const args of aclCommands) run('icacls', args);
-  } catch {
-    throw new Error('Cannot secure sensitive Studio path with Windows ACLs: ' + path.basename(targetPath));
+  runWindowsAclScript(windowsAclScript(entries), dependencies);
+}
+
+export function enforceSensitiveAccess(targetPath: string, directory: boolean, dependencies: SensitiveAccessDependencies = {}): void {
+  enforceSensitiveAccessBatch([{ targetPath, directory }], dependencies);
+}
+
+export function hardenStudioAccess(paths: StudioPaths, dependencies: SensitiveAccessDependencies = {}): void {
+  const sensitive: SensitivePathEntry[] = [];
+  for (const [targetPath, directory] of [
+    [paths.studioDir, true],
+    [paths.runtimeDir, true],
+    [paths.manifestPath, false],
+    [paths.databasePath, false],
+    [paths.databasePath + '-wal', false],
+    [paths.databasePath + '-shm', false],
+    [paths.providerDatabasePath, false],
+    [paths.providerEnvPath, false],
+    [paths.daemonLockDatabasePath, false],
+    [paths.daemonLockDatabasePath + '-journal', false],
+    [paths.daemonOwnerRecordPath, false]
+  ] as const) {
+    if (fs.existsSync(targetPath)) sensitive.push({ targetPath, directory });
   }
-}
-
-function ensurePrivateDirectory(paths: StudioPaths, dir: string, dependencies: SensitiveAccessDependencies = {}): void {
-  ensureWorkspaceDirectory(paths, dir);
-  const info = fs.lstatSync(dir);
-  if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('Sensitive Studio path must be a real directory: ' + path.basename(dir));
-  enforceSensitiveAccess(dir, true, dependencies);
-}
-
-function ensurePrivateFile(filePath: string, dependencies: SensitiveAccessDependencies = {}): void {
-  const info = fs.lstatSync(filePath);
-  if (info.isSymbolicLink() || !info.isFile()) throw new Error('provider.env must be a real file.');
-  enforceSensitiveAccess(filePath, false, dependencies);
+  enforceSensitiveAccessBatch(sensitive, dependencies);
 }
 
 
@@ -170,6 +223,19 @@ export function resolveWorkspaceRoot(workspaceRoot: string): string {
   return path.resolve(workspaceRoot);
 }
 
+export function sameWorkspaceRoot(left: string, right: string, platform: NodeJS.Platform = process.platform): boolean {
+  const canonical = (value: string): string => {
+    const absolute = path.resolve(value);
+    try { return fs.realpathSync.native(absolute); }
+    catch { return absolute; }
+  };
+  const leftCanonical = canonical(left);
+  const rightCanonical = canonical(right);
+  return platform === 'win32'
+    ? leftCanonical.toLowerCase() === rightCanonical.toLowerCase()
+    : leftCanonical === rightCanonical;
+}
+
 export function studioPaths(workspaceRoot: string): StudioPaths {
   const root = resolveWorkspaceRoot(workspaceRoot);
   const studioDir = path.join(root, 'daoge-studio');
@@ -197,7 +263,7 @@ export function readStudioManifest(paths: StudioPaths): StudioManifest | null {
   if (parsed.schemaVersion !== STUDIO_MANIFEST_VERSION || !parsed.studioId || !parsed.workspaceRoot) {
     throw new Error('The existing studio.json is not a valid DAOGE Pic vNext Studio manifest.');
   }
-  if (path.resolve(parsed.workspaceRoot) !== paths.workspaceRoot) {
+  if (!sameWorkspaceRoot(parsed.workspaceRoot, paths.workspaceRoot)) {
     throw new Error('The existing studio.json workspaceRoot does not match the requested workspace root.');
   }
   return parsed;
@@ -220,8 +286,8 @@ export function initializeStudio(options: InitializeStudioOptions): InitializeSt
   if (fs.existsSync(paths.providerEnvPath)) assertWorkspacePath(paths, paths.providerEnvPath);
   const existingManifest = readStudioManifest(paths);
   ensureWorkspaceDirectory(paths, paths.workspaceRoot);
-  ensurePrivateDirectory(paths, paths.studioDir, options.sensitiveAccess);
-  ensurePrivateDirectory(paths, paths.runtimeDir, options.sensitiveAccess);
+  ensureWorkspaceDirectory(paths, paths.studioDir);
+  ensureWorkspaceDirectory(paths, paths.runtimeDir);
 
   let manifest = existingManifest;
   let createdManifest = false;
@@ -236,9 +302,20 @@ export function initializeStudio(options: InitializeStudioOptions): InitializeSt
     createdManifest = true;
   }
 
-  if (fs.existsSync(paths.providerEnvPath)) ensurePrivateFile(paths.providerEnvPath, options.sensitiveAccess);
+  if (options.hardenAccess === true) hardenStudioAccess(paths, options.sensitiveAccess);
   if (options.writeGitignore !== false) ensureGitignore(paths);
   return { paths, manifest, createdManifest };
+}
+
+export function attachStudio(workspaceRoot: string): AttachStudioResult {
+  const paths = studioPaths(workspaceRoot);
+  if (!assertWorkspacePath(paths, paths.workspaceRoot, { requireDirectory: true })) throw new Error('Studio workspace root does not exist.');
+  if (!assertWorkspacePath(paths, paths.studioDir, { requireDirectory: true })) throw new Error('Studio is not initialized for this workspace.');
+  if (!assertWorkspacePath(paths, paths.manifestPath)) throw new Error('Studio manifest is missing.');
+  const manifest = readStudioManifest(paths);
+  if (!manifest) throw new Error('Studio manifest is missing.');
+  if (!assertWorkspacePath(paths, paths.databasePath)) throw new Error('Studio database is missing.');
+  return { paths, manifest, createdManifest: false };
 }
 
 export function ensureAssetBucket(paths: StudioPaths, bucket: AssetBucket): string {
@@ -249,7 +326,7 @@ export function ensureAssetBucket(paths: StudioPaths, bucket: AssetBucket): stri
 }
 
 export function ensureRuntimeDirectory(paths: StudioPaths): string {
-  ensurePrivateDirectory(paths, paths.runtimeDir);
+  ensureWorkspaceDirectory(paths, paths.runtimeDir);
   return paths.runtimeDir;
 }
 

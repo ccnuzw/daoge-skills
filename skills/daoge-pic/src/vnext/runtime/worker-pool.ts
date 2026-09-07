@@ -1,8 +1,9 @@
 import path from 'node:path';
 import os from 'node:os';
-import { fork, ChildProcess } from 'node:child_process';
+import { spawn, ChildProcess } from 'node:child_process';
 import { MAX_GLOBAL_CONCURRENCY, MAX_PROVIDER_CONCURRENCY } from '../studio/runtime-settings';
 import { ProviderConcurrencyGovernor, ProviderConcurrencySnapshot, ProviderHealthSample } from './provider-concurrency';
+import { safeErrorSummary } from '../shared/safe-error';
 
 export interface WorkerPoolTick {
   claimed: number;
@@ -17,6 +18,17 @@ interface WorkerTickResponse {
   providerStats?: ProviderHealthSample;
 }
 
+export type ProcessPoolState = 'idle' | 'starting' | 'ready' | 'degraded' | 'failed' | 'stopping';
+export interface ProcessPoolHealth {
+  state: ProcessPoolState;
+  targetSize: number;
+  processCount: number;
+  readyCount: number;
+  busyCount: number;
+  queuedCount: number;
+  restartCount: number;
+  lastError: string | null;
+}
 const EMPTY_PROVIDER_STATS: ProviderHealthSample = { succeeded: 0, rateLimited: 0, transient: 0, unknown: 0, otherFailure: 0, maxRssBytes: 0, maxExternalBytes: 0 };
 
 interface WorkerSlot {
@@ -43,6 +55,12 @@ export function generationWorkerPoolSize(parallelism = typeof os.availableParall
 export class WorkerProcessPool {
   private readonly slots: WorkerSlot[] = [];
   private stopping = false;
+  private activated = false;
+  private exhausted = false;
+  private restartCount = 0;
+  private lastError: string | null = null;
+  private readonly entry: string;
+  private readonly maxSize: number;
   private readonly governor = new ProviderConcurrencyGovernor(MAX_PROVIDER_CONCURRENCY);
 
   processIds(): number[] {
@@ -51,15 +69,22 @@ export class WorkerProcessPool {
   concurrencySnapshot(): ProviderConcurrencySnapshot {
     return this.governor.snapshot();
   }
+  healthSnapshot(): ProcessPoolHealth {
+    const readyCount = this.slots.filter((slot) => slot.ready).length;
+    const busyCount = this.slots.filter((slot) => slot.busy).length;
+    const state: ProcessPoolState = this.stopping ? 'stopping' : this.exhausted ? 'failed' : !this.activated ? 'idle' : readyCount === 0 ? 'starting' : this.slots.some((slot) => slot.failed || slot.restartAttempts > 0) ? 'degraded' : 'ready';
+    return { state, targetSize: this.maxSize, processCount: this.processIds().length, readyCount, busyCount, queuedCount: 0, restartCount: this.restartCount, lastError: this.lastError };
+  }
 
   constructor(private readonly workspaceRoot: string, size = generationWorkerPoolSize()) {
-    const entry = path.resolve(__dirname, '../runner/worker-process.js');
-    const workerCount = Math.max(1, Math.min(MAX_GENERATION_WORKER_POOL_SIZE, Math.floor(size) || 1));
-    for (let index = 0; index < workerCount; index += 1) this.slots.push(this.startSlot(entry));
+    this.entry = path.resolve(__dirname, '../runner/worker-process.js');
+    this.maxSize = Math.max(1, Math.min(MAX_GENERATION_WORKER_POOL_SIZE, Math.floor(size) || 1));
   }
 
   async processOnce(limit = MAX_GLOBAL_CONCURRENCY): Promise<WorkerPoolTick> {
     if (this.stopping) return EMPTY_RESULT;
+    this.activated = true;
+    this.ensureCapacity(1);
     const ready = this.slots.filter((slot) => slot.ready && !slot.busy && slot.child.connected);
     if (!ready.length) return EMPTY_RESULT;
     const requestedLimit = Math.max(1, Math.min(MAX_GLOBAL_CONCURRENCY, Number(limit) || 1));
@@ -100,10 +125,12 @@ export class WorkerProcessPool {
         };
       }, { ...EMPTY_PROVIDER_STATS });
       this.governor.record(providerStats);
-      return responses.reduce((total, response) => {
-        const result = response.result;
-        return { claimed: total.claimed + result.claimed, succeeded: total.succeeded + result.succeeded, retrying: total.retrying + result.retrying, blocked: total.blocked + result.blocked, unknown: total.unknown + result.unknown, cancelled: total.cancelled + result.cancelled };
+      const result = responses.reduce((total, response) => {
+        const tick = response.result;
+        return { claimed: total.claimed + tick.claimed, succeeded: total.succeeded + tick.succeeded, retrying: total.retrying + tick.retrying, blocked: total.blocked + tick.blocked, unknown: total.unknown + tick.unknown, cancelled: total.cancelled + tick.cancelled };
       }, { ...EMPTY_RESULT });
+      if (result.claimed >= boundedLimit && this.slots.length < this.maxSize) this.ensureCapacity(this.slots.length + 1);
+      return result;
     } catch (error) {
       this.governor.record({ ...EMPTY_PROVIDER_STATS, unknown: 1 });
       throw error;
@@ -132,14 +159,25 @@ export class WorkerProcessPool {
     await Promise.all(exits);
   }
 
+  private ensureCapacity(target: number): void {
+    if (this.stopping || this.exhausted) return;
+    const bounded = Math.min(this.maxSize, Math.max(1, target));
+    while (this.slots.length < bounded) this.slots.push(this.startSlot(this.entry));
+  }
+
   private startSlot(entry: string, restartAttempts = 0): WorkerSlot {
-    const child = fork(entry, ['--workspace', this.workspaceRoot], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    const child = spawn(process.execPath, [entry, '--workspace', this.workspaceRoot], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
     const slot: WorkerSlot = { child, ready: false, busy: false, pending: null, entry, restartTimer: null, healthyTimer: undefined, restartAttempts, failed: false };
     child.on('message', (message: { type?: unknown; result?: WorkerPoolTick; providerStats?: ProviderHealthSample; message?: unknown }) => {
       if (message?.type === 'ready') {
         slot.ready = true;
+        this.lastError = null;
         clearTimeout(slot.healthyTimer);
         slot.healthyTimer = setTimeout(() => { slot.restartAttempts = 0; slot.healthyTimer = undefined; }, WORKER_HEALTHY_WINDOW_MS);
+        return;
+      }
+      if (message?.type === 'fatal') {
+        this.failSlot(slot, new Error(typeof message.message === 'string' ? message.message : 'Worker process failed during startup.'));
         return;
       }
       const pending = slot.pending;
@@ -160,6 +198,7 @@ export class WorkerProcessPool {
     slot.failed = true;
     slot.ready = false;
     slot.busy = false;
+    this.lastError = safeErrorSummary(error.message) || 'Worker process failed.';
     clearTimeout(slot.healthyTimer);
     slot.healthyTimer = undefined;
     if (slot.pending) {
@@ -169,9 +208,15 @@ export class WorkerProcessPool {
     }
     if (this.stopping) return;
     if (slot.child.exitCode === null && slot.child.signalCode === null) slot.child.kill(error.message === 'Worker tick watchdog expired.' ? 'SIGKILL' : 'SIGTERM');
-    if (slot.restartAttempts >= MAX_RESTART_ATTEMPTS) return;
+    if (slot.restartAttempts >= MAX_RESTART_ATTEMPTS) {
+      const index = this.slots.indexOf(slot);
+      if (index >= 0) this.slots.splice(index, 1);
+      this.exhausted = true;
+      return;
+    }
     const delay = Math.min(30000, 100 * 2 ** Math.min(slot.restartAttempts, 8));
     const nextAttempts = slot.restartAttempts + 1;
+    this.restartCount += 1;
     slot.restartTimer = setTimeout(() => {
       slot.restartTimer = null;
       if (this.stopping) return;

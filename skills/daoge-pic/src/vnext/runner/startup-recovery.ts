@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { recoverAssetMediaOperations } from '../domain/assets';
 import { MediaReconciliationResult, reconcileManagedMedia, reconcileManagedMediaAsync, recoverGeneratedMediaCommits } from '../media/reconcile';
 import { pruneStudioEphemeralRecords, StudioDatabase } from '../studio/database';
@@ -31,7 +32,10 @@ export async function recoverStudioStartupAsync(db: StudioDatabase, paths: Studi
   pruneStudioEphemeralRecords(db, now);
   const generatedMediaCommits = recoverGeneratedMediaCommits(db, paths, studioId);
   const assetMediaOperations = recoverAssetMediaOperations(db, paths, studioId);
-  const managedMedia = options.mediaWorkerPool ? (await options.mediaWorkerPool.run<{ type: 'reconcile'; result: MediaReconciliationResult }>({ type: 'reconcile', studioId, recoverAssetOperations: false })).result : await reconcileManagedMediaAsync(db, paths, studioId, { recoverAssetOperations: false });
+  const mediaReconciliationRequired = generatedMediaCommits > 0 || assetMediaOperations > 0 || fs.existsSync(paths.assetRoot) || Boolean(db.prepare('SELECT 1 FROM assets WHERE studio_id = ? LIMIT 1').get(studioId));
+  const managedMedia = mediaReconciliationRequired
+    ? options.mediaWorkerPool ? (await options.mediaWorkerPool.run<{ type: 'reconcile'; result: MediaReconciliationResult }>({ type: 'reconcile', studioId, recoverAssetOperations: false })).result : await reconcileManagedMediaAsync(db, paths, studioId, { recoverAssetOperations: false })
+    : { quarantinedOrphans: 0, missingRows: 0 };
   const terminalRuns = reconcileTerminalRuns(db, now);
   const expiredLeases = recoverExpiredLeases(db, now);
   const dueRetries = promoteDueRetryWaitItems(db, now);

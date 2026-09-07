@@ -4,11 +4,13 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { openWorkbenchUrl } from './open-workbench';
 import { MAX_GLOBAL_CONCURRENCY, MIN_EXECUTION_CONCURRENCY } from '../studio/runtime-settings';
-import { healthStudioId, signalVerifiedDaemon } from './legacy-daemon';
-import { readStudioManifest, studioPaths } from '../studio/workspace';
+import { healthStudioId, shutdownVerifiedDaemon } from './legacy-daemon';
+import { readStudioManifest, sameWorkspaceRoot, studioPaths } from '../studio/workspace';
 import { SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
+import { registerSkill, SkillRegistrationScope } from './register-skill';
+import { assertWorkspaceSupported, doctorWorkspace, formatDoctorReport, redactDoctorReport } from './doctor';
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
-export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; heartbeatAt: string; providerConcurrency?: ProviderConcurrencySnapshot | null; }
+export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; startedAt?: string; heartbeatAt: string; providerConcurrency?: ProviderConcurrencySnapshot | null; }
 
 type JsonObject = Record<string, unknown>;
 const STDIN_JSON_MARKER = Object.freeze({ __daogeJsonStdin: true });
@@ -16,8 +18,8 @@ const STDIN_SECRET_MARKER = Object.freeze({ __daogeSecretStdin: true });
 const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
-type LocalAction = 'status' | 'studio' | 'open' | 'restart';
-type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose';
+type LocalAction = 'status' | 'studio' | 'open' | 'restart' | 'register-skill' | 'doctor';
+type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
   action?: LocalAction;
@@ -28,10 +30,14 @@ interface CommandSchema {
 }
 interface ParsedCommand {
   name: string;
-  workspaceRoot: string;
+  workspaceRoot?: string;
   action?: LocalAction;
   request?: { method: HttpMethod; pathname: string; body: JsonObject; idempotencyKey?: string; operationName?: string };
   force?: boolean;
+  allowNestedStudio?: boolean;
+  scope?: SkillRegistrationScope;
+  jsonOutput?: boolean;
+  redactedOutput?: boolean;
 }
 
 function workspaceRoot(value: string | undefined): string {
@@ -40,12 +46,28 @@ function workspaceRoot(value: string | undefined): string {
   return path.resolve(root);
 }
 
+export function assertImplicitStudioCreationAllowed(workspaceRoot: string, allowNestedStudio = false): void {
+  if (allowNestedStudio) return;
+  const root = path.resolve(workspaceRoot);
+  let candidate = path.dirname(root);
+  if (candidate === root) return;
+  while (true) {
+    const manifest = readStudioManifest(studioPaths(candidate));
+    if (manifest) {
+      throw new Error('检测到父级 DAOGE Pic Studio：' + candidate + '。为避免创建数据不互通的嵌套 Studio，已拒绝初始化 ' + root + '。请复用父级工作区；如确需独立 Studio，请先执行 daoge open --workspace <path> --allow-nested-studio true。');
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) return;
+    candidate = parent;
+  }
+}
+
 function runtimePath(workspaceRoot: string): string { return path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json'); }
 function manifestPath(workspaceRoot: string): string { return path.join(workspaceRoot, 'daoge-studio', 'studio.json'); }
 function readStudioId(workspaceRoot: string): string {
   try {
     const manifest = JSON.parse(fs.readFileSync(manifestPath(workspaceRoot), 'utf8')) as { studioId?: unknown; workspaceRoot?: unknown };
-    if (typeof manifest.studioId === 'string' && manifest.studioId && typeof manifest.workspaceRoot === 'string' && path.resolve(manifest.workspaceRoot) === workspaceRoot) return manifest.studioId;
+    if (typeof manifest.studioId === 'string' && manifest.studioId && typeof manifest.workspaceRoot === 'string' && sameWorkspaceRoot(manifest.workspaceRoot, workspaceRoot)) return manifest.studioId;
   } catch { /* handled by the safe refusal below */ }
   throw new Error('无法确认当前 Studio manifest 身份，拒绝停止已有 daemon。');
 }
@@ -54,7 +76,7 @@ function readRuntime(workspaceRoot: string): RuntimeRecord | null {
     const value = JSON.parse(fs.readFileSync(runtimePath(workspaceRoot), 'utf8')) as RuntimeRecord;
     if (!value || !Number.isInteger(value.pid) || value.pid <= 0 || typeof value.url !== 'string' || typeof value.workspaceRoot !== 'string') return null;
     const parsed = new URL(value.url);
-    if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1' || path.resolve(value.workspaceRoot) !== workspaceRoot) return null;
+    if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1' || !sameWorkspaceRoot(value.workspaceRoot, workspaceRoot)) return null;
     if (value.capability !== undefined && (typeof value.capability !== 'string' || value.capability.length < 43)) return null;
     return value;
   } catch { return null; }
@@ -69,12 +91,20 @@ function workbenchBootstrapUrl(record: RuntimeRecord): string {
   return record.url + '/#capability=' + encodeURIComponent(record.capability);
 }
 
+const DAEMON_LIFECYCLE_ATTEMPTS = process.platform === 'win32' ? 600 : 100;
 async function healthy(url: string, expectedStudioId?: string): Promise<boolean> {
   const studioId = await healthStudioId(url);
   return Boolean(studioId && (!expectedStudioId || studioId === expectedStudioId));
 }
 
 function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+
+function assertSupportedNodeRuntime(): void {
+  const [major, minor] = process.versions.node.split('.').map(Number);
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || major < 22 || (major === 22 && minor < 17)) {
+    throw new Error('DAOGE Pic 需要 Node.js 22.17.0 或更高版本；当前版本为 ' + process.versions.node + '。');
+  }
+}
 
 
 function strictExecutionConcurrency(value: string): number {
@@ -96,7 +126,7 @@ function recordedOwnerPid(workspaceRoot: string): number | null {
 
 
 async function waitForDaemonRelease(workspaceRoot: string, record: RuntimeRecord): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
     const live = livePid(record.pid);
     const responding = await healthy(record.url);
     if (!live && !responding) {
@@ -108,15 +138,15 @@ async function waitForDaemonRelease(workspaceRoot: string, record: RuntimeRecord
     }
     await sleep(100);
   }
-  throw new Error('Studio daemon 未能在 6 秒内安全停止；没有执行强制终止。');
+  throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内安全停止；没有执行强制终止。');
 }
 
 async function stopRecordedDaemon(workspaceRoot: string, existing: RuntimeRecord): Promise<void> {
-  if (path.resolve(existing.workspaceRoot) !== workspaceRoot) throw new Error('运行记录不属于当前工作区，拒绝停止。');
+  if (!sameWorkspaceRoot(existing.workspaceRoot, workspaceRoot)) throw new Error('运行记录不属于当前工作区，拒绝停止。');
   if (livePid(existing.pid)) {
     const ownerPid = recordedOwnerPid(workspaceRoot);
-    if (ownerPid === null) throw new Error('daemon owner record 无有效 PID，拒绝发送终止信号。');
-    await signalVerifiedDaemon(existing, {
+    if (ownerPid === null) throw new Error('daemon owner record 无有效 PID，拒绝受控关闭。');
+    await shutdownVerifiedDaemon(existing, {
       workspaceRoot,
       studioId: readStudioId(workspaceRoot),
       lockPid: ownerPid,
@@ -155,6 +185,22 @@ async function stopSpawnedDaemon(child: ChildProcess): Promise<void> {
 async function restartDaemon(workspaceRoot: string): Promise<{ previousPid: number | null; daemon: RuntimeRecord }> {
   const existing = readRuntime(workspaceRoot);
   const previousPid = existing?.pid || null;
+  if (existing?.capability && await healthy(existing.url, readStudioId(workspaceRoot))) {
+    const previousStartedAt = existing.startedAt;
+    await api(existing, 'POST', '/api/restart', {}, 'daemon-restart-' + randomUUID());
+    for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
+      await sleep(100);
+      const restarted = readRuntime(workspaceRoot);
+      if (restarted?.pid === existing.pid
+        && restarted.capability === existing.capability
+        && restarted.startedAt
+        && restarted.startedAt !== previousStartedAt
+        && await healthy(restarted.url, readStudioId(workspaceRoot))) {
+        return { previousPid, daemon: restarted };
+      }
+    }
+    throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内完成受控重启。');
+  }
   if (existing) await stopRecordedDaemon(workspaceRoot, existing);
   return { previousPid, daemon: await ensureDaemon(workspaceRoot) };
 }
@@ -171,7 +217,7 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
   const child = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { detached: true, stdio: 'ignore', windowsHide: true });
   let spawnError: Error | null = null;
   child.once('error', (error) => { spawnError = error; });
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
     await sleep(100);
     if (spawnError) throw spawnError;
     const started = readRuntime(workspaceRoot);
@@ -182,7 +228,7 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
     }
   }
   await stopSpawnedDaemon(child);
-  throw new Error('Studio daemon 未能在 6 秒内启动。请检查 daoge-studio/runtime/daemon.log。');
+  throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内启动。请检查 daoge-studio/runtime/daemon.log。');
 }
 
 async function api(record: RuntimeRecord, method: HttpMethod, pathname: string, body: JsonObject, idempotencyKey?: string, operationName?: string): Promise<unknown> {
@@ -228,7 +274,9 @@ function booleanValue(values: Record<string, unknown>, name: string): boolean { 
 function encoded(values: Record<string, unknown>, name: string): string { return encodeURIComponent(textValue(values, name)); }
 
 const commandSchemas: Record<string, CommandSchema> = {
-  status: { action: 'status', flags: {} }, studio: { action: 'studio', flags: {} }, open: { action: 'open', flags: { '--force': { kind: 'boolean' } } }, restart: { action: 'restart', flags: {} },
+  status: { action: 'status', flags: {} }, studio: { action: 'studio', flags: {} }, open: { action: 'open', flags: { '--force': { kind: 'boolean' }, '--allow-nested-studio': { kind: 'boolean' } } }, restart: { action: 'restart', flags: {} },
+  'register-skill': { action: 'register-skill', flags: { '--scope': { kind: 'scope', required: true } } },
+  doctor: { action: 'doctor', flags: { '--json': { kind: 'boolean' }, '--redacted': { kind: 'boolean' } } },
   'provider-list': { method: 'GET', flags: {}, pathname: () => '/api/providers' },
   'provider-import-env': { method: 'POST', flags: {}, pathname: () => '/api/providers/import-env', body: () => ({}) },
   'provider-create': { method: 'POST', flags: { '--name': { kind: 'text', required: true }, '--provider': { kind: 'text', required: true }, '--model': { kind: 'text', required: true }, '--base-url': { kind: 'text', required: true }, '--api-key-stdin': { kind: 'secret-stdin', required: true }, '--options': { kind: 'json' }, '--active': { kind: 'boolean' } }, pathname: () => '/api/providers', body: (v) => ({ name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: v['--base-url'], apiKey: v['--api-key-stdin'], options: v['--options'], active: v['--active'] === true }) },
@@ -285,6 +333,7 @@ function validateFlag(name: string, raw: string, kind: FlagKind): unknown {
   if (kind === 'boolean') { if (value !== 'true' && value !== 'false') throw new Error(name + ' 只能是 true 或 false。'); return value === 'true'; }
   if (kind === 'purpose') { if (!['exploration', 'refinement', 'variation', 'edit', 'fill'].includes(value)) throw new Error(name + ' 不是支持的创作目的。'); return value; }
   if (kind === 'execution-concurrency') return strictExecutionConcurrency(value);
+  if (kind === 'scope') { if (value !== 'project' && value !== 'user') throw new Error(name + ' 只能是 project 或 user。'); return value; }
   const integer = Number(value); if (!Number.isInteger(integer) || integer < 1) throw new Error(name + ' 必须是正整数。'); return integer;
 }
 
@@ -368,10 +417,11 @@ function parseCommand(args: string[]): ParsedCommand {
     if (action === 'replace' && !hasSecret) throw new Error('替换 API Key 必须使用 --api-key-stdin @-。');
     if (action !== 'replace' && hasSecret) throw new Error('--api-key-stdin 只能与 --api-key-action replace 一起使用。');
   }
-  const root = workspaceRoot(rawValues['--workspace']);
+  const userRegistration = name === 'register-skill' && values['--scope'] === 'user';
+  const root = userRegistration && rawValues['--workspace'] === undefined ? undefined : workspaceRoot(rawValues['--workspace']);
   const markerCount = Object.values(values).filter((value) => value === STDIN_JSON_MARKER).length;
   if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
-  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true } : {}) };
+  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}) };
   const method = schema.method as HttpMethod;
   const operationName = method === 'GET' || rawValues['--idempotency-key'] ? undefined : rawValues['--operation-name'] ? explicitOperationName(rawValues['--operation-name']) : undefined;
   const idempotencyKey = method === 'GET' || operationName ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
@@ -381,8 +431,11 @@ function parseCommand(args: string[]): ParsedCommand {
 function usage(): string {
   return [
     'DAOGE Pic vNext Studio',
+    'daoge register-skill --scope project --workspace <path>  # 注册当前安装包到项目 .agents/skills；目标已存在则拒绝',
+    'daoge register-skill --scope user  # 注册当前安装包到当前用户 ~/.codex/skills；目标已存在则拒绝',
+    'daoge doctor --workspace <path> [--json true] [--redacted true]  # 不调用 Provider；检查工作区、SQLite、权限、sharp 与 Windows volume',
     'daoge studio --workspace <path>',
-    'daoge open --workspace <path> [--force true]  # 默认复用唯一 Workbench；force 仅用于用户明确要求新标签',
+    'daoge open --workspace <path> [--force true] [--allow-nested-studio true]  # 默认复用唯一 Workbench；嵌套 Studio 必须由用户显式允许',
     'daoge provider-list --workspace <path>',
     'daoge provider-import-env --workspace <path>  # 显式导入工作区 daoge-studio/provider.env',
     'daoge provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key-stdin @- [--active true]  # 密钥只从 stdin 读取',
@@ -421,17 +474,33 @@ function usage(): string {
 }
 
 export async function main(): Promise<void> {
+  assertSupportedNodeRuntime();
   const args = process.argv.slice(2);
   const command = args[0] || 'help';
   if (command === 'help' || command === '--help' || command === '-h') { process.stdout.write(usage() + '\n'); return; }
   const parsed = parseCommand(args);
-  const root = parsed.workspaceRoot;
+  if (parsed.action === 'register-skill') {
+    process.stdout.write(JSON.stringify(registerSkill({ scope: parsed.scope as SkillRegistrationScope, workspaceRoot: parsed.workspaceRoot }), null, 2) + '\n');
+    return;
+  }
+  const root = parsed.workspaceRoot as string;
+  if (parsed.action === 'doctor') {
+    const original = doctorWorkspace(root);
+    const report = parsed.redactedOutput ? redactDoctorReport(original) : original;
+    process.stdout.write((parsed.jsonOutput ? JSON.stringify(report, null, 2) : formatDoctorReport(report)) + '\n');
+    if (!original.ok) process.exitCode = 1;
+    return;
+  }
   const manifest = readStudioManifest(studioPaths(root));
-  if (manifest && path.resolve(manifest.workspaceRoot) !== root) throw new Error('当前 Studio manifest workspaceRoot 与请求工作区不匹配。');
+  if (manifest && !sameWorkspaceRoot(manifest.workspaceRoot, root)) throw new Error('当前 Studio manifest workspaceRoot 与请求工作区不匹配。');
   if (parsed.action === 'status') {
     const record = readRuntime(root);
     process.stdout.write(JSON.stringify({ workspaceRoot: root, daemon: publicRuntime(record), healthy: Boolean(record && await healthy(record.url)) }, null, 2) + '\n');
     return;
+  }
+  if (!manifest) {
+    assertWorkspaceSupported(root);
+    assertImplicitStudioCreationAllowed(root, parsed.action === 'open' && parsed.allowNestedStudio === true);
   }
   if (parsed.action === 'restart') {
     const restarted = await restartDaemon(root);

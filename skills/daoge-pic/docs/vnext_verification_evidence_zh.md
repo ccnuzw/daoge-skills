@@ -4,7 +4,7 @@
 
 验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
 
-当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)。下列章节按版本隔离发布事实；5.10.2、5.10.1、5.10.0、5.9.1 及更早章节保持历史证据，不得用其哈希、worker 架构或协议兼容规则解释 5.10.3。
+当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)，当前源码与本地候选制品版本为 `5.10.4`。下列章节按版本隔离发布事实；候选验证不等于 GitHub Release 已发布，5.10.3 及更早章节保持历史证据。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -109,8 +109,8 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 ### SQLite process lock 与关闭安全证据
 
 - 唯一进程互斥由独立 `runtime/daemon-lock.sqlite` 连接持有不提交业务数据的长期 `BEGIN EXCLUSIVE` 事务实现；连接使用 100ms `busy_timeout`、`journal_mode=DELETE`、`synchronous=FULL`。第二持有者只在 SQLite 主结果码为 `SQLITE_BUSY (5)` 时报告 already running。正常关闭按 pid+ownerId 精确删除 owner record 后 `ROLLBACK`/close；崩溃时由 OS/SQLite 自动释放文件锁，遗留 record 不参与互斥。
-- 永久回归实际覆盖同进程双连接互斥、持锁子进程 `SIGKILL` 后立即重获、无关存活 PID 遗留 record 的原子覆盖，以及四个并发首次 CLI 只收敛到一个 daemon PID；loser 子进程全部退出。唯一 owner 收到一次安全 `SIGTERM` 后，测试等待 PID 与 runtime owner 文件消失，再观察 250ms，确认 loser 不接管、不重建 daemon。
-- daemon 关闭先停止 Worker；即使 Provider 忽略 abort 且请求不返回，`worker.shutdown()` 也会使已领取项进入 `outcome_unknown`，不会等待该 Provider 或自动重放。Worker tick、HTTP service 与 HTTP connection 关闭均有边界，数据库关闭和 mutex 释放完成后才卸载 `SIGTERM` 处理器。
+- 永久回归实际覆盖同进程双连接互斥、持锁子进程 `SIGKILL` 后立即重获、无关存活 PID 遗留 record 的原子覆盖，以及四个并发首次 CLI 只收敛到一个 daemon PID；loser 子进程全部退出。唯一 owner 通过仅 Bearer Skill/CLI 可调用的本地控制端点受控关闭，测试等待 PID 与 runtime owner 文件消失，再观察 250ms，确认 loser 不接管、不重建 daemon。
+- daemon 关闭先停止 Worker；即使 Provider 忽略 abort 且请求不返回，`worker.shutdown()` 也会使已领取项进入 `outcome_unknown`，不会等待该 Provider 或自动重放。Worker tick、HTTP service 与 HTTP connection 关闭均有边界，数据库关闭和 mutex 释放完成后才卸载进程信号与受控生命周期处理器；Windows 不把外部 `SIGTERM` 当成可执行异步清理的优雅关闭。
 - 协调 DB 权限固定为 0600、runtime 目录为 0700，启动拒绝协调路径上的 symlink 或非普通文件。DELETE 模式不使用 WAL/SHM；可能出现的 rollback journal 由 SQLite 管理，不做可能误删新持有者文件的用户态清理。
 
 ### 制品、迁移与验证边界
@@ -243,3 +243,31 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - 定向确认、API、运行、多会话和学习中心回归共 45 项通过；`npm test` 共 295 项通过，0 失败、0 取消、0 跳过。
 - `npm run test:package` 构建 TypeScript 与 Vite Workbench 成功；发布清单 116 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
 - 本次验证未调用真实图片 Provider，未产生计费生成请求。
+
+## 12. daoge-pic 5.10.4 Windows 候选验证证据
+
+本节对应待发布的 `5.10.4` 源码与本地候选制品，不声明 GitHub Release 已创建。`5.10.3` 及更早章节是不可改写的历史证据。
+
+### Windows 初始化与运行边界
+
+- Node.js 下限固定为 `22.17.0`：`22.13.x` 的内置 SQLite 未启用 FTS5，无法创建 Studio 搜索 schema；`22.16.0` 虽已启用 FTS5，但其 libuv 1.49.2 在 Windows Server 2025 会让路径 stat 与已打开句柄返回不一致的文件身份。`22.17.0` 升至 libuv 1.51.0，包含 Windows `FILE_STAT_BASIC_INFORMATION` 字段顺序和卷序列号一致性修复。Windows daemon 身份使用系统 Windows PowerShell 中有界的 .NET WMI `Win32_Process` 查询，WMI 与 Node 外层超时同时生效；不依赖 WMIC 或 PowerShell 模块。
+- daemon owner 独占工作区创建、schema migration、旧 Provider 导入和权限强化。敏感目录、manifest、SQLite 与现有 sidecar 在一个 PowerShell 进程中通过 .NET `FileSystemSecurity` 批量设置并复核 DACL；Generation/media Worker 只附加既有数据库。
+- 空 Studio 不启动 media Worker；存在媒体恢复或实际媒体作业时才按需创建。Generation pool 首次 tick 从一个 Worker 开始，持续满载时逐个扩容。两类池公开脱敏健康、重启次数、最终熔断与安全错误摘要。
+- 新工作区在任何 Studio 文件创建前检查 Windows 本地固定 NTFS、UNC、同步盘/系统目录和已有 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 ACL、DriveInfo/Registry、`sharp` 与默认浏览器关联。
+- 高负载 Windows runner 上，回归套件将跨文件并发限制为 1；DriveInfo/Registry PowerShell 与 WMI 查询保留内外层有界超时，批量 ACL 设置与复核预算为 20 秒，daemon 启停等待预算覆盖系统 PowerShell 首次启动和安全清理，不以取消安全检查换取速度。
+
+### 安装、路径与 Workbench 恢复
+
+- 发布包提供 `register-skill --scope project|user`，以 fail-if-exists 方式创建 link/junction，并拒绝经父级 symlink/junction 写出注册根。package smoke 在独立临时 pack 目录工作，不再删除仓库同名正式制品。
+- 安装 smoke 在含中文和空格的临时路径安装候选包，执行真实 bin、内置注册命令、doctor 与 `sharp` 加载。Windows 使用 `cmd.exe` 实际调用 npm 生成的 `daoge.cmd`。
+- 交付路径保留安全 Unicode、限制组件长度、规避 Windows `CON/PRN/AUX/NUL/COM1..9/LPT1..9`，并给项目与交付目录追加稳定短 ID。
+- Workbench 健康横幅显示 Worker 待命、启动、正常、恢复、熔断；受控重启显示安全关闭、重连和已恢复，重连后刷新权威快照。用户可刷新状态、安全重启故障池并复制不含密钥、完整 URL、capability 或路径的诊断摘要。
+
+### 已执行验证
+
+- macOS 本地 `npm test`：315 项，313 通过、0 失败、0 取消、2 项仅 Windows 实机用例跳过；跳过项为真实最终 DACL 与真实 WMI/长 Unicode 路径诊断。
+- 本地 `npm run test:package`：构建 TypeScript 与 Vite Workbench 成功；发布清单 122 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 的真实 bin、注册链接、doctor 与 `sharp` 均通过。
+- 浏览器实测 1440×1000 与 375×812：健康横幅无横向溢出，移动端操作按钮高度 44px；实际 daemon 故障注入后观察到“后台处理池需要重启 → 正在安全关闭后台任务 → Studio 已恢复”，页面 URL 与授权继续复用。
+- 本地 `npm run bench:perf`：Schema v22 空 Studio control-plane 构造 `41.90 ms`，需求前 media process 为 `0`；100000 pending 队列领取 1000 项为 `132.48 ms`，RSS `107.7 MiB`。
+- [Windows Actions 运行 34082076215](https://github.com/ccnuzw/daoge-skills/actions/runs/34082076215) 在 commit `f93b6ce49b3ca03a6632ab919450a51083318162` 上完成 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组矩阵，四组均成功。每组 `npm test` 共 315 项，311 通过、0 失败、0 取消、4 项 Windows symlink 用例按平台条件跳过；每组 `npm run test:package` 均为 122 个文件且 `unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，真实 bin、注册、doctor 与 `sharp` 全部通过。四份脱敏 doctor 报告均为 `ok: true`，原子 rename、SQLite 排他锁、私有 DACL、NTFS/固定磁盘、默认浏览器和 `sharp` 检查全部通过；空 Studio 的 media process 均为 `0`，100000 项队列领取 1000 项耗时范围为 `157.55–231.35 ms`。
+- 所有本地回归和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。

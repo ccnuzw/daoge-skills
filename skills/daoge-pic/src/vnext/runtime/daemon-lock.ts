@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { createId, nowIso } from '../shared/ids';
-import { enforceSensitiveAccess } from '../studio/workspace';
+
 
 const SQLITE_BUSY = 5;
 const LOCK_BUSY_TIMEOUT_MS = 100;
@@ -123,7 +123,7 @@ export function acquireDaemonLock(paths: DaemonLockPaths, dependencies: DaemonLo
   let transactionHeld = false;
   try {
     assertCoordinationDatabasePath(paths.databasePath);
-    enforceSensitiveAccess(paths.databasePath, false);
+    if (process.platform !== 'win32') fs.chmodSync(paths.databasePath, 0o600);
     configureCoordinationDatabase(database);
     database.exec('BEGIN EXCLUSIVE');
     transactionHeld = true;

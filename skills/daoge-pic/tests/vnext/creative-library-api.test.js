@@ -18,7 +18,7 @@ test('creative library HTTP API exposes reusable kits without sensitive definiti
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const taskType = await json(started, '/api/task-types', { method: 'POST', key: 'library-task-type', body: { name: '系列商品图', definition: { summary: '连续商品构图', fields: ['product', 'angle'], secret_token: 'not-public' } } });
     assert.equal(taskType.status, 200);
     assert.equal(JSON.stringify(taskType.body.data).includes('not-public'), false);

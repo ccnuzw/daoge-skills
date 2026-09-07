@@ -6,6 +6,7 @@ const { performance } = require('node:perf_hooks');
 const { initializeStudio } = require('../dist/vnext/studio/workspace');
 const { appendStudioEvent, closeStudioDatabase, openStudioDatabase, studioSchemaVersion, withTransaction } = require('../dist/vnext/studio/database');
 const { claimRunItems } = require('../dist/vnext/runner/run-commands');
+const { LocalStudioService } = require('../dist/vnext/api/server');
 
 function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-perf-'));
@@ -47,18 +48,43 @@ function runQueueBenchmark(itemCount) {
   }
 }
 
-const workspaceRoot = temporaryWorkspace();
-let db;
-try {
-  const initialized = initializeStudio({ workspaceRoot });
-  db = openStudioDatabase(initialized.paths, initialized.manifest);
-  const events = measure(() => {
-    withTransaction(db, () => {
-      for (let index = 0; index < 2000; index += 1) appendStudioEvent(db, { studioId: initialized.manifest.studioId, entityType: 'bench', entityId: 'bench', eventType: 'bench.event', payload: { index } });
+async function coldStartBenchmark() {
+  const workspaceRoot = temporaryWorkspace();
+  let service;
+  try {
+    const started = measure(() => {
+      service = new LocalStudioService({ workspaceRoot });
+      return service;
     });
-  });
-  console.log(JSON.stringify({ schemaVersion: studioSchemaVersion(db), eventRetention: { count: 2000, milliseconds: events.milliseconds }, queues: [1000, 10000, 100000].map(runQueueBenchmark) }, null, 2));
-} finally {
-  closeStudioDatabase(db);
-  fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    return {
+      controlPlaneMilliseconds: started.milliseconds,
+      mediaProcessesBeforeDemand: service.mediaWorkerPool.processIds().length
+    };
+  } finally {
+    if (service) await service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
 }
+
+async function main() {
+  const workspaceRoot = temporaryWorkspace();
+  let db;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    db = openStudioDatabase(initialized.paths, initialized.manifest);
+    const events = measure(() => {
+      withTransaction(db, () => {
+        for (let index = 0; index < 2000; index += 1) appendStudioEvent(db, { studioId: initialized.manifest.studioId, entityType: 'bench', entityId: 'bench', eventType: 'bench.event', payload: { index } });
+      });
+    });
+    console.log(JSON.stringify({ schemaVersion: studioSchemaVersion(db), coldStart: await coldStartBenchmark(), eventRetention: { count: 2000, milliseconds: events.milliseconds }, queues: [1000, 10000, 100000].map(runQueueBenchmark) }, null, 2));
+  } finally {
+    closeStudioDatabase(db);
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+}
+
+void main().catch((error) => {
+  process.stderr.write((error instanceof Error ? error.stack || error.message : String(error)) + '\n');
+  process.exitCode = 1;
+});

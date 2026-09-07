@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { createId, nowIso } from '../shared/ids';
 import { InvalidCommandError, StudioNotFoundError, VersionConflictError } from '../domain/studio-commands';
 import { capabilitiesForProvider, configFromProviderEnv, isProviderId, parseProviderEnv, providerSnapshot, ProviderId, ResolvedProviderConfig, SafeProviderStatus } from './provider-config';
-import { enforceSensitiveAccess, StudioPaths } from './workspace';
+import { StudioPaths } from './workspace';
 const PROVIDER_SCHEMA_VERSION = 1;
 export type ProviderDatabase = DatabaseSyncType;
 type DatabaseSyncConstructor = new (path: string) => ProviderDatabase;
@@ -135,16 +135,36 @@ function mutation<T>(db: ProviderDatabase, key: string, operation: string, reque
   }
 }
 
-export function openProviderDatabase(paths: StudioPaths): ProviderDatabase {
-  fs.mkdirSync(paths.studioDir, { recursive: true });
-  if (fs.existsSync(paths.providerDatabasePath)) {
-    const stat = fs.lstatSync(paths.providerDatabasePath);
+export function openProviderDatabase(paths: StudioPaths, options: { attachOnly?: boolean } = {}): ProviderDatabase {
+  if (options.attachOnly) {
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(paths.providerDatabasePath); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('Provider.db is missing; configure a Provider before starting a generation worker.');
+      throw error;
+    }
     if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('Provider.db must be a real file and may not be a symbolic link.');
+  } else {
+    fs.mkdirSync(paths.studioDir, { recursive: true });
+    if (fs.existsSync(paths.providerDatabasePath)) {
+      const stat = fs.lstatSync(paths.providerDatabasePath);
+      if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('Provider.db must be a real file and may not be a symbolic link.');
+    }
   }
   const db = new (databaseConstructor())(paths.providerDatabasePath);
+  if (process.platform !== 'win32') fs.chmodSync(paths.providerDatabasePath, 0o600);
   try {
-    enforceSensitiveAccess(paths.providerDatabasePath, false);
-    db.exec("PRAGMA journal_mode = DELETE; PRAGMA secure_delete = ON; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; CREATE TABLE IF NOT EXISTS provider_schema (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS provider_profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider_id TEXT NOT NULL CHECK (provider_id IN ('openai-images','gemini-image','gemini-openai-compatible','xai-grok-image')), model TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, options_json TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1, active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0,1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_profiles_one_active ON provider_profiles(active) WHERE active = 1; CREATE TABLE IF NOT EXISTS provider_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS provider_receipts (idempotency_key TEXT PRIMARY KEY, operation TEXT NOT NULL, request_hash TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL); INSERT OR IGNORE INTO provider_schema (version, applied_at) VALUES (1, datetime('now')); ");
+    db.exec(options.attachOnly
+      ? 'PRAGMA secure_delete = ON; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'
+      : 'PRAGMA journal_mode = DELETE; PRAGMA secure_delete = ON; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    if (options.attachOnly) {
+      const journal = db.prepare('PRAGMA journal_mode').get() as { journal_mode?: unknown } | undefined;
+      if (String(journal?.journal_mode || '').toLowerCase() !== 'delete') throw new Error('Provider database requires DELETE journal mode before a worker can attach.');
+      const schema = db.prepare('SELECT MAX(version) AS version FROM provider_schema').get() as { version: number | null };
+      if (Number(schema.version) !== PROVIDER_SCHEMA_VERSION) throw new Error('Provider database requires daemon initialization before a worker can attach.');
+      return db;
+    }
+    db.exec("CREATE TABLE IF NOT EXISTS provider_schema (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS provider_profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider_id TEXT NOT NULL CHECK (provider_id IN ('openai-images','gemini-image','gemini-openai-compatible','xai-grok-image')), model TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, options_json TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1, active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0,1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_profiles_one_active ON provider_profiles(active) WHERE active = 1; CREATE TABLE IF NOT EXISTS provider_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS provider_receipts (idempotency_key TEXT PRIMARY KEY, operation TEXT NOT NULL, request_hash TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL); INSERT OR IGNORE INTO provider_schema (version, applied_at) VALUES (1, datetime('now')); ");
     const schema = db.prepare('SELECT MAX(version) AS version FROM provider_schema').get() as { version: number | null };
     if (schema.version !== null && Number(schema.version) > PROVIDER_SCHEMA_VERSION) throw new Error('Provider database schema is newer than this DAOGE Pic runtime supports.');
     if (schema.version === null) db.prepare('INSERT INTO provider_schema (version, applied_at) VALUES (?, ?)').run(PROVIDER_SCHEMA_VERSION, nowIso());

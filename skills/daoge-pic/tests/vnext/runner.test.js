@@ -124,7 +124,7 @@ test('persists a no-call dry-run preview and rejects stale Provider snapshots be
     assert.throws(() => createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'duplicate-preflight' }), VersionConflictError);
     assert.equal(fixture.db.prepare('SELECT COUNT(*) AS total FROM generation_runs').get().total, 1);
     assert.equal(fixture.db.prepare("SELECT COUNT(*) AS total FROM command_receipts WHERE idempotency_key IN ('duplicate-run', 'duplicate-preflight')").get().total, 0);
-  } finally { cleanup(fixture.workspaceRoot); }
+  } finally { closeStudioDatabase(fixture.db); cleanup(fixture.workspaceRoot); }
 });
 
 test('dry-run command rejects an unconfirmed round without durable evidence', () => {

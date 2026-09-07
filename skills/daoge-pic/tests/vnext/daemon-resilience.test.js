@@ -22,10 +22,17 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQ
 test('media worker pool is an independently addressable child-process pool', async () => {
   const { MediaProcessPool } = require('../../dist/vnext/runtime/media-worker-pool');
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-media-pool-'));
+  const initialized = initializeStudio({ workspaceRoot });
+  const database = openStudioDatabase(initialized.paths, initialized.manifest);
+  closeStudioDatabase(database);
   const pool = new MediaProcessPool(workspaceRoot, 1);
   try {
-    for (let attempt = 0; attempt < 50 && !pool.processIds().length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(pool.processIds().length, 1);
+    assert.deepEqual(pool.processIds(), []);
+    assert.equal(pool.healthSnapshot().state, 'idle');
+    const reconciliation = pool.run({ type: 'reconcile', studioId: initialized.manifest.studioId });
+    await waitFor(() => pool.processIds().length === 1, 'lazy media worker child');
+    assert.equal((await reconciliation).type, 'reconcile');
+    assert.equal(pool.healthSnapshot().state, 'ready');
     assert.notEqual(pool.processIds()[0], process.pid);
   } finally {
     await pool.close();
@@ -42,14 +49,25 @@ test('generation and media worker pools respawn crashed children and drain queue
   try {
     const initialized = initializeStudio({ workspaceRoot });
     configureProvider(initialized, { name: 'Worker Respawn Provider' });
+    const database = openStudioDatabase(initialized.paths, initialized.manifest);
+    closeStudioDatabase(database);
     generationPool = new WorkerProcessPool(workspaceRoot, 1);
     mediaPool = new MediaProcessPool(workspaceRoot, 1);
-    await waitFor(() => generationPool.processIds().length === 1 && mediaPool.processIds().length === 1, 'worker pool children');
+    assert.deepEqual(generationPool.processIds(), []);
+    assert.deepEqual(mediaPool.processIds(), []);
+    assert.equal(generationPool.healthSnapshot().state, 'idle');
+    assert.equal(mediaPool.healthSnapshot().state, 'idle');
+    await generationPool.processOnce(1);
+    const initialMedia = mediaPool.run({ type: 'reconcile', studioId: initialized.manifest.studioId });
+    await waitFor(() => generationPool.processIds().length === 1 && mediaPool.processIds().length === 1, 'lazy worker pool children');
+    await initialMedia;
     const generationPid = generationPool.processIds()[0];
     const mediaPid = mediaPool.processIds()[0];
     process.kill(generationPid, 'SIGKILL');
     process.kill(mediaPid, 'SIGKILL');
     await waitFor(() => generationPool.processIds()[0] && generationPool.processIds()[0] !== generationPid && mediaPool.processIds()[0] && mediaPool.processIds()[0] !== mediaPid, 'respawned worker pool children');
+    assert.ok(generationPool.healthSnapshot().restartCount >= 1);
+    assert.ok(mediaPool.healthSnapshot().restartCount >= 1);
     const generationTick = await generationPool.processOnce(1);
     assert.equal(generationTick.claimed, 0);
     const mediaResult = await mediaPool.run({ type: 'reconcile', studioId: initialized.manifest.studioId });
@@ -107,13 +125,23 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitFor(condition, description, timeoutMs = 5000) {
+async function waitFor(condition, description, timeoutMs = process.platform === 'win32' ? 60000 : 5000) {
   const started = Date.now();
   while (!condition()) {
     if (Date.now() - started > timeoutMs) throw new Error('Timed out waiting for ' + description + '.');
     await wait(25);
   }
 }
+async function fetchEventually(url, options, timeoutMs = process.platform === 'win32' ? 30000 : 5000) {
+  const started = Date.now();
+  let failure;
+  while (Date.now() - started <= timeoutMs) {
+    try { return await fetch(url, options); }
+    catch (error) { failure = error; await wait(50); }
+  }
+  throw failure || new Error('Timed out waiting for daemon HTTP recovery.');
+}
+
 function livePid(pid) {
   try {
     process.kill(pid, 0);
@@ -142,12 +170,30 @@ async function startCountingProvider() {
 }
 
 
-function stopDaemon(child) {
-  if (!child || child.exitCode !== null || child.killed) return Promise.resolve();
+async function shutdownDaemonRuntime(workspaceRoot, expectedPid) {
+  const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
+  const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+  if (runtime.pid !== expectedPid) throw new Error('Refusing to shut down a different daemon process.');
+  const response = await fetch(runtime.url + '/api/shutdown', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer ' + runtime.capability,
+      'content-type': 'application/json',
+      'x-daoge-operation-name': 'daemon-shutdown-test',
+      'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0'
+    },
+    body: '{}',
+    signal: AbortSignal.timeout(process.platform === 'win32' ? 30000 : 5000)
+  });
+  if (!response.ok) throw new Error('Daemon rejected controlled shutdown with HTTP ' + response.status + '.');
+}
+
+function stopDaemon(child, workspaceRoot) {
+  if (!child || child.exitCode !== null) return Promise.resolve();
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => { child.kill('SIGKILL'); }, 3000);
+    const timeout = setTimeout(() => { child.kill('SIGKILL'); }, process.platform === 'win32' ? 30000 : 3000);
     child.once('exit', () => { clearTimeout(timeout); resolve(); });
-    child.kill('SIGTERM');
+    void shutdownDaemonRuntime(workspaceRoot, child.pid).catch(() => { child.kill(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM'); });
   });
 }
 
@@ -159,7 +205,7 @@ function runChild(entry, args) {
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new Error('Timed out waiting for child process to exit.'));
-    }, 5000);
+    }, process.platform === 'win32' ? 60000 : 5000);
     child.stdout.on('data', (chunk) => { stdout += String(chunk); });
     child.stderr.on('data', (chunk) => { stderr += String(chunk); });
     child.once('error', (error) => { clearTimeout(timeout); reject(error); });
@@ -227,7 +273,7 @@ test('daemon restart preserves a 100-item queue and never replays external reque
     await waitFor(() => fs.existsSync(runtimePath), 'daemon runtime record');
     await wait(800);
     assert.equal(provider.count(), 0, 'a restarted daemon must not call the Provider for resume_pending work');
-    await stopDaemon(daemon);
+    await stopDaemon(daemon, workspaceRoot);
     daemon = null;
 
     const reopened = openStudioDatabase(fixture.initialized.paths, fixture.initialized.manifest);
@@ -273,7 +319,7 @@ test('daemon restart preserves a 100-item queue and never replays external reque
     assert.equal(provider.count(), 0, 'the restarted daemon never replayed any prior external request');
   } finally {
     if (fixture && fixture.db) closeStudioDatabase(fixture.db);
-    await stopDaemon(daemon);
+    await stopDaemon(daemon, workspaceRoot);
     await provider.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
     if (daemonStderr) assert.equal(daemonStderr.includes('Studio daemon failed.'), false, daemonStderr);
@@ -293,20 +339,20 @@ test('standalone service startup performs explicit idempotent recovery without c
     closeStudioDatabase(fixture.db);
     fixture.db = null;
 
-    constructed = new LocalStudioService({ workspaceRoot });
+    constructed = new LocalStudioService({ hardenAccess: false, workspaceRoot });
     assert.equal(listGenerationRunItems(constructed.db, fixture.run.id)[0].status, 'requesting');
     assert.equal(getGenerationRun(constructed.db, fixture.run.id).status, 'running');
     await constructed.close();
     constructed = null;
 
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     assert.equal(listGenerationRunItems(started.service.db, fixture.run.id)[0].status, 'outcome_unknown');
     assert.equal(getGenerationRun(started.service.db, fixture.run.id).status, 'resume_pending');
     assert.equal(provider.count(), 0);
     await started.service.close();
     started = null;
 
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     assert.equal(listGenerationRunItems(started.service.db, fixture.run.id)[0].status, 'outcome_unknown');
     assert.equal(getGenerationRun(started.service.db, fixture.run.id).status, 'resume_pending');
   } finally {
@@ -352,11 +398,11 @@ test('controlled restart preserves its port and Workbench authorization only ins
     const setCookie = bootstrap.headers.get('set-cookie');
     assert.ok(setCookie);
     const cookie = setCookie.split(';', 1)[0];
-    const restart = await fetch(first.url + '/api/restart', { method: 'POST', headers: { cookie, origin: first.url, 'content-type': 'application/json', 'idempotency-key': 'workbench-restart' }, body: '{}' });
-    assert.equal(restart.status, 200);
-    await waitFor(() => {
-      try { return JSON.parse(fs.readFileSync(runtimePath, 'utf8')).startedAt !== first.startedAt; } catch { return false; }
-    }, 'controlled daemon restart');
+    const restart = spawnSync(process.execPath, [cliEntry, 'restart', '--workspace', workspaceRoot], { encoding: 'utf8', timeout: process.platform === 'win32' ? 45000 : 15000 });
+    assert.equal(restart.status, 0, restart.stderr);
+    const restartResult = JSON.parse(restart.stdout);
+    assert.equal(restartResult.previousPid, first.pid);
+    assert.equal(restartResult.daemon.pid, first.pid);
     const restarted = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
     const restartedOwner = JSON.parse(fs.readFileSync(ownerRecordPath, 'utf8'));
     assert.equal(restarted.pid, first.pid);
@@ -365,13 +411,14 @@ test('controlled restart preserves its port and Workbench authorization only ins
     assert.equal(firstOwner.pid, first.pid);
     assert.equal(restartedOwner.pid, first.pid);
     assert.notEqual(restartedOwner.ownerId, firstOwner.ownerId, 'controlled restart must release and reacquire the SQLite mutex');
-    assert.equal((await fetch(restarted.url + '/api/studio', { headers: { cookie } })).status, 200);
-    const normalClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
+    assert.equal((await fetchEventually(restarted.url + '/api/studio', { headers: { cookie } })).status, 200);
+    const normalClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
     assert.deepEqual((await normalClaim.json()).data, { claimed: false, reused: true, reason: 'recent-workbench' }, 'controlled restart must retain recent Workbench presence in daemon memory');
-    const forcedClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
+    const forcedClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
     assert.deepEqual((await forcedClaim.json()).data, { claimed: true, reused: false, reason: 'forced-opener-claim' });
-    assert.equal((await fetch(restarted.url + '/api/projects', { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:9', 'content-type': 'application/json', 'idempotency-key': 'hostile-local-page' }, body: JSON.stringify({ name: 'blocked' }) })).status, 403);
-    await stopDaemon(daemon);
+    assert.equal((await fetchEventually(restarted.url + '/api/projects', { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:9', 'content-type': 'application/json', 'idempotency-key': 'hostile-local-page' }, body: JSON.stringify({ name: 'blocked' }) })).status, 403);
+    assert.equal((await fetchEventually(restarted.url + '/api/shutdown', { method: 'POST', headers: { cookie, origin: restarted.url, 'content-type': 'application/json', 'idempotency-key': 'cookie-shutdown-blocked' }, body: '{}' })).status, 403);
+    await stopDaemon(daemon, workspaceRoot);
     daemon = null;
     assert.equal(fs.existsSync(runtimePath), false);
     assert.equal(fs.existsSync(ownerRecordPath), false);
@@ -386,7 +433,7 @@ test('controlled restart preserves its port and Workbench authorization only ins
     assert.equal(JSON.parse(fs.readFileSync(portPath, 'utf8')).port, first.port);
     assert.equal((await fetch(second.url + '/api/health')).status, 200);
   } finally {
-    await stopDaemon(daemon);
+    await stopDaemon(daemon, workspaceRoot);
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
@@ -447,7 +494,8 @@ test('a stale owner record plus four concurrent first-start Studio CLIs converge
       try { daemonPid = JSON.parse(fs.readFileSync(runtimePath, 'utf8')).pid || null; } catch { /* daemon never published runtime */ }
     }
     if (daemonPid) {
-      try { process.kill(daemonPid, 'SIGTERM'); } catch { /* daemon already stopped */ }
+      try { await shutdownDaemonRuntime(workspaceRoot, daemonPid); }
+      catch { try { process.kill(daemonPid, process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM'); } catch { /* daemon already stopped */ } }
       await waitFor(() => !livePid(daemonPid) && !fs.existsSync(runtimePath) && !fs.existsSync(lockPath), 'concurrent-start daemon process, runtime, and owner shutdown');
       await wait(250);
       assert.equal(livePid(daemonPid), false);
@@ -483,7 +531,7 @@ test('a live unrelated PID owner record is overwritten without signaling that pr
     assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).ownerId, lock.ownerId);
     assert.equal((await fetch(runtime.url + '/api/health')).status, 200);
   } finally {
-    await stopDaemon(daemon);
+    await stopDaemon(daemon, workspaceRoot);
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });

@@ -8,7 +8,7 @@ import { writeImageZip } from '../media/zip';
 import { openDeliveryExportFileAsync } from '../domain/deliveries';
 import { reconcileManagedMediaAsync } from '../media/reconcile';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase } from '../studio/database';
-import { ensureCacheDirectory, initializeStudio, StudioPaths } from '../studio/workspace';
+import { attachStudio, ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 import type { MediaJob, MediaJobResult, MediaSource, MediaZipEntry } from '../runtime/media-worker-pool';
 import { createId } from '../shared/ids';
 
@@ -87,9 +87,9 @@ function abortError(): Error {
 async function main(): Promise<void> {
   const workspaceRoot = valueAfter(process.argv.slice(2), '--workspace');
   if (!workspaceRoot) throw new Error('Media worker process requires --workspace.');
-  const initialized = initializeStudio({ workspaceRoot });
+  const initialized = attachStudio(workspaceRoot);
   const paths = initialized.paths;
-  const db = openStudioDatabase(paths, initialized.manifest, { skipIntegrityCheck: true });
+  const db = openStudioDatabase(paths, initialized.manifest, { skipIntegrityCheck: true, attachOnly: true });
   let stopping = false;
   const jobs = new Map<string, AbortController>();
   const shutdown = (): void => {

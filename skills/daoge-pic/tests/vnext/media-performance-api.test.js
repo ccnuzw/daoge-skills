@@ -15,7 +15,7 @@ test('Workbench thumbnails are bounded WebP derivatives with immutable condition
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const original = await sharp({ create: { width: 1600, height: 1200, channels: 3, background: '#4f765c' } }).png().toBuffer();
     const upload = await fetchStudio(started, '/api/assets/import', { method: 'POST', headers: { 'content-type': 'image/png', 'idempotency-key': 'thumbnail-upload' }, body: original });
     assert.equal(upload.status, 200);

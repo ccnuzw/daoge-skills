@@ -4,7 +4,7 @@ import { StudioAssetResolver } from '../media/asset-resolver';
 import { GenerationWorker } from './worker';
 import { closeStudioDatabase, openStudioDatabase } from '../studio/database';
 import { closeProviderDatabase, openProviderDatabase, providerStatus, resolveActiveProviderConfig } from '../studio/provider-store';
-import { initializeStudio } from '../studio/workspace';
+import { attachStudio } from '../studio/workspace';
 import { MAX_GLOBAL_CONCURRENCY, MAX_WORKER_BATCH_CONCURRENCY } from '../studio/runtime-settings';
 import { ProviderHealthSample, ProviderOutcome } from '../runtime/provider-concurrency';
 import { createId } from '../shared/ids';
@@ -21,9 +21,9 @@ function send(message: Record<string, unknown>): void {
 async function main(): Promise<void> {
   const workspaceRoot = valueAfter(process.argv.slice(2), '--workspace');
   if (!workspaceRoot) throw new Error('Worker process requires --workspace.');
-  const initialized = initializeStudio({ workspaceRoot });
-  const db = openStudioDatabase(initialized.paths, initialized.manifest, { skipIntegrityCheck: true });
-  const providerDb = openProviderDatabase(initialized.paths);
+  const initialized = attachStudio(workspaceRoot);
+  const db = openStudioDatabase(initialized.paths, initialized.manifest, { skipIntegrityCheck: true, attachOnly: true });
+  const providerDb = openProviderDatabase(initialized.paths, { attachOnly: true });
   const config = resolveActiveProviderConfig(providerDb);
   const status = providerStatus(providerDb);
   if (!config || !status.configured) throw new Error('Worker process requires an active configured Provider.');

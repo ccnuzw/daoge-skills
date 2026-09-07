@@ -19,7 +19,7 @@ test('project visual selection persists as scoped Studio asset relations', async
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const projectA = await json(started, '/api/projects', { method: 'POST', key: 'selection-project-a', body: { name: '项目 A' } });
     const projectB = await json(started, '/api/projects', { method: 'POST', key: 'selection-project-b', body: { name: '项目 B' } });
     const projectAId = projectA.body.data.value.id;

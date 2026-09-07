@@ -6,3 +6,6 @@ __pycache__/
 skills/daoge-pic/node_modules/
 skills/daoge-pic/dist/
 skills/daoge-pic/*.tgz
+/daoge-studio/
+/daoge-assets/
+/daoge-deliveries/

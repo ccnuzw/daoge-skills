@@ -1,0 +1,84 @@
+name: DAOGE Pic Windows
+
+on:
+  pull_request:
+    paths:
+      - "skills/daoge-pic/**"
+      - ".github/workflows/daoge-pic-windows.yml"
+      - "README.md"
+      - "CHANGELOG.md"
+  push:
+    branches: [main]
+    paths:
+      - "skills/daoge-pic/**"
+      - ".github/workflows/daoge-pic-windows.yml"
+      - "README.md"
+      - "CHANGELOG.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        node: ["22.17.0", "24"]
+    defaults:
+      run:
+        working-directory: skills/daoge-pic
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: skills/daoge-pic/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run Windows runtime and ACL regression suite
+        shell: pwsh
+        run: |
+          $diagnosticRoot = Join-Path $env:RUNNER_TEMP "daoge-diagnostics"
+          New-Item -ItemType Directory -Force -Path $diagnosticRoot | Out-Null
+          npm test 2>&1 | Tee-Object -FilePath (Join-Path $diagnosticRoot "tests.txt")
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            $tail = (Get-Content (Join-Path $diagnosticRoot "tests.txt") -Tail 120 | ForEach-Object { $_.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A') }) -join '%0A'
+            Write-Output "::error title=Windows runtime regression failed::$tail"
+            exit $testExit
+          }
+      - name: Verify package install, cmd shim, junction, and sharp
+        if: always()
+        shell: pwsh
+        run: |
+          $diagnosticRoot = Join-Path $env:RUNNER_TEMP "daoge-diagnostics"
+          New-Item -ItemType Directory -Force -Path $diagnosticRoot | Out-Null
+          npm run test:package 2>&1 | Tee-Object -FilePath (Join-Path $diagnosticRoot "package.txt")
+          $packageExit = $LASTEXITCODE
+          if ($packageExit -ne 0) {
+            $tail = (Get-Content (Join-Path $diagnosticRoot "package.txt") -Tail 120 | ForEach-Object { $_.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A') }) -join '%0A'
+            Write-Output "::error title=Windows package smoke failed::$tail"
+            exit $packageExit
+          }
+      - name: Capture redacted runtime and workspace diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $diagnosticRoot = Join-Path $env:RUNNER_TEMP "daoge-diagnostics"
+          New-Item -ItemType Directory -Force -Path $diagnosticRoot | Out-Null
+          $workspace = Join-Path $env:RUNNER_TEMP "DAOGE 图片 空格"
+          node scripts/daoge.js doctor --workspace $workspace --json true --redacted true | Set-Content -Encoding UTF8 (Join-Path $diagnosticRoot "doctor.json")
+          npm run bench:perf | Set-Content -Encoding UTF8 (Join-Path $diagnosticRoot "performance.txt")
+      - name: Upload redacted Windows evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: daoge-pic-${{ matrix.os }}-node-${{ matrix.node }}
+          path: ${{ runner.temp }}/daoge-diagnostics
+          if-no-files-found: warn
+          retention-days: 14

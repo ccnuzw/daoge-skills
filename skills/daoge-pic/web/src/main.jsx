@@ -1,6 +1,6 @@
 import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, LockKeyhole, MessageSquareText, PanelLeftClose, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, LockKeyhole, MessageSquareText, PanelLeftClose, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
 import { mergeRunHistoryItems, runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
 import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectRound, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
@@ -27,6 +27,7 @@ import { assetRefreshPath } from './asset-refresh-plan.mjs';
 import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, createProjectSearchIndex, createTaskSearchIndex, filterProjectIndex, filterTaskIndex, paginateWorkspaceItems } from './workspace-list-model.mjs';
 import { ProviderSettings } from './provider-settings.jsx';
 import { workbenchConversationId } from './workbench-session.mjs';
+import { redactedRuntimeDiagnostic, runtimeHealthPresentation } from './runtime-health.mjs';
 import './styles.css';
 
 const EMPTY = [];
@@ -87,6 +88,20 @@ function StatusPill({ value, scope = 'generic', presentation = null }) {
 
 function IconButton({ label, children, onClick, disabled = false, tone = 'default' }) {
   return <button className={'icon-button ' + tone} type="button" onClick={onClick} disabled={disabled} title={label} aria-label={label}>{children}</button>;
+}
+
+function RuntimeHealthBanner({ studio, recoveryPhase, repairing, onCopy, onRefresh, onRepair }) {
+  const presentation = runtimeHealthPresentation(studio?.runtime, recoveryPhase);
+  const repairable = recoveryPhase === 'ready' && [studio?.runtime?.workerPool?.state, studio?.runtime?.mediaWorkerPool?.state].some((state) => state === 'degraded' || state === 'failed');
+  return <aside className={'runtime-health-banner is-' + presentation.tone} role={presentation.tone === 'danger' ? 'alert' : 'status'} aria-live={presentation.live ? 'polite' : 'off'}>
+    <div className="runtime-health-icon"><Activity size={18} aria-hidden="true" /></div>
+    <div><strong>{presentation.title}</strong><span>{presentation.detail}</span></div>
+    <div className="runtime-health-actions">
+      {repairable && <button type="button" className="outline-button" disabled={repairing} onClick={onRepair}><RefreshCw size={15} className={repairing ? 'spin' : ''} />{repairing ? '正在重启' : '安全重启'}</button>}
+      <button type="button" className="outline-button" onClick={onRefresh}><RefreshCw size={15} />刷新状态</button>
+      <button type="button" className="outline-button" onClick={onCopy}><Copy size={15} />复制脱敏诊断</button>
+    </div>
+  </aside>;
 }
 function AssetSelectionStrip({ assets, onRemove, onClear, onPreview, onDownloadArchive }) {
   return <section className="selection-strip">
@@ -265,6 +280,8 @@ function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [connectionError, setConnectionError] = useState('');
+  const [recoveryPhase, setRecoveryPhase] = useState('ready');
+  const [runtimeRepairing, setRuntimeRepairing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
   const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0 });
@@ -292,6 +309,9 @@ function App() {
   const advancedDetailRequests = useRef(null);
   const assetRequests = useRef(null);
   const selectionRequests = useRef(null);
+  const recoveryPhaseRef = useRef('ready');
+  const recoveryTimerRef = useRef(null);
+  const restartMonitorEpoch = useRef(0);
   const sharedAssetRequests = useRef(null);
   const eventRefreshQueueRef = useRef(null);
   const eventRefreshCallbacks = useRef(null);
@@ -309,6 +329,7 @@ function App() {
     schedule: (callback, delay) => window.setTimeout(callback, delay),
     cancelSchedule: (timer) => window.clearTimeout(timer)
   });
+  useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); }, []);
   const { view, projectId: activeProjectId, taskId: activeTaskId, roundId: activeRoundId, compareRoundIds = EMPTY, runId: activeRunId, assetScope } = route;
   const routeView = rendererForWorkbenchView(view);
   const studioView = isStudioView(view);
@@ -543,13 +564,69 @@ function App() {
     if (refreshed) applyEventRefreshPlan({ taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, refreshContext: true });
     return refreshed;
   }, [refresh, applyEventRefreshPlan]);
+  const updateRecoveryPhase = useCallback((phase) => { recoveryPhaseRef.current = phase; setRecoveryPhase(phase); }, []);
+  const finishStudioRecovery = useCallback(async () => {
+    if (!['stopping', 'reconnecting'].includes(recoveryPhaseRef.current)) return true;
+    const restored = await refreshSnapshot();
+    if (!restored) return false;
+    restartMonitorEpoch.current += 1;
+    setConnectionError('');
+    updateRecoveryPhase('restored');
+    if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
+    recoveryTimerRef.current = window.setTimeout(() => updateRecoveryPhase('ready'), 2400);
+    return true;
+  }, [refreshSnapshot, updateRecoveryPhase]);
+  const monitorStudioRestart = useCallback(async (epoch, previousStartedAt) => {
+    for (let attempt = 0; attempt < 100 && restartMonitorEpoch.current === epoch; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+      try {
+        const next = await api('/api/studio');
+        const nextStartedAt = next?.runtime?.startedAt;
+        if ((!previousStartedAt && nextStartedAt) || (previousStartedAt && nextStartedAt && nextStartedAt !== previousStartedAt)) {
+          await finishStudioRecovery();
+          return;
+        }
+      } catch { /* daemon is inside the expected restart gap */ }
+    }
+    if (restartMonitorEpoch.current === epoch) setError('Studio 重启超时。请复制脱敏诊断并检查本地 daemon 日志。');
+  }, [finishStudioRecovery]);
+  const beginStudioRestart = useCallback(() => {
+    if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
+    const epoch = ++restartMonitorEpoch.current;
+    updateRecoveryPhase('stopping');
+    void monitorStudioRestart(epoch, studio?.runtime?.startedAt || null);
+  }, [monitorStudioRestart, studio?.runtime?.startedAt, updateRecoveryPhase]);
+  const handleConnectionError = useCallback((message) => {
+    setConnectionError(message);
+    if (message) updateRecoveryPhase('reconnecting');
+  }, [updateRecoveryPhase]);
+  const handleReconnected = useCallback(async () => { await finishStudioRecovery(); }, [finishStudioRecovery]);
   useStudioEvents({
     studioId: studio?.studioId || null,
     onEventBatch: refreshForEvents,
     onSnapshot: refreshSnapshot,
-    onConnectionError: setConnectionError,
+    onConnectionError: handleConnectionError,
+    onReconnected: handleReconnected,
     onRequestError: setError
   });
+
+  const copyRuntimeDiagnostic = async () => {
+    try {
+      const diagnostic = redactedRuntimeDiagnostic({ studio, provider, recoveryPhase, connectionError });
+      if (!navigator.clipboard?.writeText) throw new Error('当前浏览器未提供剪贴板权限。');
+      await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
+      setNotice('已复制脱敏运行诊断；内容不含 Provider 密钥或工作区路径。');
+    } catch (nextError) { setError(nextError.message || '无法复制脱敏诊断。'); }
+  };
+  const repairRuntime = async () => {
+    if (runtimeRepairing) return;
+    setRuntimeRepairing(true);
+    try {
+      await api('/api/restart', { method: 'POST', idempotencyKey: uniqueKey('runtime-repair'), body: {} });
+      beginStudioRestart();
+    } catch (nextError) { setError(nextError.message || '无法安全重启 Studio。'); }
+    finally { setRuntimeRepairing(false); }
+  };
   useEffect(() => {
     if (!session) { setSessionPlanStatus(null); return undefined; }
     const controller = new AbortController();
@@ -1158,6 +1235,7 @@ function App() {
           {canImport && view !== 'library' && <button type="button" className="command-button" onClick={() => inputRef.current?.click()} disabled={uploading}><ImagePlus size={17} />{uploading && uploadProgress ? '正在导入 ' + uploadProgress.completed + '/' + uploadProgress.total : importLabel}</button>}
         </div>
       </header>
+      <RuntimeHealthBanner studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
 
        {!studioView && <WorkspaceContextBar project={selectedProject} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} assetScope={assetScope} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectRound={(roundId) => navigateRoute(selectRound(route, roundId))} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} />}
       {connectionError && <div className="connection-error-strip" role="alert" aria-live="assertive"><CloudOff size={16} /><span>{connectionError}</span></div>}
@@ -1172,7 +1250,7 @@ function App() {
     {assetProvenance && <aside className="asset-inspector" aria-label="资产来源与评审记录"><div className="asset-inspector-head"><div><p className="eyebrow">资产检查器</p><h2>{assetProvenance.asset?.kind === 'generated' ? '生成结果来源链' : '导入素材来源链'}</h2></div><IconButton label="关闭资产检查器" onClick={() => setAssetProvenance(null)}><X size={16} /></IconButton></div><div className="asset-inspector-section"><span>来源</span><p>{assetProvenance.asset?.kind === 'generated' ? '由已确认轮次中的运行项保存' : '导入到当前 Studio 的素材'}</p>{assetProvenance.outputs?.map((output) => <button type="button" key={output.runItem.id} className="trace-link" onClick={() => { navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id }); setAssetProvenance(null); }}><span>{output.project.name} / {output.task.name}</span><b>{output.round.purpose} · 运行项 {output.runItem.sequence}</b></button>)}</div><div className="asset-inspector-section"><span>评审历史</span>{assetProvenance.reviews?.length ? assetProvenance.reviews.map((review) => <p key={review.id}><b>{review.decision === 'keep' ? '保留' : review.decision === 'review' ? '待复核' : review.decision === 'reject' ? '不采用' : '衍生方向'}</b> · {review.createdAt}</p>) : <p>尚未记录评审。</p>}</div><div className="asset-inspector-section"><span>交付引用</span>{assetProvenance.deliveries?.length ? assetProvenance.deliveries.map((delivery) => <p key={delivery.id}>{delivery.name} · {delivery.status}</p>) : <p>尚未加入交付草稿。</p>}</div><div className="asset-inspector-section"><span>批次版本</span>{assetProvenance.deliveryBatches?.length ? assetProvenance.deliveryBatches.map((batch) => <p key={batch.versionId}>{batch.name} · v{batch.versionNo} · {batch.status === 'ready' ? '已准备' : batch.status === 'draft' ? '草稿' : '已被新修订版本替代'}</p>) : <p>尚未加入版本化交付批次。</p>}</div></aside>}
     {generationConfirmation && <ConfirmationDialog label="确认创作计划" title={'确认计划 v' + generationConfirmation.round.planVersion + '？'} message="此操作代表当前用户已审阅计划，并把确认绑定到当前 conversation 与计划哈希。确认不会调用 Provider；请返回当前智能体会话继续预检和生成。" confirmLabel="确认计划" busy={generationConfirmationBusy} error={generationConfirmationError} tone="warning" onCancel={dismissGenerationConfirmation} onConfirm={confirmGenerationPlan} />}
     {previewAssets.length > 0 && <AccessibleDialog className="image-inspector" label={previewAssets.length === 2 ? '双图对比' : '素材放大查看'} onDismiss={() => setPreviewAssets([])}><div className="inspector-toolbar"><span>{previewAssets.length === 2 ? '双图对比' : '素材查看'}</span><div><IconButton label="缩小" disabled={previewZoom <= 0.75} onClick={() => setPreviewZoom((value) => Math.max(0.75, value - 0.25))}><ZoomOut size={16} /></IconButton><IconButton label="放大" disabled={previewZoom >= 2} onClick={() => setPreviewZoom((value) => Math.min(2, value + 0.25))}><ZoomIn size={16} /></IconButton><IconButton label="关闭查看" onClick={() => setPreviewAssets([])}><X size={16} /></IconButton></div></div><div className={'inspector-images ' + (previewAssets.length === 2 ? 'is-compare' : '')}>{previewAssets.map((asset, index) => { const selected = selectedAssetIds.has(asset.id); const busy = selectionBusyIds.has(asset.id); return <figure className={selected ? 'is-selected' : ''} key={asset.id}>{selectedProject && !asset.deletedAt && <label className="inspector-select-control"><input type="checkbox" checked={selected} disabled={busy} onChange={() => void markAsDeliverable(asset)} /><span>{selected ? <Check size={15} /> : <Bookmark size={15} />}{busy ? '正在保存' : selected ? '已选成果' : '选为成果'}</span></label>}<img src={assetOriginalUrl(asset)} alt="" style={{ transform: 'scale(' + previewZoom + ')' }} /><figcaption>{asset.display?.label || (previewAssets.length === 2 ? '对比图 ' + (index + 1) : '素材预览')}</figcaption></figure>; })}</div></AccessibleDialog>}
-    {providerDetails && <ProviderSettings request={api} onDismiss={() => setProviderDetails(null)} onChanged={refresh} />}
+    {providerDetails && <ProviderSettings request={api} onDismiss={() => setProviderDetails(null)} onChanged={refresh} onRestarting={beginStudioRestart} />}
     {confirmation && <ConfirmationDialog label={confirmation.kind === 'archive' ? '确认归档项目' : '确认移入回收站'} title={confirmation.kind === 'archive' ? '归档“' + confirmation.projectName + '”？' : '将图片移入回收站？'} message={confirmation.kind === 'archive' ? '归档后将关闭该项目下的任务与轮次。未完成生成必须先暂停或取消。是否继续？' : '这张图片仍被选择、资料库或交付引用。移入回收站不会删除已冻结交付，是否继续？'} confirmLabel={confirmation.kind === 'archive' ? '确认归档' : '继续移入'} busy={confirmationBusy} error={confirmationError} onCancel={dismissConfirmation} onConfirm={confirmPendingAction} />}
   </main>;
 }

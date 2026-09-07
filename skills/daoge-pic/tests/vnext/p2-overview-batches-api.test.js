@@ -18,7 +18,7 @@ test('P2 searches safe projections, compares explicit task rounds, and keeps del
   let started;
   try {
     initializeStudio({ workspaceRoot });
-    started = await startLocalStudioService({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const project = await json(started, '/api/projects', { method: 'POST', key: 'p2-project', body: { name: 'P2 运营项目' } });
     const projectId = project.body.data.value.id;
     const task = await json(started, '/api/tasks', { method: 'POST', key: 'p2-task', body: { projectId, name: 'P2 安全检索任务', intent: { prompt: 'must-not-return-search-source', apiKey: 'must-not-return-secret', endpoint: 'https://private.example.test' } } });
