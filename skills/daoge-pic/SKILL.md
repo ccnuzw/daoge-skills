@@ -118,7 +118,7 @@ node scripts/daoge.js studio --workspace <path>
 node scripts/daoge.js open --workspace <path> [--allow-nested-studio true]
 ```
 
-`open` 必须先完成工作区身份检查，再通过已授权本地 API 获取 daemon 内存 opener claim，并由唯一持有者使用跨平台安全 opener：macOS `open`、Linux `xdg-open`、Windows 先用 `rundll32.exe url.dll,FileProtocolHandler`，该进程无法启动时回退到无 shell 的 `explorer.exe`；不得通过 shell 字符串拼接 URL。健康 daemon 的 CLI `restart` 必须通过已授权本地 API 在原进程内完成受控重启，不得在 Windows 上用强制 `SIGTERM` 代替正常关闭。异常进程恢复所需的 Windows daemon 身份必须通过系统 Windows PowerShell 的 CIM `Win32_Process` 查询，不得依赖可选且已弃用的 `wmic.exe`。所有 opener 均失败或平台不支持时明确失败并释放自己的 claim。`open --force true` 仅绕过活动/最近 presence，不得抢占另一个未过期 claim；`open --allow-nested-studio true` 仅在用户明确要求创建独立嵌套 Studio 时使用。
+`open` 必须先完成工作区身份检查，再通过已授权本地 API 获取 daemon 内存 opener claim，并由唯一持有者使用跨平台安全 opener：macOS `open`、Linux `xdg-open`、Windows 先用 `rundll32.exe url.dll,FileProtocolHandler`，该进程无法启动时回退到无 shell 的 `explorer.exe`；不得通过 shell 字符串拼接 URL。健康 daemon 的 CLI `restart` 必须通过已授权本地 API 在原进程内完成受控重启；停止当前 daemon 也必须在核对 runtime、owner PID、Studio、进程入口与工作区后走仅 Bearer Skill/CLI 可调用的本地受控关闭端点，不得在 Windows 上用外部 `SIGTERM` 冒充优雅清理。仅当本地浏览器命令无法启动时才报告失败，并提示 `doctor`，不得把 bootstrap URL 或 capability 打印到终端。
 
 每个 daemon 生成高熵 local capability。Workbench 只可通过 URL fragment bootstrap 换取 `HttpOnly`、`SameSite=Strict` Cookie，随后立即清除 fragment；CLI 使用 Bearer capability。Open claim token 由 CLI 生成，只以哈希形式短暂保存在 daemon 内存，不进入响应、数据库、事件、日志或 runtime 文件。同一进程受控重启复用最近 Workbench presence；独立 daemon 进程重置。Workbench 的 UI Session 使用每标签页 `sessionStorage` 身份，reload 复用而标签间不共享；它不代表任何智能体会话，也不得让其他会话的 Session context 更新抢占当前 route。除最小健康检查外，API、媒体、ZIP 和 SSE 都要求当前 Studio 授权，写入还校验 Host、Origin 和 Content-Type，任意 localhost 页面不得因重启获得权限。不得输出、记录、复制或分享 capability、bootstrap URL、Cookie、session token、claim token 或 runtime 私密字段；`status` 只能返回脱敏 daemon 信息。
 

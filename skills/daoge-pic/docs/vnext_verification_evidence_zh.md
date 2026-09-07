@@ -109,8 +109,8 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 ### SQLite process lock 与关闭安全证据
 
 - 唯一进程互斥由独立 `runtime/daemon-lock.sqlite` 连接持有不提交业务数据的长期 `BEGIN EXCLUSIVE` 事务实现；连接使用 100ms `busy_timeout`、`journal_mode=DELETE`、`synchronous=FULL`。第二持有者只在 SQLite 主结果码为 `SQLITE_BUSY (5)` 时报告 already running。正常关闭按 pid+ownerId 精确删除 owner record 后 `ROLLBACK`/close；崩溃时由 OS/SQLite 自动释放文件锁，遗留 record 不参与互斥。
-- 永久回归实际覆盖同进程双连接互斥、持锁子进程 `SIGKILL` 后立即重获、无关存活 PID 遗留 record 的原子覆盖，以及四个并发首次 CLI 只收敛到一个 daemon PID；loser 子进程全部退出。唯一 owner 收到一次安全 `SIGTERM` 后，测试等待 PID 与 runtime owner 文件消失，再观察 250ms，确认 loser 不接管、不重建 daemon。
-- daemon 关闭先停止 Worker；即使 Provider 忽略 abort 且请求不返回，`worker.shutdown()` 也会使已领取项进入 `outcome_unknown`，不会等待该 Provider 或自动重放。Worker tick、HTTP service 与 HTTP connection 关闭均有边界，数据库关闭和 mutex 释放完成后才卸载 `SIGTERM` 处理器。
+- 永久回归实际覆盖同进程双连接互斥、持锁子进程 `SIGKILL` 后立即重获、无关存活 PID 遗留 record 的原子覆盖，以及四个并发首次 CLI 只收敛到一个 daemon PID；loser 子进程全部退出。唯一 owner 通过仅 Bearer Skill/CLI 可调用的本地控制端点受控关闭，测试等待 PID 与 runtime owner 文件消失，再观察 250ms，确认 loser 不接管、不重建 daemon。
+- daemon 关闭先停止 Worker；即使 Provider 忽略 abort 且请求不返回，`worker.shutdown()` 也会使已领取项进入 `outcome_unknown`，不会等待该 Provider 或自动重放。Worker tick、HTTP service 与 HTTP connection 关闭均有边界，数据库关闭和 mutex 释放完成后才卸载进程信号与受控生命周期处理器；Windows 不把外部 `SIGTERM` 当成可执行异步清理的优雅关闭。
 - 协调 DB 权限固定为 0600、runtime 目录为 0700，启动拒绝协调路径上的 symlink 或非普通文件。DELETE 模式不使用 WAL/SHM；可能出现的 rollback journal 由 SQLite 管理，不做可能误删新持有者文件的用户态清理。
 
 ### 制品、迁移与验证边界
@@ -254,6 +254,7 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - daemon owner 独占工作区创建、schema migration、旧 Provider 导入和权限强化。敏感目录、manifest、SQLite 与现有 sidecar 在一个 PowerShell 进程中通过 .NET `FileSystemSecurity` 批量设置并复核 DACL；Generation/media Worker 只附加既有数据库。
 - 空 Studio 不启动 media Worker；存在媒体恢复或实际媒体作业时才按需创建。Generation pool 首次 tick 从一个 Worker 开始，持续满载时逐个扩容。两类池公开脱敏健康、重启次数、最终熔断与安全错误摘要。
 - 新工作区在任何 Studio 文件创建前检查 Windows 本地固定 NTFS、UNC、同步盘/系统目录和已有 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 ACL、DriveInfo/Registry、`sharp` 与默认浏览器关联。
+- 高负载 Windows runner 上，回归套件将跨文件并发限制为 2；DriveInfo/Registry PowerShell 与 WMI 查询保留内外层有界超时，daemon 启停等待预算覆盖系统 PowerShell 首次启动和安全清理，不以取消安全检查换取速度。
 
 ### 安装、路径与 Workbench 恢复
 

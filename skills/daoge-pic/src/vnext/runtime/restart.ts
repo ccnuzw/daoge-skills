@@ -1,16 +1,27 @@
-let restartHandler: (() => void) | null = null;
+interface DaemonLifecycleHandlers {
+  restart(): void;
+  stop(): void;
+}
 
-export function installDaemonRestartHandler(handler: () => void): () => void {
-  if (restartHandler) throw new Error('A daemon restart handler is already installed.');
-  restartHandler = handler;
-  return () => { if (restartHandler === handler) restartHandler = null; };
+let lifecycleHandlers: DaemonLifecycleHandlers | null = null;
+
+export function installDaemonLifecycleHandlers(handlers: DaemonLifecycleHandlers): () => void {
+  if (lifecycleHandlers) throw new Error('Daemon lifecycle handlers are already installed.');
+  lifecycleHandlers = handlers;
+  return () => { if (lifecycleHandlers === handlers) lifecycleHandlers = null; };
 }
-export function daemonRestartAvailable(): boolean {
-  return restartHandler !== null;
-}
+
+export function daemonRestartAvailable(): boolean { return lifecycleHandlers !== null; }
+export function daemonShutdownAvailable(): boolean { return lifecycleHandlers !== null; }
 
 export function requestDaemonRestart(): boolean {
-  if (!restartHandler) return false;
-  restartHandler();
+  if (!lifecycleHandlers) return false;
+  lifecycleHandlers.restart();
+  return true;
+}
+
+export function requestDaemonShutdown(): boolean {
+  if (!lifecycleHandlers) return false;
+  lifecycleHandlers.stop();
   return true;
 }

@@ -4,7 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { openWorkbenchUrl } from './open-workbench';
 import { MAX_GLOBAL_CONCURRENCY, MIN_EXECUTION_CONCURRENCY } from '../studio/runtime-settings';
-import { healthStudioId, signalVerifiedDaemon } from './legacy-daemon';
+import { healthStudioId, shutdownVerifiedDaemon } from './legacy-daemon';
 import { readStudioManifest, sameWorkspaceRoot, studioPaths } from '../studio/workspace';
 import { SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
 import { registerSkill, SkillRegistrationScope } from './register-skill';
@@ -91,7 +91,7 @@ function workbenchBootstrapUrl(record: RuntimeRecord): string {
   return record.url + '/#capability=' + encodeURIComponent(record.capability);
 }
 
-const DAEMON_LIFECYCLE_ATTEMPTS = process.platform === 'win32' ? 300 : 100;
+const DAEMON_LIFECYCLE_ATTEMPTS = process.platform === 'win32' ? 600 : 100;
 async function healthy(url: string, expectedStudioId?: string): Promise<boolean> {
   const studioId = await healthStudioId(url);
   return Boolean(studioId && (!expectedStudioId || studioId === expectedStudioId));
@@ -145,8 +145,8 @@ async function stopRecordedDaemon(workspaceRoot: string, existing: RuntimeRecord
   if (!sameWorkspaceRoot(existing.workspaceRoot, workspaceRoot)) throw new Error('运行记录不属于当前工作区，拒绝停止。');
   if (livePid(existing.pid)) {
     const ownerPid = recordedOwnerPid(workspaceRoot);
-    if (ownerPid === null) throw new Error('daemon owner record 无有效 PID，拒绝发送终止信号。');
-    await signalVerifiedDaemon(existing, {
+    if (ownerPid === null) throw new Error('daemon owner record 无有效 PID，拒绝受控关闭。');
+    await shutdownVerifiedDaemon(existing, {
       workspaceRoot,
       studioId: readStudioId(workspaceRoot),
       lockPid: ownerPid,

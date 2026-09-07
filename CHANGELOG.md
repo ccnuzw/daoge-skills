@@ -11,6 +11,7 @@
 - Node.js 下限固定为 `22.13.0`；daemon 身份查询从 WMIC 改为系统 Windows PowerShell 中有界的 .NET WMI 查询，不依赖 PowerShell 模块，并同时设置 WMI 与 Node 外层超时。
 - 新工作区在任何 Studio 文件创建前拒绝 UNC、同步盘/系统目录、非本地固定磁盘、非 NTFS 与已有 junction/symlink；`open --allow-nested-studio true` 不能越过这些存储约束。
 - 敏感目录、manifest、SQLite 与现有 sidecar 由 daemon owner 在一个 PowerShell 进程中批量设置并复核 DACL；只允许当前用户 SID、SYSTEM 与 Administrators。ACL 超时、PowerShell 缺失和权限拒绝均失败关闭。
+- Windows 外部 `SIGTERM` 会直接终止 Node 进程，不能承诺执行异步清理；当前 runtime 的安全关闭改走仅 Bearer Skill/CLI 可调用的本地 HTTP 控制端点，并在关闭前继续核对 owner PID、Studio、进程入口与工作区。测试套件限制跨文件并发，避免冷启动 PowerShell 与 daemon 恢复在 runner 高负载下互相挤占。
 - 交付路径保留安全 Unicode、限制组件长度、规避 Windows 设备保留名，并给项目与交付目录追加短 ID。
 - `rundll32.exe` 无法启动或立即非零退出时回退到无 shell 的 `explorer.exe`；最终失败提示运行 doctor，不泄露 bootstrap URL 或 capability。
 
@@ -33,7 +34,7 @@
 - 浏览器实测 1440×1000 与 375×812，无横向溢出，移动端健康操作为 44px；实际 daemon 故障注入完整观察到故障、安全关闭和恢复状态。
 - `npm run bench:perf`：空 Studio control-plane `41.81 ms`、需求前 media process `0`；100000 pending 队列领取 1000 项 `128.03 ms`，RSS `105.6 MiB`。
 - Windows Actions 扩为 `windows-2022`、`windows-2025` × Node.js `22.13.0`、`24`，并在每组上传脱敏 doctor 与性能证据。分支推送前不把本地 macOS 结果冒充 Windows runner 结果。
-- 本地候选制品 `daoge-pic-5.10.4.tgz` 为 `350990` bytes，SHA-256 为 `d69ca290516871a2eaf4cb74d86269f7ecbe2f9f2609d26bc6732c8da9e52c09`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
+- 本地候选制品 `daoge-pic-5.10.4.tgz` 为 `351590` bytes，SHA-256 为 `4e495b6638af1575df16e99d3176dbdcc0960f1e597afbc75df32b98fd68b717`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
 - 所有验证未调用真实图片 Provider，未产生计费生成请求。
 
 ## daoge-pic 5.10.3 - 2026-09-05

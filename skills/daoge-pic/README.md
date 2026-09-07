@@ -93,7 +93,7 @@ node scripts/daoge.js studio --workspace /absolute/workspace  # 后续健康检�
 
 请求根尚无 Studio manifest 时，CLI 会先检查祖先目录。发现有效的父级 Studio 后，默认在任何 daemon、manifest 或 Workbench 副作用前拒绝初始化，并提示复用父级工作区；这可避免误把仓库子目录打开成数据不互通的第二个 Studio。只有用户明确需要独立的嵌套 Studio 时，才执行 `node scripts/daoge.js open --workspace /absolute/nested-workspace --allow-nested-studio true`。该参数不会合并或共享两个 Studio 的数据。
 
-每个 daemon 都生成高熵 local capability。`open` 通过 URL fragment 完成一次 Cookie bootstrap 后立即清除 fragment。CLI 使用 Bearer capability。Claim token 只短暂保存哈希。“保存并重启”在同一 daemon 进程内复用授权与最近 Workbench presence；Workbench 依次显示安全关闭、重连和已恢复，并在重连后刷新权威快照。运行横幅展示 generation/media Worker 的待命、启动、正常、恢复、熔断状态；连续恢复失败时可执行授权的安全重启，并复制不含密钥、完整 URL、capability 或工作区路径的诊断摘要。
+每个 daemon 都生成高熵 local capability。`open` 通过 URL fragment 完成一次 Cookie bootstrap 后立即清除 fragment。CLI 使用 Bearer capability。Claim token 只短暂保存哈希。“保存并重启”在同一 daemon 进程内复用授权与最近 Workbench presence；Workbench 依次显示安全关闭、重连和已恢复，并在重连后刷新权威快照。需要停止当前 daemon 时，Skill/CLI 先核对 runtime、owner PID、Studio、进程入口与工作区，再调用仅接受 Bearer 的本地受控关闭端点；Windows 不依赖外部 `SIGTERM` 执行异步清理。运行横幅展示 generation/media Worker 的待命、启动、正常、恢复、熔断状态；连续恢复失败时可执行授权的安全重启。诊断复制只含版本、协议、Worker 状态和脱敏错误码，不包含工作区路径、完整 URL、capability 或 Provider 密钥。
 
 首次初始化在创建任何 Studio 文件前验证 manifest、父级 Studio 与工作区位置。Windows 额外拒绝同步盘/系统目录、UNC、非固定磁盘、非 NTFS 和已有 junction/symlink 组件；`doctor` 还验证原子 rename、SQLite 排他锁、私有 ACL、`sharp` 与默认浏览器关联，且不访问 Provider。新工作区不会创建 `provider.env`；Provider.db、资产、交付、缓存和 Worker 按需创建。
 

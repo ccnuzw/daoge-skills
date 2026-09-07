@@ -516,7 +516,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-022 | Workbench 只提交人工计划确认，预检与入队只接受 Skill/CLI；同一轮次即使由不同预检、幂等键、旧页面或并发入口提交也最多创建一个 Generation Run，重复请求在调用 Provider 前被拒绝并指向已有运行，再次生成必须创建新轮次。 |
 | PIC-VN-AC-023 | 请求根没有 manifest 且祖先目录存在有效 Studio 时，CLI 在任何子 Studio、daemon 或 Workbench 副作用前拒绝隐式初始化；仅用户显式执行 `open --allow-nested-studio true` 才可创建隔离的嵌套 Studio，既有准确工作区继续正常复用。 |
 | PIC-VN-AC-024 | Windows 在创建任何 Studio 文件前拒绝 UNC、同步盘/系统目录、非固定磁盘、非 NTFS 与 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 DACL、DriveInfo、sharp 与浏览器关联；daemon 身份使用有界 WMI 查询。 |
-| PIC-VN-AC-025 | daemon owner 是唯一目录/schema/ACL 初始化者；空 Studio 不创建 Worker，Generation/media pool 按需启动并提供脱敏健康、有限重启与最终熔断。Workbench 对受控重启显示关闭、重连、快照恢复与已恢复，并能复制脱敏诊断。 |
+| PIC-VN-AC-025 | daemon owner 是唯一目录/schema/ACL 初始化者；空 Studio 不创建 Worker，Generation/media pool 按需启动并提供脱敏健康、有限重启与最终熔断。Workbench 对受控重启显示关闭、重连、快照恢复与已恢复，并能复制脱敏诊断；Windows 正常关闭必须走核验身份且仅 Bearer Skill/CLI 可调用的本地控制端点，不依赖外部 `SIGTERM` 执行清理。 |
 
 ## 16. 实施与发布约束
 

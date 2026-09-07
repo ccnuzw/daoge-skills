@@ -96,7 +96,7 @@ export function inspectWindowsVolume(workspaceRoot: string, dependencies: Worksp
   const run = dependencies.execFile || ((command: string, args: readonly string[], options: { timeout: number; maxBuffer: number }): string => execFileSync(command, args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'], ...options }));
   let output: string;
   try {
-    output = run(dependencies.powershellPath || windowsPowerShellExecutable(dependencies.environment), encodedPowerShellArguments(script), { timeout: 15000, maxBuffer: 1024 * 1024 });
+    output = run(dependencies.powershellPath || windowsPowerShellExecutable(dependencies.environment), encodedPowerShellArguments(script), { timeout: 30000, maxBuffer: 1024 * 1024 });
   } catch {
     throw new Error('windows_volume_probe_failed: System PowerShell could not inspect the workspace volume.');
   }

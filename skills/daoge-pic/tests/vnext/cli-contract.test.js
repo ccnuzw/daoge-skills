@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { openWorkbenchUrl } = require('../../dist/vnext/cli/open-workbench');
-const { signalVerifiedDaemon } = require('../../dist/vnext/cli/legacy-daemon');
+const { shutdownVerifiedDaemon } = require('../../dist/vnext/cli/legacy-daemon');
 const { main, parseCommand, materializeStdinJson, assertImplicitStudioCreationAllowed } = require('../../dist/vnext/cli/daoge');
 const { matchesDaemonProcess, queryProcessArguments } = require('../../dist/vnext/cli/process-identity');
 const { registerSkill } = require('../../dist/vnext/cli/register-skill');
@@ -104,7 +104,7 @@ test('Windows doctor uses bounded module-free volume inspection and rejects mana
   assert.match(script, /Microsoft\.Win32\.Registry/);
   assert.doesNotMatch(script, /Get-CimInstance|Get-ItemProperty/);
   assert.equal(script.includes('C:\\Users\\Example\\Source\\图片项目'), false);
-  assert.deepEqual(calls[0].options, { timeout: 15000, maxBuffer: 1024 * 1024 });
+  assert.deepEqual(calls[0].options, { timeout: 30000, maxBuffer: 1024 * 1024 });
   const checks = inspectWorkspaceSupport('C:\\Users\\Example\\OneDrive\\project', dependencies);
   assert.equal(checks.some((check) => check.code === 'workspace_managed_root' && check.status === 'fail'), true);
   assert.throws(() => inspectWindowsVolume('\\\\server\\share\\project', dependencies), /UNC/);
@@ -322,8 +322,8 @@ test('Windows process identity uses bounded module-free WMI instead of optional 
   assert.deepEqual(calls[0].args.slice(0, 4), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand']);
   const script = Buffer.from(calls[0].args[4], 'base64').toString('utf16le');
   assert.match(script, /ManagementObjectSearcher/);
-  assert.match(script, /Options\.Timeout = \[TimeSpan\]::FromSeconds\(3\)/);
-  assert.deepEqual(calls[0].options, { timeout: 10000, maxBuffer: 1024 * 1024 });
+  assert.match(script, /Options\.Timeout = \[TimeSpan\]::FromSeconds\(5\)/);
+  assert.deepEqual(calls[0].options, { timeout: 20000, maxBuffer: 1024 * 1024 });
   assert.match(script, /ProcessId = 4242/);
   assert.doesNotMatch(script, /Get-CimInstance|wmic/i);
 });
@@ -334,35 +334,39 @@ function healthResponse(studioId) {
     data: { service: 'daoge-pic-vnext', studioId }
   }), { status: 200, headers: { 'content-type': 'application/json' } });
 }
+function shutdownResponse() {
+  return new Response(JSON.stringify({ ok: true, data: { shuttingDown: true } }), { status: 200, headers: { 'content-type': 'application/json' } });
+}
 
-test('legacy daemon signals only when runtime, lock, manifest, health, entry, and workspace identities all match', async () => {
+test('recorded daemon shuts down only after runtime, lock, manifest, health, entry, and workspace identities match', async () => {
   const manifest = { studioId: 'studio-manifest', workspaceRoot: '/tmp/daoge legacy workspace' };
-  const runtime = { pid: 4242, url: 'http://127.0.0.1:43123/', workspaceRoot: manifest.workspaceRoot };
+  const runtime = { pid: 4242, url: 'http://127.0.0.1:43123/', capability: 'c'.repeat(43), workspaceRoot: manifest.workspaceRoot };
   const daemonEntry = '/opt/daoge/dist/vnext/daemon/daemon-entry.js';
-  const healthRequests = [];
+  const requests = [];
   const processQueries = [];
-  const signals = [];
 
-  await signalVerifiedDaemon(runtime, {
+  await shutdownVerifiedDaemon(runtime, {
     workspaceRoot: manifest.workspaceRoot,
     studioId: manifest.studioId,
     lockPid: runtime.pid,
     daemonEntry
   }, {
-    fetch: async (input) => {
-      healthRequests.push(String(input));
-      return healthResponse(manifest.studioId);
+    fetch: async (input, init) => {
+      requests.push({ url: String(input), init });
+      return String(input).endsWith('/api/health') ? healthResponse(manifest.studioId) : shutdownResponse();
     },
     queryProcessArguments: (pid) => {
       processQueries.push(pid);
       return [process.execPath, daemonEntry, '--workspace', manifest.workspaceRoot];
-    },
-    signal: (pid, signal) => signals.push({ pid, signal })
+    }
   });
 
-  assert.deepEqual(healthRequests, ['http://127.0.0.1:43123/api/health']);
+  assert.deepEqual(requests.map((request) => request.url), ['http://127.0.0.1:43123/api/health', 'http://127.0.0.1:43123/api/shutdown']);
+  assert.equal(requests[1].init.method, 'POST');
+  assert.equal(requests[1].init.headers.authorization, 'Bearer ' + runtime.capability);
+  assert.equal(requests[1].init.headers['x-daoge-operation-name'], 'daemon-shutdown');
+  assert.equal(requests[1].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/2.0.0');
   assert.deepEqual(processQueries, [runtime.pid]);
-  assert.deepEqual(signals, [{ pid: runtime.pid, signal: 'SIGTERM' }]);
 });
 
 test('daemon process identity accepts a registered Skill symlink to the same entry', () => {
@@ -382,7 +386,7 @@ test('daemon process identity accepts a registered Skill symlink to the same ent
 
 const legacyIdentityFixture = {
   manifest: { studioId: 'studio-manifest', workspaceRoot: '/tmp/daoge legacy workspace' },
-  runtime: { pid: 4242, url: 'http://127.0.0.1:43123/', workspaceRoot: '/tmp/daoge legacy workspace' },
+  runtime: { pid: 4242, url: 'http://127.0.0.1:43123/', capability: 'c'.repeat(43), workspaceRoot: '/tmp/daoge legacy workspace' },
   daemonEntry: '/opt/daoge/dist/vnext/daemon/daemon-entry.js'
 };
 
@@ -418,24 +422,27 @@ for (const identityCase of [
     error: /无法可靠查询 daemon 进程身份/
   }
 ]) {
-  test('legacy daemon refuses to signal when ' + identityCase.name, async () => {
-    const signals = [];
-    const runtime = identityCase.runtime || legacyIdentityFixture.runtime;
+  test('recorded daemon refuses shutdown when ' + identityCase.name, async () => {
+    const shutdownRequests = [];
+    const runtime = identityCase.runtime ? { capability: 'c'.repeat(43), ...identityCase.runtime } : legacyIdentityFixture.runtime;
     const arguments_ = Object.prototype.hasOwnProperty.call(identityCase, 'arguments')
       ? identityCase.arguments
       : [process.execPath, legacyIdentityFixture.daemonEntry, '--workspace', legacyIdentityFixture.manifest.workspaceRoot];
 
-    await assert.rejects(() => signalVerifiedDaemon(runtime, {
+    await assert.rejects(() => shutdownVerifiedDaemon(runtime, {
       workspaceRoot: legacyIdentityFixture.manifest.workspaceRoot,
       studioId: legacyIdentityFixture.manifest.studioId,
       lockPid: legacyIdentityFixture.runtime.pid,
       daemonEntry: legacyIdentityFixture.daemonEntry
     }, {
-      fetch: async () => healthResponse(identityCase.healthStudioId || legacyIdentityFixture.manifest.studioId),
-      queryProcessArguments: () => arguments_,
-      signal: (pid, signal) => signals.push({ pid, signal })
+      fetch: async (input) => {
+        if (String(input).endsWith('/api/health')) return healthResponse(identityCase.healthStudioId || legacyIdentityFixture.manifest.studioId);
+        shutdownRequests.push(String(input));
+        return shutdownResponse();
+      },
+      queryProcessArguments: () => arguments_
     }), identityCase.error);
 
-    assert.deepEqual(signals, []);
+    assert.deepEqual(shutdownRequests, []);
   });
 }

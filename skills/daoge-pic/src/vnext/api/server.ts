@@ -25,7 +25,7 @@ import { studioEventWindow } from './events';
 import { discardStagedImage, MediaArchiveError, MediaValidationError, openVerifiedManagedFileAsync, stageImageStream, VerifiedManagedFile } from '../media/archive';
 import { thumbnailEtag } from '../media/thumbnails';
 import { MediaJobResult, MediaProcessPool, MediaSource, MediaZipEntry } from '../runtime/media-worker-pool';
-import { daemonRestartAvailable, requestDaemonRestart } from '../runtime/restart';
+import { daemonRestartAvailable, daemonShutdownAvailable, requestDaemonRestart, requestDaemonShutdown } from '../runtime/restart';
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
 import type { ProcessPoolHealth } from '../runtime/worker-pool';
 import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName, LocalAuthentication } from './local-auth';
@@ -578,6 +578,13 @@ export class LocalStudioService {
       if (!daemonRestartAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法从 Workbench 重启。');
       success(response, { restarting: true });
       setImmediate(() => requestDaemonRestart());
+      return;
+    }
+    if (pathname === '/api/shutdown' && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '只有当前 Skill/CLI 可以关闭 Studio daemon。');
+      if (!daemonShutdownAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法关闭。');
+      success(response, { shuttingDown: true });
+      setImmediate(() => requestDaemonShutdown());
       return;
     }
     if (pathname === '/api/providers/import-env' && request.method === 'POST') return success(response, importProviderEnvProfile(this.providerDb, this.initialized.paths, key));

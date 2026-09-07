@@ -85,14 +85,14 @@ export function queryProcessArguments(pid: number, dependencies: ProcessQueryDep
         "$ErrorActionPreference = 'Stop'",
         "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Management')",
         "$searcher = [System.Management.ManagementObjectSearcher]::new('SELECT CommandLine FROM Win32_Process WHERE ProcessId = " + pid + "')",
-        '$searcher.Options.Timeout = [TimeSpan]::FromSeconds(3)',
+        '$searcher.Options.Timeout = [TimeSpan]::FromSeconds(5)',
         '$matches = @($searcher.Get())',
         '$searcher.Dispose()',
         "if ($matches.Count -ne 1 -or $null -eq $matches[0]['CommandLine']) { exit 3 }",
         "$commandLine = [string]$matches[0]['CommandLine']",
         '[System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($commandLine))'
       ].join('; ');
-      const output = execFile(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 10000, maxBuffer: 1024 * 1024 }).trim();
+      const output = execFile(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 20000, maxBuffer: 1024 * 1024 }).trim();
       const commandLine = Buffer.from(output, 'base64').toString('utf8');
       return commandLine ? parseWindowsCommandLine(commandLine) : null;
     }

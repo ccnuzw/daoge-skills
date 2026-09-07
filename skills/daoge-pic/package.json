@@ -26,7 +26,7 @@
     "build:workbench": "vite build --config vite.workbench.config.mjs",
     "build": "npm run build:vnext && npm run build:workbench",
     "bench:perf": "npm run build:vnext && node scripts/bench-perf.js",
-    "test:vnext": "npm run build && node --test tests/vnext/*.test.js",
+    "test:vnext": "npm run build && node --test --test-concurrency=2 tests/vnext/*.test.js",
     "test": "npm run test:vnext",
     "test:package": "npm run build && node scripts/package-smoke.js",
     "prepack": "npm run build"

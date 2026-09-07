@@ -10,7 +10,7 @@ import { providerSnapshot } from '../studio/provider-config';
 import { providerStatus, resolveActiveProviderConfig } from '../studio/provider-store';
 import { MAX_GLOBAL_CONCURRENCY } from '../studio/runtime-settings';
 import { ensureRuntimeDirectory, initializeStudio, studioPaths } from '../studio/workspace';
-import { installDaemonRestartHandler } from './restart';
+import { installDaemonLifecycleHandlers } from './restart';
 import { WorkbenchPresence } from './workbench-presence';
 import { acquireDaemonLock } from './daemon-lock';
 import { WorkerProcessPool } from './worker-pool';
@@ -139,12 +139,12 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     if (!shutdownStarted) restartRequested = true;
     finish();
   };
-  const uninstallRestart = installDaemonRestartHandler(restart);
+  const uninstallLifecycleHandlers = installDaemonLifecycleHandlers({ restart, stop });
   const cleanupSignals = (): void => {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGHUP', stop);
-    uninstallRestart();
+    uninstallLifecycleHandlers();
   };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
