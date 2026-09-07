@@ -2,9 +2,9 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
-## daoge-pic 5.10.4（待发布）
+## daoge-pic 5.10.4 - 2026-09-07
 
-5.10.4 候选集中完成 Windows 安装、工作区、进程、权限、冷启动和 Workbench 恢复优化。当前稳定 GitHub Release 仍为 5.10.3；只有创建并验证 `daoge-pic-v5.10.4` Release 后才能移除“待发布”标记。
+5.10.4 集中完成 Windows 安装、工作区、进程、权限、冷启动和 Workbench 恢复优化，并以 Windows Server 2022/2025 × Node.js 22.17.0/24 四组实机矩阵验证。
 
 ### Windows 初始化与安全
 
@@ -28,13 +28,13 @@
 - package smoke 改在独立临时 pack 目录运行，不删除仓库同名正式制品；临时 consumer 路径包含中文和空格，并执行真实 bin、注册、doctor 与 `sharp`。
 - Workbench 新增运行健康横幅、安全重启、状态刷新和脱敏诊断复制；受控重启依次显示安全关闭、重连、权威快照恢复和已恢复。
 
-### 验证与候选制品
+### 验证与制品
 
 - macOS `npm test`：315 项，313 通过、0 失败、2 项 Windows 实机用例跳过。`npm run test:package`：122 个发布文件，全部清单、安装、bin、注册、doctor 与 `sharp` 检查通过。
 - 浏览器实测 1440×1000 与 375×812，无横向溢出，移动端健康操作为 44px；实际 daemon 故障注入完整观察到故障、安全关闭和恢复状态。
 - `npm run bench:perf`：空 Studio control-plane `41.90 ms`、需求前 media process `0`；100000 pending 队列领取 1000 项 `132.48 ms`，RSS `107.7 MiB`。
 - [Windows Actions 运行 34082076215](https://github.com/ccnuzw/daoge-skills/actions/runs/34082076215) 在 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组全部通过；每组 315 项回归为 311 通过、0 失败、4 项 Windows symlink 用例按平台条件跳过，122 文件安装包、真实 `.cmd`、junction、`sharp` 与 12 项脱敏 doctor 检查全部通过。
-- 本地候选制品 `daoge-pic-5.10.4.tgz` 为 `352074` bytes，SHA-256 为 `242770191caf72f261f558d0b81313c92a21af42cb2586ceb9ce1aec097e0c43`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
+- 最终制品 `daoge-pic-5.10.4.tgz` 为 `351910` bytes，SHA-256 为 `6217bdeec6821156639ad4670445120b349d2b025441bbbb8be4f72b1bcfa443`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
 - 所有验证未调用真实图片 Provider，未产生计费生成请求。
 
 ## daoge-pic 5.10.3 - 2026-09-05

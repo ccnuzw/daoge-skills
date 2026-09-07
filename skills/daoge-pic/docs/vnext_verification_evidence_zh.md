@@ -2,9 +2,9 @@
 
 本文件只记录实际执行的发布验证，不定义产品需求或实现状态。需求唯一来源是 [vNext 升级规格](daoge_pic_vnext_upgrade_spec_zh.md)；实现以对应版本的源码为准。
 
-验证证据外置在源码仓库与对应 GitHub Release 中，供维护者审计；它不属于 `daoge-pic` 运行时 npm 包，也不得成为安装后启动 Studio 的依赖。
+验证证据随 npm 包分发供维护者审计，但不是 Studio 运行时依赖；外部不可变资产与摘要由源码仓库和对应 GitHub Release 保存。
 
-当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)，当前源码与本地候选制品版本为 `5.10.4`。下列章节按版本隔离发布事实；候选验证不等于 GitHub Release 已发布，5.10.3 及更早章节保持历史证据。
+当前稳定正式版本为 [`5.10.4`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)。下列章节按版本隔离发布事实；5.10.3 及更早章节保持历史证据。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -244,9 +244,9 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - `npm run test:package` 构建 TypeScript 与 Vite Workbench 成功；发布清单 116 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 安装、bin 与 help 检查通过。
 - 本次验证未调用真实图片 Provider，未产生计费生成请求。
 
-## 12. daoge-pic 5.10.4 Windows 候选验证证据
+## 12. daoge-pic 5.10.4 Windows 发布验证证据
 
-本节对应待发布的 `5.10.4` 源码与本地候选制品，不声明 GitHub Release 已创建。`5.10.3` 及更早章节是不可改写的历史证据。
+本节对应 [`daoge-pic-v5.10.4`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4) 的发布源码与不可变 `.tgz` 制品。`5.10.3` 及更早章节是不可改写的历史证据。
 
 ### Windows 初始化与运行边界
 
@@ -259,7 +259,7 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 ### 安装、路径与 Workbench 恢复
 
 - 发布包提供 `register-skill --scope project|user`，以 fail-if-exists 方式创建 link/junction，并拒绝经父级 symlink/junction 写出注册根。package smoke 在独立临时 pack 目录工作，不再删除仓库同名正式制品。
-- 安装 smoke 在含中文和空格的临时路径安装候选包，执行真实 bin、内置注册命令、doctor 与 `sharp` 加载。Windows 使用 `cmd.exe` 实际调用 npm 生成的 `daoge.cmd`。
+- 安装 smoke 在含中文和空格的临时路径安装正式包，执行真实 bin、内置注册命令、doctor 与 `sharp` 加载。Windows 使用 `cmd.exe` 实际调用 npm 生成的 `daoge.cmd`。
 - 交付路径保留安全 Unicode、限制组件长度、规避 Windows `CON/PRN/AUX/NUL/COM1..9/LPT1..9`，并给项目与交付目录追加稳定短 ID。
 - Workbench 健康横幅显示 Worker 待命、启动、正常、恢复、熔断；受控重启显示安全关闭、重连和已恢复，重连后刷新权威快照。用户可刷新状态、安全重启故障池并复制不含密钥、完整 URL、capability 或路径的诊断摘要。
 
@@ -269,5 +269,5 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - 本地 `npm run test:package`：构建 TypeScript 与 Vite Workbench 成功；发布清单 122 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 的真实 bin、注册链接、doctor 与 `sharp` 均通过。
 - 浏览器实测 1440×1000 与 375×812：健康横幅无横向溢出，移动端操作按钮高度 44px；实际 daemon 故障注入后观察到“后台处理池需要重启 → 正在安全关闭后台任务 → Studio 已恢复”，页面 URL 与授权继续复用。
 - 本地 `npm run bench:perf`：Schema v22 空 Studio control-plane 构造 `41.90 ms`，需求前 media process 为 `0`；100000 pending 队列领取 1000 项为 `132.48 ms`，RSS `107.7 MiB`。
-- [Windows Actions 运行 34082076215](https://github.com/ccnuzw/daoge-skills/actions/runs/34082076215) 在 commit `f93b6ce49b3ca03a6632ab919450a51083318162` 上完成 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组矩阵，四组均成功。每组 `npm test` 共 315 项，311 通过、0 失败、0 取消、4 项 Windows symlink 用例按平台条件跳过；每组 `npm run test:package` 均为 122 个文件且 `unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，真实 bin、注册、doctor 与 `sharp` 全部通过。四份脱敏 doctor 报告均为 `ok: true`，原子 rename、SQLite 排他锁、私有 DACL、NTFS/固定磁盘、默认浏览器和 `sharp` 检查全部通过；空 Studio 的 media process 均为 `0`，100000 项队列领取 1000 项耗时范围为 `157.55–231.35 ms`。
+- [Windows Actions 运行 34082960741](https://github.com/ccnuzw/daoge-skills/actions/runs/34082960741) 在最终 PR commit `b12bbc6ae42338d69a717c838dba6ad45c120119` 上完成 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组矩阵，四组均成功。每组 `npm test` 共 315 项，311 通过、0 失败、0 取消、4 项 Windows symlink 用例按平台条件跳过；每组 `npm run test:package` 均为 122 个文件且 `unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，真实 bin、注册、doctor 与 `sharp` 全部通过。四份脱敏 doctor 报告均为 `ok: true`，原子 rename、SQLite 排他锁、私有 DACL、NTFS/固定磁盘、默认浏览器和 `sharp` 检查全部通过；空 Studio 的 media process 均为 `0`，100000 项队列领取 1000 项耗时范围为 `157.55–231.35 ms`。
 - 所有本地回归和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。

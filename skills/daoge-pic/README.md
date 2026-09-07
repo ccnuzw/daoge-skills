@@ -2,15 +2,15 @@
 
 DAOGE Pic 是面向智能体会话的本地图像创作管理平台。会话负责澄清、规划、确认和汇报；本地 Studio Workbench 负责查看项目上下文、Generation History（生成历史）、运行、资产、选择、复核和交付。
 
-> **版本状态**：当前稳定正式版本为 [`5.10.3`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)；当前源码与本地候选制品版本为 `5.10.4`，GitHub Release 创建前不得声称它已正式发布。
+> **版本状态**：当前稳定正式版本为 [`5.10.4`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)。
 
 vNext 是一次不兼容替换，不读取或迁移旧 `task_spec.json`、`prepare` / `execute` / `ingest` 命令、旧静态工作区、`results.html`、旧目录状态或旧运行记录。
 
 
-本次架构协议为 `daoge-pic-skill-protocol 2.0.0`，独立于候选制品版本 `5.10.4`。daemon 负责机器闸门：运行必须携带绑定当前 `plan_hash`、`preflight_id`、`conversation_id` 的 `confirm_token`；确认挑战只能通过 Workbench 授权 Cookie 提交，预检和创建运行只接受 Skill/CLI，同一轮次只能创建一个初始 Generation Run。daemon owner 独占工作区初始化、schema migration 与权限强化；子 Worker 只附加既有数据库。Generation/media child-process pool 从零按需启动，持续满载时渐进扩容，Provider 目标并发最高为 `100`，在 429、临时故障或内存压力下自动降速，并公开脱敏健康状态。Provider 成功响应优先流式写入临时文件；control-plane 保持 API/SSE、队列与恢复。大计划支持 `--plan @-`，`--operation-name <verb:scope>` 与高级 `--idempotency-key` 互斥。Workbench 提供只读会话计划摘要、独立人工确认闸门、运行健康横幅与重启恢复反馈。
+本次架构协议为 `daoge-pic-skill-protocol 2.0.0`，独立于制品版本 `5.10.4`。daemon 负责机器闸门：运行必须携带绑定当前 `plan_hash`、`preflight_id`、`conversation_id` 的 `confirm_token`；确认挑战只能通过 Workbench 授权 Cookie 提交，预检和创建运行只接受 Skill/CLI，同一轮次只能创建一个初始 Generation Run。daemon owner 独占工作区初始化、schema migration 与权限强化；子 Worker 只附加既有数据库。Generation/media child-process pool 从零按需启动，持续满载时渐进扩容，Provider 目标并发最高为 `100`，在 429、临时故障或内存压力下自动降速，并公开脱敏健康状态。Provider 成功响应优先流式写入临时文件；control-plane 保持 API/SSE、队列与恢复。大计划支持 `--plan @-`，`--operation-name <verb:scope>` 与高级 `--idempotency-key` 互斥。Workbench 提供只读会话计划摘要、独立人工确认闸门、运行健康横幅与重启恢复反馈。
 ## 安装版本
 
-当前稳定版仍为 `5.10.3`；其安装方式以对应 GitHub Release 为准。当前源码候选 `5.10.4` 必须先通过全部 Windows 验证。发布后的 GitHub Release `.tgz` 资产不表示包已发布到 npm registry。项目级安装和诊断使用：
+当前稳定版为 `5.10.4`。GitHub Release `.tgz` 资产不表示包已发布到 npm registry。项目级安装和诊断使用：
 
 ```bash
 npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
@@ -42,7 +42,7 @@ npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/dao
 daoge.cmd register-skill --scope user
 ```
 
-`5.10.4` GitHub Release 创建前，上述 URL 只定义待发布流程，不表示资产已存在。源码维护者可安装本地 `daoge-pic-5.10.4.tgz` 候选进行验证。
+上述 URL 指向 `5.10.4` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
 
 需要直接试用 `main` 分支开发源码时，可继续使用 `npx skills add`：
 
@@ -195,4 +195,4 @@ Workbench 用于人工确认计划，以及项目/任务/轮次导航、Generati
 
 Workbench 不提供自然语言对话，不绕过会话确认，不显示 Provider 密钥，不接受任意绝对文件路径，也不把浏览器状态、目录或 SSE 当业务事实源。
 
-受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.10.4 候选验证与 5.10.3、5.10.2、5.10.1、5.10.0、5.9.1 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。
+受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.10.4、5.10.3、5.10.2、5.10.1、5.10.0、5.9.1 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。

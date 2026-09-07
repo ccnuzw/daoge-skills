@@ -1,6 +1,6 @@
-# DAOGE Pic v5.10.4（发布候选）
+# DAOGE Pic v5.10.4
 
-本候选版本集中解决 Windows 安装、工作区兼容、ACL 冷启动、后台 Worker 恢复和 Workbench 诊断体验。当前稳定 GitHub Release 仍为 5.10.3；只有 Windows Actions 四组矩阵通过并创建 `daoge-pic-v5.10.4` Release 后，才能移除“发布候选”标记。
+本版本集中解决 Windows 安装、工作区兼容、ACL 冷启动、后台 Worker 恢复和 Workbench 诊断体验，正式制品通过 Windows Server 2022/2025 × Node.js 22.17.0/24 四组矩阵验证。
 
 ## 主要变化
 
@@ -24,7 +24,7 @@
 
 ## 安装
 
-GitHub Release 创建后，项目级安装：
+项目级安装：
 
 ```bash
 npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
@@ -42,13 +42,13 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 
 目标 Skill 目录已存在时，`register-skill` 会拒绝覆盖。安装和注册完成后完整重启 Codex。
 
-## 验证与候选制品
+## 验证与发布制品
 
 - macOS `npm test`：315 项，313 通过、0 失败、2 项仅 Windows 实机用例跳过。
 - `npm run test:package`：122 个发布文件；清单、安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
 - `npm run bench:perf`：空 Studio control-plane 41.90 ms，需求前 media process 为 0；100000 pending 队列领取 1000 项为 132.48 ms，RSS 107.7 MiB。
 - 浏览器实测 1440×1000 与 375×812；无横向溢出，移动端健康操作高度 44px，实际 daemon 重启完整显示恢复阶段。
 - [Windows Actions 运行 34082076215](https://github.com/ccnuzw/daoge-skills/actions/runs/34082076215) 已在 Windows Server 2022/2025 × Node.js 22.17.0/24 四组全部通过；每组 315 项回归为 311 通过、0 失败、4 项 Windows symlink 用例按平台条件跳过，122 文件安装包、真实 `.cmd`、junction、`sharp` 与 12 项脱敏 doctor 检查全部通过。
-- 本地候选制品：`daoge-pic-5.10.4.tgz`，352,074 bytes。
-- SHA-256：`242770191caf72f261f558d0b81313c92a21af42cb2586ceb9ce1aec097e0c43`。
+- 最终发布制品：`daoge-pic-5.10.4.tgz`，351,910 bytes。
+- SHA-256：`6217bdeec6821156639ad4670445120b349d2b025441bbbb8be4f72b1bcfa443`。
 - 验证未调用真实图片 Provider，未产生计费生成请求。

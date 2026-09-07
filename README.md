@@ -2,7 +2,7 @@
 
 面向中文工作流的 DAOGE Skill 系列。每个 Skill 都是可独立安装、独立使用、独立演进的能力包：Skill 负责把自然语言需求转化为可执行的标准流程，附带的脚本、参考资料和本地工作台负责让关键过程可检查、可恢复、可交付。
 
-> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.10.3](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)；`main` 正在验证待发布的 [`5.10.4`](./docs/daoge_pic_5.10.4_release_notes_zh.md)，不得把源码候选误写成已存在的 GitHub Release。
+> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.10.4](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)，发布说明与完整验证证据见 [`5.10.4 发布说明`](./docs/daoge_pic_5.10.4_release_notes_zh.md)。
 
 当前仓库包含两项彼此独立的能力：
 
@@ -41,7 +41,7 @@ daoge-pic
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
 ```
 
-当前稳定版仍为 `5.10.3`；其安装方式以对应 GitHub Release 为准。待 `5.10.4` 完成 Windows 验证并发布后，项目级安装使用同一正式制品和内置注册命令：
+当前稳定版为 `5.10.4`。项目级安装使用 GitHub Release 的不可变制品和内置注册命令：
 
 ```bash
 npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
@@ -73,7 +73,7 @@ npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/dao
 daoge.cmd register-skill --scope user
 ```
 
-完成注册后重启 Codex，使其重建 Skill registry。`5.10.4` GitHub Release 创建前，上述 URL 只描述待发布流程，不表示资产已存在；源码维护者可改为安装本仓库生成并校验的本地候选 tgz。
+完成注册后重启 Codex，使其重建 Skill registry。GitHub Release `.tgz` 资产不表示该包已发布到 npm registry；安装应继续使用上述不可变 Release URL。
 
 如需直接试用 `main` 分支的开发源码，可使用 `npx skills add` 明确安装 Skill 路径；该方式不等同于固定版本的 GitHub Release 制品：
 
@@ -146,7 +146,7 @@ node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 
 ## 发布与反馈
 
-每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.10.3](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.3)。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
+每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.10.4](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
 
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
