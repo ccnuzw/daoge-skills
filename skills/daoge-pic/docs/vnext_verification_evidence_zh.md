@@ -254,7 +254,7 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - daemon owner 独占工作区创建、schema migration、旧 Provider 导入和权限强化。敏感目录、manifest、SQLite 与现有 sidecar 在一个 PowerShell 进程中通过 .NET `FileSystemSecurity` 批量设置并复核 DACL；Generation/media Worker 只附加既有数据库。
 - 空 Studio 不启动 media Worker；存在媒体恢复或实际媒体作业时才按需创建。Generation pool 首次 tick 从一个 Worker 开始，持续满载时逐个扩容。两类池公开脱敏健康、重启次数、最终熔断与安全错误摘要。
 - 新工作区在任何 Studio 文件创建前检查 Windows 本地固定 NTFS、UNC、同步盘/系统目录和已有 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 ACL、DriveInfo/Registry、`sharp` 与默认浏览器关联。
-- 高负载 Windows runner 上，回归套件将跨文件并发限制为 2；DriveInfo/Registry PowerShell 与 WMI 查询保留内外层有界超时，daemon 启停等待预算覆盖系统 PowerShell 首次启动和安全清理，不以取消安全检查换取速度。
+- 高负载 Windows runner 上，回归套件将跨文件并发限制为 1；DriveInfo/Registry PowerShell 与 WMI 查询保留内外层有界超时，daemon 启停等待预算覆盖系统 PowerShell 首次启动和安全清理，不以取消安全检查换取速度。
 
 ### 安装、路径与 Workbench 恢复
 

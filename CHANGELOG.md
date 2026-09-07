@@ -11,7 +11,7 @@
 - Node.js 下限固定为 `22.13.0`；daemon 身份查询从 WMIC 改为系统 Windows PowerShell 中有界的 .NET WMI 查询，不依赖 PowerShell 模块，并同时设置 WMI 与 Node 外层超时。
 - 新工作区在任何 Studio 文件创建前拒绝 UNC、同步盘/系统目录、非本地固定磁盘、非 NTFS 与已有 junction/symlink；`open --allow-nested-studio true` 不能越过这些存储约束。
 - 敏感目录、manifest、SQLite 与现有 sidecar 由 daemon owner 在一个 PowerShell 进程中批量设置并复核 DACL；只允许当前用户 SID、SYSTEM 与 Administrators。ACL 超时、PowerShell 缺失和权限拒绝均失败关闭。
-- Windows 外部 `SIGTERM` 会直接终止 Node 进程，不能承诺执行异步清理；当前 runtime 的安全关闭改走仅 Bearer Skill/CLI 可调用的本地 HTTP 控制端点，并在关闭前继续核对 owner PID、Studio、进程入口与工作区。测试套件限制跨文件并发，避免冷启动 PowerShell 与 daemon 恢复在 runner 高负载下互相挤占。
+- Windows 外部 `SIGTERM` 会直接终止 Node 进程，不能承诺执行异步清理；当前 runtime 的安全关闭改走仅 Bearer Skill/CLI 可调用的本地 HTTP 控制端点，并在关闭前继续核对 owner PID、Studio、进程入口与工作区。测试套件限制跨文件并发为 1，避免冷启动 PowerShell 与 daemon 恢复在 runner 高负载下互相挤占。
 - 交付路径保留安全 Unicode、限制组件长度、规避 Windows 设备保留名，并给项目与交付目录追加短 ID。
 - `rundll32.exe` 无法启动或立即非零退出时回退到无 shell 的 `explorer.exe`；最终失败提示运行 doctor，不泄露 bootstrap URL 或 capability。
 
