@@ -122,7 +122,7 @@ test('Windows sensitive paths apply one SID-based private ACL update without an 
   for (const call of calls) {
     assert.equal(call.command, powershellPath);
     assert.deepEqual(call.args.slice(0, 4), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand']);
-    assert.deepEqual(call.options, { timeout: 10000, maxBuffer: 1024 * 1024 });
+    assert.deepEqual(call.options, { timeout: 20000, maxBuffer: 1024 * 1024 });
   }
   const fileScript = Buffer.from(calls[0].args[4], 'base64').toString('utf16le');
   const directoryScript = Buffer.from(calls[1].args[4], 'base64').toString('utf16le');

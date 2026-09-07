@@ -54,7 +54,7 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 
 ## 运行条件
 
-- Node.js `22.16.0` 或更高版本；该下限保证 `node:sqlite` 无需实验开关且内置 SQLite 包含 Studio 搜索所需的 FTS5。
+- Node.js `22.17.0` 或更高版本；该下限保证 `node:sqlite` 无需实验开关且内置 SQLite 包含 Studio 搜索所需的 FTS5，并包含 libuv 1.51.0 的 Windows stat 文件身份修复。
 - 一个稳定、可写的本地工作区根目录；不得把不稳定的当前目录、网络共享、同步盘、移动盘或 junction/symlink 根当作 Studio 工作区。
 - 真实生成时，通过 Workbench 或受控 `provider-*` CLI 在 `<workspace>/daoge-studio/Provider.db` 配置并激活一个 Profile。
 

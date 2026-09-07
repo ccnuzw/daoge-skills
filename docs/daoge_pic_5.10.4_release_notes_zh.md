@@ -16,7 +16,7 @@
 
 ## 兼容性
 
-- Node.js：`>=22.16.0`（内置 SQLite 必须包含 FTS5）
+- Node.js：`>=22.17.0`（内置 SQLite 包含 FTS5，Windows 文件身份修复包含在 libuv 1.51.0）
 - Skill protocol：`daoge-pic-skill-protocol 2.0.0`
 - Runtime compatibility：`>=5.10.4 <6.0.0`
 - Studio Schema：保持 v22
@@ -48,7 +48,7 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 - `npm run test:package`：122 个发布文件；清单、安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
 - `npm run bench:perf`：空 Studio control-plane 41.81 ms，需求前 media process 为 0；100000 pending 队列领取 1000 项为 128.03 ms，RSS 105.6 MiB。
 - 浏览器实测 1440×1000 与 375×812；无横向溢出，移动端健康操作高度 44px，实际 daemon 重启完整显示恢复阶段。
-- Windows Actions 已配置 Windows Server 2022/2025 × Node.js 22.16.0/24；分支推送前不把本地 macOS 结果写成 Windows runner 已通过。
+- Windows Actions 已配置 Windows Server 2022/2025 × Node.js 22.17.0/24；分支推送前不把本地 macOS 结果写成 Windows runner 已通过。
 - 本地候选制品：`daoge-pic-5.10.4.tgz`，351,590 bytes。
 - SHA-256：`4e495b6638af1575df16e99d3176dbdcc0960f1e597afbc75df32b98fd68b717`。
 - 验证未调用真实图片 Provider，未产生计费生成请求。

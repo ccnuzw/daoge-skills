@@ -453,7 +453,7 @@ Studio 全局导航固定为项目、创作资料库、共享素材、学习中�
 
 | 层级 | 选择 | 约束 |
 | --- | --- | --- |
-| 运行时 | Node.js `22.16.0` 或更高版本与 TypeScript 编译产物。 | 必须使用默认可用且启用 FTS5 的 `node:sqlite`；Windows 使用系统 Windows PowerShell/.NET DriveInfo、Registry、WMI 和本地固定 NTFS DACL，不依赖 WMIC 或 PowerShell 模块。 |
+| 运行时 | Node.js `22.17.0` 或更高版本与 TypeScript 编译产物。 | 必须使用默认可用且启用 FTS5 的 `node:sqlite`；Windows 还依赖 libuv 1.51.0 修复后的 stat 文件身份，并使用系统 Windows PowerShell/.NET DriveInfo、Registry、WMI 和本地固定 NTFS DACL，不依赖 WMIC 或 PowerShell 模块。 |
 | 本地服务 | Node 原生 HTTP 与 SSE 或等价轻量路由层。 | 禁止因 Workbench 引入完整云端 Web 应用依赖。 |
 | 业务数据 | SQLite WAL、FTS5、版本化 SQL migration。 | studio.db 是唯一业务事实源。 |
 | 数据访问 | 小型 typed repository 与 schema 校验。 | 禁止由页面或目录直接写入业务事实。 |

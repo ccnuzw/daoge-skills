@@ -27,12 +27,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
-        node: ["22.16.0", "24"]
+        node: ["22.17.0", "24"]
     defaults:
       run:
         working-directory: skills/daoge-pic
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
@@ -76,7 +76,7 @@ jobs:
           npm run bench:perf | Set-Content -Encoding UTF8 (Join-Path $diagnosticRoot "performance.txt")
       - name: Upload redacted Windows evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: daoge-pic-${{ matrix.os }}-node-${{ matrix.node }}
           path: ${{ runner.temp }}/daoge-diagnostics

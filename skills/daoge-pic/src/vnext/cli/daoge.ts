@@ -101,8 +101,8 @@ function sleep(milliseconds: number): Promise<void> { return new Promise((resolv
 
 function assertSupportedNodeRuntime(): void {
   const [major, minor] = process.versions.node.split('.').map(Number);
-  if (!Number.isInteger(major) || !Number.isInteger(minor) || major < 22 || (major === 22 && minor < 16)) {
-    throw new Error('DAOGE Pic 需要 Node.js 22.16.0 或更高版本；当前版本为 ' + process.versions.node + '。');
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || major < 22 || (major === 22 && minor < 17)) {
+    throw new Error('DAOGE Pic 需要 Node.js 22.17.0 或更高版本；当前版本为 ' + process.versions.node + '。');
   }
 }
 

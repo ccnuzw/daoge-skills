@@ -121,7 +121,7 @@ function runWindowsAclScript(script: string, dependencies: SensitiveAccessDepend
     return execFileSync(command, commandArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...options });
   });
   try {
-    const output = run(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 10000, maxBuffer: 1024 * 1024 });
+    const output = run(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 20000, maxBuffer: 1024 * 1024 });
     if (typeof output === 'string' && output.trim()) {
       const parsed = JSON.parse(output.trim()) as { expected?: unknown; results?: unknown };
       const values = <T>(value: T | T[] | null | undefined): T[] => Array.isArray(value) ? value : value === null || value === undefined ? [] : [value];
@@ -135,7 +135,7 @@ function runWindowsAclScript(script: string, dependencies: SensitiveAccessDepend
     }
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { signal?: string; killed?: boolean; stderr?: string | Buffer };
-    if (failure.code === 'ETIMEDOUT' || failure.killed || failure.signal === 'SIGTERM') throw new Error('windows_acl_timeout: Windows ACL update exceeded 10 seconds. Use a writable local NTFS directory and retry.');
+    if (failure.code === 'ETIMEDOUT' || failure.killed || failure.signal === 'SIGTERM') throw new Error('windows_acl_timeout: Windows ACL update exceeded 20 seconds. Use a writable local NTFS directory and retry.');
     if (failure.code === 'ENOENT') throw new Error('windows_powershell_missing: System Windows PowerShell is required to secure Studio data.');
     if (failure.message.startsWith('Sensitive Studio ACL verification failed:')) throw new Error('windows_acl_verification_failed: ' + failure.message.slice(43, 2048));
     const detail = String(failure.stderr || '').replace(/[A-Za-z]:\\[^\r\n]+/g, '[redacted-path]').replace(/[A-Za-z0-9+/=]{80,}/g, '[redacted-data]').replace(/\s+/g, ' ').trim().slice(0, 600);

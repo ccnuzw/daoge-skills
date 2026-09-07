@@ -8,7 +8,7 @@
 
 ### Windows 初始化与安全
 
-- Node.js 下限固定为 `22.16.0`；Node `22.13.x` 内置 SQLite 未启用 FTS5，不能满足 Studio 搜索 schema。daemon 身份查询从 WMIC 改为系统 Windows PowerShell 中有界的 .NET WMI 查询，不依赖 PowerShell 模块，并同时设置 WMI 与 Node 外层超时。
+- Node.js 下限固定为 `22.17.0`；Node `22.13.x` 内置 SQLite 未启用 FTS5，Node `22.16.0` 携带的 libuv 1.49.2 又会在 Windows Server 2025 返回不一致的路径/句柄文件身份；`22.17.0` 的 libuv 1.51.0 修复 Windows stat 结构字段顺序与卷序列号一致性。daemon 身份查询从 WMIC 改为系统 Windows PowerShell 中有界的 .NET WMI 查询，不依赖 PowerShell 模块，并同时设置 WMI 与 Node 外层超时。
 - 新工作区在任何 Studio 文件创建前拒绝 UNC、同步盘/系统目录、非本地固定磁盘、非 NTFS 与已有 junction/symlink；`open --allow-nested-studio true` 不能越过这些存储约束。
 - 敏感目录、manifest、SQLite 与现有 sidecar 由 daemon owner 在一个 PowerShell 进程中批量设置并复核 DACL；只允许当前用户 SID、SYSTEM 与 Administrators。ACL 超时、PowerShell 缺失和权限拒绝均失败关闭。
 - Windows 外部 `SIGTERM` 会直接终止 Node 进程，不能承诺执行异步清理；当前 runtime 的安全关闭改走仅 Bearer Skill/CLI 可调用的本地 HTTP 控制端点，并在关闭前继续核对 owner PID、Studio、进程入口与工作区。测试套件限制跨文件并发为 1，避免冷启动 PowerShell 与 daemon 恢复在 runner 高负载下互相挤占。
@@ -33,7 +33,7 @@
 - macOS `npm test`：315 项，313 通过、0 失败、2 项 Windows 实机用例跳过。`npm run test:package`：122 个发布文件，全部清单、安装、bin、注册、doctor 与 `sharp` 检查通过。
 - 浏览器实测 1440×1000 与 375×812，无横向溢出，移动端健康操作为 44px；实际 daemon 故障注入完整观察到故障、安全关闭和恢复状态。
 - `npm run bench:perf`：空 Studio control-plane `41.81 ms`、需求前 media process `0`；100000 pending 队列领取 1000 项 `128.03 ms`，RSS `105.6 MiB`。
-- Windows Actions 覆盖 `windows-2022`、`windows-2025` × Node.js `22.16.0`、`24`，并在每组上传脱敏 doctor 与性能证据。分支推送前不把本地 macOS 结果冒充 Windows runner 结果。
+- Windows Actions 覆盖 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24`，并在每组上传脱敏 doctor 与性能证据。分支推送前不把本地 macOS 结果冒充 Windows runner 结果。
 - 本地候选制品 `daoge-pic-5.10.4.tgz` 为 `351590` bytes，SHA-256 为 `4e495b6638af1575df16e99d3176dbdcc0960f1e597afbc75df32b98fd68b717`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
 - 所有验证未调用真实图片 Provider，未产生计费生成请求。
 
