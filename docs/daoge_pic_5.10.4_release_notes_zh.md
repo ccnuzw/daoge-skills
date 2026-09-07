@@ -5,7 +5,7 @@
 ## 主要变化
 
 - 新工作区在创建 Studio 文件前拒绝 UNC、同步盘/系统目录、非本地固定磁盘、非 NTFS 与 junction/symlink。
-- Windows daemon 身份查询改用系统 Windows PowerShell/CIM，并具有内外层超时；不依赖 WMIC。
+- Windows daemon 身份查询改用系统 Windows PowerShell 中有界的 .NET WMI 查询，并具有内外层超时；不依赖 WMIC 或 PowerShell 模块。
 - daemon owner 在一个 PowerShell 进程中批量设置并复核敏感目录、manifest、SQLite 与 sidecar DACL；Worker 不再重复修改 ACL。
 - Generation/media Worker 只附加已初始化数据库，从零按需启动；持续负载渐进扩容，连续恢复失败后熔断并公开脱敏健康状态。
 - 新增 `register-skill --scope project|user` 和无 Provider 调用的 `doctor --workspace <path> [--json true] [--redacted true]`。
@@ -48,6 +48,6 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 - `npm run bench:perf`：空 Studio control-plane 41.81 ms，需求前 media process 为 0；100000 pending 队列领取 1000 项为 128.03 ms，RSS 105.6 MiB。
 - 浏览器实测 1440×1000 与 375×812；无横向溢出，移动端健康操作高度 44px，实际 daemon 重启完整显示恢复阶段。
 - Windows Actions 已配置 Windows Server 2022/2025 × Node.js 22.13.0/24；分支推送前不把本地 macOS 结果写成 Windows runner 已通过。
-- 本地候选制品：`daoge-pic-5.10.4.tgz`，350,776 bytes。
-- SHA-256：`2662d9332ec30a5857d045d20e9dea32e8637193470eda657f7bfdb61e0cef87`。
+- 本地候选制品：`daoge-pic-5.10.4.tgz`，350,990 bytes。
+- SHA-256：`d69ca290516871a2eaf4cb74d86269f7ecbe2f9f2609d26bc6732c8da9e52c09`。
 - 验证未调用真实图片 Provider，未产生计费生成请求。

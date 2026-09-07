@@ -453,7 +453,7 @@ Studio 全局导航固定为项目、创作资料库、共享素材、学习中�
 
 | 层级 | 选择 | 约束 |
 | --- | --- | --- |
-| 运行时 | Node.js `22.13.0` 或更高版本与 TypeScript 编译产物。 | 必须使用默认可用的 `node:sqlite`；Windows 使用系统 Windows PowerShell/CIM 和本地固定 NTFS DACL，不依赖 WMIC。 |
+| 运行时 | Node.js `22.13.0` 或更高版本与 TypeScript 编译产物。 | 必须使用默认可用的 `node:sqlite`；Windows 使用系统 Windows PowerShell/.NET DriveInfo、Registry、WMI 和本地固定 NTFS DACL，不依赖 WMIC 或 PowerShell 模块。 |
 | 本地服务 | Node 原生 HTTP 与 SSE 或等价轻量路由层。 | 禁止因 Workbench 引入完整云端 Web 应用依赖。 |
 | 业务数据 | SQLite WAL、FTS5、版本化 SQL migration。 | studio.db 是唯一业务事实源。 |
 | 数据访问 | 小型 typed repository 与 schema 校验。 | 禁止由页面或目录直接写入业务事实。 |
@@ -515,7 +515,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-021 | 同一稳定 workspace 的 3–4 个并发会话最终复用唯一 daemon/PID 和单一活动 Workbench；真实 conversation Session 的 project/task/round、项目与 Run 归属互相隔离，Workbench per-tab UI Session 与 agent Sessions 分离，用户当前 route 不被后台 context 更新抢占；所有 Runs 仍共享 daemon Worker 与全局公平队列。 |
 | PIC-VN-AC-022 | Workbench 只提交人工计划确认，预检与入队只接受 Skill/CLI；同一轮次即使由不同预检、幂等键、旧页面或并发入口提交也最多创建一个 Generation Run，重复请求在调用 Provider 前被拒绝并指向已有运行，再次生成必须创建新轮次。 |
 | PIC-VN-AC-023 | 请求根没有 manifest 且祖先目录存在有效 Studio 时，CLI 在任何子 Studio、daemon 或 Workbench 副作用前拒绝隐式初始化；仅用户显式执行 `open --allow-nested-studio true` 才可创建隔离的嵌套 Studio，既有准确工作区继续正常复用。 |
-| PIC-VN-AC-024 | Windows 在创建任何 Studio 文件前拒绝 UNC、同步盘/系统目录、非固定磁盘、非 NTFS 与 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 DACL、CIM、sharp 与浏览器关联。 |
+| PIC-VN-AC-024 | Windows 在创建任何 Studio 文件前拒绝 UNC、同步盘/系统目录、非固定磁盘、非 NTFS 与 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 DACL、DriveInfo、sharp 与浏览器关联；daemon 身份使用有界 WMI 查询。 |
 | PIC-VN-AC-025 | daemon owner 是唯一目录/schema/ACL 初始化者；空 Studio 不创建 Worker，Generation/media pool 按需启动并提供脱敏健康、有限重启与最终熔断。Workbench 对受控重启显示关闭、重连、快照恢复与已恢复，并能复制脱敏诊断。 |
 
 ## 16. 实施与发布约束

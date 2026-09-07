@@ -83,25 +83,29 @@ export function inspectWindowsVolume(workspaceRoot: string, dependencies: Worksp
   const encodedRoot = Buffer.from(root, 'utf8').toString('base64');
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     "$target = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + encodedRoot + "'))",
-    "$device = [System.IO.Path]::GetPathRoot($target).TrimEnd('\\')",
-    "$escaped = $device.Replace(\"'\", \"''\")",
-    "$disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter (\"DeviceID = '\" + $escaped + \"'\") -OperationTimeoutSec 3",
-    'if ($null -eq $disk) { throw \"Workspace volume was not found.\" }',
-    "$browser = (Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice' -Name ProgId -ErrorAction SilentlyContinue).ProgId",
-    '[PSCustomObject]@{ driveType = [int]$disk.DriveType; fileSystem = [string]$disk.FileSystem; browserProgId = if ($browser) { [string]$browser } else { $null } } | ConvertTo-Json -Compress'
+    '$drive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($target))',
+    "if (!$drive.IsReady) { throw 'Workspace volume is not ready.' }",
+    "$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice')",
+    "$browser = if ($null -ne $key) { [string]$key.GetValue('ProgId', '') } else { '' }",
+    'if ($null -ne $key) { $key.Dispose() }',
+    '$fileSystem = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([string]$drive.DriveFormat))',
+    '$browserValue = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($browser))',
+    '([int]$drive.DriveType).ToString() + \'|\' + $fileSystem + \'|\' + $browserValue'
   ].join('; ');
   const run = dependencies.execFile || ((command: string, args: readonly string[], options: { timeout: number; maxBuffer: number }): string => execFileSync(command, args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'], ...options }));
   let output: string;
   try {
-    output = run(dependencies.powershellPath || windowsPowerShellExecutable(dependencies.environment), encodedPowerShellArguments(script), { timeout: 5000, maxBuffer: 1024 * 1024 });
+    output = run(dependencies.powershellPath || windowsPowerShellExecutable(dependencies.environment), encodedPowerShellArguments(script), { timeout: 15000, maxBuffer: 1024 * 1024 });
   } catch {
-    throw new Error('windows_volume_probe_failed: PowerShell/CIM could not inspect the workspace volume.');
+    throw new Error('windows_volume_probe_failed: System PowerShell could not inspect the workspace volume.');
   }
-  const parsed = JSON.parse(output.trim()) as Partial<WindowsVolumeInfo>;
-  if (!Number.isInteger(parsed.driveType) || typeof parsed.fileSystem !== 'string') throw new Error('windows_volume_probe_invalid: PowerShell/CIM returned invalid volume metadata.');
-  return { driveType: Number(parsed.driveType), fileSystem: parsed.fileSystem, browserProgId: typeof parsed.browserProgId === 'string' && parsed.browserProgId ? parsed.browserProgId : null };
+  const [driveTypeRaw, fileSystemRaw, browserRaw] = output.trim().split('|');
+  const driveType = Number(driveTypeRaw);
+  const fileSystem = fileSystemRaw ? Buffer.from(fileSystemRaw, 'base64').toString('utf8') : '';
+  const browserProgId = browserRaw ? Buffer.from(browserRaw, 'base64').toString('utf8') : null;
+  if (!Number.isInteger(driveType) || !fileSystem) throw new Error('windows_volume_probe_invalid: System PowerShell returned invalid volume metadata.');
+  return { driveType, fileSystem, browserProgId: browserProgId || null };
 }
 
 export function inspectWorkspaceSupport(workspaceRoot: string, dependencies: WorkspaceInspectionDependencies = {}): DoctorCheck[] {
@@ -115,17 +119,19 @@ export function inspectWorkspaceSupport(workspaceRoot: string, dependencies: Wor
   } catch (error) {
     checks.push({ code: 'workspace_real_path', status: 'fail', summary: error instanceof Error ? error.message : '工作区路径无效。', remediation: '选择当前用户拥有的真实本地目录。' });
   }
+  if (checks.some((check) => check.status === 'fail')) return checks;
   if (platform === 'win32') {
     const disallowedRoots = [environment.OneDrive, environment.OneDriveCommercial, environment.OneDriveConsumer, environment.ProgramFiles, environment.SystemRoot, environment.WINDIR].filter((value): value is string => Boolean(value));
     if (disallowedRoots.some((candidate) => isInside(root, candidate, 'win32'))) checks.push({ code: 'workspace_managed_root', status: 'fail', summary: '工作区位于同步盘或系统受管目录。', remediation: '迁移到当前用户拥有的本地 NTFS 源码目录。' });
     else checks.push({ code: 'workspace_managed_root', status: 'pass', summary: '工作区不在已知同步盘或系统目录中。' });
+    if (checks.some((check) => check.status === 'fail')) return checks;
     try {
       const volume = inspectWindowsVolume(root, dependencies);
       checks.push({ code: 'workspace_fixed_drive', status: volume.driveType === 3 ? 'pass' : 'fail', summary: volume.driveType === 3 ? '工作区位于本地固定磁盘。' : '工作区不在本地固定磁盘。', remediation: volume.driveType === 3 ? undefined : '使用本地固定磁盘上的工作区。' });
       checks.push({ code: 'workspace_ntfs', status: volume.fileSystem.toUpperCase() === 'NTFS' ? 'pass' : 'fail', summary: '文件系统：' + volume.fileSystem, remediation: volume.fileSystem.toUpperCase() === 'NTFS' ? undefined : '迁移到 NTFS 文件系统。' });
       checks.push({ code: 'browser_association', status: volume.browserProgId ? 'pass' : 'warning', summary: volume.browserProgId ? '已配置默认 HTTP 浏览器。' : '未确认默认 HTTP 浏览器关联。', remediation: volume.browserProgId ? undefined : '在 Windows 默认应用中设置 HTTP/HTTPS 浏览器。' });
     } catch (error) {
-      checks.push({ code: 'windows_volume', status: 'fail', summary: error instanceof Error ? error.message : 'Windows volume probe failed.', remediation: '确认系统 Windows PowerShell、CIM/WMI 服务和当前用户权限可用。' });
+      checks.push({ code: 'windows_volume', status: 'fail', summary: error instanceof Error ? error.message : 'Windows volume probe failed.', remediation: '确认系统 Windows PowerShell、目标磁盘和当前用户权限可用。' });
     }
     if (root.length > 200) checks.push({ code: 'workspace_path_length', status: 'warning', summary: '工作区路径较长，交付目录可能接近旧 Win32 路径限制。', remediation: '尽量选择更短的工作区路径。' });
     else checks.push({ code: 'workspace_path_length', status: 'pass', summary: '工作区路径长度安全。' });

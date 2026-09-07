@@ -89,21 +89,22 @@ test('doctor validates runtime primitives without creating the requested Studio 
   }
 });
 
-test('Windows doctor uses bounded CIM volume inspection and rejects managed roots', () => {
+test('Windows doctor uses bounded module-free volume inspection and rejects managed roots', () => {
   const calls = [];
   const dependencies = {
     platform: 'win32',
     environment: { SystemRoot: 'C:\\Windows', ProgramFiles: 'C:\\Program Files', OneDrive: 'C:\\Users\\Example\\OneDrive' },
     powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-    execFile: (command, args, options) => { calls.push({ command, args, options }); return JSON.stringify({ driveType: 3, fileSystem: 'NTFS', browserProgId: 'BrowserHTML' }); }
+    execFile: (command, args, options) => { calls.push({ command, args, options }); return '3|TlRGUw==|QnJvd3NlckhUTUw='; }
   };
   const volume = inspectWindowsVolume('C:\\Users\\Example\\Source\\图片项目', dependencies);
   assert.deepEqual(volume, { driveType: 3, fileSystem: 'NTFS', browserProgId: 'BrowserHTML' });
   const script = Buffer.from(calls[0].args[4], 'base64').toString('utf16le');
-  assert.match(script, /Win32_LogicalDisk/);
-  assert.match(script, /OperationTimeoutSec 3/);
+  assert.match(script, /System\.IO\.DriveInfo/);
+  assert.match(script, /Microsoft\.Win32\.Registry/);
+  assert.doesNotMatch(script, /Get-CimInstance|Get-ItemProperty/);
   assert.equal(script.includes('C:\\Users\\Example\\Source\\图片项目'), false);
-  assert.deepEqual(calls[0].options, { timeout: 5000, maxBuffer: 1024 * 1024 });
+  assert.deepEqual(calls[0].options, { timeout: 15000, maxBuffer: 1024 * 1024 });
   const checks = inspectWorkspaceSupport('C:\\Users\\Example\\OneDrive\\project', dependencies);
   assert.equal(checks.some((check) => check.code === 'workspace_managed_root' && check.status === 'fail'), true);
   assert.throws(() => inspectWindowsVolume('\\\\server\\share\\project', dependencies), /UNC/);
@@ -124,7 +125,7 @@ test('doctor rejects an existing symlink or Windows junction workspace root', ()
   }
 });
 
-test('Windows native CIM and long Unicode workspace diagnostics execute on the real OS', { skip: process.platform !== 'win32' }, () => {
+test('Windows native WMI and long Unicode workspace diagnostics execute on the real OS', { skip: process.platform !== 'win32' }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-Windows-图片 空格-'));
   const workspaceRoot = path.join(root, '长'.repeat(Math.max(1, 205 - root.length - 1)));
   try {
@@ -307,24 +308,24 @@ test('Workbench opener reports platform launch failures', async () => {
   await assert.rejects(opening, /无法启动系统浏览器/);
 });
 
-test('Windows process identity uses PowerShell CIM instead of optional WMIC', () => {
+test('Windows process identity uses bounded module-free WMI instead of optional WMIC', () => {
   const calls = [];
   const commandLine = '"C:\\Program Files\\nodejs\\node.exe" "C:\\skill path\\daemon.js" --workspace "C:\\workspace with spaces"';
   const arguments_ = queryProcessArguments(4242, {
     platform: 'win32',
     powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-    execFile: (command, args, options) => { calls.push({ command, args, options }); return JSON.stringify(commandLine) + '\r\n'; }
+    execFile: (command, args, options) => { calls.push({ command, args, options }); return Buffer.from(commandLine, 'utf8').toString('base64') + '\r\n'; }
   });
   assert.deepEqual(arguments_, ['C:\\Program Files\\nodejs\\node.exe', 'C:\\skill path\\daemon.js', '--workspace', 'C:\\workspace with spaces']);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
   assert.deepEqual(calls[0].args.slice(0, 4), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand']);
   const script = Buffer.from(calls[0].args[4], 'base64').toString('utf16le');
-  assert.match(script, /Get-CimInstance -ClassName Win32_Process/);
-  assert.match(script, /OperationTimeoutSec 3/);
-  assert.deepEqual(calls[0].options, { timeout: 5000, maxBuffer: 1024 * 1024 });
+  assert.match(script, /ManagementObjectSearcher/);
+  assert.match(script, /Options\.Timeout = \[TimeSpan\]::FromSeconds\(3\)/);
+  assert.deepEqual(calls[0].options, { timeout: 10000, maxBuffer: 1024 * 1024 });
   assert.match(script, /ProcessId = 4242/);
-  assert.doesNotMatch(script, /wmic/i);
+  assert.doesNotMatch(script, /Get-CimInstance|wmic/i);
 });
 
 function healthResponse(studioId) {

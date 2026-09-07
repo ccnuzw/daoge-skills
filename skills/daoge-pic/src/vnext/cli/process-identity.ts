@@ -83,14 +83,18 @@ export function queryProcessArguments(pid: number, dependencies: ProcessQueryDep
     if (platform === 'win32') {
       const script = [
         "$ErrorActionPreference = 'Stop'",
-        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-        "$process = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = " + pid + "' -OperationTimeoutSec 3",
-        'if ($null -eq $process -or $null -eq $process.CommandLine) { exit 3 }',
-        '$process.CommandLine | ConvertTo-Json -Compress'
+        "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Management')",
+        "$searcher = [System.Management.ManagementObjectSearcher]::new('SELECT CommandLine FROM Win32_Process WHERE ProcessId = " + pid + "')",
+        '$searcher.Options.Timeout = [TimeSpan]::FromSeconds(3)',
+        '$matches = @($searcher.Get())',
+        '$searcher.Dispose()',
+        "if ($matches.Count -ne 1 -or $null -eq $matches[0]['CommandLine']) { exit 3 }",
+        "$commandLine = [string]$matches[0]['CommandLine']",
+        '[System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($commandLine))'
       ].join('; ');
-      const output = execFile(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 5000, maxBuffer: 1024 * 1024 }).trim();
-      const commandLine = JSON.parse(output) as unknown;
-      return typeof commandLine === 'string' ? parseWindowsCommandLine(commandLine) : null;
+      const output = execFile(dependencies.powershellPath || windowsPowerShellExecutable(), encodedPowerShellArguments(script), { timeout: 10000, maxBuffer: 1024 * 1024 }).trim();
+      const commandLine = Buffer.from(output, 'base64').toString('utf8');
+      return commandLine ? parseWindowsCommandLine(commandLine) : null;
     }
     return null;
   } catch {

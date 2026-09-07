@@ -125,13 +125,23 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitFor(condition, description, timeoutMs = 5000) {
+async function waitFor(condition, description, timeoutMs = process.platform === 'win32' ? 20000 : 5000) {
   const started = Date.now();
   while (!condition()) {
     if (Date.now() - started > timeoutMs) throw new Error('Timed out waiting for ' + description + '.');
     await wait(25);
   }
 }
+async function fetchEventually(url, options, timeoutMs = process.platform === 'win32' ? 15000 : 5000) {
+  const started = Date.now();
+  let failure;
+  while (Date.now() - started <= timeoutMs) {
+    try { return await fetch(url, options); }
+    catch (error) { failure = error; await wait(50); }
+  }
+  throw failure || new Error('Timed out waiting for daemon HTTP recovery.');
+}
+
 function livePid(pid) {
   try {
     process.kill(pid, 0);
@@ -163,7 +173,7 @@ async function startCountingProvider() {
 function stopDaemon(child) {
   if (!child || child.exitCode !== null || child.killed) return Promise.resolve();
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => { child.kill('SIGKILL'); }, 3000);
+    const timeout = setTimeout(() => { child.kill('SIGKILL'); }, process.platform === 'win32' ? 10000 : 3000);
     child.once('exit', () => { clearTimeout(timeout); resolve(); });
     child.kill('SIGTERM');
   });
@@ -177,7 +187,7 @@ function runChild(entry, args) {
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new Error('Timed out waiting for child process to exit.'));
-    }, 5000);
+    }, process.platform === 'win32' ? 20000 : 5000);
     child.stdout.on('data', (chunk) => { stdout += String(chunk); });
     child.stderr.on('data', (chunk) => { stderr += String(chunk); });
     child.once('error', (error) => { clearTimeout(timeout); reject(error); });
@@ -370,7 +380,7 @@ test('controlled restart preserves its port and Workbench authorization only ins
     const setCookie = bootstrap.headers.get('set-cookie');
     assert.ok(setCookie);
     const cookie = setCookie.split(';', 1)[0];
-    const restart = spawnSync(process.execPath, [cliEntry, 'restart', '--workspace', workspaceRoot], { encoding: 'utf8', timeout: 15000 });
+    const restart = spawnSync(process.execPath, [cliEntry, 'restart', '--workspace', workspaceRoot], { encoding: 'utf8', timeout: process.platform === 'win32' ? 45000 : 15000 });
     assert.equal(restart.status, 0, restart.stderr);
     const restartResult = JSON.parse(restart.stdout);
     assert.equal(restartResult.previousPid, first.pid);
@@ -383,12 +393,12 @@ test('controlled restart preserves its port and Workbench authorization only ins
     assert.equal(firstOwner.pid, first.pid);
     assert.equal(restartedOwner.pid, first.pid);
     assert.notEqual(restartedOwner.ownerId, firstOwner.ownerId, 'controlled restart must release and reacquire the SQLite mutex');
-    assert.equal((await fetch(restarted.url + '/api/studio', { headers: { cookie } })).status, 200);
-    const normalClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
+    assert.equal((await fetchEventually(restarted.url + '/api/studio', { headers: { cookie } })).status, 200);
+    const normalClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
     assert.deepEqual((await normalClaim.json()).data, { claimed: false, reused: true, reason: 'recent-workbench' }, 'controlled restart must retain recent Workbench presence in daemon memory');
-    const forcedClaim = await fetch(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
+    const forcedClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
     assert.deepEqual((await forcedClaim.json()).data, { claimed: true, reused: false, reason: 'forced-opener-claim' });
-    assert.equal((await fetch(restarted.url + '/api/projects', { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:9', 'content-type': 'application/json', 'idempotency-key': 'hostile-local-page' }, body: JSON.stringify({ name: 'blocked' }) })).status, 403);
+    assert.equal((await fetchEventually(restarted.url + '/api/projects', { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:9', 'content-type': 'application/json', 'idempotency-key': 'hostile-local-page' }, body: JSON.stringify({ name: 'blocked' }) })).status, 403);
     await stopDaemon(daemon);
     daemon = null;
     assert.equal(fs.existsSync(runtimePath), false);

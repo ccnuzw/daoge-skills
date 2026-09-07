@@ -250,10 +250,10 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 
 ### Windows 初始化与运行边界
 
-- Node.js 下限固定为 `22.13.0`。Windows daemon 身份改用系统 Windows PowerShell/CIM，CIM `OperationTimeoutSec` 与 Node 外层超时同时生效；不依赖 WMIC。
-- daemon owner 独占工作区创建、schema migration、旧 Provider 导入和权限强化。敏感目录、manifest、SQLite 与现有 sidecar 在一个 PowerShell 进程中批量设置并复核 DACL；Generation/media Worker 只附加既有数据库。
+- Node.js 下限固定为 `22.13.0`。Windows daemon 身份使用系统 Windows PowerShell 中有界的 .NET WMI `Win32_Process` 查询，WMI 与 Node 外层超时同时生效；不依赖 WMIC 或 PowerShell 模块。
+- daemon owner 独占工作区创建、schema migration、旧 Provider 导入和权限强化。敏感目录、manifest、SQLite 与现有 sidecar 在一个 PowerShell 进程中通过 .NET `FileSystemSecurity` 批量设置并复核 DACL；Generation/media Worker 只附加既有数据库。
 - 空 Studio 不启动 media Worker；存在媒体恢复或实际媒体作业时才按需创建。Generation pool 首次 tick 从一个 Worker 开始，持续满载时逐个扩容。两类池公开脱敏健康、重启次数、最终熔断与安全错误摘要。
-- 新工作区在任何 Studio 文件创建前检查 Windows 本地固定 NTFS、UNC、同步盘/系统目录和已有 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 ACL、CIM、`sharp` 与默认浏览器关联。
+- 新工作区在任何 Studio 文件创建前检查 Windows 本地固定 NTFS、UNC、同步盘/系统目录和已有 junction/symlink；`doctor` 在不访问 Provider 的前提下验证原子 rename、SQLite 排他锁、私有 ACL、DriveInfo/Registry、`sharp` 与默认浏览器关联。
 
 ### 安装、路径与 Workbench 恢复
 
@@ -264,9 +264,9 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 
 ### 已执行验证
 
-- macOS 本地 `npm test`：315 项，313 通过、0 失败、0 取消、2 项仅 Windows 实机用例跳过；跳过项为真实最终 DACL 与真实 CIM/长 Unicode 路径诊断。
+- macOS 本地 `npm test`：315 项，313 通过、0 失败、0 取消、2 项仅 Windows 实机用例跳过；跳过项为真实最终 DACL 与真实 WMI/长 Unicode 路径诊断。
 - 本地 `npm run test:package`：构建 TypeScript 与 Vite Workbench 成功；发布清单 122 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 的真实 bin、注册链接、doctor 与 `sharp` 均通过。
 - 浏览器实测 1440×1000 与 375×812：健康横幅无横向溢出，移动端操作按钮高度 44px；实际 daemon 故障注入后观察到“后台处理池需要重启 → 正在安全关闭后台任务 → Studio 已恢复”，页面 URL 与授权继续复用。
 - `npm run bench:perf`：Schema v22 空 Studio control-plane 构造 `41.81 ms`，需求前 media process 为 `0`；100000 pending 队列领取 1000 项为 `128.03 ms`，RSS `105.6 MiB`。
-- Windows Actions 已配置 `windows-2022`、`windows-2025` × Node.js `22.13.0`、`24` 四组矩阵，执行完整回归、真实 DACL/CIM/长路径、cmd shim、junction、安装、daemon 恢复、`sharp` 与脱敏诊断/性能证据上传。该矩阵只有在分支推送后运行；本地 macOS 结果不得冒充 Windows runner 结果。
+- Windows Actions 已配置 `windows-2022`、`windows-2025` × Node.js `22.13.0`、`24` 四组矩阵，执行完整回归、真实 DACL/WMI/长路径、cmd shim、junction、安装、daemon 恢复、`sharp` 与脱敏诊断/性能证据上传。该矩阵只有在分支推送后运行；本地 macOS 结果不得冒充 Windows runner 结果。
 - 所有本地回归和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。

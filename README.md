@@ -57,7 +57,7 @@ npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\s
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
 
-`register-skill` 跨 macOS、Linux 和 Windows 创建项目级 Skill 注册：Windows 使用 junction，其他平台使用目录符号链接。目标已存在时直接失败，不删除或覆盖已有目录。`doctor` 不调用图片 Provider；它在初始化 Studio 前检查目录、SQLite、权限、原生 `sharp`，并在 Windows 检查本地固定 NTFS 磁盘、CIM/PowerShell 和默认浏览器关联。
+`register-skill` 跨 macOS、Linux 和 Windows 创建项目级 Skill 注册：Windows 使用 junction，其他平台使用目录符号链接。目标已存在时直接失败，不删除或覆盖已有目录。`doctor` 不调用图片 Provider；它在初始化 Studio 前检查目录、SQLite、权限、原生 `sharp`，并在 Windows 通过系统 PowerShell/.NET 检查本地固定 NTFS 磁盘和默认浏览器关联。
 
 需要全局安装时：
 

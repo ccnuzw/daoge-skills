@@ -8,7 +8,7 @@
 
 ### Windows 初始化与安全
 
-- Node.js 下限固定为 `22.13.0`；daemon 身份查询从 WMIC 改为系统 Windows PowerShell/CIM，并同时设置 CIM 与 Node 外层超时。
+- Node.js 下限固定为 `22.13.0`；daemon 身份查询从 WMIC 改为系统 Windows PowerShell 中有界的 .NET WMI 查询，不依赖 PowerShell 模块，并同时设置 WMI 与 Node 外层超时。
 - 新工作区在任何 Studio 文件创建前拒绝 UNC、同步盘/系统目录、非本地固定磁盘、非 NTFS 与已有 junction/symlink；`open --allow-nested-studio true` 不能越过这些存储约束。
 - 敏感目录、manifest、SQLite 与现有 sidecar 由 daemon owner 在一个 PowerShell 进程中批量设置并复核 DACL；只允许当前用户 SID、SYSTEM 与 Administrators。ACL 超时、PowerShell 缺失和权限拒绝均失败关闭。
 - 交付路径保留安全 Unicode、限制组件长度、规避 Windows 设备保留名，并给项目与交付目录追加短 ID。
@@ -23,7 +23,7 @@
 ### 安装、诊断与 Workbench
 
 - 新增 `register-skill --scope project|user`，跨平台创建 fail-if-exists link/junction，并拒绝父级 symlink/junction 路径穿越；README 与发布模板不再要求长 Node 注册脚本。
-- 新增不调用 Provider 的 `doctor --workspace <path> [--json true] [--redacted true]`，检查目录、原子 rename、SQLite 排他锁、权限、`sharp`，并在 Windows 检查磁盘/文件系统、CIM 和浏览器关联。
+- 新增不调用 Provider 的 `doctor --workspace <path> [--json true] [--redacted true]`，检查目录、原子 rename、SQLite 排他锁、权限、`sharp`，并在 Windows 通过 .NET DriveInfo/Registry 检查磁盘、文件系统和浏览器关联。
 - package smoke 改在独立临时 pack 目录运行，不删除仓库同名正式制品；临时 consumer 路径包含中文和空格，并执行真实 bin、注册、doctor 与 `sharp`。
 - Workbench 新增运行健康横幅、安全重启、状态刷新和脱敏诊断复制；受控重启依次显示安全关闭、重连、权威快照恢复和已恢复。
 
@@ -33,7 +33,7 @@
 - 浏览器实测 1440×1000 与 375×812，无横向溢出，移动端健康操作为 44px；实际 daemon 故障注入完整观察到故障、安全关闭和恢复状态。
 - `npm run bench:perf`：空 Studio control-plane `41.81 ms`、需求前 media process `0`；100000 pending 队列领取 1000 项 `128.03 ms`，RSS `105.6 MiB`。
 - Windows Actions 扩为 `windows-2022`、`windows-2025` × Node.js `22.13.0`、`24`，并在每组上传脱敏 doctor 与性能证据。分支推送前不把本地 macOS 结果冒充 Windows runner 结果。
-- 本地候选制品 `daoge-pic-5.10.4.tgz` 为 `350776` bytes，SHA-256 为 `2662d9332ec30a5857d045d20e9dea32e8637193470eda657f7bfdb61e0cef87`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
+- 本地候选制品 `daoge-pic-5.10.4.tgz` 为 `350990` bytes，SHA-256 为 `d69ca290516871a2eaf4cb74d86269f7ecbe2f9f2609d26bc6732c8da9e52c09`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.10.4 <6.0.0`。
 - 所有验证未调用真实图片 Provider，未产生计费生成请求。
 
 ## daoge-pic 5.10.3 - 2026-09-05

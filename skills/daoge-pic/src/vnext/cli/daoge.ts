@@ -91,6 +91,7 @@ function workbenchBootstrapUrl(record: RuntimeRecord): string {
   return record.url + '/#capability=' + encodeURIComponent(record.capability);
 }
 
+const DAEMON_LIFECYCLE_ATTEMPTS = process.platform === 'win32' ? 300 : 100;
 async function healthy(url: string, expectedStudioId?: string): Promise<boolean> {
   const studioId = await healthStudioId(url);
   return Boolean(studioId && (!expectedStudioId || studioId === expectedStudioId));
@@ -125,7 +126,7 @@ function recordedOwnerPid(workspaceRoot: string): number | null {
 
 
 async function waitForDaemonRelease(workspaceRoot: string, record: RuntimeRecord): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
     const live = livePid(record.pid);
     const responding = await healthy(record.url);
     if (!live && !responding) {
@@ -137,7 +138,7 @@ async function waitForDaemonRelease(workspaceRoot: string, record: RuntimeRecord
     }
     await sleep(100);
   }
-  throw new Error('Studio daemon 未能在 6 秒内安全停止；没有执行强制终止。');
+  throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内安全停止；没有执行强制终止。');
 }
 
 async function stopRecordedDaemon(workspaceRoot: string, existing: RuntimeRecord): Promise<void> {
@@ -187,7 +188,7 @@ async function restartDaemon(workspaceRoot: string): Promise<{ previousPid: numb
   if (existing?.capability && await healthy(existing.url, readStudioId(workspaceRoot))) {
     const previousStartedAt = existing.startedAt;
     await api(existing, 'POST', '/api/restart', {}, 'daemon-restart-' + randomUUID());
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
       await sleep(100);
       const restarted = readRuntime(workspaceRoot);
       if (restarted?.pid === existing.pid
@@ -198,7 +199,7 @@ async function restartDaemon(workspaceRoot: string): Promise<{ previousPid: numb
         return { previousPid, daemon: restarted };
       }
     }
-    throw new Error('Studio daemon 未能在 10 秒内完成受控重启。');
+    throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内完成受控重启。');
   }
   if (existing) await stopRecordedDaemon(workspaceRoot, existing);
   return { previousPid, daemon: await ensureDaemon(workspaceRoot) };
@@ -216,7 +217,7 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
   const child = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { detached: true, stdio: 'ignore', windowsHide: true });
   let spawnError: Error | null = null;
   child.once('error', (error) => { spawnError = error; });
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
     await sleep(100);
     if (spawnError) throw spawnError;
     const started = readRuntime(workspaceRoot);
@@ -227,7 +228,7 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
     }
   }
   await stopSpawnedDaemon(child);
-  throw new Error('Studio daemon 未能在 6 秒内启动。请检查 daoge-studio/runtime/daemon.log。');
+  throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内启动。请检查 daoge-studio/runtime/daemon.log。');
 }
 
 async function api(record: RuntimeRecord, method: HttpMethod, pathname: string, body: JsonObject, idempotencyKey?: string, operationName?: string): Promise<unknown> {

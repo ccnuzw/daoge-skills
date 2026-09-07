@@ -71,7 +71,7 @@ npx.cmd daoge open --workspace "C:\Users\<用户名>\source\<项目名>"
 
 Studio 的敏感目录和 `Provider.db` 只允许当前用户 SID、SYSTEM 与 Administrators 完全控制。daemon owner 在一个 PowerShell 进程中为敏感目录、manifest、SQLite 与现有 sidecar 批量构造、应用并复核完整 DACL；不执行 `icacls /reset`。ACL 操作最长等待 10 秒，并区分超时、系统 PowerShell 缺失和权限拒绝。Generation/media Worker 不修改 ACL。应选择当前用户拥有的本地 NTFS 目录，避免系统目录、OneDrive/同步盘、UNC/网络共享、FAT/exFAT、移动盘和受企业策略限制的位置。`Provider.db` 仍是明文 SQLite；ACL 不能防止当前用户权限下的进程或管理员读取。
 
-Windows daemon 身份通过系统 Windows PowerShell/CIM `Win32_Process` 查询，CIM 内外层都具有超时，不依赖 `wmic.exe`。自动打开 Workbench 先使用 `rundll32.exe url.dll,FileProtocolHandler`，进程无法启动或立即非零退出时再调用无 shell 的 `explorer.exe`；都失败时保持失败关闭并提示运行 `daoge doctor`，不输出 capability 或 bootstrap URL。
+Windows daemon 身份通过系统 Windows PowerShell 中有界的 .NET WMI `Win32_Process` 查询，内外层都具有超时，不依赖 `wmic.exe` 或 PowerShell 模块。自动打开 Workbench 先使用 `rundll32.exe url.dll,FileProtocolHandler`，进程无法启动或立即非零退出时再调用无 shell 的 `explorer.exe`；都失败时保持失败关闭并提示运行 `daoge doctor`，不输出 capability 或 bootstrap URL。
 
 正式发布包包含编译后的运行时和 Workbench，安装后无需手动构建。以下命令只用于包含 `src/`、`web/`、`tests/` 和构建配置的源码仓库检出：
 
