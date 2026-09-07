@@ -76,7 +76,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 ## 工作区、Schema 与密钥
 
-运行时必须是 Node.js `22.13.0` 或更高版本，确保 `node:sqlite` 无需实验开关。Windows 必须使用当前用户拥有的本地 NTFS 工作区；不得把 OneDrive/同步盘、UNC/网络共享、移动盘、WSL 挂载路径或 junction/symlink 根作为 Studio 工作区。PowerShell 执行策略阻止 npm `.ps1` shim 时使用对应 `.cmd`，不得要求用户放宽全局执行策略。
+运行时必须是 Node.js `22.16.0` 或更高版本，确保 `node:sqlite` 无需实验开关且内置 SQLite 包含 Studio 搜索所需的 FTS5。Windows 必须使用当前用户拥有的本地 NTFS 工作区；不得把 OneDrive/同步盘、UNC/网络共享、移动盘、WSL 挂载路径或 junction/symlink 根作为 Studio 工作区。PowerShell 执行策略阻止 npm `.ps1` shim 时使用对应 `.cmd`，不得要求用户放宽全局执行策略。
 
 每次必须使用稳定工作区根目录，传入 `--workspace <path>` 或明确设置 `DAOGE_WORKSPACE_ROOT`。没有稳定根目录时停止并向用户索取，不得回退到任意当前目录。
 

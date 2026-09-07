@@ -142,10 +142,10 @@ test('Windows native WMI and long Unicode workspace diagnostics execute on the r
 
 test('CLI rejects Node versions that cannot load node:sqlite without a flag', () => {
   const modulePath = path.join(skillRoot, 'dist', 'vnext', 'cli', 'daoge.js');
-  const script = `Object.defineProperty(process.versions, 'node', { value: '22.12.0' }); process.argv = ['node', 'daoge', '--help']; const { main } = require(${JSON.stringify(modulePath)}); void main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });`;
+  const script = `Object.defineProperty(process.versions, 'node', { value: '22.15.0' }); process.argv = ['node', 'daoge', '--help']; const { main } = require(${JSON.stringify(modulePath)}); void main().catch((error) => { process.stderr.write(error.message); process.exitCode = 1; });`;
   const rejected = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
   assert.equal(rejected.status, 1);
-  assert.match(rejected.stderr, /Node\.js 22\.13\.0/);
+  assert.match(rejected.stderr, /Node\.js 22\.16\.0/);
   assert.equal(rejected.stdout, '');
 });
 

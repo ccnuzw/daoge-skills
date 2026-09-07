@@ -33,7 +33,7 @@ daoge-pic
 
 可以只安装一个 Skill，也可以按需安装多个。`daoge-docs` 通过 `npx skills add` 安装；`daoge-pic` 稳定版必须使用对应 GitHub Release 的不可变 `.tgz` 制品。对 `daoge-pic` 而言，npm 安装负责提供 `daoge` CLI 和运行时，link/junction 步骤负责把同一个已安装包注册为 Codex Skill；两步缺一不可。
 
-`daoge-pic` 实际运行下限为 Node.js `22.13.0`，因为 CLI 直接使用无需实验开关的 `node:sqlite`。Windows 建议使用同一普通用户在本地 NTFS 目录完成项目级安装和运行；PowerShell 执行策略阻止 `.ps1` shim 时使用 `npm.cmd`、`npx.cmd` 或 `daoge.cmd`，不要放宽全局执行策略。Studio 工作区不得放在 OneDrive/同步盘、UNC/网络共享、移动盘、WSL 挂载路径或 junction/symlink 根上。
+`daoge-pic` 实际运行下限为 Node.js `22.16.0`，因为 CLI 使用无需实验开关的 `node:sqlite`，Studio 搜索还要求该版本内置的 FTS5。Windows 建议使用同一普通用户在本地 NTFS 目录完成项目级安装和运行；PowerShell 执行策略阻止 `.ps1` shim 时使用 `npm.cmd`、`npx.cmd` 或 `daoge.cmd`，不要放宽全局执行策略。Studio 工作区不得放在 OneDrive/同步盘、UNC/网络共享、移动盘、WSL 挂载路径或 junction/symlink 根上。
 
 安装 `daoge-docs`：
 

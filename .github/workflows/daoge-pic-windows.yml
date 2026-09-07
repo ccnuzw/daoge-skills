@@ -27,7 +27,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
-        node: ["22.13.0", "24"]
+        node: ["22.16.0", "24"]
     defaults:
       run:
         working-directory: skills/daoge-pic
