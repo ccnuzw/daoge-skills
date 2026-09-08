@@ -15,21 +15,25 @@ export function studioEventRefreshPlan(events = []) {
   const planEvent = (event) => ['creative_round', 'round'].includes(event?.entityType) || /^(round|plan)\./.test(event?.eventType || '');
   const assetEvent = (event) => ['asset', 'review'].includes(event?.entityType) || /^(asset|review)\./.test(event?.eventType || '') || ['run.items_updated', 'project.selection_updated'].includes(event?.eventType);
   const contextEvent = (event) => ['task', 'creative_round', 'round', 'generation_run', 'run', 'run_item', 'delivery', 'delivery_batch'].includes(event?.entityType) || /^(task|round|run|run_item|delivery|delivery_batch)\./.test(event?.eventType || '');
+  const canvasLayoutEvent = (event) => event?.entityType === 'canvas_layout' || /^canvas_layout\./.test(event?.eventType || '');
   const refreshSelection = values.some((event) => event?.eventType === 'project.selection_updated' || /^asset\.(reviewed|trashed|restored|restored_reused)$/.test(event?.eventType || ''));
   const refreshSharedAssets = values.some((event) => /^asset\.(shared|unshared)_across_projects$/.test(event?.eventType || ''));
   const refreshContext = global || values.some(contextEvent);
   const refreshAssets = global || values.some(assetEvent);
+  const refreshCanvasLayout = values.some(canvasLayoutEvent);
   return {
     scope: global ? 'all' : 'context',
     refreshContext,
     refreshAssets,
     refreshSelection,
     refreshSharedAssets,
+    refreshCanvasLayout,
     taskOverview: values.some(detailEvent),
     creativeRecord: values.some(detailEvent),
     studioOverview: values.some(detailEvent),
     planVersions: values.some(planEvent),
-    maximumRefreshes: (refreshContext ? 1 : 0) + (refreshAssets ? 1 : 0) + (refreshSelection ? 1 : 0) + (refreshSharedAssets ? 1 : 0) + (values.some(detailEvent) ? 1 : 0)
+    canvasLayout: refreshCanvasLayout,
+    maximumRefreshes: (refreshContext ? 1 : 0) + (refreshAssets ? 1 : 0) + (refreshSelection ? 1 : 0) + (refreshSharedAssets ? 1 : 0) + (refreshCanvasLayout ? 1 : 0) + (values.some(detailEvent) ? 1 : 0)
   };
 }
 
@@ -72,6 +76,16 @@ export function createStudioEventStream({
     source?.close();
     source = null;
   };
+  const clearBatchTimer = () => {
+    if (!batchTimer) return;
+    clearTimer(batchTimer);
+    batchTimer = null;
+  };
+  const discardBufferedEvents = () => {
+    clearBatchTimer();
+    pending = [];
+    overflowed = false;
+  };
   const connect = () => {
     if (disposed || source) return;
     const nextSource = createEventSource('/api/events?after=' + cursor);
@@ -104,8 +118,7 @@ export function createStudioEventStream({
   };
   const failCurrentStream = (message) => {
     closeSource();
-    pending = [];
-    overflowed = false;
+    discardBufferedEvents();
     callbacks().onRequestError?.(message);
     reconnect();
   };
@@ -160,6 +173,7 @@ export function createStudioEventStream({
   async function snapshotRequired(message) {
     if (disposed) return;
     closeSource();
+    discardBufferedEvents();
     try {
       const snapshot = JSON.parse(message.data || '{}');
       const refreshed = await callbacks().onSnapshot?.();

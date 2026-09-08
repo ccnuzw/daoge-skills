@@ -2,6 +2,30 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.11.0 - 2026-09-09
+
+5.11.0 集中增强 Workbench 创作谱系、Generation History 大批量分页、项目资产打包、协议协商和本地敏感文件防护。
+
+### Workbench
+
+- 重构 Generation History 为全宽双栏工作区：运行记录保持显式选择，详情区集中呈现提示词、计划规格、运行状态、恢复操作和生成项；中小屏改为横向历史条与单栏详情，减少无效留白与拥挤的三栏分割。
+- 运行项改为服务端分页：每页 25/50/100、状态筛选、序号定位、精确状态计数、输出缩略图和 URL 持久化；大型批次只读取当前页，避免重复从创作记录加载全部运行项。
+- 结果队列新增可重试项本页选择、批量重试、单项详情对话框和安全恢复建议；对话框保留 `role="dialog"`、焦点约束、Escape 关闭和关闭后焦点返回。
+- 新增创作谱系画布，覆盖项目、任务、轮次、计划、运行、运行项、资产、交付、任务类型、风格包和品牌包节点；布局只保存位置、视口、筛选、分组和人工软连线，不替代 SQLite 业务事实源。
+
+### Runtime 与安全
+
+- Bearer Skill/CLI 请求必须声明 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`/api/studio` 返回协议与运行时版本，CLI 只复用兼容 daemon。
+- 项目资产 ZIP 改为按请求 `assetId` 做 scoped 查询和保序校验，不再受当前分页窗口限制。
+- 创作谱系与导出摘要统一过滤 Provider、完整 URL、路径、token、content hash、storage path 和 capability 等敏感字段；仓库忽略嵌套 `daoge-studio` runtime、Provider.db 与 provider.env。
+
+### 验证
+
+- macOS `npm test`：332 项，330 通过、0 失败、2 项 Windows 实机用例跳过。
+- 本地 `npm run test:package`：发布清单 124 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，真实 bin、注册、doctor 与 `sharp` 全部通过。
+- 最终制品 `daoge-pic-5.11.0.tgz` 为 `403432` bytes，SHA-256 为 `1deb7a92af0bbc0e3cbcd984d4f184043fc1bd08aa2c816713f917ff7c4a82ac`；Skill 协议保持 `2.0.0`，运行时兼容下限为 `>=5.11.0 <6.0.0`。
+- 所有验证未调用真实图片 Provider，未产生计费生成请求。
+
 ## daoge-pic 5.10.4 - 2026-09-07
 
 5.10.4 集中完成 Windows 安装、工作区、进程、权限、冷启动和 Workbench 恢复优化，并以 Windows Server 2022/2025 × Node.js 22.17.0/24 四组实机矩阵验证。

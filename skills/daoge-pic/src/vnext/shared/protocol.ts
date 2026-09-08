@@ -1,7 +1,8 @@
 export const SKILL_PROTOCOL_NAME = 'daoge-pic-skill-protocol';
 export const SKILL_PROTOCOL_VERSION = '2.0.0';
-export const RUNTIME_VERSION = '5.10.4';
+export const RUNTIME_VERSION = '5.11.0';
 export const SUPPORTED_PROTOCOL_RANGE = '>=2.0.0 <3.0.0';
+export const RUNTIME_COMPATIBILITY_RANGE = '>=5.11.0 <6.0.0';
 
 interface SemanticVersion { major: number; minor: number; patch: number; }
 
@@ -15,14 +16,19 @@ function compareSemanticVersions(left: SemanticVersion, right: SemanticVersion):
   return left.major - right.major || left.minor - right.minor || left.patch - right.patch;
 }
 
-/** Returns whether a client protocol version is inside this daemon's published range. */
-export function isSupportedProtocolVersion(version: string): boolean {
+export function isVersionInRange(version: string, rangeValue: string): boolean {
   const parsed = parseSemanticVersion(version);
-  const range = /^(>=\d+\.\d+\.\d+)\s+(<\d+\.\d+\.\d+)$/.exec(SUPPORTED_PROTOCOL_RANGE);
-  const lower = range ? parseSemanticVersion(range[1].slice(2)) : null;
-  const upper = range ? parseSemanticVersion(range[2].slice(1)) : null;
+  const range = /^>=(\d+\.\d+\.\d+)\s+<(\d+\.\d+\.\d+)$/.exec(rangeValue.trim());
+  const lower = range ? parseSemanticVersion(range[1]) : null;
+  const upper = range ? parseSemanticVersion(range[2]) : null;
   return Boolean(parsed && lower && upper && compareSemanticVersions(parsed, lower) >= 0 && compareSemanticVersions(parsed, upper) < 0);
 }
+
+/** Returns whether a client protocol version is inside this daemon's published range. */
+export function isSupportedProtocolVersion(version: string): boolean { return isVersionInRange(version, SUPPORTED_PROTOCOL_RANGE); }
+
+/** Returns whether a daemon runtime version is safe for this Skill package. */
+export function isSupportedRuntimeVersion(version: string): boolean { return isVersionInRange(version, RUNTIME_COMPATIBILITY_RANGE); }
 
 export function protocolStatus(): { name: string; version: string; runtimeVersion: string; supportedRange: string } {
   return { name: SKILL_PROTOCOL_NAME, version: SKILL_PROTOCOL_VERSION, runtimeVersion: RUNTIME_VERSION, supportedRange: SUPPORTED_PROTOCOL_RANGE };

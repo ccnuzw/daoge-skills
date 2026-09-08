@@ -56,12 +56,12 @@ test('event refresh queue merges trailing event plans into one bounded follow-up
   });
   const current = queue.request({ scope: 'context', taskOverview: true, creativeRecord: false, studioOverview: false, planVersions: false });
   queue.request({ scope: 'all', taskOverview: false, creativeRecord: true, studioOverview: false, planVersions: false, refreshContext: true, refreshAssets: true });
-  queue.request({ scope: 'context', taskOverview: false, creativeRecord: false, studioOverview: true, planVersions: true, refreshContext: false, refreshAssets: true });
+  queue.request({ scope: 'context', taskOverview: false, creativeRecord: false, studioOverview: true, planVersions: true, refreshContext: false, refreshAssets: true, refreshCanvasLayout: true, canvasLayout: true });
   first.resolve();
   await current;
   await Promise.resolve();
   assert.equal(plans.length, 2);
-  assert.deepEqual(plans[1], { scope: 'all', taskOverview: false, creativeRecord: true, studioOverview: true, planVersions: true, refreshContext: true, refreshAssets: true, refreshSelection: false, refreshSharedAssets: false });
+  assert.deepEqual(plans[1], { scope: 'all', taskOverview: false, creativeRecord: true, studioOverview: true, planVersions: true, refreshContext: true, refreshAssets: true, refreshSelection: false, refreshSharedAssets: false, refreshCanvasLayout: true, canvasLayout: true, maximumRefreshes: 4 });
   assert.equal(applied.length, 2);
   queue.dispose();
 });
@@ -81,4 +81,14 @@ test('Workbench keeps asset refresh, deferred list filtering, and selection load
   assert.doesNotMatch(delivery, /assets\.find\(/);
   assert.match(main, /selection\/batch/);
   assert.doesNotMatch(main, /Promise\.all\(candidates\.map/);
+});
+
+test('event refresh revisions are driven by event content instead of the active view', () => {
+  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  assert.doesNotMatch(main, /const detail = view ===/);
+  assert.match(main, /taskOverview: current\.taskOverview \+ \(plan\.taskOverview \? 1 : 0\)/);
+  assert.match(main, /creativeRecord: current\.creativeRecord \+ \(plan\.creativeRecord \? 1 : 0\)/);
+  assert.match(main, /studioOverview: current\.studioOverview \+ \(plan\.studioOverview \? 1 : 0\)/);
+  assert.match(main, /planVersions: current\.planVersions \+ \(plan\.planVersions \? 1 : 0\)/);
+  assert.match(main, /const refreshSnapshot = useCallback[\s\S]*refreshSelection\(\)/);
 });

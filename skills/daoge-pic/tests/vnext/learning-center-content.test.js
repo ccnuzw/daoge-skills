@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 test('learning center covers every core Studio domain with structured guidance', async () => {
   const { LEARNING_FILTERS, LEARNING_PHASES, LEARNING_TOPICS } = await import('../../web/src/learning-center-content.mjs');
   const ids = new Set(LEARNING_TOPICS.map((topic) => topic.id));
-  for (const required of ['projects', 'sessions', 'provider', 'plans', 'preflight', 'runs', 'history', 'assets', 'references', 'library', 'delivery', 'recovery', 'safety']) assert.equal(ids.has(required), true);
+  for (const required of ['projects', 'sessions', 'provider', 'plans', 'preflight', 'runs', 'history', 'assets', 'references', 'lineage', 'library', 'delivery', 'recovery', 'safety']) assert.equal(ids.has(required), true);
   assert.equal(ids.size, LEARNING_TOPICS.length);
   assert.equal(LEARNING_FILTERS.some((item) => item.id === 'assets'), true);
   assert.deepEqual(LEARNING_PHASES.map((phase) => phase.id), ['projects', 'plans', 'runs', 'assets', 'delivery']);
@@ -60,6 +60,16 @@ test('learning center matches the stable session, Provider, preflight, history, 
   const delivery = topicText('delivery');
   assert.match(delivery, /全选或取消全选交付图片/);
   assert.match(delivery, /ZIP/);
+
+  const lineage = topicText('lineage');
+  assert.match(lineage, /只保存布局、视口、分组、人工软连线和资料节点位置/);
+  assert.match(lineage, /资料节点不会预检、运行或访问 Provider/);
+  assert.match(lineage, /回到会话审阅/);
+
+  const library = topicText('library');
+  assert.match(library, /项目内打开资料库会保留当前项目壳/);
+  assert.match(library, /项目内打开资料库不关闭当前项目/);
+  assert.match(library, /不绑定任务、轮次、计划或运行/);
 });
 const fs = require('node:fs');
 const path = require('node:path');
@@ -70,7 +80,7 @@ test('learning center only deep-links to Studio-global views', () => {
   const content = fs.readFileSync(path.join(skillRoot, 'web/src/learning-center-content.mjs'), 'utf8');
   assert.match(source, /<LearningCenter onDismiss=\{dismissGuide\} onNavigate=\{\([^)]*\) => navigateRoute\(\{ view: [^}]+ \}\)\} \/>/);
   assert.match(content, /action: 'projects'/);
-  assert.match(content, /action: 'library'/);
+  assert.doesNotMatch(content, /action: 'library'/);
   assert.doesNotMatch(content, /action: 'runs'/);
   assert.doesNotMatch(content, /action: 'deliveries'/);
 });

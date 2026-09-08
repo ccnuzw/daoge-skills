@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const { createHash } = require('node:crypto');
 const { once } = require('node:events');
 const { PassThrough, Writable } = require('node:stream');
 const test = require('node:test');
@@ -152,7 +153,7 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     assert.equal(JSON.stringify(queued.body).includes('api-secret-never-in-http-response'), false);
     const runId = queued.body.data.value.id;
     const publicItems = await requestJson(started, '/api/runs/' + runId + '/items');
-    assert.deepEqual(Object.keys(publicItems.body.data.items[0]).sort(), ['attempts', 'error', 'id', 'result', 'retryAt', 'runId', 'sequence', 'status']);
+    assert.deepEqual(Object.keys(publicItems.body.data.items[0]).sort(), ['attempts', 'error', 'id', 'outputAssets', 'result', 'retryAt', 'runId', 'sequence', 'status', 'updatedAt']);
     const forbiddenItemKeys = new Set(['leaseToken', 'leaseExpiresAt', 'requestId', 'promptPayload', 'prompt_payload_json']);
     assert.equal(recursiveKeys(publicItems.body.data).some((key) => forbiddenItemKeys.has(key)), false);
     const paused = await requestJson(started, '/api/runs/' + runId + '/pause', { method: 'POST', idempotencyKey: 'pause-once', body: {} });
@@ -425,6 +426,42 @@ test('asset API returns filtered pages with the full scoped total', async () => 
     assert.equal(page.body.data.total, 30);
     assert.equal(page.body.data.assets.length, 14);
     assert.equal(page.body.data.assets.every((asset) => asset.kind === 'generated'), true);
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('project asset archive validates requested ids beyond the first listed asset page', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'archive-page-project', body: { name: '打包分页项目' } });
+    const projectId = project.body.data.value.id;
+    const studioId = initialized.manifest.studioId;
+    const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
+    const targetId = 'asset_archive_oldest';
+    const targetPath = path.join(workspaceRoot, 'daoge-assets', 'imports', targetId + '.png');
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, image);
+    const targetHash = createHash('sha256').update(image).digest('hex');
+    const insertAsset = started.service.db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertRelation = started.service.db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    insertAsset.run(targetId, studioId, 'import', 'image/png', 'daoge-assets/imports/' + targetId + '.png', targetHash, image.length, '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    insertRelation.run('relation-' + targetId, targetId, 'attached_to', 'project', projectId, '{}', '2026-01-01T00:00:00.000Z');
+    for (let index = 0; index < 500; index += 1) {
+      const id = 'asset_archive_newer_' + String(index).padStart(3, '0');
+      const createdAt = new Date(Date.UTC(2026, 0, 2, 0, 0, index)).toISOString();
+      insertAsset.run(id, studioId, 'import', 'image/png', 'daoge-assets/imports/missing-' + id + '.png', String(index).padStart(64, '0'), 1, '{}', createdAt, createdAt);
+      insertRelation.run('relation-' + id, id, 'attached_to', 'project', projectId, '{}', createdAt);
+    }
+    const archive = await fetchStudio(started, '/api/projects/' + projectId + '/assets/archive?assetId=' + targetId);
+    assert.equal(archive.status, 200);
+    const archiveBytes = Buffer.from(await archive.arrayBuffer());
+    assert.equal(archiveBytes.subarray(0, 4).toString('ascii'), 'PK\x03\x04');
+    assert.equal(archiveBytes.includes(image), true);
   } finally {
     if (started) await started.service.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });

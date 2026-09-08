@@ -117,19 +117,30 @@ test('README and authoritative specification preserve the same session-first sta
   assert.doesNotMatch(`${skill}\n${readme}\n${spec}`, /先澄清目标[^\n]*\n(?:.*\n){0,3}.*open --workspace/);
 });
 
-test('5.10.4 is the stable release contract while earlier releases remain immutable history', () => {
+test('Skill API guidance pins the protocol header and plan/history endpoints', () => {
+  const commands = markdownSection(skill, '## 受控命令');
+  assert.match(commands, /x-daoge-skill-protocol: daoge-pic-skill-protocol\/2\.0\.0/);
+  assert.match(commands, /5\.11\.0[\s\S]*绝不能当作协议版本/);
+  assert.match(commands, /GET \/api\/studio/);
+  assert.match(commands, /GET \/api\/sessions\/<session-id>\/plan-status/);
+  assert.match(commands, /GET \/api\/rounds\/<round-id>\/runs/);
+  assert.match(commands, /未找到请求的 Studio API/);
+  assert.match(commands, /不得[\s\S]*猜测 `\/api\/studio\/\.\.\./);
+});
+
+test('5.11.0 is the stable release contract while earlier releases remain immutable history', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const currentDocs = `${skill}\n${readme}\n${spec}`;
 
-  assert.equal(packageJson.version, '5.10.4');
-  assert.equal(packageLock.version, '5.10.4');
-  assert.equal(packageLock.packages[''].version, '5.10.4');
+  assert.equal(packageJson.version, '5.11.0');
+  assert.equal(packageLock.version, '5.11.0');
+  assert.equal(packageLock.packages[''].version, '5.11.0');
   for (const document of [skill, readme, evidence]) {
-    assert.match(document, /5\.10\.4/);
+    assert.match(document, /5\.11\.0/);
   }
-  assert.match(`${skill}\n${readme}`, /稳定正式版本[^。\n]{0,120}5\.10\.4/);
-  assert.doesNotMatch(currentDocs, /5\.10\.4[^。\n]{0,120}(?:待发布|候选)|(?:待发布|候选)[^。\n]{0,120}5\.10\.4/);
+  assert.match(`${skill}\n${readme}`, /稳定正式版本[^。\n]{0,120}5\.11\.0/);
+  assert.doesNotMatch(currentDocs, /5\.11\.0[^。\n]{0,120}(?:待发布|候选)|(?:待发布|候选)[^。\n]{0,120}5\.11\.0/);
   assert.match(readme, /GitHub[^。\n]*资产[^。\n]*不表示[^。\n]*npm registry/);
   assert.match(evidence, /## 1\. daoge-pic 5\.7\.0 已发布历史证据[\s\S]*daoge-pic-5\.7\.0\.tgz[\s\S]*1fb70265f4a0e7e5858be3dec7cf21ad8706c720fede7c1712e74a36678110fe/);
   const historicalEvidence = markdownSection(evidence, '## 7. daoge-pic 5.9.1 发布验证证据');
@@ -151,4 +162,7 @@ test('5.10.4 is the stable release contract while earlier releases remain immuta
   const windowsEvidence = markdownSection(evidence, '## 12. daoge-pic 5.10.4 Windows 发布验证证据');
   assert.match(windowsEvidence, /daoge-pic-v5\.10\.4[\s\S]*Node\.js 下限固定为 `22\.17\.0`[\s\S]*Windows Actions 运行 34082960741/);
   assert.match(windowsEvidence, /315 项[\s\S]*未调用真实图片 Provider/);
+  const lineageEvidence = markdownSection(evidence, '## 13. daoge-pic 5.11.0 创作谱系与历史分页验证证据');
+  assert.match(lineageEvidence, /daoge-pic-v5\.11\.0[\s\S]*Generation History[\s\S]*创作谱系/);
+  assert.match(lineageEvidence, /332 项[\s\S]*未调用真实图片 Provider/);
 });

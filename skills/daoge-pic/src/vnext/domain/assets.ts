@@ -478,6 +478,19 @@ export function listScopedStudioAssets(db: StudioDatabase, studioId: string, inp
   return (db.prepare(query).all(studioId, ...kind.values, ...condition.values, limit, offset) as unknown as StoredAsset[]).map(assetFromRow);
 }
 
+export function listScopedStudioAssetsByIds(db: StudioDatabase, studioId: string, input: { scope: AssetScope; projectId?: string; taskId?: string; roundId?: string; assetIds: string[]; includeDeleted?: boolean; deletedOnly?: boolean }): StudioAsset[] {
+  ensureStudio(db, studioId);
+  assertScopedAssetHierarchy(db, studioId, input);
+  const assetIds = [...new Set((Array.isArray(input.assetIds) ? input.assetIds : []).map((value) => String(value || '').trim()).filter(Boolean))];
+  if (!assetIds.length) return [];
+  const condition = scopedAssetCondition(input.scope, input);
+  const placeholders = assetIds.map(() => '?').join(',');
+  const query = 'SELECT a.id, a.studio_id, a.kind, a.media_type, a.storage_path, a.content_hash, a.byte_size, a.source_json, a.deleted_at FROM assets a WHERE a.studio_id = ? AND a.id IN (' + placeholders + ') AND ' + assetVisibilitySql('a', input) + ' AND (' + condition.sql + ')';
+  const rows = (db.prepare(query).all(studioId, ...assetIds, ...condition.values) as unknown as StoredAsset[]).map(assetFromRow);
+  const byId = new Map(rows.map((asset) => [asset.id, asset]));
+  return assetIds.map((assetId) => byId.get(assetId)).filter((asset): asset is StudioAsset => Boolean(asset));
+}
+
 export function countScopedStudioAssets(db: StudioDatabase, studioId: string, input: { scope: AssetScope; projectId?: string; taskId?: string; roundId?: string; includeDeleted?: boolean; deletedOnly?: boolean; kind?: AssetKind }): number {
   ensureStudio(db, studioId);
   assertScopedAssetHierarchy(db, studioId, input);

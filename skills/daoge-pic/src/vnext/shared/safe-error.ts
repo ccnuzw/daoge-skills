@@ -5,6 +5,7 @@ export function safeErrorSummary(value: unknown): string | undefined {
   const summary = value
     .replace(/^http\s+\d{3}:\s*/i, '')
     .replace(/https?:\/\/[^\s]+/gi, '[redacted-url]')
+    .replace(/(^|[\s("'=:])(?:~\/|\.{1,2}\/|[A-Za-z]:[\\/]|\/(?:Users|home|var|tmp|private|Volumes|opt|srv|mnt|media|workspace)\/)[^\s,;:"'<>|)]*/g, '$1[redacted-path]')
     .replace(/\b(?:sk|pk|rk)-[a-z0-9_-]{8,}\b/gi, '[redacted-secret]')
     .replace(/\b(?:bearer|authorization|api[_ -]?key)\s*[:=]?\s*[^\s,;]+/gi, '[redacted-secret]')
     .replace(/\s+/g, ' ')

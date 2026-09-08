@@ -8,9 +8,11 @@ const assert = require('node:assert/strict');
 const { attachStudio, initializeStudio, studioPaths, ensureAssetBucket, ensureDeliveriesDirectory, enforceSensitiveAccess, sameWorkspaceRoot } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase, appendStudioEvent, migrateStudioDatabase, studioSchemaVersion } = require('../../dist/vnext/studio/database');
 const { openOrAttachStudioSession, archiveProject, createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan, listRoundPlanVersions, VersionConflictError } = require('../../dist/vnext/domain/studio-commands');
+const { createUserTaskType, createStyleKit } = require('../../dist/vnext/domain/libraries');
 const { stageImage, archiveStagedImage, validateImageBytes, MediaValidationError } = require('../../dist/vnext/media/archive');
 const { assertRunTransition, assertRunItemTransition, StateTransitionError } = require('../../dist/vnext/domain/states');
 const { searchStudio } = require('../../dist/vnext/domain/queries');
+const { getCanvasLayout, saveCanvasLayout } = require('../../dist/vnext/domain/canvas-layouts');
 const { encodedPowerShellArguments, windowsPowerShellExecutable } = require('../../dist/vnext/shared/windows');
 
 
@@ -209,7 +211,7 @@ test('creates the vNext schema and emits monotonic Studio events', () => {
   try {
     const initialized = initializeStudio({ workspaceRoot });
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.equal(studioSchemaVersion(db), 22);
+    assert.equal(studioSchemaVersion(db), 25);
     const studio = db.prepare('SELECT id, workspace_root FROM studios WHERE id = ?').get(initialized.manifest.studioId);
     assert.equal(studio.id, initialized.manifest.studioId);
     assert.equal(studio.workspace_root, initialized.paths.workspaceRoot);
@@ -220,6 +222,76 @@ test('creates the vNext schema and emits monotonic Studio events', () => {
     closeStudioDatabase(db);
     cleanup(workspaceRoot);
   }
+});
+
+test('persists canvas layout separately from Studio business facts', () => {
+  const workspaceRoot = temporaryWorkspace();
+  let db;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    db = openStudioDatabase(initialized.paths, initialized.manifest);
+    const project = createProject(db, { studioId: initialized.manifest.studioId, name: '谱系项目', idempotencyKey: 'layout-project' }).value;
+    const empty = getCanvasLayout(db, { studioId: initialized.manifest.studioId, projectId: project.id });
+    assert.equal(empty.id, null);
+    const otherProject = createProject(db, { studioId: initialized.manifest.studioId, name: '其他项目', idempotencyKey: 'layout-other-project' }).value;
+    const timestamp = '2026-01-01T00:00:00.000Z';
+    const insertAsset = db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertRelation = db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    insertAsset.run('asset_layout_project', initialized.manifest.studioId, 'import', 'image/png', 'daoge-assets/imports/asset_layout_project.png', 'hash-layout-project', 1, '{}', timestamp, timestamp);
+    insertAsset.run('asset_layout_private', initialized.manifest.studioId, 'import', 'image/png', 'daoge-assets/imports/asset_layout_private.png', 'hash-layout-private', 1, '{}', timestamp, timestamp);
+    insertAsset.run('asset_layout_shared', initialized.manifest.studioId, 'import', 'image/png', 'daoge-assets/imports/asset_layout_shared.png', 'hash-layout-shared', 1, '{}', timestamp, timestamp);
+    insertRelation.run('relation-layout-project', 'asset_layout_project', 'attached_to', 'project', project.id, '{}', timestamp);
+    insertRelation.run('relation-layout-private', 'asset_layout_private', 'attached_to', 'project', otherProject.id, '{}', timestamp);
+    insertRelation.run('relation-layout-shared-owner', 'asset_layout_shared', 'attached_to', 'project', otherProject.id, '{}', timestamp);
+    insertRelation.run('relation-layout-shared', 'asset_layout_shared', 'shared_across_projects', 'studio', initialized.manifest.studioId, '{}', timestamp);
+    const taskType = createUserTaskType(db, { studioId: initialized.manifest.studioId, name: '电商主图', definition: { summary: '主图构图规则' }, idempotencyKey: 'layout-task-type' });
+    const styleKit = createStyleKit(db, { studioId: initialized.manifest.studioId, name: '暖色胶片', definition: { summary: '低饱和暖色' }, assetIds: [], idempotencyKey: 'layout-style-kit' });
+    const saved = saveCanvasLayout(db, { studioId: initialized.manifest.studioId, projectId: project.id, scopeType: 'project', scopeId: project.id, viewport: { x: 12, y: -8, k: 1.25 }, settings: { filter: 'selected', apiKey: 'must-redact' }, nodes: [{ entityType: 'project', entityId: project.id, x: 10, y: 20, width: 240, height: 112 }, { entityType: 'asset', entityId: 'asset_layout_project', x: 620, y: 160, width: 174, height: 208 }, { entityType: 'shared_asset', entityId: 'asset_layout_shared', x: 820, y: 160, width: 174, height: 208 }, { entityType: 'task_type', entityId: taskType.id, x: 80, y: 160, width: 230, height: 116, groupId: 'group_context' }, { entityType: 'style_kit', entityId: styleKit.id, x: 340, y: 160, width: 230, height: 116, groupId: 'group_context' }], groups: [{ id: 'group_context', title: '计划上下文', groupType: 'custom', x: 60, y: 120, width: 540, height: 180, metadata: { collapsed: false } }], links: [{ id: 'link_context', sourceType: 'style_kit', sourceId: styleKit.id, targetType: 'task_type', targetId: taskType.id, linkType: 'context', label: '计划上下文', metadata: { manual: true } }, { id: 'link_group_context', sourceType: 'group', sourceId: 'group_context', targetType: 'project', targetId: project.id, linkType: 'context', label: '分组说明', metadata: { manual: true } }] });
+    assert.equal(saved.projectId, project.id);
+    assert.deepEqual(saved.viewport, { x: 12, y: -8, k: 1.25 });
+    assert.equal(saved.settings.filter, 'selected');
+    assert.equal(Object.hasOwn(saved.settings, 'apiKey'), false);
+    assert.deepEqual(saved.groups.map((group) => [group.id, group.title]), [['group_context', '计划上下文']]);
+    assert.deepEqual(saved.links.map((link) => [link.sourceType, link.linkType, link.targetType, link.label]), [['style_kit', 'context', 'task_type', '计划上下文'], ['group', 'context', 'project', '分组说明']]);
+    assert.deepEqual(Object.fromEntries(saved.nodes.map((node) => [node.entityType, node.groupId || null])), { project: null, asset: null, shared_asset: null, task_type: 'group_context', style_kit: 'group_context' });
+    assert.throws(() => saveCanvasLayout(db, { studioId: initialized.manifest.studioId, projectId: project.id, scopeType: 'project', scopeId: project.id, viewport: {}, settings: {}, nodes: [], groups: [], links: [{ sourceType: 'brand_kit', sourceId: 'missing', targetType: 'project', targetId: project.id, linkType: 'context' }] }), /Brand kit not found/);
+    assert.throws(() => saveCanvasLayout(db, { studioId: initialized.manifest.studioId, projectId: project.id, scopeType: 'project', scopeId: project.id, viewport: {}, settings: {}, nodes: [], groups: [{ id: 'group_context', title: '计划上下文', x: 0, y: 0, width: 120, height: 120 }], links: [{ sourceType: 'group', sourceId: 'missing_group', targetType: 'project', targetId: project.id, linkType: 'context' }] }), /group endpoint/);
+    assert.throws(() => saveCanvasLayout(db, { studioId: initialized.manifest.studioId, projectId: project.id, scopeType: 'project', scopeId: project.id, viewport: {}, settings: {}, nodes: [], groups: [{ title: '缺少稳定 ID', x: 0, y: 0, width: 120, height: 120 }], links: [] }), /Canvas group id/);
+    assert.throws(() => saveCanvasLayout(db, { studioId: initialized.manifest.studioId, projectId: project.id, scopeType: 'project', scopeId: project.id, viewport: {}, settings: {}, nodes: [{ entityType: 'asset', entityId: 'asset_layout_private', x: 0, y: 0, width: 174, height: 208 }], groups: [], links: [] }), /not available to this project/);
+    assert.throws(() => saveCanvasLayout(db, { studioId: initialized.manifest.studioId, projectId: project.id, scopeType: 'project', scopeId: project.id, viewport: {}, settings: {}, nodes: [{ entityType: 'shared_asset', entityId: 'asset_layout_project', x: 0, y: 0, width: 174, height: 208 }], groups: [], links: [] }), /explicitly shared/);
+    assert.throws(() => saveCanvasLayout(db, { studioId: initialized.manifest.studioId, projectId: project.id, scopeType: 'project', scopeId: project.id, viewport: {}, settings: {}, nodes: [], groups: [], links: [{ sourceType: 'asset', sourceId: 'asset_layout_private', targetType: 'project', targetId: project.id, linkType: 'reference' }] }), /not available to this project/);
+    const event = db.prepare("SELECT event_type, payload_json FROM events WHERE entity_type = 'canvas_layout'").get();
+    assert.equal(event.event_type, 'canvas.layout_updated');
+    assert.deepEqual(JSON.parse(event.payload_json), { projectId: project.id, scopeType: 'project', scopeId: project.id, nodeCount: 5, groupCount: 1, linkCount: 2 });
+  } finally {
+    closeStudioDatabase(db);
+    cleanup(workspaceRoot);
+  }
+});
+
+test('exports canvas lineage as a redacted planning artifact', async () => {
+  const { createLineageExport, lineageExportFilename } = await import('../../web/src/lineage-export-model.mjs');
+  const payload = createLineageExport({
+    generatedAt: '2026-01-02T03:04:05.678Z',
+    project: { id: 'project_alpha123456', name: '谱系 项目', description: '公开描述 /Users/apple/private-project sk-projectsecret123', apiKey: 'must-not-leak' },
+    scope: { type: 'project', id: 'project_alpha123456' },
+    nodes: [{ entityType: 'asset', entityId: 'asset_abcdefgh987', title: '成果图 sk-nodesecret123', status: 'keep', subtitle: '已选成果 /Users/apple/private.png', selectedAsset: true, sharedAsset: true, deliveredAsset: true, mediaUnavailable: true, entity: { storagePath: '/Users/apple/private.png', contentHash: 'hash-value' } }],
+    groups: [{ id: 'group_context123', title: '计划上下文 /home/private', groupType: 'custom', metadata: { collapsed: true, token: 'hidden' } }],
+    links: [{ linkType: 'reference', label: '参考自 bearer secret-token-value', sourceType: 'asset', sourceId: 'asset_abcdefgh987', targetType: 'group', targetId: 'group_context123' }]
+  });
+
+  assert.deepEqual(payload.project, { shortId: 'alpha123', name: '谱系 项目', description: '公开描述 [redacted-path] [redacted-secret]' });
+  assert.deepEqual(payload.summary, { nodes: 1, groups: 1, links: 1 });
+  assert.deepEqual(payload.nodes[0].flags, { selected: true, shared: true, delivered: true, externalShared: false, unavailable: true });
+  assert.equal(payload.groups[0].shortId, 'context1');
+  assert.deepEqual(payload.links[0].source, { type: 'asset', shortId: 'abcdefgh' });
+  assert.deepEqual(payload.links[0].target, { type: 'group', shortId: 'context1' });
+  assert.equal(JSON.stringify(payload).includes('must-not-leak'), false);
+  assert.equal(JSON.stringify(payload).includes('/Users/apple/private.png'), false);
+  assert.equal(JSON.stringify(payload).includes('/home/private'), false);
+  assert.equal(JSON.stringify(payload).includes('secret-token-value'), false);
+  assert.equal(JSON.stringify(payload).includes('sk-nodesecret123'), false);
+  assert.equal(lineageExportFilename(' A/B * C ', new Date('2026-01-02T03:04:05.678Z')), 'A-B-C-创作谱系-2026-01-02T03-04-05.json');
 });
 
 
@@ -277,7 +349,7 @@ test('migrates v15 media operation identity fields whether the legacy table is p
       migrateStudioDatabase(db);
       const columns = db.prepare('PRAGMA table_info(asset_media_operations)').all().map((column) => column.name);
       assert.deepEqual(columns, ['id', 'studio_id', 'asset_id', 'operation', 'source_path', 'target_path', 'asset_json', 'relation_json', 'created_at', 'expected_hash', 'expected_size', 'expected_media_type', 'phase']);
-      assert.equal(studioSchemaVersion(db), 22);
+      assert.equal(studioSchemaVersion(db), 25);
       const migrated = db.prepare('SELECT expected_hash, expected_size, expected_media_type, phase FROM asset_media_operations WHERE id = ?').get('operation_v15');
       assert.deepEqual(migrated ? { ...migrated } : null, legacyTablePresent ? { expected_hash: null, expected_size: null, expected_media_type: null, phase: 'prepared' } : null);
       if (legacyTablePresent) {
@@ -466,7 +538,7 @@ test('migrates v16 journals and task types without assigning ambiguous user data
       db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('official_migration_type', '旧官方类型', '{}', 'official', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       db.prepare('INSERT INTO task_types (id, name, definition_json, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('user_migration_type', '旧用户类型', '{}', 'user', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
       migrateStudioDatabase(db);
-      assert.equal(studioSchemaVersion(db), 22);
+      assert.equal(studioSchemaVersion(db), 25);
       const journalPrimaryKey = db.prepare('PRAGMA table_info(delivery_export_journal)').all().filter((column) => column.pk > 0).sort((left, right) => left.pk - right.pk).map((column) => column.name);
       assert.deepEqual(journalPrimaryKey, ['studio_id', 'idempotency_key']);
       const migratedJournal = db.prepare('SELECT studio_id, delivery_id FROM delivery_export_journal WHERE idempotency_key = ?').get('legacy-export-key');
@@ -522,11 +594,11 @@ test('rejects future Studio database and metadata versions without retaining a d
     db = null;
     assert.throws(() => openStudioDatabase(initialized.paths, initialized.manifest), /manifest schema is newer/);
     db = new DatabaseSync(initialized.paths.databasePath);
-    db.prepare('UPDATE studios SET schema_version = 22 WHERE id = ?').run(initialized.manifest.studioId);
+    db.prepare('UPDATE studios SET schema_version = 25 WHERE id = ?').run(initialized.manifest.studioId);
     closeStudioDatabase(db);
     db = null;
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.equal(studioSchemaVersion(db), 22);
+    assert.equal(studioSchemaVersion(db), 25);
   } finally {
     closeStudioDatabase(db);
     cleanup(workspaceRoot);

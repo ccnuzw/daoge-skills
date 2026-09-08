@@ -31,4 +31,9 @@ test('route refresh signature changes for popstate route and every scope dimensi
     assert.match(routeRefreshSignature({ ...base, assetScope: scope }), new RegExp(scope + '$'));
   }
   assert.equal(new Set(['round', 'task', 'project', 'studio'].map((scope) => routeRefreshSignature({ ...base, assetScope: scope }))).size, 4);
+  const runBase = { ...base, view: 'runs', runItemFilter: 'all', runItemPage: 1, runItemPageSize: 50, runItemSequence: null };
+  assert.notEqual(routeRefreshSignature(runBase), routeRefreshSignature({ ...runBase, runItemPage: 2 }));
+  assert.notEqual(routeRefreshSignature(runBase), routeRefreshSignature({ ...runBase, runItemFilter: 'attention' }));
+  assert.notEqual(routeRefreshSignature(runBase), routeRefreshSignature({ ...runBase, runItemPageSize: 100 }));
+  assert.notEqual(routeRefreshSignature(runBase), routeRefreshSignature({ ...runBase, runItemSequence: 42 }));
 });

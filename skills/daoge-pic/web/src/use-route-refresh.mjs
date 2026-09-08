@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 
 export function routeRefreshSignature(route) {
-  return [route.view, route.projectId || '', route.taskId || '', route.roundId || '', (route.compareRoundIds || []).join('|'), route.runId || '', route.assetScope].join(':');
+  const runItemControls = route.view === 'runs' ? [route.runItemFilter || '', route.runItemPage ?? '', route.runItemPageSize ?? '', route.runItemSequence ?? ''] : [];
+  return [route.view, route.projectId || '', route.taskId || '', route.roundId || '', (route.compareRoundIds || []).join('|'), route.runId || '', route.assetScope, ...runItemControls].join(':');
 }
 
 export function createLatestRequestGate() {

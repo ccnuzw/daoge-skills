@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 
 const { openWorkbenchUrl } = require('../../dist/vnext/cli/open-workbench');
 const { shutdownVerifiedDaemon } = require('../../dist/vnext/cli/legacy-daemon');
-const { main, parseCommand, materializeStdinJson, assertImplicitStudioCreationAllowed } = require('../../dist/vnext/cli/daoge');
+const { main, parseCommand, materializeStdinJson, assertImplicitStudioCreationAllowed, daemonCompatible } = require('../../dist/vnext/cli/daoge');
 const { matchesDaemonProcess, queryProcessArguments } = require('../../dist/vnext/cli/process-identity');
 const { registerSkill } = require('../../dist/vnext/cli/register-skill');
 const { doctorWorkspace, inspectWindowsVolume, inspectWorkspaceSupport, redactDoctorReport } = require('../../dist/vnext/cli/doctor');
@@ -338,6 +338,39 @@ function shutdownResponse() {
   return new Response(JSON.stringify({ ok: true, data: { shuttingDown: true } }), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
+function studioStatusResponse(studioId, protocol = {}) {
+  return new Response(JSON.stringify({
+    ok: true,
+    data: {
+      studioId,
+      protocol: {
+        name: protocol.name || 'daoge-pic-skill-protocol',
+        version: protocol.version || '2.0.0',
+        runtimeVersion: protocol.runtimeVersion || '5.11.0',
+        supportedRange: protocol.supportedRange || '>=2.0.0 <3.0.0'
+      }
+    }
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+}
+
+test('CLI daemon reuse requires the authenticated Studio protocol endpoint and compatible runtime', async () => {
+  const runtime = { pid: 4242, url: 'http://127.0.0.1:43123', capability: 'c'.repeat(43), workspaceRoot: '/tmp/daoge runtime check' };
+  const requests = [];
+  const compatible = await daemonCompatible(runtime, 'studio-runtime', async (input, init) => {
+    requests.push({ url: String(input), init });
+    return studioStatusResponse('studio-runtime');
+  });
+  assert.equal(compatible, true);
+  assert.deepEqual(requests.map((request) => request.url), ['http://127.0.0.1:43123/api/studio']);
+  assert.equal(requests[0].init.headers.authorization, 'Bearer ' + runtime.capability);
+  assert.equal(requests[0].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/2.0.0');
+
+  assert.equal(await daemonCompatible(runtime, 'studio-runtime', async () => studioStatusResponse('studio-runtime', { runtimeVersion: '5.10.3' })), false);
+  assert.equal(await daemonCompatible(runtime, 'studio-runtime', async () => studioStatusResponse('studio-runtime', { version: '1.9.0' })), false);
+  assert.equal(await daemonCompatible(runtime, 'studio-runtime', async () => new Response(JSON.stringify({ ok: false, error: { message: '未找到请求的 Studio API。' } }), { status: 404, headers: { 'content-type': 'application/json' } })), false);
+  assert.equal(await daemonCompatible({ ...runtime, capability: undefined }, 'studio-runtime'), false);
+});
+
 test('recorded daemon shuts down only after runtime, lock, manifest, health, entry, and workspace identities match', async () => {
   const manifest = { studioId: 'studio-manifest', workspaceRoot: '/tmp/daoge legacy workspace' };
   const runtime = { pid: 4242, url: 'http://127.0.0.1:43123/', capability: 'c'.repeat(43), workspaceRoot: manifest.workspaceRoot };
@@ -367,6 +400,34 @@ test('recorded daemon shuts down only after runtime, lock, manifest, health, ent
   assert.equal(requests[1].init.headers['x-daoge-operation-name'], 'daemon-shutdown');
   assert.equal(requests[1].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/2.0.0');
   assert.deepEqual(processQueries, [runtime.pid]);
+});
+
+test('recorded daemon retries shutdown without the protocol header for legacy protocol rejections', async () => {
+  const manifest = { studioId: 'studio-manifest', workspaceRoot: '/tmp/daoge legacy workspace' };
+  const runtime = { pid: 4242, url: 'http://127.0.0.1:43123/', capability: 'c'.repeat(43), workspaceRoot: manifest.workspaceRoot };
+  const daemonEntry = '/opt/daoge/dist/vnext/daemon/daemon-entry.js';
+  const shutdownRequests = [];
+
+  await shutdownVerifiedDaemon(runtime, {
+    workspaceRoot: manifest.workspaceRoot,
+    studioId: manifest.studioId,
+    lockPid: runtime.pid,
+    daemonEntry
+  }, {
+    fetch: async (input, init) => {
+      if (String(input).endsWith('/api/health')) return healthResponse(manifest.studioId);
+      shutdownRequests.push(init);
+      if (shutdownRequests.length === 1) {
+        return new Response(JSON.stringify({ ok: false, error: { message: 'Skill 协议不兼容；daemon 支持 >=1.0.0 <2.0.0。' } }), { status: 400, headers: { 'content-type': 'application/json' } });
+      }
+      return shutdownResponse();
+    },
+    queryProcessArguments: () => [process.execPath, daemonEntry, '--workspace', manifest.workspaceRoot]
+  });
+
+  assert.equal(shutdownRequests.length, 2);
+  assert.equal(shutdownRequests[0].headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/2.0.0');
+  assert.equal(Object.prototype.hasOwnProperty.call(shutdownRequests[1].headers, 'x-daoge-skill-protocol'), false);
 });
 
 test('daemon process identity accepts a registered Skill symlink to the same entry', () => {

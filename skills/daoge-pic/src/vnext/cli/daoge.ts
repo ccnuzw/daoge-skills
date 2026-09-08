@@ -6,7 +6,7 @@ import { openWorkbenchUrl } from './open-workbench';
 import { MAX_GLOBAL_CONCURRENCY, MIN_EXECUTION_CONCURRENCY } from '../studio/runtime-settings';
 import { healthStudioId, shutdownVerifiedDaemon } from './legacy-daemon';
 import { readStudioManifest, sameWorkspaceRoot, studioPaths } from '../studio/workspace';
-import { SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
+import { isSupportedProtocolVersion, isSupportedRuntimeVersion, SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
 import { registerSkill, SkillRegistrationScope } from './register-skill';
 import { assertWorkspaceSupported, doctorWorkspace, formatDoctorReport, redactDoctorReport } from './doctor';
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
@@ -97,6 +97,41 @@ async function healthy(url: string, expectedStudioId?: string): Promise<boolean>
   return Boolean(studioId && (!expectedStudioId || studioId === expectedStudioId));
 }
 
+
+function jsonRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringField(record: Record<string, unknown>, field: string): string {
+  const value = record[field];
+  return typeof value === 'string' ? value : '';
+}
+
+function studioStatusCompatible(value: unknown, expectedStudioId: string): boolean {
+  const data = jsonRecord(value);
+  if (!data || stringField(data, 'studioId') !== expectedStudioId) return false;
+  const protocol = jsonRecord(data.protocol);
+  return Boolean(protocol
+    && stringField(protocol, 'name') === SKILL_PROTOCOL_NAME
+    && isSupportedProtocolVersion(stringField(protocol, 'version'))
+    && isSupportedRuntimeVersion(stringField(protocol, 'runtimeVersion')));
+}
+
+export async function daemonCompatible(record: RuntimeRecord, expectedStudioId: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  if (!record.capability) return false;
+  try {
+    const response = await fetchImpl(new URL('/api/studio', record.url), {
+      headers: { accept: 'application/json', authorization: 'Bearer ' + record.capability, 'x-daoge-skill-protocol': SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION },
+      signal: AbortSignal.timeout(800)
+    });
+    if (!response.ok) return false;
+    const payload = await response.json() as { ok?: unknown; data?: unknown };
+    return payload.ok === true && studioStatusCompatible(payload.data, expectedStudioId);
+  } catch {
+    return false;
+  }
+}
+
 function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
 function assertSupportedNodeRuntime(): void {
@@ -185,21 +220,25 @@ async function stopSpawnedDaemon(child: ChildProcess): Promise<void> {
 async function restartDaemon(workspaceRoot: string): Promise<{ previousPid: number | null; daemon: RuntimeRecord }> {
   const existing = readRuntime(workspaceRoot);
   const previousPid = existing?.pid || null;
-  if (existing?.capability && await healthy(existing.url, readStudioId(workspaceRoot))) {
-    const previousStartedAt = existing.startedAt;
-    await api(existing, 'POST', '/api/restart', {}, 'daemon-restart-' + randomUUID());
-    for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
-      await sleep(100);
-      const restarted = readRuntime(workspaceRoot);
-      if (restarted?.pid === existing.pid
-        && restarted.capability === existing.capability
-        && restarted.startedAt
-        && restarted.startedAt !== previousStartedAt
-        && await healthy(restarted.url, readStudioId(workspaceRoot))) {
-        return { previousPid, daemon: restarted };
+  if (existing?.capability) {
+    const studioId = readStudioId(workspaceRoot);
+    if (await healthy(existing.url, studioId) && await daemonCompatible(existing, studioId)) {
+      const previousStartedAt = existing.startedAt;
+      await api(existing, 'POST', '/api/restart', {}, 'daemon-restart-' + randomUUID());
+      for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
+        await sleep(100);
+        const restarted = readRuntime(workspaceRoot);
+        if (restarted?.pid === existing.pid
+          && restarted.capability === existing.capability
+          && restarted.startedAt
+          && restarted.startedAt !== previousStartedAt
+          && await healthy(restarted.url, studioId)
+          && await daemonCompatible(restarted, studioId)) {
+          return { previousPid, daemon: restarted };
+        }
       }
+      throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内完成受控重启。');
     }
-    throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内完成受控重启。');
   }
   if (existing) await stopRecordedDaemon(workspaceRoot, existing);
   return { previousPid, daemon: await ensureDaemon(workspaceRoot) };
@@ -209,7 +248,7 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
   const existing = readRuntime(workspaceRoot);
   if (existing) {
     const studioId = readStudioId(workspaceRoot);
-    if (existing.capability && await healthy(existing.url, studioId)) return existing;
+    if (existing.capability && await healthy(existing.url, studioId) && await daemonCompatible(existing, studioId)) return existing;
     await stopRecordedDaemon(workspaceRoot, existing);
   }
   const daemonEntry = path.resolve(__dirname, 'daemon.js');
@@ -221,7 +260,8 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
     await sleep(100);
     if (spawnError) throw spawnError;
     const started = readRuntime(workspaceRoot);
-    if (started?.capability && await healthy(started.url, readStudioId(workspaceRoot))) {
+    const studioId = started ? readStudioId(workspaceRoot) : '';
+    if (started?.capability && await healthy(started.url, studioId) && await daemonCompatible(started, studioId)) {
       if (started.pid === child.pid) child.unref();
       else await stopSpawnedDaemon(child);
       return started;

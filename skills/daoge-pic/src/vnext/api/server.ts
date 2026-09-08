@@ -13,13 +13,14 @@ import { probeHttpEndpoint } from '../providers/http-safety';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getRound, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, getDryRunPreview, getGenerationRun, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { StateTransitionError } from '../domain/states';
-import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
+import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listScopedStudioAssetsByIds, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { getLatestRun, listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { completeDeliveryStepAsync, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDeliveryAsync, getDelivery, listDeliveries, openDeliveryExportFileAsync, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
 import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
 import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
 import { listProjectSelectionAssets, setProjectAssetSelected, setProjectAssetsSelected } from '../domain/project-selections';
+import { getCanvasLayout, saveCanvasLayout, CanvasLayoutScopeType } from '../domain/canvas-layouts';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { studioEventWindow } from './events';
 import { discardStagedImage, MediaArchiveError, MediaValidationError, openVerifiedManagedFileAsync, stageImageStream, VerifiedManagedFile } from '../media/archive';
@@ -521,6 +522,13 @@ export class LocalStudioService {
       }
       const projectSelectionMatch = /^\/api\/projects\/([^/]+)\/selection$/.exec(parsed.pathname);
       if (request.method === 'GET' && projectSelectionMatch) return success(response, { selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectSelectionMatch[1]) });
+      const canvasLayoutMatch = /^\/api\/projects\/([^/]+)\/canvas-layout$/.exec(parsed.pathname);
+      if (request.method === 'GET' && canvasLayoutMatch) {
+        this.assertProjectInStudio(canvasLayoutMatch[1]);
+        const scopeType = (parsed.searchParams.get('scopeType') || 'project') as CanvasLayoutScopeType;
+        const scopeId = parsed.searchParams.get('scopeId') || canvasLayoutMatch[1];
+        return success(response, { layout: getCanvasLayout(this.db, { studioId: this.initialized.manifest.studioId, projectId: canvasLayoutMatch[1], scopeType, scopeId }) });
+      }
       const assetImpactMatch = /^\/api\/assets\/([^/]+)\/impact$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetImpactMatch) return success(response, { impact: getAssetImpact(this.db, this.initialized.manifest.studioId, assetImpactMatch[1]) });
       const assetProvenanceMatch = /^\/api\/assets\/([^/]+)\/provenance$/.exec(parsed.pathname);
@@ -548,7 +556,11 @@ export class LocalStudioService {
       const roundMatch = /^\/api\/tasks\/([^/]+)\/rounds$/.exec(parsed.pathname);
       if (request.method === 'GET' && roundMatch) return success(response, { rounds: listRounds(this.db, this.initialized.manifest.studioId, roundMatch[1]) });
       const creativeRecordMatch = /^\/api\/rounds\/([^/]+)\/creative-record$/.exec(parsed.pathname);
-      if (request.method === 'GET' && creativeRecordMatch) return success(response, { record: getRoundCreativeRecord(this.db, this.initialized.manifest.studioId, creativeRecordMatch[1], parsed.searchParams.get('runId') || undefined) });
+      if (request.method === 'GET' && creativeRecordMatch) {
+        const includeItemsValue = parsed.searchParams.get('includeItems');
+        if (includeItemsValue !== null && !['0', '1'].includes(includeItemsValue)) throw new InvalidCommandError('includeItems 只支持 0 或 1。');
+        return success(response, { record: getRoundCreativeRecord(this.db, this.initialized.manifest.studioId, creativeRecordMatch[1], parsed.searchParams.get('runId') || undefined, includeItemsValue !== '0') });
+      }
       const planVersionsMatch = /^\/api\/rounds\/([^/]+)\/plan-versions$/.exec(parsed.pathname);
       if (request.method === 'GET' && planVersionsMatch) return success(response, { planVersions: listRoundPlanVersions(this.db, this.initialized.manifest.studioId, planVersionsMatch[1]) });
       const dryRunsMatch = /^\/api\/rounds\/([^/]+)\/dry-runs$/.exec(parsed.pathname);
@@ -556,7 +568,16 @@ export class LocalStudioService {
       const runMatch = /^\/api\/rounds\/([^/]+)\/runs$/.exec(parsed.pathname);
       if (request.method === 'GET' && runMatch) return success(response, { runs: listRuns(this.db, this.initialized.manifest.studioId, runMatch[1]) });
       const runItemsMatch = /^\/api\/runs\/([^/]+)\/items$/.exec(parsed.pathname);
-      if (request.method === 'GET' && runItemsMatch) return success(response, { items: listRunItemsForQuery(this.db, this.initialized.manifest.studioId, runItemsMatch[1]) });
+      if (request.method === 'GET' && runItemsMatch) {
+        const sort = parsed.searchParams.get('sort');
+        if (sort && sort !== 'sequence') throw new InvalidCommandError('运行项只支持按序号排序。');
+        return success(response, listRunItemsForQuery(this.db, this.initialized.manifest.studioId, runItemsMatch[1], {
+          page: parsed.searchParams.get('page') || undefined,
+          pageSize: parsed.searchParams.get('pageSize') || undefined,
+          statuses: parsed.searchParams.getAll('status'),
+          sequence: parsed.searchParams.get('sequence') || undefined
+        }));
+      }
       const assetFileMatch = /^\/api\/assets\/([^/]+)\/file$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetFileMatch) return await this.assetFile(request, response, assetFileMatch[1], parsed.searchParams.get('download') === '1');
       const assetThumbnailMatch = /^\/api\/assets\/([^/]+)\/thumbnail$/.exec(parsed.pathname);
@@ -661,6 +682,15 @@ export class LocalStudioService {
         return setProjectAssetsSelected(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetIds, selected });
       }), { projectId, assetIds, selected, keepAssetIds });
       return success(response, { ...updated.value, selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectId) });
+    }
+    const canvasLayoutMatch = /^\/api\/projects\/([^/]+)\/canvas-layout$/.exec(pathname);
+    if (canvasLayoutMatch && request.method === 'POST') {
+      const projectId = canvasLayoutMatch[1];
+      this.assertProjectInStudio(projectId);
+      const scopeType = (text(body.scopeType) || 'project') as CanvasLayoutScopeType;
+      const scopeId = text(body.scopeId) || projectId;
+      const saved = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'canvas.layout', () => saveCanvasLayout(this.db, { studioId: this.initialized.manifest.studioId, projectId, scopeType, scopeId, viewport: record(body.viewport) as never, settings: record(body.settings), nodes: Array.isArray(body.nodes) ? body.nodes as never : [], groups: Array.isArray(body.groups) ? body.groups as never : [], links: Array.isArray(body.links) ? body.links as never : [] }), { projectId, scopeType, scopeId, viewport: record(body.viewport), settings: record(body.settings), nodes: Array.isArray(body.nodes) ? body.nodes : [], groups: Array.isArray(body.groups) ? body.groups : [], links: Array.isArray(body.links) ? body.links : [] });
+      return success(response, { layout: saved.value });
     }
     if (pathname === '/api/projects') {
       const created = createProject(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), description: text(body.description) || undefined, sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
@@ -985,7 +1015,7 @@ export class LocalStudioService {
     const project = this.db.prepare('SELECT name FROM projects WHERE id = ? AND studio_id = ?').get(projectId, this.initialized.manifest.studioId) as { name: string } | undefined;
     if (!project) throw new StudioNotFoundError('项目不存在：' + projectId);
     const assetIds = [...new Set(requestedAssetIds.map((value) => value.trim()).filter(Boolean))];
-    const projectAssets = listScopedStudioAssets(this.db, this.initialized.manifest.studioId, { scope: 'project', projectId, limit: 500 });
+    const projectAssets = listScopedStudioAssetsByIds(this.db, this.initialized.manifest.studioId, { scope: 'project', projectId, assetIds });
     const available = new Map(projectAssets.map((asset) => [asset.id, asset]));
     const assets = assetIds.map((assetId) => {
       const asset = available.get(assetId);

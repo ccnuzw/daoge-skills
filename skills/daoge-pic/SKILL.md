@@ -5,7 +5,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.10.4`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)。本文件定义 5.10.4 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0)。本文件定义 5.11.0 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
 
 用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
@@ -179,9 +179,11 @@ node scripts/daoge.js status --workspace <path>
 
 Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接写 Studio 文件、SQLite 或运行状态。
 
+同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.11.0` 是制品/运行时版本，绝不能当作协议版本放入该 header。`GET /api/studio` 是唯一协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History 的运行列表。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝，Skill 必须改用正确端点或受控 CLI，而不是猜测 `/api/studio/...`、旧命令或工作区文件。
+
 ## 幂等命令恢复
 
-所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、稳定运行时 `5.10.4`；不兼容协议由 daemon 拒绝。
+所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、稳定运行时 `5.11.0`；不兼容协议由 daemon 拒绝。
 
 ## 运行恢复与媒体边界
 
@@ -193,7 +195,7 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 - daemon 启动时固定 active Profile 的 `profileId + configVersion`、Provider、模型和端点身份。活动 Profile、模型、端点、密钥、options 或 configVersion 变化后标记 `restartRequired`；重启前拒绝新运行，已有运行不静默切换。Worker 只领取与启动快照 `profileId + configVersion` 匹配的运行。
 - 并发只属于 Generation Run：持久队列的全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Provider 活跃请求安全目标上限为 `100`，daemon 通过自适应 Governor 按成功率、429、临时故障和 Worker RSS/外部内存样本动态升降；目标初始为 `16`，异常时退避，健康时逐步升至 `100`。大响应优先流式写入临时文件，只有不超过 `1 MiB` 的 Provider 图片结果保留为内存 Buffer。
 - daemon owner 负责工作区创建、数据库迁移与敏感路径权限强化；Windows 将当前批次中的敏感目录、manifest、SQLite 及 sidecar 在一个 PowerShell 进程中设置并复核 DACL，ACL 最长等待 10 秒。Generation/media Worker 只附加已完成初始化的 manifest 与数据库，不写 `.gitignore`、不迁移 schema、不修改 ACL。Worker 池按需求从零启动，generation pool 在持续满载时逐个扩容；两类池都公开脱敏健康状态、job watchdog、稳定窗口、有界重启和最终熔断，调用不得永久等待。
-- Schema v22 保留历史业务数据，补齐媒体操作 owner/heartbeat、运行项 lease worker、资产媒体健康状态、运行/预检/事件与媒体恢复索引，以及完整性校验。Studio DB 强制 WAL 与 `synchronous=FULL`。
+- Schema v25 保留历史业务数据，补齐媒体操作 owner/heartbeat、运行项 lease worker、资产媒体健康状态、运行/预检/事件与媒体恢复索引、Workbench 创作谱系布局表、人工软连线、资料节点布局，以及完整性校验。Studio DB 强制 WAL 与 `synchronous=FULL`。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。活动 journal 由 owner heartbeat 保护，恢复只处理过期遗留项；同哈希竞争收敛到唯一资产，交付同一冻结目录的并发导出收敛到同一结果。
 - 缺失媒体持久标记为不可用，不得作为参考图、遮罩或交付候选；对账确认恢复后才重新可用。过期 staging `.part` 文件只在不属于活动 journal 时清理。
 - 参考图和遮罩只能引用当前项目资产，或具备当前 Studio 明确 `shared_across_projects` 关系的共享素材；计划写入、确认、预检、排队和 Worker 读取前都必须重复校验。其他项目未共享素材不得因同属 Studio 而被引用。
@@ -213,7 +215,7 @@ Workbench 的普通“完成交付”通过内部 `/api/deliveries/complete` API
 
 ## Workbench 边界与可访问性
 
-Workbench 可用于：项目/任务/轮次导航、Generation History、SSE 实时状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。参考图选择只显示当前项目资产与明确共享素材。
+Workbench 可用于：项目/任务/轮次导航、创作谱系画布、Generation History、SSE 实时状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。创作谱系只保存节点位置、视口、筛选和分组等布局状态，项目/任务/轮次/运行/资产/交付事实仍以 Studio API/SQLite 为准。参考图选择只显示当前项目资产与明确共享素材。
 
 Workbench 顶部必须持续显示 daemon 与 Worker 池的脱敏健康状态。受控重启依次呈现“正在安全关闭”“正在重连”“已恢复”；重连后先刷新权威快照。池连续恢复失败时可执行授权的安全重启，并可复制不含 Provider 密钥、完整 URL、capability 或工作区路径的诊断摘要。
 

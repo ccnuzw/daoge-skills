@@ -4,7 +4,7 @@
 
 验证证据随 npm 包分发供维护者审计，但不是 Studio 运行时依赖；外部不可变资产与摘要由源码仓库和对应 GitHub Release 保存。
 
-当前稳定正式版本为 [`5.10.4`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)。下列章节按版本隔离发布事实；5.10.3 及更早章节保持历史证据。
+当前稳定正式版本为 [`5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0)。下列章节按版本隔离发布事实；5.10.4 及更早章节保持历史证据。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -271,3 +271,28 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - 本地 `npm run bench:perf`：Schema v22 空 Studio control-plane 构造 `41.90 ms`，需求前 media process 为 `0`；100000 pending 队列领取 1000 项为 `132.48 ms`，RSS `107.7 MiB`。
 - [Windows Actions 运行 34082960741](https://github.com/ccnuzw/daoge-skills/actions/runs/34082960741) 在最终 PR commit `b12bbc6ae42338d69a717c838dba6ad45c120119` 上完成 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组矩阵，四组均成功。每组 `npm test` 共 315 项，311 通过、0 失败、0 取消、4 项 Windows symlink 用例按平台条件跳过；每组 `npm run test:package` 均为 122 个文件且 `unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，真实 bin、注册、doctor 与 `sharp` 全部通过。四份脱敏 doctor 报告均为 `ok: true`，原子 rename、SQLite 排他锁、私有 DACL、NTFS/固定磁盘、默认浏览器和 `sharp` 检查全部通过；空 Studio 的 media process 均为 `0`，100000 项队列领取 1000 项耗时范围为 `157.55–231.35 ms`。
 - 所有本地回归和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。
+
+## 13. daoge-pic 5.11.0 创作谱系与历史分页验证证据
+
+本节对应 [`daoge-pic-v5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0) 的发布源码与不可变 `.tgz` 制品。`5.10.4` 及更早章节是不可改写的历史证据。
+
+### Workbench 与历史数据边界
+
+- Generation History 改为运行项服务端分页，支持 25/50/100 页大小、状态筛选、序号定位、精确状态计数、输出缩略图、可重试项本页选择和 URL 持久化；大型批次只读取当前页。
+- 创作谱系完整加载当前范围内所有 run items 与 assets，而不是只取首批分页；画布覆盖项目、任务、轮次、计划、运行、运行项、资产、共享素材、交付和资料节点。
+- 创作谱系只持久化布局、视口、筛选、分组和人工软连线；项目、任务、轮次、运行、资产、评审和交付事实仍以 Studio API/SQLite 为准。
+
+### 安全与协议边界
+
+- Bearer Skill/CLI 请求必须声明 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.11.0` 是制品/运行时版本，不得作为协议版本。
+- CLI 复用 daemon 前读取 `/api/studio` 并校验协议名称、协议范围、运行时兼容范围与 Studio ID；不兼容 daemon 会被安全重启。
+- 项目资产 ZIP 按请求 `assetId` 做 scoped 查询、保序返回和缺失拒绝，避免分页窗口外的已选图片被错误排除。
+- 创作谱系导出只保留公开摘要，过滤 Provider、完整 URL、路径、token、content hash、storage path、capability、cookie 和外部请求字段。
+
+### 已执行验证
+
+- macOS 本地 `npm test`：332 项，330 通过、0 失败、0 取消、2 项仅 Windows 实机用例跳过；覆盖 Generation History 分页、创作谱系完整加载、协议门禁、项目资产 ZIP、Workbench 可访问性和现有全量回归。
+- 浏览器实测 1440×1000：临时 daemon 与 Workbench 授权成功，Lineage 路由显示测试项目/任务/轮次，渲染 4 个谱系节点且无 fatal/error alert；归档确认弹窗为 `role="dialog"` + `aria-modal="true"`，初始焦点在取消按钮。
+- 本地 `npm run test:package`：构建 TypeScript 与 Vite Workbench 成功；发布清单 124 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 的真实 bin、注册链接、doctor 与 `sharp` 均通过。
+- 最终制品 `daoge-pic-5.11.0.tgz` 的大小和 SHA-256 记录在包外 `daoge-pic-5.11.0.tgz.sha256` sidecar、仓库变更记录与发布说明中；本文件随制品发布，不嵌入会改变自身内容的哈希。
+- 所有本地回归、打包和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。

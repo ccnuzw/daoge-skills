@@ -1,6 +1,9 @@
-export const WORKBENCH_VIEWS = ['projects', 'project-overview', 'tasks', 'assets', 'runs', 'studio-overview', 'prompts', 'library', 'shared-assets', 'guide', 'deliveries', 'trash'];
+import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, normalizeRunItemFilter, normalizeRunItemPageNumber, normalizeRunItemPageSize, normalizeRunItemSequence } from './run-item-pagination.mjs';
+
+export const WORKBENCH_VIEWS = ['projects', 'project-overview', 'lineage', 'tasks', 'assets', 'runs', 'studio-overview', 'prompts', 'library', 'shared-assets', 'guide', 'deliveries', 'trash'];
 export const STUDIO_VIEWS = ['projects', 'library', 'shared-assets', 'guide'];
 export const ASSET_SCOPES = ['round', 'task', 'project', 'studio'];
+const PROJECT_CONTEXT_STUDIO_VIEWS = ['library', 'guide'];
 
 export const WORKBENCH_VIEW_RENDERERS = Object.freeze(Object.fromEntries(WORKBENCH_VIEWS.map((view) => [view, view])));
 
@@ -21,13 +24,37 @@ export function isStudioView(view) {
   return STUDIO_VIEWS.includes(view);
 }
 
+function studioViewKeepsProject(view) {
+  return PROJECT_CONTEXT_STUDIO_VIEWS.includes(view);
+}
+function runItemControls(route) {
+  return {
+    runItemFilter: normalizeRunItemFilter(route.runItemFilter),
+    runItemPage: normalizeRunItemPageNumber(route.runItemPage),
+    runItemPageSize: normalizeRunItemPageSize(route.runItemPageSize),
+    runItemSequence: normalizeRunItemSequence(route.runItemSequence)
+  };
+}
+
+
 function normalizeRoute(route) {
   const view = known(route.view, WORKBENCH_VIEWS, 'projects');
-  if (isStudioView(view)) return { view, projectId: null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'studio' };
+  const controls = view === 'runs' ? runItemControls(route) : {};
+  if (isStudioView(view)) {
+    const projectId = studioViewKeepsProject(view) ? route.projectId || null : null;
+    return { view, projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: projectId ? 'project' : 'studio' };
+  }
   const projectId = route.projectId || null;
   if (!projectId) return { view: 'projects', projectId: null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'studio' };
-  const suppliedScope = known(route.assetScope, ASSET_SCOPES, route.taskId ? 'task' : 'project');
-  const requestedScope = view === 'assets' && suppliedScope === 'studio' ? route.taskId ? 'task' : 'project' : suppliedScope;
+  const taskId = route.taskId || null;
+  let compareRoundIds = [...new Set(Array.isArray(route.compareRoundIds) ? route.compareRoundIds : route.roundId ? [route.roundId] : [])].filter(Boolean).slice(0, 12);
+  if (view === 'lineage' && !taskId) compareRoundIds = [];
+  const roundId = compareRoundIds[0] || null;
+  const contextScope = roundId ? 'round' : taskId ? 'task' : 'project';
+  const suppliedScope = known(route.assetScope, ASSET_SCOPES, contextScope);
+  let requestedScope = ['assets', 'lineage'].includes(view) && suppliedScope === 'studio' ? contextScope : suppliedScope;
+  if (view === 'lineage' && requestedScope === 'round' && !roundId) requestedScope = taskId ? 'task' : 'project';
+  if (view === 'lineage' && requestedScope === 'task' && !taskId) requestedScope = 'project';
   const projectViews = ['project-overview', 'tasks', 'deliveries', 'trash'];
   if (projectViews.includes(view)) {
     return { view, projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' };
@@ -35,13 +62,10 @@ function normalizeRoute(route) {
   if (view === 'assets' && requestedScope === 'project') {
     return { view, projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' };
   }
-  const taskId = route.taskId || null;
-  const compareRoundIds = [...new Set(Array.isArray(route.compareRoundIds) ? route.compareRoundIds : route.roundId ? [route.roundId] : [])].filter(Boolean).slice(0, 12);
-  const roundId = compareRoundIds[0] || null;
   const taskViews = ['studio-overview', 'prompts', 'runs'];
   if (taskViews.includes(view) && !taskId) return { view: 'tasks', projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' };
   if (['prompts', 'runs'].includes(view) && !roundId) return { view: 'studio-overview', projectId, taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' };
-  return { view, projectId, taskId, roundId, compareRoundIds, runId: route.runId || null, assetScope: requestedScope };
+  return { view, projectId, taskId, roundId, compareRoundIds, runId: route.runId || null, assetScope: requestedScope, ...controls };
 }
 
 export function parseWorkbenchRoute(search = '') {
@@ -54,7 +78,11 @@ export function parseWorkbenchRoute(search = '') {
     roundId: compareRoundIds[0] || null,
     compareRoundIds,
     runId: identifier(params, 'run'),
-    assetScope: params.get('scope')
+    assetScope: params.get('scope'),
+    runItemFilter: params.get('itemFilter'),
+    runItemPage: params.get('itemPage'),
+    runItemPageSize: params.get('itemPageSize'),
+    runItemSequence: params.get('itemSequence')
   });
 }
 
@@ -62,12 +90,20 @@ export function serializeWorkbenchRoute(route) {
   const normalized = normalizeRoute(route);
   const params = new URLSearchParams();
   params.set('view', normalized.view);
-  if (!isStudioView(normalized.view)) {
+  if (isStudioView(normalized.view)) {
+    if (studioViewKeepsProject(normalized.view) && normalized.projectId) params.set('project', normalized.projectId);
+  } else {
     params.set('project', normalized.projectId);
     if (normalized.taskId) params.set('task', normalized.taskId);
     for (const roundId of normalized.compareRoundIds) params.append('round', roundId);
     if (normalized.runId) params.set('run', normalized.runId);
     params.set('scope', normalized.assetScope);
+    if (normalized.view === 'runs') {
+      if (normalized.runItemFilter !== DEFAULT_RUN_ITEM_FILTER) params.set('itemFilter', normalized.runItemFilter);
+      if (normalized.runItemPage !== 1) params.set('itemPage', String(normalized.runItemPage));
+      if (normalized.runItemPageSize !== DEFAULT_RUN_ITEM_PAGE_SIZE) params.set('itemPageSize', String(normalized.runItemPageSize));
+      if (normalized.runItemSequence !== null) params.set('itemSequence', String(normalized.runItemSequence));
+    }
   }
   return '?' + params.toString();
 }

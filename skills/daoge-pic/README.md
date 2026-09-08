@@ -2,18 +2,18 @@
 
 DAOGE Pic 是面向智能体会话的本地图像创作管理平台。会话负责澄清、规划、确认和汇报；本地 Studio Workbench 负责查看项目上下文、Generation History（生成历史）、运行、资产、选择、复核和交付。
 
-> **版本状态**：当前稳定正式版本为 [`5.10.4`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)。
+> **版本状态**：当前稳定正式版本为 [`5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0)。
 
 vNext 是一次不兼容替换，不读取或迁移旧 `task_spec.json`、`prepare` / `execute` / `ingest` 命令、旧静态工作区、`results.html`、旧目录状态或旧运行记录。
 
 
-本次架构协议为 `daoge-pic-skill-protocol 2.0.0`，独立于制品版本 `5.10.4`。daemon 负责机器闸门：运行必须携带绑定当前 `plan_hash`、`preflight_id`、`conversation_id` 的 `confirm_token`；确认挑战只能通过 Workbench 授权 Cookie 提交，预检和创建运行只接受 Skill/CLI，同一轮次只能创建一个初始 Generation Run。daemon owner 独占工作区初始化、schema migration 与权限强化；子 Worker 只附加既有数据库。Generation/media child-process pool 从零按需启动，持续满载时渐进扩容，Provider 目标并发最高为 `100`，在 429、临时故障或内存压力下自动降速，并公开脱敏健康状态。Provider 成功响应优先流式写入临时文件；control-plane 保持 API/SSE、队列与恢复。大计划支持 `--plan @-`，`--operation-name <verb:scope>` 与高级 `--idempotency-key` 互斥。Workbench 提供只读会话计划摘要、独立人工确认闸门、运行健康横幅与重启恢复反馈。
+本次架构协议为 `daoge-pic-skill-protocol 2.0.0`，独立于制品版本 `5.11.0`。daemon 负责机器闸门：运行必须携带绑定当前 `plan_hash`、`preflight_id`、`conversation_id` 的 `confirm_token`；确认挑战只能通过 Workbench 授权 Cookie 提交，预检和创建运行只接受 Skill/CLI，同一轮次只能创建一个初始 Generation Run。daemon owner 独占工作区初始化、schema migration 与权限强化；子 Worker 只附加既有数据库。Generation/media child-process pool 从零按需启动，持续满载时渐进扩容，Provider 目标并发最高为 `100`，在 429、临时故障或内存压力下自动降速，并公开脱敏健康状态。Provider 成功响应优先流式写入临时文件；control-plane 保持 API/SSE、队列与恢复。大计划支持 `--plan @-`，`--operation-name <verb:scope>` 与高级 `--idempotency-key` 互斥。Workbench 提供只读会话计划摘要、独立人工确认闸门、运行健康横幅与重启恢复反馈。
 ## 安装版本
 
-当前稳定版为 `5.10.4`。GitHub Release `.tgz` 资产不表示包已发布到 npm registry。项目级安装和诊断使用：
+当前稳定版为 `5.11.0`。GitHub Release `.tgz` 资产不表示包已发布到 npm registry。项目级安装和诊断使用：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.11.0/daoge-pic-5.11.0.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -21,7 +21,7 @@ npx daoge doctor --workspace /absolute/workspace
 Windows PowerShell：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.11.0/daoge-pic-5.11.0.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
@@ -31,18 +31,18 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 需要全局安装时：
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.11.0/daoge-pic-5.11.0.tgz"
 daoge register-skill --scope user
 ```
 
 Windows PowerShell：
 
 ```powershell
-npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.11.0/daoge-pic-5.11.0.tgz"
 daoge.cmd register-skill --scope user
 ```
 
-上述 URL 指向 `5.10.4` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
+上述 URL 指向 `5.11.0` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
 
 需要直接试用 `main` 分支开发源码时，可继续使用 `npx skills add`：
 
@@ -63,7 +63,7 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 Windows 应优先使用项目级安装，并以最终运行 DAOGE Pic 的同一个普通用户完成安装、Skill 注册、Studio 初始化和后续运行。项目级 junction 在当前用户可写的本地 NTFS 目录中不需要管理员权限；目标 `.agents/skills/daoge-pic` 已存在时仍会直接拒绝覆盖。PowerShell 执行策略阻止 npm 生成的 `.ps1` shim 时使用 `npm.cmd`、`npx.cmd` 或 `daoge.cmd`，不得为此放宽全局执行策略。示例：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.11.0/daoge-pic-5.11.0.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge open --workspace "C:\Users\<用户名>\source\<项目名>"
@@ -189,10 +189,10 @@ Workbench 的“完成交付”使用内部同源 API `/api/deliveries/complete`
 
 ## Workbench 能力边界
 
-Workbench 用于人工确认计划，以及项目/任务/轮次导航、Generation History、SSE 实时状态、素材批量导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。人工确认只激活计划，预检与运行创建由会话负责。图片放大预览可直接选为成果或取消成果，当前选片缩略卡片会为长标题和独立移除按钮保留空间。项目资产采用服务端分页，默认每页 24 张，可切换 16/24/32/48/64/96，并提供只作用于当前页的全选/取消全选；交付图片提供明确的全选/取消全选。项目首页和项目任务列表提供搜索、生命周期筛选与分页，避免项目或任务无限向下堆叠。项目资产和已导出交付 ZIP 使用项目名、交付名及下载时间生成可区分文件名。交付失败会保留当前阶段，可安全重试；已导出交付按冻结文件领取。参考素材选择只显示当前项目资产和明确共享素材。
+Workbench 用于人工确认计划，以及项目/任务/轮次导航、创作谱系画布、Generation History、SSE 实时状态、素材批量导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。创作谱系只持久化布局、视口、筛选、分组、人工软连线和资料节点位置；资料节点来自任务类型、风格包与品牌包，只作为会话计划上下文，不会预检、运行或调用 Provider，也不把浏览器画布状态当项目/运行/资产事实。人工确认只激活计划，预检与运行创建由会话负责。图片放大预览可直接选为成果或取消成果，当前选片缩略卡片会为长标题和独立移除按钮保留空间。项目资产采用服务端分页，默认每页 24 张，可切换 16/24/32/48/64/96，并提供只作用于当前页的全选/取消全选；交付图片提供明确的全选/取消全选。项目首页和项目任务列表提供搜索、生命周期筛选与分页，避免项目或任务无限向下堆叠。项目资产和已导出交付 ZIP 使用项目名、交付名及下载时间生成可区分文件名。交付失败会保留当前阶段，可安全重试；已导出交付按冻结文件领取。参考素材选择只显示当前项目资产和明确共享素材。
 
 键盘和辅助技术契约包括可见焦点、搜索组合框语义、状态/错误 live region，以及模态图片查看器的初始焦点、Tab 焦点约束、Escape 关闭和关闭后焦点返回。
 
 Workbench 不提供自然语言对话，不绕过会话确认，不显示 Provider 密钥，不接受任意绝对文件路径，也不把浏览器状态、目录或 SSE 当业务事实源。
 
-受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.10.4、5.10.3、5.10.2、5.10.1、5.10.0、5.9.1 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。
+受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。详细权威需求见 [vNext 升级规格](docs/daoge_pic_vnext_upgrade_spec_zh.md)。5.11.0、5.10.4、5.10.3、5.10.2、5.10.1、5.10.0、5.9.1 及更早稳定版历史证据分章记录在 [验证记录](docs/vnext_verification_evidence_zh.md)；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。

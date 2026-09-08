@@ -12,7 +12,7 @@ const { requestJson } = require('./local-studio-test-helper');
 
 
 function databaseCounts(db) {
-  const tables = ['projects', 'creative_tasks', 'creative_rounds', 'round_plan_versions', 'dry_run_previews', 'generation_runs', 'run_items', 'events', 'command_receipts'];
+  const tables = ['projects', 'creative_tasks', 'creative_rounds', 'round_plan_versions', 'dry_run_previews', 'generation_runs', 'run_items', 'canvas_layouts', 'canvas_node_layouts', 'canvas_groups', 'canvas_links', 'events', 'command_receipts'];
   return Object.fromEntries(tables.map((table) => [table, db.prepare('SELECT COUNT(*) AS total FROM ' + table).get().total]));
 }
 
@@ -44,7 +44,8 @@ test('public project, task, round, run, and run-item APIs reject foreign Studio 
       ['foreign-retry', 'runs.retry'],
       ['foreign-resume', 'runs.resume'],
       ['foreign-cancel', 'runs.cancel'],
-      ['foreign-resolve', 'runs.resolve_unknown']
+      ['foreign-resolve', 'runs.resolve_unknown'],
+      ['foreign-layout', 'canvas.layout']
     ];
     const insertReceipt = db.prepare('INSERT INTO command_receipts (studio_id, idempotency_key, command_name, request_hash, response_json, created_at) VALUES (?, ?, ?, NULL, ?, ?)');
     for (const [idempotencyKey, commandName] of replayFixtures) insertReceipt.run(initialized.manifest.studioId, idempotencyKey, commandName, JSON.stringify({ replayedForeignEntity: true }), timestamp);
@@ -57,6 +58,7 @@ test('public project, task, round, run, and run-item APIs reject foreign Studio 
       ['/api/rounds/round_foreign_matrix/dry-runs', {}],
       ['/api/rounds/round_foreign_matrix/runs', {}],
       ['/api/runs/run_foreign_matrix/items', {}],
+      ['/api/projects/project_foreign_matrix/canvas-layout', {}],
       ['/api/projects/project_foreign_matrix/archive', { method: 'POST', idempotencyKey: 'foreign-archive', body: {} }],
       ['/api/tasks', { method: 'POST', idempotencyKey: 'foreign-task', body: { projectId: 'project_foreign_matrix', name: 'Blocked' } }],
       ['/api/rounds', { method: 'POST', idempotencyKey: 'foreign-round', body: { taskId: 'task_foreign_matrix', purpose: 'exploration' } }],
@@ -68,7 +70,8 @@ test('public project, task, round, run, and run-item APIs reject foreign Studio 
       ['/api/runs/run_foreign_matrix/retry', { method: 'POST', idempotencyKey: 'foreign-retry', body: { itemIds: ['item_foreign_matrix'] } }],
       ['/api/runs/run_foreign_matrix/resume', { method: 'POST', idempotencyKey: 'foreign-resume', body: {} }],
       ['/api/runs/run_foreign_matrix/cancel', { method: 'POST', idempotencyKey: 'foreign-cancel', body: {} }],
-      ['/api/runs/run_foreign_matrix/outcomes/resolve', { method: 'POST', idempotencyKey: 'foreign-resolve', body: { itemIds: ['item_foreign_matrix'] } }]
+      ['/api/runs/run_foreign_matrix/outcomes/resolve', { method: 'POST', idempotencyKey: 'foreign-resolve', body: { itemIds: ['item_foreign_matrix'] } }],
+      ['/api/projects/project_foreign_matrix/canvas-layout', { method: 'POST', idempotencyKey: 'foreign-layout', body: { scopeType: 'project', scopeId: 'project_foreign_matrix', viewport: { x: 0, y: 0, k: 1 }, nodes: [] } }]
     ];
 
     for (const [pathname, options] of checks) {

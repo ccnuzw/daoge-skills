@@ -36,3 +36,13 @@ test('live run items merge into creative history without dropping historical out
     { id: 'i3', status: 'pending' }
   ]);
 });
+
+test('run item pagination model serializes filters, bounds and retryable selections', async () => {
+  const { normalizeRunItemPage, runItemFilterCount, runItemPageBounds, selectableRunItemIds, serializeRunItemRequestQuery } = await import('../../web/src/run-item-pagination.mjs');
+  const query = serializeRunItemRequestQuery({ page: 3, pageSize: 100, filter: 'attention', sequence: 42 });
+  assert.equal(query, 'page=3&pageSize=100&status=failed&status=blocked&status=outcome_unknown&sequence=42&sort=sequence');
+  const page = normalizeRunItemPage({ items: [{ id: 'failed-1', status: 'failed' }, { id: 'blocked-1', status: 'blocked' }, { id: 'retry-1', status: 'retry_wait' }, { id: 'ok-1', status: 'succeeded' }], page: 3, pageSize: 100, total: 205, totalPages: 3, allTotal: 260, statusCounts: { failed: 2, blocked: 1, outcome_unknown: 1, succeeded: 200 } });
+  assert.deepEqual(runItemPageBounds(page), { start: 201, end: 204 });
+  assert.equal(runItemFilterCount(page.statusCounts, 'attention'), 4);
+  assert.deepEqual(selectableRunItemIds(page.items, new Set(['failed-1', 'blocked-1', 'retry-1', 'ok-1'])), ['failed-1', 'blocked-1', 'retry-1']);
+});

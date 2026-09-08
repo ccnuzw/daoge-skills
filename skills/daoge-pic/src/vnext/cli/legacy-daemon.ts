@@ -66,16 +66,22 @@ export async function shutdownVerifiedDaemon(
     (dependencies.signal || ((pid, signal) => process.kill(pid, signal)))(record.pid, 'SIGTERM');
     return;
   }
-  const response = await fetchImpl(new URL('/api/shutdown', record.url), {
-    method: 'POST',
-    headers: {
+  const requestShutdown = async (includeProtocolHeader: boolean): Promise<void> => {
+    const headers: Record<string, string> = {
       authorization: 'Bearer ' + record.capability,
       'content-type': 'application/json',
-      'x-daoge-operation-name': 'daemon-shutdown',
-      'x-daoge-skill-protocol': SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION
-    },
-    body: '{}'
-  });
-  const payload = await response.json() as { ok?: unknown; error?: { message?: unknown } };
-  if (!response.ok || payload.ok !== true) throw new Error(typeof payload.error?.message === 'string' ? payload.error.message : 'Studio daemon 拒绝受控关闭。');
+      'x-daoge-operation-name': 'daemon-shutdown'
+    };
+    if (includeProtocolHeader) headers['x-daoge-skill-protocol'] = SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION;
+    const response = await fetchImpl(new URL('/api/shutdown', record.url), { method: 'POST', headers, body: '{}' });
+    const payload = await response.json() as { ok?: unknown; error?: { message?: unknown } };
+    if (!response.ok || payload.ok !== true) throw new Error(typeof payload.error?.message === 'string' ? payload.error.message : 'Studio daemon 拒绝受控关闭。');
+  };
+  try {
+    await requestShutdown(true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (!/Skill 协议不兼容|Skill 请求必须声明|Studio API|protocol/i.test(message)) throw error;
+    await requestShutdown(false);
+  }
 }

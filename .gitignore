@@ -9,3 +9,7 @@ skills/daoge-pic/*.tgz
 /daoge-studio/
 /daoge-assets/
 /daoge-deliveries/
+**/daoge-studio/Provider.db
+**/daoge-studio/Provider.db-*
+**/daoge-studio/provider.env
+**/daoge-studio/runtime/

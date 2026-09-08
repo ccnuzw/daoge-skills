@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 22;
+export const STUDIO_SCHEMA_VERSION = 25;
 export const STUDIO_EVENT_RETENTION = 2000;
 
 const SCHEMA_V1 = [
@@ -181,6 +181,29 @@ const SCHEMA_V22 = [
   "CREATE INDEX IF NOT EXISTS idx_asset_media_operations_studio_created ON asset_media_operations(studio_id, created_at)"
 ].join(';\n') + ';';
 
+const SCHEMA_V23 = [
+  "CREATE TABLE IF NOT EXISTS canvas_layouts (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), project_id TEXT NOT NULL REFERENCES projects(id), scope_type TEXT NOT NULL CHECK (scope_type IN ('project', 'task', 'round')), scope_id TEXT NOT NULL, viewport_json TEXT NOT NULL DEFAULT '{\"x\":0,\"y\":0,\"k\":1}', settings_json TEXT NOT NULL DEFAULT '{}', version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(studio_id, project_id, scope_type, scope_id))",
+  "CREATE TABLE IF NOT EXISTS canvas_node_layouts (id TEXT PRIMARY KEY, layout_id TEXT NOT NULL REFERENCES canvas_layouts(id) ON DELETE CASCADE, entity_type TEXT NOT NULL CHECK (entity_type IN ('project', 'task', 'round', 'plan', 'run', 'run_item', 'asset', 'shared_asset', 'delivery', 'group')), entity_id TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, width REAL NOT NULL, height REAL NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, group_id TEXT, updated_at TEXT NOT NULL, UNIQUE(layout_id, entity_type, entity_id))",
+  "CREATE TABLE IF NOT EXISTS canvas_groups (id TEXT PRIMARY KEY, layout_id TEXT NOT NULL REFERENCES canvas_layouts(id) ON DELETE CASCADE, title TEXT NOT NULL, group_type TEXT NOT NULL CHECK (group_type IN ('task', 'round', 'run', 'delivery', 'custom')), x REAL NOT NULL, y REAL NOT NULL, width REAL NOT NULL, height REAL NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_canvas_layouts_scope ON canvas_layouts(studio_id, project_id, scope_type, scope_id)",
+  "CREATE INDEX IF NOT EXISTS idx_canvas_node_layouts_layout ON canvas_node_layouts(layout_id)",
+  "CREATE INDEX IF NOT EXISTS idx_canvas_groups_layout ON canvas_groups(layout_id)"
+].join(';\n') + ';';
+
+const SCHEMA_V24 = [
+  "ALTER TABLE canvas_node_layouts RENAME TO canvas_node_layouts_v23",
+  "CREATE TABLE canvas_node_layouts (id TEXT PRIMARY KEY, layout_id TEXT NOT NULL REFERENCES canvas_layouts(id) ON DELETE CASCADE, entity_type TEXT NOT NULL CHECK (entity_type IN ('project', 'task', 'round', 'plan', 'run', 'run_item', 'asset', 'shared_asset', 'delivery', 'group', 'task_type', 'style_kit', 'brand_kit')), entity_id TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, width REAL NOT NULL, height REAL NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, group_id TEXT, updated_at TEXT NOT NULL, UNIQUE(layout_id, entity_type, entity_id))",
+  "INSERT INTO canvas_node_layouts (id, layout_id, entity_type, entity_id, x, y, width, height, collapsed, group_id, updated_at) SELECT id, layout_id, entity_type, entity_id, x, y, width, height, collapsed, group_id, updated_at FROM canvas_node_layouts_v23",
+  "DROP TABLE canvas_node_layouts_v23",
+  "CREATE TABLE IF NOT EXISTS canvas_links (id TEXT PRIMARY KEY, layout_id TEXT NOT NULL REFERENCES canvas_layouts(id) ON DELETE CASCADE, source_type TEXT NOT NULL CHECK (source_type IN ('project', 'task', 'round', 'plan', 'run', 'run_item', 'asset', 'shared_asset', 'delivery', 'group', 'task_type', 'style_kit', 'brand_kit')), source_id TEXT NOT NULL, target_type TEXT NOT NULL CHECK (target_type IN ('project', 'task', 'round', 'plan', 'run', 'run_item', 'asset', 'shared_asset', 'delivery', 'group', 'task_type', 'style_kit', 'brand_kit')), target_id TEXT NOT NULL, link_type TEXT NOT NULL CHECK (link_type IN ('reference', 'style', 'alternative', 'rejected', 'todo', 'context', 'custom')), label TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_canvas_node_layouts_layout ON canvas_node_layouts(layout_id)",
+  "CREATE INDEX IF NOT EXISTS idx_canvas_links_layout ON canvas_links(layout_id)",
+  "CREATE INDEX IF NOT EXISTS idx_canvas_links_source ON canvas_links(layout_id, source_type, source_id)",
+  "CREATE INDEX IF NOT EXISTS idx_canvas_links_target ON canvas_links(layout_id, target_type, target_id)"
+].join(';\n') + ';';
+
+const SCHEMA_V25 = "CREATE INDEX IF NOT EXISTS idx_run_items_run_status_sequence ON run_items(run_id, status, sequence)";
+
 
 
 export type StudioDatabase = DatabaseSyncType;
@@ -238,6 +261,10 @@ const REQUIRED_SCHEMA_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   asset_media_operations: ['id', 'studio_id', 'phase', 'owner_id', 'heartbeat_at'],
   media_commit_journal: ['asset_id', 'studio_id', 'owner_id', 'heartbeat_at'],
   delivery_export_journal: ['studio_id', 'idempotency_key', 'delivery_id'],
+  canvas_layouts: ['id', 'studio_id', 'project_id', 'scope_type', 'scope_id'],
+  canvas_node_layouts: ['id', 'layout_id', 'entity_type', 'entity_id'],
+  canvas_groups: ['id', 'layout_id', 'title', 'group_type'],
+  canvas_links: ['id', 'layout_id', 'source_type', 'source_id', 'target_type', 'target_id', 'link_type'],
   events: ['id', 'studio_id', 'event_type'],
   schema_migrations: ['version', 'applied_at']
 };
@@ -339,7 +366,10 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
     { version: 19, sql: SCHEMA_V19 },
     { version: 20, sql: SCHEMA_V20 },
       { version: 21, sql: SCHEMA_V21 },
-      { version: 22, sql: SCHEMA_V22 }
+      { version: 22, sql: SCHEMA_V22 },
+      { version: 23, sql: SCHEMA_V23 },
+      { version: 24, sql: SCHEMA_V24 },
+      { version: 25, sql: SCHEMA_V25 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
@@ -359,6 +389,8 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
       } else if (migration.version === 22) {
         const requiredTables = ['generation_runs', 'run_items', 'dry_run_previews', 'events', 'asset_media_operations'];
         if (requiredTables.every((name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)))) db.exec(SCHEMA_V22);
+      } else if (migration.version === 25) {
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_items'").get()) db.exec(SCHEMA_V25);
       } else db.exec(migration.sql);
       if (migration.version === 16 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get()) db.exec(SCHEMA_V16_ASSET_BACKFILL);
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());

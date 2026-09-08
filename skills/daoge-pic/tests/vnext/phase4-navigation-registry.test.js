@@ -22,13 +22,43 @@ test('every WORKBENCH_VIEW has exactly one renderer key and legacy dispatch is a
 
 test('mobile navigation exposes project utility in the horizontal scroller with 44px targets', async () => {
   const { workbenchNavigationViews } = await import('../../web/src/workbench-navigation-model.mjs');
-  assert.deepEqual(workbenchNavigationViews(true), ['projects', 'library', 'shared-assets', 'guide', 'project-overview', 'tasks', 'assets', 'deliveries', 'trash']);
+  assert.deepEqual(workbenchNavigationViews(true), ['projects', 'guide', 'project-overview', 'lineage', 'tasks', 'runs', 'assets', 'deliveries', 'trash']);
+  const navigation = fs.readFileSync(path.join(skillRoot, 'web/src/workbench-navigation.jsx'), 'utf8');
+  assert.match(navigation, /lineage: \{ view: 'lineage'.*changes: \{ \.\.\.PROJECT_CONTEXT_RESET, assetScope: 'project' \}/);
+  assert.match(navigation, /const primaryItems = \[NAVIGATION_ITEMS\.projects\]/);
+  assert.doesNotMatch(navigation, /NAVIGATION_ITEMS\.library/);
+  assert.match(navigation, /<NavigationButton item=\{NAVIGATION_ITEMS\.assets\}/);
+  assert.match(navigation, /<NavigationButton item=\{runItem\}/);
+  assert.match(navigation, /<NavigationButton item=\{NAVIGATION_ITEMS\.deliveries\}/);
+  assert.ok(navigation.indexOf("label: '谱系'") < navigation.indexOf('item={NAVIGATION_ITEMS.tasks}'));
+  assert.ok(navigation.indexOf('item={runItem}') < navigation.indexOf('item={NAVIGATION_ITEMS.assets}'));
   const css = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
   assert.match(css, /\.studio-rail \{ min-width:0; max-width:100%; overflow:hidden;[^}]*\}/);
   assert.match(css, /\.workspace-navigation \{ display:flex; width:100%; max-width:100%; min-width:0;[^}]*overflow-x:auto/);
   assert.match(css, /\.workspace-navigation section \{ display:flex; flex:0 0 auto/);
   assert.match(css, /\.workspace-navigation \.project-navigation,\.workspace-navigation \.project-utility \{ display:flex/);
   assert.match(css, /\.workspace-navigation button \{ flex:0 0 auto; min-width:44px; min-height:44px/);
+});
+
+test('sidebar owns collapsible chrome, studio status controls, and manual entry', () => {
+  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  const navigation = fs.readFileSync(path.join(skillRoot, 'web/src/workbench-navigation.jsx'), 'utf8');
+  const css = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
+  assert.match(main, /RAIL_COLLAPSE_KEY/);
+  assert.match(main, /is-rail-collapsed/);
+  assert.doesNotMatch(main, /RuntimeHealthControl/);
+  assert.doesNotMatch(main, /className="connection-state/);
+  assert.match(navigation, /ProviderStatusCard/);
+  assert.match(navigation, /RuntimeStatusCard/);
+  assert.match(navigation, /rail-system-panel/);
+  assert.match(navigation, /创作手册/);
+  assert.match(css, /\.rail-status-card/);
+  assert.match(css, /\.rail-guide-card/);
+  assert.match(css, /\.rail-section-label \{ margin:0 0 5px; padding:0 10px; color:#7d8a7d; font-size:10px/);
+  assert.match(css, /\.workspace-navigation \{ flex:1 1 auto; align-content:start/);
+  assert.match(css, /\.studio-shell\.is-rail-collapsed/);
+  assert.match(css, /\.rail-status-popover \{ position:absolute/);
+  assert.match(css, /@media \(max-width:800px\) \{[\s\S]*\.rail-utility-stack/);
 });
 
 test('styles cover all keyboard focus surfaces and reduced motion', () => {

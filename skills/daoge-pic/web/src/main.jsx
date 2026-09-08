@@ -1,13 +1,15 @@
 import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, LockKeyhole, MessageSquareText, PanelLeftClose, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, Library, LoaderCircle, LockKeyhole, MessageSquareText, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
-import { mergeRunHistoryItems, runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
+import { runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
+import { planPresentation, planStateLabel } from './plan-presentation.mjs';
 import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectRound, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
 import { PromptWorkspace } from './prompt-workspace.jsx';
 import { LearningCenter } from './learning-center.jsx';
 import { CreativeLibrary } from './creative-library.jsx';
 import { SharedAssets } from './shared-assets.jsx';
+import { CreativeLineageCanvas } from './creative-lineage-canvas.jsx';
 import { CreatorDelivery } from './creator-delivery.jsx';
 import { WorkbenchNavigation } from './workbench-navigation.jsx';
 import { deliverySelectionMessage, projectDeliverySelection } from './delivery-workflow.mjs';
@@ -23,14 +25,19 @@ import { createEventRefreshQueue } from './refresh-coordinator.mjs';
 import { createStudioSearchCoordinator } from './studio-search-model.mjs';
 import { batchOperationSignature, createBatchOperationSnapshot, createDeliveryInteractionGuard, isDeliveryOperationCurrent } from './creator-delivery-model.mjs';
 import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, clampAssetPage, normalizeAssetPageSize } from './asset-pagination.mjs';
+import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, EMPTY_RUN_ITEM_PAGE, RUN_ITEM_FILTER_OPTIONS, RUN_ITEM_PAGE_SIZES, normalizeRunItemFilter, normalizeRunItemPage, normalizeRunItemPageNumber, normalizeRunItemPageSize, normalizeRunItemSequence, retryableRunItems, runItemFilterCount, runItemPageBounds, runItemProgress, selectableRunItemIds, serializeRunItemRequestQuery } from './run-item-pagination.mjs';
 import { assetRefreshPath } from './asset-refresh-plan.mjs';
+import { EMPTY_LINEAGE_RUN_ITEM_COVERAGE, LINEAGE_ASSET_PAGE_SIZE, loadCompleteLineageAssets, loadCompleteLineageRunItems } from './lineage-data-loader.mjs';
 import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, createProjectSearchIndex, createTaskSearchIndex, filterProjectIndex, filterTaskIndex, paginateWorkspaceItems } from './workspace-list-model.mjs';
 import { ProviderSettings } from './provider-settings.jsx';
 import { workbenchConversationId } from './workbench-session.mjs';
 import { redactedRuntimeDiagnostic, runtimeHealthPresentation } from './runtime-health.mjs';
+import { installBrowserErrorGuard } from './browser-error-guard.mjs';
 import './styles.css';
 
 const EMPTY = [];
+
+installBrowserErrorGuard();
 
 function isAbortError(error) {
   return error instanceof DOMException && error.name === 'AbortError';
@@ -70,14 +77,28 @@ function projectArchiveUrl(projectId, assetIds) { const params = new URLSearchPa
 
 function deliveryArchiveUrl(deliveryId, sequences) { const params = new URLSearchParams(); for (const sequence of sequences) params.append('sequence', String(sequence)); return '/api/deliveries/' + encodeURIComponent(deliveryId) + '/archive?' + params.toString(); }
 
+
 function uniqueKey(prefix) {
   return prefix + '-' + crypto.randomUUID();
 }
 const DELIVERY_COMPLETION_PREFIX = 'daoge-pic:delivery-completion:';
 const ASSET_PAGE_SIZE_KEY = 'daoge-pic:asset-page-size';
+const RAIL_COLLAPSE_KEY = 'daoge-pic:rail-collapsed';
 
 const ASSET_SCOPE_LABELS = { round: '当前轮次', task: '当前任务', project: '当前项目', studio: '全部 Studio' };
+const ROUND_PURPOSE_LABELS = { exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' };
 
+
+function runExecutionPresentationFromCounts(run, statusCounts) {
+  if (!run) return runExecutionPresentation(null, EMPTY);
+  if (['completed', 'partial', 'failed', 'cancelled', 'paused', 'resume_pending', 'pausing'].includes(run.status)) return statusPresentation('run', run.status);
+  const counts = statusCounts && typeof statusCounts === 'object' ? statusCounts : {};
+  if (['requesting', 'receiving', 'persisting'].some((status) => Number(counts[status] || 0) > 0)) return { label: '正在生成', tone: 'live' };
+  if (Number(counts.leased || 0) > 0) return { label: '正在准备', tone: 'live' };
+  if (Number(counts.retry_wait || 0) > 0) return { label: '等待重试', tone: 'quiet' };
+  if (run.status === 'queued' || Number(counts.pending || 0) > 0) return { label: '排队中', tone: 'live' };
+  return statusPresentation('run', run.status);
+}
 
 function statusLabel(value) { return statusPresentation('generic', value).label; }
 
@@ -90,12 +111,12 @@ function IconButton({ label, children, onClick, disabled = false, tone = 'defaul
   return <button className={'icon-button ' + tone} type="button" onClick={onClick} disabled={disabled} title={label} aria-label={label}>{children}</button>;
 }
 
-function RuntimeHealthBanner({ studio, recoveryPhase, repairing, onCopy, onRefresh, onRepair }) {
+function RuntimeHealthAlertStrip({ studio, recoveryPhase, repairing, onCopy, onRefresh, onRepair }) {
   const presentation = runtimeHealthPresentation(studio?.runtime, recoveryPhase);
+  if (!['warning', 'danger'].includes(presentation.tone)) return null;
   const repairable = recoveryPhase === 'ready' && [studio?.runtime?.workerPool?.state, studio?.runtime?.mediaWorkerPool?.state].some((state) => state === 'degraded' || state === 'failed');
-  return <aside className={'runtime-health-banner is-' + presentation.tone} role={presentation.tone === 'danger' ? 'alert' : 'status'} aria-live={presentation.live ? 'polite' : 'off'}>
-    <div className="runtime-health-icon"><Activity size={18} aria-hidden="true" /></div>
-    <div><strong>{presentation.title}</strong><span>{presentation.detail}</span></div>
+  return <aside className={'runtime-alert-strip is-' + presentation.tone} role={presentation.tone === 'danger' ? 'alert' : 'status'} aria-live={presentation.live ? 'polite' : 'off'}>
+    <div><Activity size={16} aria-hidden="true" /><strong>{presentation.title}</strong><span>{presentation.detail}</span></div>
     <div className="runtime-health-actions">
       {repairable && <button type="button" className="outline-button" disabled={repairing} onClick={onRepair}><RefreshCw size={15} className={repairing ? 'spin' : ''} />{repairing ? '正在重启' : '安全重启'}</button>}
       <button type="button" className="outline-button" onClick={onRefresh}><RefreshCw size={15} />刷新状态</button>
@@ -103,9 +124,21 @@ function RuntimeHealthBanner({ studio, recoveryPhase, repairing, onCopy, onRefre
     </div>
   </aside>;
 }
-function AssetSelectionStrip({ assets, onRemove, onClear, onPreview, onDownloadArchive }) {
+
+function SessionPlanSummary({ sessionPlanStatus }) {
+  if (!sessionPlanStatus) return null;
+  const context = sessionPlanStatus.context;
+  const purpose = context ? (({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[context.round.purpose] || context.round.purpose) : '';
+  return <details className={'session-plan-summary ' + (!context ? 'is-empty' : '')}>
+    <summary><LockKeyhole size={14} aria-hidden="true" /><span>当前会话</span><b>{context ? context.project.name + ' / ' + context.task.name : '未绑定活动轮次'}</b>{context && <em>{purpose} · 计划 v{context.round.planVersion}</em>}</summary>
+    <div className="session-plan-popover" aria-label="当前会话只读计划摘要">
+      {context ? <><p className="eyebrow">只读摘要</p><h3>{context.project.name} / {context.task.name}</h3><span>{purpose} · 计划 v{context.round.planVersion}</span><div className="session-plan-state"><StatusPill value={context.round.status} scope="round" /><span>{sessionPlanStatus.confirmation?.confirmed ? '当前计划已由用户确认' : '当前计划尚未人工确认'}</span>{sessionPlanStatus.latestRun && <span>最近运行：{statusLabel(sessionPlanStatus.latestRun.status)}</span>}</div></> : <><p className="eyebrow">只读摘要</p><h3>当前会话没有活动轮次</h3><span>请在会话中绑定项目、任务和轮次；此处只显示已绑定的计划事实。</span></>}
+    </div>
+  </details>;
+}
+function AssetSelectionStrip({ assets, onRemove, onClear, onPreview, onDownloadArchive, onDeliver }) {
   return <section className="selection-strip">
-    <header><div><p className="eyebrow">当前选片</p><h2>{String(assets.length).padStart(2, '0')} 张</h2></div>{assets.length > 0 && <div className="selection-strip-actions"><button type="button" className="outline-button" onClick={onDownloadArchive}><Download size={15} />打包下载 {assets.length} 张</button><IconButton label="清空当前选片" onClick={onClear}><X size={15} /></IconButton></div>}</header>
+    <header><div><p className="eyebrow">已选图片</p><h2>{String(assets.length).padStart(2, '0')} 张</h2></div>{assets.length > 0 && <div className="selection-strip-actions"><button type="button" className="outline-button" onClick={() => onPreview(assets)}><Eye size={15} />预览</button><button type="button" className="command-button" onClick={onDeliver}><Check size={15} />去交付</button><button type="button" className="outline-button" onClick={onDownloadArchive}><Download size={15} />打包下载 {assets.length} 张</button><IconButton label="清空当前选片" onClick={onClear}><X size={15} /></IconButton></div>}</header>
     {assets.length ? <div className="selection-strip-items">{assets.map((asset) => <article className="selection-item" key={asset.id}><button type="button" className="selection-preview" onClick={() => onPreview([asset])} aria-label="放大查看已选图片"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button><div className="selection-item-copy"><strong title={asset.display?.label || '已选素材'}>{asset.display?.label || '已选素材'}</strong><span>{asset.review?.decision === 'keep' ? '已保留' : asset.review?.decision === 'review' ? '待复核' : asset.review?.decision === 'derive' ? '衍生方向' : '尚未评审'}</span></div><button type="button" className="selection-remove" title="移出当前选片" aria-label="移出当前选片" onClick={() => onRemove(asset.id)}><X size={13} /></button></article>)}</div> : <div className="selection-strip-empty"><Bookmark size={18} /><span>当前没有已选图片</span></div>}
   </section>;
 }
@@ -141,17 +174,22 @@ function ManagedTaskList({ tasks, pageSize, actionLabel, emptyMessage, onOpenTas
 
 function ProjectOverview({ project, tasks, selectedCount, onOpenTasks, onOpenAssets, onOpenDeliveries, onOpenTask }) {
   const activeTasks = tasks.filter((task) => !['archived', 'completed'].includes(task.status));
-  return <section className="project-overview-stage"><header className="project-overview-head"><div><p className="eyebrow">项目工作区</p><h2>{project.name}</h2><span>从任务推进创作，在项目资产中完成跨任务选片，再进入交付。</span></div><StatusPill value={project.status} scope="project" /></header><div className="project-status-strip"><button type="button" onClick={onOpenTasks}><span>任务</span><b>{tasks.length}</b><small>{activeTasks.length ? activeTasks.length + ' 个进行中' : '暂无进行中任务'}</small></button><button type="button" onClick={onOpenAssets}><span>当前选片</span><b>{selectedCount}</b><small>跨任务的项目选择</small></button><button type="button" onClick={onOpenDeliveries}><span>交付</span><b>查看</b><small>草稿、版本与导出</small></button></div><section className="project-task-panel"><header><div><p className="eyebrow">创作任务</p><h3>从一个目标继续</h3></div><button type="button" className="outline-button" onClick={onOpenTasks}>查看全部任务</button></header><ManagedTaskList tasks={tasks} pageSize={TASK_OVERVIEW_PAGE_SIZE} actionLabel="进入任务" emptyMessage="在会话中建立创作任务后，可以从这里继续。" onOpenTask={onOpenTask} /></section></section>;
+  const nextTask = activeTasks[0] || tasks[0] || null;
+  const recentTasks = (activeTasks.length ? activeTasks : tasks).slice(0, TASK_OVERVIEW_PAGE_SIZE);
+  const nextTitle = nextTask ? '继续：' + nextTask.name : selectedCount ? '去交付已选图片' : '先在会话中创建任务';
+  const nextHint = nextTask ? taskPresentation(nextTask).label : selectedCount ? selectedCount + ' 张图片已选好，可以创建交付包。' : '项目已打开，新的创作目标由当前会话建立。';
+  const nextAction = nextTask ? () => onOpenTask(nextTask.id) : selectedCount ? onOpenDeliveries : onOpenTasks;
+  return <section className="project-overview-stage"><header className="project-overview-head"><div><p className="eyebrow">项目</p><h2>{project.name}</h2></div><StatusPill value={project.status} scope="project" /></header><section className="project-next-step"><div><p className="eyebrow">下一步</p><h3>{nextTitle}</h3><span>{nextHint}</span></div><button type="button" className="command-button" onClick={nextAction}>{nextTask ? <Play size={16} /> : selectedCount ? <Check size={16} /> : <FolderKanban size={16} />}{nextTask ? '继续任务' : selectedCount ? '去交付' : '查看任务'}</button></section><div className="project-status-strip"><button type="button" onClick={onOpenTasks}><span>任务</span><b>{tasks.length}</b><small>{activeTasks.length ? activeTasks.length + ' 个可继续' : '没有待处理任务'}</small></button><button type="button" onClick={onOpenAssets}><span>已选图片</span><b>{selectedCount}</b><small>用于交付的成果</small></button><button type="button" onClick={onOpenDeliveries}><span>交付</span><b>打开</b><small>下载与交付包</small></button></div><section className="project-task-panel is-recent"><header><div><p className="eyebrow">最近任务</p><h3>选择一个目标</h3></div><button type="button" className="outline-button" onClick={onOpenTasks}>全部任务</button></header>{recentTasks.length ? <div className="project-task-list is-compact">{recentTasks.map((task) => <button type="button" key={task.id} onClick={() => onOpenTask(task.id)}><span><b>{task.name}</b><small>{taskPresentation(task).label}</small></span><span>继续</span></button>)}</div> : <div className="empty-stage"><FolderKanban size={26} strokeWidth={1.15} /><p>在会话中建立创作任务后，可以从这里继续。</p></div>}</section></section>;
 }
 
 function ProjectTaskList({ project, tasks, onOpenTask }) {
   return <section className="project-tasks-stage"><header><div><p className="eyebrow">{project.name}</p><h2>任务</h2><span>搜索、按状态筛选并分页管理每个独立创作目标。</span></div></header><ManagedTaskList tasks={tasks} pageSize={TASK_PAGE_SIZE} actionLabel="查看轮次" emptyMessage="在会话中建立创作任务后，会显示在这里。" onOpenTask={onOpenTask} /></section>;
 }
 
-function WorkspaceContextBar({ project, task, rounds, selectedRound, view, assetScope, onProject, onTasks, onSelectRound, onNavigate }) {
+function WorkspaceContextBar({ project, task, rounds, selectedRound, view, assetScope, sessionPlanStatus, onProject, onTasks, onSelectRound, onNavigate }) {
   if (!project) return null;
-  const taskMode = Boolean(task) && (['studio-overview', 'prompts', 'runs'].includes(view) || (view === 'assets' && assetScope !== 'project'));
-  return <div className="workspace-context"><button type="button" onClick={onProject}><span>项目</span><b>{project.name}</b></button>{task && <button type="button" onClick={onTasks}><span>任务</span><b>{task.name}</b></button>}{taskMode && <><label><span>轮次</span><select value={selectedRound?.id || ''} onChange={(event) => onSelectRound(event.target.value || null)}><option value="">选择轮次</option>{rounds.map((round) => <option value={round.id} key={round.id}>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[round.purpose] || round.purpose} · 计划 v{round.planVersion}</option>)}</select></label><div className="task-local-tabs"><button type="button" className={view === 'studio-overview' ? 'is-active' : ''} onClick={() => onNavigate('studio-overview', { assetScope: 'task' })}>概览</button><button type="button" className={view === 'prompts' ? 'is-active' : ''} disabled={!selectedRound} onClick={() => onNavigate('prompts', { assetScope: 'round' })}>计划</button><button type="button" className={view === 'runs' ? 'is-active' : ''} disabled={!selectedRound} onClick={() => onNavigate('runs', { assetScope: 'round' })}>运行</button><button type="button" className={view === 'assets' ? 'is-active' : ''} onClick={() => onNavigate('assets', { assetScope: selectedRound ? 'round' : 'task' })}>结果</button></div></>}</div>;
+  const taskMode = Boolean(task) && (['lineage', 'studio-overview', 'prompts', 'runs'].includes(view) || (view === 'assets' && assetScope !== 'project'));
+  return <div className="workspace-context"><button type="button" onClick={onProject}><span>项目</span><b>{project.name}</b></button>{task && <button type="button" onClick={onTasks}><span>任务</span><b>{task.name}</b></button>}{taskMode && <><label><span>轮次</span><select value={selectedRound?.id || ''} onChange={(event) => onSelectRound(event.target.value || null)}><option value="">选择轮次</option>{rounds.map((round) => <option value={round.id} key={round.id}>{ROUND_PURPOSE_LABELS[round.purpose] || round.purpose} · 计划 v{round.planVersion}</option>)}</select></label><div className="task-local-tabs"><button type="button" className={view === 'prompts' ? 'is-active' : ''} disabled={!selectedRound} onClick={() => onNavigate('prompts', { assetScope: 'round' })}>计划</button><button type="button" className={view === 'runs' ? 'is-active' : ''} disabled={!selectedRound} onClick={() => onNavigate('runs', { assetScope: 'round' })}>生成历史</button><button type="button" className={view === 'assets' ? 'is-active' : ''} onClick={() => onNavigate('assets', { assetScope: selectedRound ? 'round' : 'task' })}>结果</button><button type="button" className={view === 'lineage' ? 'is-active' : ''} onClick={() => onNavigate('lineage', { assetScope: selectedRound ? 'round' : 'task' })}>谱系</button><details className="task-more-tabs"><summary>更多</summary><div><button type="button" className={view === 'studio-overview' ? 'is-active' : ''} onClick={() => onNavigate('studio-overview', { assetScope: 'task' })}>轮次对比</button></div></details></div></>}<SessionPlanSummary sessionPlanStatus={sessionPlanStatus} /></div>;
 }
 
 
@@ -164,29 +202,128 @@ function AssetCard({ asset, selected, selectionBusy, shared, onToggleSelect, onR
   const assetLabel = asset.display?.label || (asset.kind === 'generated' ? '生成结果' : '导入素材');
   const roundLabel = asset.display?.roundSequence ? (({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[asset.display.roundPurpose] || '创作') + ' · 第 ' + asset.display.roundSequence + ' 轮' : null;
   const contextLabel = asset.display?.taskName && roundLabel ? asset.display.taskName + ' · ' + roundLabel : asset.display?.taskName || roundLabel;
-  const stateLabel = asset.deletedAt ? '已移入回收站' : asset.review?.decision === 'keep' ? '已保留，可交付' : asset.review?.decision === 'review' ? '待复核' : asset.review?.decision === 'reject' ? '不采用' : selected ? '已加入选片' : '尚未评审';
+  const stateLabel = asset.deletedAt ? '回收站' : asset.review?.decision === 'keep' ? '已保留' : asset.review?.decision === 'review' ? '待复核' : asset.review?.decision === 'reject' ? '不采用' : selected ? '已选' : '未评审';
   return <article className={'asset-card ' + (asset.deletedAt ? 'is-trashed ' : '') + (selected ? 'is-selected' : '')}>
     <div className="asset-preview">
       {asset.deletedAt ? <div className="trash-preview"><Trash2 size={24} strokeWidth={1.4} /></div> : <button type="button" className="asset-preview-button" onClick={() => onPreview([asset])} aria-label="放大查看素材"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button>}
       {!asset.deletedAt && <label className="asset-select-control"><input type="checkbox" checked={selected} disabled={selectionBusy} onChange={() => onToggleSelect(asset)} /><span><Bookmark size={13} fill={selected ? 'currentColor' : 'none'} />{selected ? '已选成果' : '选为成果'}</span></label>}
-      <div className="asset-card-tools">{!asset.deletedAt && <IconButton label="下载原图" onClick={() => onDownload(asset)}><Download size={16} /></IconButton>}<IconButton label={menuOpen ? '关闭资产操作' : '打开资产操作'} onClick={() => setMenuOpen((value) => !value)}><Ellipsis size={17} /></IconButton></div>
+      <div className="asset-card-tools"><IconButton label={menuOpen ? '关闭更多操作' : '更多操作'} onClick={() => setMenuOpen((value) => !value)}><Ellipsis size={17} /></IconButton></div>
 
     </div>
-    {menuOpen && <div className="asset-action-menu">{asset.deletedAt ? <button type="button" onClick={() => runMenuAction(() => onRestore(asset.id))}><RotateCcw size={15} /><span>恢复资产</span></button> : <><button type="button" onClick={() => runMenuAction(() => onCopy(asset))}><Copy size={15} /><span>复制图片</span></button><button type="button" onClick={() => runMenuAction(() => onSetShared(asset, !shared))}><Share2 size={15} /><span>{shared ? '取消跨项目共享' : '共享到跨项目素材'}</span></button><button type="button" onClick={() => runMenuAction(() => onInspect(asset.id))}><GitFork size={15} /><span>查看来源与评审</span></button><div className="asset-action-group"><button type="button" onClick={() => runMenuAction(() => onReview(asset.id, 'keep'))}><Check size={15} /><span>保留</span></button><button type="button" onClick={() => runMenuAction(() => onReview(asset.id, 'review'))}><CircleAlert size={15} /><span>待复核</span></button><button type="button" onClick={() => { setAnnotating(true); setMenuOpen(false); }}><MessageSquareText size={15} /><span>添加批注</span></button><button type="button" onClick={() => runMenuAction(() => onReview(asset.id, 'derive'))}><Sparkles size={15} /><span>标记为衍生方向</span></button><button type="button" onClick={() => runMenuAction(() => onReview(asset.id, 'reject'))}><X size={15} /><span>不采用</span></button></div><button type="button" className="danger" role="menuitem" onClick={() => runMenuAction(() => onTrash(asset.id))}><Trash2 size={15} /><span>移入回收站</span></button></>}</div>}
+    {menuOpen && <div className="asset-action-menu">{asset.deletedAt ? <button type="button" onClick={() => runMenuAction(() => onRestore(asset.id))}><RotateCcw size={15} /><span>恢复资产</span></button> : <><button type="button" aria-label="下载原图" onClick={() => runMenuAction(() => onDownload(asset))}><Download size={15} /><span>下载原图</span></button><button type="button" onClick={() => runMenuAction(() => onCopy(asset))}><Copy size={15} /><span>复制图片</span></button><button type="button" onClick={() => runMenuAction(() => onSetShared(asset, !shared))}><Share2 size={15} /><span>{shared ? '取消共享' : '共享到资料'}</span></button><button type="button" onClick={() => runMenuAction(() => onInspect(asset.id))}><GitFork size={15} /><span>来源</span></button><div className="asset-action-group"><button type="button" onClick={() => runMenuAction(() => onReview(asset.id, 'keep'))}><Check size={15} /><span>保留</span></button><button type="button" onClick={() => runMenuAction(() => onReview(asset.id, 'review'))}><CircleAlert size={15} /><span>待复核</span></button><button type="button" onClick={() => { setAnnotating(true); setMenuOpen(false); }}><MessageSquareText size={15} /><span>批注</span></button><button type="button" onClick={() => runMenuAction(() => onReview(asset.id, 'derive'))}><Sparkles size={15} /><span>可衍生</span></button><button type="button" onClick={() => runMenuAction(() => onReview(asset.id, 'reject'))}><X size={15} /><span>不采用</span></button></div><button type="button" className="danger" role="menuitem" onClick={() => runMenuAction(() => onTrash(asset.id))}><Trash2 size={15} /><span>移入回收站</span></button></>}</div>}
     <div className="asset-meta"><div><strong>{assetLabel}</strong><span className="asset-state">{stateLabel}</span></div>{contextLabel && <span className="asset-context-line" title={contextLabel}>{contextLabel}</span>}</div>
     {annotating && <div className="annotation-editor"><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="记录本轮反馈" /><button type="button" className="outline-button" disabled={!note.trim()} onClick={saveNote}>保存批注</button></div>}
   </article>;
 }
 
-function RunItemRow({ item, onInspect, onRetry }) {
+function RunItemOutputThumbs({ assets, onInspect }) {
+  if (!assets?.length) return <span className="run-item-output is-empty">暂无图像</span>;
+  return <span className="run-item-output">{assets.slice(0, 3).map((asset, index) => <button type="button" key={asset.id} aria-label={'查看第 ' + (index + 1) + ' 个结果资产来源'} title="查看结果资产来源" onClick={() => void onInspect(asset.id)}><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button>)}{assets.length > 3 && <em>+{assets.length - 3}</em>}</span>;
+}
+
+function RunItemRow({ item, selected, onToggleSelected, onOpenDetail, onInspect, onRetry }) {
   const recovery = runItemRecovery(item);
-  const retryable = ['failed', 'blocked', 'retry_wait'].includes(item.status);
-  return <div className="run-item-row">
-    <div className="run-item-summary"><span>第 {item.sequence} 项</span>{item.outputAssets?.length ? <span className="run-item-output">{item.outputAssets.map((asset) => <button type="button" key={asset.id} title="查看结果资产来源" onClick={() => void onInspect(asset.id)}><img src={assetThumbnailUrl(asset)} alt="运行结果" loading="lazy" decoding="async" /></button>)}</span> : null}</div>
+  const retryable = retryableRunItems([item]).length > 0;
+  const attempts = Number.isInteger(item.attempts) ? item.attempts : 0;
+  return <article className={'run-item-row ' + (selected ? 'is-selected ' : '') + (retryable ? 'is-retryable' : '')}>
+    <label className="run-item-select"><input type="checkbox" checked={selected} disabled={!retryable} onChange={() => onToggleSelected(item.id)} aria-label={'选择第 ' + item.sequence + ' 项用于批量重试'} /><span aria-hidden="true"><Check size={12} /></span></label>
+    <div className="run-item-summary"><b>#{String(item.sequence).padStart(3, '0')}</b><RunItemOutputThumbs assets={item.outputAssets || EMPTY} onInspect={onInspect} /></div>
     <StatusPill value={item.status} scope="run_item" />
-    <div className="run-item-details"><span>尝试 {Number.isInteger(item.attempts) ? item.attempts : 0} 次</span>{item.retryAt && <span>重试时间 {item.retryAt}</span>}{recovery.error && <span className="run-item-error">{recovery.error}</span>}{recovery.advice && <span className="run-item-recovery">{recovery.advice}</span>}</div>
-    {retryable ? <IconButton label={'重试第 ' + item.sequence + ' 项'} onClick={() => void onRetry(item.id)}><RefreshCw size={15} /></IconButton> : <span />}
+    <div className="run-item-details"><span>尝试 {attempts} 次</span>{item.retryAt && <span>重试 {item.retryAt}</span>}{item.updatedAt && <span>更新 {new Date(item.updatedAt).toLocaleString('zh-CN')}</span>}{recovery.error && <span className="run-item-error">{recovery.error}</span>}{recovery.advice && <span className="run-item-recovery">{recovery.advice}</span>}</div>
+    <div className="run-item-actions"><button type="button" className="outline-button" onClick={() => onOpenDetail(item)}><Eye size={15} />详情</button>{retryable && <IconButton label={'重试第 ' + item.sequence + ' 项'} onClick={() => void onRetry(item.id)}><RefreshCw size={15} /></IconButton>}</div>
+  </article>;
+}
+
+function RunItemDetailDialog({ item, onDismiss, onInspect, onRetry }) {
+  if (!item) return null;
+  const recovery = runItemRecovery(item);
+  const retryable = retryableRunItems([item]).length > 0;
+  return <AccessibleDialog label={'第 ' + item.sequence + ' 项运行详情'} onDismiss={onDismiss} className="run-item-detail-dialog">
+    <header><div><p className="eyebrow">运行项详情</p><h2>第 {item.sequence} 项</h2></div><IconButton label="关闭运行项详情" onClick={onDismiss}><X size={16} /></IconButton></header>
+    <div className="run-item-detail-grid"><section><h3>状态</h3><StatusPill value={item.status} scope="run_item" /><p>已尝试 {Number.isInteger(item.attempts) ? item.attempts : 0} 次{item.retryAt ? '，下次重试 ' + item.retryAt : ''}。</p>{item.updatedAt && <p>最后更新：{new Date(item.updatedAt).toLocaleString('zh-CN')}</p>}</section><section><h3>恢复建议</h3>{recovery.error ? <p className="run-item-error">{recovery.error}</p> : <p>没有安全错误摘要。</p>}{recovery.advice && <p className="run-item-recovery">{recovery.advice}</p>}</section><section className="run-item-detail-assets"><h3>输出资产</h3>{item.outputAssets?.length ? <div>{item.outputAssets.map((asset) => <button type="button" key={asset.id} onClick={() => void onInspect(asset.id)}><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /><span>{asset.mediaType || 'image'} · {asset.mediaState || 'available'}</span></button>)}</div> : <p>这一项还没有输出资产。</p>}</section></div>
+    {retryable && <footer><button type="button" className="command-button" onClick={() => void onRetry(item.id)}><RefreshCw size={16} />立即重试此项</button></footer>}
+  </AccessibleDialog>;
+}
+
+function RunItemProgressBar({ page }) {
+  const progress = runItemProgress(page.statusCounts);
+  const total = Math.max(0, Number(page.allTotal || page.total || 0));
+  const segments = [{ key: 'succeeded', label: '完成', value: progress.succeeded }, { key: 'active', label: '进行中', value: progress.active }, { key: 'waiting', label: '等待', value: progress.waiting }, { key: 'attention', label: '需处理', value: progress.attention }, { key: 'cancelled', label: '取消', value: progress.cancelled }].filter((segment) => segment.value > 0);
+  return <div className="run-item-progress" role="progressbar" aria-label={'运行项完成进度：' + progress.succeeded + ' / ' + total} aria-valuemin="0" aria-valuemax={total || 1} aria-valuenow={Math.min(progress.succeeded, total || 1)}>
+    <div>{segments.length ? segments.map((segment) => <span key={segment.key} className={'is-' + segment.key} style={{ width: Math.max(2, (segment.value / Math.max(1, total)) * 100) + '%' }} />) : <span className="is-empty" />}</div>
+    <p>{progress.succeeded} 完成 · {progress.active} 进行中 · {progress.attention} 需处理 · 共 {total} 项</p>
   </div>;
+}
+
+function GenerationHistory({ selectedRound, runs, activeRunId, activeRun, runExecutionStatus, runLifecycleStatus, taskOverview, creativeRecord, visibleRunItems, runItemPage, runItemFilter, runItemPageSize, runItemSequence, selectedRunItemIds, runItemDetail, canCancelActiveRun, advancedDetails, onSelectRun, onControlRun, onRetryItem, onInspectAsset, onSetRunItemFilter, onSetRunItemPage, onSetRunItemPageSize, onSetRunItemSequence, onToggleRunItemSelection, onSelectRetryablePageItems, onRetrySelectedItems, onOpenRunItemDetail, onCloseRunItemDetail, onToggleAdvanced, onCloseAdvanced, onCopyPrompt }) {
+  const plan = activeRun ? planPresentation(activeRun.planSnapshot) : null;
+  const hasPrompt = Boolean(activeRun?.planSnapshot?.prompt?.trim());
+  const runShortId = activeRun ? String(activeRun.id || '').slice(-8) || '未记录' : '';
+  const bounds = runItemPageBounds(runItemPage);
+  const normalizedFilter = normalizeRunItemFilter(runItemFilter);
+  const normalizedPageSize = normalizeRunItemPageSize(runItemPageSize);
+  const normalizedSequence = normalizeRunItemSequence(runItemSequence);
+  const retryablePageItems = retryableRunItems(visibleRunItems);
+  const selectedRetryableIds = selectableRunItemIds(visibleRunItems, selectedRunItemIds);
+  const allRetryableSelected = retryablePageItems.length > 0 && selectedRetryableIds.length === retryablePageItems.length;
+  return <section className="run-stage">
+    <div className="run-history-layout">
+      <aside className="run-history-panel" aria-label="当前轮次的生成历史">
+        <header><div><p className="eyebrow">当前轮次</p><h2>运行记录</h2></div><span className="run-history-count">{runs.length}</span></header>
+        <p className="run-history-help">{selectedRound ? '选择一条记录查看当时的提示词、结果与恢复操作。' : '先从上方选择轮次。'}</p>
+        {selectedRound ? runs.length ? <div className="run-history-list">{runs.map((run, index) => <button type="button" key={run.id} className={run.id === activeRunId ? 'is-active' : ''} aria-pressed={run.id === activeRunId} aria-label={runHistoryOption(run)} title={runHistoryOption(run)} onClick={() => onSelectRun(run.id)}>
+          <span className="run-history-index">{String(index + 1).padStart(2, '0')}</span>
+          <span className="run-history-entry"><b>计划 v{run.planVersion ?? '?'}</b><small>{run.createdAt ? new Date(run.createdAt).toLocaleString('zh-CN') : '时间未知'} · {String(run.id || '').slice(-8) || '未知标识'}</small></span>
+          <StatusPill value={run.status} scope="run" />
+        </button>)}</div> : <p className="empty-copy">当前轮次还没有生成运行。</p> : <p className="empty-copy">从上方选择一个轮次后，再查看生成历史。</p>}
+      </aside>
+
+      <section className="run-detail-panel">
+        <header className="run-detail-header">
+          <div><p className="eyebrow">{selectedRound ? (ROUND_PURPOSE_LABELS[selectedRound.purpose] || selectedRound.purpose) + '轮次' : '未选择轮次'}</p><h2>{activeRun ? '生成详情' : '选择一条运行记录'}</h2>{activeRun && <span>{activeRun.createdAt ? new Date(activeRun.createdAt).toLocaleString('zh-CN') : '时间未知'} · 计划 v{activeRun.planVersion ?? '?'} · {runShortId}</span>}</div>
+          {activeRun && <StatusPill presentation={runExecutionStatus} />}
+        </header>
+
+        {activeRun ? <>
+          <section className="run-prompt-card">
+            <header><div className="run-prompt-title"><MessageSquareText size={17} aria-hidden="true" /><div><span>本次提示词</span><small>{plan.operation} · {plan.output}</small></div></div><button type="button" className="run-copy-button" onClick={() => void onCopyPrompt(activeRun.planSnapshot.prompt)} disabled={!hasPrompt}><Copy size={15} />复制提示词</button></header>
+            <p>{plan.prompt}</p>
+            <div className="run-plan-facts"><span>计划产出 <b>{plan.itemCount ?? '未记录'}</b></span><span>参考素材 <b>{activeRun.planSnapshot?.referenceCount ?? plan.references.length}</b></span><span>执行并发 <b>{activeRun.executionConcurrency || '未记录'}</b></span></div>
+          </section>
+
+          <section className="run-overview-strip" aria-label="运行概览">
+            {taskOverview && <div className="run-task-context"><p className="eyebrow">当前任务</p><strong>{taskOverview.task?.name}</strong><span>{taskOverview.summary?.roundCount || 0} 个轮次 · {taskOverview.summary?.runCount || 0} 次运行 · {taskOverview.summary?.resultCount || 0} 个结果{creativeRecord?.lineage?.rounds?.length ? ' · 承接 ' + creativeRecord.lineage.rounds.length + ' 个上游轮次' : ''}</span></div>}
+            <div className="run-metrics"><div><span>计划</span><b>v{activeRun.planVersion ?? creativeRecord?.round?.planVersion ?? '?'}</b></div><div><span>执行</span><b>{runExecutionStatus.label}</b></div><div><span>状态</span><b>{runLifecycleStatus.label}</b></div></div>
+          </section>
+
+          <div className="run-controls" aria-label="运行操作">
+            <span className="run-controls-label">运行操作</span>
+            {['queued', 'running'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void onControlRun('pause')}><Pause size={16} />暂停</button>}
+            {activeRun.status === 'paused' && <button type="button" className="command-button" onClick={() => void onControlRun('resume')}><Play size={16} />继续</button>}
+            {['partial', 'failed'].includes(activeRun.status) && <button type="button" className="command-button" onClick={() => void onControlRun('retry')}><RefreshCw size={16} />重试失败项</button>}
+            {canCancelActiveRun && <button type="button" className="danger-button" onClick={() => void onControlRun('cancel')}><X size={16} />取消运行</button>}
+            <button type="button" className="run-advanced-button" aria-expanded={Boolean(advancedDetails)} onClick={onToggleAdvanced}><Ellipsis size={16} />{advancedDetails ? '收起技术详情' : '技术详情'}</button>
+          </div>
+
+          <section className="run-items-section">
+            <header className="run-items-heading"><div><p className="eyebrow">生成结果</p><h3>结果队列</h3></div><span>{bounds.start ? bounds.start + '-' + bounds.end : '0'} / {runItemPage.total} 项{runItemPage.allTotal !== runItemPage.total ? ' · 总 ' + runItemPage.allTotal : ''}</span></header>
+            <RunItemProgressBar page={runItemPage} />
+            <div className="run-item-toolbar">
+              <div className="run-item-filters" aria-label="运行项状态筛选">{RUN_ITEM_FILTER_OPTIONS.map((option) => <button type="button" key={option.id} className={normalizedFilter === option.id ? 'is-active' : ''} onClick={() => onSetRunItemFilter(option.id)}>{option.label}<small>{runItemFilterCount(runItemPage.statusCounts, option.id)}</small></button>)}</div>
+              <label className="run-item-sequence"><Search size={14} /><span>序号</span><input type="number" min="1" inputMode="numeric" value={normalizedSequence || ''} onChange={(event) => onSetRunItemSequence(event.target.value)} placeholder="任意" />{normalizedSequence !== null && <button type="button" aria-label="清除序号筛选" onClick={() => onSetRunItemSequence(null)}><X size={13} /></button>}</label>
+              <label className="run-item-page-size"><span>每页</span><select aria-label="每页运行项数量" value={normalizedPageSize} onChange={(event) => onSetRunItemPageSize(event.target.value)}>{RUN_ITEM_PAGE_SIZES.map((size) => <option value={size} key={size}>{size}</option>)}</select></label>
+              <div className="run-item-bulk"><button type="button" className="outline-button" disabled={!retryablePageItems.length} onClick={() => onSelectRetryablePageItems(!allRetryableSelected)}><Check size={15} />{allRetryableSelected ? '取消本页' : '选择可重试'}</button><button type="button" className="command-button" disabled={!selectedRetryableIds.length} onClick={() => void onRetrySelectedItems(selectedRetryableIds)}><RefreshCw size={15} />重试已选 {selectedRetryableIds.length || ''}</button></div>
+            </div>
+            <div className="run-item-list">{visibleRunItems.length ? visibleRunItems.map((item) => <RunItemRow key={item.id} item={item} selected={selectedRunItemIds.has(item.id)} onToggleSelected={onToggleRunItemSelection} onOpenDetail={onOpenRunItemDetail} onInspect={onInspectAsset} onRetry={onRetryItem} />) : <p className="empty-copy">当前筛选没有运行项。</p>}</div>
+            <nav className="run-item-pagination" aria-label="运行项分页"><button type="button" className="outline-button" disabled={runItemPage.page <= 1} onClick={() => onSetRunItemPage(runItemPage.page - 1)}><ChevronLeft size={15} />上一页</button><span>第 {runItemPage.page} / {runItemPage.totalPages} 页</span><button type="button" className="outline-button" disabled={runItemPage.page >= runItemPage.totalPages} onClick={() => onSetRunItemPage(runItemPage.page + 1)}>下一页<ChevronRight size={15} /></button></nav>
+          </section>
+
+          {advancedDetails && <section className="advanced-details"><div className="advanced-details-head"><div><p className="eyebrow">技术详情</p><h3>计划与预检证据</h3></div><IconButton label="关闭技术详情" onClick={onCloseAdvanced}><X size={15} /></IconButton></div><div className="advanced-evidence"><section><h4>计划版本</h4>{advancedDetails.plans.length ? advancedDetails.plans.map((item) => <p key={item.id || item.planVersion}>v{item.planVersion} · {planStateLabel?.(item.state) || item.state || '未知'}</p>) : <p>没有计划版本记录。</p>}</section><section><h4>预检</h4>{advancedDetails.dryRuns.length ? advancedDetails.dryRuns.map((dryRun) => { const evidence = dryRunEvidence(dryRun); return <p key={dryRun.id}>{evidence.status} · 计划 v{evidence.planVersion || '未知'} · {JSON.stringify(evidence.details)}</p>; }) : <p>没有预检记录。</p>}</section></div></section>}
+        </> : <div className="run-detail-empty"><Sparkles size={28} strokeWidth={1.25} /><div><h3>选择一条运行记录</h3><p>选择后会在这里集中显示提示词、执行状态、生成结果和可用操作。</p></div></div>}
+      </section>
+    </div>
+    <RunItemDetailDialog item={runItemDetail} onDismiss={onCloseRunItemDetail} onInspect={onInspectAsset} onRetry={onRetryItem} />
+  </section>;
 }
 
 class WorkbenchErrorBoundary extends Component {
@@ -259,7 +396,7 @@ function App() {
   const [advancedDetails, setAdvancedDetails] = useState(null);
   const [planVersions, setPlanVersions] = useState(EMPTY);
   const [planVersionsLoading, setPlanVersionsLoading] = useState(false);
-  const [guideDismissed, setGuideDismissed] = useState(() => window.localStorage.getItem('daoge-pic:guide-dismissed') === '1');
+  const [railCollapsed, setRailCollapsed] = useState(() => window.localStorage.getItem(RAIL_COLLAPSE_KEY) === '1');
   const [providerDetails, setProviderDetails] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
   const [confirmationBusy, setConfirmationBusy] = useState(false);
@@ -271,7 +408,11 @@ function App() {
   const [rounds, setRounds] = useState(EMPTY);
   const [runs, setRuns] = useState(EMPTY);
   const [sessionPlanStatus, setSessionPlanStatus] = useState(null);
-  const [runItems, setRunItems] = useState(EMPTY);
+  const [runItemPage, setRunItemPage] = useState(EMPTY_RUN_ITEM_PAGE);
+  const [lineageRunItems, setLineageRunItems] = useState(EMPTY);
+  const [lineageRunItemCoverage, setLineageRunItemCoverage] = useState(EMPTY_LINEAGE_RUN_ITEM_COVERAGE);
+  const [selectedRunItemIds, setSelectedRunItemIds] = useState(new Set());
+  const [runItemDetailId, setRunItemDetailId] = useState(null);
   const [session, setSession] = useState(null);
   const [route, setRoute] = useState(() => parseWorkbenchRoute(window.location.search));
   const [contextError, setContextError] = useState('');
@@ -284,7 +425,7 @@ function App() {
   const [runtimeRepairing, setRuntimeRepairing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
-  const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0 });
+  const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0, canvasLayout: 0 });
   const inputRef = useRef(null);
   const searchCoordinatorRef = useRef(null);
   const batchBusyRef = useRef(false);
@@ -330,7 +471,7 @@ function App() {
     cancelSchedule: (timer) => window.clearTimeout(timer)
   });
   useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); }, []);
-  const { view, projectId: activeProjectId, taskId: activeTaskId, roundId: activeRoundId, compareRoundIds = EMPTY, runId: activeRunId, assetScope } = route;
+  const { view, projectId: activeProjectId, taskId: activeTaskId, roundId: activeRoundId, compareRoundIds = EMPTY, runId: activeRunId, assetScope, runItemFilter: activeRunItemFilter = DEFAULT_RUN_ITEM_FILTER, runItemPage: activeRunItemPage = 1, runItemPageSize: activeRunItemPageSize = DEFAULT_RUN_ITEM_PAGE_SIZE, runItemSequence: activeRunItemSequence = null } = route;
   const routeView = rendererForWorkbenchView(view);
   const studioView = isStudioView(view);
   activeProjectIdRef.current = activeProjectId;
@@ -370,7 +511,7 @@ function App() {
     if (!request.isCurrent()) throw new DOMException('Stale refresh', 'AbortError');
     const nextProjects = projectData.projects || [];
     setStudio(studioData);
-    setProvider(providerData.status);
+    setProvider({ ...(providerData.status || {}), restartRequired: providerData.runtime?.restartRequired === true });
     setProjects(nextProjects);
     setTaskTypes(taskTypeData.taskTypes || []);
     setStyleKits(styleKitData.styleKits || []);
@@ -388,18 +529,22 @@ function App() {
       requireCurrent();
       return data;
     };
+    const clearLineageRunData = () => {
+      setLineageRunItems(EMPTY);
+      setLineageRunItemCoverage(EMPTY_LINEAGE_RUN_ITEM_COVERAGE);
+    };
     const selectedProject = activeProjectId ? (knownProjects || []).find((project) => project.id === activeProjectId) || null : null;
     if (activeProjectId && !selectedProject) {
-      setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setDeliveries(EMPTY); setDeliveryBatches(EMPTY);
+      setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItemPage(EMPTY_RUN_ITEM_PAGE); setDeliveries(EMPTY); setDeliveryBatches(EMPTY); clearLineageRunData();
       setContextError('该链接所指向的项目已不存在，或不属于当前 Studio。');
       return;
     }
     if (!selectedProject) {
-      setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY); setDeliveries(EMPTY); setDeliveryBatches(EMPTY);
+      setTasks(EMPTY); setRounds(EMPTY); setRuns(EMPTY); setRunItemPage(EMPTY_RUN_ITEM_PAGE); setDeliveries(EMPTY); setDeliveryBatches(EMPTY); clearLineageRunData();
       setContextError(activeTaskId || activeRoundId || activeRunId ? '请先选择一个项目，再继续查看任务、轮次或运行。' : '');
       return;
     }
-    const needsDeliveries = view === 'deliveries';
+    const needsDeliveries = view === 'deliveries' || view === 'lineage';
     const [taskData, deliveryData, batchData] = await Promise.all([
       load('/api/projects/' + encodeURIComponent(selectedProject.id) + '/tasks'),
       needsDeliveries ? load('/api/projects/' + encodeURIComponent(selectedProject.id) + '/deliveries') : Promise.resolve({ deliveries: EMPTY }),
@@ -412,12 +557,12 @@ function App() {
     setDeliveryBatches(batchData.batches || []);
     const selectedTask = activeTaskId ? nextTasks.find((task) => task.id === activeTaskId) || null : null;
     if (activeTaskId && !selectedTask) {
-      setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY);
+      setRounds(EMPTY); setRuns(EMPTY); setRunItemPage(EMPTY_RUN_ITEM_PAGE); clearLineageRunData();
       setContextError('该任务不属于当前项目，或已不存在。');
       return;
     }
     if (!selectedTask) {
-      setRounds(EMPTY); setRuns(EMPTY); setRunItems(EMPTY);
+      setRounds(EMPTY); setRuns(EMPTY); setRunItemPage(EMPTY_RUN_ITEM_PAGE); clearLineageRunData();
       setContextError(activeRoundId || activeRunId ? '请先选择一个任务，再继续查看轮次或运行。' : '');
       return;
     }
@@ -426,12 +571,12 @@ function App() {
     setRounds(nextRounds);
     const selectedRound = activeRoundId ? nextRounds.find((round) => round.id === activeRoundId) || null : null;
     if (activeRoundId && !selectedRound) {
-      setRuns(EMPTY); setRunItems(EMPTY);
+      setRuns(EMPTY); setRunItemPage(EMPTY_RUN_ITEM_PAGE); clearLineageRunData();
       setContextError('该轮次不属于当前任务，或已不存在。');
       return;
     }
-    if (!selectedRound || view !== 'runs') {
-      setRuns(EMPTY); setRunItems(EMPTY);
+    if (!selectedRound || !['runs', 'lineage'].includes(view)) {
+      setRuns(EMPTY); setRunItemPage(EMPTY_RUN_ITEM_PAGE); clearLineageRunData();
       setContextError(activeRunId ? '请先打开生成运行视图，再继续查看运行。' : '');
       return;
     }
@@ -439,27 +584,39 @@ function App() {
     const nextRuns = runData.runs || [];
     setRuns(nextRuns);
     const selectedRun = activeRunId ? nextRuns.find((run) => run.id === activeRunId) || null : null;
+    if (view === 'lineage') {
+      setRunItemPage(EMPTY_RUN_ITEM_PAGE);
+      const lineage = await loadCompleteLineageRunItems(nextRuns, load, requireCurrent);
+      requireCurrent();
+      setLineageRunItems(lineage.items);
+      setLineageRunItemCoverage({ loaded: lineage.loaded, total: lineage.total });
+      setContextError(activeRunId && !selectedRun ? '该运行不属于当前轮次，或已不存在。' : '');
+      return;
+    }
+    clearLineageRunData();
     if (activeRunId && !selectedRun) {
-      setRunItems(EMPTY);
+      setRunItemPage(EMPTY_RUN_ITEM_PAGE);
       setContextError('该运行不属于当前轮次，或已不存在。');
     } else if (selectedRun) {
-      const itemData = await load('/api/runs/' + encodeURIComponent(selectedRun.id) + '/items');
-      setRunItems(itemData.items || []);
+      const itemQuery = serializeRunItemRequestQuery({ page: activeRunItemPage, pageSize: activeRunItemPageSize, filter: activeRunItemFilter, sequence: activeRunItemSequence });
+      const itemData = await load('/api/runs/' + encodeURIComponent(selectedRun.id) + '/items?' + itemQuery);
+      setRunItemPage(normalizeRunItemPage(itemData, activeRunItemPageSize));
       setContextError('');
     } else {
-      setRunItems(EMPTY);
+      setRunItemPage(EMPTY_RUN_ITEM_PAGE);
       setContextError('');
     }
-  }, [activeProjectId, activeTaskId, activeRoundId, activeRunId, view]);
+  }, [activeProjectId, activeTaskId, activeRoundId, activeRunId, activeRunItemFilter, activeRunItemPage, activeRunItemPageSize, activeRunItemSequence, view]);
 
   const refreshAssets = useCallback(async () => {
-    if (!['assets', 'trash', 'deliveries'].includes(view)) {
+    if (!['assets', 'trash', 'deliveries', 'lineage'].includes(view)) {
       assetRequests.current.cancel();
       setAssets(EMPTY);
       setAssetTotal(0);
       return true;
     }
-    const path = assetRefreshPath(route, ['assets', 'trash'].includes(view) ? { page: assetPage, pageSize: assetPageSize, filter: assetFilter } : null);
+    const pagination = ['assets', 'trash'].includes(view) ? { page: assetPage, pageSize: assetPageSize, filter: assetFilter } : view === 'lineage' ? { page: 1, pageSize: LINEAGE_ASSET_PAGE_SIZE, filter: 'all' } : null;
+    const path = assetRefreshPath(route, pagination);
     if (!path) {
       setAssets(EMPTY);
       setAssetTotal(0);
@@ -467,7 +624,7 @@ function App() {
     }
     const request = assetRequests.current.begin(path);
     try {
-      const data = await api(path, { signal: request.signal });
+      const data = view === 'lineage' ? await loadCompleteLineageAssets(route, (nextPath) => api(nextPath, { signal: request.signal }), () => { if (!request.isCurrent()) throw new DOMException('Stale refresh', 'AbortError'); }) : await api(path, { signal: request.signal });
       if (!request.isCurrent()) return false;
       const nextAssets = data.assets || EMPTY;
       setAssets(nextAssets);
@@ -533,15 +690,15 @@ function App() {
     return () => assetRequests.current.cancel();
   }, [refreshAssets]);
   const applyEventRefreshPlan = useCallback((plan) => {
-    const detail = view === 'studio-overview' ? 'studioOverview' : view === 'prompts' ? 'planVersions' : view === 'runs' ? 'creativeRecord' : '';
     setEventRevision((current) => ({
-      taskOverview: current.taskOverview,
-      creativeRecord: current.creativeRecord + (detail === 'creativeRecord' && plan.creativeRecord ? 1 : 0),
-      studioOverview: current.studioOverview + (detail === 'studioOverview' && plan.studioOverview ? 1 : 0),
-      planVersions: current.planVersions + (detail === 'planVersions' && plan.planVersions ? 1 : 0),
-      runs: current.runs + (plan.refreshContext ? 1 : 0)
+      taskOverview: current.taskOverview + (plan.taskOverview ? 1 : 0),
+      creativeRecord: current.creativeRecord + (plan.creativeRecord ? 1 : 0),
+      studioOverview: current.studioOverview + (plan.studioOverview ? 1 : 0),
+      planVersions: current.planVersions + (plan.planVersions ? 1 : 0),
+      runs: current.runs + (plan.refreshContext ? 1 : 0),
+      canvasLayout: current.canvasLayout + (plan.refreshCanvasLayout || plan.canvasLayout ? 1 : 0)
     }));
-  }, [view]);
+  }, []);
   eventRefreshCallbacks.current = {
     refresh: async (plan) => {
       const contextRefresh = plan.refreshContext ? (plan.scope === 'all' ? refreshAll() : refreshCurrentContext()) : Promise.resolve(true);
@@ -561,9 +718,10 @@ function App() {
   const refreshForEvents = useCallback((events) => eventRefreshQueueRef.current.request(studioEventRefreshPlan(events)), []);
   const refreshSnapshot = useCallback(async () => {
     const refreshed = await refresh();
-    if (refreshed) applyEventRefreshPlan({ taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, refreshContext: true });
-    return refreshed;
-  }, [refresh, applyEventRefreshPlan]);
+    const selectionRefreshed = refreshed ? await refreshSelection() : false;
+    if (refreshed && selectionRefreshed) applyEventRefreshPlan({ taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, refreshContext: true, canvasLayout: true });
+    return refreshed && selectionRefreshed;
+  }, [refresh, refreshSelection, applyEventRefreshPlan]);
   const updateRecoveryPhase = useCallback((phase) => { recoveryPhaseRef.current = phase; setRecoveryPhase(phase); }, []);
   const finishStudioRecovery = useCallback(async () => {
     if (!['stopping', 'reconnecting'].includes(recoveryPhaseRef.current)) return true;
@@ -663,12 +821,14 @@ function App() {
   const selectionAssetById = useMemo(() => new Map(selectionAssets.map((asset) => [asset.id, asset])), [selectionAssets]);
   const deliveryFlowAssets = deliveryCompletion ? deliveryCompletion.assetIds.map((assetId) => assetById.get(assetId) || selectionAssetById.get(assetId) || { id: assetId, display: { label: '已冻结交付图片' } }) : selectedAssets;
   const selectedTaskStatus = taskPresentation(selectedTask, rounds);
-  const runExecutionStatus = runExecutionPresentation(activeRun, runItems);
-  const visibleRunItems = useMemo(() => mergeRunHistoryItems(creativeRecord?.items || EMPTY, runItems), [creativeRecord?.items, runItems]);
+  const visibleRunItems = runItemPage.items;
+  const lineageVisibleRunItems = view === 'lineage' ? lineageRunItems : visibleRunItems;
+  const runExecutionStatus = runExecutionPresentationFromCounts(activeRun, runItemPage.statusCounts);
+  const runItemDetail = useMemo(() => runItemDetailId ? visibleRunItems.find((item) => item.id === runItemDetailId) || null : null, [runItemDetailId, visibleRunItems]);
   const runLifecycleStatus = activeRun ? statusPresentation('run', activeRun.status) : null;
   const canCancelActiveRun = Boolean(activeRun && !['completed', 'cancelled'].includes(activeRun.status));
   const uploadTarget = assetScope === 'round' && selectedRound ? { type: 'creative_round', id: selectedRound.id } : assetScope === 'task' && selectedTask ? { type: 'creative_task', id: selectedTask.id } : selectedProject ? { type: 'project', id: selectedProject.id } : null;
-  const canImport = view === 'assets' && Boolean(selectedProject);
+  const canImport = ['assets', 'lineage'].includes(view) && Boolean(selectedProject);
   const importLabel = selectedRound && assetScope === 'round' ? '添加为本轮参考' : '导入到项目';
   const deliverySelection = useMemo(() => projectDeliverySelection(selectedProject?.id || null, selectedAssets), [selectedProject?.id, selectedAssets]);
   const selectedDeliveryAssets = deliverySelection.eligibleAssets;
@@ -684,6 +844,24 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(ASSET_PAGE_SIZE_KEY, String(assetPageSize));
   }, [assetPageSize]);
+  useEffect(() => {
+    if (view === 'runs' && activeRun && runItemPage.page !== activeRunItemPage) navigateRoute({ runItemPage: runItemPage.page }, true);
+  }, [view, activeRun?.id, runItemPage.page, activeRunItemPage, navigateRoute]);
+  useEffect(() => {
+    setSelectedRunItemIds(new Set());
+    setRunItemDetailId(null);
+  }, [activeRunId, activeRunItemFilter, activeRunItemSequence]);
+  useEffect(() => {
+    const allowed = new Set(retryableRunItems(visibleRunItems).map((item) => item.id));
+    setSelectedRunItemIds((current) => {
+      const next = new Set([...current].filter((id) => allowed.has(id)));
+      return next.size === current.size ? current : next;
+    });
+    if (runItemDetailId && !visibleRunItems.some((item) => item.id === runItemDetailId)) setRunItemDetailId(null);
+  }, [visibleRunItems, runItemDetailId]);
+  useEffect(() => {
+    window.localStorage.setItem(RAIL_COLLAPSE_KEY, railCollapsed ? '1' : '0');
+  }, [railCollapsed]);
 
   useEffect(() => {
     batchOperationRef.current = null;
@@ -718,10 +896,12 @@ function App() {
   }, [selectedTask?.id, eventRevision.taskOverview]);
   useEffect(() => {
     if (!selectedRound) { creativeRecordRequests.current.cancel(); setCreativeRecord(null); return undefined; }
+    const params = new URLSearchParams();
+    params.set('includeItems', '0');
+    if (activeRunId) params.set('runId', activeRunId);
     const signature = [selectedRound.id, activeRunId || '', eventRevision.creativeRecord].join(':');
     const request = creativeRecordRequests.current.begin(signature);
-    const query = activeRunId ? '?runId=' + encodeURIComponent(activeRunId) : '';
-    void api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/creative-record' + query, { signal: request.signal }).then((data) => {
+    void api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/creative-record?' + params.toString(), { signal: request.signal }).then((data) => {
       if (request.isCurrent()) setCreativeRecord(data.record || null);
     }).catch((nextError) => {
       if (request.isCurrent() && !isAbortError(nextError)) setError(nextError.message || '无法读取轮次创作记录。');
@@ -897,6 +1077,24 @@ function App() {
     const candidateIds = candidates.map((asset) => asset.id);
     enqueueSelectionWrite(projectId, candidateIds, () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('page-selection'), body: { assetIds: candidateIds, selected, keepAssetIds: selected ? candidates.filter((asset) => asset.review?.decision !== 'keep').map((asset) => asset.id) : [] } }), '无法更新本页选片。');
   };
+  const setAssetsSelection = (assetIds, selected) => {
+    if (!selectedProject || !assetIds.length) return;
+    const uniqueIds = [...new Set(assetIds)].filter(Boolean);
+    const nextIds = new Set(selectedAssetIdsRef.current);
+    for (const assetId of uniqueIds) { if (selected) nextIds.add(assetId); else nextIds.delete(assetId); }
+    selectedAssetIdsRef.current = nextIds;
+    setSelectedAssetIds(new Set(nextIds));
+    setSelectionAssets((current) => selected ? [...current, ...uniqueIds.map((assetId) => assetById.get(assetId)).filter((asset) => asset && !current.some((item) => item.id === asset.id))] : current.filter((asset) => !uniqueIds.includes(asset.id)));
+    const projectId = selectedProject.id;
+    enqueueSelectionWrite(projectId, uniqueIds, () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('canvas-selection'), body: { assetIds: uniqueIds, selected, keepAssetIds: selected ? uniqueIds.filter((assetId) => assetById.get(assetId)?.review?.decision !== 'keep') : [] } }), '无法更新创作谱系选片。');
+  };
+  const batchReview = async (assetIds, decision) => {
+    try {
+      const uniqueIds = [...new Set(assetIds)].filter(Boolean);
+      for (const assetId of uniqueIds) await api('/api/assets/' + encodeURIComponent(assetId) + '/review', { method: 'POST', idempotencyKey: uniqueKey('canvas-review'), body: { decision, taskId: selectedTask?.id, roundId: selectedRound?.id, feedback: {} } });
+      await refresh();
+    } catch (nextError) { setError(nextError.message || '无法批量保存评审。'); }
+  };
   const inspectAsset = async (assetId) => {
     try { const data = await api('/api/assets/' + encodeURIComponent(assetId) + '/provenance'); setAssetProvenance(data.provenance || null); } catch (nextError) { setError(nextError.message || '无法读取素材来源与评审记录。'); }
   };
@@ -1056,24 +1254,50 @@ function App() {
       setBatchBusy(false);
     }
   };
-  const retryRunItem = async (itemId) => {
-    if (!activeRun) return;
-    try {
-      await api('/api/runs/' + encodeURIComponent(activeRun.id) + '/retry', { method: 'POST', idempotencyKey: uniqueKey('retry-run-item'), body: { itemIds: [itemId] } });
-      await refresh();
-    } catch (nextError) { setError(nextError.message || '无法重试该生成项。'); }
+  const updateRunItemControls = (changes) => navigateRoute(changes, false);
+  const setRunItemFilter = (filter) => updateRunItemControls({ runItemFilter: normalizeRunItemFilter(filter), runItemPage: 1 });
+  const setRunItemPageNumber = (page) => updateRunItemControls({ runItemPage: normalizeRunItemPageNumber(page) });
+  const setRunItemPageSizeValue = (pageSize) => updateRunItemControls({ runItemPageSize: normalizeRunItemPageSize(pageSize), runItemPage: 1 });
+  const setRunItemSequenceValue = (sequence) => updateRunItemControls({ runItemSequence: normalizeRunItemSequence(sequence), runItemPage: 1 });
+  const toggleRunItemSelection = (itemId) => {
+    const item = retryableRunItems(visibleRunItems).find((candidate) => candidate.id === itemId);
+    if (!item) return;
+    setSelectedRunItemIds((current) => { const next = new Set(current); if (next.has(itemId)) next.delete(itemId); else next.add(itemId); return next; });
   };
-  const controlRun = async (action) => {
+  const selectRetryablePageItems = (selected) => {
+    const pageIds = retryableRunItems(visibleRunItems).map((item) => item.id);
+    setSelectedRunItemIds((current) => { const next = new Set(current); for (const itemId of pageIds) selected ? next.add(itemId) : next.delete(itemId); return next; });
+  };
+  const retryRunItemsByIds = async (itemIds) => {
     if (!activeRun) return;
+    const retryIds = [...new Set(itemIds)].filter(Boolean);
+    if (!retryIds.length) return;
+    try {
+      await api('/api/runs/' + encodeURIComponent(activeRun.id) + '/retry', { method: 'POST', idempotencyKey: uniqueKey('retry-run-item'), body: { itemIds: retryIds } });
+      setSelectedRunItemIds(new Set());
+      await refresh();
+    } catch (nextError) { setError(nextError.message || '无法重试生成项。'); }
+  };
+  const retryRunItem = async (itemId) => retryRunItemsByIds([itemId]);
+  const controlRun = async (action, runId = activeRun?.id) => {
+    const targetRunId = runId || activeRun?.id;
+    if (!targetRunId) return;
     if (action === 'resume') {
       setError('恢复运行需要在当前智能体会话中重新确认。');
       return;
     }
     const path = action === 'pause' ? '/pause' : action === 'cancel' ? '/cancel' : '/retry';
     try {
-      await api('/api/runs/' + encodeURIComponent(activeRun.id) + path, { method: 'POST', idempotencyKey: uniqueKey('run-' + action), body: {} });
+      await api('/api/runs/' + encodeURIComponent(targetRunId) + path, { method: 'POST', idempotencyKey: uniqueKey('run-' + action), body: {} });
       await refresh();
     } catch (nextError) { setError(nextError.message || '无法更新生成运行。'); }
+  };
+  const copyRunPrompt = async (prompt) => {
+    try {
+      if (!prompt || !navigator.clipboard?.writeText) throw new Error('当前浏览器未提供剪贴板权限。');
+      await navigator.clipboard.writeText(prompt);
+      setNotice('已复制本次运行的提示词。');
+    } catch (nextError) { setError(nextError.message || '无法复制本次提示词。'); }
   };
   const openGenerationConfirmation = async () => {
     if (!selectedRound || selectedRound.status !== 'awaiting_confirmation') return;
@@ -1174,38 +1398,70 @@ function App() {
     void refreshPlanVersions();
     return () => planVersionRequests.current.cancel();
   }, [view, selectedRound?.id, eventRevision.planVersions]);
-  const dismissGuide = () => { window.localStorage.setItem('daoge-pic:guide-dismissed', '1'); setGuideDismissed(true); };
+  const dismissGuide = () => { window.localStorage.setItem('daoge-pic:guide-dismissed', '1'); };
 
-  const renderAssetsView = () => <section className="asset-stage">
-    {routeView === 'assets' && <div className="asset-scope-control" aria-label="资产范围"><span>查看范围</span>{ASSET_SCOPES.filter((scope) => scope !== 'studio').map((scope) => <button type="button" key={scope} className={assetScope === scope ? 'is-active' : ''} disabled={(scope === 'round' && !selectedRound) || (scope === 'task' && !selectedTask) || (scope === 'project' && !selectedProject)} onClick={() => navigateRoute({ assetScope: scope })}>{ASSET_SCOPE_LABELS[scope]}</button>)}</div>}
+  const renderAssetsView = () => <section className={'asset-stage ' + (selectedAssets.length && routeView === 'assets' ? 'has-selection' : '')}>
     <div className="asset-stage-head">
-      <div><span className="asset-count">{assetTotal.toString().padStart(2, '0')}</span><span className="asset-count-label">{routeView === 'trash' ? '已移入回收站' : '张可用资产'}</span></div>
+      <div><span className="asset-count">{assetTotal.toString().padStart(2, '0')}</span><span className="asset-count-label">{routeView === 'trash' ? '回收站图片' : '张图片'}</span></div>
       <div className="asset-stage-tools">
+        {routeView === 'assets' && <div className="asset-scope-control" aria-label="资产范围">{ASSET_SCOPES.filter((scope) => scope !== 'studio').map((scope) => <button type="button" key={scope} className={assetScope === scope ? 'is-active' : ''} disabled={(scope === 'round' && !selectedRound) || (scope === 'task' && !selectedTask) || (scope === 'project' && !selectedProject)} onClick={() => navigateRoute({ assetScope: scope })}>{ASSET_SCOPE_LABELS[scope]}</button>)}</div>}
         <div className="asset-filter" aria-label="素材筛选"><SlidersHorizontal size={14} />{[['all', '全部'], ['generated', '生成'], ['import', '导入']].map(([value, label]) => <button type="button" key={value} className={assetFilter === value ? 'is-active' : ''} onClick={() => { setAssetFilter(value); setAssetPage(1); }}>{label}</button>)}</div>
         {routeView === 'assets' && visibleAssets.length > 0 && <button type="button" className="outline-button asset-select-page" disabled={pageSelectionBusy} onClick={() => void setPageSelection(!allPageAssetsSelected)}><Check size={15} />{allPageAssetsSelected ? '取消全选本页' : '全选本页'}</button>}
-        <label className="asset-page-size"><span>每页</span><select aria-label="每页资产数量" value={assetPageSize} onChange={(event) => { setAssetPageSize(normalizeAssetPageSize(event.target.value)); setAssetPage(1); }}>{ASSET_PAGE_SIZES.map((size) => <option value={size} key={size}>{size}</option>)}</select><span>张</span></label>
+        <details className="asset-view-options"><summary><SlidersHorizontal size={14} />显示</summary><label className="asset-page-size"><span>每页</span><select aria-label="每页资产数量" value={assetPageSize} onChange={(event) => { setAssetPageSize(normalizeAssetPageSize(event.target.value)); setAssetPage(1); }}>{ASSET_PAGE_SIZES.map((size) => <option value={size} key={size}>{size}</option>)}</select><span>张</span></label></details>
+        {routeView === 'assets' && selectedProject && <button type="button" className="outline-button asset-trash-link" onClick={() => navigateRoute({ view: 'trash', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })}><Trash2 size={15} />回收站</button>}
+        {routeView === 'trash' && selectedProject && <button type="button" className="outline-button" onClick={() => navigateRoute({ view: 'assets', assetScope: 'project' })}><ImagePlus size={15} />返回素材</button>}
         {selectedAssets.length === 2 && <IconButton label="对比两张已选素材" onClick={() => { setPreviewZoom(1); setPreviewAssets(selectedAssets); }}><Eye size={16} /></IconButton>}
         <div className="asset-hint">{routeView === 'trash' ? '当前项目回收站' : selectedAssetIds.size ? selectedAssetIds.size + ' 张已选择' : ASSET_SCOPE_LABELS[assetScope] + '资产'}</div>
       </div>
     </div>
-    {routeView === 'assets' && selectedProject && <AssetSelectionStrip assets={selectedAssets} onRemove={toggleSelection} onClear={() => void clearSelection()} onDownloadArchive={() => downloadProjectArchive(selectedAssets.map((asset) => asset.id))} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
+    {routeView === 'assets' && selectedProject && selectedAssets.length > 0 && <AssetSelectionStrip assets={selectedAssets} onRemove={toggleSelection} onClear={() => void clearSelection()} onDownloadArchive={() => downloadProjectArchive(selectedAssets.map((asset) => asset.id))} onDeliver={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
     {visibleAssets.length ? <><div className="asset-grid">{visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} selected={selectedAssetIds.has(asset.id)} selectionBusy={selectionBusyIds.has(asset.id)} shared={sharedAssetIds.has(asset.id)} onToggleSelect={markAsDeliverable} onReview={review} onTrash={trash} onRestore={restore} onInspect={inspectAsset} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />)}</div><nav className="asset-pagination" aria-label="资产分页"><button type="button" className="outline-button" disabled={assetPage <= 1} onClick={() => setAssetPage((current) => Math.max(1, current - 1))}><ChevronLeft size={15} />上一页</button><span>第 <b>{assetPage}</b> / {totalAssetPages} 页 · 共 {assetTotal} 张</span><button type="button" className="outline-button" disabled={assetPage >= totalAssetPages} onClick={() => setAssetPage((current) => Math.min(totalAssetPages, current + 1))}>下一页<ChevronRight size={15} /></button></nav></> : <div className="empty-stage asset-empty">{routeView === 'trash' ? <Archive size={30} strokeWidth={1.15} /> : <Inbox size={30} strokeWidth={1.15} />}<p>{routeView === 'trash' ? '当前项目回收站为空' : (assetScope === 'round' && !selectedRound ? '请先从任务上下文选择轮次，再查看本轮结果。' : '当前范围内暂未找到资产。')}</p>{routeView === 'assets' && <button type="button" className="outline-button" onClick={() => inputRef.current?.click()}><Upload size={16} />导入图片</button>}</div>}
   </section>;
   const viewRenderers = {
     projects: () => <ProjectIndex projects={projects} onOpenProject={(projectId) => navigateRoute(selectProject(route, projectId))} />,
     'project-overview': () => selectedProject ? <ProjectOverview project={selectedProject} tasks={tasks} selectedCount={selectedAssets.length} onOpenTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenAssets={() => navigateRoute({ view: 'assets', assetScope: 'project', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenDeliveries={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null,
+    lineage: () => selectedProject ? <CreativeLineageCanvas
+      request={api}
+      project={selectedProject}
+      tasks={tasks}
+      selectedTask={selectedTask}
+      rounds={rounds}
+      selectedRound={selectedRound}
+      runs={runs}
+      activeRun={activeRun}
+      runItems={lineageVisibleRunItems}
+      runItemCoverage={lineageRunItemCoverage}
+      assets={visibleAssets}
+      assetTotal={assetTotal}
+      sharedAssets={sharedAssets}
+      selectedAssetIds={selectedAssetIds}
+      selectionBusyIds={selectionBusyIds}
+      deliveries={deliveries}
+      taskTypes={taskTypes}
+      styleKits={styleKits}
+      brandKits={brandKits}
+      layoutRevision={eventRevision.canvasLayout}
+      onNavigate={navigateRoute}
+      onPreviewAsset={(asset) => { setPreviewZoom(1); setPreviewAssets([asset]); }}
+      onInspectAsset={inspectAsset}
+      onToggleAsset={markAsDeliverable}
+      onBatchSelectAssets={setAssetsSelection}
+      onReviewAsset={review}
+      onBatchReviewAssets={batchReview}
+      onSetAssetShared={setAssetShared}
+      onDownloadAsset={downloadAsset}
+      onCopyAsset={copyAsset}
+      onRetryRunItem={retryRunItem}
+      onControlRun={controlRun}
+      onOpenProvider={openProviderDetails}
+    /> : null,
     tasks: () => selectedProject ? <ProjectTaskList project={selectedProject} tasks={tasks} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null,
     'studio-overview': () => <section className="overview-stage">
       <div className="overview-head"><div><p className="eyebrow">同一任务内的显式对比</p><h2>{selectedTask ? selectedTask.name : '请选择任务'}</h2><span>{studioOverview?.availableRounds?.length || 0} 个可比较轮次。比较不会推断或启动运行。</span></div>{taskOverview && <div className="overview-metrics"><span>轮次 {taskOverview.summary?.roundCount || 0}</span><span>运行 {taskOverview.summary?.runCount || 0}</span><span>结果 {taskOverview.summary?.resultCount || 0}</span></div>}</div>
       {selectedTask ? <><div className="compare-selector">{(studioOverview?.availableRounds || rounds).map((round) => <label key={round.id}><input type="checkbox" checked={compareRoundIds.includes(round.id)} onChange={() => toggleComparedRound(round.id)} /><span>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[round.purpose] || round.purpose} · 计划 v{round.planVersion}</span></label>)}</div>{studioOverview?.comparisons?.length ? <div className="comparison-grid">{studioOverview.comparisons.map((comparison) => <article key={comparison.round.id} className="comparison-column"><header><div><p>轮次 {comparison.round.planVersion}</p><h3>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[comparison.round.purpose] || comparison.round.purpose}</h3></div><StatusPill value={comparison.round.status} scope="round" /></header><dl><div><dt>上游</dt><dd>{comparison.lineage?.rounds?.length ? '承接 ' + comparison.lineage.rounds.length + ' 个轮次' : '首个方向'}</dd></div><div><dt>计划</dt><dd>{comparison.round.plan?.operation === 'edit' ? '编辑' : '生成'} · {comparison.round.plan?.itemCount || 0} 项</dd></div><div><dt>产出</dt><dd>{comparison.summary?.resultCount || 0} 个结果</dd></div></dl>{comparison.runsTruncated && <p className="comparison-truncated">仅显示最近 24 次运行</p>}<div className="comparison-runs">{comparison.runs?.map((run) => <section key={run.id}><button type="button" className="trace-link" onClick={() => navigateRoute({ view: 'runs', projectId: selectedProject?.id, taskId: selectedTask.id, roundId: comparison.round.id, compareRoundIds: [comparison.round.id], runId: run.id })}><b>运行项 {run.items?.length || 0}</b><StatusPill value={run.status} scope="run" /></button><div className="comparison-assets">{run.items?.flatMap((item) => item.outputAssets || []).map((asset) => <button type="button" key={asset.id} title="查看资产来源与评审" onClick={() => void inspectAsset(asset.id)}><img src={assetThumbnailUrl(asset)} alt="轮次结果" loading="lazy" decoding="async" /><span>{asset.review?.decision === 'keep' ? '保留' : asset.review?.decision === 'review' ? '待复核' : '未评审'}</span></button>)}</div></section>)}</div></article>)}</div> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>勾选一个或多个轮次后，比较计划、运行、结果和当前评审。</p></div>}</> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>请先选择项目和任务，再打开创作总览。</p></div>}
     </section>,
     prompts: () => <><PromptWorkspace round={selectedRound} planVersions={planVersions} loading={planVersionsLoading} onRefresh={() => void refreshPlanVersions()} />{selectedRound?.status === 'awaiting_confirmation' && <section className="human-confirmation-gate"><div><p className="eyebrow">人工确认闸门 · 可写操作</p><h3>等待当前用户确认计划</h3><span>这是独立于只读摘要的写入闸门。Skill 只能创建挑战；此 Workbench 标签只负责激活计划，确认后由当前智能体会话执行预检并创建唯一运行。</span></div><button type="button" className="command-button" onClick={() => void openGenerationConfirmation()} disabled={!session || generationConfirmationBusy}><LockKeyhole size={16} />{generationConfirmationBusy ? '正在准备确认' : '审阅并确认计划'}</button></section>}</>,
-    runs: () => <section className="run-stage">
-      <div className="run-focus"><div><p className="eyebrow">{selectedRound ? ({ exploration: '探索轮次', refinement: '优化轮次', variation: '变体轮次', edit: '编辑轮次', fill: '补图轮次' })[selectedRound.purpose] : '请先选择轮次'}</p><h2>{activeRun ? '已选择生成运行' : selectedRound ? '请选择生成运行' : '尚未选择轮次'}</h2></div>{activeRun && <StatusPill presentation={runExecutionStatus} />}</div>
-      {selectedRound && <label className="run-history-select"><span>运行历史</span><select value={activeRunId || ''} onChange={(event) => navigateRoute({ runId: event.target.value || null })}><option value="">请选择生成运行</option>{runs.map((run) => <option value={run.id} key={run.id}>{runHistoryOption(run)}</option>)}</select></label>}
-      {taskOverview && <section className="creative-summary"><div><p className="eyebrow">当前任务创作链</p><h3>{taskOverview.task?.name}</h3><span>{taskOverview.summary?.roundCount || 0} 个轮次 · {taskOverview.summary?.runCount || 0} 次运行 · {taskOverview.summary?.resultCount || 0} 个结果</span></div>{creativeRecord && <div className="round-record"><span>第 {creativeRecord.round?.planVersion || 0} 版计划 · {creativeRecord.round?.purpose || '创作'}方向</span><span>{creativeRecord.lineage?.rounds?.length ? '承接 ' + creativeRecord.lineage.rounds.length + ' 个上游轮次' : '首个创作方向'}</span></div>}</section>}
-      {activeRun ? <><div className="run-metrics"><div><span>计划产出</span><b>{activeRun.planSnapshot?.itemCount ?? '未记录'}</b></div><div><span>冻结并发</span><b>{activeRun.executionConcurrency + ' 路'}</b><small>{activeRun.concurrencySource === 'default' ? '默认' : activeRun.concurrencySource === 'serial' ? '串行' : '显式指定'}</small></div><div><span>实际执行</span><b>{runExecutionStatus.label}</b></div><div><span>运行状态</span><b>{runLifecycleStatus.label}</b></div></div><div className="run-controls">{['queued', 'running'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void controlRun('pause')}><Pause size={16} />暂停</button>}{activeRun.status === 'paused' && <button type="button" className="command-button" onClick={() => void controlRun('resume')}><Play size={16} />继续</button>}{['partial', 'failed'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void controlRun('retry')}><RefreshCw size={16} />重试安全项</button>}{canCancelActiveRun && <button type="button" className="danger-button" onClick={() => void controlRun('cancel')}><X size={16} />取消</button>}<IconButton label="查看高级详情" onClick={() => void openAdvancedDetails()}><Ellipsis size={18} /></IconButton></div><div className="run-item-list">{visibleRunItems.length ? visibleRunItems.map((item) => <RunItemRow key={item.id} item={item} onInspect={inspectAsset} onRetry={retryRunItem} />) : <p className="empty-copy">尚无运行项。</p>}</div></> : <p className="empty-copy">从运行历史中选择一次运行，查看冻结计划、并发与执行结果。</p>}
-    </section>,
+    runs: () => <GenerationHistory selectedRound={selectedRound} runs={runs} activeRunId={activeRunId} activeRun={activeRun} runExecutionStatus={runExecutionStatus} runLifecycleStatus={runLifecycleStatus} taskOverview={taskOverview} creativeRecord={creativeRecord} visibleRunItems={visibleRunItems} runItemPage={runItemPage} runItemFilter={activeRunItemFilter} runItemPageSize={activeRunItemPageSize} runItemSequence={activeRunItemSequence} selectedRunItemIds={selectedRunItemIds} runItemDetail={runItemDetail} canCancelActiveRun={canCancelActiveRun} advancedDetails={advancedDetails} onSelectRun={(runId) => navigateRoute({ runId, runItemFilter: DEFAULT_RUN_ITEM_FILTER, runItemPage: 1, runItemPageSize: DEFAULT_RUN_ITEM_PAGE_SIZE, runItemSequence: null })} onControlRun={controlRun} onRetryItem={retryRunItem} onInspectAsset={inspectAsset} onSetRunItemFilter={setRunItemFilter} onSetRunItemPage={setRunItemPageNumber} onSetRunItemPageSize={setRunItemPageSizeValue} onSetRunItemSequence={setRunItemSequenceValue} onToggleRunItemSelection={toggleRunItemSelection} onSelectRetryablePageItems={selectRetryablePageItems} onRetrySelectedItems={retryRunItemsByIds} onOpenRunItemDetail={(item) => setRunItemDetailId(item.id)} onCloseRunItemDetail={() => setRunItemDetailId(null)} onToggleAdvanced={() => advancedDetails ? setAdvancedDetails(null) : void openAdvancedDetails()} onCloseAdvanced={() => setAdvancedDetails(null)} onCopyPrompt={copyRunPrompt} />,
     guide: () => <LearningCenter onDismiss={dismissGuide} onNavigate={(nextView) => navigateRoute({ view: nextView })} />,
     library: () => <CreativeLibrary taskTypes={taskTypes} styleKits={styleKits} brandKits={brandKits} sharedAssets={sharedAssets} onOpenProjects={() => navigateRoute({ view: 'projects' })} onOpenSharedAssets={() => navigateRoute({ view: 'shared-assets' })} />,
     'shared-assets': () => <SharedAssets assets={sharedAssets} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onOpenProjects={() => navigateRoute({ view: 'projects' })} />,
@@ -1216,34 +1472,31 @@ function App() {
   const renderActiveView = viewRenderers[routeView];
 
   if (loading) return <div className="loading-shell"><LoaderCircle size={22} className="spin" /><span>正在连接 Studio</span></div>;
-  return <main className="studio-shell" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files).filter((item) => item.type.startsWith('image/')); if (files.length && canImport) void upload(files); }} onPaste={(event) => { const files = [...event.clipboardData.files].filter((item) => item.type.startsWith('image/')); if (files.length && canImport) { event.preventDefault(); void upload(files); } }}>
-    <aside className="studio-rail">
-      <div className="brand-mark"><span>DAOGE</span><b>Pic</b></div>
-      <WorkbenchNavigation view={view} project={selectedProject} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} />
-      <div className="rail-bottom"><button type="button" className="settings-path" onClick={openProviderDetails}><PanelLeftClose size={16} /><span>{provider?.configured ? 'Provider 设置' : '配置生成服务'}</span></button></div>
+  return <main className={'studio-shell' + (railCollapsed ? ' is-rail-collapsed' : '')} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files).filter((item) => item.type.startsWith('image/')); if (files.length && canImport) void upload(files); }} onPaste={(event) => { const files = [...event.clipboardData.files].filter((item) => item.type.startsWith('image/')); if (files.length && canImport) { event.preventDefault(); void upload(files); } }}>
+    <aside className="studio-rail" aria-label="Studio 左侧控制栏">
+      <div className="rail-brand-row"><div className="brand-mark" aria-label="DAOGE Pic"><span>DAOGE</span><b>Pic</b></div><button type="button" className="rail-collapse-toggle" onClick={() => setRailCollapsed((current) => !current)} title={railCollapsed ? '展开左侧栏' : '折叠左侧栏'} aria-label={railCollapsed ? '展开左侧栏' : '折叠左侧栏'} aria-pressed={railCollapsed}>{railCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}</button></div>
+      <WorkbenchNavigation view={view} project={selectedProject} task={selectedTask} round={selectedRound} provider={provider} studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onOpenProvider={openProviderDetails} onOpenGuide={() => navigateRoute({ view: 'guide' })} onCopyRuntimeDiagnostic={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
     </aside>
 
     <section className="work-surface">
-      <header className="surface-header">
-        <div className="heading-group"><p className="eyebrow">{studioView ? 'Studio' : selectedProject ? '项目工作区' : 'Studio'}</p><h1>{view === 'projects' ? '项目' : view === 'project-overview' ? '项目概览' : view === 'tasks' ? '任务' : view === 'assets' ? assetScope === 'project' ? '项目资产' : '结果资产' : view === 'runs' ? '生成运行' : view === 'studio-overview' ? '任务概览' : view === 'prompts' ? '计划与提示词' : view === 'library' ? '创作资料库' : view === 'shared-assets' ? '共享素材' : view === 'guide' ? '学习中心' : view === 'deliveries' ? '交付' : '项目回收站'}</h1>{studioView ? <span>{view === 'library' ? '可复用的任务类型、风格与品牌规则。' : view === 'shared-assets' ? '仅显示从项目明确共享的跨项目图片。' : view === 'guide' ? '从工作流、选片和交付开始。' : '选择一个项目后进入创作与交付工作区。'}</span> : selectedProject ? <span>{selectedProject.name}</span> : null}</div>
-        <div className="header-actions">
-          <StudioSearch query={searchQuery} results={searchResults} loading={searchLoading} error={searchError} onQueryChange={setSearchQuery} onOpenResult={openSearchResult} />
-          {provider?.configured ? <button type="button" className="connection-state" onClick={openProviderDetails}><span className="signal-dot" />生成配置已就绪</button> : <button type="button" className="connection-state is-error" onClick={openProviderDetails}><CloudOff size={14} />生成配置未就绪</button>}
-          {!studioView && selectedProject && selectedProject.status !== 'archived' && <IconButton label="归档当前项目" onClick={openArchiveConfirmation}><Archive size={17} /></IconButton>}
-          <IconButton label="刷新工作台" onClick={() => void refresh()}><RefreshCw size={17} /></IconButton>
-          <input ref={inputRef} className="file-input" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void upload(event.target.files)} />
-          {canImport && view !== 'library' && <button type="button" className="command-button" onClick={() => inputRef.current?.click()} disabled={uploading}><ImagePlus size={17} />{uploading && uploadProgress ? '正在导入 ' + uploadProgress.completed + '/' + uploadProgress.total : importLabel}</button>}
-        </div>
-      </header>
-      <RuntimeHealthBanner studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
-
-       {!studioView && <WorkspaceContextBar project={selectedProject} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} assetScope={assetScope} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectRound={(roundId) => navigateRoute(selectRound(route, roundId))} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} />}
+      <div className="workspace-chrome">
+        <header className="surface-header">
+          <div className="heading-group"><p className="eyebrow">{studioView ? 'Studio' : selectedProject ? '项目工作区' : 'Studio'}</p><h1>{view === 'projects' ? '项目' : view === 'project-overview' ? '项目' : view === 'lineage' ? '谱系' : view === 'tasks' ? '任务' : view === 'assets' ? assetScope === 'project' ? '素材' : '结果' : view === 'runs' ? '生成历史' : view === 'studio-overview' ? '轮次对比' : view === 'prompts' ? '当前计划' : view === 'library' ? '资料' : view === 'shared-assets' ? '共享素材' : view === 'guide' ? '创作手册' : view === 'deliveries' ? '交付' : '回收站'}</h1>{studioView ? <span>{view === 'library' ? '任务类型、风格与品牌规则。' : view === 'shared-assets' ? '跨项目复用图片。' : view === 'guide' ? '工作流帮助。' : '选择项目后继续创作。'}</span> : selectedProject ? <span>{selectedProject.name}</span> : null}</div>
+          <div className="header-actions">
+            <StudioSearch query={searchQuery} results={searchResults} loading={searchLoading} error={searchError} onQueryChange={setSearchQuery} onOpenResult={openSearchResult} />
+            {!studioView && selectedProject && selectedProject.status !== 'archived' && <IconButton label="归档当前项目" onClick={openArchiveConfirmation}><Archive size={17} /></IconButton>}
+            <IconButton label="刷新工作台" onClick={() => void refresh()}><RefreshCw size={17} /></IconButton>
+            <input ref={inputRef} className="file-input" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void upload(event.target.files)} />
+            {canImport && view !== 'library' && <button type="button" className="command-button" onClick={() => inputRef.current?.click()} disabled={uploading}><ImagePlus size={17} />{uploading && uploadProgress ? '正在导入 ' + uploadProgress.completed + '/' + uploadProgress.total : importLabel}</button>}
+          </div>
+        </header>
+        {!studioView ? <WorkspaceContextBar project={selectedProject} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} assetScope={assetScope} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectRound={(roundId) => navigateRoute(selectRound(route, roundId))} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} /> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} />}
+      </div>
+      <RuntimeHealthAlertStrip studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
       {connectionError && <div className="connection-error-strip" role="alert" aria-live="assertive"><CloudOff size={16} /><span>{connectionError}</span></div>}
-      {sessionPlanStatus && <aside className={'session-plan-panel ' + (!sessionPlanStatus.context ? 'is-empty' : '')} aria-label="当前会话只读计划摘要"><div><p className="eyebrow">当前会话 · 只读摘要</p>{sessionPlanStatus.context ? <><h3>{sessionPlanStatus.context.project.name} / {sessionPlanStatus.context.task.name}</h3><span>{sessionPlanStatus.context.round.purpose} · 计划 v{sessionPlanStatus.context.round.planVersion}</span></> : <><h3>当前会话没有活动轮次</h3><span>请在会话中绑定项目、任务和轮次；此处只显示已绑定的计划事实。</span></>}</div>{sessionPlanStatus.context && <div className="session-plan-state"><StatusPill value={sessionPlanStatus.context.round.status} scope="round" /><span>{sessionPlanStatus.confirmation.confirmed ? '当前计划已由用户确认' : '当前计划尚未人工确认'}</span>{sessionPlanStatus.latestRun && <span>最近运行：{statusLabel(sessionPlanStatus.latestRun.status)}</span>}</div>}</aside>}
       {error && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={16} /><span>{error}</span><IconButton label="关闭请求错误" onClick={() => setError('')}><X size={15} /></IconButton></div>}
+      {contextError && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={16} /><span>{contextError}</span><IconButton label="关闭上下文错误" onClick={() => setContextError('')}><X size={15} /></IconButton></div>}
       {notice && <div className="notice-strip" role="status" aria-live="polite"><Check size={16} /><span>{notice}</span><IconButton label="关闭通知" onClick={() => setNotice('')}><X size={15} /></IconButton></div>}
-       {view === 'projects' && !guideDismissed && <button type="button" className="guide-nudge" onClick={() => navigateRoute({ view: 'guide' })}>首次使用 Studio？从学习中心了解计划、生成、选片与交付。</button>}
-
       {renderActiveView()}
     </section>
 

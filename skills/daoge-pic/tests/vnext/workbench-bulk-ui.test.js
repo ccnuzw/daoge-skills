@@ -46,10 +46,81 @@ test('Workbench confirmations use the shared accessible modal instead of native 
   assert.match(confirmation, /confirmation-dialog-actions/);
 });
 
-test('run history binds every rendered retry control to a defined handler', () => {
+test('Workbench suppresses only injected diagnostics startTime errors', async () => {
+  const { isInjectedDiagnosticsStartTimeError } = await import('../../web/src/browser-error-guard.mjs');
+  assert.equal(isInjectedDiagnosticsStartTimeError({
+    message: "Uncaught TypeError: Cannot read properties of undefined (reading 'startTime')",
+    filename: 'VM190',
+    error: { stack: "TypeError: Cannot read properties of undefined (reading 'startTime')\n    at et.reportAllChanges (<anonymous>:2:19429)" }
+  }), true);
+  assert.equal(isInjectedDiagnosticsStartTimeError({
+    message: "Uncaught TypeError: Cannot read properties of undefined (reading 'startTime')",
+    filename: '/assets/index.js',
+    error: { stack: "TypeError: Cannot read properties of undefined (reading 'startTime')\n    at reportAllChanges (/assets/index.js:2:10)" }
+  }), false);
+  assert.equal(isInjectedDiagnosticsStartTimeError({
+    message: "Cannot read properties of undefined (reading 'id')",
+    error: { stack: "TypeError\n    at et.reportAllChanges (<anonymous>:2:19429)" }
+  }), false);
+});
+
+test('Workbench guards injected diagnostics timer callbacks without hiding app errors', async () => {
+  const { installBrowserErrorGuard } = await import('../../web/src/browser-error-guard.mjs');
+  const listeners = new Map();
+  const target = {
+    onerror: null,
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    removeEventListener(type) { listeners.delete(type); },
+    setTimeout(callback, delay, ...args) { this.pendingTimeout = { callback, delay, args }; return 1; },
+    setInterval(callback, delay, ...args) { this.pendingInterval = { callback, delay, args }; return 2; }
+  };
+  const restore = installBrowserErrorGuard(target);
+  const injectedError = new TypeError("Cannot read properties of undefined (reading 'startTime')");
+  injectedError.stack = "TypeError: Cannot read properties of undefined (reading 'startTime')\n    at et.reportAllChanges (<anonymous>:2:19429)";
+  target.setTimeout(() => { throw injectedError; }, 10);
+  assert.doesNotThrow(() => target.pendingTimeout.callback());
+  target.setTimeout(() => { throw new TypeError("Cannot read properties of undefined (reading 'id')"); }, 10);
+  assert.throws(() => target.pendingTimeout.callback(), /reading 'id'/);
+  const event = { message: "Uncaught TypeError: Cannot read properties of undefined (reading 'startTime')", filename: 'VM84', preventDefaultCalled: false, stopped: false, preventDefault() { this.preventDefaultCalled = true; }, stopImmediatePropagation() { this.stopped = true; } };
+  listeners.get('error')(event);
+  assert.equal(event.preventDefaultCalled, true);
+  assert.equal(event.stopped, true);
+  assert.equal(target.onerror(event.message, event.filename, 2, 19429, null), true);
+  restore();
+});
+
+test('lineage canvas preserves group soft links as layout endpoints', () => {
+  const lineage = fs.readFileSync(path.join(skillRoot, 'web/src/creative-lineage-canvas.jsx'), 'utf8');
+  assert.match(lineage, /endpointByKey/);
+  assert.match(lineage, /nodeKey\('group', rendered\.id\)/);
+  assert.match(lineage, /payloadEndpointKeys/);
+  assert.doesNotMatch(lineage, /payloadNodeKeys\.has\(nodeKey\(link\.sourceType, link\.sourceId\)\) && payloadNodeKeys\.has/);
+});
+
+test('lineage canvas exposes complete data loading and keyboard-accessible overlays', () => {
+  const lineage = fs.readFileSync(path.join(skillRoot, 'web/src/creative-lineage-canvas.jsx'), 'utf8');
+  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
   const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  assert.match(main, /const retryRunItem = async \(itemId\) => \{/);
-  assert.match(main, /\/api\/runs\/'.*'\/retry/);
-  assert.match(main, /onRetry=\{retryRunItem\}/);
-  assert.match(main, /const controlRun = async \(action\) => \{/);
+  assert.match(main, /runItems=\{lineageVisibleRunItems\}/);
+  assert.match(main, /runItemCoverage=\{lineageRunItemCoverage\}/);
+  assert.match(main, /loadCompleteLineageAssets\(route/);
+  assert.match(lineage, /assetCountLabel/);
+  assert.match(lineage, /runItemCountLabel/);
+  assert.match(lineage, /role="combobox"/);
+  assert.match(lineage, /aria-activedescendant=\{activeSearchOptionId\}/);
+  assert.match(lineage, /role="listbox"/);
+  assert.match(lineage, /role="option"/);
+  assert.match(lineage, /const menuRef = useRef\(null\)/);
+  assert.match(lineage, /event\.key === 'Escape'/);
+  assert.match(lineage, /event\.key === 'ArrowDown'/);
+  assert.match(lineage, /return <article role="button" tabIndex=\{0\}/);
+  assert.match(lineage, /event\.key === 'Enter'/);
+  assert.match(lineage, /event\.key === 'ContextMenu'/);
+  assert.match(styles, /\.lineage-node:focus-visible/);
+});
+
+test('Workbench renders route context errors as live alerts', () => {
+  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  assert.match(main, /contextError && <div className="error-strip" role="alert" aria-live="assertive"/);
+  assert.match(main, /关闭上下文错误/);
 });

@@ -85,6 +85,25 @@ test('snapshot-required replaces a higher local cursor with the authoritative lo
   stream.dispose();
 });
 
+test('snapshot-required discards pending ordinary events and queued flushes before reconnecting', async () => {
+  const value = harness({ initialCursor: 2 });
+  const stream = await value.create();
+  await value.sources[0].emit('studio-event', { id: 3, entityType: 'asset', eventType: 'asset.reviewed' });
+  assert.equal(stream.state().pending, 1);
+  const pendingTimer = value.timers.find((entry) => entry.delay === 1);
+  assert.ok(pendingTimer);
+  await value.sources[0].emit('snapshot-required', { cursor: 4 });
+  assert.equal(stream.state().pending, 0);
+  assert.equal(stream.state().overflowed, false);
+  assert.equal(pendingTimer.cancelled, true);
+  assert.equal(value.snapshotCount(), 1);
+  assert.equal(value.batches.length, 0);
+  assert.equal(value.stored.get('daoge-pic:event-cursor:studio-a'), '4');
+  value.runTimer(0);
+  assert.equal(value.sources[1].url, '/api/events?after=4');
+  stream.dispose();
+});
+
 test('failed ordinary refresh and failed snapshot do not commit observed cursors', async () => {
   const ordinary = harness({ initialCursor: 2, batchResult: false });
   const ordinaryStream = await ordinary.create();
@@ -125,9 +144,10 @@ test('event refresh classification stays bounded and includes plan invalidation'
     { entityType: 'run_item', eventType: 'run_item.retry_wait' },
     ...Array.from({ length: 200 }, () => ({ entityType: 'asset', eventType: 'asset.reviewed' }))
   ]);
-  assert.deepEqual(plan, { scope: 'all', refreshContext: true, refreshAssets: true, refreshSelection: true, refreshSharedAssets: false, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, maximumRefreshes: 4 });
-  assert.deepEqual(studioEventRefreshPlan([{ entityType: 'asset', eventType: 'asset.shared_across_projects' }]), { scope: 'context', refreshContext: false, refreshAssets: true, refreshSelection: false, refreshSharedAssets: true, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: false, maximumRefreshes: 3 });
+  assert.deepEqual(plan, { scope: 'all', refreshContext: true, refreshAssets: true, refreshSelection: true, refreshSharedAssets: false, refreshCanvasLayout: false, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, canvasLayout: false, maximumRefreshes: 4 });
+  assert.deepEqual(studioEventRefreshPlan([{ entityType: 'asset', eventType: 'asset.shared_across_projects' }]), { scope: 'context', refreshContext: false, refreshAssets: true, refreshSelection: false, refreshSharedAssets: true, refreshCanvasLayout: false, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: false, canvasLayout: false, maximumRefreshes: 3 });
   assert.equal(studioEventRefreshPlan([{ entityType: 'delivery', eventType: 'delivery.exported' }]).refreshContext, true);
+  assert.deepEqual(studioEventRefreshPlan([{ entityType: 'canvas_layout', eventType: 'canvas_layout.updated' }]), { scope: 'context', refreshContext: false, refreshAssets: false, refreshSelection: false, refreshSharedAssets: false, refreshCanvasLayout: true, taskOverview: false, creativeRecord: false, studioOverview: false, planVersions: false, canvasLayout: true, maximumRefreshes: 1 });
   assert.equal(studioEventRefreshPlan([{ entityType: 'project', eventType: 'project.updated' }]).scope, 'all');
 });
 
@@ -147,7 +167,7 @@ test('event refresh queue returns a failed refresh so event cursors are not ackn
   const { createEventRefreshQueue } = await import('../../web/src/refresh-coordinator.mjs');
   const applied = [];
   const queue = createEventRefreshQueue({ refresh: async () => false, applyPlan: (plan) => applied.push(plan) });
-  const result = await queue.request({ scope: 'context', refreshContext: true, refreshAssets: false, refreshSelection: false, refreshSharedAssets: false, taskOverview: false, creativeRecord: false, studioOverview: false, planVersions: false });
+  const result = await queue.request({ scope: 'context', refreshContext: true, refreshAssets: false, refreshSelection: false, refreshSharedAssets: false, refreshCanvasLayout: false, taskOverview: false, creativeRecord: false, studioOverview: false, planVersions: false, canvasLayout: false });
   assert.equal(result, false);
   assert.deepEqual(applied, []);
   queue.dispose();
