@@ -4,18 +4,26 @@ import { assetThumbnailUrl } from './asset-media-url.mjs';
 import { creativeLibraryResources, filterCreativeLibraryResources } from './creative-library-model.mjs';
 import { createLineageExport, lineageExportFilename } from './lineage-export-model.mjs';
 import { runExecutionPresentation, statusPresentation } from './status-presentation.mjs';
+import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 
 const PURPOSE_LABELS = { exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' };
 const OPERATION_LABELS = { generation: '生成', generate: '生成', edit: '编辑', variation: '变体', refinement: '优化', fill: '补图' };
-const REVIEW_LABELS = { keep: '保留', review: '待定', reject: '淘汰', derive: '可衍生' };
+const REVIEW_LABELS = { keep: '成果', review: '未定', reject: '不采用', derive: '可继续' };
+const CREATOR_MODES = [
+  ['map', '项目地图', '看项目、任务、轮次和交付全貌。'],
+  ['flow', '任务创作流', '沿参考、计划、运行、结果继续推进。'],
+  ['rounds', '轮次对比', '比较每一轮方向和保留率。'],
+  ['assets', '资产分支', '围绕关键图片继续变体或精修。'],
+  ['delivery', '交付路线', '只看交付候选、交付包和最终路径。']
+];
 const FILTERS = [
   ['all', '全部'],
-  ['issues', '只看异常'],
-  ['selected', '只看已选'],
-  ['unreviewed', '未评审'],
-  ['rejected', '客户否决'],
-  ['delivery', '交付候选'],
-  ['shared', '只看共享']
+  ['issues', '异常'],
+  ['selected', '成果'],
+  ['undecided', '未定'],
+  ['rejected', '不采用'],
+  ['delivery', '交付'],
+  ['shared', '共享']
 ];
 const BACKGROUNDS = [
   ['lines', '网格'],
@@ -45,7 +53,7 @@ const TEMPLATE_OPTIONS = [
 const RESOURCE_NODE_TYPES = ['task_type', 'style_kit', 'brand_kit'];
 const REFERENCE_TARGET_TYPES = ['project', 'task', 'round', 'plan'];
 const DEFAULT_VIEWPORT = { x: 80, y: 80, k: 0.88 };
-const DEFAULT_SETTINGS = { filter: 'all', background: 'lines', minimap: true, snapGrid: true, edgeLabels: true };
+const DEFAULT_SETTINGS = { filter: 'all', mode: 'map', background: 'lines', minimap: true, snapGrid: true, edgeLabels: true };
 const HISTORY_LIMIT = 50;
 const SNAP_SIZE = 24;
 const CULL_MARGIN = 520;
@@ -125,23 +133,43 @@ function selectedNodeContextLine(node) {
   return [nodeTypeLabel(node.entityType) + '：' + node.title, status, node.subtitle, 'ID ' + shortId(node.entityId)].filter(Boolean).join(' · ');
 }
 function assetLabel(asset) { return asset?.display?.label || asset?.source?.label || shortId(asset?.id); }
-function assetState(asset, selected, shared, delivered, unavailable) {
+function assetState(asset, selected, shared, delivered, unavailable, derived = false) {
   if (unavailable) return '媒体不可用';
   if (delivered) return '已交付';
   if (selected) return '已选成果';
+  if (derived) return '已衍生';
   if (shared) return '共享素材';
   return REVIEW_LABELS[asset?.review?.decision] || '未评审';
 }
 function assetBadges(node) {
   if (!isAssetNode(node)) return [];
-  const badges = [];
-  if (node.mediaUnavailable) badges.push(['danger', '不可用']);
-  if (node.selectedAsset) badges.push(['ready', '已选']);
-  if (node.deliveredAsset) badges.push(['delivery', '已交付']);
-  if (node.sharedAsset) badges.push(['shared', '共享']);
+  if (node.mediaUnavailable) return [['danger', '不可用']];
+  if (node.deliveredAsset) return [['delivery', '已交付']];
   const decision = node.entity?.review?.decision;
-  if (decision) badges.push([decision === 'reject' ? 'danger' : decision === 'keep' ? 'ready' : 'neutral', REVIEW_LABELS[decision] || decision]);
-  return badges;
+  if (node.selectedAsset || decision === 'keep') return [['ready', '成果']];
+  if (decision === 'reject') return [['danger', '不采用']];
+  if (decision === 'derive') return [['derived', '可继续']];
+  if (decision === 'review') return [['neutral', '未定']];
+  if (node.sharedAsset) return [['shared', '共享']];
+  return [];
+}
+function roundReferenceMaterials(round) { return listValue(round?.plan?.referenceMaterials).filter((item) => item?.assetId); }
+function roundParentAssetIds(round) { return [...new Set([...listValue(round?.plan?.parentAssetIds), ...listValue(round?.plan?.sourceAssetIds), ...roundReferenceMaterials(round).filter((item) => item.usage === 'subject').map((item) => item.assetId)].filter(Boolean))]; }
+function roundMaskAssetIds(round) { return [...new Set([round?.plan?.maskAssetId, ...roundReferenceMaterials(round).filter((item) => item.usage === 'mask').map((item) => item.assetId)].filter(Boolean))]; }
+function usageLabel(usage) { return ({ subject: '主体参考', style: '风格参考', composition: '构图参考', color: '色彩参考', brand: '品牌参考', mask: '遮罩', negative: '反例参考' })[usage] || '参考素材'; }
+function assetSourceRoundId(asset) { return asset?.display?.roundId || asset?.source?.roundId || asset?.source?.creativeRoundId || null; }
+function assetSourceTaskId(asset) { return asset?.display?.taskId || asset?.source?.taskId || asset?.source?.creativeTaskId || null; }
+function taskForAsset(asset, tasks) { const taskId = assetSourceTaskId(asset); return listValue(tasks).find((task) => task.id === taskId) || null; }
+function taskForAssets(assets, tasks) { const taskIds = [...new Set(listValue(assets).map(assetSourceTaskId).filter(Boolean))]; return taskIds.length === 1 ? taskForAsset({ display: { taskId: taskIds[0] } }, tasks) : null; }
+function taskIntentSummary(task) { return text(task?.intent?.brief || task?.intent?.goal || task?.intent?.description || task?.intent?.summary || task?.intent?.creativeIntent || ''); }
+function taskRounds(task, rounds) { return listValue(rounds).filter((round) => round.taskId === task?.id); }
+function runStatusCounts(runs) { return runs.reduce((acc, run) => ({ ...acc, [run.status || 'unknown']: (acc[run.status || 'unknown'] || 0) + 1 }), {}); }
+function reviewDecisionCounts(assets) {
+  return listValue(assets).reduce((acc, asset) => {
+    const key = asset?.deletedAt ? 'trash' : asset?.review?.decision || 'unreviewed';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, { keep: 0, review: 0, reject: 0, derive: 0, unreviewed: 0, trash: 0 });
 }
 function createNode(entityType, entity, position, overrides = {}) {
   const [width, height] = NODE_SIZE[entityType] || [220, 120];
@@ -205,7 +233,7 @@ function nodeSearchHaystack(node) {
 }
 
 function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, assets, sharedAssets, selectedAssetIds, sharedAssetIds, deliveries, resourcePlacements, resourceCatalog }) {
-  if (!project) return { nodes: [], connections: [], metrics: { issues: 0, selected: 0, assets: 0, deliveries: 0, resources: 0 } };
+  if (!project) return { nodes: [], connections: [], metrics: { issues: 0, selected: 0, assets: 0, deliveries: 0, resources: 0, reviews: reviewDecisionCounts([]) } };
   const safeTasks = listValue(tasks);
   const safeRounds = listValue(rounds);
   const safeRuns = listValue(runs);
@@ -222,7 +250,7 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
   const connectionIds = new Set();
   const connect = (from, to, type, label) => {
     if (!from || !to) return;
-    const id = from + '->' + to + ':' + type;
+    const id = from + '->' + to + ':' + type + ':' + (label || '');
     if (connectionIds.has(id)) return;
     connectionIds.add(id);
     connections.push({ id, from, to, type, label, manual: false });
@@ -237,29 +265,55 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     }
   }
 
+  const taskList = selectedTask ? [selectedTask] : safeTasks;
+  const taskIndexById = new Map(taskList.map((task, index) => [task.id, index]));
+  const visibleRounds = safeRounds.filter((round) => taskIndexById.has(round.taskId));
+  const roundLocalIndex = new Map();
+  const roundAnchorById = new Map();
+  const derivedAssetIds = new Set();
+
   const projectNode = createNode('project', project, { x: 0, y: 0 }, { title: project.name, subtitle: (project.description || '项目工作区').slice(0, 80), tone: 'project', focused: true });
   nodes.push(projectNode);
 
-  const taskList = selectedTask ? [selectedTask] : safeTasks;
   taskList.forEach((task, index) => {
-    const taskNode = createNode('task', task, { x: 0, y: 170 + index * 152 }, { title: task.name, subtitle: task.status === 'completed' ? '已完成任务' : '任务 · ' + (task.taskTypeId || '通用创作'), tone: 'task', focused: selectedTask?.id === task.id });
+    const roundsForTask = taskRounds(task, visibleRounds);
+    const intent = taskIntentSummary(task);
+    const y = selectedTask ? 170 : 170 + index * Math.max(260, 152 + roundsForTask.length * 150);
+    const taskNode = createNode('task', task, { x: 0, y }, { title: task.name, subtitle: [task.status === 'completed' ? '已完成任务' : '任务', task.taskTypeId || '通用创作', intent || '', roundsForTask.length ? roundsForTask.length + ' 个轮次' : '暂无轮次'].filter(Boolean).join(' · '), tone: 'task', focused: selectedTask?.id === task.id });
     nodes.push(taskNode);
     connect(projectNode.key, taskNode.key, 'contains', '包含任务');
   });
 
-  const roundList = selectedTask ? safeRounds : [];
-  roundList.forEach((round, index) => {
+  visibleRounds.forEach((round) => {
+    const taskIndex = taskIndexById.get(round.taskId) || 0;
+    const localIndex = roundLocalIndex.get(round.taskId) || 0;
+    roundLocalIndex.set(round.taskId, localIndex + 1);
+    const taskBaseY = selectedTask ? 170 : 170 + taskIndex * Math.max(260, 152 + taskRounds({ id: round.taskId }, visibleRounds).length * 150);
+    const y = taskBaseY + localIndex * 150;
+    roundAnchorById.set(round.id, { x: 310, y });
     const detail = roundPlanDetails(round);
-    const roundNode = createNode('round', round, { x: 310, y: 70 + index * 150 }, { title: (PURPOSE_LABELS[round.purpose] || round.purpose) + '轮次', subtitle: '计划 v' + round.planVersion + ' · ' + detail.operationLabel, tone: 'round', focused: selectedRound?.id === round.id });
-    const planNode = createNode('plan', round, { x: 590, y: 70 + index * 150 }, { title: '计划 v' + round.planVersion, subtitle: planSummary(round), status: round.status, tone: 'plan', planDetail: detail, focused: selectedRound?.id === round.id });
+    const parentAssets = roundParentAssetIds(round);
+    const references = roundReferenceMaterials(round);
+    const masks = roundMaskAssetIds(round);
+    for (const assetId of parentAssets) derivedAssetIds.add(assetId);
+    const roundNode = createNode('round', round, { x: 310, y }, { title: (PURPOSE_LABELS[round.purpose] || round.purpose) + '轮次', subtitle: ['计划 v' + round.planVersion, detail.operationLabel, parentAssets.length ? parentAssets.length + ' 张父资产' : '', references.length ? references.length + ' 张参考' : ''].filter(Boolean).join(' · '), tone: 'round', focused: selectedRound?.id === round.id });
+    const planNode = createNode('plan', round, { x: 590, y }, { title: '计划 v' + round.planVersion, subtitle: planSummary(round), status: round.status, tone: 'plan', planDetail: detail, focused: selectedRound?.id === round.id });
     nodes.push(roundNode, planNode);
     connect(nodeKey('task', round.taskId), roundNode.key, 'contains', '包含轮次');
     if (round.parentRoundId) connect(nodeKey('round', round.parentRoundId), roundNode.key, 'lineage', '衍生自');
     connect(roundNode.key, planNode.key, 'plan', '计划');
+    for (const assetId of parentAssets) connect(nodeKey('asset', assetId), roundNode.key, 'lineage', '衍生起点');
+    for (const material of references) connect(nodeKey(material.externalShared ? 'shared_asset' : 'asset', material.assetId), planNode.key, material.usage === 'negative' ? 'manual' : 'reference', usageLabel(material.usage));
+    for (const assetId of masks) connect(nodeKey('asset', assetId), planNode.key, 'reference', '遮罩');
   });
 
+  const runLocalIndex = new Map();
   safeRuns.forEach((run, index) => {
-    const runNode = createNode('run', run, { x: 900, y: 70 + index * 160 }, { title: '生成运行 ' + shortId(run.id), subtitle: '计划 v' + run.planVersion + ' · ' + (run.executionConcurrency || 0) + ' 路并发', status: run.status, tone: 'run', focused: activeRun?.id === run.id });
+    const anchor = roundAnchorById.get(run.roundId);
+    const localIndex = runLocalIndex.get(run.roundId) || 0;
+    runLocalIndex.set(run.roundId, localIndex + 1);
+    const y = anchor ? anchor.y + localIndex * 136 : 70 + index * 160;
+    const runNode = createNode('run', run, { x: 900, y }, { title: '生成运行 ' + shortId(run.id), subtitle: '计划 v' + run.planVersion + ' · ' + (run.executionConcurrency || 0) + ' 路并发', status: run.status, tone: 'run', focused: activeRun?.id === run.id });
     nodes.push(runNode);
     connect(nodeKey('plan', run.roundId), runNode.key, 'run', '提交运行');
   });
@@ -272,17 +326,29 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     for (const output of listValue(item.outputAssets)) if (output?.id) connect(itemNode.key, nodeKey('asset', output.id), 'generated', '生成资产');
   });
 
+  const assetLaneIndex = new Map();
   const currentAssetIds = new Set(safeAssets.map((asset) => asset?.id).filter(Boolean));
   safeAssets.forEach((asset, index) => {
     if (!asset?.id) return;
     const selected = selectedAssetSet.has(asset.id);
     const shared = sharedAssetSet.has(asset.id);
     const delivered = deliveredAssetIds.has(asset.id);
+    const derived = derivedAssetIds.has(asset.id) || asset.review?.decision === 'derive';
     const unavailable = mediaUnavailable(asset);
     const source = outputByAsset.get(asset.id);
-    const sourceText = source ? '来自第 ' + source.itemSequence + ' 项' + (source.retry ? ' · 重试产物' : '') : '';
-    const subtitle = [assetState(asset, selected, shared, delivered, unavailable), sourceText].filter(Boolean).join(' · ');
-    nodes.push(createNode('asset', asset, { x: 1490 + (index % 3) * 198, y: 40 + Math.floor(index / 3) * 250 }, { title: assetLabel(asset), subtitle, status: unavailable ? 'unavailable' : asset.review?.decision || (selected ? 'selected' : 'active'), tone: shared ? 'shared' : 'asset', selectedAsset: selected, sharedAsset: shared, deliveredAsset: delivered, mediaUnavailable: unavailable, outputSource: source || null, focused: Boolean(activeRun?.id && source?.runId === activeRun.id) }));
+    const sourceRoundId = assetSourceRoundId(asset);
+    const sourceTaskId = assetSourceTaskId(asset);
+    const laneKey = sourceRoundId || sourceTaskId || 'project';
+    const localIndex = assetLaneIndex.get(laneKey) || 0;
+    assetLaneIndex.set(laneKey, localIndex + 1);
+    const sourceAnchor = sourceRoundId ? roundAnchorById.get(sourceRoundId) : null;
+    const taskIndex = sourceTaskId ? taskIndexById.get(sourceTaskId) : null;
+    const yBase = sourceAnchor ? sourceAnchor.y : Number.isInteger(taskIndex) ? 170 + taskIndex * 260 : 40;
+    const sourceText = source ? '来自第 ' + source.itemSequence + ' 项' + (source.retry ? ' · 重试产物' : '') : sourceRoundId ? '来自轮次结果' : '';
+    const subtitle = [assetState(asset, selected, shared, delivered, unavailable, derived), sourceText].filter(Boolean).join(' · ');
+    const assetNode = createNode('asset', asset, { x: 1490 + (localIndex % 3) * 198, y: yBase + Math.floor(localIndex / 3) * 250 }, { title: assetLabel(asset), subtitle, status: unavailable ? 'unavailable' : asset.review?.decision || (selected ? 'selected' : derived ? 'derived' : 'active'), tone: shared ? 'shared' : 'asset', selectedAsset: selected, sharedAsset: shared, deliveredAsset: delivered, derivedAsset: derived, mediaUnavailable: unavailable, outputSource: source || null, focused: Boolean(activeRun?.id && source?.runId === activeRun.id) });
+    nodes.push(assetNode);
+    if (!source && sourceRoundId) connect(nodeKey('round', sourceRoundId), assetNode.key, 'generated', '轮次结果');
   });
 
   let externalSharedIndex = 0;
@@ -310,7 +376,7 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
 
   const selectedCount = safeAssets.filter((asset) => selectedAssetSet.has(asset?.id)).length;
   const issues = [...safeRuns, ...safeRunItems].filter((item) => /failed|blocked|unknown|resume_pending|partial/.test(item?.status || '')).length;
-  return { nodes, connections, metrics: { issues, selected: selectedCount, assets: safeAssets.length, deliveries: safeDeliveries.length, resources: safeResourcePlacements.length } };
+  return { nodes, connections, metrics: { issues, selected: selectedCount, assets: safeAssets.length, deliveries: safeDeliveries.length, resources: safeResourcePlacements.length, reviews: reviewDecisionCounts(safeAssets) } };
 }
 
 function applySavedLayout(nodes, positions) {
@@ -322,15 +388,84 @@ function applySavedLayout(nodes, positions) {
 function visibleByFilter(node, filter, selectedKeys) {
   if (filter === 'all') return true;
   if (filter === 'issues') return /failed|blocked|unknown|resume_pending|partial|error|unavailable/.test(node.status || '');
-  if (filter === 'selected') return node.selectedAsset || selectedKeys.has(node.key);
-  if (filter === 'unreviewed') return isAssetNode(node) && !node.entity?.review?.decision && !node.externalSharedAsset;
+  if (filter === 'selected') return node.selectedAsset || selectedKeys.has(node.key) || (isAssetNode(node) && node.entity?.review?.decision === 'keep');
+  if (filter === 'undecided') return isAssetNode(node) && !node.externalSharedAsset && (!node.entity?.review?.decision || node.entity?.review?.decision === 'review');
   if (filter === 'rejected') return isAssetNode(node) && node.entity?.review?.decision === 'reject';
   if (filter === 'delivery') return node.entityType === 'delivery' || node.deliveredAsset || (node.selectedAsset && node.entity?.review?.decision === 'keep');
   if (filter === 'shared') return node.sharedAsset || node.entityType === 'shared_asset';
   return true;
 }
+function visibleByMode(node, mode) {
+  if (mode === 'flow') return true;
+  if (mode === 'map') return ['project', 'task', 'round', 'delivery'].includes(node.entityType) || node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep';
+  if (mode === 'rounds') return ['project', 'task', 'round', 'plan', 'run'].includes(node.entityType) || node.entity?.review?.decision === 'keep' || node.entity?.review?.decision === 'reject' || node.selectedAsset || node.deliveredAsset;
+  if (mode === 'assets') return ['project', 'task', 'round', 'asset', 'shared_asset', 'delivery'].includes(node.entityType);
+  if (mode === 'delivery') return ['project', 'delivery'].includes(node.entityType) || node.deliveredAsset || node.selectedAsset || node.entity?.review?.decision === 'keep';
+  return true;
+}
 
-export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onRetryRunItem, onControlRun, onOpenProvider }) {
+function statusCountText(counts) {
+  const parts = Object.entries(counts || {}).filter(([, value]) => value > 0).map(([status, value]) => statusPresentation('run', status).label + ' ' + value);
+  return parts.length ? parts.join(' / ') : '暂无运行';
+}
+
+function sessionContextLine(sessionPlanStatus, selectedTask, selectedRound) {
+  const context = sessionPlanStatus?.context;
+  if (context?.project?.name) {
+    const round = context.round;
+    return [context.task?.name, round ? (PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion : '未绑定轮次'].filter(Boolean).join(' / ');
+  }
+  if (selectedRound) return (PURPOSE_LABELS[selectedRound.purpose] || selectedRound.purpose) + ' · 计划 v' + selectedRound.planVersion;
+  if (selectedTask) return selectedTask.name;
+  return '未绑定活动轮次';
+}
+
+function planStatusLine(sessionPlanStatus, selectedRound) {
+  const contextRound = sessionPlanStatus?.context?.round;
+  const round = selectedRound || contextRound;
+  const pendingForRound = Boolean(sessionPlanStatus?.pendingConfirmation && (!selectedRound || !contextRound?.id || contextRound.id === selectedRound.id));
+  if (pendingForRound) return '待确认；确认后由 Agent 执行预检和运行。';
+  if (sessionPlanStatus?.confirmation?.confirmed && (!selectedRound || !contextRound?.id || contextRound.id === selectedRound.id)) return '计划已确认；预检与运行仍由 Agent 受控执行。';
+  if (sessionPlanStatus?.latestRun && (!selectedRound || !contextRound?.id || contextRound.id === selectedRound.id)) return '最近运行：' + statusPresentation('run', sessionPlanStatus.latestRun.status).label;
+  if (round?.status === 'draft') return '草稿轮次，可继续补充参考或整理计划。';
+  if (round) return '状态：' + statusPresentation('generic', round.status).label;
+  return '';
+}
+
+function LineageWorkspaceSummary({ project, selectedTask, selectedRound, runs = EMPTY_ARRAY, sessionPlanStatus, graph, mode, onMode, onOpenTasks, onCreateTask }) {
+  const reviews = graph.metrics.reviews || {};
+  const currentMode = CREATOR_MODES.find(([value]) => value === mode) || CREATOR_MODES[0];
+  const undecided = (reviews.unreviewed || 0) + (reviews.review || 0);
+  const metrics = [
+    { key: 'selected', className: 'is-delivery', value: graph.metrics.selected || reviews.keep || 0, label: '成果' },
+    { key: 'undecided', className: 'is-unreviewed', value: undecided, label: '未定' },
+    { key: 'reject', className: 'is-reject', value: reviews.reject || 0, label: '不采用' },
+    { key: 'runs', className: 'is-runs', value: runs.length, label: '运行', title: statusCountText(runStatusCounts(runs)) }
+  ];
+  const contextStatus = planStatusLine(sessionPlanStatus, selectedRound);
+  return <div className="lineage-workspace-summary" data-lineage-no-zoom>
+    <section className="lineage-focus-strip" aria-label="谱系当前视图与上下文">
+      <section className="lineage-mode-panel" aria-label="创作谱系工作模式">
+        <div className="lineage-mode-heading"><span>视图</span><strong>{currentMode[1]}</strong><small>{currentMode[2]}</small></div>
+        <div className="lineage-mode-grid" role="radiogroup" aria-label="切换谱系视图">
+          {CREATOR_MODES.map(([value, label, description]) => <button type="button" key={value} className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} onClick={() => onMode(value)}><strong>{label}</strong><span>{description}</span></button>)}
+        </div>
+      </section>
+      <div className="lineage-context-column">
+        <div className="lineage-context-card">
+          <span>上下文</span>
+          <strong>{sessionContextLine(sessionPlanStatus, selectedTask, selectedRound)}</strong>
+          {contextStatus && <small>{contextStatus}</small>}
+          <div className="lineage-context-actions"><button type="button" className="outline-button" onClick={onOpenTasks}><GitFork size={14} />任务列表</button><button type="button" className="outline-button" onClick={onCreateTask}><Sparkles size={14} />新建任务</button></div>
+        </div>
+        <section className="lineage-metrics-strip" aria-label="创作决策统计">
+          {metrics.map((item) => <article key={item.key} className={item.className} title={item.title || item.label}><b>{item.value}</b><span>{item.label}</span></article>)}
+        </section>
+      </div>
+    </section>
+  </div>;
+}
+export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onRetryRunItem, onControlRun, onOpenProvider, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
   tasks = listValue(tasks);
   rounds = listValue(rounds);
   runs = listValue(runs);
@@ -410,7 +545,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     const rendered = groupMemberBounds(group, nodes);
     return { ...rendered, key: nodeKey('group', rendered.id), entityType: 'group', entityId: rendered.id };
   }), [groups, nodes]);
-  const filteredNodes = useMemo(() => nodes.filter((node) => !collapsedGroupIds.has(node.groupId) && visibleByFilter(node, settings.filter, selectedKeys)), [nodes, collapsedGroupIds, selectedKeys, settings.filter]);
+  const filteredNodes = useMemo(() => nodes.filter((node) => !collapsedGroupIds.has(node.groupId) && visibleByMode(node, settings.mode || 'map') && visibleByFilter(node, settings.filter, selectedKeys)), [nodes, collapsedGroupIds, selectedKeys, settings.filter, settings.mode]);
   const selectedNodes = useMemo(() => nodes.filter((node) => selectedKeys.has(node.key)), [nodes, selectedKeys]);
   const selectedAssetNodes = selectedNodes.filter((node) => isAssetNode(node) && !node.externalSharedAsset);
   const primaryNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
@@ -674,6 +809,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     canvasRef.current?.focus({ preventScroll: true });
     fitItems([node], true, record);
   }, [fitItems]);
+  const focusCurrentContext = useCallback(() => {
+    const context = sessionPlanStatus?.context;
+    const key = selectedRound ? nodeKey('round', selectedRound.id) : context?.round?.id ? nodeKey('round', context.round.id) : selectedTask ? nodeKey('task', selectedTask.id) : context?.task?.id ? nodeKey('task', context.task.id) : project ? nodeKey('project', project.id) : null;
+    focusNode(key ? nodeByKey.get(key) : null);
+  }, [focusNode, nodeByKey, project, selectedRound, selectedTask, sessionPlanStatus?.context]);
 
 
   const selectNode = useCallback((event, node) => {
@@ -1015,37 +1155,39 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const searchListId = 'lineage-search-results';
   const activeSearchOptionId = activeNodeSearch ? 'lineage-search-option-' + nodeSearchIndex : undefined;
 
+  const toolbarMode = CREATOR_MODES.find(([value]) => value === (settings.mode || 'map')) || CREATOR_MODES[0];
   return <section className={'lineage-stage ' + (editing ? 'is-editing' : 'is-browsing')} aria-label="创作谱系">
     <header className="lineage-toolbar" data-lineage-no-zoom>
-      <div>
-        <p className="eyebrow">创作谱系</p>
-        <h2>{project?.name || '项目'} 的创作链</h2>
-        <span>{editing ? '编辑布局、资料节点、分组和人工标注。' : '默认浏览事实链。需要整理画布时再进入编辑模式。'}</span>
+      <div className="lineage-toolbar-title">
+        <h2>{editing ? '布局编辑' : toolbarMode[1]}</h2>
+        <span>{editing ? '只调整画布呈现，不改项目事实。' : toolbarMode[2]}</span>
       </div>
       <div className="lineage-actions">
         <button type="button" onClick={fitAll}><Search size={15} />适应全部</button>
         {selectedKeys.size > 0 && <button type="button" onClick={fitSelection}><ZoomIn size={15} />适应选择</button>}
-        {selectedKeys.size > 0 && <button type="button" onClick={fitSelection}><Move size={15} />居中选择</button>}
         <button type="button" className={editing ? 'is-active' : ''} onClick={() => setEditing((value) => !value)}><Move size={15} />{editing ? '退出编辑' : '编辑模式'}</button>
         {editing && <>
           <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')}><BoxSelect size={15} />选择</button>
           <button type="button" className={tool === 'pan' ? 'is-active' : ''} onClick={() => setTool('pan')}><Move size={15} />拖动画布</button>
-          <button type="button" onClick={resetView}><ZoomOut size={15} />重置视图</button>
-          <button type="button" onClick={undoLayout} disabled={!historyCounts.undo}><Undo2 size={15} />撤销</button>
-          <button type="button" onClick={redoLayout} disabled={!historyCounts.redo}><Redo2 size={15} />重做</button>
-          <select className="lineage-template-select" value="" onChange={(event) => { if (event.target.value) applyLayoutTemplate(event.target.value); event.target.value = ''; }} aria-label="套用布局模板">
-            <option value="">布局模板</option>
-            {TEMPLATE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
           <button type="button" onClick={autoArrange}><Columns3 size={15} />自动整理</button>
-          <button type="button" onClick={() => updateSettings({ snapGrid: !settings.snapGrid })}><Grid2X2 size={15} />{settings.snapGrid ? '吸附开启' : '吸附关闭'}</button>
           <button type="button" onClick={() => setResourcePanelOpen((value) => !value)}><BookOpen size={15} />{resourcePanelOpen ? '隐藏资料' : '显示资料'}</button>
-          <button type="button" onClick={() => updateSettings({ minimap: !settings.minimap })}><MapIcon size={15} />{settings.minimap ? '隐藏小地图' : '显示小地图'}</button>
-          <button type="button" onClick={() => setShortcutsOpen((value) => !value)}><BookOpen size={15} />快捷键</button>
+          <details className="lineage-edit-more">
+            <summary><Grid2X2 size={15} />编辑设置</summary>
+            <div className="lineage-edit-menu">
+              <button type="button" onClick={resetView}><ZoomOut size={15} />重置视图</button>
+              <button type="button" onClick={undoLayout} disabled={!historyCounts.undo}><Undo2 size={15} />撤销</button>
+              <button type="button" onClick={redoLayout} disabled={!historyCounts.redo}><Redo2 size={15} />重做</button>
+              <label><span>布局模板</span><select className="lineage-template-select" value="" onChange={(event) => { if (event.target.value) applyLayoutTemplate(event.target.value); event.target.value = ''; }} aria-label="套用布局模板"><option value="">选择模板</option>{TEMPLATE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <button type="button" onClick={() => updateSettings({ snapGrid: !settings.snapGrid })}><Grid2X2 size={15} />{settings.snapGrid ? '吸附开启' : '吸附关闭'}</button>
+              <button type="button" onClick={() => updateSettings({ minimap: !settings.minimap })}><MapIcon size={15} />{settings.minimap ? '隐藏小地图' : '显示小地图'}</button>
+              <button type="button" onClick={() => setShortcutsOpen((value) => !value)}><BookOpen size={15} />快捷键</button>
+            </div>
+          </details>
         </>}
         <button type="button" onClick={exportLineageSummary}><Download size={15} />导出摘要</button>
       </div>
     </header>
+    <LineageWorkspaceSummary project={project} selectedTask={selectedTask} selectedRound={selectedRound} runs={runs} sessionPlanStatus={sessionPlanStatus} graph={graph} mode={settings.mode || 'map'} onMode={(mode) => updateSettings({ mode }, false)} onOpenTasks={() => onNavigate({ view: 'tasks', projectId: project?.id || null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })} onCreateTask={onCreateTask} />
 
     <div className="lineage-filterbar" data-lineage-no-zoom>
       <div>{FILTERS.map(([value, label]) => <button type="button" key={value} className={settings.filter === value ? 'is-active' : ''} onClick={() => updateSettings({ filter: value })}>{label}</button>)}</div>
@@ -1087,7 +1229,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode && !isResourceType(contextNode.entityType))} canGroup={editing && selectedNodes.length > 1} canRemoveResource={editing && contextNode && isResourceType(contextNode.entityType)} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onRemoveResource={() => contextNode && removeResourceNode(contextNode)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
         {editing && shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
       </div>
-      <LineageInspector editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onRetryRunItem={onRetryRunItem} onControlRun={onControlRun} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} />
+      <LineageInspector tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onRetryRunItem={onRetryRunItem} onControlRun={onControlRun} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} onCreateTask={onCreateTask} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onCreateDelivery={onCreateDelivery} onOpenConfirmation={onOpenConfirmation} />
     </div>
   </section>;
 }
@@ -1176,29 +1318,36 @@ function openNode(node, { onNavigate, onInspectAsset }) {
   else if (isAssetNode(node)) onInspectAsset(node.entity.id);
   else if (node.entityType === 'delivery') onNavigate({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
 }
-function LineageInspector({ editing, node, selectedNodes, selectedAssetNodes, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onRetryRunItem, onControlRun, onOpenProvider, onCopyContext }) {
+function contextRouteForNode(node) {
+  if (!node) return null;
+  if (node.entityType === 'project') return { view: 'lineage', projectId: node.entity.id, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' };
+  if (node.entityType === 'task') return { view: 'lineage', projectId: node.entity.projectId, taskId: node.entity.id, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' };
+  if (node.entityType === 'round' || node.entityType === 'plan') return { view: 'lineage', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' };
+  return null;
+}
+function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onRetryRunItem, onControlRun, onOpenProvider, onCopyContext, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
   if (!selectedNodes.length) {
     return <aside className="lineage-inspector" data-lineage-no-zoom>
       <p className="eyebrow">检查器</p>
       <h2>选择一个节点</h2>
-      <p>{editing ? '编辑模式可多选、分组、添加标注或拖入资料。' : '单击节点查看详情。常用动作会出现在这里。'}</p>
-      <button type="button" className="outline-button" onClick={onOpenProvider}>生成服务</button>
+      <p>{editing ? '编辑模式可多选、分组、添加标注或拖入资料。' : '单击节点查看详情；节点相关动作会在这里出现。'}</p>
+      <p className="lineage-note">先点画布里的图片或轮次；右侧只显示和当前选择直接相关的操作。</p>
     </aside>;
   }
   if (!node) {
     const selectedAssetIds = selectedAssetNodes.map((item) => item.entity.id).filter(Boolean);
+    const selectedAssets = selectedAssetNodes.map((item) => item.entity).filter(Boolean);
     return <aside className="lineage-inspector" data-lineage-no-zoom>
       <div className="lineage-inspector-head">
         <div><p className="eyebrow">批量操作</p><h2>{selectedNodes.length} 个节点</h2></div>
         <button type="button" className="icon-button" aria-label="清除选择" onClick={onClear}><X size={15} /></button>
       </div>
       {selectedAssetIds.length ? <>
-        <p className={batchBusy ? 'lineage-batch-status is-busy' : 'lineage-batch-status'}>{batchBusy ? '选片同步进行中，批量按钮暂不可用。' : '已选择 ' + selectedAssetIds.length + ' 个资产，可批量设为成果或评审。'}</p>
+        <p className={batchBusy ? 'lineage-batch-status is-busy' : 'lineage-batch-status'}>{batchBusy ? '选片同步进行中，批量按钮暂不可用。' : '已选择 ' + selectedAssetIds.length + ' 个资产，可批量设为成果、移出成果，或作为参考继续创作。'}</p>
+        <CreativeActionLauncher assets={batchBusy ? EMPTY_ARRAY : selectedAssets} selectedTask={selectedTask} fallbackTask={taskForAssets(selectedAssets, tasks)} selectedRound={selectedRound} label="继续创作" onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} />
         <div className="lineage-inspector-actions">
-          <button type="button" className="command-button" disabled={batchBusy} onClick={() => onBatchSelectAssets(selectedAssetIds, true)}><Bookmark size={15} />选为成果</button>
-          <button type="button" className="outline-button" disabled={batchBusy} onClick={() => onBatchSelectAssets(selectedAssetIds, false)}><X size={15} />移出选片</button>
-          <button type="button" className="outline-button" disabled={batchBusy} onClick={() => onBatchReviewAssets(selectedAssetIds, 'keep')}><Check size={15} />标记保留</button>
-          <button type="button" className="outline-button" disabled={batchBusy} onClick={() => onBatchReviewAssets(selectedAssetIds, 'reject')}><Trash2 size={15} />标记淘汰</button>
+          <button type="button" className="outline-button" disabled={batchBusy} onClick={() => onBatchSelectAssets(selectedAssetIds, true)}><Bookmark size={15} />选为成果</button>
+          <button type="button" className="outline-button" disabled={batchBusy} onClick={() => onBatchSelectAssets(selectedAssetIds, false)}><X size={15} />移出成果</button>
         </div>
       </> : <p>当前选择中没有可批量处理的资产节点。</p>}
       <div className="lineage-inspector-actions">
@@ -1220,10 +1369,10 @@ function LineageInspector({ editing, node, selectedNodes, selectedAssetNodes, ba
     </div>
     <dl>
       <div><dt>类型</dt><dd>{nodeTypeLabel(node.entityType)}</dd></div>
-      <div><dt>状态</dt><dd>{isAsset ? assetState(entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable) : statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status).label}</dd></div>
+      <div><dt>状态</dt><dd>{isAsset ? assetState(entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable, node.derivedAsset) : statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status).label}</dd></div>
       <div><dt>短 ID</dt><dd>{shortId(node.entityId)}</dd></div>
     </dl>
-    {node.entityType === 'plan' ? <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} /> : isAsset ? <AssetActions editing={editing} node={node} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} /> : node.entityType === 'run_item' ? <RunItemActions item={entity} onRetryRunItem={onRetryRunItem} /> : node.entityType === 'run' ? <RunActions run={entity} onNavigate={onNavigate} onControlRun={onControlRun} /> : isResource ? <ResourceActions node={node} onCopyContext={onCopyContext} /> : <NavigationActions node={node} onNavigate={onNavigate} />}
+    {node.entityType === 'plan' ? <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} /> : isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : node.entityType === 'run_item' ? <RunItemActions item={entity} onRetryRunItem={onRetryRunItem} /> : node.entityType === 'run' ? <RunActions run={entity} onNavigate={onNavigate} onControlRun={onControlRun} /> : isResource ? <ResourceActions node={node} onCopyContext={onCopyContext} /> : ['task', 'round', 'delivery'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} onOpenReference={onOpenReference} /> : null}
     {editing && nodeLinks.length ? <SoftLinkList links={nodeLinks} node={node} onRemove={onRemoveLink} onUpdate={onUpdateLink} onReverse={onReverseLink} /> : null}
   </aside>;
 }
@@ -1235,14 +1384,42 @@ function SoftLinkList({ links, node, onRemove, onUpdate, onReverse }) {
   return <div className="lineage-soft-links"><h3>人工标注</h3>{links.map((link) => <div key={link.id}><select value={link.linkType} onChange={(event) => onUpdate(link.id, { linkType: event.target.value, label: relationLabel(event.target.value) })}>{RELATION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input value={link.label} maxLength={80} onChange={(event) => onUpdate(link.id, { label: event.target.value })} aria-label="软连线标签" /><small>{link.sourceType === node.entityType && link.sourceId === node.entityId ? '指向 ' + nodeTypeLabel(link.targetType) + ' ' + shortId(link.targetId) : '来自 ' + nodeTypeLabel(link.sourceType) + ' ' + shortId(link.sourceId)}</small><button type="button" className="icon-button" aria-label="反转软连线方向" onClick={() => onReverse(link.id)}><GitFork size={13} /></button><button type="button" className="icon-button" aria-label="删除软连线" onClick={() => onRemove(link.id)}><X size={13} /></button></div>)}</div>;
 }
 function ResourceActions({ node, onCopyContext }) { return <div className="lineage-inspector-actions"><p className="lineage-note">资料节点只提供计划上下文。复制后回到会话生成待确认计划，不会直接调用 Provider。</p><button type="button" className="command-button" onClick={() => onCopyContext('plan', [node])}><Copy size={15} />复制计划上下文指令</button><button type="button" className="outline-button" onClick={() => onCopyContext('variation', [node])}><Sparkles size={15} />复制变体上下文</button></div>; }
-function PlanActions({ node, onNavigate, onCopyContext }) {
+function PlanActions({ node, onNavigate, onCopyContext, onOpenConfirmation }) {
   const detail = node.planDetail || roundPlanDetails(node.entity);
-  return <div className="lineage-plan-details"><p className="lineage-note">计划节点展示已保存的脱敏计划摘要。确认、预检和运行仍由会话受控执行。</p><dl><div><dt>操作</dt><dd>{detail.operationLabel}</dd></div><div><dt>数量</dt><dd>{detail.itemCount || 0} 项</dd></div><div><dt>输出</dt><dd>{detail.outputSummary}</dd></div><div><dt>参考/遮罩</dt><dd>{detail.referenceCount || 0} / {detail.maskCount || 0}</dd></div><div><dt>提示词</dt><dd>{detail.prompt}</dd></div></dl><div className="lineage-inspector-actions"><button type="button" className="command-button" onClick={() => openNode(node, { onNavigate, onInspectAsset: () => undefined })}><Eye size={15} />打开计划版本对比</button><button type="button" className="outline-button" onClick={() => onCopyContext('refinement', [node])}><RefreshCw size={15} />复制优化计划上下文</button><button type="button" className="outline-button" onClick={() => onCopyContext('variation', [node])}><Sparkles size={15} />复制变体计划上下文</button></div></div>;
+  const needsConfirmation = node.entity?.status === 'awaiting_confirmation';
+  return <div className="lineage-plan-details">
+    <p className="lineage-note">计划节点展示已保存的脱敏计划摘要。待确认时可在这里激活人工确认；预检和运行仍由会话受控执行。</p>
+    <dl><div><dt>操作</dt><dd>{detail.operationLabel}</dd></div><div><dt>数量</dt><dd>{detail.itemCount || 0} 项</dd></div><div><dt>输出</dt><dd>{detail.outputSummary}</dd></div><div><dt>参考/遮罩</dt><dd>{detail.referenceCount || 0} / {detail.maskCount || 0}</dd></div><div><dt>提示词</dt><dd>{detail.prompt}</dd></div></dl>
+    {needsConfirmation && <section className="lineage-confirmation-callout"><p>当前计划正在等待人工确认。</p><button type="button" className="command-button" onClick={() => onOpenConfirmation?.(node.entity)}><Check size={15} />审阅并确认计划</button></section>}
+    <div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => openNode(node, { onNavigate, onInspectAsset: () => undefined })}><Eye size={15} />打开计划版本对比</button><button type="button" className="outline-button" onClick={() => onCopyContext('refinement', [node])}><RefreshCw size={15} />复制优化计划上下文</button><button type="button" className="outline-button" onClick={() => onCopyContext('variation', [node])}><Sparkles size={15} />复制变体计划上下文</button></div>
+  </div>;
 }
-function AssetActions({ editing, node, onPreviewAsset, onInspectAsset, onToggleAsset, onReviewAsset, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext }) {
+function LineageAssetGetActions({ asset, onPreviewAsset, onDownloadAsset, onCopyAsset }) {
+  return <section className="lineage-action-section lineage-get-actions" aria-label="获取图片">
+    <header><strong>获取图片</strong><span>查看、复制或保存原图</span></header>
+    <div className="lineage-utility-row">
+      <button type="button" className="outline-button" onClick={() => onPreviewAsset(asset)}><Eye size={15} />放大</button>
+      <button type="button" className="outline-button" onClick={() => onCopyAsset(asset)}><Copy size={15} />复制</button>
+      <button type="button" className="outline-button" onClick={() => onDownloadAsset(asset)}><Download size={15} />下载</button>
+    </div>
+  </section>;
+}
+function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selectedRound, onPreviewAsset, onInspectAsset, onToggleAsset, onReviewAsset, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext, onOpenDerive, onAddReference, onReject, onOpenReference }) {
   const asset = node.entity;
-  if (node.externalSharedAsset) return <div className="lineage-inspector-actions"><p className="lineage-note">跨项目共享素材只能作为参考查看，不能直接选为当前项目成果。</p><button type="button" className="command-button" onClick={() => onPreviewAsset(asset)}><Eye size={15} />放大查看</button><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onCopyContext('reference', [node])}><Copy size={15} />复制为参考上下文</button><button type="button" className="outline-button" onClick={() => onCopyAsset(asset)}><Copy size={15} />复制图片</button><button type="button" className="outline-button" onClick={() => onDownloadAsset(asset)}><Download size={15} />下载原图</button></div>;
-  return <div className="lineage-inspector-actions"><button type="button" className="command-button" onClick={() => onPreviewAsset(asset)}><Eye size={15} />放大查看</button><button type="button" className="outline-button" onClick={() => onToggleAsset(asset)}><Bookmark size={15} />{node.selectedAsset ? '移出选片' : '选为成果'}</button><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onCopyContext('reference', [node])}><Copy size={15} />复制为参考</button>{editing && <><button type="button" className="outline-button" onClick={() => onReviewAsset(asset.id, 'keep')}><Check size={15} />标记保留</button><button type="button" className="outline-button" onClick={() => onReviewAsset(asset.id, 'review')}><RefreshCw size={15} />标记待定</button><button type="button" className="outline-button" onClick={() => onReviewAsset(asset.id, 'reject')}><Trash2 size={15} />标记淘汰</button><button type="button" className="outline-button" onClick={() => onReviewAsset(asset.id, 'derive')}><Sparkles size={15} />可衍生</button><button type="button" className="outline-button" onClick={() => onSetAssetShared(asset, !node.sharedAsset)}><Share2 size={15} />{node.sharedAsset ? '取消共享' : '共享素材'}</button><button type="button" className="outline-button" onClick={() => onCopyAsset(asset)}><Copy size={15} />复制图片</button><button type="button" className="outline-button" onClick={() => onDownloadAsset(asset)}><Download size={15} />下载原图</button></>}</div>;
+  const fallbackTask = taskForAsset(asset, tasks);
+  if (node.externalSharedAsset) return <div className="lineage-inspector-stack">
+    <CreativeActionLauncher assets={[asset]} selectedTask={selectedTask} fallbackTask={fallbackTask} selectedRound={selectedRound} label="继续使用" onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} />
+    <LineageAssetGetActions asset={asset} onPreviewAsset={onPreviewAsset} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} />
+    <details className="lineage-secondary-actions"><summary>更多信息</summary><div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onCopyContext('reference', [node])}><Copy size={15} />复制参考上下文</button></div></details>
+  </div>;
+  return <div className="lineage-inspector-stack">
+    <div className="lineage-primary-actions">
+      <button type="button" className="command-button" onClick={() => onToggleAsset(asset)}><Bookmark size={15} />{node.selectedAsset ? '移出成果' : '选为成果'}</button>
+      <CreativeActionLauncher assets={[asset]} selectedTask={selectedTask} fallbackTask={fallbackTask} selectedRound={selectedRound} label="继续创作" onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} />
+    </div>
+    <LineageAssetGetActions asset={asset} onPreviewAsset={onPreviewAsset} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} />
+    <details className="lineage-secondary-actions"><summary>更多信息</summary><div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onSetAssetShared(asset, !node.sharedAsset)}><Share2 size={15} />{node.sharedAsset ? '取消共享' : '共享素材'}</button></div></details>
+  </div>;
 }
 function RunItemActions({ item, onRetryRunItem }) {
   const retryable = ['failed', 'blocked', 'retry_wait'].includes(item.status);
@@ -1252,7 +1429,17 @@ function RunActions({ run, onNavigate, onControlRun }) {
   const execution = runExecutionPresentation(run, []);
   return <div className="lineage-inspector-actions"><p>{execution.detail || '运行由 daemon Worker 队列执行，画布只展示状态。'}</p><button type="button" className="outline-button" onClick={() => onNavigate({ view: 'runs', roundId: run.roundId, compareRoundIds: [run.roundId], runId: run.id, assetScope: 'round' })}><Eye size={15} />查看生成历史</button>{['queued', 'running'].includes(run.status) && <button type="button" className="outline-button" onClick={() => onControlRun('pause', run.id)}><Pause size={15} />暂停运行</button>}{run.status === 'paused' && <button type="button" className="command-button" onClick={() => onControlRun('resume', run.id)}><Play size={15} />恢复运行</button>}{!['completed', 'cancelled'].includes(run.status) && <button type="button" className="outline-button" onClick={() => onControlRun('cancel', run.id)}><X size={15} />取消运行</button>}</div>;
 }
-function NavigationActions({ node, onNavigate }) { return <div className="lineage-inspector-actions"><button type="button" className="command-button" onClick={() => openNode(node, { onNavigate, onInspectAsset: () => undefined })}><Eye size={15} />打开详情</button></div>; }
+function NavigationActions({ node, onNavigate, onCreateRound, onOpenReference }) {
+  const route = contextRouteForNode(node);
+  const isTask = node.entityType === 'task';
+  const isRound = node.entityType === 'round' || node.entityType === 'plan';
+  return <div className="lineage-inspector-actions">
+    {route && <button type="button" className="command-button" onClick={() => onNavigate(route)}><Search size={15} />设为当前上下文</button>}
+    <button type="button" className="outline-button" onClick={() => openNode(node, { onNavigate, onInspectAsset: () => undefined })}><Eye size={15} />打开详情</button>
+    {isTask && <button type="button" className="outline-button" onClick={() => { onNavigate(route); onCreateRound(); }}><GitFork size={15} />为此任务新建轮次</button>}
+    {isRound && node.entity?.status === 'draft' && <button type="button" className="outline-button" onClick={() => onNavigate(route)}><Image size={15} />设为当前后添加参考</button>}
+  </div>;
+}
 function LineageMinimap({ nodes, groups = [], viewport, canvasSize, searchMatchKeys = EMPTY_SET, onViewportChange }) {
   const svgRef = useRef(null);
   const [dragging, setDragging] = useState(false);

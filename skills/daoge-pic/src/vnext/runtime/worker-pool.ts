@@ -3,6 +3,7 @@ import os from 'node:os';
 import { spawn, ChildProcess } from 'node:child_process';
 import { MAX_GLOBAL_CONCURRENCY, MAX_PROVIDER_CONCURRENCY } from '../studio/runtime-settings';
 import { ProviderConcurrencyGovernor, ProviderConcurrencySnapshot, ProviderHealthSample } from './provider-concurrency';
+import type { ResolvedProviderConfig } from '../studio/provider-config';
 import { safeErrorSummary } from '../shared/safe-error';
 
 export interface WorkerPoolTick {
@@ -42,12 +43,12 @@ interface WorkerSlot {
   restartAttempts: number;
   failed: boolean;
 }
-
 export const MAX_GENERATION_WORKER_POOL_SIZE = 8;
 const EMPTY_RESULT: WorkerPoolTick = { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 };
 const WORKER_TICK_TIMEOUT_MS = 12 * 60 * 1000;
 const WORKER_HEALTHY_WINDOW_MS = 30 * 1000;
 const MAX_RESTART_ATTEMPTS = 8;
+
 export function generationWorkerPoolSize(parallelism = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length): number {
   return Math.max(1, Math.min(MAX_GENERATION_WORKER_POOL_SIZE, parallelism - 1 || 1));
 }
@@ -58,10 +59,12 @@ export class WorkerProcessPool {
   private activated = false;
   private exhausted = false;
   private restartCount = 0;
-  private lastError: string | null = null;
-  private readonly entry: string;
   private readonly maxSize: number;
+  private readonly entry: string;
   private readonly governor = new ProviderConcurrencyGovernor(MAX_PROVIDER_CONCURRENCY);
+  private lastError: string | null = null;
+  private retiring = false;
+  private readonly providerConfig: ResolvedProviderConfig | null;
 
   processIds(): number[] {
     return this.slots.flatMap((slot) => typeof slot.child.pid === 'number' && slot.child.pid > 0 ? [slot.child.pid] : []);
@@ -76,9 +79,14 @@ export class WorkerProcessPool {
     return { state, targetSize: this.maxSize, processCount: this.processIds().length, readyCount, busyCount, queuedCount: 0, restartCount: this.restartCount, lastError: this.lastError };
   }
 
-  constructor(private readonly workspaceRoot: string, size = generationWorkerPoolSize()) {
+  retire(): void {
+    this.retiring = true;
+  }
+
+  constructor(private readonly workspaceRoot: string, size = generationWorkerPoolSize(), providerConfig: ResolvedProviderConfig | null = null) {
     this.entry = path.resolve(__dirname, '../runner/worker-process.js');
     this.maxSize = Math.max(1, Math.min(MAX_GENERATION_WORKER_POOL_SIZE, Math.floor(size) || 1));
+    this.providerConfig = providerConfig;
   }
 
   async processOnce(limit = MAX_GLOBAL_CONCURRENCY): Promise<WorkerPoolTick> {
@@ -129,7 +137,7 @@ export class WorkerProcessPool {
         const tick = response.result;
         return { claimed: total.claimed + tick.claimed, succeeded: total.succeeded + tick.succeeded, retrying: total.retrying + tick.retrying, blocked: total.blocked + tick.blocked, unknown: total.unknown + tick.unknown, cancelled: total.cancelled + tick.cancelled };
       }, { ...EMPTY_RESULT });
-      if (result.claimed >= boundedLimit && this.slots.length < this.maxSize) this.ensureCapacity(this.slots.length + 1);
+      if (!this.retiring && result.claimed >= boundedLimit && this.slots.length < this.maxSize) this.ensureCapacity(this.slots.length + 1);
       return result;
     } catch (error) {
       this.governor.record({ ...EMPTY_PROVIDER_STATS, unknown: 1 });
@@ -164,9 +172,10 @@ export class WorkerProcessPool {
     const bounded = Math.min(this.maxSize, Math.max(1, target));
     while (this.slots.length < bounded) this.slots.push(this.startSlot(this.entry));
   }
-
   private startSlot(entry: string, restartAttempts = 0): WorkerSlot {
-    const child = spawn(process.execPath, [entry, '--workspace', this.workspaceRoot], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
+    const args = [entry, '--workspace', this.workspaceRoot];
+    if (this.providerConfig) args.push('--provider-profile-id', this.providerConfig.profileId, '--provider-config-version', String(this.providerConfig.configVersion), '--provider-config-ipc');
+    const child = spawn(process.execPath, args, { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
     const slot: WorkerSlot = { child, ready: false, busy: false, pending: null, entry, restartTimer: null, healthyTimer: undefined, restartAttempts, failed: false };
     child.on('message', (message: { type?: unknown; result?: WorkerPoolTick; providerStats?: ProviderHealthSample; message?: unknown }) => {
       if (message?.type === 'ready') {
@@ -190,6 +199,14 @@ export class WorkerProcessPool {
     });
     child.on('error', (error) => this.failSlot(slot, error));
     child.on('exit', () => this.failSlot(slot, new Error('Worker process exited.')));
+    if (this.providerConfig) {
+      child.once('spawn', () => {
+        if (!child.connected) return this.failSlot(slot, new Error('Worker process IPC channel is unavailable.'));
+        child.send?.({ type: 'configure-provider', config: this.providerConfig }, (error) => {
+          if (error) this.failSlot(slot, error);
+        });
+      });
+    }
     return slot;
   }
 

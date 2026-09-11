@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const { createImageProvider } = require('../../dist/vnext/providers/http-adapters');
 const { sanitizeProviderMetadata, sanitizeProviderRequestId } = require('../../dist/vnext/providers/response-sanitizer');
 const { cleanupProviderResult } = require('../../dist/vnext/media/generated-assets');
-const { decodeBoundedBase64, downloadHttpResource, readBoundedResponse } = require('../../dist/vnext/providers/http-safety');
+const { decodeBoundedBase64, downloadHttpResource, probeHttpEndpoint, readBoundedResponse, requestPinnedHttpEndpoint } = require('../../dist/vnext/providers/http-safety');
 
 const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==';
 const png = Buffer.from(pngBase64, 'base64');
@@ -27,6 +27,7 @@ function responseFor(providerId) {
   if (providerId === 'gemini-image') {
     return { candidates: [{ content: { parts: [{ inlineData: { data: pngBase64, mimeType: 'image/png' } }] } }] };
   }
+  if (providerId === 'xai-grok-image') return { created: 1, model: 'xai-response-model', usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 }, data: [{ b64_json: pngBase64, mime_type: 'image/jpeg', revised_prompt: 'fixture revised prompt' }] };
   return { created: 1, model: 'fixture-model', data: [{ b64_json: pngBase64, revised_prompt: 'fixture revised prompt' }] };
 }
 
@@ -46,11 +47,15 @@ for (const providerId of ['openai-images', 'gemini-image', 'gemini-openai-compat
       const provider = createImageProvider(config);
       const result = await provider.generate({ requestId: 'request-1', idempotencyKey: 'idempotency-1', prompt: 'fixture prompt', output: { size: '1024x1024', format: 'png' }, referenceAssets: [] }, { abortSignal: new AbortController().signal });
       assert.deepEqual(result.bytes, png);
-      assert.equal(result.mediaType, 'image/png');
+      assert.equal(result.mediaType, providerId === 'xai-grok-image' ? 'image/jpeg' : 'image/png');
       assert.equal(provider.validateConfig(config).valid, true);
       assert.equal(provider.capabilities(config).textToImage, true);
-      assert.equal(provider.capabilities(config).referenceEdit, providerId === 'openai-images');
+      assert.equal(provider.capabilities(config).referenceEdit, providerId === 'openai-images' || providerId === 'xai-grok-image');
       assert.equal(result.safeMeta.requestPath, providerId === 'gemini-image' ? '/v1beta/models/fixture-model:generateContent' : '/v1/images/generations');
+      if (providerId === 'xai-grok-image') {
+        assert.equal(result.safeMeta.responseModel, 'xai-response-model');
+        assert.deepEqual(result.safeMeta.usage, { input_tokens: 3, output_tokens: 4, total_tokens: 7 });
+      }
     });
     assert.equal(received.length, 1);
     assert.equal(received[0].body.prompt || received[0].body.contents?.[0]?.parts?.[0]?.text, 'fixture prompt');
@@ -60,9 +65,18 @@ for (const providerId of ['openai-images', 'gemini-image', 'gemini-openai-compat
     } else {
       assert.equal(received[0].authorization, 'Bearer fixture-key');
       assert.equal(received[0].url, '/v1/images/generations');
+      if (providerId === 'xai-grok-image') assert.equal(Object.hasOwn(received[0].body, 'size'), false);
     }
   });
 }
+test('public compatible Provider endpoints reject credentialed HTTP before sending a request', async () => {
+  const provider = createImageProvider({ providerId: 'openai-images', baseUrl: 'http://public.example.test/v1', apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false, endpointTrustMode: 'compatible_public' });
+  const validation = provider.validateConfig({ providerId: 'openai-images', baseUrl: 'http://public.example.test/v1', apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false, endpointTrustMode: 'compatible_public' });
+  assert.equal(validation.valid, false);
+  assert.deepEqual(validation.errors, ['public_endpoint_requires_https']);
+  await assert.rejects(() => provider.generate({ requestId: 'insecure-request', idempotencyKey: 'insecure-request-key', prompt: 'must not send', output: {}, referenceAssets: [] }, { abortSignal: new AbortController().signal }), /public_endpoint_requires_https/);
+});
+
 test('large Provider Base64 results stream to a temporary file instead of returning a large Buffer', async () => {
   const large = Buffer.concat([png, Buffer.alloc(2 * 1024 * 1024 - png.length, 0x41)]);
   let result = null;
@@ -113,6 +127,62 @@ test('vNext OpenAI adapter sends managed reference and mask bytes as multipart e
   assert.equal(received.body.includes(Buffer.from('asset-mask.png')), true);
 });
 
+test('vNext Grok adapter sends official generation parameters without size', async () => {
+  let received = null;
+  await withServer((request, response) => {
+    let body = '';
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      received = { url: request.url, authorization: request.headers.authorization, body: JSON.parse(body) };
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(responseFor('xai-grok-image')));
+    });
+  }, async (baseUrl) => {
+    const provider = createImageProvider({ providerId: 'xai-grok-image', baseUrl, apiKey: 'fixture-key', model: 'grok-imagine-image-2.0', referenceEnabled: false });
+    await provider.generate({ requestId: 'xai-generate', idempotencyKey: 'xai-generate-key', prompt: 'fixture grok prompt', output: { aspectRatio: '9:19.5', resolution: '2K', quality: 'medium', size: '945x2048' }, referenceAssets: [] }, { abortSignal: new AbortController().signal });
+  });
+  assert.equal(received.url, '/v1/images/generations');
+  assert.equal(received.authorization, 'Bearer fixture-key');
+  assert.equal(received.body.size, undefined);
+  assert.equal(received.body.aspect_ratio, '9:19.5');
+  assert.equal(received.body.resolution, '2k');
+  assert.equal(received.body.quality, 'medium');
+  assert.equal(received.body.response_format, 'b64_json');
+});
+
+test('vNext Grok adapter sends managed references as JSON editing input', async () => {
+  let received = null;
+  await withServer((request, response) => {
+    let body = '';
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      received = { url: request.url, authorization: request.headers.authorization, contentType: request.headers['content-type'], body: JSON.parse(body) };
+      response.writeHead(200, { 'content-type': 'application/json', 'x-request-id': 'xai-edit-request-1' });
+      response.end(JSON.stringify(responseFor('xai-grok-image')));
+    });
+  }, async (baseUrl) => {
+    const provider = createImageProvider({ providerId: 'xai-grok-image', baseUrl, apiKey: 'fixture-key', model: 'grok-imagine-image-2.0', referenceEnabled: false });
+    const result = await provider.edit({ requestId: 'xai-edit', idempotencyKey: 'xai-edit-key', prompt: 'preserve character, change lighting', output: { aspectRatio: 'auto', resolution: '1K', quality: 'low' }, referenceAssets: [{ assetId: 'asset-reference-1', mediaType: 'image/png', bytes: png }, { assetId: 'asset-reference-2', mediaType: 'image/webp', bytes: png }] }, { abortSignal: new AbortController().signal });
+    assert.deepEqual(result.bytes, png);
+    assert.equal(result.mediaType, 'image/jpeg');
+    assert.equal(result.externalRequestId, 'xai-edit-request-1');
+    assert.equal(result.safeMeta.managedReferenceCount, 2);
+    assert.equal(result.safeMeta.usedMask, false);
+    assert.equal(result.safeMeta.requestPath, '/v1/images/edits');
+  });
+  assert.equal(received.url, '/v1/images/edits');
+  assert.equal(received.authorization, 'Bearer fixture-key');
+  assert.equal(received.contentType, 'application/json');
+  assert.equal(received.body.size, undefined);
+  assert.equal(received.body.image, undefined);
+  assert.equal(received.body.images.length, 2);
+  assert.match(received.body.images[0].url, /^data:image\/png;base64,/);
+  assert.match(received.body.images[1].url, /^data:image\/webp;base64,/);
+  assert.equal(received.body.aspect_ratio, 'auto');
+  assert.equal(received.body.resolution, '1k');
+  assert.equal(received.body.quality, 'low');
+});
+
 
 test('vNext adapters forward requested aspect ratios instead of defaulting to square output', async () => {
   for (const providerId of ['gemini-image', 'gemini-openai-compatible', 'xai-grok-image']) {
@@ -155,10 +225,40 @@ test('vNext adapter rejects generation endpoint redirects before following them'
   assert.equal(redirectedRequestCount, 0);
 });
 
+test('vNext Provider adapter lists models through explicit credentialed model endpoints', async () => {
+  const requests = [];
+  const openai = createImageProvider({ providerId: 'openai-images', baseUrl: 'https://provider.example/v1/images/generations', apiKey: 'openai-secret', model: 'gpt-image-2', referenceEnabled: false }, {
+    fetch: async (input, init = {}) => {
+      const headers = new Headers(init.headers);
+      requests.push({ url: String(input), redirect: init.redirect, authorization: headers.get('authorization'), apiKey: headers.get('x-goog-api-key') });
+      return new Response(JSON.stringify({ data: [{ id: 'gpt-image-2', owned_by: 'openai' }, { id: 'gpt-image-1' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+  });
+  const openaiModels = await openai.listModels({ abortSignal: new AbortController().signal });
+  assert.deepEqual(openaiModels, [{ id: 'gpt-image-2', label: 'gpt-image-2', ownedBy: 'openai' }, { id: 'gpt-image-1', label: 'gpt-image-1', ownedBy: null }]);
+
+  const gemini = createImageProvider({ providerId: 'gemini-image', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-old:generateContent', apiKey: 'gemini-secret', model: 'gemini-old', referenceEnabled: true }, {
+    fetch: async (input, init = {}) => {
+      const headers = new Headers(init.headers);
+      requests.push({ url: String(input), redirect: init.redirect, authorization: headers.get('authorization'), apiKey: headers.get('x-goog-api-key') });
+      return new Response(JSON.stringify({ models: [{ name: 'models/gemini-2.5-flash-image', displayName: 'Gemini Flash Image', supportedGenerationMethods: ['generateContent'] }, { name: 'models/embed-only', supportedGenerationMethods: ['embedContent'] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+  });
+  const geminiModels = await gemini.listModels({ abortSignal: new AbortController().signal });
+  assert.deepEqual(geminiModels, [{ id: 'models/gemini-2.5-flash-image', label: 'Gemini Flash Image', ownedBy: 'generateContent' }]);
+  assert.deepEqual(requests, [
+    { url: 'https://provider.example/v1/models', redirect: 'manual', authorization: 'Bearer openai-secret', apiKey: null },
+    { url: 'https://generativelanguage.googleapis.com/v1beta/models', redirect: 'manual', authorization: null, apiKey: 'gemini-secret' }
+  ]);
+});
+
 test('vNext Provider adapter classifies rate limits, invalid input, and ambiguous transport errors', () => {
   const config = { providerId: 'openai-images', baseUrl: 'https://images.example.test/v1', apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false };
   const provider = createImageProvider(config);
   assert.equal(provider.classifyError(new Error('http 429: slow down')).kind, 'rate_limited');
+  const limited = provider.classifyError({ status: 429, code: 'rate_limit_exceeded', message: 'rate limited', retryAfterMs: 5000 });
+  assert.equal(limited.kind, 'rate_limited');
+  assert.equal(limited.retryAfterMs, 5000);
   assert.equal(provider.classifyError(new Error('http 400: invalid prompt')).kind, 'invalid_request');
   assert.equal(provider.classifyError(new Error('socket closed after request write')).kind, 'unknown_outcome');
 });
@@ -236,6 +336,22 @@ test('vNext Provider rejects non-HTTP and non-public image URLs before connectin
   await assert.rejects(() => downloadHttpResource('http://[::ffff:127.0.0.1]/provider.png', options), /non-public/);
   await assert.rejects(() => downloadHttpResource('https://private.example/provider.png', options), /non-public/);
   assert.equal(requestCount, 0);
+});
+test('vNext Provider rejects metadata endpoints even in private trust modes', async () => {
+  const signal = new AbortController().signal;
+  await assert.rejects(() => requestPinnedHttpEndpoint('http://169.254.169.254/latest/meta-data', { signal, headers: { accept: 'application/json' }, allowPrivate: true }), /forbidden private|non-public/);
+  await assert.rejects(() => requestPinnedHttpEndpoint('http://[fe80::1]/metadata', { signal, headers: { accept: 'application/json' }, privateAddressPolicy: 'local_proxy' }), /forbidden private|non-public/);
+});
+
+test('Provider endpoint probe marks redirects unreachable', async () => {
+  await withServer((request, response) => {
+    request.resume();
+    response.writeHead(302, { location: '/final' });
+    response.end();
+  }, async (baseUrl) => {
+    const result = await probeHttpEndpoint(baseUrl + '/v1', { accept: 'application/json' }, new AbortController().signal, true, 'local_proxy');
+    assert.deepEqual(result, { reachable: false, status: 302 });
+  });
 });
 
 const nonGlobalResolvedAddresses = [

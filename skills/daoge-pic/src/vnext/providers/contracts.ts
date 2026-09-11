@@ -1,4 +1,5 @@
-import { ProviderId, ResolvedProviderConfig } from '../studio/provider-config';
+import { ProviderId, providerDescriptor, referenceEnabledForProvider } from './descriptors';
+import { ResolvedProviderConfig } from '../studio/provider-config';
 
 export type ImageOperation = 'generate' | 'edit';
 export const MAX_IMAGE_REQUEST_REFERENCE_ASSETS = 8;
@@ -19,6 +20,13 @@ export interface ImageProviderCapabilities {
 export interface ProviderValidationResult {
   valid: boolean;
   missing: string[];
+  errors?: string[];
+}
+
+export interface ProviderModelSummary {
+  id: string;
+  label: string;
+  ownedBy: string | null;
 }
 
 export interface ProviderError {
@@ -57,21 +65,24 @@ export interface ImageProvider {
   capabilities(config: ResolvedProviderConfig): ImageProviderCapabilities;
   generate(request: ImageRequest, context: ImageRequestContext): Promise<ImageResult>;
   edit?(request: ImageRequest, context: ImageRequestContext): Promise<ImageResult>;
+  listModels?(context: ImageRequestContext): Promise<ProviderModelSummary[]>;
   classifyError(error: unknown): ProviderError;
   cancel?(externalRequestId: string, context: ImageRequestContext): Promise<void>;
   reconcile?(externalRequestId: string, context: ImageRequestContext): Promise<ImageResult | null>;
 }
 
-const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
-
 export function staticCapabilitiesForProvider(providerId: ProviderId, referenceEnabled = false): ImageProviderCapabilities {
-  if (providerId === 'openai-images') {
-    return { textToImage: true, referenceEdit: true, maskEdit: true, cancellation: false, reconciliation: false, idempotency: false, acceptedReferenceMediaTypes: IMAGE_MEDIA_TYPES };
-  }
-  if (providerId === 'gemini-image') {
-    return { textToImage: true, referenceEdit: referenceEnabled, maskEdit: false, cancellation: false, reconciliation: false, idempotency: false, acceptedReferenceMediaTypes: IMAGE_MEDIA_TYPES };
-  }
-  return { textToImage: true, referenceEdit: false, maskEdit: false, cancellation: false, reconciliation: false, idempotency: false, acceptedReferenceMediaTypes: IMAGE_MEDIA_TYPES };
+  const descriptor = providerDescriptor(providerId);
+  const enabled = referenceEnabledForProvider(providerId, referenceEnabled);
+  return {
+    textToImage: descriptor.operations.generate,
+    referenceEdit: descriptor.operations.edit && descriptor.reference.supported && enabled,
+    maskEdit: descriptor.operations.edit && descriptor.mask.supported,
+    cancellation: false,
+    reconciliation: false,
+    idempotency: false,
+    acceptedReferenceMediaTypes: [...descriptor.reference.acceptedMediaTypes]
+  };
 }
 
 export function classifyProviderFailure(error: unknown): ProviderError {

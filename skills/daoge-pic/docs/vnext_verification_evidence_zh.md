@@ -4,7 +4,7 @@
 
 验证证据随 npm 包分发供维护者审计，但不是 Studio 运行时依赖；外部不可变资产与摘要由源码仓库和对应 GitHub Release 保存。
 
-当前稳定正式版本为 [`5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0)。下列章节按版本隔离发布事实；5.10.4 及更早章节保持历史证据。
+当前稳定正式版本为 [`5.12.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0)；`5.11.0` 及更早章节保持不可变历史证据。下列章节按版本隔离发布事实。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -93,7 +93,9 @@
 
 本节对应 [`daoge-pic-v5.8.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.8.0) 的发布源码与 GitHub Release `.tgz` 资产。5.8.0 以“会话为入口、Studio 为共享工作台”为稳定协议：同一稳定 workspace 的多个会话共享唯一 daemon 与 Workbench，每个真实 conversation 建立独立 Studio Session，并保持项目、任务、轮次和 Run 归属隔离。
 
-Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Profile、唯一 active、write-only API Key/完整 Base URL 与 Workbench 设置界面。既有 `provider.env` 只作为首次升级的一次迁移或显式 import 输入，成功后不再参与运行时读取；切换 Profile 或其配置版本后必须受控 restart。执行型触发按“稳定 workspace → 普通 open/open-reuse → conversation Session → 项目上下文 → 创作澄清”的顺序执行，咨询/开发型触发不启动 Studio。Workbench 使用 per-tab `sessionStorage` UI Session，与智能体 Sessions 分离。
+Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Profile、唯一 active、write-only API Key/完整 Base URL 与 Workbench 设置界面。既有 `provider.env` 只作为首次升级的一次迁移或显式 import 输入，成功后不再参与运行时读取；活动配置修改或切换后由 daemon 在旧配置任务排空后热加载，已完成预检必须重新预检。执行型触发按“稳定 workspace → 普通 open/open-reuse → conversation Session → 项目上下文 → 创作澄清”的顺序执行，咨询/开发型触发不启动 Studio。Workbench 使用 per-tab `sessionStorage` UI Session，与智能体 Sessions 分离。
+
+Provider 配置的当前运行行为与 5.8.0 旧验证文字不同；本节后续机器数据仍只证明 5.8.0 的历史制品，不作为当前动态热加载实现的验证证据。
 
 并发只属于 Generation Run：系统硬上限 `1000`、默认 `4`、串行 `1`；preflight 冻结 `executionConcurrency`，queue 与 run 阶段都不能改写。旧 workspace worker concurrency 与 `config --worker-concurrency` 已移除。Provider 响应使用精确 secret 净化并约束 request-id；打包清单拒绝敏感数据库、配置、runtime 与日志。binary import、fair scheduler、reference flag 和 repeat import 回归均纳入 5.8.0 验证边界。
 
@@ -118,7 +120,7 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - 先前 SHA-256 为 `a454326e3b5c47ce0f9c54629f245eaf5c6d8f438c524876a52221eddca030fd`、安装于 `daoge-pic-5.8.0-a454326e` 的早期候选制品属于 SQLite process lock 与关闭安全修复前基线，现已被后续修复取代（superseded）。该哈希只保留为过程证据，不得作为最终 5.8.0 Release 资产哈希或安装证据。
 - 最终 `.tgz` 的 SHA-256 不写入包内文档，避免制品对自身哈希形成自引用；重新 pack 后的最终哈希、字节数与资产身份由 `.tgz.sha256` sidecar 和 GitHub Release 在包外记录。
 - 验证没有调用任何真实外部图片 Provider，也没有产生计费生成请求；测试 Provider 与 standalone service 只验证本地边界。opener 行为使用可注入 fake opener 与 API/CLI 契约验证，没有调用真实系统默认浏览器，也没有进行桌面/移动真实浏览器视觉验收。
-- `provider.env` 迁移后不再作为运行时配置源；切换 Profile 必须 restart，queue 中不能修改 Run 并发。安装或升级后还需完整重启 Codex，以重建 process-wide Skill registry 并加载 5.8.0。
+ - Provider 配置修改或切换由 daemon 在旧配置任务排空后热加载；已完成预检必须重新预检，旧运行继续使用其 Provider 快照。安装或升级后还需完整重启 Codex，以重建 process-wide Skill registry。
 - 5.8.0 的发布渠道是 GitHub Release 不可变 `.tgz`；`npm install <GitHub URL>` 只是安装该资产的本地方式，不表示 npm registry 已发布对应包。
 
 ## 6. daoge-pic 5.9.0 发布验证证据
@@ -271,6 +273,25 @@ Provider 配置以 `Provider.db` 为唯一运行时事实源，支持多个 Prof
 - 本地 `npm run bench:perf`：Schema v22 空 Studio control-plane 构造 `41.90 ms`，需求前 media process 为 `0`；100000 pending 队列领取 1000 项为 `132.48 ms`，RSS `107.7 MiB`。
 - [Windows Actions 运行 34082960741](https://github.com/ccnuzw/daoge-skills/actions/runs/34082960741) 在最终 PR commit `b12bbc6ae42338d69a717c838dba6ad45c120119` 上完成 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组矩阵，四组均成功。每组 `npm test` 共 315 项，311 通过、0 失败、0 取消、4 项 Windows symlink 用例按平台条件跳过；每组 `npm run test:package` 均为 122 个文件且 `unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，真实 bin、注册、doctor 与 `sharp` 全部通过。四份脱敏 doctor 报告均为 `ok: true`，原子 rename、SQLite 排他锁、私有 DACL、NTFS/固定磁盘、默认浏览器和 `sharp` 检查全部通过；空 Studio 的 media process 均为 `0`，100000 项队列领取 1000 项耗时范围为 `157.55–231.35 ms`。
 - 所有本地回归和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。
+
+## 14. daoge-pic 5.12.0 发布验证证据
+
+本节对应 [daoge-pic-v5.12.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0) 的稳定发布源码与不可变 GitHub Release 制品。5.11.0 及更早章节保持历史证据，不与本节的运行时、Provider.db schema 或验证计数混用。
+
+### 本轮机器验证
+
+- 验证日期：2026-09-11；本地 macOS、Node.js 22+。
+- `npm test`：358 项测试，356 通过、0 失败、2 项按条件跳过。
+- `npm run build`：vNext TypeScript 与 Vite Workbench 构建通过；主 Workbench chunk 约 594 kB 的大小提示为非阻断 warning。
+- `npm run test:package`：发布清单 130 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；临时 consumer 安装、真实 bin、register-skill、doctor 和 `sharp` 全部通过。
+- P2 专项回归通过：Provider 的错误 HTTP method 不执行副作用；项目、任务、轮次创建后直接进入当前上下文；公开命令与 Workbench 创作手册包含 `provider-models`、Provider 安全和模板化创建说明。
+- 本地验证未调用真实图片 Provider，未产生计费生成请求；制品大小与 SHA-256 记录在包外发布说明和 `daoge-pic-5.12.0.tgz.sha256` sidecar 中。
+
+### 运行边界
+
+- Skill protocol 保持 `2.0.0`；运行时兼容范围为 `>=5.12.0 <6.0.0`。
+- Provider.db schema 为 v3；测试证据绑定 Profile `configVersion`，外部 secret 清理失败进入持久队列。
+- `compatible_public` 不允许凭据请求使用明文 HTTP；本地代理和企业私有端点必须显式选择信任模式。
 
 ## 13. daoge-pic 5.11.0 创作谱系与历史分页验证证据
 

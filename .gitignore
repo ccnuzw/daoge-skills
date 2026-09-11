@@ -12,4 +12,5 @@ skills/daoge-pic/*.tgz
 **/daoge-studio/Provider.db
 **/daoge-studio/Provider.db-*
 **/daoge-studio/provider.env
+**/daoge-studio/provider-secrets/
 **/daoge-studio/runtime/

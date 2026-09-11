@@ -2,7 +2,8 @@ import { createId, nowIso } from '../shared/ids';
 import { assertRunItemTransition, assertRunTransition, RunItemStatus, RunStatus } from '../domain/states';
 import { CommandReceipt, executeIdempotent, InvalidCommandError, StudioNotFoundError, VersionConflictError } from '../domain/studio-commands';
 import { ImageOperation, MAX_IMAGE_REQUEST_MEDIA_BYTES } from '../providers/contracts';
-import { PreflightPlan, PreflightResult, preflightGenerationPlan } from './preflight';
+import { providerDescriptor } from '../providers/descriptors';
+import { ITEM_PROMPT_PREFIX, PreflightPlan, PreflightResult, preflightGenerationPlan } from './preflight';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig, SafeProviderStatus } from '../studio/provider-config';
 import { ConcurrencySource, MAX_GLOBAL_CONCURRENCY, resolveExecutionConcurrency } from '../studio/runtime-settings';
@@ -10,6 +11,7 @@ import { getStudioAsset, isStudioAssetMediaAvailable } from '../domain/assets';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { SafeErrorDetail, safeErrorDetail } from '../shared/safe-error';
 
+const MEDIA_TYPES_BY_ID = (values: readonly string[]): Record<string, true> => Object.fromEntries(values.map((value) => [value, true]));
 export interface GenerationRun {
   id: string;
   roundId: string;
@@ -123,7 +125,7 @@ function promptPayloadForSequence(plan: PreflightPlan, sequence: number): Record
   const scene = itemPrompts?.[sequence - 1];
   return {
     ...sharedPlan,
-    prompt: scene ? sharedPlan.prompt + '\n\nSpecific scene direction for this image: ' + scene : sharedPlan.prompt,
+    prompt: scene ? sharedPlan.prompt + ITEM_PROMPT_PREFIX + scene : sharedPlan.prompt,
     sequence
   };
 }
@@ -191,8 +193,9 @@ function assertRoundHasNoGenerationRun(db: StudioDatabase, roundId: string): voi
   if (existing) throw new VersionConflictError('当前轮次已创建生成运行 ' + existing.id + '（' + existing.status + '）。请在 Generation History 查看；如需再次生成，请创建新的变体、优化或补图轮次。');
 }
 
-function validateManagedAssets(db: StudioDatabase, studioId: string, projectId: string, result: PreflightResult): PreflightResult {
-  const accepted = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+function validateManagedAssets(db: StudioDatabase, studioId: string, projectId: string, result: PreflightResult, providerStatus: SafeProviderStatus): PreflightResult {
+  const descriptor = providerStatus.providerId ? providerDescriptor(providerStatus.providerId) : null;
+  const accepted = MEDIA_TYPES_BY_ID(descriptor?.reference.acceptedMediaTypes || []);
   const referenceAssetIds = result.normalizedPlan.referenceAssetIds || [];
   const maskAssetId = result.normalizedPlan.maskAssetId;
   const access = inspectProjectAssetAccess(db, { studioId, projectId, assetIds: [...referenceAssetIds, ...(maskAssetId ? [maskAssetId] : [])] });
@@ -203,7 +206,7 @@ function validateManagedAssets(db: StudioDatabase, studioId: string, projectId: 
     else {
       if (!projectAssetReferenceAllowed(access.get(assetId))) result.issues.push({ code: 'reference_asset_out_of_scope', message: '参考素材必须属于当前项目或已明确共享到跨项目素材。', field: 'referenceAssetIds' });
       aggregateBytes += asset.byteSize;
-      if (!accepted.includes(asset.mediaType)) result.issues.push({ code: 'reference_media_unsupported', message: '引用素材不是支持的图像格式。', field: 'referenceAssetIds' });
+      if (!accepted[asset.mediaType]) result.issues.push({ code: 'reference_media_unsupported', message: '引用素材不是当前 Provider 支持的图像格式。', field: 'referenceAssetIds' });
     }
   }
   if (maskAssetId) {
@@ -230,9 +233,19 @@ function storeRunStatus(db: StudioDatabase, run: StoredRun, status: RunStatus, w
   return { ...runFromRow(run), status, version: run.version + 1 };
 }
 
+function applyProviderProfileLimits(result: PreflightResult, providerConfig: ResolvedProviderConfig): PreflightResult {
+  const issues = [...result.issues];
+  const normalizedPlan: PreflightPlan = { ...result.normalizedPlan, output: { ...(result.normalizedPlan.output || {}) } };
+  if (providerConfig.limits.maxRunItems && normalizedPlan.itemCount > providerConfig.limits.maxRunItems && !issues.some((issue) => issue.code === 'provider_item_limit_exceeded')) {
+    issues.push({ code: 'provider_item_limit_exceeded', message: '当前 Provider Profile 限制单次最多 ' + providerConfig.limits.maxRunItems + ' 张。', field: 'itemCount' });
+  }
+  if (providerConfig.limits.requestTimeoutMs) normalizedPlan.output = { ...(normalizedPlan.output || {}), timeoutMs: providerConfig.limits.requestTimeoutMs };
+  return { valid: issues.length === 0, issues, normalizedPlan };
+}
+
 export function preflightRound(db: StudioDatabase, input: { studioId: string; roundId: string; providerStatus: SafeProviderStatus }): PreflightResult {
   const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
-  const validated = validateManagedAssets(db, input.studioId, round.project_id, preflightGenerationPlan(parseObject(round.plan_json), input.providerStatus));
+  const validated = validateManagedAssets(db, input.studioId, round.project_id, preflightGenerationPlan(parseObject(round.plan_json), input.providerStatus), input.providerStatus);
   if (round.status !== 'active') {
     return { ...validated, valid: false, issues: [{ code: 'round_not_confirmed', message: '创作计划需要在会话中确认后才能开始生图。', field: 'roundId' }, ...validated.issues] };
   }
@@ -251,12 +264,14 @@ export function createDryRunPreview(db: StudioDatabase, input: { studioId: strin
     if (round.status !== 'active') throw new InvalidCommandError('Only a confirmed creative round can be dry-run.');
     assertRoundHasNoGenerationRun(db, round.id);
     if (input.providerConfig.providerId !== input.providerStatus.providerId) throw new InvalidCommandError('Provider configuration changed during dry-run.');
-    const preflight = validateManagedAssets(db, input.studioId, round.project_id, preflightGenerationPlan(parseObject(round.plan_json), input.providerStatus));
+    let preflight = validateManagedAssets(db, input.studioId, round.project_id, preflightGenerationPlan(parseObject(round.plan_json), input.providerStatus), input.providerStatus);
+    preflight = applyProviderProfileLimits(preflight, input.providerConfig);
     if (!preflight.valid) return { preview: null, preflight };
+    const frozenConcurrency = resolveExecutionConcurrency(input.executionConcurrency, input.concurrencySource);
+    if (input.providerConfig.limits.maxExecutionConcurrency && frozenConcurrency.executionConcurrency > input.providerConfig.limits.maxExecutionConcurrency) throw new InvalidCommandError('当前 Provider Profile 限制运行并发最多 ' + input.providerConfig.limits.maxExecutionConcurrency + '。');
     const timestamp = nowIso();
     const id = createId('dryrun');
     const provider = providerSnapshot(input.providerConfig);
-    const frozenConcurrency = resolveExecutionConcurrency(input.executionConcurrency, input.concurrencySource);
     db.prepare('INSERT INTO dry_run_previews (id, round_id, plan_version, provider_snapshot_json, plan_snapshot_json, item_count, execution_concurrency, concurrency_source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, round.id, round.plan_version, JSON.stringify(provider), JSON.stringify(preflight.normalizedPlan), preflight.normalizedPlan.itemCount, frozenConcurrency.executionConcurrency, frozenConcurrency.concurrencySource, timestamp);
     const insertItem = db.prepare('INSERT INTO dry_run_items (id, preview_id, sequence, prompt_payload_json, created_at) VALUES (?, ?, ?, ?, ?)');
     for (let sequence = 1; sequence <= preflight.normalizedPlan.itemCount; sequence += 1) insertItem.run(createId('dryitem'), id, sequence, JSON.stringify(promptPayloadForSequence(preflight.normalizedPlan, sequence)), timestamp);
@@ -280,7 +295,8 @@ export function queueGenerationRun(db: StudioDatabase, input: { studioId: string
     const round = resolveRoundInStudio(db, requireValue(input.studioId, 'studioId'), requireValue(input.roundId, 'roundId'));
     if (round.status !== 'active') throw new InvalidCommandError('The creative round must be confirmed before a run can be queued.');
     assertRoundHasNoGenerationRun(db, round.id);
-    const preflight = validateManagedAssets(db, round.studio_id, round.project_id, preflightGenerationPlan(parseObject(round.plan_json), input.providerStatus));
+    let preflight = validateManagedAssets(db, round.studio_id, round.project_id, preflightGenerationPlan(parseObject(round.plan_json), input.providerStatus), input.providerStatus);
+    preflight = applyProviderProfileLimits(preflight, input.providerConfig);
     if (!preflight.valid) throw new InvalidCommandError('Generation preflight failed: ' + preflight.issues.map((issue) => issue.code).join(', '));
     const snapshot = providerSnapshot(input.providerConfig);
     if (!input.preflightId) throw new InvalidCommandError('Dry-run evidence is required before queueing.');

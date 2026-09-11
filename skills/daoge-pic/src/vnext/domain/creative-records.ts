@@ -68,7 +68,7 @@ function assetDisplayContexts(db: StudioDatabase, assets: StudioAsset[]): Map<st
       "JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id " +
       "JOIN creative_tasks task ON task.id = round.task_id WHERE relation.asset_id IN (" + placeholders + ") " +
       "AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item') " +
-    "SELECT first.asset_id, first.item_sequence, first.round_purpose, first.task_name, " +
+    "SELECT first.asset_id, first.item_sequence, first.round_id, first.task_id, first.round_purpose, first.task_name, " +
       "1 + (SELECT COUNT(*) FROM creative_rounds prior_round WHERE prior_round.task_id = first.task_id " +
         "AND (prior_round.created_at < first.round_created_at OR " +
           "(prior_round.created_at = first.round_created_at AND prior_round.id < first.round_id))) AS round_sequence, " +
@@ -76,11 +76,11 @@ function assetDisplayContexts(db: StudioDatabase, assets: StudioAsset[]): Map<st
         "AND (prior_run.created_at < first.run_created_at OR " +
           "(prior_run.created_at = first.run_created_at AND prior_run.id < first.run_id))) AS run_sequence " +
     "FROM first_outputs first WHERE first.position = 1 ORDER BY first.asset_id"
-  ).all(...assets.map((asset) => asset.id)) as Array<{ asset_id: string; item_sequence: number; round_purpose: string; task_name: string; round_sequence: number; run_sequence: number }>;
+  ).all(...assets.map((asset) => asset.id)) as Array<{ asset_id: string; item_sequence: number; round_id: string; task_id: string; round_purpose: string; task_name: string; round_sequence: number; run_sequence: number }>;
   for (const row of rows) {
     const roundLabel = purposeLabel(row.round_purpose) + '第 ' + row.round_sequence + ' 轮';
     const label = row.task_name + ' · ' + roundLabel + ' · 运行 ' + row.run_sequence + ' · 第 ' + row.item_sequence + ' 张';
-    displays.set(row.asset_id, { label, selectionText: label, taskName: row.task_name, roundPurpose: row.round_purpose, roundSequence: row.round_sequence, runSequence: row.run_sequence, itemSequence: row.item_sequence });
+    displays.set(row.asset_id, { label, selectionText: label, taskId: row.task_id, roundId: row.round_id, taskName: row.task_name, roundPurpose: row.round_purpose, roundSequence: row.round_sequence, runSequence: row.run_sequence, itemSequence: row.item_sequence });
   }
   for (const asset of assets) if (!displays.has(asset.id)) displays.set(asset.id, { label: asset.kind === 'import' ? '导入素材' : asset.kind === 'export' ? '导出素材' : '生成结果', selectionText: asset.kind === 'import' ? '导入素材' : asset.kind === 'export' ? '导出素材' : '生成结果' });
   return displays;

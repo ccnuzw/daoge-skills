@@ -11,8 +11,10 @@ const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/st
 const { configureProvider } = require('./provider-test-helper');
 const { createProject, createTaskDraft, createRoundDraft, openOrAttachStudioSession, updateStudioSessionContext, prepareRoundForConfirmation, confirmRoundPlan, InvalidCommandError } = require('../../dist/vnext/domain/studio-commands');
 const { createDryRunPreview, queueGenerationRun, claimRunItems, getGenerationRun, listGenerationRunItems, resolveUnknownRunItems, transitionRunItem, resumeGenerationRun } = require('../../dist/vnext/runner/run-commands');
+const { openProviderDatabase, closeProviderDatabase, createProviderProfile } = require('../../dist/vnext/studio/provider-store');
 const { GenerationWorker } = require('../../dist/vnext/runner/worker');
 const { LocalStudioService, startLocalStudioService } = require('../../dist/vnext/api/server');
+const { requestJson, requestJsonAsWorkbench, workbenchCookie } = require('./local-studio-test-helper');
 
 const skillRoot = path.resolve(__dirname, '../..');
 
@@ -117,6 +119,75 @@ test('generation Worker pool can exceed four active Provider requests under a he
   }
 });
 
+test('daemon hot-loads active Provider changes without a controlled restart', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const providerRequests = [];
+  const providerServer = http.createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      providerRequests.push({ url: request.url, authorization: request.headers.authorization || null, body: Buffer.concat(chunks).toString('utf8') });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ data: [{ b64_json: png.toString('base64') }] }));
+    });
+  });
+  let daemon;
+  let providerDb;
+  let daemonStderr = '';
+  try {
+    await new Promise((resolve, reject) => providerServer.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve()));
+    const address = providerServer.address();
+    assert.ok(address && typeof address !== 'string');
+    const providerBase = 'http://127.0.0.1:' + address.port;
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Initial Provider', baseUrl: providerBase + '/initial/v1', apiKey: 'initial-provider-key', model: 'initial-model', endpointTrustMode: 'local_proxy' });
+    providerDb = openProviderDatabase(initialized.paths);
+    const alternate = createProviderProfile(providerDb, { name: 'Alternate Provider', providerId: 'openai-images', model: 'alternate-model', baseUrl: providerBase + '/alternate/v1', apiKey: 'alternate-provider-key', endpointTrustMode: 'local_proxy', options: {}, active: false, idempotencyKey: 'alternate-provider-create' });
+    closeProviderDatabase(providerDb);
+    providerDb = null;
+
+    assert.ok(fs.existsSync(daemonEntry), 'vNext daemon must be compiled before resilience tests run');
+    daemon = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot, '--port', '0'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    daemon.stderr.on('data', (chunk) => { daemonStderr += String(chunk); });
+    const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
+    await waitFor(() => fs.existsSync(runtimePath), 'daemon runtime record');
+    const initialRuntime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    const started = { url: initialRuntime.url, access: { bearerToken: initialRuntime.capability } };
+    const activated = await requestJson(started, '/api/providers/' + encodeURIComponent(alternate.id) + '/activate', { method: 'POST', idempotencyKey: 'activate-alternate-provider', body: {} });
+    assert.equal(activated.status, 200, JSON.stringify(activated.body));
+    assert.equal(activated.body.data.impact.restartRequired, false);
+    await waitFor(() => {
+      const current = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+      return current.pid === initialRuntime.pid && current.provider?.profileId === alternate.id;
+    }, 'daemon hot-loaded Provider identity');
+    assert.equal(livePid(initialRuntime.pid), true);
+
+    const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'hot-provider-session', body: { conversationId: 'hot-provider-conversation' } });
+    const sessionId = session.body.data.id;
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'hot-provider-project', body: { name: 'Provider hot reload', sessionId } });
+    const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'hot-provider-task', body: { projectId: project.body.data.value.id, name: 'Hot reload image', sessionId } });
+    const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: 'hot-provider-round', body: { taskId: task.body.data.value.id, purpose: 'exploration', sessionId } });
+    const prepared = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/prepare', { method: 'POST', idempotencyKey: 'hot-provider-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'hot loaded provider image' } } });
+    const challenge = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/confirmation-challenge', { method: 'POST', idempotencyKey: 'hot-provider-challenge', body: { sessionId } });
+    const cookie = await workbenchCookie(started);
+    const confirmed = await requestJsonAsWorkbench(started, '/api/rounds/' + round.body.data.value.id + '/confirm', { cookie, idempotencyKey: 'hot-provider-confirm', body: { expectedVersion: prepared.body.data.value.version, sessionId, challenge: challenge.body.data.challenge } });
+    assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
+    const preflight = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/preflight', { method: 'POST', idempotencyKey: 'hot-provider-preflight', body: { sessionId } });
+    assert.equal(preflight.status, 200, JSON.stringify(preflight.body));
+    const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'hot-provider-run', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, confirmToken: preflight.body.data.value.confirmToken } });
+    assert.equal(queued.status, 200, JSON.stringify(queued.body));
+    await waitFor(() => providerRequests.some((entry) => entry.authorization === 'Bearer alternate-provider-key'), 'hot-loaded Provider request', 10000);
+    assert.equal(providerRequests.some((entry) => entry.authorization === 'Bearer initial-provider-key'), false);
+    assert.equal(providerRequests.some((entry) => entry.url === '/alternate/v1/images/generations'), true);
+  } finally {
+    if (providerDb) closeProviderDatabase(providerDb);
+    await stopDaemon(daemon, workspaceRoot);
+    if (providerServer.listening) await new Promise((resolve, reject) => providerServer.close((error) => error ? reject(error) : resolve()));
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    if (daemonStderr) assert.equal(daemonStderr.includes('Studio daemon failed.'), false, daemonStderr);
+  }
+});
+
 function temporaryWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-daemon-resilience-'));
 }
@@ -216,7 +287,7 @@ function runChild(entry, args) {
 
 function createQueuedHundredItemRun(workspaceRoot, providerBaseUrl) {
   const initialized = initializeStudio({ workspaceRoot });
-  const { config, status } = configureProvider(initialized, { baseUrl: providerBaseUrl, model: 'gpt-image-2', apiKey: 'daemon-recovery-test-key' });
+  const { config, status } = configureProvider(initialized, { baseUrl: providerBaseUrl, model: 'gpt-image-2', apiKey: 'daemon-recovery-test-key', endpointTrustMode: 'local_proxy' });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: '100-item restart recovery', idempotencyKey: 'project' });
   const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.value.id, name: 'catalog images', idempotencyKey: 'task' });

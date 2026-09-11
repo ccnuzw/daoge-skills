@@ -6,16 +6,19 @@ import { URL } from 'node:url';
 import { Readable } from 'node:stream';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase, subscribeStudioEvents, withTransaction } from '../studio/database';
 import { hardenStudioAccess, ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
-import { ProviderCapabilities, ProviderId, providerSnapshot } from '../studio/provider-config';
-import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerStatus, resolveActiveProviderConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
-import { createImageProvider } from '../providers/http-adapters';
+import { isProviderId, ProviderCapabilities, ProviderId, providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
+import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
+import { isProviderEndpointTrustMode, providerDescriptor, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, referenceEnabledForProvider } from '../providers/descriptors';
+import { createImageProvider, requestEndpointFor } from '../providers/http-adapters';
 import { probeHttpEndpoint } from '../providers/http-safety';
-import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getRound, getStudioSession, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
+import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getRound, getStudioSession, getTask, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateRoundDraftContext, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, getDryRunPreview, getGenerationRun, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { StateTransitionError } from '../domain/states';
 import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listScopedStudioAssetsByIds, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
+import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { getLatestRun, listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
+import { listProjectTemplates } from '../domain/project-templates';
 import { completeDeliveryStepAsync, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDeliveryAsync, getDelivery, listDeliveries, openDeliveryExportFileAsync, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
 import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
 import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
@@ -117,6 +120,20 @@ function headerValue(request: IncomingMessage, name: string): string {
   return String(Array.isArray(value) ? value[0] : value || '').trim();
 }
 
+function decodedHeaderText(request: IncomingMessage, name: string, label: string): string {
+  const value = headerValue(request, name);
+  if (!value) return '';
+  try { return decodeURIComponent(value).trim(); }
+  catch { throw new InvalidCommandError(label + ' 不是合法的 URI 编码文本。'); }
+}
+
+function importMaterialUsage(value: unknown): string | undefined {
+  const usage = text(value);
+  if (!usage) return undefined;
+  if (!DERIVED_REFERENCE_USAGES.has(usage)) throw new InvalidCommandError('不支持该素材用途。');
+  return usage;
+}
+
 function text(value: unknown): string {
   return String(value || '').trim();
 }
@@ -160,6 +177,207 @@ function assetScope(value: string | null): AssetScope | null {
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function draftProviderConfig(input: Record<string, unknown>): ResolvedProviderConfig {
+  const providerId = text(input.providerId);
+  if (!isProviderId(providerId)) throw new InvalidCommandError('Provider 类型无效。');
+  const descriptor = providerDescriptor(providerId);
+  const endpointTrustMode = text(input.endpointTrustMode) || descriptor.endpoint.defaultTrustMode;
+  if (!isProviderEndpointTrustMode(endpointTrustMode)) throw new InvalidCommandError('Provider 端点信任模式无效。');
+  const options = record(input.options);
+  return {
+    profileId: 'draft-profile',
+    profileName: 'Draft Provider Profile',
+    configVersion: 0,
+    providerId,
+    model: text(input.model) || descriptor.modelExamples[0] || 'model-list-probe',
+    baseUrl: text(input.baseUrl),
+    apiKey: text(input.apiKey),
+    options,
+    referenceEnabled: referenceEnabledForProvider(providerId, options.referenceEnabled === true),
+    endpointTrustMode,
+    limits: {},
+    descriptorVersion: PROVIDER_DESCRIPTOR_VERSION,
+    adapterVersion: PROVIDER_ADAPTER_VERSION
+  };
+}
+
+function providerModelConfigFromProfile(current: ResolvedProviderConfig, input: Record<string, unknown>): ResolvedProviderConfig {
+  const providerIdInput = text(input.providerId);
+  const providerId = providerIdInput ? providerIdInput : current.providerId;
+  if (!isProviderId(providerId)) throw new InvalidCommandError('Provider 类型无效。');
+  const descriptor = providerDescriptor(providerId);
+  const endpointTrustModeInput = text(input.endpointTrustMode);
+  const endpointTrustMode = endpointTrustModeInput || (providerId === current.providerId ? current.endpointTrustMode : descriptor.endpoint.defaultTrustMode);
+  if (!isProviderEndpointTrustMode(endpointTrustMode)) throw new InvalidCommandError('Provider 端点信任模式无效。');
+  const options = input.options === undefined ? current.options : record(input.options);
+  return {
+    ...current,
+    providerId,
+    model: text(input.model) || (providerId === current.providerId ? current.model : descriptor.modelExamples[0]) || descriptor.modelExamples[0] || 'model-list-probe',
+    baseUrl: input.baseUrl === undefined ? current.baseUrl : text(input.baseUrl),
+    apiKey: input.apiKey === undefined ? current.apiKey : text(input.apiKey),
+    options,
+    referenceEnabled: referenceEnabledForProvider(providerId, options.referenceEnabled === true),
+    endpointTrustMode,
+    descriptorVersion: PROVIDER_DESCRIPTOR_VERSION,
+    adapterVersion: PROVIDER_ADAPTER_VERSION
+  };
+}
+
+async function listProviderModelsForConfig(config: ResolvedProviderConfig): Promise<{ models: unknown[] }> {
+  const provider = createImageProvider(config);
+  if (!provider.listModels) throw new InvalidCommandError('该 Provider adapter 不支持模型列表。');
+  const validation = provider.validateConfig(config);
+  if (!validation.valid) throw new InvalidCommandError('Provider 配置无效：' + [...validation.missing, ...(validation.errors || [])].join(', '));
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 30000);
+  try {
+    return { models: await provider.listModels({ abortSignal: controller.signal }) };
+  } catch (error) {
+    const classified = provider.classifyError(error);
+    if (timedOut || classified.kind === 'transient' || classified.kind === 'rate_limited') throw new InvalidCommandError('暂时无法读取 Provider 模型列表。请检查网络、限流状态后重试。');
+    if (classified.kind === 'permission') throw new InvalidCommandError('读取 Provider 模型列表未通过鉴权。请检查 API Key 权限。');
+    throw new InvalidCommandError('无法读取 Provider 模型列表。请检查 Base URL 与 Provider 类型。');
+  } finally { clearTimeout(timeout); }
+}
+
+const DERIVED_REFERENCE_USAGES = new Set(['subject', 'style', 'composition', 'color', 'brand', 'mask', 'negative']);
+const DERIVED_PURPOSES = new Set(['variation', 'refinement', 'edit', 'fill']);
+
+function boundedTextList(value: unknown, label: string, max = 16): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new InvalidCommandError(label + ' 必须是字符串数组。');
+  if (value.length > max) throw new InvalidCommandError(label + ' 不能超过 ' + max + ' 项。');
+  const values = value.map((item) => text(item)).filter(Boolean);
+  return [...new Set(values)];
+}
+
+function derivedReferenceUsage(value: unknown, fallback: string): string {
+  const usage = text(value);
+  if (DERIVED_REFERENCE_USAGES.has(usage)) return usage;
+  return DERIVED_REFERENCE_USAGES.has(fallback) ? fallback : 'subject';
+}
+
+function derivedDefaultReferenceUsage(purpose: string): string {
+  if (purpose === 'fill') return 'composition';
+  return 'subject';
+}
+
+function compactJsonRecord(value: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined || item === null || item === '') continue;
+    if (Array.isArray(item) && item.length === 0) continue;
+    if (typeof item === 'object' && !Array.isArray(item) && Object.keys(item as Record<string, unknown>).length === 0) continue;
+    result[key] = item;
+  }
+  return result;
+}
+
+function derivedReferenceMaterials(body: JsonBody, sourceAssetIds: string[], defaultUsage: string): Array<Record<string, unknown>> {
+  const materials = new Map<string, Record<string, unknown>>();
+  const explicit = Array.isArray(body.referenceMaterials) ? body.referenceMaterials : [];
+  if (explicit.length > MAX_BATCH_IDS) throw new InvalidCommandError('referenceMaterials 不能超过 ' + MAX_BATCH_IDS + ' 项。');
+  for (const item of explicit) {
+    const material = record(item);
+    const assetId = text(material.assetId);
+    if (!assetId) throw new InvalidCommandError('referenceMaterials 只能包含带 assetId 的对象。');
+    materials.set(assetId, compactJsonRecord({ assetId, usage: derivedReferenceUsage(material.usage, defaultUsage), note: text(material.note) }));
+  }
+  for (const assetId of sourceAssetIds) if (!materials.has(assetId)) materials.set(assetId, { assetId, usage: defaultUsage });
+  return [...materials.values()];
+}
+
+function derivedPrimaryAssetId(body: JsonBody, sourceAssetIds: string[]): string {
+  const primaryAssetId = text(body.primaryAssetId);
+  if (!primaryAssetId) return sourceAssetIds[0] || '';
+  if (!sourceAssetIds.includes(primaryAssetId)) throw new InvalidCommandError('primaryAssetId 必须来自 sourceAssetIds。');
+  return primaryAssetId;
+}
+
+function derivedParentAssetIds(body: JsonBody, sourceAssetIds: string[]): string[] {
+  if (body.parentAssetIds === undefined) return sourceAssetIds;
+  if (!Array.isArray(body.parentAssetIds)) throw new InvalidCommandError('parentAssetIds 必须是字符串数组。');
+  if (body.parentAssetIds.length > MAX_BATCH_IDS) throw new InvalidCommandError('parentAssetIds 不能超过 ' + MAX_BATCH_IDS + ' 项。');
+  const parentAssetIds = [...new Set(body.parentAssetIds.map((item) => text(item)).filter(Boolean))];
+  for (const assetId of parentAssetIds) if (!sourceAssetIds.includes(assetId)) throw new InvalidCommandError('parentAssetIds 必须来自 sourceAssetIds。');
+  return parentAssetIds.length ? parentAssetIds : sourceAssetIds;
+}
+
+function derivedReferenceUsageCounts(materials: Array<Record<string, unknown>>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const material of materials) {
+    const usage = text(material.usage) || 'subject';
+    counts[usage] = (counts[usage] || 0) + 1;
+  }
+  return counts;
+}
+
+function derivedReferenceArrangement(body: JsonBody, materials: Array<Record<string, unknown>>, sourceAssetIds: string[]): Record<string, unknown> {
+  const nested = record(body.referenceArrangement);
+  const primaryAssetId = derivedPrimaryAssetId(body, sourceAssetIds);
+  return compactJsonRecord({
+    mode: text(body.referenceArrangementMode || nested.mode),
+    label: text(body.referenceArrangementLabel || nested.label),
+    primaryAssetId,
+    usageCounts: derivedReferenceUsageCounts(materials),
+    total: materials.length
+  });
+}
+
+function derivedFeedbackToNextRound(body: JsonBody, sourceAssetIds: string[]): Record<string, unknown> | undefined {
+  const feedback = record(body.feedbackToNextRound);
+  if (!Object.keys(feedback).length) return undefined;
+  const assetIds = boundedTextList(feedback.assetIds, 'feedbackToNextRound.assetIds', MAX_BATCH_IDS);
+  for (const assetId of assetIds) if (!sourceAssetIds.includes(assetId)) throw new InvalidCommandError('feedbackToNextRound.assetIds 必须来自 sourceAssetIds。');
+  return compactJsonRecord({
+    source: text(feedback.source),
+    assetIds,
+    reasonIds: boundedTextList(feedback.reasonIds, 'feedbackToNextRound.reasonIds'),
+    reasons: boundedTextList(feedback.reasons, 'feedbackToNextRound.reasons'),
+    note: text(feedback.note)
+  });
+}
+
+function derivedRoundPlan(body: JsonBody, purpose: string, sourceAssetIds: string[]): Record<string, unknown> {
+  const defaultUsage = derivedDefaultReferenceUsage(purpose);
+  const materials = derivedReferenceMaterials(body, sourceAssetIds, defaultUsage);
+  const parentAssetIds = derivedParentAssetIds(body, sourceAssetIds);
+  const itemCount = Number(body.targetCount ?? body.itemCount);
+  const aspectRatio = text(body.aspectRatio || record(body.output).aspectRatio);
+  const referenceArrangement = derivedReferenceArrangement(body, materials, sourceAssetIds);
+  const derivation = compactJsonRecord({
+    action: text(body.action) || purpose,
+    actionLabel: text(body.actionLabel),
+    sourceAssetIds,
+    primaryAssetId: referenceArrangement.primaryAssetId,
+    referenceArrangement,
+    parentAssetIds,
+    variationAxes: boundedTextList(body.variationAxes, 'variationAxes'),
+    keepConstraints: boundedTextList(body.keepConstraints, 'keepConstraints'),
+    refinementGoals: boundedTextList(body.refinementGoals, 'refinementGoals'),
+    feedbackToNextRound: derivedFeedbackToNextRound(body, sourceAssetIds),
+    editIntent: text(body.editIntent || body.instruction),
+    fillDirection: text(body.fillDirection),
+    note: text(body.note)
+  });
+  const referenceAssetIds = materials.filter((item) => item.usage !== 'mask').map((item) => text(item.assetId)).filter(Boolean);
+  const maskAssetId = materials.find((item) => item.usage === 'mask')?.assetId;
+  return compactJsonRecord({
+    createdFrom: 'workbench',
+    draftKind: 'studio-derived-round-context',
+    parentAssetIds,
+    derivation,
+    referenceMaterials: materials,
+    referenceAssetIds,
+    maskAssetId: text(maskAssetId),
+    itemCount: Number.isInteger(itemCount) && itemCount > 0 ? itemCount : undefined,
+    output: aspectRatio ? { aspectRatio } : undefined,
+    note: 'Studio 基于图片创建的下一轮上下文草稿；生成前仍需 Agent 形成可确认计划。'
+  });
 }
 
 function publicValue(value: unknown): unknown {
@@ -407,6 +625,11 @@ export class LocalStudioService {
     };
   }
 
+  private assertProviderProfileHasNoUnfinishedRuns(profileId: string, action: string): void {
+    const run = this.db.prepare("SELECT id FROM generation_runs WHERE provider_profile_id = ? AND status NOT IN ('completed', 'failed', 'cancelled') LIMIT 1").get(profileId) as { id: string } | undefined;
+    if (run) throw new InvalidCommandError('该 Provider Profile 仍有未完成运行；请先完成、取消或恢复运行后再' + action + '。');
+  }
+
   private runtimeStatus() {
     const record = readActiveDaemonRuntime(this.initialized.paths.runtimeDir);
     const active = record?.provider && typeof record.provider.profileId === 'string' && Number.isInteger(record.provider.configVersion) && typeof record.provider.providerId === 'string' && typeof record.provider.model === 'string' ? {
@@ -416,20 +639,25 @@ export class LocalStudioService {
       model: record.provider.model,
       endpoint: typeof record.provider.endpoint === 'string' ? record.provider.endpoint : null
     } : null;
-    const config = resolveActiveProviderConfig(this.providerDb);
+    const config = resolveActiveProviderConfig(this.providerDb, this.initialized.paths);
     const desired = config ? providerSnapshot(config) : null;
     const desiredIdentity = desired ? { profileId: desired.profileId, configVersion: desired.configVersion, providerId: desired.providerId, model: desired.model, endpoint: desired.endpoint } : null;
+    const reconfigurationPending = Boolean(record && JSON.stringify(active) !== JSON.stringify(desiredIdentity));
+    const daemon = {
+      mode: record ? 'daemon' : 'standalone',
+      startedAt: typeof record?.startedAt === 'string' ? record.startedAt : null,
+      workerPool: record?.workerPool?.health || null,
+      mediaWorkerPool: record?.mediaWorkerPool?.health || this.mediaWorkerPool.healthSnapshot()
+    };
     return {
       desired,
       active,
-      restartRequired: Boolean(record && JSON.stringify(active) !== JSON.stringify(desiredIdentity)),
+      restartRequired: false,
+      reconfigurationPending,
       providerConcurrency: record?.providerConcurrency || null,
-      daemon: {
-        mode: record ? 'daemon' : 'standalone',
-        startedAt: typeof record?.startedAt === 'string' ? record.startedAt : null,
-        workerPool: record?.workerPool?.health || null,
-        mediaWorkerPool: record?.mediaWorkerPool?.health || this.mediaWorkerPool.healthSnapshot()
-      }
+      workerPool: daemon.workerPool,
+      mediaWorkerPool: daemon.mediaWorkerPool,
+      daemon
     };
   }
 
@@ -489,8 +717,9 @@ export class LocalStudioService {
         const runtime = this.runtimeStatus().daemon;
         return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion, protocol: protocolStatus(), runtime });
       }
-      if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { profiles: listProviderProfiles(this.providerDb), status: providerStatus(this.providerDb), runtime: this.runtimeStatus() });
+      if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { descriptors: providerDescriptorSummaries(), profiles: listProviderProfiles(this.providerDb, this.initialized.paths), status: providerStatus(this.providerDb, this.initialized.paths), runtime: this.runtimeStatus() });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
+      if (request.method === 'GET' && parsed.pathname === '/api/project-templates') return success(response, { templates: listProjectTemplates() });
       if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
       if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db, this.initialized.manifest.studioId).map(publicValue) });
       if (request.method === 'GET' && parsed.pathname === '/api/style-kits') return success(response, { styleKits: listStyleKits(this.db, this.initialized.manifest.studioId).map(publicValue) });
@@ -506,6 +735,16 @@ export class LocalStudioService {
         const consent = round ? this.confirmationGate.consentFor(round.id) : null;
         const pendingConfirmation = round ? this.confirmationGate.getChallenge(round.id) : null;
         return success(response, { session: { id: session.id, conversationId: session.conversationId }, context: round ? { project: { id: round.project_id, name: round.project_name }, task: { id: round.task_id, name: round.task_name }, round: { id: round.id, purpose: round.purpose, planVersion: round.plan_version, status: round.status, plan: publicValue(JSON.parse(round.plan_json)) } } : null, confirmation: consent ? { confirmed: true, confirmedAt: consent.confirmedAt, expiresAt: consent.expiresAt } : { confirmed: false }, pendingConfirmation: pendingConfirmation ? { challenge: pendingConfirmation.challenge, sessionId: pendingConfirmation.sessionId, expectedVersion: pendingConfirmation.expectedVersion, expiresAt: pendingConfirmation.expiresAt } : null, latestRun });
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/assets/by-id') {
+        const assetIds = [...new Set(parsed.searchParams.getAll('assetId').map((value) => value.trim()).filter(Boolean))];
+        if (assetIds.length > MAX_BATCH_IDS) throw new InvalidCommandError('assetId 不能超过 ' + MAX_BATCH_IDS + ' 项。');
+        const projectId = parsed.searchParams.get('projectId') || '';
+        if (!projectId) throw new InvalidCommandError('Asset lookup requires projectId.');
+        this.assertProjectInStudio(projectId);
+        const access = inspectProjectAssetAccess(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetIds });
+        const ordered = assetIds.map((assetId) => projectAssetReferenceAllowed(access.get(assetId)) ? getStudioAsset(this.db, this.initialized.manifest.studioId, assetId) : null).filter((asset): asset is StudioAsset => Boolean(asset));
+        return success(response, { assets: listAssetsWithReviewSummaries(this.db, ordered, projectId).map(publicAsset) });
       }
       if (request.method === 'GET' && parsed.pathname === '/api/assets') {
         const scope = assetScope(parsed.searchParams.get('scope'));
@@ -608,41 +847,61 @@ export class LocalStudioService {
       setImmediate(() => requestDaemonShutdown());
       return;
     }
-    if (pathname === '/api/providers/import-env' && request.method === 'POST') return success(response, importProviderEnvProfile(this.providerDb, this.initialized.paths, key));
     if (pathname === '/api/providers' && request.method === 'POST') {
-      return success(response, createProviderProfile(this.providerDb, { name: body.name, providerId: body.providerId, model: body.model, baseUrl: body.baseUrl, apiKey: body.apiKey, options: body.options, active: body.active === true, idempotencyKey: key }));
+      return success(response, createProviderProfile(this.providerDb, { name: body.name, providerId: body.providerId, model: body.model, baseUrl: body.baseUrl, apiKey: body.apiKey, options: body.options, active: body.active === true, endpointTrustMode: body.endpointTrustMode, limits: body.limits, paths: this.initialized.paths, idempotencyKey: key }));
+    }
+    if (pathname === '/api/provider-models' && request.method === 'POST') {
+      const profileId = text(body.profileId);
+      const config = profileId ? providerModelConfigFromProfile(resolveProviderProfileForTest(this.providerDb, profileId, { paths: this.initialized.paths }), body) : draftProviderConfig(body);
+      return success(response, await listProviderModelsForConfig(config));
     }
     const providerUpdateMatch = /^\/api\/providers\/([^/]+)$/.exec(pathname);
-    if (providerUpdateMatch && request.method === 'PUT') return success(response, updateProviderProfile(this.providerDb, providerUpdateMatch[1], { name: body.name, providerId: body.providerId, model: body.model, baseUrl: body.baseUrl, apiKey: body.apiKey, options: body.options, expectedConfigVersion: body.expectedConfigVersion, idempotencyKey: key }));
+    if (providerUpdateMatch && request.method === 'PUT') {
+      this.assertProviderProfileHasNoUnfinishedRuns(providerUpdateMatch[1], '修改');
+      return success(response, updateProviderProfile(this.providerDb, providerUpdateMatch[1], { name: body.name, providerId: body.providerId, model: body.model, baseUrl: body.baseUrl, apiKey: body.apiKey, options: body.options, expectedConfigVersion: body.expectedConfigVersion, endpointTrustMode: body.endpointTrustMode, limits: body.limits, paths: this.initialized.paths, idempotencyKey: key }));
+    }
     const providerCopyMatch = /^\/api\/providers\/([^/]+)\/copy$/.exec(pathname);
-    if (providerCopyMatch) return success(response, copyProviderProfile(this.providerDb, providerCopyMatch[1], { name: body.name, idempotencyKey: key }));
+    if (providerCopyMatch && request.method === 'POST') return success(response, copyProviderProfile(this.providerDb, providerCopyMatch[1], { name: body.name, paths: this.initialized.paths, idempotencyKey: key }));
     const providerActivateMatch = /^\/api\/providers\/([^/]+)\/activate$/.exec(pathname);
-    if (providerActivateMatch) return success(response, activateProviderProfile(this.providerDb, providerActivateMatch[1], key));
+    if (providerActivateMatch && request.method === 'POST') return success(response, activateProviderProfile(this.providerDb, providerActivateMatch[1], key, { paths: this.initialized.paths }));
     const providerDeleteMatch = /^\/api\/providers\/([^/]+)\/delete$/.exec(pathname);
-    if (providerDeleteMatch) return success(response, deleteProviderProfile(this.providerDb, providerDeleteMatch[1], key));
+    if (providerDeleteMatch && request.method === 'POST') {
+      this.assertProviderProfileHasNoUnfinishedRuns(providerDeleteMatch[1], '删除');
+      return success(response, deleteProviderProfile(this.providerDb, providerDeleteMatch[1], key, { force: body.force === true, paths: this.initialized.paths }));
+    }
     const providerValidateMatch = /^\/api\/providers\/([^/]+)\/validate$/.exec(pathname);
-    if (providerValidateMatch) {
-      const config = resolveProviderProfileForTest(this.providerDb, providerValidateMatch[1], { baseUrl: body.baseUrl, apiKey: body.apiKey });
+    if (providerValidateMatch && request.method === 'POST') {
+      const config = resolveProviderProfileForTest(this.providerDb, providerValidateMatch[1], { baseUrl: body.baseUrl, apiKey: body.apiKey, paths: this.initialized.paths });
       const validation = createImageProvider(config).validateConfig(config);
-      return success(response, { valid: validation.valid, missing: validation.missing });
+      return success(response, { valid: validation.valid, missing: validation.missing, descriptorVersion: config.descriptorVersion, adapterVersion: config.adapterVersion, warnings: config.baseUrl ? config.baseUrl.startsWith('http://') ? ['该 Provider endpoint 使用 HTTP；请确认这是受控测试或代理。'] : [] : [] });
     }
     const providerTestMatch = /^\/api\/providers\/([^/]+)\/test$/.exec(pathname);
-    if (providerTestMatch) {
-      const config = resolveProviderProfileForTest(this.providerDb, providerTestMatch[1], { baseUrl: body.baseUrl, apiKey: body.apiKey });
+    if (providerTestMatch && request.method === 'POST') {
+      const config = resolveProviderProfileForTest(this.providerDb, providerTestMatch[1], { baseUrl: body.baseUrl, apiKey: body.apiKey, paths: this.initialized.paths });
       const validation = createImageProvider(config).validateConfig(config);
-      if (!validation.valid) throw new InvalidCommandError('Provider 配置不完整：' + validation.missing.join(', '));
+      if (!validation.valid) throw new InvalidCommandError('Provider 配置无效：' + [...validation.missing, ...(validation.errors || [])].join(', '));
       const controller = new AbortController();
       let timedOut = false;
       const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
+      let probeResult: { reachable: boolean; status: number };
       try {
         const headers: Record<string, string> = { accept: 'application/json' };
         if (config.providerId === 'gemini-image') headers['x-goog-api-key'] = config.apiKey;
         else headers.authorization = 'Bearer ' + config.apiKey;
-        const result = await this.providerProbe(config.baseUrl, headers, controller.signal);
-        return success(response, { connected: result.reachable, status: result.status });
+        const probeTarget = requestEndpointFor(config);
+        if (!probeTarget) throw new InvalidCommandError('无法构造 Provider 生成端点，请检查 Base URL、Provider 类型和模型。');
+        const privateAddressPolicy = config.endpointTrustMode === 'local_proxy' || config.endpointTrustMode === 'enterprise_private' ? config.endpointTrustMode : undefined;
+        probeResult = await this.providerProbe(probeTarget, headers, controller.signal, privateAddressPolicy !== undefined, privateAddressPolicy);
       } catch {
         throw new InvalidCommandError(timedOut ? 'Provider 连接测试超时。请检查 Base URL 与网络后重试。' : '无法连接 Provider 端点。请检查 Base URL、网络和访问权限后重试。');
       } finally { clearTimeout(timeout); }
+      const evidence = recordProviderTestEvidence(this.providerDb, providerTestMatch[1], { configVersion: config.configVersion, reachable: probeResult.reachable, status: probeResult.status, warnings: config.baseUrl.startsWith('http://') ? ['该 Provider endpoint 使用 HTTP；请确认这是受控测试或代理。'] : [] });
+      return success(response, { connected: probeResult.reachable, status: probeResult.status, evidence });
+    }
+    const providerModelsMatch = /^\/api\/providers\/([^/]+)\/models$/.exec(pathname);
+    if (providerModelsMatch && request.method === 'POST') {
+      const current = resolveProviderProfileForTest(this.providerDb, providerModelsMatch[1], { paths: this.initialized.paths });
+      return success(response, await listProviderModelsForConfig(providerModelConfigFromProfile(current, body)));
     }
     if (pathname === '/api/sessions/open') {
       const conversationId = text(body.conversationId);
@@ -693,7 +952,7 @@ export class LocalStudioService {
       return success(response, { layout: saved.value });
     }
     if (pathname === '/api/projects') {
-      const created = createProject(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), description: text(body.description) || undefined, sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
+      const created = createProject(this.db, { studioId: this.initialized.manifest.studioId, name: text(body.name), description: text(body.description) || undefined, templateId: text(body.templateId) || undefined, templateVersion: body.templateVersion === undefined ? undefined : numberValue(body.templateVersion), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
     }
     if (pathname === '/api/delivery-batches' && request.method === 'POST') {
@@ -734,7 +993,24 @@ export class LocalStudioService {
     if (pathname === '/api/tasks') {
       this.assertProjectInStudio(text(body.projectId));
       if (text(body.sessionId)) this.assertSessionInStudio(text(body.sessionId));
-      const created = createTaskDraft(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), taskTypeId: text(body.taskTypeId) || undefined, intent: record(body.intent), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
+      const created = createTaskDraft(this.db, { studioId: this.initialized.manifest.studioId, projectId: text(body.projectId), name: text(body.name), taskTypeId: text(body.taskTypeId) || undefined, styleKitId: text(body.styleKitId) || undefined, brandKitId: text(body.brandKitId) || undefined, intent: record(body.intent), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
+      return success(response, created);
+    }
+    if (pathname === '/api/rounds/derived' && request.method === 'POST') {
+      const taskId = text(body.taskId);
+      const purpose = text(body.purpose);
+      if (!DERIVED_PURPOSES.has(purpose)) throw new InvalidCommandError('图片驱动轮次只支持变体、精修、局部编辑或补图。');
+      this.assertTaskInStudio(taskId);
+      const task = getTask(this.db, this.initialized.manifest.studioId, taskId);
+      if (!task) throw new InvalidCommandError('任务不存在或不属于当前 Studio。');
+      if (text(body.parentRoundId)) this.assertRoundInStudio(text(body.parentRoundId));
+      if (text(body.sessionId)) this.assertSessionInStudio(text(body.sessionId));
+      const sourceAssetIds = boundedIds(body.sourceAssetIds, 'sourceAssetIds', { max: 32 }) || [];
+      if (!sourceAssetIds.length) throw new InvalidCommandError('至少选择一张图片作为下一轮参考。');
+      for (const assetId of sourceAssetIds) this.assertAssetInStudio(assetId);
+      const access = inspectProjectAssetAccess(this.db, { studioId: this.initialized.manifest.studioId, projectId: task.projectId, assetIds: sourceAssetIds });
+      for (const assetId of sourceAssetIds) if (!projectAssetReferenceAllowed(access.get(assetId))) throw new InvalidCommandError('图片驱动轮次素材必须来自当前项目或已明确共享素材。');
+      const created = createRoundDraft(this.db, { studioId: this.initialized.manifest.studioId, taskId, purpose: purpose as 'variation' | 'refinement' | 'edit' | 'fill', parentRoundId: text(body.parentRoundId) || undefined, plan: derivedRoundPlan(body, purpose, sourceAssetIds), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
     }
     if (pathname === '/api/rounds') {
@@ -743,6 +1019,12 @@ export class LocalStudioService {
       if (text(body.sessionId)) this.assertSessionInStudio(text(body.sessionId));
       const created = createRoundDraft(this.db, { studioId: this.initialized.manifest.studioId, taskId: text(body.taskId), purpose: text(body.purpose) as 'exploration' | 'refinement' | 'variation' | 'edit' | 'fill', parentRoundId: text(body.parentRoundId) || undefined, plan: record(body.plan), sessionId: text(body.sessionId) || undefined, idempotencyKey: key });
       return success(response, created);
+    }
+    const draftContextMatch = /^\/api\/rounds\/([^/]+)\/draft-context$/.exec(pathname);
+    if (draftContextMatch && request.method === 'PUT') {
+      this.assertRoundInStudio(draftContextMatch[1]);
+      const updated = updateRoundDraftContext(this.db, { studioId: this.initialized.manifest.studioId, roundId: draftContextMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
+      return success(response, updated);
     }
     const prepareMatch = /^\/api\/rounds\/([^/]+)\/prepare$/.exec(pathname);
     if (prepareMatch) {
@@ -799,8 +1081,8 @@ export class LocalStudioService {
       if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '预检必须由当前智能体会话在用户确认后提交。');
       this.assertRoundInStudio(preflightMatch[1]);
       this.assertConfirmedRoundSession(preflightMatch[1], text(body.sessionId));
-      const config = resolveActiveProviderConfig(this.providerDb);
-      const status = providerStatus(this.providerDb);
+      const config = resolveActiveProviderConfig(this.providerDb, this.initialized.paths);
+      const status = providerStatus(this.providerDb, this.initialized.paths);
       if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerStatus: status }) });
       const receipt = createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: status, executionConcurrency: body.executionConcurrency, concurrencySource: body.concurrencySource, idempotencyKey: key });
       if (!receipt.value.preview) return success(response, receipt);
@@ -818,10 +1100,8 @@ export class LocalStudioService {
        this.assertRoundInStudio(roundId);
        if (preflightId) this.assertDryRunInStudio(preflightId);
       if (body.requestedConcurrency !== undefined || body.executionConcurrency !== undefined || body.concurrencySource !== undefined) throw new InvalidCommandError('并发必须在预检时确定；请重新预检。');
-      const config = resolveActiveProviderConfig(this.providerDb);
+      const config = resolveActiveProviderConfig(this.providerDb, this.initialized.paths);
       if (!config) throw new InvalidCommandError('当前工作区没有可用的图片生成配置。');
-      const runtime = this.runtimeStatus();
-      if (runtime.restartRequired) throw new InvalidCommandError('Provider 配置已变更，必须先重启 Studio 后再提交生成。');
        const preview = preflightId ? getDryRunPreview(this.db, this.initialized.manifest.studioId, roundId, preflightId) : null;
       if (!preview) throw new InvalidCommandError('预检证据不存在或不属于当前轮次。');
       const consent = this.confirmationGate.consentFor(roundId);
@@ -837,7 +1117,7 @@ export class LocalStudioService {
         throw new InvalidCommandError('confirm_token 已经授权过其他运行操作，不能使用不同的幂等键重放。');
       }
       try {
-        const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId, providerConfig: config, providerStatus: providerStatus(this.providerDb), preflightId, idempotencyKey: key });
+        const queued = queueGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, roundId, providerConfig: config, providerStatus: providerStatus(this.providerDb, this.initialized.paths), preflightId, idempotencyKey: key });
         return success(response, queued);
       } catch (error) {
         if (!reservation.replayed) this.confirmationGate.releaseToken(token, key);
@@ -856,7 +1136,7 @@ export class LocalStudioService {
       if (authentication !== 'cookie') throw new LocalAccessError(403, 'forbidden', '运行恢复必须由已授权 Workbench 中的真实用户完成。');
       const sessionId = text(body.sessionId);
       this.assertResumeSession(resumeMatch[1], sessionId);
-      const config = resolveActiveProviderConfig(this.providerDb);
+      const config = resolveActiveProviderConfig(this.providerDb, this.initialized.paths);
       const run = getGenerationRun(this.db, resumeMatch[1]);
       const runProfileId = typeof run?.providerSnapshot.profileId === 'string' ? run.providerSnapshot.profileId : '';
       const runConfigVersion = Number(run?.providerSnapshot.configVersion);
@@ -970,6 +1250,9 @@ export class LocalStudioService {
     const targetType = headerValue(request, 'x-daoge-target-type') || undefined;
     const targetId = headerValue(request, 'x-daoge-target-id') || undefined;
     const originalFilename = headerValue(request, 'x-daoge-filename') || undefined;
+    const materialNeed = decodedHeaderText(request, 'x-daoge-material-need', '素材需求');
+    if (materialNeed.length > 120) throw new InvalidCommandError('素材需求不能超过 120 个字符。');
+    const materialUsage = importMaterialUsage(headerValue(request, 'x-daoge-material-usage'));
     this.assertImportTarget(targetType, targetId);
     const staged = await stageImageStream(this.initialized.paths, request, mediaType, { deferValidation: true });
     try {
@@ -980,9 +1263,9 @@ export class LocalStudioService {
         originalFilename,
         targetType,
         targetId,
-        source: { channel: 'workbench_upload', idempotencyKey: key },
+        source: compactJsonRecord({ channel: 'workbench_upload', idempotencyKey: key, materialNeed, materialUsage }),
         archiveStagedImage: (stagedImage, archiveInput) => this.mediaWorkerPool.run<Extract<MediaJobResult, { type: 'archive-staged' }>>({ type: 'archive-staged', staged: stagedImage, assetId: archiveInput.assetId, bucket: archiveInput.bucket })
-      }), { contentHash: staged.contentHash, mediaType: staged.mediaType, targetType, targetId, originalFilename });
+      }), { contentHash: staged.contentHash, mediaType: staged.mediaType, targetType, targetId, originalFilename, materialNeed, materialUsage });
       success(response, publicAsset(receipt.value));
     } finally {
       discardStagedImage(staged);

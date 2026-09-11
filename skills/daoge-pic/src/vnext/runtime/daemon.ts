@@ -173,14 +173,22 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     startedUrl = started.url;
     writeAtomically(portPath, { port: Number(new URL(startedUrl).port) });
     const pollMs = Math.max(100, Math.min(5000, options.pollMs || 350));
-    // A daemon uses one in-memory Provider identity for its lifetime. Configuration changes require a restart and cannot silently alter an in-flight run.
-    const workerConfig = resolveActiveProviderConfig(daemonProviderDb);
-    const workerStatus = providerStatus(daemonProviderDb);
-    const workerReady = Boolean(workerConfig && workerStatus.configured);
-    const workerSnapshot = workerConfig ? providerSnapshot(workerConfig) : null;
-    activeProvider = workerSnapshot ? { profileId: workerSnapshot.profileId, configVersion: workerSnapshot.configVersion, providerId: workerSnapshot.providerId, model: workerSnapshot.model, endpoint: workerSnapshot.endpoint } : null;
-    let configChangeReported = false;
-    workerPool = workerReady ? new WorkerProcessPool(initialized.paths.workspaceRoot) : null;
+    const providerIdentity = (snapshot: ReturnType<typeof providerSnapshot> | null): RuntimeRecord['provider'] => snapshot ? { profileId: snapshot.profileId, configVersion: snapshot.configVersion, providerId: snapshot.providerId, model: snapshot.model, endpoint: snapshot.endpoint } : null;
+    const sameProviderIdentity = (left: RuntimeRecord['provider'], right: RuntimeRecord['provider']): boolean => JSON.stringify(left) === JSON.stringify(right);
+    const logWorkerError = (error: unknown): void => {
+      const message = error instanceof Error ? error.message.replace(/[A-Za-z0-9_-]{20,}/g, '[redacted]') : 'unknown daemon worker failure';
+      fs.appendFileSync(path.join(runtimeDir, 'daemon.log'), nowIso() + ' ' + message + '\n', { mode: 0o600 });
+    };
+    const activeProviderWork = (provider: RuntimeRecord['provider']): number => {
+      if (!provider) return 0;
+      const row = daemonDb.prepare("SELECT COUNT(*) AS total FROM run_items item JOIN generation_runs run ON run.id = item.run_id WHERE run.provider_profile_id = ? AND run.provider_config_version = ? AND run.status IN ('queued', 'running', 'pausing') AND item.status IN ('pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested')").get(provider.profileId, provider.configVersion) as { total: number } | undefined;
+      return Number(row?.total) || 0;
+    };
+    let deferredProviderKey: string | null = null;
+    const initialConfig = resolveActiveProviderConfig(daemonProviderDb, initialized.paths);
+    const initialStatus = providerStatus(daemonProviderDb, initialized.paths);
+    activeProvider = providerIdentity(initialConfig ? providerSnapshot(initialConfig) : null);
+    workerPool = initialConfig && initialStatus.configured ? new WorkerProcessPool(initialized.paths.workspaceRoot, undefined, initialConfig) : null;
     heartbeat();
     heartbeatTimer = setInterval(heartbeat, 5000);
     const tick = async (): Promise<void> => {
@@ -196,11 +204,28 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
           reconciledRuns = reconcileTerminalRuns(daemonDb);
           lastMaintenanceAt = maintenanceNow;
         }
-        const currentConfig = resolveActiveProviderConfig(daemonProviderDb);
-        const currentSnapshot = currentConfig ? providerSnapshot(currentConfig) : null;
-        if (!configChangeReported && JSON.stringify(currentSnapshot) !== JSON.stringify(workerSnapshot)) {
-          configChangeReported = true;
-          appendStudioEvent(daemonDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_changed', payload: { restartRequired: true } });
+        const currentConfig = resolveActiveProviderConfig(daemonProviderDb, initialized.paths);
+        const currentStatus = providerStatus(daemonProviderDb, initialized.paths);
+        const desiredProvider = providerIdentity(currentConfig ? providerSnapshot(currentConfig) : null);
+        if (!sameProviderIdentity(activeProvider, desiredProvider)) {
+          const pendingWork = activeProviderWork(activeProvider);
+          if (workerPool && activeProvider && pendingWork > 0) {
+            workerPool.retire();
+            const desiredKey = JSON.stringify(desiredProvider);
+            if (deferredProviderKey !== desiredKey) {
+              deferredProviderKey = desiredKey;
+              appendStudioEvent(daemonDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_pending', payload: { previousProvider: activeProvider, activeProvider: desiredProvider, pendingRunItems: pendingWork } });
+            }
+          } else {
+            const previousProvider = activeProvider;
+            const previousPool = workerPool;
+            activeProvider = desiredProvider;
+            workerPool = currentConfig && currentStatus.configured ? new WorkerProcessPool(initialized.paths.workspaceRoot, undefined, currentConfig) : null;
+            deferredProviderKey = null;
+            appendStudioEvent(daemonDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_applied', payload: { hotReloaded: true, previousProvider, activeProvider, workerReady: Boolean(workerPool) } });
+            if (previousPool) void previousPool.close().catch(logWorkerError);
+            heartbeat();
+          }
         }
         if (workerPool) {
           const result = await workerPool.processOnce(MAX_GLOBAL_CONCURRENCY);

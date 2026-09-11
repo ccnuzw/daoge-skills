@@ -20,23 +20,30 @@ test('every WORKBENCH_VIEW has exactly one renderer key and legacy dispatch is a
   assert.doesNotMatch(main, /__legacy_deliveries__|DeliveryComposer/);
 });
 
-test('mobile navigation exposes project utility in the horizontal scroller with 44px targets', async () => {
+test('mobile navigation exposes five human workbench entries with 44px targets', async () => {
   const { workbenchNavigationViews } = await import('../../web/src/workbench-navigation-model.mjs');
-  assert.deepEqual(workbenchNavigationViews(true), ['projects', 'guide', 'project-overview', 'lineage', 'tasks', 'runs', 'assets', 'deliveries', 'trash']);
+  assert.deepEqual(workbenchNavigationViews(true), ['projects', 'lineage', 'assets', 'runs', 'deliveries']);
+  assert.deepEqual(workbenchNavigationViews(false), ['projects']);
   const navigation = fs.readFileSync(path.join(skillRoot, 'web/src/workbench-navigation.jsx'), 'utf8');
-  assert.match(navigation, /lineage: \{ view: 'lineage'.*changes: \{ \.\.\.PROJECT_CONTEXT_RESET, assetScope: 'project' \}/);
-  assert.match(navigation, /const primaryItems = \[NAVIGATION_ITEMS\.projects\]/);
-  assert.doesNotMatch(navigation, /NAVIGATION_ITEMS\.library/);
-  assert.match(navigation, /<NavigationButton item=\{NAVIGATION_ITEMS\.assets\}/);
-  assert.match(navigation, /<NavigationButton item=\{runItem\}/);
-  assert.match(navigation, /<NavigationButton item=\{NAVIGATION_ITEMS\.deliveries\}/);
-  assert.ok(navigation.indexOf("label: '谱系'") < navigation.indexOf('item={NAVIGATION_ITEMS.tasks}'));
-  assert.ok(navigation.indexOf('item={runItem}') < navigation.indexOf('item={NAVIGATION_ITEMS.assets}'));
+  assert.match(navigation, /label: '工作台'/);
+  assert.match(navigation, /label: '创作流'/);
+  assert.match(navigation, /label: '素材库'/);
+  assert.match(navigation, /label: '生成记录'/);
+  assert.match(navigation, /label: '交付'/);
+  assert.match(navigation, /const mainItems = \[/);
+  assert.match(navigation, /WORKBENCH_ACTIVE_VIEWS/);
+  assert.match(navigation, /workbench: \{ view: 'projects', label: '工作台'[^\n]+projectId: null/);
+  assert.match(navigation, /const workbenchItem = NAVIGATION_ITEMS\.workbench/);
+  assert.match(navigation, /const WORKBENCH_ACTIVE_VIEWS = new Set\(\['projects'\]\)/);
+  assert.doesNotMatch(navigation, /workbenchItem = project \?/);
+  assert.doesNotMatch(navigation, /workbenchItem[^\n]+project-overview/);
+  assert.match(navigation, /ASSET_ACTIVE_VIEWS/);
+  assert.doesNotMatch(navigation, /label: '项目管理'|label: '项目资产'|label: '回收站'|label: '任务'/);
+  assert.doesNotMatch(navigation, /NAVIGATION_ITEMS\.library|project-navigation-name/);
   const css = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
   assert.match(css, /\.studio-rail \{ min-width:0; max-width:100%; overflow:hidden;[^}]*\}/);
   assert.match(css, /\.workspace-navigation \{ display:flex; width:100%; max-width:100%; min-width:0;[^}]*overflow-x:auto/);
   assert.match(css, /\.workspace-navigation section \{ display:flex; flex:0 0 auto/);
-  assert.match(css, /\.workspace-navigation \.project-navigation,\.workspace-navigation \.project-utility \{ display:flex/);
   assert.match(css, /\.workspace-navigation button \{ flex:0 0 auto; min-width:44px; min-height:44px/);
 });
 

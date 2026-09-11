@@ -1,7 +1,7 @@
 import { createId, nowIso, sha256 } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from './asset-access';
-
+import { isProjectTemplateId } from './project-templates';
 export class StudioNotFoundError extends Error {}
 export class VersionConflictError extends Error {}
 export class InvalidCommandError extends Error {}
@@ -26,6 +26,8 @@ export interface Project {
   studioId: string;
   name: string;
   description: string | null;
+  templateId: string | null;
+  templateVersion: number | null;
   status: 'active' | 'archived';
   version: number;
 }
@@ -66,6 +68,8 @@ interface StoredProject {
   studio_id: string;
   name: string;
   description: string | null;
+  template_id: string | null;
+  template_version: number | null;
   status: Project['status'];
   version: number;
 }
@@ -103,13 +107,38 @@ function parseObject(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function referencedPlanAssetIds(plan: Record<string, unknown>): { referenceAssetIds: string[]; maskAssetId: string | null } {
+  const ids = new Set<string>();
+  const directReferences = Array.isArray(plan.referenceAssetIds) ? plan.referenceAssetIds : [];
+  for (const assetId of directReferences) if (typeof assetId === 'string' && assetId.trim().length > 0) ids.add(assetId.trim());
+  const materials = Array.isArray(plan.referenceMaterials) ? plan.referenceMaterials : [];
+  let maskAssetId = typeof plan.maskAssetId === 'string' && plan.maskAssetId.trim().length > 0 ? plan.maskAssetId.trim() : null;
+  for (const item of materials) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const material = item as Record<string, unknown>;
+    const assetId = typeof material.assetId === 'string' && material.assetId.trim().length > 0 ? material.assetId.trim() : null;
+    if (!assetId) continue;
+    ids.add(assetId);
+    if (!maskAssetId && material.usage === 'mask') maskAssetId = assetId;
+  }
+  return { referenceAssetIds: [...ids], maskAssetId };
+}
+
 function assertPlanAssetScope(db: StudioDatabase, input: { studioId: string; projectId: string; plan: Record<string, unknown> }): void {
-  const referenceAssetIds = Array.isArray(input.plan.referenceAssetIds) ? input.plan.referenceAssetIds.filter((assetId): assetId is string => typeof assetId === 'string' && assetId.trim().length > 0) : [];
-  const maskAssetId = typeof input.plan.maskAssetId === 'string' && input.plan.maskAssetId.trim().length > 0 ? input.plan.maskAssetId : null;
+  const { referenceAssetIds, maskAssetId } = referencedPlanAssetIds(input.plan);
   const access = inspectProjectAssetAccess(db, { studioId: input.studioId, projectId: input.projectId, assetIds: [...referenceAssetIds, ...(maskAssetId ? [maskAssetId] : [])] });
   if (referenceAssetIds.some((assetId) => !projectAssetReferenceAllowed(access.get(assetId)))) throw new InvalidCommandError('参考素材必须属于当前项目或已明确共享到跨项目素材。');
   if (maskAssetId && !projectAssetReferenceAllowed(access.get(maskAssetId))) throw new InvalidCommandError('遮罩素材必须属于当前项目或已明确共享到跨项目素材。');
 }
+function intentId(intent: Record<string, unknown>, key: string): string | undefined {
+  const value = intent[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function assertKitInStudio(db: StudioDatabase, studioId: string, kitId: string, table: 'style_kits' | 'brand_kits', label: string): void {
+  if (!db.prepare('SELECT id FROM ' + table + ' WHERE id = ? AND studio_id = ?').get(kitId, studioId)) throw new StudioNotFoundError(label + ' not found: ' + kitId);
+}
+
 
 function sessionFromRow(row: StoredSession): StudioSession {
   return {
@@ -124,7 +153,7 @@ function sessionFromRow(row: StoredSession): StudioSession {
 }
 
 function projectFromRow(row: StoredProject): Project {
-  return { id: row.id, studioId: row.studio_id, name: row.name, description: row.description, status: row.status, version: row.version };
+  return { id: row.id, studioId: row.studio_id, name: row.name, description: row.description, templateId: row.template_id, templateVersion: row.template_version, status: row.status, version: row.version };
 }
 
 function taskFromRow(row: StoredTask): CreativeTask {
@@ -142,7 +171,7 @@ function ensureStudio(db: StudioDatabase, studioId: string): void {
 
 function resolveProjectInStudio(db: StudioDatabase, studioId: string, projectId: string): StoredProject {
   const id = requireValue(projectId, 'projectId');
-  const row = db.prepare('SELECT id, studio_id, name, description, status, version FROM projects WHERE id = ? AND studio_id = ?').get(id, requireValue(studioId, 'studioId')) as StoredProject | undefined;
+  const row = db.prepare('SELECT id, studio_id, name, description, template_id, template_version, status, version FROM projects WHERE id = ? AND studio_id = ?').get(id, requireValue(studioId, 'studioId')) as StoredProject | undefined;
   if (!row) throw new StudioNotFoundError('Project not found: ' + id);
   return row;
 }
@@ -288,18 +317,22 @@ export function updateStudioSessionContext(db: StudioDatabase, input: { studioId
   return { ...sessionFromRow(session), activeProjectId: projectId, activeTaskId: taskId, activeRoundId: roundId, version: session.version + 1 };
 }
 
-export function createProject(db: StudioDatabase, input: { studioId: string; name: string; description?: string; sessionId?: string; idempotencyKey: string }): CommandReceipt<Project> {
+export function createProject(db: StudioDatabase, input: { studioId: string; name: string; description?: string; templateId?: string; templateVersion?: number; sessionId?: string; idempotencyKey: string }): CommandReceipt<Project> {
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'projects.create', () => {
     const studioId = requireValue(input.studioId, 'studioId');
     const name = requireValue(input.name, 'project name');
     ensureStudio(db, studioId);
+    const templateId = input.templateId ? requireValue(input.templateId, 'project template id') : null;
+    if (templateId && !isProjectTemplateId(templateId)) throw new StudioNotFoundError('Project template not found: ' + templateId);
+    const templateVersion = templateId ? (input.templateVersion === undefined ? 1 : Number(input.templateVersion)) : null;
+    if (templateVersion !== null && (!Number.isInteger(templateVersion) || templateVersion < 1)) throw new InvalidCommandError('Project template version must be a positive integer.');
     const id = createId('project');
     const timestamp = nowIso();
     const description = input.description ? input.description.trim() : null;
-    db.prepare('INSERT INTO projects (id, studio_id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, studioId, name, description, 'active', timestamp, timestamp);
+    db.prepare('INSERT INTO projects (id, studio_id, name, description, template_id, template_version, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, studioId, name, description, templateId, templateVersion, 'active', timestamp, timestamp);
     updateStudioSessionContext(db, { studioId, sessionId: input.sessionId, projectId: id });
-    appendStudioEvent(db, { studioId, entityType: 'project', entityId: id, eventType: 'project.created', payload: { name } });
-    return { id, studioId, name, description, status: 'active', version: 1 };
+    appendStudioEvent(db, { studioId, entityType: 'project', entityId: id, eventType: 'project.created', payload: { name, ...(templateId ? { templateId, templateVersion } : {}) } });
+    return { id, studioId, name, description, templateId, templateVersion, status: 'active', version: 1 };
   }, input);
 }
 
@@ -320,7 +353,7 @@ export function archiveProject(db: StudioDatabase, input: { studioId: string; pr
   }, input);
 }
 
-export function createTaskDraft(db: StudioDatabase, input: { studioId: string; projectId: string; name: string; taskTypeId?: string; intent?: Record<string, unknown>; sessionId?: string; idempotencyKey: string }): CommandReceipt<CreativeTask> {
+export function createTaskDraft(db: StudioDatabase, input: { studioId: string; projectId: string; name: string; taskTypeId?: string; styleKitId?: string; brandKitId?: string; intent?: Record<string, unknown>; sessionId?: string; idempotencyKey: string }): CommandReceipt<CreativeTask> {
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'tasks.create_draft', () => {
     const project = resolveProjectInStudio(db, input.studioId, input.projectId);
     if (project.status === 'archived') throw new InvalidCommandError('Cannot create a task in an archived project.');
@@ -330,11 +363,15 @@ export function createTaskDraft(db: StudioDatabase, input: { studioId: string; p
     if (taskTypeId && !db.prepare("SELECT id FROM task_types WHERE id = ? AND ((source = 'official' AND studio_id IS NULL) OR (source = 'user' AND studio_id = ?))").get(taskTypeId, input.studioId)) {
       throw new StudioNotFoundError('Task type not found: ' + taskTypeId);
     }
-    const intent = input.intent || {};
+    const intent = { ...(input.intent || {}) };
+    const styleKitId = input.styleKitId ? requireValue(input.styleKitId, 'style kit id') : intentId(intent, 'styleKitId');
+    const brandKitId = input.brandKitId ? requireValue(input.brandKitId, 'brand kit id') : intentId(intent, 'brandKitId');
+    if (styleKitId) { assertKitInStudio(db, input.studioId, styleKitId, 'style_kits', 'Style kit'); intent.styleKitId = styleKitId; }
+    if (brandKitId) { assertKitInStudio(db, input.studioId, brandKitId, 'brand_kits', 'Brand kit'); intent.brandKitId = brandKitId; }
     const timestamp = nowIso();
     db.prepare('INSERT INTO creative_tasks (id, project_id, task_type_id, name, intent_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, project.id, taskTypeId, name, JSON.stringify(intent), 'draft', timestamp, timestamp);
     updateStudioSessionContext(db, { studioId: input.studioId, sessionId: input.sessionId, projectId: project.id, taskId: id });
-    appendStudioEvent(db, { studioId: input.studioId, entityType: 'creative_task', entityId: id, eventType: 'task.draft_created', payload: { projectId: project.id, name } });
+    appendStudioEvent(db, { studioId: input.studioId, entityType: 'creative_task', entityId: id, eventType: 'task.draft_created', payload: { projectId: project.id, name, ...(taskTypeId ? { taskTypeId } : {}), ...(styleKitId ? { styleKitId } : {}), ...(brandKitId ? { brandKitId } : {}) } });
     return { id, projectId: project.id, taskTypeId, name, intent, status: 'draft', version: 1 };
   }, input);
 }
@@ -358,6 +395,21 @@ export function createRoundDraft(db: StudioDatabase, input: { studioId: string; 
     updateStudioSessionContext(db, { studioId: input.studioId, sessionId: input.sessionId, projectId: task.project_id, taskId: task.id, roundId: id });
     appendStudioEvent(db, { studioId: input.studioId, entityType: 'creative_round', entityId: id, eventType: 'round.draft_created', payload: { taskId: task.id, purpose: input.purpose } });
     return { id, taskId: task.id, parentRoundId: input.parentRoundId || null, purpose: input.purpose, plan, planVersion: 1, status: 'draft', version: 1 };
+  }, input);
+}
+
+export function updateRoundDraftContext(db: StudioDatabase, input: { studioId: string; roundId: string; plan: Record<string, unknown>; expectedVersion: number; idempotencyKey: string }): CommandReceipt<CreativeRound> {
+  return executeIdempotent(db, input.studioId, input.idempotencyKey, 'rounds.update_draft_context', () => {
+    const row = resolveRoundInStudio(db, input.studioId, input.roundId);
+    assertVersion(row.version, input.expectedVersion);
+    if (row.status !== 'draft') throw new InvalidCommandError('Only draft rounds can update Studio context directly.');
+    const plan = input.plan || {};
+    assertPlanAssetScope(db, { studioId: input.studioId, projectId: row.project_id, plan });
+    const timestamp = nowIso();
+    db.prepare('UPDATE creative_rounds SET plan_json = ?, version = version + 1, updated_at = ? WHERE id = ?').run(JSON.stringify(plan), timestamp, row.id);
+    db.prepare("UPDATE round_plan_versions SET plan_json = ? WHERE round_id = ? AND plan_version = ? AND state = 'draft'").run(JSON.stringify(plan), row.id, row.plan_version);
+    appendStudioEvent(db, { studioId: input.studioId, entityType: 'creative_round', entityId: row.id, eventType: 'round.draft_context_updated', payload: { planVersion: row.plan_version } });
+    return { id: row.id, taskId: row.task_id, parentRoundId: row.parent_round_id, purpose: row.purpose, plan, planVersion: row.plan_version, status: row.status, version: row.version + 1 };
   }, input);
 }
 
@@ -390,7 +442,7 @@ export function confirmRoundPlan(db: StudioDatabase, input: { studioId: string; 
 }
 
 export function getProject(db: StudioDatabase, studioId: string, projectId: string): Project | null {
-  const row = db.prepare('SELECT id, studio_id, name, description, status, version FROM projects WHERE id = ? AND studio_id = ?').get(projectId, studioId) as StoredProject | undefined;
+  const row = db.prepare('SELECT id, studio_id, name, description, template_id, template_version, status, version FROM projects WHERE id = ? AND studio_id = ?').get(projectId, studioId) as StoredProject | undefined;
   return row ? projectFromRow(row) : null;
 }
 

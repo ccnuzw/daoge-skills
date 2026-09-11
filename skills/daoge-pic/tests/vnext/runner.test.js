@@ -22,10 +22,10 @@ function cleanup(workspaceRoot) {
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 }
 
-function configuredStudio() {
+function configuredStudio(overrides = {}) {
   const workspaceRoot = temporaryWorkspace();
   const initialized = initializeStudio({ workspaceRoot });
-  const { config, status } = configureProvider(initialized, { model: 'gpt-image-2', apiKey: 'provider-key-not-for-db' });
+  const { config, status } = configureProvider(initialized, { ...overrides, model: overrides.model || 'gpt-image-2', apiKey: overrides.apiKey || 'provider-key-not-for-db' });
   const db = openStudioDatabase(initialized.paths, initialized.manifest);
   const project = createProject(db, { studioId: initialized.manifest.studioId, name: '运行引擎测试', idempotencyKey: 'project' });
   const task = createTaskDraft(db, { studioId: initialized.manifest.studioId, projectId: project.value.id, name: '主视觉', idempotencyKey: 'task' });
@@ -60,9 +60,25 @@ test('preflight rejects malformed plan shapes without throwing or coercing opera
   assert.ok(invalidMask.issues.some((issue) => issue.code === 'invalid_mask_asset_id'));
 });
 
+test('preflight caps OpenAI GPT image final per-item prompts at 32000 characters', () => {
+  const provider = { providerId: 'openai-images', configured: true, missing: [], model: 'gpt-image-2', endpoint: 'https://images.example.test', capabilities: { generate: true, edit: true, referenceImage: true, mask: true } };
+  const basePrompt = 'a'.repeat(31900);
+  const oversized = preflightGenerationPlan({ operation: 'generate', itemCount: 2, prompt: basePrompt, itemPrompts: ['short', 'b'.repeat(200)], output: { aspectRatio: '1:1' } }, provider);
+  assert.equal(oversized.valid, false);
+  assert.ok(oversized.issues.some((issue) => issue.code === 'provider_prompt_too_large'));
+  const valid = preflightGenerationPlan({ operation: 'generate', itemCount: 2, prompt: basePrompt, itemPrompts: ['short', 'also short'], output: { aspectRatio: '1:1' } }, provider);
+  assert.equal(valid.valid, true);
+});
+
 
 test('preflight rejects more than eight unique reference assets', () => {
   const result = preflightGenerationPlan({ operation: 'edit', itemCount: 1, prompt: 'edit', referenceAssetIds: Array.from({ length: 9 }, (_, index) => 'asset-' + index) }, { providerId: 'openai-images', configured: true, missing: [], model: 'gpt-image-2', endpoint: 'https://images.example.test', capabilities: { generate: true, edit: true, referenceImage: true, mask: true } });
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((issue) => issue.code === 'reference_asset_limit_exceeded'));
+});
+
+test('preflight rejects more than five Grok reference assets', () => {
+  const result = preflightGenerationPlan({ operation: 'edit', itemCount: 1, prompt: 'edit', referenceAssetIds: Array.from({ length: 6 }, (_, index) => 'asset-' + index) }, { providerId: 'xai-grok-image', configured: true, missing: [], model: 'grok-imagine-image-2.0', endpoint: 'https://api.x.ai', capabilities: { generate: true, edit: true, referenceImage: true, mask: false } });
   assert.equal(result.valid, false);
   assert.ok(result.issues.some((issue) => issue.code === 'reference_asset_limit_exceeded'));
 });
@@ -101,6 +117,20 @@ test('preflight validates requested aspect ratios before a Provider call', () =>
   assert.equal(explicitSize.normalizedPlan.output.size, '1024x576');
   const missingSize = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'wide scene without dimensions', output: { aspectRatio: '16:9' } }, openAi);
   assert.deepEqual(missingSize.issues.map((issue) => issue.code), ['aspect_requires_explicit_size']);
+});
+
+test('Provider Profile limits cap preflight size, concurrency, timeout, and retry policy inputs', () => {
+  const fixture = configuredStudio({ limits: { maxRunItems: 2, maxExecutionConcurrency: 1, requestTimeoutMs: 45000, maxRetryAttempts: 2 } });
+  try {
+    const tooMany = confirmedRound(fixture, { operation: 'generate', itemCount: 3, prompt: 'too many provider items' }, 'profile-limit-too-many');
+    const rejected = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: tooMany.value.id, providerConfig: fixture.config, providerStatus: fixture.status, idempotencyKey: 'profile-limit-items' });
+    assert.equal(rejected.value.preview, null);
+    assert.equal(rejected.value.preflight.issues.some((issue) => issue.code === 'provider_item_limit_exceeded'), true);
+    const allowed = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: 'within provider limits' }, 'profile-limit-ok');
+    assert.throws(() => createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: allowed.value.id, providerConfig: fixture.config, providerStatus: fixture.status, executionConcurrency: 2, idempotencyKey: 'profile-limit-concurrency' }), /限制运行并发最多 1/);
+    const dryRun = createDryRunPreview(fixture.db, { studioId: fixture.initialized.manifest.studioId, roundId: allowed.value.id, providerConfig: fixture.config, providerStatus: fixture.status, executionConcurrency: 1, idempotencyKey: 'profile-limit-ok-preview' });
+    assert.equal(dryRun.value.preview.planSnapshot.output.timeoutMs, 45000);
+  } finally { closeStudioDatabase(fixture.db); cleanup(fixture.workspaceRoot); }
 });
 
 test('persists a no-call dry-run preview and rejects stale Provider snapshots before queueing', () => {
@@ -290,7 +320,8 @@ test('projects sanitized run item error codes without Provider messages', () => 
 test('queues a confirmed plan with a safe provider snapshot and leases durable run items', () => {
   const fixture = configuredStudio();
   try {
-    const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: 'minimal studio product shot', itemPrompts: ['four boys play beach volleyball', 'four boys perform as a school band'], output: { aspectRatio: '1:1' } });
+    const longPrompt = 'minimal studio product shot ' + 'with precise untouched prompt detail '.repeat(18) + 'TAIL_FULL_PROMPT_SENT_TO_PROVIDER';
+    const confirmed = confirmedRound(fixture, { operation: 'generate', itemCount: 2, prompt: longPrompt, itemPrompts: ['four boys play beach volleyball', 'four boys perform as a school band'], output: { aspectRatio: '1:1' } });
     const config = fixture.config;
     assert.ok(config);
     const status = fixture.status;
@@ -308,9 +339,11 @@ test('queues a confirmed plan with a safe provider snapshot and leases durable r
     assert.deepEqual(claimed.map((item) => item.status), ['leased', 'leased']);
     assert.equal(getGenerationRun(fixture.db, queued.value.id).status, 'running');
     assert.deepEqual(claimed.map((item) => item.promptPayload.prompt), [
-      'minimal studio product shot\n\nSpecific scene direction for this image: four boys play beach volleyball',
-      'minimal studio product shot\n\nSpecific scene direction for this image: four boys perform as a school band'
+      longPrompt + '\n\nSpecific scene direction for this image: four boys play beach volleyball',
+      longPrompt + '\n\nSpecific scene direction for this image: four boys perform as a school band'
     ]);
+    assert.ok(claimed[0].promptPayload.prompt.length > 320);
+    assert.ok(claimed[0].promptPayload.prompt.includes('TAIL_FULL_PROMPT_SENT_TO_PROVIDER'));
 
     transitionRunItem(fixture.db, { itemId: claimed[0].id, leaseToken: claimed[0].leaseToken, status: 'requesting', now: new Date('2026-01-01T00:00:00.000Z') });
     assert.equal(markRunsResumePending(fixture.db), 1);

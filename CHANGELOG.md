@@ -2,11 +2,74 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.12.0 - 2026-09-11
+
+当前稳定发布包/runtime 版本为 `5.12.0`；`5.11.0` 保持为不可变历史发布，旧 daemon 不得与本版本混用。
+
+### Workbench
+
+- Studio 从“Agent 驱动工具”升级为“Agent + 创作者工作台协作系统”：新增项目、任务和轮次的直接创建入口，使用模板、选项和提示减少创作者输入，同时继续走同一 Studio API/SQLite 事实源。
+- 新建任务支持目标类型、任务类型、目标数量、画幅、风格包、品牌包和首个轮次联动创建；新建轮次支持探索、精修、变体、局部修改和补图/扩图，并绑定当前 Workbench 标签页会话上下文。
+- 强化双入口、单工作流边界：Studio 直接创建只建立结构化上下文或草稿，不触发 Provider、预检、确认挑战或 Generation Run；生成仍由 Agent 输出计划并确认。
+- 当前计划页新增参考素材面板和选择器：创作者可从当前项目或共享素材中选择主体、风格、构图、色彩、品牌、遮罩或反例参考，保存为草稿轮次上下文；已进入确认/运行的轮次仍必须回到 Agent 修改计划。
+- 项目资产和大图预览新增“继续创作”动作：创作者可基于单图或已选多图创建变体、精修、局部修改、补图/扩图草稿轮次，并在多图用途编排板中套用“主图 + 风格 + 构图”“多主体融合”“主体 + 反例对照”“局部编辑三件套”“补图构图板”等模板，逐张标注主体、风格、构图、色彩、品牌、遮罩或反例，自动写入主参考图、父资产、参考用途、变化维度、保持约束、目标数量和画幅，并设为当前会话上下文。
+- 局部修改新增轻量遮罩准备区：创作者可把现有图片设为遮罩，或导入、拖入、粘贴黑白 / 透明遮罩图；Studio 把遮罩作为项目资产和 `maskAssetId` 写入草稿，主体父资产不包含遮罩。此版本刻意不提供浏览器画笔或像素编辑器；生成前仍由预检验证遮罩素材和 Provider mask 能力。
+- 新增统一创作动作入口：当前选片、资产卡片、大图预览和谱系检查器提供“生成更多类似图”“让这张图更精致”“换背景 / 局部修改”“扩图 / 改画幅”等创作者选项，并共享同一动作模型；结构化“不采用”反馈可只保存、加入当前草稿轮次作为反例，或一键创建带 `feedbackToNextRound`、反例参考、修正目标和保持约束的下一轮草稿。
+- 创作谱系升级为项目工作区首页：项目/任务选择默认进入谱系，Workbench 顶部只保留当前会话上下文、导航和健康状态；取消“推荐下一步”区域，不再用额外动作卡片占首屏空间。谱系页保留五种工作模式但折叠为轻量选择器，成果/未定/不采用/运行改成精简指标条。
+- 谱系节点检查器改为人本意图入口：空选只说明选择语义，资产节点第一层只保留“选为成果 / 用这张继续 / 作为参考 / 获取图片”，来源、共享、批注和不采用原因进入更多信息；不再暴露“保留 / 待复核 / 可衍生”三类并列标记按钮；检查器菜单改为内联展开，“作为参考”直接显示主体/风格/构图/反例用途，“获取图片”直接显示放大/复制/下载，“用这张继续”使用检查器内全宽动作卡片，避免浮层错位或被裁切。
+- 新建项目/任务/轮次表单继续收敛为创作者选项化流程：项目模板返回默认名称、说明提示、示例说明、优先准备的素材和创建后必要上下文；任务目标和轮次目的带出推荐数量、画幅、必补信息、变化维度、精修目标、保持约束和可点击示例；创建后直接进入当前项目、任务或轮次上下文，不再弹出创建完成提示或“推荐下一步”，Provider 调用仍需 Agent 计划、用户确认和预检。
+- 项目模板与新建任务表单建立深度联动：品牌视觉、电商商品图、社媒内容图、角色/IP 和自定义项目分别返回排序后的任务目标、默认任务名、目标数量、画幅、首轮目的、素材需求、必补信息、可点击示例、变化维度、精修目标和保持约束；任务创建 intent 与首轮草稿 plan 会记录项目模板、目标和素材需求，供 Agent 后续整理可确认计划。
+- 资产页新增素材需求导入引导：根据当前项目、任务或草稿轮次的素材需求显示准备清单，可在导入前选择“商品主体图”“品牌包 / Logo”“平台规格”等需求，导入资产会保存脱敏 `materialNeed` / `materialUsage` 来源摘要；导入到草稿轮次时会按默认用途自动加入 `referenceMaterials`，不触发确认、预检、Generation Run 或 Provider 调用。
+- Generation History 的“本次提示词”仍按安全摘要显示截断文本，但“复制完整提示词”会按运行的计划版本回读完整计划；若计划含逐图提示词，会复制每张图实际发送给 Provider 的“通用提示词 + 逐图差异提示词”。实际生图继续使用 `run_items.prompt_payload_json` 中的完整逐项提示词，不使用 Workbench 摘要。
+- 生成详情的技术详情改成结构化证据面板：预检不再把 JSON 连成一行展示，改为计划版本、运行项、Provider、模型、参考素材、逐图提示词、输出规格和能力快照分区；原始摘要保留在折叠项里供排障查看。
+- 当前计划页新增确认前结构化审阅：在现有计划摘要下展示关键指标、20 张逐图提示词清单、每张图最终会发送给 Provider 的完整提示词、结构化原始计划字段和折叠原始 JSON；确认前即可检查差异提示词、参考素材和输出规格。
+- 当前计划的“原始计划结构”继续收敛：保留短字段网格、参考素材表和折叠原始 JSON，移除重复的“提示词独占展示”；逐图提示词只在确认前审阅区展示，避免同一信息渲染两遍。
+- 当前计划页头部按钮布局调整为桌面端单行操作组：刷新、复制通用提示词、复制全部最终提示词、复制结构化 JSON 固定同一行，复制成功提示单独占下一行；窄屏再切成两列，避免横向溢出。
+
+### Provider / 输出规格
+
+- xAI/Grok 输出规格改为独立映射：支持官方 `aspect_ratio` 枚举、`1K`/`2K` resolution、`low`/`medium`/`auto` quality，并在 OpenAI 兼容传输中不再伪造 `size`。
+- OpenAI GPT Image 模型提示词预检对齐官方 32000 字符上限：按每张图最终请求提示词计算，超出时在预检阶段拒绝，避免已确认后才被 Provider 退回。
+- xAI/Grok 图片编辑改为 JSON 多图参考输入，最多 5 张 PNG/JPEG/WebP 受管理参考图；遮罩仍拒绝，预检和 Worker 按 Provider 能力与媒体类型重复校验。
+- Provider Descriptor 从后续目标落地为单一事实源：Profile store、API、Workbench、预检、输出规格和 HTTP adapter 共享能力、端点策略、参考素材和版本字段，运行快照记录 descriptor/adapter 版本。
+- Provider.db 升级到 schema v3：新增密钥后端引用、端点信任模式、Profile 级数量/并发/超时/重试限额、绑定 configVersion 的连接测试证据、外部 secret 清理队列和 active Profile 生命周期保护；active 配置修改或切换由 daemon 在旧配置任务排空后热加载，已完成预检需重新预检。
+- Provider 设置页补齐 Descriptor 可见性、端点信任模式、Profile 级安全限额、显式模型列表读取与模型选择、连接测试说明、运行影响提示和 active 删除确认；API Key / Base URL 继续保持 write-only。
+- Provider adapter 新增显式模型发现 API：OpenAI-compatible 与 Gemini 使用各自模型端点，返回受限安全模型摘要；不会自动联网或触发生成。
+- Provider 设置页重排为左侧 Profile 轨道、右侧安全摘要 / 连接摘要 / 能力 / 限额 / 集中操作分区；按钮分组、移动端横向 Profile 列表和表单分段间距统一到 44px 可点击目标。
+- `compatible_public` 端点拒绝明文 HTTP；macOS Keychain secret 通过 stdin 写入，system secret backend 不可用时 fail closed；Provider mutation/test 路由显式限制 HTTP method。
+
+### 验证
+
+- `npm test` 通过，包含 vNext TypeScript、Vite Workbench 构建和全量 vNext 测试：358 项测试，356 通过、0 失败、2 项按条件跳过。
+- `npm run build` 通过，包含 vNext TypeScript 与 Vite Workbench 构建。
+- `node --test tests/vnext/output-spec.test.js tests/vnext/plan-presentation.test.js tests/vnext/provider-adapters.test.js tests/vnext/runner.test.js tests/vnext/worker.test.js tests/vnext/studio-foundation.test.js tests/vnext/workbench-context-api.test.js tests/vnext/workbench-bulk-ui.test.js tests/vnext/creative-library-api.test.js` 通过：125 项测试，124 通过、0 失败、1 项 Windows 实机用例按平台跳过。
+- `node --test tests/vnext/project-reference-boundary.test.js` 通过：1 项通过、0 失败。
+- `node --test tests/vnext/workbench-route.test.js tests/vnext/lineage-data-loader.test.js tests/vnext/workbench-bulk-ui.test.js` 通过：21 项通过、0 失败。
+- `node --test tests/vnext/workbench-bulk-ui.test.js tests/vnext/workbench-context-api.test.js` 通过：18 项通过、0 失败。
+- `npm run build:workbench` 通过；随后 `node --test --test-concurrency=1 tests/vnext/workbench-bulk-ui.test.js tests/vnext/phase4-navigation-registry.test.js tests/vnext/workbench-route.test.js tests/vnext/local-auth-workbench.test.js` 通过：28 项通过、0 失败。
+- Chromium smoke：在临时 Studio 中验证项目资产页连续两次导入图片，导入按钮始终保留且资产卡片增至 2 张；在谱系顶部直接切换任务与轮次后，当前会话摘要同步到所选轮次。
+- Chromium smoke：在谱系“任务创作流”中点选待确认计划节点，检查器显示“审阅并确认计划”；确认挑战创建后，Workbench 打开 `role="dialog"` / `aria-modal="true"` 的确认弹窗，点击“确认计划”后提示当前用户已确认，未触发 Provider。
+- Chromium smoke：构造 20 张含逐图差异提示词的运行，Generation History 详情只显示通用提示词摘要且不含第 20 张尾标记；点击“复制完整提示词”后剪贴板包含 20 段逐图完整提示词，包含通用提示词、Provider 实际前缀、首张和第 20 张差异尾标记。运行项 `prompt_payload_json` 中首尾项目也保留各自完整差异提示词，证明 Provider 请求使用全量逐图提示词。
+- Chromium smoke：打开含 20 张逐图提示词运行的生成详情，展开技术详情后验证预检证据以卡片和字段网格展示，包含运行项、Provider、模型、输出规格和能力快照；旧的一行 JSON 预检文本不再出现。
+- Chromium smoke：打开含 20 张逐图差异提示词的当前计划页，验证指标显示 `20 / 20` 条逐图提示词、最长单图提示词 `402 / 32000` 字符、20 个可展开提示词卡片；展开第 20 张可见通用提示词 + `Specific scene direction for this image:` + 第 20 张差异尾标记；“复制全部最终提示词”复制 20 段完整最终提示词，“原始计划结构”按基础、提示词和输出规格分组展示。
+- Chromium smoke：当前计划页头部 `.prompt-stage-actions` 在 1440px 视口下渲染为 4 列网格，刷新、复制通用提示词、复制全部最终提示词、复制结构化 JSON 四个按钮 top 坐标一致，确认桌面端在同一行。
+- Chromium smoke：展开当前计划“原始计划结构”，验证短字段区只包含“基础 / 输出规格”等概览卡片，不再混入“提示词”组，也不再显示“提示词独占展示”；20 条逐图提示词仍保留在确认前审阅区。
+- Chromium smoke：在临时 Studio 中打开项目列表，选择“电商商品图”模板，验证默认项目名、说明提示、项目说明示例和素材准备上下文；创建项目后直接进入当前项目工作区，不显示创建完成提示或推荐下一步卡片。随后创建“基于已有图做变化”任务，验证默认 4 张、构图/背景变化、主体/Logo 保持、风格包/品牌包选择和首个变体轮次；再创建“补图 / 扩图”轮次，验证默认 2 张、16:9 和补图提示。最终新轮次 Generation Run 数量为 0，未触发 Provider。
+- Chromium smoke：在临时 Studio 中验证项目模板与任务表单深度联动：创建“电商商品图”项目后，新建任务默认优先为“商品主图探索”，自动填入 8 张、1:1、商品主体图 / 品牌包 / Logo / 平台规格 / 核心卖点素材需求，并把目标、数量、画幅和素材需求持久化到任务 intent 与首轮草稿 plan，Generation Run 数量为 0；再创建“角色 / IP 设计”项目，新建任务默认切换为“角色形象探索”，显示角色设定描述、主体参考图、不可改变特征和动作/表情变体，未沿用电商任务目标。
+- Chromium smoke：在临时 Studio 中打开创作谱系项目工作区，验证五种工作模式、当前会话上下文、Provider 不触发边界提示、项目/任务/轮次/计划/资产节点加载；切换到“任务创作流”后点选资产，检查器第一层只显示成果、继续、参考和获取图片四类入口，并验证任务级路由里点击“主体参考”不会再出现草稿轮次死胡同错误。
+- Chromium smoke：在临时 Studio 中打开 Workbench，使用“新建项目”选择“电商商品图”模板创建项目；再用“新建任务”选择“基于已有图做变化”，绑定官方任务类型、风格包、品牌包、变化维度和保持约束，并联动创建首个变体轮次。Workbench 跳到当前计划页，当前会话摘要显示项目/任务/轮次，轮次状态为草稿，持久化任务 intent 与轮次 plan，新轮次 Generation Run 数量为 0，Provider 未配置且未触发生成调用。
+- Chromium smoke：在临时 Studio 的当前轮次资产页选择 3 张图片，打开“基于已选继续”，验证多图用途编排板显示“主图 + 风格 + 构图”“多主体 / 多元素融合”“主体 + 反例对照”等模板；创建变体草稿后，Workbench 跳到当前计划页，显示“当前轮次还是草稿”“3 张已绑定”“3 张已挂载”。计划版本持久化 `referenceArrangement.mode=lead-style-composition`、主参考图、`subject/style/composition` 用途统计和 3 个父资产，新轮次 Generation Run 数量为 0，Provider 未配置且未触发生成调用。
+- Chromium smoke：在临时 Studio 中从单图选择“局部修改”，打开轻量遮罩准备区并用浏览器文件上传导入一张不同内容的遮罩图。弹窗显示 2 张来源图和 1 张遮罩图；创建草稿后，当前计划显示 2 张已绑定 / 挂载，持久化 `subject` 与 `mask` 用途、独立 `maskAssetId`、仅含主体的 `parentAssetIds` 与 `referenceAssetIds`。新轮次没有 Generation Run，Provider 未配置且未触发生成调用。
+- Chromium smoke：在临时 Studio 的当前轮次资产页打开资产卡片“创作动作”，验证“生成更多类似图”“让这张图更精致”“换背景 / 局部修改”“扩图 / 改画幅”“作为主体/风格/构图/反例参考”和“从不采用原因创建下一轮”选项；提交“不采用”反馈后 Workbench 跳转到新优化轮次的谱系页，通知显示下一轮草稿已创建，新轮次 Generation Run 数量为 0，Provider 未配置且未触发生成调用。
+
+- 发布制品：`daoge-pic-5.12.0.tgz`，482,468 bytes；npm shasum 为 `b2a75a2c7632418feadac8b9217887374dbbade7`，SHA-256 为 `1daf37155d643379accad5318b8e836cf928fcf49b75c54e22b33b110d5fc494`。
+- 发布说明：[docs/daoge_pic_5.12.0_release_notes_zh.md](docs/daoge_pic_5.12.0_release_notes_zh.md)；校验 sidecar：`skills/daoge-pic/daoge-pic-5.12.0.tgz.sha256`。
+- GitHub Release 标签：`daoge-pic-v5.12.0`；本包通过 GitHub Release 资产分发，不发布到 npm registry。
+
 ## daoge-pic 5.11.0 - 2026-09-09
 
 5.11.0 集中增强 Workbench 创作谱系、Generation History 大批量分页、项目资产打包、协议协商和本地敏感文件防护。
 
-### Workbench
 
 - 重构 Generation History 为全宽双栏工作区：运行记录保持显式选择，详情区集中呈现提示词、计划规格、运行状态、恢复操作和生成项；中小屏改为横向历史条与单栏详情，减少无效留白与拥挤的三栏分割。
 - 运行项改为服务端分页：每页 25/50/100、状态筛选、序号定位、精确状态计数、输出缩略图和 URL 持久化；大型批次只读取当前页，避免重复从创作记录加载全部运行项。
@@ -52,7 +115,6 @@
 - package smoke 改在独立临时 pack 目录运行，不删除仓库同名正式制品；临时 consumer 路径包含中文和空格，并执行真实 bin、注册、doctor 与 `sharp`。
 - Workbench 新增运行健康横幅、安全重启、状态刷新和脱敏诊断复制；受控重启依次显示安全关闭、重连、权威快照恢复和已恢复。
 
-### 验证与制品
 
 - macOS `npm test`：315 项，313 通过、0 失败、2 项 Windows 实机用例跳过。`npm run test:package`：122 个发布文件，全部清单、安装、bin、注册、doctor 与 `sharp` 检查通过。
 - 浏览器实测 1440×1000 与 375×812，无横向溢出，移动端健康操作为 44px；实际 daemon 故障注入完整观察到故障、安全关闭和恢复状态。
@@ -194,14 +256,13 @@
 - 性能场景：500 次运行对比为 6 次 SQL / 2.71 ms；1000 张选片为 4 次 SQL / 5.73 ms；10000 个待执行项领取写入 20 条事件；64 MiB 媒体最大事件循环延迟 0.92 ms。
 - Chromium 桌面与移动 smoke：24 张资产使用缩略图、全选本页单次批量请求、无横向溢出、无控制台错误。
 - 最终制品 `daoge-pic-5.9.0.tgz` 为 288686 bytes，SHA-256 为 `d055be3f8ca3e6ebf9561e1e27181c837b949a8ad542cb8734b962417fc61313`，并通过包外 `.tgz.sha256` sidecar 记录。
-
 ## daoge-pic 5.8.0 - 2026-09-02
 
 5.8.0 固化“会话为入口、Studio 为共享工作台”的稳定协议：同一 workspace 的多个会话共享唯一 daemon 与 Workbench，同时用独立 Studio Session 隔离各自上下文、项目与 Run。
 
 ### 新增
 
-- Provider 配置迁移到独立 `Provider.db`，支持多个 Profile、唯一 active、write-only API Key/完整 Base URL，以及 Workbench 中的列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试和“保存并重启”。既有 `provider.env` 仅在首次升级时一次迁移或显式 import，之后不再作为运行时配置源。
+- Provider 配置迁移到独立 `Provider.db`，支持多个 Profile、唯一 active、write-only API Key/完整 Base URL，以及 Workbench 中的列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试、显式读取模型列表和模型选择。既有 `provider.env` 仅在首次升级时一次迁移或显式 import，之后不再作为运行时配置源；活动配置修改或切换由 daemon 在旧配置任务排空后热加载。
 - 执行型触发采用稳定 workspace → 普通 open/open-reuse → conversation Studio Session → 项目/任务/轮次上下文 → 创作澄清的强制顺序；咨询/开发型请求不启动 Studio。presence/open-claim 只允许首个会话触发 opener，其余会话安全复用。
 - 同一 workspace 支持 3–4 个并发会话共享单 daemon/Workbench；真实 conversation Session、项目与 Run 归属互相隔离，Workbench 改用 per-tab `sessionStorage` 身份。
 - Generation Run 并发改为 preflight 冻结：范围 `1..1000`、默认 `4`、串行 `1`，queue 和 run 阶段不可改写；移除 `config --worker-concurrency` 与 workspace worker concurrency 双重配置源。

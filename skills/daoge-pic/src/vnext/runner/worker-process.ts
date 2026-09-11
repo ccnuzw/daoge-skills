@@ -3,15 +3,43 @@ import { StudioGeneratedAssetPersister } from '../media/generated-assets';
 import { StudioAssetResolver } from '../media/asset-resolver';
 import { GenerationWorker } from './worker';
 import { closeStudioDatabase, openStudioDatabase } from '../studio/database';
-import { closeProviderDatabase, openProviderDatabase, providerStatus, resolveActiveProviderConfig } from '../studio/provider-store';
+import { closeProviderDatabase, openProviderDatabase, resolveActiveProviderConfig, resolveProviderProfileConfig } from '../studio/provider-store';
 import { attachStudio } from '../studio/workspace';
 import { MAX_GLOBAL_CONCURRENCY, MAX_WORKER_BATCH_CONCURRENCY } from '../studio/runtime-settings';
+import { DEFAULT_RETRY_POLICY } from './retry-policy';
 import { ProviderHealthSample, ProviderOutcome } from '../runtime/provider-concurrency';
 import { createId } from '../shared/ids';
+import { isProviderId } from '../studio/provider-config';
+import type { ResolvedProviderConfig } from '../studio/provider-config';
+import type { ProviderDatabase } from '../studio/provider-store';
 
 function valueAfter(args: string[], flag: string): string | null {
   const index = args.indexOf(flag);
   return index >= 0 ? String(args[index + 1] || '').trim() || null : null;
+}
+function isProviderConfig(value: unknown): value is ResolvedProviderConfig {
+  if (!value || typeof value !== 'object') return false;
+  const config = value as Record<string, unknown>;
+  return typeof config.profileId === 'string' && typeof config.profileName === 'string' && Number.isInteger(config.configVersion) && Number(config.configVersion) > 0 && typeof config.providerId === 'string' && isProviderId(config.providerId) && typeof config.baseUrl === 'string' && typeof config.apiKey === 'string' && typeof config.model === 'string' && Boolean(config.options && typeof config.options === 'object') && typeof config.referenceEnabled === 'boolean' && typeof config.endpointTrustMode === 'string' && Boolean(config.limits && typeof config.limits === 'object') && Number.isInteger(config.descriptorVersion) && typeof config.adapterVersion === 'string';
+}
+
+function receiveProviderConfig(): Promise<ResolvedProviderConfig> {
+  const { promise, resolve, reject } = Promise.withResolvers<ResolvedProviderConfig>();
+  let timeout: NodeJS.Timeout;
+  const onMessage = (message: unknown): void => {
+    if (!message || typeof message !== 'object' || (message as Record<string, unknown>).type !== 'configure-provider') return;
+    clearTimeout(timeout);
+    process.removeListener('message', onMessage);
+    const config = (message as Record<string, unknown>).config;
+    if (!isProviderConfig(config)) reject(new Error('Worker process received an invalid Provider configuration.'));
+    else resolve(config);
+  };
+  timeout = setTimeout(() => {
+    process.removeListener('message', onMessage);
+    reject(new Error('Worker process did not receive its assigned Provider configuration.'));
+  }, 10_000);
+  process.on('message', onMessage);
+  return promise;
 }
 
 function send(message: Record<string, unknown>): void {
@@ -19,14 +47,27 @@ function send(message: Record<string, unknown>): void {
 }
 
 async function main(): Promise<void> {
-  const workspaceRoot = valueAfter(process.argv.slice(2), '--workspace');
+  const args = process.argv.slice(2);
+  const workspaceRoot = valueAfter(args, '--workspace');
   if (!workspaceRoot) throw new Error('Worker process requires --workspace.');
+  const expectedProfileId = valueAfter(args, '--provider-profile-id');
+  const expectedConfigVersionText = valueAfter(args, '--provider-config-version');
+  let expectedConfigVersion: number | null = null;
+  if (expectedProfileId !== null || expectedConfigVersionText !== null) {
+    const parsedVersion = Number(expectedConfigVersionText);
+    if (!expectedProfileId || !Number.isInteger(parsedVersion) || parsedVersion < 1) throw new Error('Worker process provider identity is invalid.');
+    expectedConfigVersion = parsedVersion;
+  }
   const initialized = attachStudio(workspaceRoot);
+  const assignedConfig = args.includes('--provider-config-ipc') ? await receiveProviderConfig() : null;
+  if (assignedConfig && expectedProfileId !== null && (assignedConfig.profileId !== expectedProfileId || assignedConfig.configVersion !== expectedConfigVersion)) throw new Error('Worker process Provider identity does not match its assigned configuration.');
   const db = openStudioDatabase(initialized.paths, initialized.manifest, { skipIntegrityCheck: true, attachOnly: true });
-  const providerDb = openProviderDatabase(initialized.paths, { attachOnly: true });
-  const config = resolveActiveProviderConfig(providerDb);
-  const status = providerStatus(providerDb);
-  if (!config || !status.configured) throw new Error('Worker process requires an active configured Provider.');
+  let providerDb: ProviderDatabase | null = null;
+  const config = assignedConfig || (() => {
+    providerDb = openProviderDatabase(initialized.paths, { attachOnly: true });
+    return expectedProfileId !== null ? resolveProviderProfileConfig(providerDb, expectedProfileId, initialized.paths) : resolveActiveProviderConfig(providerDb, initialized.paths);
+  })();
+  if (!config || !config.baseUrl || !config.apiKey || !config.model) throw new Error('Worker process requires an assigned configured Provider.');
   const provider = createImageProvider(config);
   const validation = provider.validateConfig(config);
   if (!validation.valid) throw new Error('Worker Provider configuration is invalid.');
@@ -46,7 +87,8 @@ async function main(): Promise<void> {
     assetPersister: new StudioGeneratedAssetPersister({ db, paths: initialized.paths, studioId: initialized.manifest.studioId }),
     assetResolver: new StudioAssetResolver({ db, paths: initialized.paths }),
     manageRetries: false,
-    onProviderOutcome: recordProviderOutcome
+    onProviderOutcome: recordProviderOutcome,
+    retryPolicy: { ...DEFAULT_RETRY_POLICY, ...(config.limits.maxRetryAttempts ? { maxAttempts: config.limits.maxRetryAttempts } : {}) }
   });
   let busy = false;
   let stopping = false;

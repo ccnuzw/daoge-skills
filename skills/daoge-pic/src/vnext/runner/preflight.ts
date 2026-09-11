@@ -1,6 +1,7 @@
-import { ImageOperation, ImageProviderCapabilities, MAX_IMAGE_REQUEST_REFERENCE_ASSETS } from '../providers/contracts';
+import { ImageOperation, ImageProviderCapabilities } from '../providers/contracts';
 import { SafeProviderStatus } from '../studio/provider-config';
 import { resolveOutputSpec } from '../providers/output-spec';
+import { providerDescriptor } from '../providers/descriptors';
 
 export interface PreflightPlan {
   operation: ImageOperation;
@@ -25,7 +26,8 @@ export interface PreflightResult {
 }
 
 function capabilitiesFromStatus(status: SafeProviderStatus): ImageProviderCapabilities | null {
-  if (!status.capabilities) return null;
+  if (!status.capabilities || !status.providerId) return null;
+  const descriptor = providerDescriptor(status.providerId);
   return {
     textToImage: status.capabilities.generate,
     referenceEdit: status.capabilities.referenceImage,
@@ -33,14 +35,36 @@ function capabilitiesFromStatus(status: SafeProviderStatus): ImageProviderCapabi
     cancellation: false,
     reconciliation: false,
     idempotency: false,
-    acceptedReferenceMediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    acceptedReferenceMediaTypes: [...descriptor.reference.acceptedMediaTypes]
   };
 }
 
+export const ITEM_PROMPT_PREFIX = '\n\nSpecific scene direction for this image: ';
+const OPENAI_GPT_IMAGE_PROMPT_CHARS = 32000;
 const MAX_PLAN_PROMPT_CHARS = 64 * 1024;
 const MAX_ITEM_PROMPT_CHARS = 8 * 1024;
 const MAX_PLAN_JSON_BYTES = 256 * 1024;
 const MAX_ASSET_ID_CHARS = 256;
+function maxReferenceAssets(status: SafeProviderStatus): number {
+  return status.providerId && status.capabilities?.referenceImage ? providerDescriptor(status.providerId).reference.maxCount : 0;
+}
+function promptLimitForProvider(status: SafeProviderStatus): number | null {
+  const model = typeof status.model === 'string' ? status.model.trim() : '';
+  if (status.providerId === 'openai-images' && (model.startsWith('gpt-image') || model === 'chatgpt-image-latest')) return OPENAI_GPT_IMAGE_PROMPT_CHARS;
+  return null;
+}
+
+function finalPromptLength(prompt: string, itemPrompt?: string): number {
+  return itemPrompt ? prompt.length + ITEM_PROMPT_PREFIX.length + itemPrompt.length : prompt.length;
+}
+
+function maxFinalPromptLength(prompt: string, itemPrompts?: string[]): number {
+  if (!itemPrompts?.length) return prompt.length;
+  let max = 0;
+  for (const itemPrompt of itemPrompts) max = Math.max(max, finalPromptLength(prompt, itemPrompt));
+  return max;
+}
+
 
 export function preflightGenerationPlan(plan: PreflightPlan | unknown, providerStatus: SafeProviderStatus): PreflightResult {
   const issues: PreflightIssue[] = [];
@@ -80,7 +104,16 @@ export function preflightGenerationPlan(plan: PreflightPlan | unknown, providerS
   if (!providerStatus.configured || !providerStatus.providerId || !capabilities) issues.push({ code: 'provider_not_ready', message: '当前生成配置未完成，无法开始生图。', field: 'provider' });
   if (!Number.isInteger(normalizedPlan.itemCount) || normalizedPlan.itemCount < 1 || normalizedPlan.itemCount > 1000) issues.push({ code: 'invalid_item_count', message: '生成数量必须是 1 到 1000 之间的整数。', field: 'itemCount' });
   if (!normalizedPlan.prompt) issues.push({ code: 'missing_prompt', message: '创作计划缺少可执行的图像描述。', field: 'prompt' });
-  if ((normalizedPlan.referenceAssetIds || []).length > MAX_IMAGE_REQUEST_REFERENCE_ASSETS) issues.push({ code: 'reference_asset_limit_exceeded', message: '参考素材最多支持 ' + MAX_IMAGE_REQUEST_REFERENCE_ASSETS + ' 张。', field: 'referenceAssetIds' });
+  const referenceCount = (normalizedPlan.referenceAssetIds || []).length;
+  const maxReferenceCount = maxReferenceAssets(providerStatus);
+  if (referenceCount > maxReferenceCount) {
+    issues.push(maxReferenceCount === 0
+      ? { code: 'reference_edit_unsupported', message: '当前 Provider 不支持参考素材。', field: 'referenceAssetIds' }
+      : { code: 'reference_asset_limit_exceeded', message: '参考素材最多支持 ' + maxReferenceCount + ' 张。', field: 'referenceAssetIds' });
+  }
+  if (providerStatus.limits?.maxRunItems && normalizedPlan.itemCount > providerStatus.limits.maxRunItems) issues.push({ code: 'provider_item_limit_exceeded', message: '当前 Provider Profile 限制单次最多 ' + providerStatus.limits.maxRunItems + ' 张。', field: 'itemCount' });
+  const providerPromptLimit = promptLimitForProvider(providerStatus);
+  if (providerPromptLimit && maxFinalPromptLength(normalizedPlan.prompt, normalizedPlan.itemPrompts) > providerPromptLimit) issues.push({ code: 'provider_prompt_too_large', message: 'OpenAI GPT Image 单次请求提示词不能超过 ' + providerPromptLimit + ' 字符；请缩短通用提示词或逐图提示词。', field: normalizedPlan.itemPrompts ? 'itemPrompts' : 'prompt' });
   if (providerStatus.providerId && providerStatus.model) {
     const outputSpec = resolveOutputSpec({ providerId: providerStatus.providerId, model: providerStatus.model, output: normalizedPlan.output });
     if (!outputSpec.ok) issues.push({ code: outputSpec.code, message: outputSpec.message, field: outputSpec.field });

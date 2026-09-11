@@ -124,25 +124,29 @@ test('Skill API guidance pins the protocol header and plan/history endpoints', (
   assert.match(commands, /GET \/api\/studio/);
   assert.match(commands, /GET \/api\/sessions\/<session-id>\/plan-status/);
   assert.match(commands, /GET \/api\/rounds\/<round-id>\/runs/);
+  assert.match(commands, /provider-models --workspace <path> --profile <id>/);
   assert.match(commands, /未找到请求的 Studio API/);
   assert.match(commands, /不得[\s\S]*猜测 `\/api\/studio\/\.\.\./);
 });
 
-test('5.11.0 is the stable release contract while earlier releases remain immutable history', () => {
+test('5.12.0 is the stable release while 5.11.0 remains historical', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const currentDocs = `${skill}\n${readme}\n${spec}`;
 
-  assert.equal(packageJson.version, '5.11.0');
-  assert.equal(packageLock.version, '5.11.0');
-  assert.equal(packageLock.packages[''].version, '5.11.0');
+  assert.equal(packageJson.version, '5.12.0');
+  assert.equal(packageLock.version, '5.12.0');
+  assert.equal(packageLock.packages[''].version, '5.12.0');
   for (const document of [skill, readme, evidence]) {
     assert.match(document, /5\.11\.0/);
   }
-  assert.match(`${skill}\n${readme}`, /稳定正式版本[^。\n]{0,120}5\.11\.0/);
+  assert.match(`${skill}\n${readme}`, /稳定正式版本[^。\n]{0,120}5\.12\.0/);
+  assert.match(currentDocs, /当前(?:稳定正式版本|源码与运行时|源码运行时|源码包\/runtime)[^。\n]{0,120}5\.12\.0/);
   assert.doesNotMatch(currentDocs, /5\.11\.0[^。\n]{0,120}(?:待发布|候选)|(?:待发布|候选)[^。\n]{0,120}5\.11\.0/);
   assert.match(readme, /GitHub[^。\n]*资产[^。\n]*不表示[^。\n]*npm registry/);
   assert.match(evidence, /## 1\. daoge-pic 5\.7\.0 已发布历史证据[\s\S]*daoge-pic-5\.7\.0\.tgz[\s\S]*1fb70265f4a0e7e5858be3dec7cf21ad8706c720fede7c1712e74a36678110fe/);
+  const currentReleaseEvidence = markdownSection(evidence, '## 14. daoge-pic 5.12.0 发布验证证据');
+  assert.match(currentReleaseEvidence, /daoge-pic-v5\.12\.0[\s\S]*358 项测试[\s\S]*130 个文件[\s\S]*未调用真实图片 Provider/);
   const historicalEvidence = markdownSection(evidence, '## 7. daoge-pic 5.9.1 发布验证证据');
   assert.match(historicalEvidence, /daoge-pic-v5\.9\.1[\s\S]*GitHub Release[^\n]*\.tgz/);
   const previousReleaseEvidence = markdownSection(evidence, '## 8. daoge-pic 5.10.0 发布验证证据');

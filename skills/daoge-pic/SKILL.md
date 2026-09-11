@@ -1,13 +1,13 @@
 ---
 name: daoge-pic
-description: 会话优先的本地图像创作管理 Skill。把用户需求收敛为可确认的创作计划，启动受控的生成运行，并通过本地 DAOGE Pic Studio Workbench 管理资产、选择、复核和交付。
+description: Agent + 创作者工作台协作的本地图像创作管理 Skill。Agent 收敛需求、计划、确认与受控生成；Studio Workbench 支持项目/任务/轮次、素材、选片、复核和交付的可视操作。
 ---
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0)。本文件定义 5.11.0 的稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
+当前稳定正式版本是 [`5.12.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0)。`5.11.0` 保持为不可变历史发布；不兼容的旧 daemon 不得与本版本混用。本文件定义稳定会话协议：同一稳定工作区共享唯一 daemon 与 Workbench，每个真实 conversation 使用独立 Studio Session，Provider 配置以 `Provider.db` 为唯一运行时事实源。
 
-用户可见沟通使用中文。主入口始终是智能体会话；Workbench 只提供项目、轮次、Generation History（生成历史）、运行、资产和交付的可视管理，不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
+用户可见沟通使用中文。创作理解、计划确认与外部 Provider 调用控制始终以智能体会话为主；Workbench 是面向创作者的人本操作台，可直接创建和管理项目、任务、轮次、素材、Generation History、选片、复核和交付，但不提供第二个聊天界面。不得执行或建议旧 `prepare`、`execute`、`ingest`，不得创建 `task_spec.json`，也不得把旧 `workspace/*.html` 或 `results.html` 当作当前入口。
 
 ## 机器强制执行边界
 
@@ -20,6 +20,8 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 - 默认 worker 池由独立 child process 执行 Provider HTTP、sharp、hash 和媒体持久化；control-plane 负责 API、SSE、SQLite 队列与恢复。生成 worker 与 media worker 按本机并行度自适应，生成运行仍受全局容量保护。
 - 大 JSON 可通过 CLI 的 `--plan @-` 等 stdin 标记传输；每次命令最多一个 `@-`，stdin 仅读取一次且必须是 JSON 对象，最大 8 MiB。`some-agent | node scripts/daoge.js plan ... --plan @-` 是推荐传输方式。`--operation-name <verb:scope>` 由 daemon 派生稳定幂等键；跨进程恢复首选 operation-name，或保存显式 idempotency-key；不提供任一参数时 CLI 生成的随机 key 不具备跨进程恢复语义。
 - Workbench 提供只读“当前会话计划摘要”，显示项目、任务、轮次、确认状态与最近运行；无活动轮次时显示明确空状态。摘要不改变事实源。人工确认是旁侧独立的“确认闸门”，不是只读摘要的一部分。
+- Studio 直接创建项目、任务和轮次，或为草稿轮次选择参考素材时，必须走同一套 Studio API/SQLite 事实源，并可绑定当前 Workbench 标签页 Studio Session；它只建立结构化上下文和草稿，不生成计划确认、不执行预检、不创建 Generation Run。项目模板、任务目标和轮次目的可以给出素材准备清单；Workbench 导入素材时可以保存脱敏的素材需求与默认参考用途，导入到草稿轮次时可写入当前轮次参考素材上下文，但仍不得触发 Provider。
+- Workbench 可基于当前项目或明确共享的图片创建 `variation`、`refinement`、`edit`、`fill` 草稿轮次，自动写入父资产、参考用途、变化维度、保持约束与结构化说明，并绑定当前 Studio Session；该动作仍不得生成计划确认、预检、Generation Run 或 Provider 调用。
 - 人工确认与 consent 只存在 daemon 内存中；daemon 重启或进程更换后必须重新发起确认挑战并再次确认。一次签发的 token 在其有效期内可用于同一绑定预检；具体运行由幂等 key 防重放，并由轮次级唯一运行门禁防止不同预检或不同入口造成重复批次。
 
 ## 执行型启动协议（MUST）
@@ -65,7 +67,7 @@ description: 会话优先的本地图像创作管理 Skill。把用户需求收�
 ## 会话工作法
 
 1. 先完成“执行型启动协议”：Workbench 已打开或已安全复用，Studio Session 与稳定工作区已绑定，项目、任务和轮次上下文已创建或恢复。
-2. 再澄清目标、受众、数量、画幅、风格、限制条件、参考素材与交付用途，并把确认事实写入当前领域上下文。参考素材只能来自当前项目或已明确共享到跨项目素材。
+2. 再澄清目标、受众、数量、画幅、风格、限制条件、参考素材与交付用途，并把确认事实写入当前领域上下文。参考素材和父资产可以由会话指定，也可以由创作者在 Workbench 当前计划页、资产页或大图预览中选择；只能来自当前项目或已明确共享到跨项目素材。
 3. 给出用户可审阅的版本化计划：operation、提示词、数量、输出规格、引用素材、父轮次/父资产与风险。
 4. 未得到用户明确确认前，不得发起任何外部 Provider 调用。
 5. Workbench 完成确认后，先读取当前会话计划摘要和 Generation History。若当前轮次已有运行，必须显式选择并汇报该运行，不得再次预检或入队；没有运行时才执行预检。预检只验证当前配置快照、能力、素材、规格、依赖与运行项计划，不调用 Provider、不计费、不创建正式生成资产。
@@ -105,11 +107,13 @@ Studio 在工作区内维护：
 
 `studio.json` 只记录 Studio 身份、manifest schema 与规范工作区根。已有 manifest 的 `workspaceRoot` 必须与本次请求的规范根严格相同；不匹配时拒绝使用。`studio.db` 是项目、任务、轮次、计划、运行、资产关系、评审和交付的业务事实源；它只保存脱敏 Provider 历史快照，不保存 Profile 或秘密。
 
-完整 Provider 配置只保存在精确路径 `<workspace>/daoge-studio/Provider.db`。这是受本地权限保护的明文敏感 SQLite，不是加密数据库；拒绝符号链接。Unix 使用 `0600`；Windows 必须按当前用户 SID、SYSTEM 与 Administrators 构造完整私有 DACL，并通过系统 .NET `FileSystemSecurity` API 在一个 PowerShell 进程中批量应用和复核，不依赖可冲突的 PowerShell 安全模块。任何 ACL 读取、写入或复核失败都必须拒绝继续，不得先用 `icacls /reset` 暴露继承权限，也不得按可本地化用户名授权。数据库使用 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。
+完整 Provider 配置只保存在精确路径 `<workspace>/daoge-studio/Provider.db`。默认后端是受本地权限保护的明文敏感 SQLite，不是加密数据库；拒绝符号链接。Unix 使用 `0600`；Windows 必须按当前用户 SID、SYSTEM 与 Administrators 构造完整私有 DACL，并通过系统 .NET `FileSystemSecurity` API 在一个 PowerShell 进程中批量应用和复核，不依赖可冲突的 PowerShell 安全模块。任何 ACL 读取、写入或复核失败都必须拒绝继续，不得先用 `icacls /reset` 暴露继承权限，也不得按可本地化用户名授权。数据库使用 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。设置 `DAOGE_PIC_PROVIDER_SECRET_BACKEND=system` 时，macOS 使用 Keychain、Windows 使用当前用户 DPAPI sidecar、Linux 在可用时使用 libsecret；`Provider.db` 仅保存密钥引用和 write-only 摘要，sidecar 目录也必须纳入敏感路径权限强化。
 
-Workbench 提供 Profile 列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试和保存并重启。API Key 与完整 Base URL 是 write-only，更新必须明确 `keep`、`replace` 或 `clear`；GET 只返回安全摘要。页面打开、加载或保存不得自动连接 Provider。
+Provider 能力、官方端点、参考图 / 遮罩能力、远程参考数量、媒体类型和输出规格必须来自版本化 Provider Descriptor；Profile store、API、Workbench、预检和 HTTP adapter 必须消费同一份 Descriptor，并在安全摘要、预检快照、连接测试证据和运行快照中带 `descriptorVersion` / `adapterVersion`。
 
-密钥与完整 Base URL 只在已授权本地写入表单、daemon 和 Worker 内存中短暂出现，绝不能进入 `studio.db`、事件、幂等响应、日志、快照、导出、诊断、打包、聊天或浏览器持久存储。Provider API 携带凭据的请求拒绝重定向。远程图片下载只接受无凭据 HTTP/HTTPS 公网地址并执行既有 SSRF 与大小校验。
+Workbench 提供 Profile 列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试、显式读取模型列表、模型选择、Descriptor 展示、端点信任模式和 Profile 级安全限额。API Key 与完整 Base URL 是 write-only，更新必须明确 `keep`、`replace` 或 `clear`；GET 只返回安全摘要。页面打开、加载或保存不得自动连接 Provider；显式连接测试与模型列表读取只在用户点击时访问 Provider，模型列表只返回受限安全投影，并记录连接测试的可达性、HTTP 状态、Descriptor/adapter 版本和端点策略警告。active Profile 配置修改或切换由 daemon 在无活动旧配置任务时自动热加载；已完成的预检必须重新预检，已有运行继续使用其快照。若 Profile 仍被未完成或可恢复运行引用，修改和删除会被拒绝，避免旧运行失去可恢复的精确配置；删除 active Profile 仍必须显式确认 `force`。
+
+端点信任模式只放宽明确范围：`local_proxy` 允许本机回环，`enterprise_private` 允许 RFC1918/ULA；两者仍拒绝 metadata、链路本地、未指定、组播、保留和文档地址。所有生产凭据请求（生成、编辑、模型列表）都进行 DNS 解析固定和远端地址复核，并拒绝重定向；连接测试对 3xx 记录为不可达，不能把“能访问 Base URL”误报为生成端点可用。
 
 ## 本地访问授权与打开 Workbench
 
@@ -140,13 +144,14 @@ node scripts/daoge.js studio --workspace <path>
 node scripts/daoge.js open --workspace <path> [--force true] [--allow-nested-studio true]
 node scripts/daoge.js provider-list --workspace <path>
 node scripts/daoge.js provider-import-env --workspace <path>
-node scripts/daoge.js provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key-stdin @- [--active true]
-node scripts/daoge.js provider-update --workspace <path> --profile <id> --version <n> --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear> [--api-key-stdin @-]
+node scripts/daoge.js provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key-stdin @- [--endpoint-trust-mode <mode>] [--limits <json>] [--active true]
+node scripts/daoge.js provider-update --workspace <path> --profile <id> --version <n> [--name <name>] [--provider <id>] [--model <model>] --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear> [--api-key-stdin @-] [--endpoint-trust-mode <mode>] [--limits <json>]
 node scripts/daoge.js provider-copy --workspace <path> --profile <id>
 node scripts/daoge.js provider-activate --workspace <path> --profile <id>
-node scripts/daoge.js provider-delete --workspace <path> --profile <id>
+node scripts/daoge.js provider-delete --workspace <path> --profile <id> [--force true]
 node scripts/daoge.js provider-validate --workspace <path> --profile <id>
 node scripts/daoge.js provider-test --workspace <path> --profile <id>
+node scripts/daoge.js provider-models --workspace <path> --profile <id>  # 显式读取模型列表，不生成图片
 node scripts/daoge.js restart --workspace <path>
 node scripts/daoge.js session --workspace <path> --conversation <conversation-id>
 node scripts/daoge.js project --workspace <path> --name "项目名称" [--description <text>] [--session <session-id>]
@@ -179,11 +184,11 @@ node scripts/daoge.js status --workspace <path>
 
 Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接写 Studio 文件、SQLite 或运行状态。
 
-同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.11.0` 是制品/运行时版本，绝不能当作协议版本放入该 header。`GET /api/studio` 是唯一协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History 的运行列表。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝，Skill 必须改用正确端点或受控 CLI，而不是猜测 `/api/studio/...`、旧命令或工作区文件。
+同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.12.0` 是当前稳定发布制品/运行时版本，`5.11.0` 是历史发布；它们都绝不能当作协议版本放入该 header。`GET /api/studio` 是唯一协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History 的运行列表。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝，Skill 必须改用正确端点或受控 CLI，而不是猜测 `/api/studio/...`、旧命令或工作区文件。
 
 ## 幂等命令恢复
 
-所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、稳定运行时 `5.11.0`；不兼容协议由 daemon 拒绝。
+所有 POST / PUT mutation 可追加 `--operation-name <verb:scope>`，由 daemon 派生稳定幂等键；需要跨进程精确恢复时仍可使用 `--idempotency-key <stable-key>`，两者互斥。大计划使用 `--plan @-` 从 stdin 读取 JSON。协议与制品版本独立，当前协议 `2.0.0`、稳定发布运行时 `5.12.0`（`5.11.0` 为历史发布）；不兼容协议或运行时由 daemon 拒绝。
 
 ## 运行恢复与媒体边界
 
@@ -192,10 +197,10 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 - daemon 重启时，未安全完成的运行进入 `resume_pending`；再次外部调用前必须在会话中得到用户确认，并以 `resume --session <session-id>` 记录。Workbench 只能显示等待状态，不能绕过会话继续。
 - `retry` 只允许 `failed`、`blocked` 或 `retry_wait`；可用 `--items` 做单项重试。`outcome_unknown` 不可直接重试。
 - `archive-project` 会拒绝仍有未完成生成的项目，再以事务方式归档项目、任务和轮次。
-- daemon 启动时固定 active Profile 的 `profileId + configVersion`、Provider、模型和端点身份。活动 Profile、模型、端点、密钥、options 或 configVersion 变化后标记 `restartRequired`；重启前拒绝新运行，已有运行不静默切换。Worker 只领取与启动快照 `profileId + configVersion` 匹配的运行。
-- 并发只属于 Generation Run：持久队列的全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Provider 活跃请求安全目标上限为 `100`，daemon 通过自适应 Governor 按成功率、429、临时故障和 Worker RSS/外部内存样本动态升降；目标初始为 `16`，异常时退避，健康时逐步升至 `100`。大响应优先流式写入临时文件，只有不超过 `1 MiB` 的 Provider 图片结果保留为内存 Buffer。
+daemon 启动时记录 active Profile 的 `profileId + configVersion`、Provider、模型和端点身份。活动 Profile、模型、端点、密钥、options、端点信任模式或 Profile 级限额变化后由 daemon 安全热加载：存在旧配置未完成运行项时先排空旧 Worker，之后启动匹配新配置的 Worker；已有运行不静默切换，新预检和新运行使用新配置。Worker 只领取与其配置 `profileId + configVersion` 匹配的运行。
+- 并发只属于 Generation Run：持久队列的全局硬上限固定 `1000`，不可配置；预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`，超出拒绝且不截断。Profile 级 `maxRunItems`、`maxExecutionConcurrency`、`requestTimeoutMs` 与 `maxRetryAttempts` 只能收紧数量、并发、超时和自动重试上限，不能超过全局硬边界。预检冻结非空 `executionConcurrency` 与解释用 `concurrencySource`，并发变化必须重新预检；`run` 只能采用绑定证据，队列时不能另改。Provider 活跃请求安全目标上限为 `100`，daemon 通过自适应 Governor 按成功率、429、临时故障和 Worker RSS/外部内存样本动态升降；目标初始为 `16`，异常时退避，健康时逐步升至 `100`。大响应优先流式写入临时文件，只有不超过 `1 MiB` 的 Provider 图片结果保留为内存 Buffer。
 - daemon owner 负责工作区创建、数据库迁移与敏感路径权限强化；Windows 将当前批次中的敏感目录、manifest、SQLite 及 sidecar 在一个 PowerShell 进程中设置并复核 DACL，ACL 最长等待 10 秒。Generation/media Worker 只附加已完成初始化的 manifest 与数据库，不写 `.gitignore`、不迁移 schema、不修改 ACL。Worker 池按需求从零启动，generation pool 在持续满载时逐个扩容；两类池都公开脱敏健康状态、job watchdog、稳定窗口、有界重启和最终熔断，调用不得永久等待。
-- Schema v25 保留历史业务数据，补齐媒体操作 owner/heartbeat、运行项 lease worker、资产媒体健康状态、运行/预检/事件与媒体恢复索引、Workbench 创作谱系布局表、人工软连线、资料节点布局，以及完整性校验。Studio DB 强制 WAL 与 `synchronous=FULL`。
+- Schema v26 保留历史业务数据，补齐媒体操作 owner/heartbeat、运行项 lease worker、资产媒体健康状态、运行/预检/事件与媒体恢复索引、Workbench 创作谱系布局表、人工软连线、资料节点布局、项目模板标识与完整性校验。Studio DB 强制 WAL 与 `synchronous=FULL`。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。活动 journal 由 owner heartbeat 保护，恢复只处理过期遗留项；同哈希竞争收敛到唯一资产，交付同一冻结目录的并发导出收敛到同一结果。
 - 缺失媒体持久标记为不可用，不得作为参考图、遮罩或交付候选；对账确认恢复后才重新可用。过期 staging `.part` 文件只在不属于活动 journal 时清理。
 - 参考图和遮罩只能引用当前项目资产，或具备当前 Studio 明确 `shared_across_projects` 关系的共享素材；计划写入、确认、预检、排队和 Worker 读取前都必须重复校验。其他项目未共享素材不得因同属 Studio 而被引用。
@@ -203,19 +208,25 @@ Skill 只能使用这些受控 Studio 命令或同源 Studio API；不得直接�
 
 ## Generation History 与交付
 
-Generation History 必须按当前轮次列出全部持久 Generation Run，并要求用户或 Skill 显式选择运行。不得把活跃运行、最新运行或当前浏览器缓存静默当作已选择历史。选择后只显示该运行的计划版本、时间、短 ID、状态、运行项和结果资产；历史项不因刷新、SSE 重连或切换路由而改写。
+Generation History 必须按当前轮次列出全部持久 Generation Run，并要求用户或 Skill 显式选择运行。不得把活跃运行、最新运行或当前浏览器缓存静默当作已选择历史。选择后只显示该运行的计划版本、时间、短 ID、状态、运行项和结果资产；历史详情里的提示词可显示截断安全摘要，但复制提示词必须回读对应计划版本的完整提示词，计划含逐图提示词时必须复制每张图实际发送给 Provider 的完整提示词，不能复制摘要截断文本；技术详情中的预检证据必须结构化展示关键字段，原始摘要只作为折叠排障信息；历史项不因刷新、SSE 重连或切换路由而改写。
+
+当前计划页必须服务于确认前审阅：在计划摘要之外结构化展示通用提示词、逐图提示词数量、最长单图最终提示词长度、参考素材、输出规格，以及每张图实际发送给 Provider 的最终提示词。计划含逐图提示词时，用户必须能在确认前展开查看每张图的完整最终提示词，并能复制通用提示词、全部逐图最终提示词和结构化计划 JSON；原始计划信息保留短字段网格、参考素材表和折叠完整 JSON，不再重复渲染提示词专区。
 
 项目当前选片是 SQLite 业务关系。交付权威状态为 `draft -> ready -> exported`；准备时冻结资产来源与评审，导出时建立冻结图片实体。源资产后续进入回收站，不得破坏已导出的交付下载、复制或 ZIP。
 
-项目资产页使用服务端分页，默认每页 `24` 张，可选择 `16`、`24`、`32`、`48`、`64`、`96`。筛选与分页总数必须由当前 Studio、项目/任务/轮次范围和资产类型共同计算；“全选本页”只作用于当前页可见资产，并保持成果选择和 `keep` 评审语义一致。资产导入支持一次选择、拖入或粘贴多张图片，并逐张持久化、汇总成功与失败。交付图片提供明确的全选/取消全选。项目和任务列表提供搜索、状态筛选与分页，避免大列表无限延伸。
+项目资产页使用服务端分页，默认每页 `24` 张，可选择 `16`、`24`、`32`、`48`、`64`、`96`。筛选与分页总数必须由当前 Studio、项目/任务/轮次范围和资产类型共同计算；“全选本页”只作用于当前页可见资产，并保持成果选择和 `keep` 评审语义一致。资产导入支持一次选择、拖入或粘贴多张图片，并逐张持久化、汇总成功与失败。当前计划页的参考素材选择器只可在草稿轮次中写入结构化上下文，素材来源限定为当前项目资产或明确共享素材。交付图片提供明确的全选/取消全选。项目和任务列表提供搜索、状态筛选与分页，避免大列表无限延伸。
 
-图片放大预览必须可直接切换成果选择，选择状态仍写入项目业务关系并保持 `keep` 评审语义。当前选片缩略条的移除按钮不得占据或遮挡标题内容。项目资产 ZIP 使用“项目名 + 项目资产 + 时间”，已导出交付 ZIP 使用“项目名 + 交付名 + 交付图片 + 时间”；HTTP 响应同时提供 UTF-8 文件名和稳定 ASCII 回退名。
+图片放大预览、资产卡片、当前选片和创作谱系检查器必须提供统一但轻量的创作者常用动作入口：第一层只暴露“选为成果 / 用这张继续 / 作为参考 / 获取图片”等用户意图，保留、待复核和可衍生不得作为并列的一层标记按钮。“用这张继续”可展开创建“更多类似”“更精致”“换背景/局部修改”“扩图/改画幅”草稿轮次；“作为参考”可展开主体、风格、构图或反例参考。结构化“不采用”反馈可只保存评审、加入当前草稿作为反例，或创建带 `feedbackToNextRound`、反例参考、修正目标和保持约束的下一轮草稿。多图继续创作必须提供用途编排模板和逐图用途微调，至少覆盖主图 + 风格 + 构图、多主体融合、主体 + 反例对照、局部编辑遮罩和补图构图等常见关系，并把动作 ID、动作标签、主参考图、用途统计、遮罩/反例/品牌/色彩等结构化说明写入草稿计划。局部编辑的轻量遮罩准备区允许把已有图片设为遮罩，或导入、拖入、粘贴黑白 / 透明遮罩图；遮罩只作为受控项目资产和 `maskAssetId` 写入草稿，不能作为主体父资产。Workbench 不提供浏览器内画笔或像素编辑器，生成前仍由预检校验遮罩媒体与 Provider 能力；所有这些操作只写入 Studio 业务关系和草稿上下文，不绕过 Agent 计划确认。
+
+Workbench 顶部只保留当前项目/任务/轮次上下文、导航和健康状态，不再增加额外动作推荐卡片。谱系页应把模式选择、统计和空选提示收敛为轻量控制；图片节点缺少草稿轮次时必须自动使用唯一草稿轮次，或提示选择/新建草稿轮次并加入参考素材，不能只给死胡同错误。
+
+项目资产 ZIP 使用“项目名 + 项目资产 + 时间”，已导出交付 ZIP 使用“项目名 + 交付名 + 交付图片 + 时间”；HTTP 响应同时提供 UTF-8 文件名和稳定 ASCII 回退名。
 
 Workbench 的普通“完成交付”通过内部 `/api/deliveries/complete` API 依次执行 `draft`、`prepare`、`export`，每阶段使用同一 operation identity 幂等恢复；失败保留已提交阶段。该 API 是 Workbench 内部主流程，不得伪装成公开 `delivery-complete` CLI 命令。高级 CLI 使用 `delivery*` 与 `delivery-batch*` 命令操作同一权威状态机。
 
 ## Workbench 边界与可访问性
 
-Workbench 可用于：项目/任务/轮次导航、创作谱系画布、Generation History、SSE 实时状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。创作谱系只保存节点位置、视口、筛选和分组等布局状态，项目/任务/轮次/运行/资产/交付事实仍以 Studio API/SQLite 为准。参考图选择只显示当前项目资产与明确共享素材。
+Workbench 可用于：项目/任务/轮次导航与直接创建、创作谱系画布、Generation History、SSE 实时状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。创作谱系只保存节点位置、视口、筛选和分组等布局状态，项目/任务/轮次/运行/资产/交付事实仍以 Studio API/SQLite 为准。参考图选择只显示当前项目资产与明确共享素材。
 
 Workbench 顶部必须持续显示 daemon 与 Worker 池的脱敏健康状态。受控重启依次呈现“正在安全关闭”“正在重连”“已恢复”；重连后先刷新权威快照。池连续恢复失败时可执行授权的安全重启，并可复制不含 Provider 密钥、完整 URL、capability 或工作区路径的诊断摘要。
 
@@ -223,7 +234,7 @@ Workbench 必须在 SSE cursor 失效或本地事件批次溢出时先完成快�
 
 Workbench 的模态图片查看必须具备 `role="dialog"`、`aria-modal`、初始焦点、Tab/Shift+Tab 焦点约束、Escape 关闭和关闭后焦点返回；搜索需要组合框/列表框键盘语义，错误与状态需要 live region，所有主要交互保留可见焦点。
 
-Workbench 不可用于：自然语言对话、绕过会话确认、展示 Provider 密钥、直接指定任意绝对路径、匿名访问、跨 Studio 访问，或把浏览器状态、文件夹和 SSE 当业务事实。
+Workbench 不可用于：自然语言对话、绕过会话确认、一键触发 Provider 生成、展示 Provider 密钥、直接指定任意绝对路径、匿名访问、跨 Studio 访问，或把浏览器状态、文件夹和 SSE 当业务事实。
 
 ## 回答规范
 

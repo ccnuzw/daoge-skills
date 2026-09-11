@@ -186,6 +186,7 @@ export function hardenStudioAccess(paths: StudioPaths, dependencies: SensitiveAc
     [paths.databasePath + '-shm', false],
     [paths.providerDatabasePath, false],
     [paths.providerEnvPath, false],
+    [path.join(paths.studioDir, 'provider-secrets'), true],
     [paths.daemonLockDatabasePath, false],
     [paths.daemonLockDatabasePath + '-journal', false],
     [paths.daemonOwnerRecordPath, false]

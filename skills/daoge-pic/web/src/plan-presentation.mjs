@@ -2,6 +2,10 @@ export const ROUND_PURPOSE_LABELS = { exploration: '探索', refinement: '优化
 
 function asRecord(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
 function asArray(value) { return Array.isArray(value) ? value.filter((item) => typeof item === 'string' && item) : []; }
+function asMaterialAssetIds(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => text(asRecord(item).assetId)).filter(Boolean);
+}
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 function specification(value) {
   if (typeof value === 'string' && value.trim()) return value.trim();
@@ -20,12 +24,13 @@ export function planPresentation(plan) {
   const value = asRecord(plan);
   const output = asRecord(value.output);
   const prompt = text(value.prompt);
-  const referenceAssetIds = asArray(value.referenceAssetIds);
+  const referenceAssetIds = [...new Set([...asArray(value.referenceAssetIds), ...asMaterialAssetIds(value.referenceMaterials), text(value.maskAssetId)].filter(Boolean))];
   const operation = value.operation === 'edit' ? '编辑' : '生成';
   const aspectRatio = text(output.aspectRatio) || '未设置';
   const resolution = specification(output.resolution);
   const size = specification(output.size);
   const dimensions = specification(output.dimensions);
+  const quality = specification(output.quality);
   return {
     operation,
     prompt: prompt || '此版本尚未填写可执行提示词。',
@@ -35,7 +40,8 @@ export function planPresentation(plan) {
     resolution,
     size,
     dimensions,
-    output: [aspectRatio, resolution, size, dimensions].filter((item) => item !== '未设置').join(' · ') || '由 Provider 能力决定',
+    quality,
+    output: [aspectRatio, resolution, size, dimensions, quality].filter((item) => item !== '未设置').join(' · ') || '由 Provider 能力决定',
     constraintCount: prompt ? prompt.split('.').map((item) => item.trim()).filter(Boolean).length : 0
   };
 }
@@ -51,6 +57,7 @@ export function planDiff(leftPlan, rightPlan) {
     ['分辨率', left.resolution, right.resolution],
     ['输出尺寸', left.size, right.size],
     ['像素尺寸', left.dimensions, right.dimensions],
+    ['质量', left.quality, right.quality],
     ['参考素材', left.references.join('、') || '无', right.references.join('、') || '无']
   ];
   return fields.filter(([, before, after]) => before !== after).map(([label, before, after]) => ({ label, before, after }));

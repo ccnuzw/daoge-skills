@@ -16,7 +16,7 @@ export interface PinnedHttpResponse {
   remoteAddress: string;
 }
 
-export type PinnedHttpTransport = (url: URL, addresses: readonly string[], init: { signal: AbortSignal; headers: Readonly<Record<string, string>> }) => Promise<PinnedHttpResponse>;
+export type PinnedHttpTransport = (url: URL, addresses: readonly string[], init: { signal: AbortSignal; headers: Readonly<Record<string, string>>; method?: string; body?: Uint8Array | string }) => Promise<PinnedHttpResponse>;
 
 export interface SafeDownloadOptions {
   signal: AbortSignal;
@@ -131,7 +131,7 @@ export async function readResponseToFile(response: Response, destination: string
 }
 
 
-type JsonImageCapture = 'base64' | 'url' | 'mediaType' | 'revisedPrompt';
+type JsonImageCapture = 'base64' | 'url' | 'mediaType' | 'revisedPrompt' | 'responseModel' | 'usage';
 
 export interface JsonImageFileResponse {
   filePath?: string;
@@ -139,6 +139,8 @@ export interface JsonImageFileResponse {
   url?: string;
   mediaType?: string;
   revisedPrompt?: string;
+  responseModel?: string;
+  usage?: Record<string, unknown>;
 }
 
 function jsonCaptureForKey(value: string): JsonImageCapture | null {
@@ -147,6 +149,8 @@ function jsonCaptureForKey(value: string): JsonImageCapture | null {
   if (key === 'url') return 'url';
   if (key === 'mimeType' || key === 'mime_type' || key === 'mediaType') return 'mediaType';
   if (key === 'revised_prompt' || key === 'revisedPrompt') return 'revisedPrompt';
+  if (key === 'model') return 'responseModel';
+  if (key === 'usage') return 'usage';
   return null;
 }
 
@@ -234,6 +238,9 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
   let url: string | undefined;
   let mediaType: string | undefined;
   let revisedPrompt: string | undefined;
+  let responseModel: string | undefined;
+  let usage: Record<string, unknown> | undefined;
+  let activeJsonCapture: { text: string; depth: number; inString: boolean; escaped: boolean } | null = null;
   const flushBase64 = async (): Promise<void> => {
     if (!base64Writer || !base64Chunk) return;
     await base64Writer.append(base64Chunk);
@@ -241,6 +248,26 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
   };
   const consume = async (text: string): Promise<void> => {
     for (const character of text) {
+      if (activeJsonCapture) {
+        if (activeJsonCapture.text.length < 8192) activeJsonCapture.text += character;
+        if (activeJsonCapture.inString) {
+          if (activeJsonCapture.escaped) activeJsonCapture.escaped = false;
+          else if (character === '\\') activeJsonCapture.escaped = true;
+          else if (character === '"') activeJsonCapture.inString = false;
+        } else if (character === '"') activeJsonCapture.inString = true;
+        else if (character === '{' || character === '[') activeJsonCapture.depth += 1;
+        else if (character === '}' || character === ']') {
+          activeJsonCapture.depth -= 1;
+          if (!activeJsonCapture.depth) {
+            try {
+              const parsed = JSON.parse(activeJsonCapture.text) as unknown;
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) usage = parsed as Record<string, unknown>;
+            } catch { /* ignore malformed optional metadata */ }
+            activeJsonCapture = null;
+          }
+        }
+        continue;
+      }
       if (inString) {
         if (escaped) {
           escaped = false;
@@ -261,6 +288,7 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
           } else if (activeCapture === 'url' && !url) url = current;
           else if (activeCapture === 'mediaType' && !mediaType) mediaType = current;
           else if (activeCapture === 'revisedPrompt' && !revisedPrompt) revisedPrompt = current;
+          else if (activeCapture === 'responseModel' && !responseModel) responseModel = current;
           else pendingString = current;
           activeCapture = null;
           current = '';
@@ -278,7 +306,7 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
         inString = true;
         current = '';
         const capture = expectingValue ? nextCapture : null;
-        activeCapture = capture === 'base64' && base64Writer ? null : capture;
+        activeCapture = capture === 'base64' && base64Writer ? null : capture === 'usage' ? null : capture;
         if (activeCapture === 'base64') base64Writer = new Base64FileWriter(handle, maxDecodedBytes);
         expectingValue = false;
         continue;
@@ -287,6 +315,13 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
       if (character === ':' && pendingString !== null) {
         expectingValue = true;
         nextCapture = jsonCaptureForKey(pendingString);
+        pendingString = null;
+        continue;
+      }
+      if (expectingValue && nextCapture === 'usage' && character === '{') {
+        activeJsonCapture = { text: '{', depth: 1, inString: false, escaped: false };
+        expectingValue = false;
+        nextCapture = null;
         pendingString = null;
         continue;
       }
@@ -309,16 +344,16 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
       await consume(decoder.decode(result.value, { stream: true }));
     }
     await consume(decoder.decode());
-    if (inString || escaped) throw new Error('Provider response JSON was incomplete.');
+    if (inString || escaped || activeJsonCapture) throw new Error('Provider response JSON was incomplete.');
     await flushBase64();
     const completedWriter = base64Writer as Base64FileWriter | null;
     if (completedWriter) await completedWriter.finish();
     await handle.sync();
     await handle.close();
     reader.releaseLock();
-    if (base64Found && completedWriter) return { filePath: destination, byteSize: completedWriter.byteSize, mediaType, revisedPrompt };
+    if (base64Found && completedWriter) return { filePath: destination, byteSize: completedWriter.byteSize, mediaType, revisedPrompt, responseModel, usage };
     await fsp.rm(destination, { force: true });
-    return { url, mediaType, revisedPrompt };
+    return { url, mediaType, revisedPrompt, responseModel, usage };
   } catch (error) {
     reader.releaseLock();
     await handle.close().catch(() => undefined);
@@ -425,6 +460,39 @@ function assertPublicAddress(address: string): void {
   throw new Error('Provider image host resolution returned an invalid address.');
 }
 
+export type PrivateAddressPolicy = 'local_proxy' | 'enterprise_private';
+
+function isLoopbackIpv4(bytes: readonly number[]): boolean { return bytes[0] === 127; }
+function isPrivateIpv4(bytes: readonly number[]): boolean {
+  return bytes[0] === 10 || (bytes[0] === 172 && bytes[1] >= 16 && bytes[1] <= 31) || (bytes[0] === 192 && bytes[1] === 168);
+}
+function isLoopbackIpv6(bytes: readonly number[]): boolean { return bytes.slice(0, 15).every((value) => value === 0) && bytes[15] === 1; }
+function isPrivateIpv6(bytes: readonly number[]): boolean { return (bytes[0] & 0xfe) === 0xfc; }
+
+function assertAllowedAddress(address: string, policy: PrivateAddressPolicy | null): void {
+  if (!policy) {
+    assertPublicAddress(address);
+    return;
+  }
+  if (address.includes('%')) throw new Error('Provider endpoint resolved to a non-public address.');
+  const ipv4 = ipv4Bytes(address);
+  if (ipv4) {
+    if (!isForbiddenIpv4(ipv4)) return;
+    if (policy === 'local_proxy' && isLoopbackIpv4(ipv4)) return;
+    if (policy === 'enterprise_private' && isPrivateIpv4(ipv4)) return;
+    throw new Error('Provider endpoint resolved to a forbidden private or reserved address.');
+  }
+  const ipv6 = ipv6Bytes(address);
+  if (ipv6) {
+    if (!isForbiddenIpv6(ipv6)) return;
+    if (policy === 'local_proxy' && isLoopbackIpv6(ipv6)) return;
+    if (policy === 'enterprise_private' && isPrivateIpv6(ipv6)) return;
+    throw new Error('Provider endpoint resolved to a forbidden private or reserved address.');
+  }
+  throw new Error('Provider endpoint resolution returned an invalid address.');
+}
+
+
 function hostnameWithoutBrackets(hostname: string): string {
   return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
 }
@@ -442,7 +510,7 @@ function sameAddress(left: string, right: string): boolean {
 
 interface SafeUrlTarget { url: URL; addresses: readonly string[]; }
 
-async function assertSafeUrl(value: string, resolver: HostResolver, signal: AbortSignal): Promise<SafeUrlTarget> {
+async function assertSafeUrl(value: string, resolver: HostResolver, signal: AbortSignal, privateAddressPolicy: PrivateAddressPolicy | null = null): Promise<SafeUrlTarget> {
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -455,7 +523,7 @@ async function assertSafeUrl(value: string, resolver: HostResolver, signal: Abor
   const hostname = hostnameWithoutBrackets(parsed.hostname);
   if (!hostname) throw new Error('Provider image URL requires a host.');
   if (isIP(hostname)) {
-    assertPublicAddress(hostname);
+    assertAllowedAddress(hostname, privateAddressPolicy);
     return { url: parsed, addresses: [hostname] };
   }
 
@@ -472,7 +540,7 @@ async function assertSafeUrl(value: string, resolver: HostResolver, signal: Abor
     throw new Error('Provider image host DNS resolution failed.');
   }
   if (!addresses.length) throw new Error('Provider image host DNS resolution returned no addresses.');
-  for (const address of addresses) assertPublicAddress(address);
+  for (const address of addresses) assertAllowedAddress(address, privateAddressPolicy);
   return { url: parsed, addresses: [...new Set(addresses)] };
 }
 
@@ -486,12 +554,13 @@ export const pinnedHttpTransport: PinnedHttpTransport = async (url, addresses, i
     else callback(null, pinned[0].address, pinned[0].family);
   };
   const request = (url.protocol === 'https:' ? https : http).request(url, {
-    method: 'GET',
+    method: init.method || 'GET',
     headers: init.headers,
     signal: init.signal,
     lookup: lookupPinned,
     ...(url.protocol === 'https:' ? { servername: hostnameWithoutBrackets(url.hostname) } : {})
   });
+  if (init.body !== undefined) request.write(init.body);
   request.end();
   const [incoming] = await once(request, 'response', { signal: init.signal }) as [IncomingMessage];
   const headers = new Headers();
@@ -503,6 +572,40 @@ export const pinnedHttpTransport: PinnedHttpTransport = async (url, addresses, i
   const body = Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
   return { response: new Response(body, { status: incoming.statusCode || 500, statusText: incoming.statusMessage, headers }), remoteAddress };
 };
+
+export interface PinnedEndpointRequestOptions {
+  signal: AbortSignal;
+  headers: Readonly<Record<string, string>>;
+  method?: string;
+  body?: Uint8Array | string;
+  allowPrivate?: boolean;
+  privateAddressPolicy?: PrivateAddressPolicy;
+  request?: PinnedHttpTransport;
+  resolveHost?: HostResolver;
+}
+
+export async function requestPinnedHttpEndpoint(value: string, options: PinnedEndpointRequestOptions): Promise<PinnedHttpResponse> {
+  const request = options.request || pinnedHttpTransport;
+  const resolver = options.resolveHost || defaultHostResolver;
+  const privateAddressPolicy = options.privateAddressPolicy || (options.allowPrivate === true ? 'enterprise_private' : null);
+  const target = await assertSafeUrl(value, resolver, options.signal, privateAddressPolicy);
+  let result: PinnedHttpResponse;
+  try {
+    result = await request(target.url, target.addresses, { headers: options.headers, signal: options.signal, method: options.method, body: options.body });
+  } catch (error) {
+    if (options.signal.aborted) throw error;
+    throw new Error('Provider endpoint request failed.');
+  }
+  try {
+    assertAllowedAddress(hostnameWithoutBrackets(result.remoteAddress), privateAddressPolicy);
+    if (!target.addresses.some((address) => sameAddress(address, result.remoteAddress))) throw new Error('Provider connection remote address did not match the pinned DNS result.');
+    return result;
+  } catch (error) {
+    await cancelBody(result.response);
+    throw error;
+  }
+}
+
 
 function redirectLocation(response: Response): string | null {
   return response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
@@ -602,14 +705,15 @@ export async function downloadHttpResourceToFile(value: string, destination: str
     return { filePath: destination, byteSize, contentType: response.headers.get('content-type') };
   }
 }
-export async function probeHttpEndpoint(value: string, headers: Readonly<Record<string, string>>, signal: AbortSignal): Promise<{ reachable: boolean; status: number }> {
-  const target = await assertSafeUrl(value, defaultHostResolver, signal);
+export async function probeHttpEndpoint(value: string, headers: Readonly<Record<string, string>>, signal: AbortSignal, allowPrivate = false, privateAddressPolicy?: PrivateAddressPolicy): Promise<{ reachable: boolean; status: number }> {
+  const policy = privateAddressPolicy || (allowPrivate ? 'enterprise_private' : null);
+  const target = await assertSafeUrl(value, defaultHostResolver, signal, policy);
   const result = await pinnedHttpTransport(target.url, target.addresses, { headers, signal });
   try {
-    assertPublicAddress(hostnameWithoutBrackets(result.remoteAddress));
+    assertAllowedAddress(hostnameWithoutBrackets(result.remoteAddress), policy);
     if (!target.addresses.some((address) => sameAddress(address, result.remoteAddress))) throw new Error('Provider connection remote address did not match the pinned DNS result.');
     const status = result.response.status;
-    return { reachable: status !== 401 && status !== 403 && status < 500, status };
+    return { reachable: !(status >= 300 && status < 400) && status !== 401 && status !== 403 && status < 500, status };
   } finally {
     await cancelBody(result.response);
   }

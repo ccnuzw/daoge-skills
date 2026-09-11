@@ -1,12 +1,12 @@
 # DAOGE Pic vNext 升级规格
 
-文档类别：vNext 长期权威产品与架构规格。当前稳定正式版本为 [`5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0)；实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
+文档类别：vNext 长期权威产品与架构规格。当前稳定正式版本为 [`5.12.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0)；`5.11.0` 为不可变历史发布。实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
 
 ## 1. 定位与结论
 
-DAOGE Pic vNext 是一个由 Skill 驱动的、本地优先的图像创作管理平台。
+DAOGE Pic vNext 是一个由 Agent 与本地 Studio Workbench 协作的、本地优先的图像创作管理平台。
 
-智能体会话是创作的主要入口。用户在会话中表达需求、讨论创作方向、确认任务与轮次，并发起生成。创作管理 Workbench 是自动启动的本地辅助界面，用于项目、任务、轮次、资产、生成过程、选片、批注与交付的可视化管理。
+智能体会话负责理解自然语言需求、讨论创作方向、生成可确认计划、控制外部 Provider 调用和处理风险恢复。创作管理 Workbench 是自动启动的本地创作者操作台，用于项目、任务、轮次、资产、生成过程、选片、批注与交付的可视化管理，并允许创作者用表单、模板和选项直接创建结构化项目/任务/轮次上下文。两者是双入口、单工作流：创建入口可以不同，事实源、当前上下文和受控生成流程必须统一。
 
 vNext 不是旧工作流的兼容升级。它必须完全替换旧任务格式、旧目录结构、旧 JSON 状态、静态 workspace 页面和文件扫描同步流程。现有代码、模板内容与 Provider 适配经验只能作为能力参考，不能形成新的兼容约束。
 
@@ -15,13 +15,13 @@ vNext 不是旧工作流的兼容升级。它必须完全替换旧任务格式�
 | 主题 | 已确认规则 |
 | --- | --- |
 | 核心用户 | 单个创作者与小型创作工作室。 |
-| 主要入口 | 智能体会话。用户不必先打开 Workbench、填写 JSON 或执行 CLI。 |
-| Workbench 定位 | 本地可视化管理、决策与提示空间，不是第二个聊天产品。 |
+| 主要入口 | 双入口、单工作流：智能体会话负责自然语言创作入口；Workbench 提供符合创作者操作习惯的结构化项目/任务/轮次创建与管理入口。用户不必先打开 Workbench、填写 JSON 或执行 CLI。 |
+| Workbench 定位 | 本地创作者操作台，负责可视化管理、选项化输入、决策与提示空间，不是第二个聊天产品。 |
 | 创作媒介 | 第一版完整支持图片生成、编辑与管理；领域模型为未来视频、音频与设计文件预留扩展。 |
 | 数据事实源 | Studio 数据库是唯一业务事实源。目录、缓存、页面和事件都不是事实源。 |
 | 项目层级 | 一个 Studio 包含多个项目；一个项目包含多个创作任务；一个任务可以包含无限个创作轮次。 |
 | Provider 适配 | 保留插件架构和已验证的 OpenAI Images、Gemini 原生、Gemini OpenAI-compatible、xAI/Grok 四类接入。 |
-| Provider Profile | Provider.db 可保存多个 Profile，第一阶段至多一个 active；daemon 启动时固定 active Profile 的配置快照，切换后必须 restart。 |
+| Provider Profile | Provider.db 可保存多个 Profile，第一阶段至多一个 active；daemon 启动和热加载都固定 active Profile 的配置快照，切换或配置修改由 daemon 在旧配置任务排空后安全热加载。 |
 | 复用 | 第一版提供创作任务类型、用户任务类型、风格套件和品牌套件；从成功任务沉淀为可复用方案属于后续能力。 |
 | 评审与交付 | 创作者自行选片、批注、衍生与导出；第一版不提供客户或团队在线协作。 |
 | 外部资产 | 保留通用图片导入，作为新资产导入能力，不兼容旧 host-native 结果格式。 |
@@ -88,16 +88,19 @@ Skill 必须先分类触发：
 
 Workbench 必须支持：
 
-- 查看当前会话关联的项目、任务和轮次。
+- 查看并直接创建当前 Studio 中的项目、任务和轮次，优先使用模板、选项、默认值、字段提示和可点击示例减少创作者输入；创建后直接进入当前上下文，不显示额外的创建完成提示或推荐下一步卡片；项目模板必须能影响后续新建任务表单的推荐顺序、默认任务名、目标数量、画幅、首轮目的、素材需求、必补信息、变化维度、精修目标和保持约束；无法枚举的自定义字段必须明确说明应填写的输入素材、限制条件、使用渠道和交付用途。
+- 管理当前 Workbench 标签页关联的项目、任务和轮次上下文；所有事实写入同一 Studio API/SQLite 事实源。
+- 顶部只保留上下文、导航与健康状态，不再额外占用首屏展示动作推荐卡片；可点动作必须出现在用户当前选择的局部位置，且不得绕过 Agent 计划确认、预检、Generation Run 唯一门禁或 Provider 调用边界。
+- 在草稿轮次中选择参考素材并标注用途，例如主体、风格、构图、色彩、品牌、遮罩或反例；选择结果只作为结构化上下文，供 Agent 形成可确认计划；从图片节点加入参考时，如果当前没有草稿轮次，必须自动使用唯一草稿轮次，或让用户选择/新建草稿轮次后直接加入。
 - 拖放、文件选择与剪贴板导入图片素材。
 - 查看实时进度、新结果、异常和恢复状态。
 - 查看图片、放大、对比、筛选、选择、批注与衍生。
-- 在创作谱系画布中拖拽节点、持久化视口/布局/分组、添加人工计划软连线，并把任务类型、风格包和品牌包作为只读资料节点拖入计划上下文。
+- 在创作谱系项目工作区中显示当前会话上下文、Provider 边界提示、工作模式切换和精简创作统计；画布可拖拽节点、持久化视口/布局/分组、添加人工计划软连线，并把任务类型、风格包和品牌包作为只读资料节点拖入计划上下文。
 - 暂停、继续、取消、重试单项或整轮生成。
 - 管理项目、归档、软删除、资产复用和导出。
 - 管理 Provider Profiles，并只查看 write-only 密钥与完整 Base URL 的安全摘要。
 
-Workbench 不提供独立聊天入口。项目意图、任务起草和生成确认以智能体会话为主。Workbench 只提供视觉操作、精细管理和受控运行操作。
+Workbench 不提供独立聊天入口。Studio 直接创建只建立结构化上下文或草稿计划，不触发确认挑战、预检、Generation Run 或 Provider 调用；项目意图深化、创作计划起草、生成确认、恢复不确定结果仍以智能体会话为主。Workbench 只提供视觉操作、精细管理和受控运行操作。
 
 ### 4.4 对话事实保存规则
 
@@ -146,11 +149,13 @@ Open-claim API 不是匿名端点：必须复用 Bearer/Cookie、Host、Origin �
 
 Creative Round 必须支持首次探索、优化调整、扩展变体、局部编辑和补图。
 
-用户在会话中提出“保持第二张的产品与光线，改为横版构图”时，Skill 必须创建或更新一个新的 Creative Round，并将被选中的父资产、已确认反馈、风格约束和参考素材关系写入数据库。
+用户在会话中提出“保持第二张的产品与光线，改为横版构图”时，Skill 必须创建或更新一个新的 Creative Round，并将被选中的父资产、已确认反馈、风格约束和参考素材上下文写入数据库。创作者也可以在 Workbench 草稿轮次中选择参考素材角色，或从资产卡片、大图预览、当前选片和创作谱系检查器的统一动作入口基于单图/多图创建 `variation`、`refinement`、`edit`、`fill` 草稿轮次；界面动作使用人能理解的选项，例如“生成更多类似图”“让这张图更精致”“换背景 / 局部修改”“扩图 / 改画幅”，但持久化时必须记录动作 ID 与动作标签，供 Agent 后续解释与续写计划。多图入口必须提供用途编排板，可套用主图 + 风格 + 构图、多主体融合、主体 + 反例对照、局部编辑三件套和补图构图板等模板，也可逐张标注主体、风格、构图、色彩、品牌、遮罩或反例。结构化“不采用”反馈必须支持只保存评审、加入当前草稿轮次作为反例，或创建带 `feedbackToNextRound`、反例参考、修正目标和保持约束的下一轮草稿。项目模板、任务目标和轮次目的必须能提示优先准备的素材；资产导入入口可以保存脱敏的素材需求与默认参考用途，导入到草稿轮次时可自动写入当前轮次 `referenceMaterials`。局部编辑入口还必须提供轻量遮罩准备区：允许将已有素材设为遮罩，或用浏览器文件选择、拖入、粘贴导入黑白 / 透明遮罩图；不提供浏览器内画笔和像素编辑器。遮罩被保存为当前项目的受控资产和 `maskAssetId`，不得出现在主体 `parentAssetIds` 中。该动作只写入主参考图、父资产、参考用途、用途统计、变化维度、保持约束、目标数量、画幅和结构化说明，不得触发确认挑战、预检、Generation Run 或 Provider 调用。已进入确认、运行或历史状态的轮次不得由 Workbench 直接改写参考上下文。
 
 ### 5.3 创作计划与提示词证据
 
 Skill 必须将每次确认后的创作计划持久化为可版本化的结构化记录，其中包括任务目标、素材关系、约束、建议产出、生成策略和每个 Run Item 的实际提示词负载。
+
+Workbench 内部可通过 `PUT /api/rounds/<round-id>/draft-context` 更新草稿轮次的结构化上下文，也可通过 `POST /api/rounds/derived` 基于当前项目或明确共享的图片创建衍生草稿轮次。两个端点都必须校验轮次/任务仍可写、版本或父子关系未冲突、素材只来自当前项目或明确共享素材；衍生轮次端点还必须校验 `primaryAssetId`、可选 `parentAssetIds` 和 `feedbackToNextRound.assetIds` 来自 `sourceAssetIds`，并持久化动作 ID、动作标签、多图 `referenceArrangement` 与结构化反馈来源。`POST /api/assets/import` 可记录 Workbench 导入时选择的 `materialNeed` 与 `materialUsage` 到资产来源摘要，便于创作者和 Agent 识别素材意图；这些字段不得替代项目边界校验。遮罩以 `referenceMaterials.usage=mask` 和 `maskAssetId` 表达，不能混入 `referenceAssetIds` 或主体父资产。端点只更新草稿计划记录，不得触发确认挑战、预检、Generation Run 或 Provider 调用。
 
 普通用户不必默认阅读 Prompt；但 Workbench 高级详情必须支持查看当前轮次的计划、提示词策略、实际请求摘要和版本差异。用户必须可以导出不含密钥和内部路径的创作记录，以便复盘、交接和审计。
 
@@ -223,11 +228,11 @@ Skill 必须使用智能体当前绑定的稳定工作区根目录。Skill 禁�
 
 Provider.db 是受本地文件权限保护的明文敏感 SQLite，不得宣称加密。Unix 使用 `0600`；Windows 由 daemon owner 在一个有界超时的 PowerShell 进程中，批量为敏感目录、manifest、SQLite 和已存在 sidecar 构造、应用并复核只含当前用户 SID、SYSTEM 与 Administrators 的完整私有 DACL。不得按可本地化用户名授权，不得执行 `icacls /reset`。ACL 超时、系统 PowerShell 缺失、读取或写入失败必须具有稳定错误码并保持失败关闭。SQLite 固定 `journal_mode=DELETE`、`secure_delete=ON`、`synchronous=FULL`、`foreign_keys=ON`。
 
-数据库保存多 Profile 的完整 `name`、`providerId`、`model`、完整 `baseUrl`、`apiKey`、`options`、`configVersion`、`active` 与时间戳。第一阶段同一工作区最多一个 active Profile，也允许零 active。`studio.db` 只保存脱敏历史快照，不保存 Profile 或秘密。
+数据库保存多 Profile 的 `name`、`providerId`、`model`、`options`、`configVersion`、`active` 与时间戳，以及默认明文后端中的完整 `baseUrl` / `apiKey`；启用系统密钥后端时只保存密钥引用和 write-only 摘要，完整秘密由对应系统后端保存。第一阶段同一工作区最多一个 active Profile，也允许零 active。`studio.db` 只保存脱敏历史快照，不保存 Profile 或秘密。
 
 ### 7.2 Workbench 与受控 API/CLI
 
-Workbench 必须提供 Profile 列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试与保存并重启。API Key 与完整 Base URL 是 write-only：GET 只返回安全摘要，更新必须明确 `keep`、`replace` 或 `clear`。密钥只允许在已授权本地页面写入表单中短暂出现；浏览器不得持久化。页面打开、加载或保存不得自动连接 Provider。
+Workbench 必须提供 Profile 列表、新建、编辑、复制、激活、删除、本地校验、显式连接测试、显式读取模型列表、模型选择和安全限额设置。API Key 与完整 Base URL 是 write-only：GET 只返回安全摘要，更新必须明确 `keep`、`replace` 或 `clear`。密钥只允许在已授权本地页面写入表单中短暂出现；浏览器不得持久化。页面打开、加载或保存不得自动连接 Provider；模型列表读取只能由用户显式发起。
 
 所有写入必须复用本地 capability/Cookie、Host、Origin、Content-Type、安全错误与幂等约束，并通过同源受控 CLI/API；Skill 与用户不得直接写 Provider.db。密钥与完整 URL 不得进入 studio.db、事件、幂等响应、日志、快照、导出、诊断、打包或聊天。
 
@@ -235,9 +240,9 @@ Workbench 必须提供 Profile 列表、新建、编辑、复制、激活、删�
 
 `provider.env` 不再是运行时事实源。既有工作区首次升级时一次性导入完整配置到 Provider.db，`IMAGE_PROVIDER` 对应 Profile 设为 active；成功后运行时只读 Provider.db，不覆盖或删除旧文件。新工作区不自动创建 provider.env。`references/provider.env.example` 只保留为显式 import-env 输入格式。
 
-### 7.4 daemon 快照与重启
+### 7.4 daemon 快照与配置热加载
 
-daemon 启动时固定 active Profile 配置。active Profile、model、endpoint、key、options 或 configVersion 变化后必须标记 `restartRequired`，重启前拒绝新运行；已有运行不得静默切换。安全快照增加 `profileId`、`profileName`、`configVersion`，不含 API Key 或完整 URL。daemon owner 独占目录创建、schema migration、旧配置导入和权限强化；Generation/media Worker 只能附加已初始化的 manifest、Studio DB 与 Provider DB，不得修改 `.gitignore`、schema 或 ACL。Worker 池从零按需启动；generation pool 持续满载时逐个扩容。
+daemon 启动和每次活动配置变更都固定 `profileId + configVersion` 对应的 Provider 配置。活动 Profile、model、endpoint、key、options、端点信任模式或 Profile 限额变化后，daemon 在旧配置仍有未完成运行项时先排空旧 Worker，之后安全热加载匹配新配置的 Worker；已有运行不得静默切换，新预检和新运行使用新配置。被未完成或可恢复运行引用的 Profile 不得修改或删除，除非先让这些运行进入终态；这是避免旧运行丢失其精确 Provider 配置的保守门禁。安全快照增加 `profileId`、`profileName`、`configVersion`，不含 API Key 或完整 URL。daemon owner 独占目录创建、schema migration、旧配置导入和权限强化；Generation/media Worker 只能附加已初始化的 manifest、Studio DB 与 Provider DB，不得修改 `.gitignore`、schema 或 ACL。Worker 池从零按需启动；generation pool 持续满载时逐个扩容。
 
 ### 7.5 Generation Run 并发
 
@@ -247,7 +252,7 @@ daemon 启动时固定 active Profile 配置。active Profile、model、endpoint
 
 Provider 活跃请求使用 daemon 内部自适应 Governor，安全目标上限为 `100`，初始目标为 `16`。Governor 按 Provider 成功、429、临时/未知结果以及 Worker RSS 和外部 Buffer 内存样本调整目标。Generation/media pool 必须公开不含 PID、路径或秘密的 `idle/starting/ready/degraded/failed/stopping` 健康状态、有界重启计数和安全错误摘要；达到最终重启上限后熔断到 `failed`，不得无限重启或让等待任务永久挂起。Provider JSON/Base64 响应和公开图片 URL 优先流式写入受控临时文件。
 
-必须移除可配置 workspace worker concurrency、`config --worker-concurrency`、相关 runtime-settings API/业务读取及其 restartRequired。Provider 变化仍要求重启。Schema v19 必须保留现有业务数据与已完成 Run 历史，并把既有可用请求值回填到 `executionConcurrency`，其余历史默认 `4`。
+必须移除可配置 workspace worker concurrency、`config --worker-concurrency`、相关 runtime-settings API/业务读取及其 restartRequired。Provider 配置变化不需要重启 daemon，但必须重新预检；旧配置任务排空和 Worker 配置切换必须保持运行隔离。Schema v19 必须保留现有业务数据与已完成 Run 历史，并把既有可用请求值回填到 `executionConcurrency`，其余历史默认 `4`。
 
 ### 7.6 动态输出规格
 
@@ -257,13 +262,15 @@ Provider 活跃请求使用 daemon 内部自适应 Governor，安全目标上限
 
 ### 7.7 Provider 能力处理
 
-Provider adapter 必须声明 generate、edit 和 capabilities。Skill 必须按当前启用 Provider 的能力决定可执行操作。
+Provider adapter 必须声明 generate、edit 和 capabilities。Skill 必须按当前启用 Provider 的能力决定可执行操作。Provider Profile 管理后续升级必须把 `providerId`、鉴权方式、端点构造、模型输入、输出规格映射、参考图 / 遮罩能力、接受媒体类型和探测策略收敛为同一个版本化 Provider Descriptor；Profile store、HTTP adapter、预检、Workbench 能力提示和安全测试都消费该 Descriptor，不得各自复制一套能力或端点判断。
 
-如果用户请求参考图、图生图或遮罩编辑，而当前 Provider 不支持对应能力，Skill 必须说明当前 active Profile 不支持该操作，并提供继续使用当前能力或先编辑 Profile 的选择。Skill 禁止伪装能力或将不支持的请求发送给 Provider。
+当前必须明确区分四类接入，而不是用“兼容 OpenAI”掩盖差异：OpenAI GPT Image 使用 Bearer 与 Images generations/edits，支持受控参考图与遮罩；Gemini 原生使用 `x-goog-api-key` 与原生模型端点，参考图能力受 Profile 显式开关约束且当前不承诺遮罩；Gemini OpenAI-compatible 使用 OpenAI 风格生成契约且当前不承诺编辑、参考图或遮罩；xAI/Grok 使用独立的 OpenAI 风格生成与 JSON 图片编辑契约，支持官方画幅、1K/2K 分辨率、low/medium/auto 质量和最多 5 张 PNG/JPEG/WebP 参考图，当前不承诺遮罩。Provider Descriptor 变化必须经 `configVersion`、受控重启和预检重新冻结，禁止按 UI 推测或静默降级。
+
+Workbench Profile 页面后续必须按 Provider Descriptor 显示模型 / Base URL 输入指引、当前可用能力和不支持原因；只显示安全摘要，不展示密钥或完整 URL。`referenceEnabled` 等 Provider 专属选项不得出现在无关 Profile。显式连接测试必须探测由 Descriptor 构造的安全最终端点或 Provider 规定的健康策略，不能只因 Base URL 可达就声称生成端点可用；实际生成仍只能由已确认的 Agent 会话通过预检和运行门禁发起。若用户请求参考图、图生图或遮罩编辑，而当前 Provider 不支持对应能力，Skill 必须说明当前 active Profile 不支持该操作，并提供继续使用当前能力或先编辑 Profile 的选择。Skill 禁止伪装能力或将不支持的请求发送给 Provider。
 
 ### 7.8 Provider HTTP 与下载安全
 
-携带 API Key 的 Provider 请求必须直接发往用户配置的最终端点，并拒绝任何 HTTP 重定向，避免凭据被转发到未确认目标。Provider 响应若返回远程图片 URL，下载器必须执行独立的 SSRF 防护：
+携带 API Key 的 Provider 请求必须直接发往用户配置的最终端点，必须先按端点信任模式固定 DNS 结果并复核远端地址，并拒绝任何 HTTP 重定向，避免凭据被转发到未确认目标。`local_proxy` 只允许本机回环，`enterprise_private` 只额外允许 RFC1918/ULA；metadata、链路本地、未指定、组播、保留和文档地址始终拒绝。Provider 响应若返回远程图片 URL，下载器必须执行独立的 SSRF 防护：
 
 - 只接受不含用户名或密码的 `http:` / `https:` URL。
 - 对域名解析得到的全部地址执行公网地址校验，拒绝 loopback、私网、链路本地、保留、文档与多播地址；连接必须固定到已验证地址，并确认实际远端地址与固定结果一致，防止 DNS rebinding。
@@ -384,6 +391,8 @@ Task Type、Style Kit 和 Brand Kit 必须是可组合的创作约束。它们�
 
 创作资料库只提供跨任务类型、风格包和品牌包的检索、类型筛选与结构化详情；项目的生成图片、导入图片和参考图不得与官方任务类型混列。项目图片默认归属于项目资产。跨项目复用必须由独立“共享素材”模块承载，且只有用户从项目资产明确共享的图片才可出现；共享不会自动加入任何项目、任务、轮次或计划。Workbench 不得在资料库导入项目图片、直接创建语义资源、自动绑定到任务/轮次/计划或触发生成；此类意图与资源创建仍由会话或受控 CLI 完成。资料库与共享素材 API 公开投影必须递归过滤密钥、令牌、端点、内部路径和内容哈希；任何带目标关系的导入必须在服务端验证目标存在、同 Studio 归属和父子层级。
 
+Workbench 的“不采用”不是简单隐藏图片，而是 Review Decision 的结构化反馈。界面必须提供主体不准、风格不对、构图不行、质感廉价、文字/Logo 错、不符合品牌等可选原因，并允许在当前草稿轮次中把被淘汰图片作为 `negative` 参考素材；Agent 制定下一轮计划时应读取这些反例和原因，转成“不要继续”的约束。
+
 ## 11. 资产、评审与交付
 
 ### 11.1 资产复用
@@ -484,7 +493,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 - 受验证文件 snapshot、流式 ZIP、背压/取消与临时副本清理。
 - SSE 事件补发与状态快照恢复。
 - 软删除、恢复与被引用资产影响分析。
-- Provider Profile 与 configVersion 变化后的安全快照、restartRequired 和运行隔离。
+- Provider Profile 与 configVersion 变化后的安全快照、热加载、旧配置排空和运行隔离。
 - 外部资产导入的类型校验、去重、来源和失败处理。
 
 ## 15. 验收标准
@@ -501,7 +510,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-006 | 一个运行会话生成至少 100 个运行项时，浏览器刷新、页面关闭、短时网络故障、429、可重试 5xx 和本地服务重启后，已完成资产不丢失，未完成项可恢复。 |
 | PIC-VN-AC-007 | 系统重启后的未完成运行会话必须进入 resume_pending，且未获得用户确认前不得自动调用外部 Provider。 |
 | PIC-VN-AC-008 | Workbench 通过 SSE 显示新资产、进度和问题；断线重连后不依赖目录扫描或全页刷新即可恢复一致状态。 |
-| PIC-VN-AC-009 | Provider 密钥和完整 Base URL 只存在于 Provider.db 与短暂写入/Worker 内存，不进入 studio.db、API GET、事件、日志、幂等响应、快照、导出、诊断、打包、浏览器持久状态或聊天；Provider.db 受本地权限保护并自动进入 .gitignore。 |
+| PIC-VN-AC-009 | Provider 密钥和完整 Base URL 只存在于受本地权限保护的 Provider.db（或显式配置的系统密钥后端）与短暂写入/Worker 内存，不进入 studio.db、API GET、事件、日志、幂等响应、快照、导出、诊断、打包、浏览器持久状态或聊天；相关敏感路径受本地权限保护并自动进入 .gitignore。 |
 | PIC-VN-AC-010 | 当前本地 Provider 不支持参考图或遮罩编辑时，Skill 必须在会话中给出明确可理解的限制与下一步，不得伪装执行成功。 |
 | PIC-VN-AC-011 | 现有创作模板的有效语义被重构为新的 Task Type Library；旧 task spec、旧模板格式、旧输出目录和旧页面契约不再作为输入或运行依赖。 |
 | PIC-VN-AC-012 | 交付默认包含精选图片、联系表和交付清单，且不包含密钥、缓存、日志或未选择的内部材料。 |
@@ -510,7 +519,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 | PIC-VN-AC-015 | Workbench 只能通过 local capability bootstrap 获得当前 Studio 会话；除最小健康检查外的 API、媒体、ZIP 与 SSE 均拒绝匿名或跨 Studio 访问，bootstrap 后 URL 不保留 capability。 |
 | PIC-VN-AC-016 | Provider 图片 URL 下载逐跳执行 SSRF 校验、DNS 固定、远端地址确认、重定向和大小限制；携带 Provider 凭据的 API 请求不得跟随重定向。 |
 | PIC-VN-AC-017 | 导入、生成、回收、恢复、交付与 ZIP 在崩溃、文件替换、符号链接、断连或 journal 冲突时不得把身份不明媒体提交为正式资产；恢复与读取只接受受管理根目录内身份匹配的 journal/snapshot。 |
-| PIC-VN-AC-018 | Provider Profile 支持 CRUD、复制、唯一 active、本地校验、显式连接测试、write-only secret 更新与受控重启；同进程重启保持既有 Workbench 授权但不放宽 localhost/Origin 边界；Worker 只领取 profileId + configVersion 匹配的运行。 |
+| PIC-VN-AC-018 | Provider Profile 支持 CRUD、复制、唯一 active、本地校验、显式连接测试、显式模型列表读取、write-only secret 更新与活动配置热加载；同进程重启保持既有 Workbench 授权但不放宽 localhost/Origin 边界；Worker 只领取 profileId + configVersion 匹配的运行。 |
 | PIC-VN-AC-019 | 每次 Run 在预检冻结 1..1000 的 executionConcurrency；默认 4、串行 1、1001 拒绝，queue 与运行中都不能改写，系统全局不超过 1000；Provider 活跃请求由安全目标 100 的自适应 Governor 控制，429、临时故障和资源压力会降速。 |
 | PIC-VN-AC-020 | 执行型触发在稳定 workspace 中先普通 `open`，再建立独立 Session/项目上下文并开始澄清；咨询/开发型不自动启动。每个独立会话都可调用普通 open，daemon 只允许首个实际 opener并让其他会话返回 reused；失败回退不泄露 bootstrap/claim 秘密；force 仅显式用户动作；零 active Provider 仍可启动且不会自动测试连接；首次汇报区分 opened/reused 并包含职责、Provider readiness、当前上下文和下一步。 |
 | PIC-VN-AC-021 | 同一稳定 workspace 的 3–4 个并发会话最终复用唯一 daemon/PID 和单一活动 Workbench；真实 conversation Session 的 project/task/round、项目与 Run 归属互相隔离，Workbench per-tab UI Session 与 agent Sessions 分离，用户当前 route 不被后台 context 更新抢占；所有 Runs 仍共享 daemon Worker 与全局公平队列。 |
@@ -530,7 +539,7 @@ vNext 涉及 API Key、并发、异步 worker、第三方图片 Provider、文�
 5. Task Type Library、Style Kit、Brand Kit 与外部资产导入。
 6. 全量 E2E、100 项恢复场景、真实 Provider 受控探测和安全检查。
 
-`5.11.0` 稳定正式版已按本规格收敛创作谱系、Generation History 分页、协议协商、项目资产 ZIP 与 Workbench 可访问性边界。后续版本不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
+`5.12.0` 稳定正式版已按本规格收敛创作谱系、Generation History 分页、协议协商、项目资产 ZIP、Provider 安全边界、模板化创建与 Workbench 可访问性边界。后续版本不得重新引入旧新混合入口。任何发布仍必须先满足本规格验收项、相关高风险技术设计和对应版本的真实验证证据。
 
 ## 17. 明确非目标
 
@@ -547,4 +556,4 @@ vNext 第一版不包含：
 
 ## 18. 规格解释
 
-本规格定义 vNext 稳定产品与目标架构；当前稳定源码版本为 `5.11.0`，具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。
+本规格定义 vNext 稳定产品与目标架构；稳定发布源码版本为 `5.12.0`，`5.11.0` 及更早版本为历史发布，具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。

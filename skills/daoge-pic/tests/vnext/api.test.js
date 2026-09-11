@@ -304,6 +304,114 @@ test('Provider connection test returns an actionable client error when the endpo
   }
 });
 
+test('Provider API exposes descriptors, records explicit test evidence, and guards active deletion', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  let probeCalls = 0;
+  let probeTarget = '';
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Descriptor Provider', endpointTrustMode: 'compatible_public', limits: { maxRunItems: 3, maxExecutionConcurrency: 2, requestTimeoutMs: 45000, maxRetryAttempts: 2 } });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot, providerProbe: async (target) => { probeCalls += 1; probeTarget = target; return { reachable: true, status: 204 }; } });
+    const listed = await requestJson(started, '/api/providers');
+    assert.equal(listed.status, 200, JSON.stringify(listed.body));
+    assert.equal(listed.body.data.descriptors.some((descriptor) => descriptor.id === 'openai-images' && descriptor.reference.maxCount === 8), true);
+    assert.equal(listed.body.data.status.limits.maxRunItems, 3);
+    assert.equal(JSON.stringify(listed.body).includes('fixture-provider-key'), false);
+    assert.equal(JSON.stringify(listed.body).includes('https://images.example.test/v1'), false);
+    const profile = listed.body.data.profiles[0];
+    const validated = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/validate', { method: 'POST', idempotencyKey: 'provider-descriptor-validate', body: {} });
+    assert.equal(validated.status, 200, JSON.stringify(validated.body));
+    assert.equal(validated.body.data.valid, true);
+    assert.equal(validated.body.data.descriptorVersion, 1);
+    assert.equal(probeCalls, 0, 'local validation must not probe the Provider');
+    const tested = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/test', { method: 'POST', idempotencyKey: 'provider-descriptor-test', body: {} });
+    assert.equal(tested.status, 200, JSON.stringify(tested.body));
+    assert.equal(tested.body.data.evidence.status, 204);
+    assert.equal(probeCalls, 1);
+    assert.equal(probeTarget, 'https://images.example.test/v1/images/generations');
+    for (const [suffix, body] of [['/copy', {}], ['/activate', {}], ['/delete', { force: true }], ['/validate', {}], ['/test', {}]]) {
+      const wrongMethod = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + suffix, { method: 'PUT', idempotencyKey: 'provider-wrong-method-' + suffix.slice(1), body });
+      assert.equal(wrongMethod.status, 404, suffix + ' must reject PUT without executing');
+    }
+    assert.equal(probeCalls, 1, 'wrong Provider methods must not probe the Provider');
+    const afterTest = await requestJson(started, '/api/providers');
+    assert.equal(afterTest.body.data.profiles[0].lastTest.status, 204);
+    const rejectedDelete = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/delete', { method: 'POST', idempotencyKey: 'provider-delete-active-rejected', body: {} });
+    assert.equal(rejectedDelete.status, 400);
+    const forcedDelete = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/delete', { method: 'POST', idempotencyKey: 'provider-delete-active-forced', body: { force: true } });
+    assert.equal(forcedDelete.status, 200, JSON.stringify(forcedDelete.body));
+    assert.equal(forcedDelete.body.data.impact.restartRequired, false);
+    assert.equal(forcedDelete.body.data.activeProfileId, null);
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+test('Provider Profile changes are blocked while resumable runs reference its frozen config', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Retirement Guard Provider' });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
+    const profile = (await requestJson(started, '/api/providers')).body.data.profiles[0];
+    const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'retirement-session', body: { conversationId: 'retirement-conversation' } });
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'retirement-project', body: { name: 'Retirement Guard Project', sessionId: session.body.data.id } });
+    const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'retirement-task', body: { projectId: project.body.data.value.id, name: 'Retirement Guard Task', sessionId: session.body.data.id } });
+    const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: 'retirement-round', body: { taskId: task.body.data.value.id, purpose: 'exploration', sessionId: session.body.data.id } });
+    const now = new Date().toISOString();
+    started.service.db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, provider_profile_id, provider_config_version, execution_concurrency, concurrency_source, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run('retirement-run', round.body.data.value.id, 'paused', JSON.stringify({ profileId: profile.id, configVersion: profile.configVersion }), '{}', profile.id, profile.configVersion, 1, 'serial', 1, now, now);
+    const update = await requestJson(started, '/api/providers/' + profile.id, { method: 'PUT', idempotencyKey: 'retirement-update', body: { expectedConfigVersion: profile.configVersion, name: 'Changed Name', providerId: profile.providerId, model: profile.model, baseUrl: { action: 'keep' }, apiKey: { action: 'keep' }, options: {} } });
+    assert.equal(update.status, 400);
+    assert.match(update.body.error.message, /未完成运行/);
+    const deletion = await requestJson(started, '/api/providers/' + profile.id + '/delete', { method: 'POST', idempotencyKey: 'retirement-delete', body: { force: true } });
+    assert.equal(deletion.status, 400);
+    assert.match(deletion.body.error.message, /未完成运行/);
+    started.service.db.prepare("UPDATE generation_runs SET status = 'completed' WHERE id = 'retirement-run'").run();
+    const deleted = await requestJson(started, '/api/providers/' + profile.id + '/delete', { method: 'POST', idempotencyKey: 'retirement-delete-after-terminal', body: { force: true } });
+    assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('Provider API lists models only through explicit safe action without leaking credentials', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const requests = [];
+  const modelServer = http.createServer((request, response) => {
+    requests.push({ url: request.url, authorization: request.headers.authorization || null });
+    request.resume();
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ data: [{ id: 'gpt-image-2', owned_by: 'openai' }, { id: 'gpt-image-1' }] }));
+  });
+  let started;
+  try {
+    await new Promise((resolve) => modelServer.listen(0, '127.0.0.1', resolve));
+    const address = modelServer.address();
+    assert.ok(address && typeof address !== 'string');
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Model List Provider', baseUrl: 'http://127.0.0.1:' + address.port + '/v1/images/generations', apiKey: 'model-list-secret', model: 'gpt-image-2', endpointTrustMode: 'local_proxy' });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
+    const listed = await requestJson(started, '/api/providers');
+    const profile = listed.body.data.profiles[0];
+    const models = await requestJson(started, '/api/provider-models', { method: 'POST', idempotencyKey: 'provider-models', body: { profileId: profile.id } });
+    assert.equal(models.status, 200, JSON.stringify(models.body));
+    assert.deepEqual(models.body.data.models, [{ id: 'gpt-image-2', label: 'gpt-image-2', ownedBy: 'openai' }, { id: 'gpt-image-1', label: 'gpt-image-1', ownedBy: null }]);
+    const draftModels = await requestJson(started, '/api/provider-models', { method: 'POST', idempotencyKey: 'provider-draft-models', body: { providerId: 'openai-images', baseUrl: 'http://127.0.0.1:' + address.port + '/v1/images/generations', apiKey: 'draft-model-secret', endpointTrustMode: 'local_proxy' } });
+    assert.equal(draftModels.status, 200, JSON.stringify(draftModels.body));
+    assert.deepEqual(draftModels.body.data.models, models.body.data.models);
+    assert.deepEqual(requests, [{ url: '/v1/models', authorization: 'Bearer model-list-secret' }, { url: '/v1/models', authorization: 'Bearer draft-model-secret' }]);
+    assert.equal(JSON.stringify(models.body).includes('model-list-secret'), false);
+    assert.equal(JSON.stringify(draftModels.body).includes('draft-model-secret'), false);
+  } finally {
+    if (started) await started.service.close();
+    if (modelServer.listening) await new Promise((resolve, reject) => modelServer.close((error) => error ? reject(error) : resolve()));
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('local Provider response echoes are sanitized before database, API, and delivery persistence', async () => {
   const workspaceRoot = temporaryWorkspace();
   const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==';
@@ -329,7 +437,7 @@ test('local Provider response echoes are sanitized before database, API, and del
     const address = providerServer.address();
     baseUrl = 'http://127.0.0.1:' + address.port + '/private/provider-base';
     const initialized = initializeStudio({ workspaceRoot });
-    configureProvider(initialized, { name: 'Echo Provider', baseUrl, apiKey, model: 'echo-model' });
+    configureProvider(initialized, { name: 'Echo Provider', baseUrl, apiKey, model: 'echo-model', endpointTrustMode: 'local_proxy' });
     started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
 
     const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'echo-session', body: { conversationId: 'echo-confirmation-conversation' } });

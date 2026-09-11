@@ -44,7 +44,7 @@ export class StudioGeneratedAssetPersister implements GeneratedAssetPersister {
     const sourcePath = typeof input.result.filePath === 'string' ? input.result.filePath : null;
     try {
       if (!sourcePath && !Buffer.isBuffer(input.result.bytes)) throw new Error('Generated Provider result has no image data.');
-      const staged = sourcePath ? await stageImageFileAsync(this.paths, sourcePath, input.result.mediaType) : await stageImageBytesAsync(this.paths, input.result.bytes as Buffer, input.result.mediaType);
+      const staged = sourcePath ? await stageImageFileAsync(this.paths, sourcePath) : await stageImageBytesAsync(this.paths, input.result.bytes as Buffer);
       const matches = this.db.prepare('SELECT id, media_type, byte_size, content_hash, deleted_at FROM assets WHERE studio_id = ? AND content_hash = ? ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, created_at').all(this.studioId, staged.contentHash) as unknown as StoredAsset[];
       const active = matches.find((asset) => !asset.deleted_at);
       if (active) {

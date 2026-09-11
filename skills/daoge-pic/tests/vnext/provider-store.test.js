@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
-const { openProviderDatabase, closeProviderDatabase, importLegacyProviderEnvOnce, importProviderEnvProfile, createProviderProfile, updateProviderProfile, copyProviderProfile, activateProviderProfile, deleteProviderProfile, listProviderProfiles, resolveActiveProviderConfig, providerStatus } = require('../../dist/vnext/studio/provider-store');
+const { openProviderDatabase, closeProviderDatabase, importLegacyProviderEnvOnce, importProviderEnvProfile, createProviderProfile, updateProviderProfile, copyProviderProfile, activateProviderProfile, deleteProviderProfile, listProviderProfiles, resolveActiveProviderConfig, providerStatus, recordProviderTestEvidence } = require('../../dist/vnext/studio/provider-store');
 
 
 
@@ -27,25 +27,43 @@ test('Provider.db enforces private SQLite settings, write-only summaries, CRUD, 
     providerDb = openProviderDatabase(initialized.paths);
     studioDb = openStudioDatabase(initialized.paths, initialized.manifest);
     const first = create(providerDb, 'provider-first', 'Primary', true);
+    assert.throws(() => createProviderProfile(providerDb, { name: 'Insecure', providerId: 'openai-images', model: 'gpt-image-2', baseUrl: 'http://public.example.test/v1', apiKey: 'insecure-secret', endpointTrustMode: 'compatible_public', active: false, idempotencyKey: 'provider-insecure' }), /必须使用 HTTPS/);
     const second = create(providerDb, 'provider-second', 'Secondary', false);
     assert.equal(first.active, true);
     assert.equal(first.referenceEnabled, true);
+    assert.equal(first.descriptorVersion, 1);
+    assert.equal(first.adapterVersion, 'http-image-v1');
+    assert.equal(first.secretBackend, 'sqlite-plaintext');
     assert.equal(JSON.stringify(listProviderProfiles(providerDb)).includes('secret-provider-first'), false);
     assert.equal(JSON.stringify(listProviderProfiles(providerDb)).includes('/v1/full/path'), false);
     const copied = copyProviderProfile(providerDb, first.id, { name: 'Primary Copy', idempotencyKey: 'provider-copy' });
     assert.equal(copied.active, false);
-    activateProviderProfile(providerDb, second.id, 'provider-activate');
+    const activatedSecond = activateProviderProfile(providerDb, second.id, 'provider-activate');
+    assert.equal(activatedSecond.impact.restartRequired, false);
+    assert.equal(activatedSecond.configVersion, second.configVersion);
     assert.equal(listProviderProfiles(providerDb).filter((profile) => profile.active).length, 1);
     assert.equal(resolveActiveProviderConfig(providerDb).profileId, second.id);
+    assert.equal(listProviderProfiles(providerDb).find((profile) => profile.id === first.id).configVersion, first.configVersion);
     const selected = listProviderProfiles(providerDb).find((profile) => profile.id === second.id);
     const updated = updateProviderProfile(providerDb, second.id, { expectedConfigVersion: selected.configVersion, baseUrl: { action: 'clear' }, apiKey: { action: 'replace', value: 'replacement-secret' }, options: { referenceEnabled: false }, idempotencyKey: 'provider-update' });
     assert.equal(updated.endpointSummary, null);
-    assert.equal(updated.referenceEnabled, false);
+    assert.equal(updated.referenceEnabled, true);
     assert.equal(providerStatus(providerDb).configured, false);
     assert.equal(JSON.stringify(updated).includes('replacement-secret'), false);
     const reenabled = updateProviderProfile(providerDb, second.id, { expectedConfigVersion: updated.configVersion, baseUrl: { action: 'keep' }, apiKey: { action: 'keep' }, options: { referenceEnabled: true }, idempotencyKey: 'provider-reenable' });
     assert.equal(reenabled.referenceEnabled, true);
     assert.equal(listProviderProfiles(providerDb).find((profile) => profile.id === second.id).referenceEnabled, true);
+    assert.throws(() => deleteProviderProfile(providerDb, second.id, 'provider-delete-active'), /需要显式确认 force/);
+    const forcedDelete = deleteProviderProfile(providerDb, second.id, 'provider-delete-active-force', { force: true });
+    assert.equal(forcedDelete.impact.restartRequired, false);
+    activateProviderProfile(providerDb, first.id, 'provider-reactivate');
+    const evidence = recordProviderTestEvidence(providerDb, first.id, { configVersion: first.configVersion, reachable: true, status: 204, warnings: ['fixture warning'] });
+    assert.equal(evidence.status, 204);
+    assert.equal(evidence.configVersion, first.configVersion);
+    assert.equal(listProviderProfiles(providerDb).find((profile) => profile.id === first.id).lastTest.status, 204);
+    const changedFirst = updateProviderProfile(providerDb, first.id, { expectedConfigVersion: first.configVersion, baseUrl: { action: 'keep' }, apiKey: { action: 'keep' }, options: { referenceEnabled: true }, idempotencyKey: 'provider-update-first' });
+    assert.throws(() => recordProviderTestEvidence(providerDb, first.id, { configVersion: first.configVersion, reachable: true, status: 204 }), /配置已变化/);
+    assert.equal(changedFirst.configVersion, first.configVersion + 1);
     deleteProviderProfile(providerDb, copied.id, 'provider-delete');
     assert.equal(listProviderProfiles(providerDb).some((profile) => profile.id === copied.id), false);
     assert.equal(studioDb.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE name = 'provider_profiles'").get().total, 0);
@@ -128,7 +146,8 @@ test('rejects a future Provider database schema and releases the failed connecti
     closeProviderDatabase(db);
     db = null;
     db = openProviderDatabase(initialized.paths);
-    assert.equal(db.prepare('SELECT MAX(version) AS version FROM provider_schema').get().version, 1);
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM provider_schema').get().version, 3);
+    assert.equal(db.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type = 'table' AND name = 'provider_secret_cleanup'").get().total, 1);
   } finally {
     closeProviderDatabase(db);
     cleanup(root);

@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 25;
+export const STUDIO_SCHEMA_VERSION = 26;
 export const STUDIO_EVENT_RETENTION = 2000;
 
 const SCHEMA_V1 = [
@@ -203,6 +203,10 @@ const SCHEMA_V24 = [
 ].join(';\n') + ';';
 
 const SCHEMA_V25 = "CREATE INDEX IF NOT EXISTS idx_run_items_run_status_sequence ON run_items(run_id, status, sequence)";
+const SCHEMA_V26 = [
+  "ALTER TABLE projects ADD COLUMN template_id TEXT",
+  "ALTER TABLE projects ADD COLUMN template_version INTEGER"
+].join(';\n') + ';';
 
 
 
@@ -255,6 +259,7 @@ function assertSupportedStudioSchema(db: StudioDatabase): void {
 const REQUIRED_SCHEMA_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   studios: ['id', 'workspace_root', 'schema_version'],
   studio_sessions: ['id', 'studio_id', 'version'],
+  projects: ['id', 'studio_id', 'template_id', 'template_version'],
   generation_runs: ['id', 'round_id', 'provider_profile_id', 'provider_config_version'],
   run_items: ['id', 'run_id', 'status', 'lease_worker_id'],
   assets: ['id', 'studio_id', 'storage_path', 'content_hash', 'media_state', 'missing_at', 'last_verified_at'],
@@ -365,11 +370,12 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
     { version: 18, sql: SCHEMA_V18 },
     { version: 19, sql: SCHEMA_V19 },
     { version: 20, sql: SCHEMA_V20 },
-      { version: 21, sql: SCHEMA_V21 },
-      { version: 22, sql: SCHEMA_V22 },
-      { version: 23, sql: SCHEMA_V23 },
-      { version: 24, sql: SCHEMA_V24 },
-      { version: 25, sql: SCHEMA_V25 }
+    { version: 21, sql: SCHEMA_V21 },
+    { version: 22, sql: SCHEMA_V22 },
+    { version: 23, sql: SCHEMA_V23 },
+    { version: 24, sql: SCHEMA_V24 },
+    { version: 25, sql: SCHEMA_V25 },
+    { version: 26, sql: SCHEMA_V26 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
@@ -391,6 +397,8 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
         if (requiredTables.every((name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)))) db.exec(SCHEMA_V22);
       } else if (migration.version === 25) {
         if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_items'").get()) db.exec(SCHEMA_V25);
+      } else if (migration.version === 26) {
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'projects'").get()) db.exec(SCHEMA_V26);
       } else db.exec(migration.sql);
       if (migration.version === 16 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get()) db.exec(SCHEMA_V16_ASSET_BACKFILL);
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());

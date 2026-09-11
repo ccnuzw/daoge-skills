@@ -25,11 +25,11 @@ test('Studio-global views preserve project shell for project-aware reference vie
   assert.equal(isStudioView('trash'), false);
 });
 
-test('project and task selection open their respective workspace home', async () => {
+test('project and task selection open lineage as the creator workspace home', async () => {
   const { selectProject, selectTask, selectRound, updateWorkbenchRoute } = await import('../../web/src/workbench-route.mjs');
   const base = { view: 'runs', projectId: 'project_a', taskId: 'task_b', roundId: 'round_c', compareRoundIds: ['round_c'], runId: 'run_d', assetScope: 'round', ...RUN_ITEM_DEFAULTS };
-  assert.deepEqual(selectProject(base, 'project_z'), { view: 'project-overview', projectId: 'project_z', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
-  assert.deepEqual(selectTask(base, 'task_z'), { view: 'studio-overview', projectId: 'project_a', taskId: 'task_z', roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
+  assert.deepEqual(selectProject(base, 'project_z'), { view: 'lineage', projectId: 'project_z', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
+  assert.deepEqual(selectTask(base, 'task_z'), { view: 'lineage', projectId: 'project_a', taskId: 'task_z', roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
   assert.deepEqual(selectRound(base, 'round_z'), { ...base, roundId: 'round_z', compareRoundIds: ['round_z'], runId: null, assetScope: 'round' });
   assert.deepEqual(updateWorkbenchRoute(base, { runId: 'run_z' }), { ...base, runId: 'run_z' });
 });

@@ -1,12 +1,6 @@
+import { capabilityShapeForProvider, isProviderId as descriptorIsProviderId, providerDescriptor, providerEndpointPolicyIssues, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, PROVIDER_IDS, ProviderEndpointTrustMode, ProviderId, ProviderProfileLimits } from '../providers/descriptors';
 
-export const PROVIDER_IDS = [
-  'openai-images',
-  'gemini-image',
-  'gemini-openai-compatible',
-  'xai-grok-image'
-] as const;
-
-export type ProviderId = typeof PROVIDER_IDS[number];
+export { PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, PROVIDER_IDS, ProviderEndpointTrustMode, ProviderId, ProviderProfileLimits } from '../providers/descriptors';
 
 export interface ProviderCapabilities {
   generate: boolean;
@@ -25,6 +19,10 @@ export interface ResolvedProviderConfig {
   model: string;
   options: Record<string, unknown>;
   referenceEnabled: boolean;
+  endpointTrustMode: ProviderEndpointTrustMode;
+  limits: ProviderProfileLimits;
+  descriptorVersion: number;
+  adapterVersion: string;
 }
 
 export interface SafeProviderStatus {
@@ -37,14 +35,12 @@ export interface SafeProviderStatus {
   model: string | null;
   endpoint: string | null;
   capabilities: ProviderCapabilities | null;
+  descriptorVersion: number | null;
+  adapterVersion: string | null;
+  endpointTrustMode: ProviderEndpointTrustMode | null;
+  endpointPolicyWarnings: string[];
+  limits: ProviderProfileLimits;
 }
-
-const CAPABILITIES: Record<ProviderId, ProviderCapabilities> = {
-  'openai-images': { generate: true, edit: true, referenceImage: true, mask: true },
-  'gemini-image': { generate: true, edit: true, referenceImage: false, mask: false },
-  'gemini-openai-compatible': { generate: true, edit: false, referenceImage: false, mask: false },
-  'xai-grok-image': { generate: true, edit: false, referenceImage: false, mask: false }
-};
 
 function unquote(value: string): string {
   if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
@@ -73,7 +69,7 @@ function valueFor(env: Record<string, string>, key: string): string {
 }
 
 export function isProviderId(value: string): value is ProviderId {
-  return PROVIDER_IDS.includes(value as ProviderId);
+  return descriptorIsProviderId(value);
 }
 
 function endpointIdentity(raw: string): string | null {
@@ -87,18 +83,17 @@ function endpointIdentity(raw: string): string | null {
 }
 
 function valuesForProvider(providerId: ProviderId, env: Record<string, string>): ResolvedProviderConfig {
-  let config: Omit<ResolvedProviderConfig, 'profileId' | 'profileName' | 'configVersion' | 'options'>;
+  let config: Omit<ResolvedProviderConfig, 'profileId' | 'profileName' | 'configVersion' | 'options' | 'endpointTrustMode' | 'limits' | 'descriptorVersion' | 'adapterVersion'>;
   if (providerId === 'openai-images') config = { providerId, baseUrl: valueFor(env, 'OPENAI_BASE_URL'), apiKey: valueFor(env, 'OPENAI_API_KEY'), model: valueFor(env, 'OPENAI_MODEL'), referenceEnabled: true };
   else if (providerId === 'gemini-image') config = { providerId, baseUrl: valueFor(env, 'GEMINI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'GEMINI_IMAGE_API_KEY'), model: valueFor(env, 'GEMINI_IMAGE_MODEL'), referenceEnabled: valueFor(env, 'GEMINI_IMAGE_ENABLE_REFERENCE').toLowerCase() === 'true' };
   else if (providerId === 'gemini-openai-compatible') config = { providerId, baseUrl: valueFor(env, 'GEMINI_OPENAI_BASE_URL'), apiKey: valueFor(env, 'GEMINI_OPENAI_API_KEY'), model: valueFor(env, 'GEMINI_OPENAI_MODEL'), referenceEnabled: false };
   else config = { providerId, baseUrl: valueFor(env, 'XAI_IMAGE_BASE_URL'), apiKey: valueFor(env, 'XAI_IMAGE_API_KEY'), model: valueFor(env, 'XAI_IMAGE_MODEL'), referenceEnabled: false };
-  return { profileId: 'legacy-env-import', profileName: 'Imported ' + providerId, configVersion: 1, options: { referenceEnabled: config.referenceEnabled }, ...config };
+  const descriptor = providerDescriptor(providerId);
+  return { profileId: 'legacy-env-import', profileName: 'Imported ' + providerId, configVersion: 1, options: { referenceEnabled: config.referenceEnabled }, endpointTrustMode: descriptor.endpoint.defaultTrustMode, limits: {}, descriptorVersion: PROVIDER_DESCRIPTOR_VERSION, adapterVersion: PROVIDER_ADAPTER_VERSION, ...config };
 }
 
 export function capabilitiesForProvider(config: ResolvedProviderConfig): ProviderCapabilities {
-  const capabilities = { ...CAPABILITIES[config.providerId] };
-  if (config.providerId === 'gemini-image') capabilities.referenceImage = config.referenceEnabled;
-  return capabilities;
+  return capabilityShapeForProvider(config.providerId, config.referenceEnabled);
 }
 
 export function configFromProviderEnv(env: Record<string, string>): ResolvedProviderConfig | null {
@@ -115,7 +110,15 @@ export function providerSnapshot(config: ResolvedProviderConfig): Omit<ResolvedP
     providerId: config.providerId,
     model: config.model,
     referenceEnabled: config.referenceEnabled,
+    endpointTrustMode: config.endpointTrustMode,
+    limits: config.limits,
+    descriptorVersion: config.descriptorVersion,
+    adapterVersion: config.adapterVersion,
     endpoint: endpointIdentity(config.baseUrl),
     capabilities: capabilitiesForProvider(config)
   };
+}
+
+export function endpointPolicyWarnings(config: ResolvedProviderConfig): string[] {
+  return providerEndpointPolicyIssues(config.providerId, config.baseUrl, config.endpointTrustMode).filter((issue) => issue.level === 'warning').map((issue) => issue.message);
 }

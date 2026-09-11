@@ -28,7 +28,7 @@ test('generation and media worker pools hide every Windows child console while r
     delete require.cache[mediaModule];
     const { WorkerProcessPool } = require(workerModule);
     const { MediaProcessPool } = require(mediaModule);
-    generationPool = new WorkerProcessPool('C:\\workspace with spaces', 1);
+    generationPool = new WorkerProcessPool('C:\\workspace with spaces', 1, { profileId: 'profile-contract', profileName: 'Contract Provider', configVersion: 7, providerId: 'openai-images', baseUrl: 'https://provider.example/v1', apiKey: 'provider-contract-key', model: 'gpt-image-2', options: {}, referenceEnabled: true, endpointTrustMode: 'compatible_public', limits: {}, descriptorVersion: 1, adapterVersion: 'http-image-v1' });
     mediaPool = new MediaProcessPool('C:\\workspace with spaces', 1);
     assert.equal(calls.length, 0);
     await generationPool.processOnce(1);
@@ -39,8 +39,9 @@ test('generation and media worker pools hide every Windows child console while r
     assert.equal(calls[1].executable, process.execPath);
     assert.match(calls[0].args[0], /worker-process\.js$/);
     assert.match(calls[1].args[0], /media-worker-process\.js$/);
+    assert.deepEqual(calls[0].args.slice(1), ['--workspace', 'C:\\workspace with spaces', '--provider-profile-id', 'profile-contract', '--provider-config-version', '7', '--provider-config-ipc']);
+    assert.deepEqual(calls[1].args.slice(1), ['--workspace', 'C:\\workspace with spaces']);
     for (const call of calls) {
-      assert.deepEqual(call.args.slice(1), ['--workspace', 'C:\\workspace with spaces']);
       assert.equal(call.options.windowsHide, true);
       assert.deepEqual(call.options.stdio, ['ignore', 'ignore', 'ignore', 'ipc']);
     }

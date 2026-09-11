@@ -10,6 +10,8 @@ function configureProvider(initialized, overrides = {}) {
       baseUrl: overrides.baseUrl || 'https://images.example.test/v1',
       apiKey: overrides.apiKey || 'fixture-provider-key',
       options: { referenceEnabled: overrides.referenceEnabled === true },
+      endpointTrustMode: overrides.endpointTrustMode,
+      limits: overrides.limits,
       active: true,
       idempotencyKey: overrides.idempotencyKey || 'test-provider-create'
     });

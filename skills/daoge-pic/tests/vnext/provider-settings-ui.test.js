@@ -11,7 +11,18 @@ test('Provider settings UI keeps secrets write-only and exposes accessible expli
   assert.match(source, /keep.*replace.*clear/s);
   assert.match(source, /本地校验/);
   assert.match(source, /连接测试/);
-  assert.match(source, /保存并重启/);
+  assert.match(source, /获取模型/);
+  assert.match(source, /\/api\/provider-models/);
+  assert.doesNotMatch(source, /action\('models'\)/);
+  assert.doesNotMatch(source, /\/api\/providers\/[^']+\/models/);
+  assert.doesNotMatch(source, /mode === 'edit' && <button type="button" className="outline-button provider-model-fetch"/);
+  assert.match(source, /provider-actions-grid/);
+  assert.match(source, /provider-model-picker/);
+  assert.match(source, /活动配置会自动热加载/);
+  assert.match(source, /端点信任模式/);
+  assert.match(source, /Profile 级安全限额/);
+  assert.match(source, /连接测试会访问 Provider 但不生成图片/);
+  assert.match(source, /Descriptor v/);
   assert.doesNotMatch(source, /window\.(?:alert|confirm|prompt)/);
   assert.match(source, /<ConfirmationDialog/);
   assert.match(source, /删除 Profile“/);
@@ -19,15 +30,22 @@ test('Provider settings UI keeps secrets write-only and exposes accessible expli
   assert.match(source, /aria-label="Provider Profile 列表"/);
   assert.match(source, /role="alert"/);
   assert.match(source, /providerConcurrency\.target/);
+  assert.match(source, /reconfigurationPending/);
+  assert.doesNotMatch(source, /重启前拒绝提交新运行/);
+  assert.doesNotMatch(source, /保存并重启/);
   assert.match(source, /aria-live="polite"/);
   assert.doesNotMatch(source, /localStorage|sessionStorage/);
 });
 
-test('Provider edit model preserves the projected referenceEnabled boolean', async () => {
-  const { createProviderEditForm } = await import('../../web/src/provider-settings-model.mjs');
-  const profile = { name: 'Gemini', providerId: 'gemini-image', model: 'gemini-image-model' };
-  assert.equal(createProviderEditForm({ ...profile, referenceEnabled: false }).referenceEnabled, false);
-  assert.equal(createProviderEditForm({ ...profile, referenceEnabled: true }).referenceEnabled, true);
+test('Provider edit model preserves projected Provider metadata and limits', async () => {
+  const { createProviderEditForm, descriptorForProvider, normalizeProfileLimits } = await import('../../web/src/provider-settings-model.mjs');
+  const profile = { name: 'Gemini', providerId: 'gemini-image', model: 'gemini-image-model', endpointTrustMode: 'official', limits: { maxRunItems: 2 }, referenceEnabled: true };
+  const form = createProviderEditForm(profile);
+  assert.equal(form.referenceEnabled, true);
+  assert.equal(form.endpointTrustMode, 'official');
+  assert.equal(form.limits.maxRunItems, 2);
+  assert.deepEqual(normalizeProfileLimits({ maxRunItems: '2', maxExecutionConcurrency: '', requestTimeoutMs: '45000' }), { maxRunItems: 2, requestTimeoutMs: 45000 });
+  assert.equal(descriptorForProvider([{ id: 'gemini-image' }], 'gemini-image').id, 'gemini-image');
   const source = fs.readFileSync(path.resolve(__dirname, '../../web/src/provider-settings.jsx'), 'utf8');
   assert.doesNotMatch(source, /optionKeys\.includes\(['"]referenceEnabled['"]\)/);
 });

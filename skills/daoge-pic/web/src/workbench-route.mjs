@@ -113,11 +113,11 @@ export function updateWorkbenchRoute(route, changes) {
 }
 
 export function selectProject(route, projectId) {
-  return normalizeRoute({ ...route, view: 'project-overview', projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
+  return normalizeRoute({ ...route, view: 'lineage', projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
 }
 
 export function selectTask(route, taskId) {
-  return normalizeRoute({ ...route, view: 'studio-overview', taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
+  return normalizeRoute({ ...route, view: 'lineage', taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
 }
 
 export function selectRound(route, roundId) {
