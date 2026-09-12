@@ -13,9 +13,9 @@ const FALLBACK_PROVIDERS = [
 
 const TRUST_MODES = [
   ['official', '官方端点', '要求 HTTPS 和官方 host。'],
-  ['compatible_public', '公开兼容端点', '适合第三方兼容服务；建议 HTTPS。'],
+  ['compatible_public', '公开兼容端点', '适合第三方兼容服务；必须 HTTPS。HTTP 请选择本地代理或企业内网。'],
   ['local_proxy', '本地代理', '允许把密钥发给本机代理。'],
-  ['enterprise_private', '企业内网', '允许受控内网网关；建议 HTTPS。']
+  ['enterprise_private', '企业内网', '允许受控内网网关；HTTP 仅限明确企业私有信任模式。']
 ];
 
 const TRUST_MODE_LABELS = Object.fromEntries(TRUST_MODES.map(([value, label]) => [value, label]));

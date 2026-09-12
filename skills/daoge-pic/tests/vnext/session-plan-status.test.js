@@ -21,7 +21,7 @@ test('Workbench session plan endpoint is read-only and projects current context 
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'project', body: { name: '只读计划项目', sessionId: session.body.data.id } });
     const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'task', body: { projectId: project.body.data.value.id, name: '只读计划任务', sessionId: session.body.data.id } });
     const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: 'round', body: { taskId: task.body.data.value.id, purpose: 'exploration', sessionId: session.body.data.id } });
-    await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/prepare', { method: 'POST', idempotencyKey: 'prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 2, prompt: '只读摘要', apiKey: 'must-not-project' } } });
+    await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/plan', { method: 'POST', idempotencyKey: 'prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 2, prompt: '只读摘要', apiKey: 'must-not-project' } } });
     const status = await requestJson(started, '/api/sessions/' + session.body.data.id + '/plan-status');
     assert.equal(status.status, 200);
     assert.equal(status.body.data.context.project.name, '只读计划项目');

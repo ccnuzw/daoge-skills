@@ -1,8 +1,8 @@
 # DAOGE Pic vNext
 
-> **当前稳定正式版本**：[`5.12.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0)
-> **当前源码与运行时**：`5.12.0`（已发布；`5.11.0` 为不可变历史版本，不与本版本 daemon 互用）。
-> **Skill protocol**：`daoge-pic-skill-protocol 2.0.0`，独立于制品版本；`5.12.0` 不是协议版本。
+> **当前稳定正式版本**：[`5.13.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0)
+> **当前源码与运行时**：`5.13.0`（已发布；`5.12.0` 及更早版本为不可变历史版本，不与本版本 daemon 互用）。
+> **Skill protocol**：`daoge-pic-skill-protocol 2.0.0`，独立于制品版本；`5.13.0` 不是协议版本。
 > **安装来源**：GitHub Release `.tgz` 资产；这不表示包已发布到 npm registry。
 
 DAOGE Pic 是 Agent + 创作者工作台协作的本地图像创作管理平台。Agent 负责澄清、规划、确认、受控执行和风险恢复；Studio Workbench 负责符合创作者操作习惯的结构化项目/任务/轮次创建、Provider 设置、创作谱系、Generation History、素材、选片、复核和交付。
@@ -11,7 +11,7 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 
 ## 目录
 
-- [5.12.0 重点升级](#5120-重点升级)
+- [5.13.0 重点升级](#5130-重点升级)
 - [5.11.0 历史升级](#5110-重点升级)
 - [快速安装](#快速安装)
 - [启动与会话顺序](#启动与会话顺序)
@@ -23,15 +23,15 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 - [开发与验证](#开发与验证)
 - [文档与发布证据](#文档与发布证据)
 
-## 5.12.0 重点升级
+## 5.13.0 重点升级
 
 | 领域 | 变化 | 用户收益 |
 | --- | --- | --- |
-| 创作手册 | 学习中心升级为带五阶段、专题筛选、判断清单和 Studio / 会话责任划分的 DAOGE Pic 创作手册，并标明当前 `v5.12.0`。 | 创作者可以按项目、计划、运行、资产和交付阶段定位操作边界。 |
-| Provider 安全 | `compatible_public` 拒绝明文 HTTP；本地代理和企业私有端点必须显式选择信任模式；连接测试证据绑定 Profile `configVersion`。 | 凭据不会在错误端点策略下发送，旧测试结果不会覆盖新配置。 |
-| Provider 模型 | 新增显式 `provider-models` 操作，模型列表只在用户点击时读取，不触发图片生成。 | 模型选择可审阅、可追溯，不会因打开设置页自动联网。 |
-| 结构化创建 | 项目模板联动任务目标、素材需求、默认输出和首轮目的；创建成功后直接进入当前上下文，不再弹出推荐下一步卡片。 | 创建流程更短，事实仍统一写入 Studio API / SQLite。 |
-| 参考与恢复 | 多图参考用途编排、遮罩独立资产、外部 secret 清理队列、system backend fail-closed 和 Provider method guard 完成收口。 | 复用关系更清楚，异常路径可恢复，错误请求不会执行副作用。 |
+| 创作谱系与导航 | 编辑模式新增完整节点坐标系小地图，点击/拖动定位视口；小地图不再冒泡成画布框选，项目上下文与统计区保持清晰分栏。 | 大型谱系可以快速定位，导航不会误触发编辑操作。 |
+| 资产预览与确认 | 图片预览恢复 `0.75x–2x` 放大范围；归档和回收站统一使用可访问确认弹窗、忙碌态和错误反馈。 | 可检查大图细节，危险操作确认后会真正执行且不会重复弹窗。 |
+| 结构化创建 | 任务与轮次恢复探索、变体、精修、编辑和补图的推荐数量/画幅；模板只覆盖自身提供的默认值，其余回退到通用推荐。 | 无模板或部分模板也能得到可用初始值，切换目的与套用推荐值行为一致。 |
+| 发布运行时 | 运行时升至 `5.13.0`，计划路径使用 `/plan`，受控 shutdown 使用 `daemon-shutdown`，包门禁验证最终 tarball 的版本和必需入口。 | 当前源码、CLI、API 和交付制品保持同一契约，旧包不会被误当作新版本。 |
+| Provider 与安全 | `compatible_public` 拒绝明文 HTTP；本地代理和企业私有端点必须显式选择信任模式；Provider.db v3 与 system backend fail-closed 规则继续有效。 | 凭据不会在错误端点策略下发送，错误请求不会执行副作用。 |
 
 ## 5.11.0 重点升级
 
@@ -57,7 +57,7 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 ### 推荐：项目级安装
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.12.0/daoge-pic-5.12.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.13.0/daoge-pic-5.13.0.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -65,7 +65,7 @@ npx daoge doctor --workspace /absolute/workspace
 Windows PowerShell：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.12.0/daoge-pic-5.12.0.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.13.0/daoge-pic-5.13.0.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
@@ -75,18 +75,18 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ### 全局安装
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.12.0/daoge-pic-5.12.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.13.0/daoge-pic-5.13.0.tgz"
 daoge register-skill --scope user
 ```
 
 Windows PowerShell：
 
 ```powershell
-npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.12.0/daoge-pic-5.12.0.tgz"
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.13.0/daoge-pic-5.13.0.tgz"
 daoge.cmd register-skill --scope user
 ```
 
-上述 URL 指向 `5.12.0` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
+上述 URL 指向 `5.13.0` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
 
 ### 直接试用 main 分支源码
 
@@ -134,10 +134,10 @@ npx daoge studio --workspace /absolute/workspace
 | 区域 | 主要用途 | 关键边界 |
 | --- | --- | --- |
 | 项目 / 任务 / 轮次导航 | 管理项目、任务、轮次和当前上下文；支持 Studio 直接创建、搜索与分页大列表。新建项目优先选择模板并带出默认名称、说明提示、示例、优先准备的素材和创建后必要上下文；新建任务会读取当前项目模板，按品牌视觉、电商商品图、社媒内容图、角色/IP 或自定义项目重排推荐目标，并自动套用任务名、目标数量、画幅、首轮目的、素材需求、变化维度、精修目标、保持约束和字段提示；新建轮次优先选择轮次目的并套用默认值。创建后直接切换到当前上下文，素材准备清单在表单和资产导入引导中展示。 | 事实以 `studio.db` 为准，不以浏览器状态为准；直接创建只建立结构化上下文，不触发 Provider。 |
-| 创作谱系 | 项目工作区首页；查看项目、任务、计划、运行、资产、交付和资料节点关系；在项目地图、任务创作流、轮次对比、资产分支、交付路线之间切换；保存布局、视口、筛选、分组和人工软连线；从节点检查器直接选片、继续创作、设置参考、获取图片或记录不采用原因。没有当前草稿轮次时，作为参考会自动使用唯一草稿轮次，或让用户选择/新建草稿轮次后加入。 | 只保存画布布局，不替代项目、运行、资产、交付事实；Studio 动作只创建/选择上下文，不预检、运行或访问 Provider。 |
+| 创作谱系 | 项目工作区首页；查看项目、任务、计划、运行、资产、交付和规则资料节点关系；在项目地图、任务创作流、轮次对比、资产分支、交付路线之间切换；保存布局、视口、筛选、分组和人工软连线；从节点检查器直接选片、继续创作、设置参考、获取图片或记录不采用原因。没有当前草稿轮次时，作为参考会自动使用唯一草稿轮次，或让用户选择/新建草稿轮次后加入。 | 只保存画布布局，不替代项目、运行、资产、交付事实；Studio 动作只创建/选择上下文，不预检、运行或访问 Provider。 |
 | Generation History | 按当前轮次列出持久 Generation Run；显式选择运行后查看计划版本、运行状态、运行项、输出缩略图和恢复动作。 | 不把“最新运行”或“活跃运行”静默当成已选择历史。 |
-| 资产 | 导入、分页、筛选、选片、复核、共享、回收、恢复、来源检查和 ZIP 下载。资产页会按当前项目/任务/草稿轮次的素材需求显示导入引导，导入时可选择“商品主体图、品牌包/Logo、平台规格、核心卖点”等需求，Studio 会保存脱敏的素材需求与默认参考用途；导入到草稿轮次时会自动加入参考素材上下文。 | “全选本页”只作用于当前页；参考素材只来自当前项目或明确共享素材；已进入确认或运行流程的轮次不能由 Studio 直接改参考上下文。 |
-| 放大预览 / 双图对比 | 查看图片、切换成果选择、复制或下载。 | 选择状态写入项目业务关系，并保持 `keep` 评审语义。 |
+| 资产 | 导入、分页、筛选、选片、复核、共享、回收、恢复、来源检查和 ZIP 下载。资产页会按当前项目/任务/草稿轮次的素材需求显示导入引导，导入时可选择“商品主体图、品牌包/Logo、平台规格、核心卖点”等需求，Studio 会保存脱敏的素材需求与默认参考用途；导入到草稿轮次时会自动加入参考素材上下文。状态图例统一解释未定、成果 / keep、不采用、可继续和交付冻结。 | “全选本页”只作用于当前页；未定资产不能进入交付，成果 / keep 才可创建交付草稿，不采用可转成反例或下一轮修正目标，可继续创作必须创建新轮次；参考素材只来自当前项目或明确共享素材；已进入确认或运行流程的轮次不能由 Studio 直接改参考上下文。 |
+| 放大预览 / 双图对比 | 查看图片、切换成果选择、复制或下载。 | 选择状态写入项目业务关系，并保持 `keep` 评审语义；交付冻结来自已准备或已导出的交付实体，不受源资产后续回收影响。 |
 | 交付 | 创建草稿、准备、导出、查看历史、下载/复制冻结文件和 ZIP。 | 状态机为 `draft -> ready -> exported`；导出后不受源资产回收影响。 |
 | Provider 设置 | Profile 新建、编辑、复制、激活、删除、本地校验、显式连接测试、显式读取模型列表、模型选择；展示 Provider Descriptor、端点信任模式和 Profile 级安全限额。 | API Key 和完整 Base URL 是 write-only，GET 只返回安全摘要；删除 active Profile 需要显式确认；被未完成或可恢复运行引用的 Profile 不能修改或删除；daemon 会在旧配置任务排空后热加载活动配置，已完成预检需重新预检。生成、编辑和模型列表请求固定 DNS 结果、复核远端地址并拒绝重定向。 |
 | 运行健康 | 查看 daemon、generation worker、media worker 的待命、启动、正常、恢复、熔断状态；安全重启故障池；复制脱敏诊断。 | 诊断不包含工作区路径、完整 URL、capability、Cookie、session token 或 Provider 密钥。 |
@@ -151,6 +151,8 @@ Workbench 不提供自然语言对话，不绕过会话确认，不展示 Provid
 创建项目、任务或轮次后，Workbench 直接切换到当前上下文和对应页面，不显示额外的创建完成提示或推荐下一步卡片。素材准备清单在创建表单和资产导入引导中展示；直接创建仍只建立结构化上下文，不执行确认、预检、Generation Run 或 Provider 调用。
 
 项目模板会影响后续新建任务表单：例如“电商商品图”默认优先推荐“商品主图探索”，目标数量为 8 张、画幅 1:1，并提示商品主体图、品牌包 / Logo、平台规格和核心卖点；“角色 / IP 设计”会优先推荐角色形象探索和动作 / 表情变体，并提示固定外观与不可改变特征。
+
+项目模板的唯一事实源是后端 `src/vnext/domain/project-templates.ts` 和 `GET /api/project-templates`；Workbench 只消费 API 返回的模板版本、任务默认、素材需求和示例，不维护第二套品牌/电商/社媒/角色模板，只保留无模板时的通用任务/轮次 fallback。规则资料只包含任务类型、风格包和品牌包；共享图片属于“共享素材”，不会混入规则资料列表。
 
 ## 核心概念
 
@@ -201,11 +203,11 @@ Workbench 不提供自然语言对话，不绕过会话确认，不展示 Provid
 
 Provider 能力、官方端点、参考图 / 遮罩能力、远程参考数量、媒体类型和输出规格来自版本化 Provider Descriptor；Profile store、API、Workbench、预检和 HTTP adapter 都返回或记录 `descriptorVersion` / `adapterVersion`，避免能力判断散落。
 
-Provider 配置只保存在 `<workspace>/daoge-studio/Provider.db`。默认后端是受权限保护的明文敏感 SQLite：Unix 使用 `0600`；Windows 只允许当前用户 SID、SYSTEM 与 Administrators 完全控制，并通过系统 .NET `FileSystemSecurity` API 批量应用和复核 DACL。任何 ACL、符号链接、权限或 schema 异常都会 fail-closed。设置 `DAOGE_PIC_PROVIDER_SECRET_BACKEND=system` 时，macOS 使用 Keychain、Windows 使用当前用户 DPAPI sidecar、Linux 在可用时使用 libsecret；`Provider.db` 仅保存密钥引用和 write-only 摘要。
+Provider Profile、密钥引用与 write-only 摘要只保存在 `<workspace>/daoge-studio/Provider.db`；5.13.0 的 Provider.db schema 为 v3。默认 secret backend 是受权限保护的明文敏感 SQLite：Unix 使用 `0600`；Windows 只允许当前用户 SID、SYSTEM 与 Administrators 完全控制，并通过系统 .NET `FileSystemSecurity` API 批量应用和复核 DACL。任何 ACL、符号链接、权限或 schema 异常都会 fail-closed。设置 `DAOGE_PIC_PROVIDER_SECRET_BACKEND=system` 时，macOS 使用 Keychain、Windows 使用当前用户 DPAPI sidecar、Linux 在可用时使用 libsecret；`Provider.db` 仅保存密钥引用和 write-only 摘要，system backend 不可用时不得静默退回 SQLite 明文。
 
-API Key 与完整 Base URL 仅持久化在 Provider.db（或显式配置的系统密钥后端），并在 Workbench 表单、daemon 和 Worker 内存中短暂出现；不会写入 `studio.db`、事件、幂等响应、日志、快照、导出、诊断、打包、聊天或浏览器持久存储。Provider 请求携带凭据时拒绝重定向；远程图片下载只接受无凭据 HTTP/HTTPS 公网地址，并执行 SSRF、DNS 固定、响应大小和格式校验。每个 Profile 可设置端点信任模式：官方端点、兼容公网端点或本地受信端点。
+API Key 与完整 Base URL 仅持久化在 Provider.db（或显式配置的系统密钥后端），并在 Workbench 表单、daemon 和 Worker 内存中短暂出现；不会写入 `studio.db`、事件、幂等响应、日志、快照、导出、诊断、打包、聊天或浏览器持久存储。Provider 请求携带凭据时拒绝重定向；远程图片下载只接受无凭据 HTTP/HTTPS 公网地址，并执行 SSRF、DNS 固定、响应大小和格式校验。每个 Profile 可设置端点信任模式：官方端点、兼容公网端点、本地代理或企业私有端点；`compatible_public` 必须使用 HTTPS，HTTP 只允许显式 `local_proxy` 或 `enterprise_private`。
 
-既有工作区的 `provider.env` 只作为一次性迁移输入；新工作区不会创建。运行时事实源是 Provider.db。显式连接测试和模型列表读取只在用户点击时访问 Provider；模型列表返回受限的 `id`、显示名和归属投影，并把连接测试的可达性、HTTP 状态、Descriptor/adapter 版本和端点策略警告保存为脱敏证据。
+既有工作区的 `provider.env` 只作为一次性迁移输入；新工作区不会创建。Provider Profile、密钥引用和 write-only 摘要的运行时事实源是 Provider.db。显式连接测试和模型列表读取只在用户点击时访问 Provider；模型列表返回受限的 `id`、显示名和归属投影，并把连接测试的可达性、HTTP 状态、Descriptor/adapter 版本和端点策略警告保存为脱敏证据。
 
 并发只属于 Generation Run：
 
@@ -256,7 +258,7 @@ node scripts/daoge.js <command> --workspace /absolute/workspace
 | 创作领域 | `project`、`archive-project`、`task`、`round`、`plan --plan <json\|@->`、`confirm-challenge`、`preflight`、`run` |
 | 运行控制 | `pause`、`resume --session <id>`、`cancel`、`retry [--items <id,...>]`、`resolve-unknown --items <id,...>` |
 | 交付 | `delivery`、`delivery-update`、`delivery-ready`、`delivery-draft`、`delivery-export`、`delivery-batch`、`delivery-batch-revise`、`delivery-batch-ready` |
-| 资料库 | `task-type`、`style-kit`、`brand-kit` |
+| 规则资料 | `task-type`、`style-kit`、`brand-kit` |
 
 所有 `POST` / `PUT` mutation 可使用命名操作恢复：
 
@@ -288,12 +290,12 @@ npm test
 npm run test:package
 ```
 
-5.12.0 已执行验证：
+5.13.0 已执行验证：
 
-- macOS `npm test`：358 项，356 通过、0 失败、2 项仅 Windows 实机用例跳过。
+- macOS `npm test`：363 项，361 通过、0 失败、2 项仅 Windows 实机用例跳过。
 - `npm run test:package`：发布清单 130 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
 - P2 专项回归：Provider 错误 HTTP method 不执行副作用；创建项目、任务和轮次后直接进入当前上下文；创作手册包含 Provider、模板、参考编排和安全边界更新。
-- 发布制品与 SHA-256 记录在包外 `daoge_pic_5.12.0_release_notes_zh.md` 与 `daoge-pic-5.12.0.tgz.sha256`。
+- 发布制品与 SHA-256 记录在包外 `daoge_pic_5.13.0_release_notes_zh.md` 与 `daoge-pic-5.13.0.tgz.sha256`。
 
 发布前最低验证：
 
@@ -314,9 +316,9 @@ npm run test:package
 - 受控会话协议：[SKILL.md](SKILL.md)
 - 长期权威产品与架构规格：[docs/daoge_pic_vnext_upgrade_spec_zh.md](docs/daoge_pic_vnext_upgrade_spec_zh.md)
 - 发布验证记录：[docs/vnext_verification_evidence_zh.md](docs/vnext_verification_evidence_zh.md)
-- v5.12.0 发布说明：[../../docs/daoge_pic_5.12.0_release_notes_zh.md](../../docs/daoge_pic_5.12.0_release_notes_zh.md)
+- v5.13.0 发布说明：[../../docs/daoge_pic_5.13.0_release_notes_zh.md](../../docs/daoge_pic_5.13.0_release_notes_zh.md)
 - v5.11.0 历史发布说明：[../../docs/daoge_pic_5.11.0_release_notes_zh.md](../../docs/daoge_pic_5.11.0_release_notes_zh.md)
-- GitHub Release：[`daoge-pic-v5.12.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0)
+- GitHub Release：[`daoge-pic-v5.13.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0)
 - 历史 GitHub Release：[`daoge-pic-v5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0)
 
 5.11.0、5.10.4、5.10.3、5.10.2、5.10.1、5.10.0、5.9.1 及更早稳定版历史证据分章记录在验证记录中；最终资产哈希由 GitHub Release 与 sidecar 在包外记录。

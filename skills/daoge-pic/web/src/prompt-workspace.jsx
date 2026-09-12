@@ -4,17 +4,66 @@ import { planDiff, planPresentation, planStateLabel, ROUND_PURPOSE_LABELS } from
 
 const ITEM_PROMPT_PREFIX = '\n\nSpecific scene direction for this image: ';
 const OPENAI_GPT_IMAGE_PROMPT_LIMIT = 32000;
-const RAW_GROUP_KEYS = new Set(['operation', 'itemCount', 'prompt', 'itemPrompts', 'output', 'referenceAssetIds', 'referenceMaterials', 'maskAssetId', 'parentAssetIds', 'parentRoundId', 'variationAxes', 'keepConstraints', 'refinementGoals', 'referenceArrangement', 'draftKind', 'createdFrom']);
+const RAW_FIELD_GROUPS = [
+  { label: '基础', keys: ['operation', 'itemCount', 'draftKind', 'createdFrom', 'requestedConcurrency'] },
+  { label: '输出规格', keys: ['output'] },
+  { label: '创作简报', keys: ['brief', 'creativeIntent', 'constraints', 'notes', 'note', 'planningNotes'] },
+  { label: '参考素材', keys: ['referenceAssetIds', 'referenceLabels', 'referenceMaterials', 'maskAssetId'] },
+  { label: '主体 / 角色', keys: ['subject', 'hero_subject', 'heroSubject', 'characterProfiles', 'identity_constraints', 'identityConstraints', 'wardrobe', 'expression', 'setting'] },
+  { label: '商品 / 包装', keys: ['product', 'productSpec', 'package_type', 'packageType', 'materials', 'selling_points', 'sellingPoints'] },
+  { label: '品牌 / 渠道', keys: ['brand', 'brandSpec', 'brand_constraints', 'brandConstraints', 'platform', 'platformSpec', 'usage_scene', 'usageScene', 'campaign'] },
+  { label: '场景 / 构图', keys: ['framingSpec', 'composition', 'compositionSpec', 'background', 'angle', 'camera_language', 'cameraLanguage', 'aspect_ratio', 'aspectRatio'] },
+  { label: '真实感 / 风格', keys: ['realismSpec', 'styleSpec', 'visualStyle', 'visual_system', 'visualSystem', 'colorPalette'] },
+  { label: '文案 / 排版', keys: ['copy', 'language', 'hierarchy', 'safe_area', 'safeArea', 'headline_safe_area', 'headlineSafeArea', 'text_safe_area', 'textSafeArea', 'cta_area', 'ctaArea', 'typography_constraints', 'typographyConstraints', 'label_policy', 'labelPolicy'] },
+  { label: '分镜 / 系列', keys: ['story', 'storyboard', 'storyboardSpec', 'shot_list', 'shotList', 'continuity', 'series', 'seriesSlot', 'seriesSpec', 'product_flow', 'productFlow', 'device', 'information_hierarchy', 'informationHierarchy'] },
+  { label: '学术 / 图解', keys: ['topic', 'claims', 'diagram_structure', 'diagramStructure', 'evidence_constraints', 'evidenceConstraints'] },
+  { label: '衍生关系', keys: ['parentAssetIds', 'parentRoundId', 'derivation', 'referenceArrangement', 'feedbackToNextRound'] },
+  { label: '变化 / 精修', keys: ['variationSpec', 'variationAxes', 'variationCatalog', 'creativeDistribution', 'keepConstraints', 'refinementGoals', 'editIntent', 'fillDirection'] },
+  { label: '质量 / 风险', keys: ['qualityGates', 'riskNotes', 'failurePolicy', 'recovery', 'compositingWorkflow'] }
+];
+const RAW_GROUP_KEYS = new Set(['prompt', 'itemPrompts', ...RAW_FIELD_GROUPS.flatMap((group) => group.keys)]);
+const RAW_OBJECT_FIELD_KEYS = new Set(['output', 'framingSpec', 'realismSpec', 'variationSpec', 'productSpec', 'brandSpec', 'platformSpec', 'compositionSpec', 'styleSpec', 'storyboardSpec', 'seriesSpec']);
 
 function stateTone(value) { return value === 'confirmed' ? 'ready' : value === 'awaiting_confirmation' ? 'pending' : 'draft'; }
 function asRecord(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
 function asArray(value) { return Array.isArray(value) ? value : []; }
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
+function looksLikeAssetId(value) { return typeof value === 'string' && /^asset_[a-f0-9-]{20,}$/i.test(value); }
 function displayValue(value) {
   if (value === null || value === undefined || value === '') return '未设置';
   if (Array.isArray(value)) return value.length ? value.map((item) => displayValue(item)).join('、') : '无';
   if (typeof value === 'object') return JSON.stringify(value, null, 2);
   return String(value);
+}
+function scalarValueSummary(value) {
+  if (value === null || value === undefined || value === '') return '未设置';
+  if (Array.isArray(value)) return value.length ? value.slice(0, 3).map((item) => scalarValueSummary(item)).join('、') + (value.length > 3 ? ' …' : '') : '无';
+  if (typeof value === 'object') {
+    const record = asRecord(value);
+    const title = text(record.name) || text(record.label) || text(record.assetId) || text(record.id);
+    if (title) return title;
+    const entries = Object.entries(record).filter(([, item]) => item !== undefined);
+    return entries.length ? entries.slice(0, 2).map(([key, item]) => key + ': ' + scalarValueSummary(item)).join(' / ') + (entries.length > 2 ? ' …' : '') : '{}';
+  }
+  const raw = String(value).replace(/\s+/g, ' ').trim();
+  return raw.length > 72 ? raw.slice(0, 69) + '…' : raw || '未设置';
+}
+function compactDisplayValue(value) {
+  if (value === null || value === undefined || value === '') return '未设置';
+  if (Array.isArray(value)) {
+    if (!value.length) return '无';
+    if (value.every(looksLikeAssetId)) return value.length + ' 项 · 已绑定素材 ID';
+    const samples = value.slice(0, 4).map((item) => {
+      const record = asRecord(item);
+      return text(record.name) || text(record.label) || text(record.assetId) || text(record.id) || scalarValueSummary(item);
+    }).filter(Boolean);
+    return value.length + ' 项' + (samples.length ? ' · ' + samples.join(' / ') + (value.length > samples.length ? ' …' : '') : '');
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(asRecord(value)).filter(([, item]) => item !== undefined);
+    return entries.length ? entries.slice(0, 4).map(([key, item]) => key + ': ' + scalarValueSummary(item)).join('\n') + (entries.length > 4 ? '\n+' + (entries.length - 4) + ' 字段' : '') : '{}';
+  }
+  return displayValue(value);
 }
 
 function currentPlanVersion(planVersions) {
@@ -64,19 +113,32 @@ function isLongRawValue(value) {
   if (Array.isArray(value)) return JSON.stringify(value).length > 160;
   return value && typeof value === 'object' ? JSON.stringify(value).length > 160 : false;
 }
+function rawFieldEntries(value, key) {
+  if (key === 'referenceMaterials') {
+    const materialCount = asArray(value.referenceMaterials).length;
+    return [['referenceMaterials', materialCount ? materialCount + ' 条' : value.referenceMaterials]];
+  }
+  if (RAW_OBJECT_FIELD_KEYS.has(key) || (/Spec$/.test(key) && value[key] && typeof value[key] === 'object' && !Array.isArray(value[key]))) {
+    const entries = Object.entries(asRecord(value[key]));
+    return entries.length ? entries : [[key, value[key]]];
+  }
+  return [[key, value[key]]];
+}
 function rawSummaryGroups(plan) {
   const value = asRecord(plan);
-  const materialCount = asArray(value.referenceMaterials).length;
-  const outputFields = Object.entries(asRecord(value.output));
-  const groups = [
-    ['基础', [['operation', value.operation], ['itemCount', value.itemCount], ['draftKind', value.draftKind], ['createdFrom', value.createdFrom]]],
-    ['输出规格', outputFields.length ? outputFields : [['output', value.output]]],
-    ['参考素材', [['referenceAssetIds', value.referenceAssetIds], ['referenceMaterials', materialCount ? materialCount + ' 条' : value.referenceMaterials], ['maskAssetId', value.maskAssetId]]],
-    ['衍生关系', [['parentAssetIds', value.parentAssetIds], ['parentRoundId', value.parentRoundId], ['variationAxes', value.variationAxes], ['keepConstraints', value.keepConstraints], ['refinementGoals', value.refinementGoals], ['referenceArrangement', value.referenceArrangement]]]
-  ];
+  const groups = RAW_FIELD_GROUPS.map(({ label, keys }) => [label, keys.flatMap((key) => rawFieldEntries(value, key)).filter(([, item]) => item !== undefined)]).filter(([, fields]) => fields.length);
   const other = Object.entries(value).filter(([key]) => !RAW_GROUP_KEYS.has(key));
   if (other.length) groups.push(['其他元数据', other]);
-  return groups.map(([label, fields]) => [label, fields.filter(([, value]) => value !== undefined)]).filter(([, fields]) => fields.length);
+  return groups;
+}
+function rawSummaryIntro(groups) {
+  const semantic = groups.map(([label]) => label).filter((label) => !['基础', '输出规格', '参考素材'].includes(label));
+  if (!semantic.length) return '字段较少时保持紧凑网格；完整计划仍保留在原始 JSON。';
+  return '已识别 ' + semantic.slice(0, 4).join('、') + (semantic.length > 4 ? ' 等' : '') + ' 任务字段；长数组和对象先摘要，可展开查看完整结构。';
+}
+function RawFieldValue({ value }) {
+  if (value && typeof value === 'object' && isLongRawValue(value)) return <details className="prompt-raw-field-details"><summary>{compactDisplayValue(value)}</summary><pre>{JSON.stringify(value, null, 2)}</pre></details>;
+  return displayValue(value);
 }
 function referenceRows(plan) {
   const value = asRecord(plan);
@@ -124,7 +186,8 @@ function ReferenceMaterialsSection({ plan }) {
 }
 
 function StructuredPlanDetails({ plan }) {
-  return <details className="prompt-raw-structure"><summary><ChevronDown size={15} /><span>原始计划结构</span><small>短字段网格 + 原始 JSON</small></summary><div className="prompt-raw-layout"><section className="prompt-raw-summary"><header><p className="eyebrow">关键字段</p><h4>短字段概览</h4></header><div className="prompt-raw-groups">{rawSummaryGroups(plan).map(([label, fields]) => <section key={label}><h4>{label}</h4><dl>{fields.map(([key, value]) => <div key={key} className={isLongRawValue(value) ? 'is-long' : ''}><dt>{key}</dt><dd>{displayValue(value)}</dd></div>)}</dl></section>)}</div></section><ReferenceMaterialsSection plan={plan} /></div><details className="prompt-raw-json"><summary>查看原始 JSON</summary><pre>{JSON.stringify(asRecord(plan), null, 2)}</pre></details></details>;
+  const groups = rawSummaryGroups(plan);
+  return <details className="prompt-raw-structure"><summary><ChevronDown size={15} /><span>原始计划结构</span><small>{groups.length} 组字段 + 原始 JSON</small></summary><div className="prompt-raw-layout"><section className="prompt-raw-summary"><header><div><p className="eyebrow">关键字段</p><h4>按任务类型归组</h4></div><span>{rawSummaryIntro(groups)}</span></header><div className="prompt-raw-groups">{groups.map(([label, fields]) => <section key={label} className={fields.some(([, value]) => isLongRawValue(value)) ? 'is-rich' : 'is-compact'}><h4>{label}</h4><dl>{fields.map(([key, value]) => <div key={key} className={isLongRawValue(value) ? 'is-long' : ''}><dt>{key}</dt><dd><RawFieldValue value={value} /></dd></div>)}</dl></section>)}</div></section><ReferenceMaterialsSection plan={plan} /></div><details className="prompt-raw-json"><summary>查看原始 JSON</summary><pre>{JSON.stringify(asRecord(plan), null, 2)}</pre></details></details>;
 }
 
 export function PromptWorkspace({ round, planVersions, loading, onRefresh }) {

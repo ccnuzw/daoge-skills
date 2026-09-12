@@ -70,9 +70,20 @@ test('current plan review exposes per-image prompts before confirmation', () => 
 test('Workbench exposes Studio-first creation controls without a second chat flow', () => {
   const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
   const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
-  assert.match(main, /PROJECT_CREATION_TEMPLATES/);
-  assert.match(main, /TASK_CREATION_GOALS/);
-  assert.match(main, /ROUND_CREATION_PURPOSES/);
+  const projectTemplates = fs.readFileSync(path.join(skillRoot, 'src/vnext/domain/project-templates.ts'), 'utf8');
+  assert.doesNotMatch(main, /PROJECT_CREATION_TEMPLATES/);
+  assert.match(main, /PROJECT_TEMPLATE_UNAVAILABLE/);
+  assert.match(main, /GENERIC_TASK_GOAL_FALLBACKS/);
+  assert.match(main, /ROUND_PURPOSE_OPTIONS/);
+  assert.match(main, /id: 'exploration',[\s\S]*defaultCount: '6',[\s\S]*defaultAspectRatio: '4:5'/);
+  assert.match(main, /id: 'variation',[\s\S]*defaultCount: '4'/);
+  assert.match(main, /id: 'refinement',[\s\S]*defaultCount: '4'/);
+  assert.match(main, /id: 'edit',[\s\S]*defaultCount: '2'/);
+  assert.match(main, /id: 'fill',[\s\S]*defaultCount: '2',[\s\S]*defaultAspectRatio: '16:9'/);
+  assert.match(main, /setIfEmptyOrDefault\(setTargetCount, previous\.defaultCount, option\.defaultCount\)/);
+  assert.match(main, /setTargetCount\(selectedGoal\.defaultCount \|\| ''\)/);
+  assert.doesNotMatch(main, /TASK_CREATION_GOALS/);
+  assert.doesNotMatch(main, /ROUND_CREATION_PURPOSES/);
   assert.match(main, /双入口、单工作流/);
   assert.match(main, /新建项目/);
   assert.match(main, /新建任务/);
@@ -107,10 +118,16 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /项目模板联动/);
   assert.match(main, /模板推荐/);
   assert.match(main, /materialNeeds/);
-  assert.match(main, /商品主图探索/);
-  assert.match(main, /商品主体图/);
-  assert.match(main, /defaultCount: '8'/);
-  assert.match(main, /defaultAspectRatio: '1:1'/);
+  assert.match(main, /项目模板只来自 Studio API/);
+  assert.match(main, /setProjectTemplates\(projectTemplateData\.templates \|\| \[\]\)/);
+  assert.match(projectTemplates, /商品主图探索/);
+  assert.match(projectTemplates, /商品主体图/);
+  assert.match(projectTemplates, /defaultCount: '8'/);
+  assert.match(projectTemplates, /defaultAspectRatio: '1:1'/);
+  assert.doesNotMatch(main, /商品主图探索/);
+  assert.doesNotMatch(main, /商品主体图/);
+  assert.doesNotMatch(main, /defaultCount: '8'/);
+  assert.doesNotMatch(main, /defaultAspectRatio: '1:1'/);
   assert.match(main, /DERIVED_VARIATION_AXES/);
   assert.match(main, /DERIVED_REFINEMENT_GOALS/);
   assert.match(main, /希望保持不变/);
@@ -252,7 +269,12 @@ test('Workbench confirmations use the shared accessible modal instead of native 
   assert.doesNotMatch(main + provider, /window\.(?:alert|confirm|prompt)|\b(?:alert|confirm|prompt)\s*\(/);
   assert.match(main, /<ConfirmationDialog/);
   assert.match(main, /归档后将关闭该项目下的任务与轮次/);
-  assert.match(main, /这张图片仍被选择、资料库或交付引用/);
+  assert.match(main, /这张图片仍被选择、规则资料或交付引用/);
+  assert.match(main, /busy=\{confirmationBusy\}/);
+  assert.match(main, /error=\{confirmationError\}/);
+  assert.match(main, /onCancel=\{dismissConfirmation\}/);
+  assert.match(main, /onConfirm=\{confirmPendingAction\}/);
+  assert.doesNotMatch(main, /archiveProjectAction|trash\(confirmation\.assetId/);
   assert.match(provider, /<ConfirmationDialog/);
   assert.match(confirmation, /<AccessibleDialog/);
   assert.match(confirmation, /confirmation-dialog-actions/);
@@ -353,6 +375,9 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /toolbarMode/);
   assert.doesNotMatch(lineage, /创作地图|创作者工作台/);
   assert.match(styles, /\.lineage-focus-strip/);
+  assert.match(styles, /\.lineage-focus-strip \{ display:grid; grid-template-columns:minmax\(260px,\.9fr\) minmax\(360px,1\.25fr\) minmax\(320px,\.85fr\)/);
+  assert.match(lineage, /title=\{description\} onClick=\{\(\) => onMode\(value\)\}><strong>\{label\}<\/strong><\/button>/);
+  assert.match(styles, /\.lineage-thumb img \{ display:block; width:100%; height:126px; object-fit:contain;/);
   assert.doesNotMatch(styles, /\.lineage-workspace-hero/);
   assert.match(lineage, /lineage-metrics-strip/);
   assert.match(lineage, /visibleByMode/);
@@ -368,10 +393,18 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /lineage-edit-more/);
   assert.match(styles, /\.lineage-shell\.has-resources \{ grid-template-columns:minmax\(0,1fr\) 360px/);
   assert.match(styles, /\.lineage-shell\.has-resources \.lineage-resource-panel \{ position:absolute/);
+  assert.match(lineage, /boundsNodes=\{nodes\}/);
+  assert.match(lineage, /event\.stopPropagation\(\)/);
+  assert.match(lineage, /aria-label="画布缩略图，拖动以定位"/);
+  assert.match(styles, /\.lineage-minimap svg \{ display:block; width:210px; height:134px/);
   assert.match(main, /onOpenConfirmation=\{\(round\) => void openGenerationConfirmation\(round\)\}/);
   assert.match(lineage, /PlanActions\(\{ node, onNavigate, onCopyContext, onOpenConfirmation \}\)/);
   assert.match(lineage, /node\.entity\?\.status === 'awaiting_confirmation'/);
   assert.match(lineage, /审阅并确认计划/);
+  assert.match(lineage, /只展示状态，不直接执行重试/);
+  assert.match(lineage, /暂停、恢复或取消运行请回到当前 Agent 会话处理/);
+  assert.doesNotMatch(lineage, /onControlRun\('(?:pause|resume|cancel)'/);
+  assert.doesNotMatch(lineage, /onRetryRunItem\(item\.id\)/);
 });
 
 test('Workbench renders route context errors as live alerts', () => {

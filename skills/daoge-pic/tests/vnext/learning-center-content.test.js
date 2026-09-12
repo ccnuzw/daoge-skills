@@ -28,6 +28,11 @@ test('learning center matches the stable session, Provider, preflight, history, 
   assert.match(sessions, /独立 Studio Session/);
   assert.match(sessions, /新打开与安全复用/);
 
+  const projects = topicText('projects');
+  assert.match(projects, /普通新建项目、任务或轮次后直接进入当前上下文/);
+  assert.match(projects, /生成计划、变更执行目标和 Provider 调用必须回到会话确认/);
+  assert.doesNotMatch(projects, /创建项目、任务和轮次，以及变更创作目标/);
+
   const provider = topicText('provider');
   assert.match(provider, /Provider\.db/);
   assert.match(provider, /只写/);
@@ -36,6 +41,8 @@ test('learning center matches the stable session, Provider, preflight, history, 
 
   const safety = topicText('safety');
   assert.match(safety, /不进入 studio\.db、事件、日志、导出或诊断/);
+  assert.match(safety, /system secret backend/);
+  assert.match(safety, /不能静默退回 SQLite 明文/);
   assert.doesNotMatch(safety, /密钥不进入数据库/);
 
   const preflight = topicText('preflight');
@@ -56,6 +63,11 @@ test('learning center matches the stable session, Provider, preflight, history, 
   assert.match(assets, /16、24、32、48、64、96/);
   assert.match(assets, /一次导入多张图片/);
   assert.match(assets, /全选本页/);
+  assert.match(assets, /状态图例/);
+  assert.match(assets, /未定资产不能进入交付/);
+  assert.match(assets, /成果 \/ keep/);
+  assert.match(assets, /不采用可转成反例/);
+  assert.match(assets, /可继续创作必须创建新轮次/);
 
   const delivery = topicText('delivery');
   assert.match(delivery, /全选或取消全选交付图片/);
@@ -67,8 +79,8 @@ test('learning center matches the stable session, Provider, preflight, history, 
   assert.match(lineage, /回到会话审阅/);
 
   const library = topicText('library');
-  assert.match(library, /项目内打开资料库会保留当前项目壳/);
-  assert.match(library, /项目内打开资料库不关闭当前项目/);
+  assert.match(library, /项目内打开规则资料会保留当前项目壳/);
+  assert.match(library, /项目内打开规则资料不关闭当前项目/);
   assert.match(library, /不绑定任务、轮次、计划或运行/);
 });
 const fs = require('node:fs');

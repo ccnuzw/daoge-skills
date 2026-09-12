@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Archive, BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, PackageCheck, Palette, Pause, Play, Redo2, RefreshCw, Save, Search, Share2, Sparkles, Tag, Trash2, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, Archive, BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, PackageCheck, Palette, Play, Redo2, RefreshCw, Save, Search, Share2, Sparkles, Tag, Trash2, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { assetThumbnailUrl } from './asset-media-url.mjs';
+import { MINIMAP_HEIGHT, MINIMAP_WIDTH, clampWorldPoint, createMinimapGeometry, minimapToWorld, viewportRectForMinimap, worldToMinimap } from './lineage-minimap-model.mjs';
 import { creativeLibraryResources, filterCreativeLibraryResources } from './creative-library-model.mjs';
 import { createLineageExport, lineageExportFilename } from './lineage-export-model.mjs';
 import { runExecutionPresentation, statusPresentation } from './status-presentation.mjs';
@@ -445,27 +446,25 @@ function LineageWorkspaceSummary({ project, selectedTask, selectedRound, runs = 
   const contextStatus = planStatusLine(sessionPlanStatus, selectedRound);
   return <div className="lineage-workspace-summary" data-lineage-no-zoom>
     <section className="lineage-focus-strip" aria-label="谱系当前视图与上下文">
+      <div className="lineage-context-card">
+        <span>上下文</span>
+        <strong>{sessionContextLine(sessionPlanStatus, selectedTask, selectedRound)}</strong>
+        {contextStatus && <small>{contextStatus}</small>}
+        <div className="lineage-context-actions"><button type="button" className="outline-button" onClick={onOpenTasks}><GitFork size={14} />任务列表</button><button type="button" className="outline-button" onClick={onCreateTask}><Sparkles size={14} />新建任务</button></div>
+      </div>
       <section className="lineage-mode-panel" aria-label="创作谱系工作模式">
-        <div className="lineage-mode-heading"><span>视图</span><strong>{currentMode[1]}</strong><small>{currentMode[2]}</small></div>
+        <div className="lineage-mode-heading"><span>视图</span><strong>{currentMode[1]}</strong></div>
         <div className="lineage-mode-grid" role="radiogroup" aria-label="切换谱系视图">
-          {CREATOR_MODES.map(([value, label, description]) => <button type="button" key={value} className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} onClick={() => onMode(value)}><strong>{label}</strong><span>{description}</span></button>)}
+          {CREATOR_MODES.map(([value, label, description]) => <button type="button" key={value} className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} title={description} onClick={() => onMode(value)}><strong>{label}</strong></button>)}
         </div>
       </section>
-      <div className="lineage-context-column">
-        <div className="lineage-context-card">
-          <span>上下文</span>
-          <strong>{sessionContextLine(sessionPlanStatus, selectedTask, selectedRound)}</strong>
-          {contextStatus && <small>{contextStatus}</small>}
-          <div className="lineage-context-actions"><button type="button" className="outline-button" onClick={onOpenTasks}><GitFork size={14} />任务列表</button><button type="button" className="outline-button" onClick={onCreateTask}><Sparkles size={14} />新建任务</button></div>
-        </div>
-        <section className="lineage-metrics-strip" aria-label="创作决策统计">
-          {metrics.map((item) => <article key={item.key} className={item.className} title={item.title || item.label}><b>{item.value}</b><span>{item.label}</span></article>)}
-        </section>
-      </div>
+      <section className="lineage-metrics-strip" aria-label="创作决策统计">
+        {metrics.map((item) => <article key={item.key} className={item.className} title={item.title || item.label}><b>{item.value}</b><span>{item.label}</span></article>)}
+      </section>
     </section>
   </div>;
 }
-export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onRetryRunItem, onControlRun, onOpenProvider, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
+export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
   tasks = listValue(tasks);
   rounds = listValue(rounds);
   runs = listValue(runs);
@@ -1225,11 +1224,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
           {renderedNodes.map((node) => <LineageNode key={node.key} node={node} active={selectedKeys.has(node.key)} searchHit={nodeSearchMatchKeys.has(node.key)} searchActive={activeNodeSearch?.key === node.key} onPointerDown={handleNodePointerDown} onSelect={selectNode} onOpen={() => openNode(node, { onNavigate, onInspectAsset })} onContextMenu={openContextMenu} onDragStart={handleNodeDragStart} onDragOver={handleNodeDragOver} onDrop={handleNodeDrop} />)}
           {selectionBox && <div className="lineage-selection-box" style={{ left: Math.min(selectionBox.startX, selectionBox.currentX), top: Math.min(selectionBox.startY, selectionBox.currentY), width: Math.abs(selectionBox.currentX - selectionBox.startX), height: Math.abs(selectionBox.currentY - selectionBox.startY) }} />}
         </div>
-        {editing && settings.minimap && <LineageMinimap nodes={filteredNodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
+        {editing && settings.minimap && <LineageMinimap nodes={filteredNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
         {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode && !isResourceType(contextNode.entityType))} canGroup={editing && selectedNodes.length > 1} canRemoveResource={editing && contextNode && isResourceType(contextNode.entityType)} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onRemoveResource={() => contextNode && removeResourceNode(contextNode)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
         {editing && shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
       </div>
-      <LineageInspector tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onRetryRunItem={onRetryRunItem} onControlRun={onControlRun} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} onCreateTask={onCreateTask} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onCreateDelivery={onCreateDelivery} onOpenConfirmation={onOpenConfirmation} />
+      <LineageInspector tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} onCreateTask={onCreateTask} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onCreateDelivery={onCreateDelivery} onOpenConfirmation={onOpenConfirmation} />
     </div>
   </section>;
 }
@@ -1325,7 +1324,7 @@ function contextRouteForNode(node) {
   if (node.entityType === 'round' || node.entityType === 'plan') return { view: 'lineage', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' };
   return null;
 }
-function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onRetryRunItem, onControlRun, onOpenProvider, onCopyContext, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
+function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCopyContext, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
   if (!selectedNodes.length) {
     return <aside className="lineage-inspector" data-lineage-no-zoom>
       <p className="eyebrow">检查器</p>
@@ -1372,7 +1371,7 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
       <div><dt>状态</dt><dd>{isAsset ? assetState(entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable, node.derivedAsset) : statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status).label}</dd></div>
       <div><dt>短 ID</dt><dd>{shortId(node.entityId)}</dd></div>
     </dl>
-    {node.entityType === 'plan' ? <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} /> : isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : node.entityType === 'run_item' ? <RunItemActions item={entity} onRetryRunItem={onRetryRunItem} /> : node.entityType === 'run' ? <RunActions run={entity} onNavigate={onNavigate} onControlRun={onControlRun} /> : isResource ? <ResourceActions node={node} onCopyContext={onCopyContext} /> : ['task', 'round', 'delivery'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} onOpenReference={onOpenReference} /> : null}
+    {node.entityType === 'plan' ? <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} /> : isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : node.entityType === 'run_item' ? <RunItemActions item={entity} /> : node.entityType === 'run' ? <RunActions run={entity} onNavigate={onNavigate} /> : isResource ? <ResourceActions node={node} onCopyContext={onCopyContext} /> : ['task', 'round', 'delivery'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} onOpenReference={onOpenReference} /> : null}
     {editing && nodeLinks.length ? <SoftLinkList links={nodeLinks} node={node} onRemove={onRemoveLink} onUpdate={onUpdateLink} onReverse={onReverseLink} /> : null}
   </aside>;
 }
@@ -1421,13 +1420,13 @@ function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selectedRound, 
     <details className="lineage-secondary-actions"><summary>更多信息</summary><div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onSetAssetShared(asset, !node.sharedAsset)}><Share2 size={15} />{node.sharedAsset ? '取消共享' : '共享素材'}</button></div></details>
   </div>;
 }
-function RunItemActions({ item, onRetryRunItem }) {
+function RunItemActions({ item }) {
   const retryable = ['failed', 'blocked', 'retry_wait'].includes(item.status);
-  return <div className="lineage-inspector-actions"><p>{item.error?.summary || item.error?.message || '该运行项暂无错误。'}</p>{retryable ? <button type="button" className="command-button" onClick={() => onRetryRunItem(item.id)}><RefreshCw size={15} />重试此项</button> : item.status === 'outcome_unknown' ? <p className="lineage-note">未知结果需要用户核实，不能自动重放。</p> : null}</div>;
+  return <div className="lineage-inspector-actions"><p>{item.error?.summary || item.error?.message || '该运行项暂无错误。'}</p>{retryable ? <p className="lineage-note">可重试运行项请回到当前 Agent 会话处理；创作谱系只展示状态，不直接执行重试。</p> : item.status === 'outcome_unknown' ? <p className="lineage-note">未知结果需要用户核实，不能自动重放；请回到当前 Agent 会话处理。</p> : null}</div>;
 }
-function RunActions({ run, onNavigate, onControlRun }) {
+function RunActions({ run, onNavigate }) {
   const execution = runExecutionPresentation(run, []);
-  return <div className="lineage-inspector-actions"><p>{execution.detail || '运行由 daemon Worker 队列执行，画布只展示状态。'}</p><button type="button" className="outline-button" onClick={() => onNavigate({ view: 'runs', roundId: run.roundId, compareRoundIds: [run.roundId], runId: run.id, assetScope: 'round' })}><Eye size={15} />查看生成历史</button>{['queued', 'running'].includes(run.status) && <button type="button" className="outline-button" onClick={() => onControlRun('pause', run.id)}><Pause size={15} />暂停运行</button>}{run.status === 'paused' && <button type="button" className="command-button" onClick={() => onControlRun('resume', run.id)}><Play size={15} />恢复运行</button>}{!['completed', 'cancelled'].includes(run.status) && <button type="button" className="outline-button" onClick={() => onControlRun('cancel', run.id)}><X size={15} />取消运行</button>}</div>;
+  return <div className="lineage-inspector-actions"><p>{execution.detail || '运行由 daemon Worker 队列执行，画布只展示状态。'}</p><button type="button" className="outline-button" onClick={() => onNavigate({ view: 'runs', roundId: run.roundId, compareRoundIds: [run.roundId], runId: run.id, assetScope: 'round' })}><Eye size={15} />查看生成历史</button>{!['completed', 'cancelled'].includes(run.status) && <p className="lineage-note">暂停、恢复或取消运行请回到当前 Agent 会话处理；创作谱系只展示状态。</p>}</div>;
 }
 function NavigationActions({ node, onNavigate, onCreateRound, onOpenReference }) {
   const route = contextRouteForNode(node);
@@ -1440,50 +1439,54 @@ function NavigationActions({ node, onNavigate, onCreateRound, onOpenReference })
     {isRound && node.entity?.status === 'draft' && <button type="button" className="outline-button" onClick={() => onNavigate(route)}><Image size={15} />设为当前后添加参考</button>}
   </div>;
 }
-function LineageMinimap({ nodes, groups = [], viewport, canvasSize, searchMatchKeys = EMPTY_SET, onViewportChange }) {
+function LineageMinimap({ nodes, boundsNodes = nodes, groups = [], viewport, canvasSize, searchMatchKeys = EMPTY_SET, onViewportChange }) {
   const svgRef = useRef(null);
   const [dragging, setDragging] = useState(false);
-  const bounds = useMemo(() => {
-    const items = [...nodes, ...groups];
-    if (!items.length) return { left: -500, top: -400, right: 500, bottom: 400 };
-    return items.reduce((acc, item) => ({ left: Math.min(acc.left, item.x), top: Math.min(acc.top, item.y), right: Math.max(acc.right, item.x + item.width), bottom: Math.max(acc.bottom, item.y + item.height) }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
-  }, [nodes, groups]);
-  const width = 210;
-  const height = 134;
-  const worldWidth = Math.max(1, bounds.right - bounds.left + 360);
-  const worldHeight = Math.max(1, bounds.bottom - bounds.top + 260);
-  const scale = Math.min(width / worldWidth, height / worldHeight);
-  const toMap = useCallback((x, y) => ({ x: (x - bounds.left + 180) * scale, y: (y - bounds.top + 130) * scale }), [bounds.left, bounds.top, scale]);
-  const toWorld = useCallback((x, y) => ({ x: (x - 180) / scale + bounds.left, y: (y - 130) / scale + bounds.top }), [bounds.left, bounds.top, scale]);
-  const viewportWidth = Math.max(1, canvasSize?.width || 900);
-  const viewportHeight = Math.max(1, canvasSize?.height || 560);
+  const width = MINIMAP_WIDTH;
+  const height = MINIMAP_HEIGHT;
+  const geometry = useMemo(() => createMinimapGeometry([...boundsNodes, ...groups], width, height), [boundsNodes, groups, width, height]);
+  const viewportWidth = Math.max(1, Number.isFinite(canvasSize?.width) ? canvasSize.width : 900);
+  const viewportHeight = Math.max(1, Number.isFinite(canvasSize?.height) ? canvasSize.height : 560);
   const updateViewportFromPointer = useCallback((event) => {
     const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
+    if (!rect?.width || !rect?.height) return;
+    const localX = Math.min(width, Math.max(0, (event.clientX - rect.left) * width / rect.width));
+    const localY = Math.min(height, Math.max(0, (event.clientY - rect.top) * height / rect.height));
+    const world = clampWorldPoint(geometry, minimapToWorld(geometry, localX, localY));
     onViewportChange({ x: viewportWidth / 2 - world.x * viewport.k, y: viewportHeight / 2 - world.y * viewport.k, k: viewport.k });
-  }, [onViewportChange, toWorld, viewport.k, viewportHeight, viewportWidth]);
+  }, [geometry, height, onViewportChange, viewport.k, viewportHeight, viewportWidth, width]);
   const handlePointerDown = useCallback((event) => {
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    event.stopPropagation();
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Pointer capture is optional for older browsers. */ }
     setDragging(true);
     updateViewportFromPointer(event);
   }, [updateViewportFromPointer]);
   const handlePointerMove = useCallback((event) => {
-    if (dragging) updateViewportFromPointer(event);
+    if (!dragging) return;
+    event.preventDefault();
+    event.stopPropagation();
+    updateViewportFromPointer(event);
   }, [dragging, updateViewportFromPointer]);
-  const stopDragging = useCallback(() => setDragging(false), []);
-  return <div className={'lineage-minimap' + (dragging ? ' is-dragging' : ' is-idle')} data-lineage-no-zoom>
-    <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={stopDragging} onPointerCancel={stopDragging} onPointerLeave={stopDragging}>
+  const stopDragging = useCallback((event) => {
+    event?.stopPropagation();
+    try {
+      if (event?.currentTarget?.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch { /* Pointer capture is optional for older browsers. */ }
+    setDragging(false);
+  }, []);
+  const viewportRect = viewportRectForMinimap(geometry, viewport, { width: viewportWidth, height: viewportHeight });
+  return <div className={'lineage-minimap' + (dragging ? ' is-dragging' : ' is-idle')} data-lineage-no-zoom onPointerDown={(event) => event.stopPropagation()} onPointerUp={stopDragging} onPointerCancel={stopDragging}>
+    <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} aria-label="画布缩略图，拖动以定位" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={stopDragging} onPointerCancel={stopDragging}>
       {groups.map((group) => {
-        const p = toMap(group.x, group.y);
-        return <rect key={'group-' + group.id} className="group" x={p.x} y={p.y} width={Math.max(3, group.width * scale)} height={Math.max(3, group.height * scale)} rx="3" />;
+        const p = worldToMinimap(geometry, group.x, group.y);
+        return <rect key={'group-' + group.id} className="group" x={p.x} y={p.y} width={Math.max(3, group.width * geometry.scale)} height={Math.max(3, group.height * geometry.scale)} rx="3" />;
       })}
       {nodes.map((node) => {
-        const p = toMap(node.x, node.y);
-        return <rect key={node.key} className={searchMatchKeys.has(node.key) ? 'node search-hit' : 'node'} x={p.x} y={p.y} width={Math.max(2, node.width * scale)} height={Math.max(2, node.height * scale)} rx="2" />;
+        const p = worldToMinimap(geometry, node.x, node.y);
+        return <rect key={node.key} className={searchMatchKeys.has(node.key) ? 'node search-hit' : 'node'} x={p.x} y={p.y} width={Math.max(2, node.width * geometry.scale)} height={Math.max(2, node.height * geometry.scale)} rx="2" />;
       })}
-      <rect className="viewport" x={Math.max(0, (-viewport.x / viewport.k - bounds.left + 180) * scale)} y={Math.max(0, (-viewport.y / viewport.k - bounds.top + 130) * scale)} width={Math.max(4, viewportWidth / viewport.k * scale)} height={Math.max(4, viewportHeight / viewport.k * scale)} />
+      <rect className="viewport" x={viewportRect.x} y={viewportRect.y} width={viewportRect.width} height={viewportRect.height} />
     </svg>
     <button type="button" onClick={() => onViewportChange(DEFAULT_VIEWPORT)}>重置视图</button>
   </div>;

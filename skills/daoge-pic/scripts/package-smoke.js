@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const zlib = require('node:zlib');
 
 function parsePackJson(output) {
   const text = String(output || '');
@@ -45,6 +46,69 @@ function runNpm(runCommand, args, options) {
   return runCommand('npm', args, options);
 }
 
+function tarFileEntries(tarballPath) {
+  const archive = zlib.gunzipSync(fs.readFileSync(tarballPath));
+  const entries = [];
+  for (let offset = 0; offset + 512 <= archive.length; ) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '');
+    const prefix = header.subarray(345, 500).toString('utf8').replace(/\0.*$/, '');
+    const sizeText = header.subarray(124, 136).toString('ascii').replace(/\0.*$/, '').trim();
+    const size = sizeText ? Number.parseInt(sizeText, 8) : 0;
+    if (!name || !Number.isSafeInteger(size) || size < 0 || offset + 512 + size > archive.length) throw new Error('Invalid tar entry in release artifact: ' + tarballPath);
+    const entryPath = (prefix ? prefix + '/' + name : name).replace(/^package\//, '');
+    entries.push({ path: entryPath, content: Buffer.from(archive.subarray(offset + 512, offset + 512 + size)) });
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+}
+
+function tarEntries(tarballPath) {
+  return tarFileEntries(tarballPath).map((entry) => entry.path);
+}
+
+function tarFile(tarballPath, expectedPath) {
+  return tarFileEntries(tarballPath).find((entry) => entry.path === expectedPath)?.content || null;
+}
+
+function assertReleaseArtifact(tarballPath, expectedVersion) {
+  if (!fs.existsSync(tarballPath)) throw new Error('Release artifact does not exist: ' + tarballPath);
+  const paths = tarEntries(tarballPath);
+  const checked = assertPackagePaths(paths);
+  const packageContent = tarFile(tarballPath, 'package.json');
+  const protocolContent = tarFile(tarballPath, 'dist/vnext/shared/protocol.js');
+  const protocolTypes = tarFile(tarballPath, 'dist/vnext/shared/protocol.d.ts');
+  const protocolManifestContent = tarFile(tarballPath, 'protocol-version.json');
+  let packageJson;
+  let protocolManifest;
+  try {
+    packageJson = packageContent ? JSON.parse(packageContent.toString('utf8')) : null;
+    protocolManifest = protocolManifestContent ? JSON.parse(protocolManifestContent.toString('utf8')) : null;
+  } catch (error) {
+    throw new Error('Release artifact contains invalid package or protocol JSON: ' + error.message);
+  }
+  const runtimeVersion = protocolContent?.toString('utf8').match(/exports\.RUNTIME_VERSION = ['"]([^'"]+)['"]/u)?.[1] || null;
+  const runtimeRange = protocolContent?.toString('utf8').match(/exports\.RUNTIME_COMPATIBILITY_RANGE = ['"]([^'"]+)['"]/u)?.[1] || null;
+  const declaredRuntimeVersion = protocolTypes?.toString('utf8').match(/RUNTIME_VERSION = ["']([^"']+)["']/u)?.[1] || null;
+  const declaredRuntimeRange = protocolTypes?.toString('utf8').match(/RUNTIME_COMPATIBILITY_RANGE = ["']([^"']+)["']/u)?.[1] || null;
+  const expectedRange = '>=' + expectedVersion + ' <6.0.0';
+  const mismatch = {
+    package: packageJson,
+    protocolManifest,
+    runtimeVersion,
+    runtimeRange,
+    declaredRuntimeVersion,
+    declaredRuntimeRange,
+    expectedVersion,
+    expectedRange
+  };
+  if (!packageJson || packageJson.name !== 'daoge-pic' || packageJson.version !== expectedVersion || !protocolManifest || protocolManifest.protocol !== 'daoge-pic-skill-protocol' || protocolManifest.version !== '2.0.0' || protocolManifest.runtimeCompatibility !== expectedRange || runtimeVersion !== expectedVersion || runtimeRange !== expectedRange || declaredRuntimeVersion !== expectedVersion || declaredRuntimeRange !== expectedRange) {
+    throw new Error(JSON.stringify(mismatch, null, 2));
+  }
+  return { paths, ...checked, version: packageJson.version, runtimeVersion, runtimeRange };
+}
+
 function isSensitivePackagePath(file) {
   const normalized = String(file || '').replace(/\\/g, '/').replace(/^\.\/+/, '');
   if (normalized === 'references/provider.env.example') return false;
@@ -58,19 +122,22 @@ function isSensitivePackagePath(file) {
 }
 
 function assertPackagePaths(paths) {
-  const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'protocol-version.json', 'references/provider.env.example', 'docs/daoge_pic_vnext_upgrade_spec_zh.md', 'docs/vnext_verification_evidence_zh.md'];
-  const allowed = /^(dist\/|scripts\/daoge\.js$|references\/provider\.env\.example$|docs\/(?:daoge_pic_vnext_upgrade_spec_zh|vnext_verification_evidence_zh)\.md$|README\.md$|SKILL\.md$|protocol-version\.json$|LICENSE$|package\.json$)/;
+  const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/cli/daemon-shutdown.js', 'dist/vnext/cli/daemon-shutdown.d.ts', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'protocol-version.json', 'references/provider.env.example', 'docs/daoge_pic_vnext_upgrade_spec_zh.md', 'docs/vnext_verification_evidence_zh.md'];
+  const allowed = /^(dist\/(?:vnext\/(?:api|cli|domain|media|providers|runner|runtime|shared|studio)\/[A-Za-z0-9._/-]+|workbench\/(?:index\.html|assets\/[A-Za-z0-9._-]+))$|scripts\/daoge\.js$|references\/provider\.env\.example$|docs\/(?:daoge_pic_vnext_upgrade_spec_zh|vnext_verification_evidence_zh)\.md$|README\.md$|SKILL\.md$|protocol-version\.json$|LICENSE$|package\.json$)/;
   const missing = required.filter((file) => !paths.includes(file));
   const unexpected = paths.filter((file) => !allowed.test(file));
   const maps = paths.filter((file) => file.endsWith('.map'));
-  const retired = paths.filter((file) => /^(app|agents|src|tests|references\/(?!provider\.env\.example$)|Dockerfile$|docker-compose\.yml$|\.env\.example$|\.dockerignore$)/.test(file) || file.includes('legacy-adapters'));
+  const retired = paths.filter((file) => /^(app|agents|src|tests|references\/(?!provider\.env\.example$)|Dockerfile$|docker-compose\.yml$|\.env\.example$|\.dockerignore$)/.test(file) || file.includes('legacy-adapters') || file.includes('legacy-daemon'));
   const sensitive = paths.filter(isSensitivePackagePath);
   if (missing.length || unexpected.length || maps.length || retired.length || sensitive.length) throw new Error(JSON.stringify({ missing, unexpected, maps, retired, sensitive }, null, 2));
   return { missing, unexpected, maps, retired, sensitive };
 }
 
-function main({ runCommand = run, makeTemp = fs.mkdtempSync, removeSync = fs.rmSync } = {}) {
-  const skillRoot = path.resolve(__dirname, '..');
+function main({ runCommand = run, makeTemp = fs.mkdtempSync, removeSync = fs.rmSync, skillRoot = path.resolve(__dirname, '..'), requireReleaseArtifact = true } = {}) {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(skillRoot, 'package.json'), 'utf8'));
+  const currentArtifact = path.join(skillRoot, 'daoge-pic-' + packageJson.version + '.tgz');
+  if (requireReleaseArtifact && !fs.existsSync(currentArtifact)) throw new Error('Required release artifact does not exist: ' + currentArtifact);
+  if (fs.existsSync(currentArtifact)) assertReleaseArtifact(currentArtifact, packageJson.version);
   const workRoot = makeTemp(path.join(os.tmpdir(), 'daoge-pic-package-smoke-图片 空格-'));
   const packRoot = path.join(workRoot, 'pack');
   const consumerRoot = path.join(workRoot, 'consumer');
@@ -83,12 +150,13 @@ function main({ runCommand = run, makeTemp = fs.mkdtempSync, removeSync = fs.rmS
     const tarballPath = path.resolve(packRoot, metadata.filename);
     const paths = metadata.files.map((file) => file.path);
     const checked = assertPackagePaths(paths);
+    assertReleaseArtifact(tarballPath, packageJson.version);
     if (!fs.existsSync(tarballPath)) throw new Error('npm pack did not create the reported tarball: ' + metadata.filename);
 
     fs.writeFileSync(path.join(consumerRoot, 'package.json'), JSON.stringify({ private: true }, null, 2) + '\n');
     runNpm(runCommand, ['install', tarballPath, '--ignore-scripts'], { cwd: consumerRoot });
     const installedRoot = path.join(consumerRoot, 'node_modules', 'daoge-pic');
-    const runtimeRequired = ['scripts/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/shared/windows.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'protocol-version.json', 'references/provider.env.example'];
+    const runtimeRequired = ['scripts/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/cli/daemon-shutdown.js', 'dist/vnext/cli/daemon-shutdown.d.ts', 'dist/vnext/shared/windows.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'protocol-version.json', 'references/provider.env.example'];
     const runtimeMissing = runtimeRequired.filter((file) => !fs.existsSync(path.join(installedRoot, file)));
     if (runtimeMissing.length) throw new Error(JSON.stringify({ runtimeMissing }, null, 2));
     const installedBin = path.join(consumerRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'daoge.cmd' : 'daoge');
@@ -115,5 +183,5 @@ function main({ runCommand = run, makeTemp = fs.mkdtempSync, removeSync = fs.rmS
   }
 }
 
-module.exports = { parsePackJson, assertPackagePaths, main };
-if (require.main === module) main();
+module.exports = { parsePackJson, tarEntries, assertPackagePaths, assertReleaseArtifact, main };
+if (require.main === module) main({ requireReleaseArtifact: process.argv.includes('--require-release-artifact') });

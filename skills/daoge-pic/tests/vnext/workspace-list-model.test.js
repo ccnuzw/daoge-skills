@@ -2,13 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 test('project management filters names, descriptions, and lifecycle status', async () => {
-  const { filterProjects } = await import('../../web/src/workspace-list-model.mjs');
+  const { PROJECT_PAGE_SIZE, filterProjects } = await import('../../web/src/workspace-list-model.mjs');
   const projects = [
     { name: '青春四人组', description: '运动电商', status: 'active' },
     { name: '旧项目', description: '历史归档', status: 'archived' }
   ];
   assert.deepEqual(filterProjects(projects, '电商', 'all').map((item) => item.name), ['青春四人组']);
   assert.deepEqual(filterProjects(projects, '', 'archived').map((item) => item.name), ['旧项目']);
+  assert.equal(PROJECT_PAGE_SIZE, 10);
+  assert.equal(projects.slice(0, PROJECT_PAGE_SIZE).length, 2);
 });
 
 test('task management groups open work and clamps paginated results', async () => {

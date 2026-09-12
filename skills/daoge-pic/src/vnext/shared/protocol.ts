@@ -1,8 +1,8 @@
 export const SKILL_PROTOCOL_NAME = 'daoge-pic-skill-protocol';
 export const SKILL_PROTOCOL_VERSION = '2.0.0';
-export const RUNTIME_VERSION = '5.12.0';
+export const RUNTIME_VERSION = '5.13.0';
 export const SUPPORTED_PROTOCOL_RANGE = '>=2.0.0 <3.0.0';
-export const RUNTIME_COMPATIBILITY_RANGE = '>=5.12.0 <6.0.0';
+export const RUNTIME_COMPATIBILITY_RANGE = '>=5.13.0 <6.0.0';
 
 interface SemanticVersion { major: number; minor: number; patch: number; }
 

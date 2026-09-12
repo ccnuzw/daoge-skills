@@ -47,5 +47,7 @@ test('Provider edit model preserves projected Provider metadata and limits', asy
   assert.deepEqual(normalizeProfileLimits({ maxRunItems: '2', maxExecutionConcurrency: '', requestTimeoutMs: '45000' }), { maxRunItems: 2, requestTimeoutMs: 45000 });
   assert.equal(descriptorForProvider([{ id: 'gemini-image' }], 'gemini-image').id, 'gemini-image');
   const source = fs.readFileSync(path.resolve(__dirname, '../../web/src/provider-settings.jsx'), 'utf8');
+  assert.match(source, /compatible_public[\s\S]*必须 HTTPS/);
+  assert.doesNotMatch(source, /compatible_public[\s\S]*建议 HTTPS/);
   assert.doesNotMatch(source, /optionKeys\.includes\(['"]referenceEnabled['"]\)/);
 });

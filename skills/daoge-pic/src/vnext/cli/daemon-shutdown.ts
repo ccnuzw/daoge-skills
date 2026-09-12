@@ -12,7 +12,6 @@ export interface RecordedDaemonIdentity {
 export interface DaemonShutdownDependencies {
   fetch?: typeof fetch;
   queryProcessArguments?: ProcessArgumentsQuery;
-  signal?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
 function loopbackRuntimeUrl(value: string): URL | null {
@@ -55,33 +54,20 @@ export async function shutdownVerifiedDaemon(
   if (record.pid !== expected.lockPid) throw new Error('daemon runtime 与 owner record PID 不匹配，拒绝关闭。');
   if (!sameWorkspaceRoot(record.workspaceRoot, expected.workspaceRoot)) throw new Error('daemon runtime 工作区不匹配，拒绝关闭。');
   if (!loopbackRuntimeUrl(record.url)) throw new Error('daemon runtime 地址不是可信 loopback URL，拒绝关闭。');
-  if (record.capability !== undefined && !/^[A-Za-z0-9_-]{43,}$/.test(record.capability)) throw new Error('daemon runtime capability 无效，拒绝关闭。');
+  if (!record.capability || !/^[A-Za-z0-9_-]{43,}$/.test(record.capability)) throw new Error('daemon runtime capability 无效，拒绝关闭。');
   const fetchImpl = dependencies.fetch || fetch;
   const studioId = await healthStudioId(record.url, fetchImpl);
   if (studioId !== expected.studioId) throw new Error('daemon 健康端点未确认当前 Studio 身份，拒绝关闭。');
   const arguments_ = (dependencies.queryProcessArguments || queryProcessArguments)(record.pid);
   if (!arguments_) throw new Error('当前平台无法可靠查询 daemon 进程身份，拒绝关闭。');
   if (!matchesDaemonProcess(arguments_, expected.daemonEntry, expected.workspaceRoot)) throw new Error('PID 对应进程不是当前工作区 daemon，拒绝关闭。');
-  if (!record.capability) {
-    (dependencies.signal || ((pid, signal) => process.kill(pid, signal)))(record.pid, 'SIGTERM');
-    return;
-  }
-  const requestShutdown = async (includeProtocolHeader: boolean): Promise<void> => {
-    const headers: Record<string, string> = {
-      authorization: 'Bearer ' + record.capability,
-      'content-type': 'application/json',
-      'x-daoge-operation-name': 'daemon-shutdown'
-    };
-    if (includeProtocolHeader) headers['x-daoge-skill-protocol'] = SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION;
-    const response = await fetchImpl(new URL('/api/shutdown', record.url), { method: 'POST', headers, body: '{}' });
-    const payload = await response.json() as { ok?: unknown; error?: { message?: unknown } };
-    if (!response.ok || payload.ok !== true) throw new Error(typeof payload.error?.message === 'string' ? payload.error.message : 'Studio daemon 拒绝受控关闭。');
+  const headers: Record<string, string> = {
+    authorization: 'Bearer ' + record.capability,
+    'content-type': 'application/json',
+    'x-daoge-operation-name': 'daemon-shutdown',
+    'x-daoge-skill-protocol': SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION
   };
-  try {
-    await requestShutdown(true);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '';
-    if (!/Skill 协议不兼容|Skill 请求必须声明|Studio API|protocol/i.test(message)) throw error;
-    await requestShutdown(false);
-  }
+  const response = await fetchImpl(new URL('/api/shutdown', record.url), { method: 'POST', headers, body: '{}' });
+  const payload = await response.json() as { ok?: unknown; error?: { message?: unknown } };
+  if (!response.ok || payload.ok !== true) throw new Error(typeof payload.error?.message === 'string' ? payload.error.message : 'Studio daemon 拒绝受控关闭。');
 }

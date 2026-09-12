@@ -120,7 +120,8 @@ test('README and authoritative specification preserve the same session-first sta
 test('Skill API guidance pins the protocol header and plan/history endpoints', () => {
   const commands = markdownSection(skill, '## 受控命令');
   assert.match(commands, /x-daoge-skill-protocol: daoge-pic-skill-protocol\/2\.0\.0/);
-  assert.match(commands, /5\.11\.0[\s\S]*绝不能当作协议版本/);
+  assert.match(skill, />=5\.13\.0 <6\.0\.0/);
+  assert.match(commands, /5\.12\.0[\s\S]*绝不能当作协议版本/);
   assert.match(commands, /GET \/api\/studio/);
   assert.match(commands, /GET \/api\/sessions\/<session-id>\/plan-status/);
   assert.match(commands, /GET \/api\/rounds\/<round-id>\/runs/);
@@ -129,24 +130,63 @@ test('Skill API guidance pins the protocol header and plan/history endpoints', (
   assert.match(commands, /不得[\s\S]*猜测 `\/api\/studio\/\.\.\./);
 });
 
-test('5.12.0 is the stable release while 5.11.0 remains historical', () => {
+test('SKILL.md stays a thin agent protocol while retaining execution-critical rules', () => {
+  assert.match(skill, /本文件是 Agent 执行协议，不是完整产品规格/);
+  assert.match(skill, /docs\/daoge_pic_vnext_upgrade_spec_zh\.md/);
+  assert.match(skill, /docs\/vnext_verification_evidence_zh\.md/);
+  for (const implementationDetail of [
+    'icacls',
+    'FileSystemSecurity',
+    'journal_mode=DELETE',
+    'secure_delete=ON',
+    'Schema v26',
+    'delivery_export_journal',
+    'idx_assets_studio_visibility',
+    'same-size replacement'
+  ]) {
+    assert.equal(skill.includes(implementationDetail), false, 'SKILL.md should not duplicate implementation detail: ' + implementationDetail);
+  }
+
+  const boundaries = markdownSection(skill, '## 机器强制执行边界');
+  assert.match(boundaries, /Provider Profile、密钥引用和 write-only 摘要[\s\S]*Provider\.db[\s\S]*v3/);
+  assert.match(boundaries, /system backend[\s\S]*fail-closed[\s\S]*不得静默退回明文/);
+  assert.match(boundaries, /API Key 与完整 Base URL[\s\S]*不得进入 Studio DB、事件、日志、导出、诊断或回复/);
+
+  const workspace = markdownSection(skill, '## 工作区、Provider 与密钥');
+  assert.match(workspace, /Provider 能力、端点信任[\s\S]*Provider Descriptor/);
+  assert.match(workspace, /显式连接测试和模型列表读取[\s\S]*只在用户点击时访问 Provider/);
+  assert.match(workspace, /compatible_public[\s\S]*HTTPS[\s\S]*local_proxy[\s\S]*enterprise_private/);
+
+  const commands = markdownSection(skill, '## 受控命令');
+  for (const signature of [
+    /provider-create --workspace <path>[\s\S]*--api-key-stdin @-/,
+    /provider-update --workspace <path>[\s\S]*--profile <id>[\s\S]*--version <n>[\s\S]*--base-url-action <keep\|replace\|clear>[\s\S]*--api-key-action <keep\|replace\|clear>/,
+    /provider-models --workspace <path> --profile <id>/,
+    /preflight --workspace <path>[\s\S]*--round <round-id>[\s\S]*--session <session-id>/,
+    /run --workspace <path>[\s\S]*--preflight <dry-run-id>[\s\S]*--confirm-token <daemon-token>/,
+    /resume --workspace <path>[\s\S]*--run <run-id>[\s\S]*--session <session-id>/,
+    /resolve-unknown --workspace <path>[\s\S]*--items <item-id,\.\.\.>/
+  ]) assert.match(commands, signature);
+  assert.match(commands, /不得猜测默认值或把 secret 写入 argv/);
+  assert.doesNotMatch(commands, /daoge (?:prepare|execute|ingest)\b/);
+  assert.doesNotMatch(commands, /\/prepare/);
+  assert.doesNotMatch(commands, /delivery-complete\s+--workspace/);
+});
+
+test('5.13.0 is the stable release while 5.12.0 remains historical', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const currentDocs = `${skill}\n${readme}\n${spec}`;
 
-  assert.equal(packageJson.version, '5.12.0');
-  assert.equal(packageLock.version, '5.12.0');
-  assert.equal(packageLock.packages[''].version, '5.12.0');
+  assert.equal(packageLock.packages[''].version, '5.13.0');
   for (const document of [skill, readme, evidence]) {
-    assert.match(document, /5\.11\.0/);
+    assert.match(document, /5\.12\.0/);
   }
-  assert.match(`${skill}\n${readme}`, /稳定正式版本[^。\n]{0,120}5\.12\.0/);
-  assert.match(currentDocs, /当前(?:稳定正式版本|源码与运行时|源码运行时|源码包\/runtime)[^。\n]{0,120}5\.12\.0/);
   assert.doesNotMatch(currentDocs, /5\.11\.0[^。\n]{0,120}(?:待发布|候选)|(?:待发布|候选)[^。\n]{0,120}5\.11\.0/);
   assert.match(readme, /GitHub[^。\n]*资产[^。\n]*不表示[^。\n]*npm registry/);
   assert.match(evidence, /## 1\. daoge-pic 5\.7\.0 已发布历史证据[\s\S]*daoge-pic-5\.7\.0\.tgz[\s\S]*1fb70265f4a0e7e5858be3dec7cf21ad8706c720fede7c1712e74a36678110fe/);
-  const currentReleaseEvidence = markdownSection(evidence, '## 14. daoge-pic 5.12.0 发布验证证据');
-  assert.match(currentReleaseEvidence, /daoge-pic-v5\.12\.0[\s\S]*358 项测试[\s\S]*130 个文件[\s\S]*未调用真实图片 Provider/);
+  const currentReleaseEvidence = markdownSection(evidence, '## 15. daoge-pic 5.13.0 发布验证证据');
+  assert.match(currentReleaseEvidence, /daoge-pic-v5\.13\.0[\s\S]*全量测试[\s\S]*130 个文件[\s\S]*未调用真实图片 Provider/);
   const historicalEvidence = markdownSection(evidence, '## 7. daoge-pic 5.9.1 发布验证证据');
   assert.match(historicalEvidence, /daoge-pic-v5\.9\.1[\s\S]*GitHub Release[^\n]*\.tgz/);
   const previousReleaseEvidence = markdownSection(evidence, '## 8. daoge-pic 5.10.0 发布验证证据');

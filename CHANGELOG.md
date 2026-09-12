@@ -2,9 +2,29 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 5.13.0 - 2026-09-12
+
+当前稳定发布包/runtime 版本为 `5.13.0`；`5.12.0` 及更早版本保持为不可变历史发布，旧 daemon 不得与本版本混用。
+
+- 收敛 `SKILL.md` 为薄 Agent 执行协议，同时保留 Provider secret backend、端点信任、运行时兼容范围和高风险 CLI 签名等执行关键规则。
+- 对齐 README 中 Provider.db 与 system secret backend 的表述，明确 `Provider.db` 保存 Profile、密钥引用和 write-only 摘要，system backend 不可用时 fail-closed。
+- 修正验证记录中 5.11.0 与 5.12.0 章节顺序；保留历史发布证据和 checksum sidecar。
+- 收紧 API 运行控制边界：`pause`、`resume`、`cancel`、`retry` 和 `resolve-unknown` 统一要求 Bearer Skill/CLI；Workbench 只提示回到会话处理。
+- 将当前计划写入 API 从旧 `/api/rounds/<id>/prepare` 迁移到 `/api/rounds/<id>/plan`，旧 `/prepare` 路径不再执行。
+- 移除 daemon shutdown 的旧协议降级路径；受控关闭必须携带当前 Skill protocol 与有效 capability，并将模块从 `legacy-daemon` 重命名为 `daemon-shutdown`。
+- 收紧 package smoke allowlist，防止任意 `dist/` 路径、旧 `legacy-daemon` 构建残留或 source/test 文件进入发布包。
+- 从当前分支移除已由 GitHub Release 承载的旧 `5.10.1`、`5.10.2`、`5.10.3` `.tgz` 二进制本体；历史 release notes 与 `.sha256` sidecar 继续保留。
+- 修复创作谱系编辑模式小地图：小地图改用完整节点坐标系，点击/拖动不再冒泡成画布框选，视口矩形与实际画布变换保持一致，避免定位后节点回显为空。
+- 修复图片预览放大按钮被错误限制在 1x 的回归，恢复 0.75x-2x 范围。
+- 修复项目归档与资产回收站确认后的动作分派：统一复用确认 handler，显示忙碌/错误状态，确认后直接执行，不重复弹窗。
+- 恢复任务和轮次创建的通用推荐默认值；模板未覆盖的目标回退到探索、变体、精修、编辑和补图的默认数量与画幅。
+- 发布门禁现在验证当前版本正式 tarball 的包版本、required runtime 入口和退役文件；历史版本制品不再被当作当前源码制品校验。
+- 当前验证、发布说明和安装 URL 统一指向 v5.13.0；5.12.0 发布记录与制品保持历史不可变。
+- 验证结果：全量 npm test 为 363 项，361 通过、0 失败、2 项跳过；npm run test:package 为 130 个文件且所有包门禁计数为 0。
+- v5.13.0 制品为 480,424 bytes，npm shasum 为 ad67294b26fa50704aa0459e7d9f0eecad8ed242，SHA-256 为 d2774a8d905a510b743b61f89292bc366a7b764af258dfae6fba0bd576ec552e。
 ## daoge-pic 5.12.0 - 2026-09-11
 
-当前稳定发布包/runtime 版本为 `5.12.0`；`5.11.0` 保持为不可变历史发布，旧 daemon 不得与本版本混用。
+该次稳定发布包/runtime 版本为 `5.12.0`；`5.12.0` 及更早版本保持为不可变历史发布，旧 daemon 不得与后续版本混用。
 
 ### Workbench
 

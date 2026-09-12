@@ -834,6 +834,8 @@ export class LocalStudioService {
 
   private async write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody, authentication: LocalAuthentication): Promise<void> {
     const key = idempotencyKey(request, body);
+    const putAllowed = /^\/api\/providers\/[^/]+$/.test(pathname) || /^\/api\/deliveries\/[^/]+\/items$/.test(pathname) || /^\/api\/rounds\/[^/]+\/draft-context$/.test(pathname);
+    if (request.method === 'PUT' && !putAllowed) return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
     if (pathname === '/api/restart' && request.method === 'POST') {
       if (!daemonRestartAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法从 Workbench 重启。');
       success(response, { restarting: true });
@@ -1026,10 +1028,10 @@ export class LocalStudioService {
       const updated = updateRoundDraftContext(this.db, { studioId: this.initialized.manifest.studioId, roundId: draftContextMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
       return success(response, updated);
     }
-    const prepareMatch = /^\/api\/rounds\/([^/]+)\/prepare$/.exec(pathname);
-    if (prepareMatch) {
-      this.assertRoundInStudio(prepareMatch[1]);
-      const prepared = prepareRoundForConfirmation(this.db, { studioId: this.initialized.manifest.studioId, roundId: prepareMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
+    const planMatch = /^\/api\/rounds\/([^/]+)\/plan$/.exec(pathname);
+    if (planMatch && request.method === 'POST') {
+      this.assertRoundInStudio(planMatch[1]);
+      const prepared = prepareRoundForConfirmation(this.db, { studioId: this.initialized.manifest.studioId, roundId: planMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
       return success(response, prepared);
     }
     const challengeMatch = /^\/api\/rounds\/([^/]+)\/confirmation-challenge$/.exec(pathname);
@@ -1125,15 +1127,15 @@ export class LocalStudioService {
       }
     }
     const pauseMatch = /^\/api\/runs\/([^/]+)\/pause$/.exec(pathname);
-    if (pauseMatch) { this.assertRunInStudio(pauseMatch[1]); return success(response, pauseGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: pauseMatch[1], idempotencyKey: key })); }
+    if (pauseMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); this.assertRunInStudio(pauseMatch[1]); return success(response, pauseGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: pauseMatch[1], idempotencyKey: key })); }
     const resolveUnknownMatch = /^\/api\/runs\/([^/]+)\/outcomes\/resolve$/.exec(pathname);
-    if (resolveUnknownMatch) { const itemIds = boundedIds(body.itemIds, 'itemIds') || []; this.assertRunInStudio(resolveUnknownMatch[1]); for (const itemId of itemIds) this.assertRunItemInStudio(itemId); return success(response, resolveUnknownRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: resolveUnknownMatch[1], itemIds, idempotencyKey: key })); }
+    if (resolveUnknownMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); const itemIds = boundedIds(body.itemIds, 'itemIds') || []; this.assertRunInStudio(resolveUnknownMatch[1]); for (const itemId of itemIds) this.assertRunItemInStudio(itemId); return success(response, resolveUnknownRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: resolveUnknownMatch[1], itemIds, idempotencyKey: key })); }
     const retryMatch = /^\/api\/runs\/([^/]+)\/retry$/.exec(pathname);
-    if (retryMatch) { const itemIds = boundedIds(body.itemIds, 'itemIds', { optional: true }); this.assertRunInStudio(retryMatch[1]); for (const itemId of itemIds || []) this.assertRunItemInStudio(itemId); return success(response, retryGenerationRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: retryMatch[1], itemIds, idempotencyKey: key })); }
+    if (retryMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); const itemIds = boundedIds(body.itemIds, 'itemIds', { optional: true }); this.assertRunInStudio(retryMatch[1]); for (const itemId of itemIds || []) this.assertRunItemInStudio(itemId); return success(response, retryGenerationRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: retryMatch[1], itemIds, idempotencyKey: key })); }
     const resumeMatch = /^\/api\/runs\/([^/]+)\/resume$/.exec(pathname);
     if (resumeMatch) {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行恢复必须由当前 Skill/CLI 在用户重新确认后提交。');
       this.assertRunInStudio(resumeMatch[1]);
-      if (authentication !== 'cookie') throw new LocalAccessError(403, 'forbidden', '运行恢复必须由已授权 Workbench 中的真实用户完成。');
       const sessionId = text(body.sessionId);
       this.assertResumeSession(resumeMatch[1], sessionId);
       const config = resolveActiveProviderConfig(this.providerDb, this.initialized.paths);
@@ -1144,7 +1146,7 @@ export class LocalStudioService {
       return success(response, resumeGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: resumeMatch[1], sessionId, idempotencyKey: key }));
     }
     const cancelMatch = /^\/api\/runs\/([^/]+)\/cancel$/.exec(pathname);
-    if (cancelMatch) { this.assertRunInStudio(cancelMatch[1]); return success(response, cancelGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: cancelMatch[1], idempotencyKey: key })); }
+    if (cancelMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); this.assertRunInStudio(cancelMatch[1]); return success(response, cancelGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: cancelMatch[1], idempotencyKey: key })); }
     const reviewMatch = /^\/api\/assets\/([^/]+)\/review$/.exec(pathname);
     if (reviewMatch) {
       this.assertAssetInStudio(reviewMatch[1]);

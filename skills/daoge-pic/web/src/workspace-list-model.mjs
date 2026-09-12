@@ -1,4 +1,4 @@
-export const PROJECT_PAGE_SIZE = 12;
+export const PROJECT_PAGE_SIZE = 10;
 export const TASK_OVERVIEW_PAGE_SIZE = 8;
 export const TASK_PAGE_SIZE = 12;
 

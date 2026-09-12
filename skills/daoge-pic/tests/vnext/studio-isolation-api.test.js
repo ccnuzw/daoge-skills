@@ -62,7 +62,7 @@ test('public project, task, round, run, and run-item APIs reject foreign Studio 
       ['/api/projects/project_foreign_matrix/archive', { method: 'POST', idempotencyKey: 'foreign-archive', body: {} }],
       ['/api/tasks', { method: 'POST', idempotencyKey: 'foreign-task', body: { projectId: 'project_foreign_matrix', name: 'Blocked' } }],
       ['/api/rounds', { method: 'POST', idempotencyKey: 'foreign-round', body: { taskId: 'task_foreign_matrix', purpose: 'exploration' } }],
-      ['/api/rounds/round_foreign_matrix/prepare', { method: 'POST', idempotencyKey: 'foreign-prepare', body: { expectedVersion: 1, plan: {} } }],
+      ['/api/rounds/round_foreign_matrix/plan', { method: 'POST', idempotencyKey: 'foreign-prepare', body: { expectedVersion: 1, plan: {} } }],
       ['/api/rounds/round_foreign_matrix/confirm', { method: 'POST', idempotencyKey: 'foreign-confirm', body: { expectedVersion: 1 } }],
       ['/api/rounds/round_foreign_matrix/preflight', { method: 'POST', idempotencyKey: 'foreign-preflight', body: {} }],
       ['/api/runs', { method: 'POST', idempotencyKey: 'foreign-queue', body: { roundId: 'round_foreign_matrix', preflightId: 'dryrun_foreign_matrix' } }],

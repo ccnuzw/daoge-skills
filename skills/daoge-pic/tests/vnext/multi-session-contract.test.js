@@ -119,7 +119,7 @@ test('four agent conversations retain independent Session context, project owner
       const roundId = round.body.data.value.id;
       const context = await requestJson(started, '/api/sessions/' + sessions[index].id + '/context', { method: 'POST', idempotencyKey: prefix + '-context', body: { projectId, taskId, roundId } });
       assert.equal(context.status, 200);
-      const prepared = await requestJson(started, '/api/rounds/' + roundId + '/prepare', { method: 'POST', idempotencyKey: prefix + '-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'isolated prompt ' + index } } });
+      const prepared = await requestJson(started, '/api/rounds/' + roundId + '/plan', { method: 'POST', idempotencyKey: prefix + '-prepare', body: { expectedVersion: round.body.data.value.version, plan: { operation: 'generate', itemCount: 1, prompt: 'isolated prompt ' + index } } });
       assert.equal(prepared.status, 200, JSON.stringify(prepared.body));
       const challenge = await requestJsonAsWorkbench(started, '/api/rounds/' + roundId + '/confirmation-challenge', { cookie, idempotencyKey: prefix + '-challenge', body: { sessionId: sessions[index].id } });
       assert.equal(challenge.status, 200, JSON.stringify(challenge.body));

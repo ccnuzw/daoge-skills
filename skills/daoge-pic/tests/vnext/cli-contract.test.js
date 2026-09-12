@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { openWorkbenchUrl } = require('../../dist/vnext/cli/open-workbench');
-const { shutdownVerifiedDaemon } = require('../../dist/vnext/cli/legacy-daemon');
+const { shutdownVerifiedDaemon } = require('../../dist/vnext/cli/daemon-shutdown');
 const { main, parseCommand, materializeStdinJson, assertImplicitStudioCreationAllowed, daemonCompatible } = require('../../dist/vnext/cli/daoge');
 const { matchesDaemonProcess, queryProcessArguments } = require('../../dist/vnext/cli/process-identity');
 const { registerSkill } = require('../../dist/vnext/cli/register-skill');
@@ -185,6 +185,7 @@ test('CLI parser preserves an explicit safe idempotency key for every mutation',
 test('CLI accepts one stdin JSON marker and rejects multiple markers', () => {
   const plan = parseCommand(['plan', '--workspace', '/tmp/daoge-stdin', '--round', 'round-1', '--version', '2', '--plan', '@-', '--operation-name', 'plan:round-1:v2']);
   assert.equal(plan.request.operationName, 'plan:round-1:v2');
+  assert.equal(plan.request.pathname, '/api/rounds/round-1/plan');
   assert.equal(plan.request.idempotencyKey, undefined);
   assert.equal(plan.request.body.plan.__daogeJsonStdin, true);
   assert.throws(() => parseCommand(['plan', '--workspace', '/tmp/daoge-stdin', '--round', 'round-1', '--version', '2', '--plan', '@-', '--operation-name', 'unsafe operation']), /安全字符/);
@@ -346,7 +347,7 @@ function studioStatusResponse(studioId, protocol = {}) {
       protocol: {
         name: protocol.name || 'daoge-pic-skill-protocol',
         version: protocol.version || '2.0.0',
-        runtimeVersion: protocol.runtimeVersion || '5.12.0',
+        runtimeVersion: protocol.runtimeVersion || '5.13.0',
         supportedRange: protocol.supportedRange || '>=2.0.0 <3.0.0'
       }
     }
@@ -402,13 +403,13 @@ test('recorded daemon shuts down only after runtime, lock, manifest, health, ent
   assert.deepEqual(processQueries, [runtime.pid]);
 });
 
-test('recorded daemon retries shutdown without the protocol header for legacy protocol rejections', async () => {
+test('recorded daemon refuses protocol downgrades during shutdown', async () => {
   const manifest = { studioId: 'studio-manifest', workspaceRoot: '/tmp/daoge legacy workspace' };
   const runtime = { pid: 4242, url: 'http://127.0.0.1:43123/', capability: 'c'.repeat(43), workspaceRoot: manifest.workspaceRoot };
   const daemonEntry = '/opt/daoge/dist/vnext/daemon/daemon-entry.js';
   const shutdownRequests = [];
 
-  await shutdownVerifiedDaemon(runtime, {
+  await assert.rejects(() => shutdownVerifiedDaemon(runtime, {
     workspaceRoot: manifest.workspaceRoot,
     studioId: manifest.studioId,
     lockPid: runtime.pid,
@@ -417,17 +418,13 @@ test('recorded daemon retries shutdown without the protocol header for legacy pr
     fetch: async (input, init) => {
       if (String(input).endsWith('/api/health')) return healthResponse(manifest.studioId);
       shutdownRequests.push(init);
-      if (shutdownRequests.length === 1) {
-        return new Response(JSON.stringify({ ok: false, error: { message: 'Skill 协议不兼容；daemon 支持 >=1.0.0 <2.0.0。' } }), { status: 400, headers: { 'content-type': 'application/json' } });
-      }
-      return shutdownResponse();
+      return new Response(JSON.stringify({ ok: false, error: { message: 'Skill 协议不兼容；daemon 支持 >=1.0.0 <2.0.0。' } }), { status: 400, headers: { 'content-type': 'application/json' } });
     },
     queryProcessArguments: () => [process.execPath, daemonEntry, '--workspace', manifest.workspaceRoot]
-  });
+  }), /Skill 协议不兼容/);
 
-  assert.equal(shutdownRequests.length, 2);
+  assert.equal(shutdownRequests.length, 1);
   assert.equal(shutdownRequests[0].headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/2.0.0');
-  assert.equal(Object.prototype.hasOwnProperty.call(shutdownRequests[1].headers, 'x-daoge-skill-protocol'), false);
 });
 
 test('daemon process identity accepts a registered Skill symlink to the same entry', () => {
@@ -456,6 +453,11 @@ for (const identityCase of [
     name: 'runtime and lock PID mismatch',
     runtime: { ...legacyIdentityFixture.runtime, pid: 4243 },
     error: /runtime 与 owner record PID 不匹配/
+  },
+  {
+    name: 'runtime capability missing',
+    runtime: { ...legacyIdentityFixture.runtime, capability: undefined },
+    error: /runtime capability 无效/
   },
   {
     name: 'runtime and manifest workspace mismatch',

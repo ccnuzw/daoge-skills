@@ -4,7 +4,7 @@
 
 验证证据随 npm 包分发供维护者审计，但不是 Studio 运行时依赖；外部不可变资产与摘要由源码仓库和对应 GitHub Release 保存。
 
-当前稳定正式版本为 [`5.12.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0)；`5.11.0` 及更早章节保持不可变历史证据。下列章节按版本隔离发布事实。
+当前稳定正式版本为 [`5.13.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0)；`5.12.0` 及更早章节保持不可变历史证据。下列章节按版本隔离发布事实。
 
 ## 1. daoge-pic 5.7.0 已发布历史证据
 
@@ -209,7 +209,7 @@ Provider 配置的当前运行行为与 5.8.0 旧验证文字不同；本节后�
 - 未调用真实图片 Provider，未产生计费生成请求。
 ## 10. daoge-pic 5.10.2 并发升级验证证据
 
-本节对应当前 `daoge-pic-v5.10.2` 源码变更，记录 Provider 并发 Governor、响应流式落盘、健康指标和临时文件清理边界。5.10.1 的四路历史行为仅保留在上一节，不再作为当前运行契约。
+本节对应当时的 `daoge-pic-v5.10.2` 源码变更，记录 Provider 并发 Governor、响应流式落盘、健康指标和临时文件清理边界。5.10.1 的四路历史行为仅保留在上一节，不再作为本版本运行契约。
 
 ### 并发与资源边界
 
@@ -237,7 +237,7 @@ Provider 配置的当前运行行为与 5.8.0 旧验证文字不同；本节后�
 
 ## 11. daoge-pic 5.10.3 重复运行防护验证证据
 
-本节对应当前 `daoge-pic-v5.10.3` 源码变更，记录确认入口收敛与轮次级重复运行防护。5.10.2 的并发与媒体路径证据保留在上一节，不替代本版本验证。
+本节对应当时的 `daoge-pic-v5.10.3` 源码变更，记录确认入口收敛与轮次级重复运行防护。5.10.2 的并发与媒体路径证据保留在上一节，不替代本版本验证。
 
 - Workbench 人工确认闸门只提交 `/confirm`，不再从浏览器执行预检或创建运行；确认成功后明确引导用户返回当前智能体会话。
 - `/preflight` 与 `/api/runs` 的写入只接受 Bearer Skill/CLI，旧 Workbench 页面或其他 Cookie 客户端不能创建第二批。
@@ -274,25 +274,6 @@ Provider 配置的当前运行行为与 5.8.0 旧验证文字不同；本节后�
 - [Windows Actions 运行 34082960741](https://github.com/ccnuzw/daoge-skills/actions/runs/34082960741) 在最终 PR commit `b12bbc6ae42338d69a717c838dba6ad45c120119` 上完成 `windows-2022`、`windows-2025` × Node.js `22.17.0`、`24` 四组矩阵，四组均成功。每组 `npm test` 共 315 项，311 通过、0 失败、0 取消、4 项 Windows symlink 用例按平台条件跳过；每组 `npm run test:package` 均为 122 个文件且 `unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，真实 bin、注册、doctor 与 `sharp` 全部通过。四份脱敏 doctor 报告均为 `ok: true`，原子 rename、SQLite 排他锁、私有 DACL、NTFS/固定磁盘、默认浏览器和 `sharp` 检查全部通过；空 Studio 的 media process 均为 `0`，100000 项队列领取 1000 项耗时范围为 `157.55–231.35 ms`。
 - 所有本地回归和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。
 
-## 14. daoge-pic 5.12.0 发布验证证据
-
-本节对应 [daoge-pic-v5.12.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0) 的稳定发布源码与不可变 GitHub Release 制品。5.11.0 及更早章节保持历史证据，不与本节的运行时、Provider.db schema 或验证计数混用。
-
-### 本轮机器验证
-
-- 验证日期：2026-09-11；本地 macOS、Node.js 22+。
-- `npm test`：358 项测试，356 通过、0 失败、2 项按条件跳过。
-- `npm run build`：vNext TypeScript 与 Vite Workbench 构建通过；主 Workbench chunk 约 594 kB 的大小提示为非阻断 warning。
-- `npm run test:package`：发布清单 130 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；临时 consumer 安装、真实 bin、register-skill、doctor 和 `sharp` 全部通过。
-- P2 专项回归通过：Provider 的错误 HTTP method 不执行副作用；项目、任务、轮次创建后直接进入当前上下文；公开命令与 Workbench 创作手册包含 `provider-models`、Provider 安全和模板化创建说明。
-- 本地验证未调用真实图片 Provider，未产生计费生成请求；制品大小与 SHA-256 记录在包外发布说明和 `daoge-pic-5.12.0.tgz.sha256` sidecar 中。
-
-### 运行边界
-
-- Skill protocol 保持 `2.0.0`；运行时兼容范围为 `>=5.12.0 <6.0.0`。
-- Provider.db schema 为 v3；测试证据绑定 Profile `configVersion`，外部 secret 清理失败进入持久队列。
-- `compatible_public` 不允许凭据请求使用明文 HTTP；本地代理和企业私有端点必须显式选择信任模式。
-
 ## 13. daoge-pic 5.11.0 创作谱系与历史分页验证证据
 
 本节对应 [`daoge-pic-v5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0) 的发布源码与不可变 `.tgz` 制品。`5.10.4` 及更早章节是不可改写的历史证据。
@@ -316,4 +297,43 @@ Provider 配置的当前运行行为与 5.8.0 旧验证文字不同；本节后�
 - 浏览器实测 1440×1000：临时 daemon 与 Workbench 授权成功，Lineage 路由显示测试项目/任务/轮次，渲染 4 个谱系节点且无 fatal/error alert；归档确认弹窗为 `role="dialog"` + `aria-modal="true"`，初始焦点在取消按钮。
 - 本地 `npm run test:package`：构建 TypeScript 与 Vite Workbench 成功；发布清单 124 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，临时 consumer 的真实 bin、注册链接、doctor 与 `sharp` 均通过。
 - 最终制品 `daoge-pic-5.11.0.tgz` 的大小和 SHA-256 记录在包外 `daoge-pic-5.11.0.tgz.sha256` sidecar、仓库变更记录与发布说明中；本文件随制品发布，不嵌入会改变自身内容的哈希。
+- 所有本地回归、打包和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。
+
+## 14. daoge-pic 5.12.0 发布验证证据
+
+本节对应 [daoge-pic-v5.12.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.12.0) 的稳定发布源码与不可变 GitHub Release 制品。5.11.0 及更早章节保持历史证据，不与本节的运行时、Provider.db schema 或验证计数混用。
+
+### 本轮机器验证
+
+- 验证日期：2026-09-11；本地 macOS、Node.js 22+。
+- `npm test`：358 项测试，356 通过、0 失败、2 项按条件跳过。
+- `npm run build`：vNext TypeScript 与 Vite Workbench 构建通过；主 Workbench chunk 约 594 kB 的大小提示为非阻断 warning。
+- `npm run test:package`：发布清单 130 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；临时 consumer 安装、真实 bin、register-skill、doctor 和 `sharp` 全部通过。
+- P2 专项回归通过：Provider 的错误 HTTP method 不执行副作用；项目、任务、轮次创建后直接进入当前上下文；公开命令与 Workbench 创作手册包含 `provider-models`、Provider 安全和模板化创建说明。
+- 本地验证未调用真实图片 Provider，未产生计费生成请求；制品大小与 SHA-256 记录在包外发布说明和 `daoge-pic-5.12.0.tgz.sha256` sidecar 中。
+
+### 运行边界
+
+- Skill protocol 保持 `2.0.0`；运行时兼容范围为 `>=5.12.0 <6.0.0`。
+- Provider.db schema 为 v3；测试证据绑定 Profile `configVersion`，外部 secret 清理失败进入持久队列。
+- `compatible_public` 不允许凭据请求使用明文 HTTP；本地代理和企业私有端点必须显式选择信任模式。
+
+## 15. daoge-pic 5.13.0 发布验证证据
+
+本节对应 [daoge-pic-v5.13.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0) 的稳定发布源码与不可变 GitHub Release 制品。5.12.0 及更早章节保持历史证据，不与本节的运行时、Provider.db schema 或验证计数混用。
+
+### 本轮机器验证
+
+- 验证日期：2026-09-12；本地 macOS、Node.js 22.23.0。
+- 全量测试 `npm test`：363 项测试，361 通过、0 失败、2 项仅 Windows 实机用例跳过。
+- `npm run build`：vNext TypeScript 与 Vite Workbench 构建通过；共转换 1620 个模块，主 Workbench chunk 为 595.71 kB 的大小提示为非阻断 warning。
+- `npm run test:package`：发布清单 130 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；强制校验当前版本 tarball 的 package、protocol manifest、编译 runtime、required shutdown 入口，并通过临时 consumer 安装、真实 bin、register-skill、doctor 和 `sharp`。
+- 定向 UI/谱系回归通过：Workbench bulk、asset-card-layout、lineage-minimap 共 17 项通过；未调用真实图片 Provider，未产生计费生成请求。
+- Skill protocol 保持 `2.0.0`；运行时兼容范围为 `>=5.13.0 <6.0.0`；包内 `protocol.js`、`protocol.d.ts` 与 `protocol-version.json` 均与 `5.13.0` 对齐。
+- 最终制品 `daoge-pic-5.13.0.tgz` 的大小、SHA-256、GitHub Release 资产 URL 与 sidecar 记录在包外 v5.13.0 发布说明中；本文件随包发布，不把包含自身的归档哈希写回自身，避免自引用。
+
+### 运行边界
+
+- Provider.db schema 继续为 v3；system backend 不可用时 fail-closed，Provider method guard 不执行错误 HTTP method 的副作用。
+- 计划写入使用 `/api/rounds/<id>/plan`；受控 daemon shutdown 使用 `daemon-shutdown`，发布包不包含退役的 `legacy-daemon`。
 - 所有本地回归、打包和浏览器验证均未调用真实图片 Provider，未产生计费生成请求。

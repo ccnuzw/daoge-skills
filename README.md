@@ -2,7 +2,7 @@
 
 面向中文工作流的 DAOGE Skill 系列。每个 Skill 都是可独立安装、独立使用、独立演进的能力包：Skill 负责把自然语言需求转化为可执行的标准流程，附带的脚本、参考资料和本地工作台负责让关键过程可检查、可恢复、可交付。
 
-> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.10.4](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)，发布说明与完整验证证据见 [`5.10.4 发布说明`](./docs/daoge_pic_5.10.4_release_notes_zh.md)。
+> **版本状态**：`daoge-pic` 当前稳定正式版本是 [5.13.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0)，发布说明与完整验证证据见 [`5.13.0 发布说明`](./docs/daoge_pic_5.13.0_release_notes_zh.md)。
 
 当前仓库包含两项彼此独立的能力：
 
@@ -41,10 +41,10 @@ daoge-pic
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
 ```
 
-当前稳定版为 `5.10.4`。项目级安装使用 GitHub Release 的不可变制品和内置注册命令：
+当前稳定版为 `5.13.0`。项目级安装使用 GitHub Release 的不可变制品和内置注册命令：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.13.0/daoge-pic-5.13.0.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -52,7 +52,7 @@ npx daoge doctor --workspace /absolute/workspace
 Windows PowerShell 使用 `.cmd` shim，不需要放宽执行策略：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.13.0/daoge-pic-5.13.0.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
@@ -62,14 +62,14 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 需要全局安装时：
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.13.0/daoge-pic-5.13.0.tgz"
 daoge register-skill --scope user
 ```
 
 Windows PowerShell：
 
 ```powershell
-npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.10.4/daoge-pic-5.10.4.tgz"
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.13.0/daoge-pic-5.13.0.tgz"
 daoge.cmd register-skill --scope user
 ```
 
@@ -105,7 +105,7 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 ```
 
-同一工作区的多个会话共享唯一 daemon 与 Workbench；presence/open-claim 只允许首个调用触发系统 opener，其余调用返回复用结果。每个会话的 Studio Session、项目与 Run 归属保持隔离，Workbench 每个标签页也使用独立 `sessionStorage` 身份。真实生成只读取 `<workspace>/daoge-studio/Provider.db` 中已激活的 Profile；既有 `provider.env` 仅用于首次迁移或显式 import，不再是运行时配置源。Workbench 用于配置多 Profile、查看项目、轮次、Generation History（生成历史）、运行、资产、复核和交付，不提供第二个聊天入口，也不读取 `task_spec.json`、旧静态工作区或旧目录状态。完整稳定协议见 [DAOGE Pic vNext README](./skills/daoge-pic/README.md)。
+同一工作区的多个会话共享唯一 daemon 与 Workbench；presence/open-claim 只允许首个调用触发系统 opener，其余调用返回复用结果。每个会话的 Studio Session、项目与 Run 归属保持隔离，Workbench 每个标签页也使用独立 `sessionStorage` 身份。真实生成只读取 `<workspace>/daoge-studio/Provider.db` 中已激活的 Profile、密钥引用与 write-only 摘要，并按配置读取系统密钥后端；既有 `provider.env` 仅用于首次迁移或显式 import，不再是运行时配置源。Workbench 用于配置多 Profile、查看项目、轮次、Generation History（生成历史）、运行、资产、复核和交付，不提供第二个聊天入口，也不读取 `task_spec.json`、旧静态工作区或旧目录状态。完整稳定协议见 [DAOGE Pic vNext README](./skills/daoge-pic/README.md)。
 
 ## 系列原则
 
@@ -146,7 +146,7 @@ node skills/daoge-pic/scripts/daoge.js open --workspace /absolute/workspace
 
 ## 发布与反馈
 
-每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.10.4](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.10.4)。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
+每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。`daoge-pic` 当前稳定正式版本为 [v5.13.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0)。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
 
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
