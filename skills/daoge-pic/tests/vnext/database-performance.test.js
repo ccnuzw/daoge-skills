@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
-const { appendStudioEvent, closeStudioDatabase, openStudioDatabase, pruneStudioEphemeralRecords, STUDIO_EVENT_RETENTION, studioSchemaVersion, subscribeStudioEvents, withTransaction } = require('../../dist/vnext/studio/database');
+const { appendStudioEvent, closeStudioDatabase, openStudioDatabase, pruneStudioEphemeralRecords, STUDIO_EVENT_RETENTION, STUDIO_SCHEMA_VERSION, studioSchemaVersion, subscribeStudioEvents, withTransaction } = require('../../dist/vnext/studio/database');
 const { studioEventWindow } = require('../../dist/vnext/api/events');
 const { listProjectSelectionAssets, setProjectAssetsSelected } = require('../../dist/vnext/domain/project-selections');
 const { listDeliveries } = require('../../dist/vnext/domain/deliveries');
@@ -47,11 +47,11 @@ function setup(count) {
   return { workspaceRoot, db, studioId, assets };
 }
 
-test('v26 uses covering indexes and keeps Workbench list query counts constant as records grow', () => {
+test('v27 uses covering indexes and keeps Workbench list query counts constant as records grow', () => {
   const small = setup(1);
   const large = setup(64);
   try {
-    assert.equal(studioSchemaVersion(large.db), 26);
+    assert.equal(studioSchemaVersion(large.db), STUDIO_SCHEMA_VERSION);
     const assetPlan = large.db.prepare("EXPLAIN QUERY PLAN SELECT id FROM assets WHERE studio_id = ? AND deleted_at IS NULL AND kind = ? ORDER BY created_at DESC, id DESC LIMIT 24").all(large.studioId, 'import').map((row) => row.detail).join('\n');
     const selectionPlan = large.db.prepare("EXPLAIN QUERY PLAN SELECT asset.id FROM asset_relations selection JOIN assets asset ON asset.id = selection.asset_id WHERE selection.relation_type = 'selected_for' AND selection.target_type = 'project' AND selection.target_id = ? AND asset.studio_id = ? ORDER BY selection.created_at, selection.asset_id").all('project-performance', large.studioId).map((row) => row.detail).join('\n');
     assert.match(assetPlan, /idx_assets_studio_visibility_kind_created/);

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Archive, BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, PackageCheck, Palette, Play, Redo2, RefreshCw, Save, Search, Share2, Sparkles, Tag, Trash2, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { assetThumbnailUrl } from './asset-media-url.mjs';
-import { MINIMAP_HEIGHT, MINIMAP_WIDTH, clampWorldPoint, createMinimapGeometry, minimapToWorld, viewportRectForMinimap, worldToMinimap } from './lineage-minimap-model.mjs';
+import { MINIMAP_HEIGHT, MINIMAP_WIDTH, clampWorldPoint, createMinimapGeometry, createMinimapItems, minimapToWorld, viewportRectForMinimap, worldToMinimap } from './lineage-minimap-model.mjs';
+import { LINEAGE_NODE_RENDER_LIMIT, lineageViewportBounds, virtualizeLineageNodes } from './lineage-viewport-model.mjs';
+import { createAccessibleLineage, redactLineageText } from './lineage-accessible-model.mjs';
 import { creativeLibraryResources, filterCreativeLibraryResources } from './creative-library-model.mjs';
 import { createLineageExport, lineageExportFilename } from './lineage-export-model.mjs';
 import { runExecutionPresentation, statusPresentation } from './status-presentation.mjs';
@@ -57,7 +59,6 @@ const DEFAULT_VIEWPORT = { x: 80, y: 80, k: 0.88 };
 const DEFAULT_SETTINGS = { filter: 'all', mode: 'map', background: 'lines', minimap: true, snapGrid: true, edgeLabels: true };
 const HISTORY_LIMIT = 50;
 const SNAP_SIZE = 24;
-const CULL_MARGIN = 520;
 const SAVE_STATUS_LABELS = { idle: '布局已保存', loading: '读取布局', queued: '等待保存', saving: '保存中', saved: '已保存', error: '保存失败' };
 const NODE_SIZE = {
   project: [250, 112],
@@ -75,6 +76,17 @@ const NODE_SIZE = {
 };
 const EMPTY_ARRAY = Object.freeze([]);
 const EMPTY_SET = new Set();
+const PLAN_PROMPT_PROTECTED_LABEL = '提示词受保护，请在会话中查看。';
+const RUN_ITEM_ERROR_PROTECTED_LABEL = '运行项错误已脱敏；请在会话中查看详情。';
+const SAFE_NODE_SUMMARY_LABEL = '结构化摘要已脱敏。';
+const LINEAGE_SENSITIVE_PATTERNS = [
+  /https?:\/\/[^\s<>"']+/i,
+  /[A-Za-z]:\\[^\r\n\t,;<>"']+/,
+  /(^|[\s('"=:])\/(?:Users|home|tmp|var|private|Volumes|opt|srv|mnt|media|workspace)\/[^\s,;<>"')]+/,
+  /\b(?:bearer|authorization|api[_ -]?key|x-goog-api-key|token|secret|password|capability)\s*[:=]?\s*[^\s,;<>"']+/i,
+  /\b(?:sk|pk|rk|dgpct1)[-_a-z0-9.]{8,}\b/i,
+  /(?:prompt|提示词|brief|response|响应体|request|请求体|raw|原始|url|链接|uri|endpoint|端点|path|路径)\s*[:=：]/i
+];
 
 function nodeKey(entityType, entityId) { return entityType + ':' + entityId; }
 function clientId(prefix) { return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8); }
@@ -97,24 +109,42 @@ function isResourceType(type) { return RESOURCE_NODE_TYPES.includes(type); }
 function resourceNodeKey(resource) { return nodeKey(resource.entityType, resource.resourceId); }
 function endpointFromNode(node) { return { type: node.entityType, id: node.entityId }; }
 function relationLabel(type) { return RELATION_OPTIONS.find(([value]) => value === type)?.[1] || '标注关系'; }
-function safeResourceSummary(resource) { return String(resource?.summary || resource?.source || '可作为计划上下文。').slice(0, 96); }
+function safeResourceSummary(resource) { return safeDisplayText(resource?.summary || resource?.source || '可作为计划上下文。', '结构化资料摘要已脱敏。', 96); }
 function nodeTypeLabel(type) { return ({ project: '项目', task: '任务', round: '轮次', plan: '计划', run: '生成运行', run_item: '运行项', asset: '项目资产', shared_asset: '共享素材', delivery: '交付', task_type: '任务类型', style_kit: '风格包', brand_kit: '品牌包', group: '分组' })[type] || type; }
 function isAssetNode(node) { return node?.entityType === 'asset' || node?.entityType === 'shared_asset'; }
 function mediaUnavailable(asset) { return asset?.deletedAt || asset?.mediaAvailable === false || asset?.mediaStatus === 'missing' || asset?.mediaStatus === 'unavailable'; }
+function hasProtectedLineageText(value) {
+  const source = text(value);
+  return Boolean(source && LINEAGE_SENSITIVE_PATTERNS.some((pattern) => pattern.test(source)));
+}
+function safeDisplayText(value, fallback = SAFE_NODE_SUMMARY_LABEL, maxLength = 120) {
+  const source = text(value);
+  if (!source) return fallback;
+  if (hasProtectedLineageText(source)) return fallback;
+  return redactLineageText(source, maxLength) || fallback;
+}
+function safeNodeTitle(entityType, value) { return safeDisplayText(value, nodeTypeLabel(entityType), 120); }
+function safeNodeSubtitle(value, fallback = '') { return value ? safeDisplayText(value, fallback || SAFE_NODE_SUMMARY_LABEL, 160) : fallback; }
+function safeSearchToken(value) { return hasProtectedLineageText(value) ? '' : redactLineageText(value, 120); }
+function runItemErrorSummary(item) {
+  const source = item?.error?.summary || item?.error?.message || '';
+  if (!source) return '';
+  const summary = safeDisplayText(source, RUN_ITEM_ERROR_PROTECTED_LABEL, 120);
+  return summary === RUN_ITEM_ERROR_PROTECTED_LABEL ? summary : '脱敏错误摘要：' + summary;
+}
 function planOutputSummary(output = {}) {
   if (!output || typeof output !== 'object') return '输出规格待确认';
   const dimensions = output.width && output.height ? output.width + '×' + output.height : '';
-  return [output.mediaType || output.format || '图片', output.aspectRatio || output.ratio, output.size || output.resolution || dimensions].filter(Boolean).join(' · ');
+  return safeDisplayText([output.mediaType || output.format || '图片', output.aspectRatio || output.ratio, output.size || output.resolution || dimensions].filter(Boolean).join(' · '), '输出规格待确认', 96);
 }
 function roundPlanDetails(round = {}) {
   const plan = round.plan || round.planSnapshot || {};
-  const operation = text(plan.operation) || text(plan.mode) || 'generation';
-  const prompt = text(plan.prompt) || text(plan.promptSummary) || text(plan.description) || '计划内容待会话写入';
+  const operation = safeDisplayText(text(plan.operation) || text(plan.mode) || 'generation', 'generation', 48);
   const itemCount = Number(plan.itemCount || plan.count || plan.items?.length || 0);
   const referenceCount = Number(plan.referenceCount || plan.referenceAssetIds?.length || plan.references?.length || 0);
   const maskCount = plan.maskAssetId || plan.mask ? 1 : 0;
   const output = plan.output || plan.outputSpec || {};
-  return { operation, operationLabel: OPERATION_LABELS[operation] || operation, prompt, itemCount, referenceCount, maskCount, outputSummary: planOutputSummary(output), output };
+  return { operation, operationLabel: OPERATION_LABELS[operation] || operation, promptNotice: PLAN_PROMPT_PROTECTED_LABEL, itemCount, referenceCount, maskCount, outputSummary: planOutputSummary(output) };
 }
 function planSummary(round) {
   const detail = roundPlanDetails(round);
@@ -131,7 +161,7 @@ function connectionPath(from, to) {
 function connectionLabelPoint(from, to) { return { x: (from.x + from.width + to.x) / 2, y: (from.y + from.height / 2 + to.y + to.height / 2) / 2 - 8 }; }
 function selectedNodeContextLine(node) {
   const status = isAssetNode(node) ? assetState(node.entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable) : statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status).label;
-  return [nodeTypeLabel(node.entityType) + '：' + node.title, status, node.subtitle, 'ID ' + shortId(node.entityId)].filter(Boolean).join(' · ');
+  return [nodeTypeLabel(node.entityType) + '：' + safeNodeTitle(node.entityType, node.title), status, safeNodeSubtitle(node.subtitle, ''), 'ID ' + shortId(node.entityId)].filter(Boolean).join(' · ');
 }
 function assetLabel(asset) { return asset?.display?.label || asset?.source?.label || shortId(asset?.id); }
 function assetState(asset, selected, shared, delivered, unavailable, derived = false) {
@@ -162,7 +192,6 @@ function assetSourceRoundId(asset) { return asset?.display?.roundId || asset?.so
 function assetSourceTaskId(asset) { return asset?.display?.taskId || asset?.source?.taskId || asset?.source?.creativeTaskId || null; }
 function taskForAsset(asset, tasks) { const taskId = assetSourceTaskId(asset); return listValue(tasks).find((task) => task.id === taskId) || null; }
 function taskForAssets(assets, tasks) { const taskIds = [...new Set(listValue(assets).map(assetSourceTaskId).filter(Boolean))]; return taskIds.length === 1 ? taskForAsset({ display: { taskId: taskIds[0] } }, tasks) : null; }
-function taskIntentSummary(task) { return text(task?.intent?.brief || task?.intent?.goal || task?.intent?.description || task?.intent?.summary || task?.intent?.creativeIntent || ''); }
 function taskRounds(task, rounds) { return listValue(rounds).filter((round) => round.taskId === task?.id); }
 function runStatusCounts(runs) { return runs.reduce((acc, run) => ({ ...acc, [run.status || 'unknown']: (acc[run.status || 'unknown'] || 0) + 1 }), {}); }
 function reviewDecisionCounts(assets) {
@@ -176,12 +205,13 @@ function createNode(entityType, entity, position, overrides = {}) {
   const [width, height] = NODE_SIZE[entityType] || [220, 120];
   const entityId = overrides.entityId || (typeof entity === 'string' ? entity : entity?.id);
   const node = { key: nodeKey(entityType, entityId), entityType, entityId, entity, x: position.x, y: position.y, width, height, status: entity?.status || 'active', ...overrides };
-  return { ...node, searchText: overrides.searchText || nodeSearchHaystack(node) };
+  const safeNode = { ...node, title: safeNodeTitle(entityType, node.title), subtitle: safeNodeSubtitle(node.subtitle, '') };
+  return { ...safeNode, searchText: overrides.searchText || nodeSearchHaystack(safeNode) };
 }
 function createResourceNode(resource, position) {
   const entityType = resource.entityType || resourceEntityType(resource.kind);
   const entity = { ...resource, id: resource.resourceId };
-  return createNode(entityType, entity, position, { title: resource.title, subtitle: resource.source + ' · ' + safeResourceSummary(resource), status: 'active', tone: entityType, resourceNode: true });
+  return createNode(entityType, entity, position, { title: resource.title, subtitle: resource.source + ' · 结构化资料节点', status: 'active', tone: entityType, resourceNode: true });
 }
 function createResourceCatalog(taskTypes, styleKits, brandKits) { return creativeLibraryResources({ taskTypes, styleKits, brandKits, assets: [] }).map((resource) => ({ ...resource, entityType: resourceEntityType(resource.kind) })); }
 function groupMemberBounds(group, nodes) {
@@ -208,7 +238,6 @@ function lineageExportLink(connection) {
   return { sourceType: source.type, sourceId: source.id, targetType: target.type, targetId: target.id, linkType, label: connection.label || relationLabel(linkType) };
 }
 function relatedLinksForNode(links, node) { return node ? links.filter((link) => (link.sourceType === node.entityType && link.sourceId === node.entityId) || (link.targetType === node.entityType && link.targetId === node.entityId)) : []; }
-function expandedBounds(bounds, margin) { return { x: bounds.x - margin, y: bounds.y - margin, width: bounds.width + margin * 2, height: bounds.height + margin * 2 }; }
 function dataTransferHasType(dataTransfer, type) {
   const types = dataTransfer?.types;
   if (!types) return false;
@@ -230,7 +259,7 @@ function safeMenuPoint(clientX, clientY) {
   return { x: Math.max(12, Math.min(clientX, Math.max(12, window.innerWidth - 236))), y: Math.max(12, Math.min(clientY, Math.max(12, window.innerHeight - 280))) };
 }
 function nodeSearchHaystack(node) {
-  return [node.title, node.subtitle, node.entityType, node.entityId, node.status, node.planDetail?.prompt, node.planDetail?.outputSummary, node.planDetail?.operationLabel, node.entity?.review?.decision, node.outputSource?.itemSequence, node.linkType].filter(Boolean).join(' ').toLowerCase();
+  return [safeSearchToken(node.title), safeSearchToken(node.subtitle), node.entityType, node.entityId, node.status, safeSearchToken(node.planDetail?.outputSummary), safeSearchToken(node.planDetail?.operationLabel), node.entity?.review?.decision, node.outputSource?.itemSequence, node.linkType].filter(Boolean).join(' ').toLowerCase();
 }
 
 function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, assets, sharedAssets, selectedAssetIds, sharedAssetIds, deliveries, resourcePlacements, resourceCatalog }) {
@@ -238,6 +267,7 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
   const safeTasks = listValue(tasks);
   const safeRounds = listValue(rounds);
   const safeRuns = listValue(runs);
+  const runById = new Map(safeRuns.map((run) => [run.id, run]));
   const safeRunItems = listValue(runItems);
   const safeAssets = listValue(assets);
   const safeSharedAssets = listValue(sharedAssets);
@@ -273,14 +303,13 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
   const roundAnchorById = new Map();
   const derivedAssetIds = new Set();
 
-  const projectNode = createNode('project', project, { x: 0, y: 0 }, { title: project.name, subtitle: (project.description || '项目工作区').slice(0, 80), tone: 'project', focused: true });
+  const projectNode = createNode('project', project, { x: 0, y: 0 }, { title: project.name, subtitle: safeDisplayText(project.description || '项目工作区', '项目说明已脱敏。', 80), tone: 'project', focused: true });
   nodes.push(projectNode);
 
   taskList.forEach((task, index) => {
     const roundsForTask = taskRounds(task, visibleRounds);
-    const intent = taskIntentSummary(task);
     const y = selectedTask ? 170 : 170 + index * Math.max(260, 152 + roundsForTask.length * 150);
-    const taskNode = createNode('task', task, { x: 0, y }, { title: task.name, subtitle: [task.status === 'completed' ? '已完成任务' : '任务', task.taskTypeId || '通用创作', intent || '', roundsForTask.length ? roundsForTask.length + ' 个轮次' : '暂无轮次'].filter(Boolean).join(' · '), tone: 'task', focused: selectedTask?.id === task.id });
+    const taskNode = createNode('task', task, { x: 0, y }, { title: task.name, subtitle: [task.status === 'completed' ? '已完成任务' : '任务', task.taskTypeId || '通用创作', roundsForTask.length ? roundsForTask.length + ' 个轮次' : '暂无轮次'].filter(Boolean).join(' · '), tone: 'task', focused: selectedTask?.id === task.id });
     nodes.push(taskNode);
     connect(projectNode.key, taskNode.key, 'contains', '包含任务');
   });
@@ -320,9 +349,12 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
   });
 
   safeRunItems.forEach((item, index) => {
-    const itemNode = createNode('run_item', item, { x: 1200, y: 58 + index * 118 }, { title: '第 ' + item.sequence + ' 项', subtitle: item.error?.summary || ('尝试 ' + (item.attempts || 0) + ' 次' + (Number(item.attempts || 0) > 1 ? ' · 重试产物' : '')), status: item.status, tone: 'run-item', focused: activeRun?.id && (item.runId || activeRun?.id) === activeRun.id });
+    const run = runById.get(item.runId) || activeRun;
+    const runId = item.runId || run?.id;
+    const roundId = item.roundId || run?.roundId;
+    const itemNode = createNode('run_item', item, { x: 1200, y: 58 + index * 118 }, { title: '第 ' + item.sequence + ' 项', subtitle: runItemErrorSummary(item) || ('尝试 ' + (item.attempts || 0) + ' 次' + (Number(item.attempts || 0) > 1 ? ' · 重试产物' : '')), status: item.status, tone: 'run-item', runId, roundId, focused: activeRun?.id && runId === activeRun.id });
     nodes.push(itemNode);
-    connect(nodeKey('run', item.runId || activeRun?.id), itemNode.key, 'run-item', '运行项');
+    if (runId) connect(nodeKey('run', runId), itemNode.key, 'run-item', '运行项');
     if (item.result?.assetId) connect(itemNode.key, nodeKey('asset', item.result.assetId), 'generated', '生成资产');
     for (const output of listValue(item.outputAssets)) if (output?.id) connect(itemNode.key, nodeKey('asset', output.id), 'generated', '生成资产');
   });
@@ -414,10 +446,10 @@ function sessionContextLine(sessionPlanStatus, selectedTask, selectedRound) {
   const context = sessionPlanStatus?.context;
   if (context?.project?.name) {
     const round = context.round;
-    return [context.task?.name, round ? (PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion : '未绑定轮次'].filter(Boolean).join(' / ');
+    return [safeDisplayText(context.task?.name, '任务', 80), round ? (PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion : '未绑定轮次'].filter(Boolean).join(' / ');
   }
   if (selectedRound) return (PURPOSE_LABELS[selectedRound.purpose] || selectedRound.purpose) + ' · 计划 v' + selectedRound.planVersion;
-  if (selectedTask) return selectedTask.name;
+  if (selectedTask) return safeDisplayText(selectedTask.name, '任务', 80);
   return '未绑定活动轮次';
 }
 
@@ -464,7 +496,7 @@ function LineageWorkspaceSummary({ project, selectedTask, selectedRound, runs = 
     </section>
   </div>;
 }
-export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
+export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
   tasks = listValue(tasks);
   rounds = listValue(rounds);
   runs = listValue(runs);
@@ -477,8 +509,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   brandKits = listValue(brandKits);
   selectedAssetIds = idSetValue(selectedAssetIds);
   selectionBusyIds = idSetValue(selectionBusyIds);
-  const parsedAssetTotal = assetTotal == null ? assets.length : Number(assetTotal);
-  const lineageAssetTotal = Number.isFinite(parsedAssetTotal) ? Math.max(0, parsedAssetTotal) : assets.length;
+  const parsedAssetTotal = assetCoverage == null ? (assetTotal == null ? assets.length : Number(assetTotal)) : Number(assetCoverage.total);
+  const parsedAssetLoaded = assetCoverage == null ? assets.length : Number(assetCoverage.loaded);
+  const lineageAssetsLoaded = Number.isFinite(parsedAssetLoaded) ? Math.max(assets.length, parsedAssetLoaded) : assets.length;
+  const lineageAssetTotal = Number.isFinite(parsedAssetTotal) ? Math.max(lineageAssetsLoaded, parsedAssetTotal) : lineageAssetsLoaded;
+  const lineageAssetLoading = assetCoverage?.loading === true;
   const parsedRunItemTotal = runItemCoverage == null ? runItems.length : Number(runItemCoverage.total);
   const parsedRunItemLoaded = runItemCoverage == null ? runItems.length : Number(runItemCoverage.loaded);
   const lineageRunItemTotal = Number.isFinite(parsedRunItemTotal) ? Math.max(runItems.length, parsedRunItemTotal) : runItems.length;
@@ -526,6 +561,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [nodeSearchQuery, setNodeSearchQuery] = useState('');
   const [nodeSearchIndex, setNodeSearchIndex] = useState(0);
+  const [outlineOpen, setOutlineOpen] = useState(false);
 
 
   const scope = selectedRound ? { type: 'round', id: selectedRound.id } : selectedTask ? { type: 'task', id: selectedTask.id } : { type: 'project', id: project?.id || '' };
@@ -576,22 +612,28 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   useEffect(() => { if (nodeSearchIndex >= nodeSearchResults.length) setNodeSearchIndex(0); }, [nodeSearchIndex, nodeSearchResults.length]);
   const activeNodeSearch = nodeSearchResults[nodeSearchIndex] || nodeSearchResults[0] || null;
   const nodeSearchMatchKeys = useMemo(() => new Set(nodeSearchResults.map((node) => node.key)), [nodeSearchResults]);
-  const viewportBounds = useMemo(() => expandedBounds({
-    x: -viewport.x / viewport.k,
-    y: -viewport.y / viewport.k,
-    width: canvasSize.width / viewport.k,
-    height: canvasSize.height / viewport.k
-  }, 360), [viewport.x, viewport.y, viewport.k, canvasSize.width, canvasSize.height]);
-  const renderedNodes = useMemo(() => {
-    if (filteredNodes.length <= 240) return filteredNodes;
-    return filteredNodes.filter((node) => selectedKeys.has(node.key) || nodeSearchMatchKeys.has(node.key) || intersects(viewportBounds, node));
-  }, [filteredNodes, nodeSearchMatchKeys, selectedKeys, viewportBounds]);
+  const viewportBounds = useMemo(() => lineageViewportBounds(viewport, canvasSize), [viewport.x, viewport.y, viewport.k, canvasSize.width, canvasSize.height]);
+  const renderableNodes = useMemo(() => {
+    const byKey = new Map(filteredNodes.map((node) => [node.key, node]));
+    for (const node of [...selectedNodes, ...nodeSearchResults]) {
+      if (!collapsedGroupIds.has(node.groupId)) byKey.set(node.key, node);
+    }
+    return [...byKey.values()];
+  }, [collapsedGroupIds, filteredNodes, nodeSearchResults, selectedNodes]);
+  const canvasElements = useMemo(() => [
+    ...renderedGroups.map((group) => ({ ...group, __lineageElementType: 'group' })),
+    ...renderableNodes
+  ], [renderableNodes, renderedGroups]);
+  const renderedCanvasModel = useMemo(() => virtualizeLineageNodes(canvasElements, { viewportBounds, selectedKeys, searchMatchKeys: nodeSearchMatchKeys, limit: LINEAGE_NODE_RENDER_LIMIT }), [canvasElements, nodeSearchMatchKeys, selectedKeys, viewportBounds]);
+  const renderedNodes = useMemo(() => renderedCanvasModel.nodes.filter((item) => item.__lineageElementType !== 'group'), [renderedCanvasModel.nodes]);
+  const renderedCanvasGroups = useMemo(() => renderedCanvasModel.nodes.filter((item) => item.__lineageElementType === 'group'), [renderedCanvasModel.nodes]);
   const renderedNodeKeys = useMemo(() => new Set(renderedNodes.map((node) => node.key)), [renderedNodes]);
-  const renderedGroupKeys = useMemo(() => new Set(renderedGroups.map((group) => group.key)), [renderedGroups]);
-  const visibleConnections = useMemo(() => [...graph.connections, ...validManualLinks.map(manualConnection)].filter((connection) => (renderedNodeKeys.has(connection.from) || renderedGroupKeys.has(connection.from)) && (renderedNodeKeys.has(connection.to) || renderedGroupKeys.has(connection.to))), [graph.connections, renderedGroupKeys, renderedNodeKeys, validManualLinks]);
+  const renderedGroupKeys = useMemo(() => new Set(renderedCanvasGroups.map((group) => group.key)), [renderedCanvasGroups]);
+  const allConnections = useMemo(() => [...graph.connections, ...validManualLinks.map(manualConnection)], [graph.connections, validManualLinks]);
+  const visibleConnections = useMemo(() => allConnections.filter((connection) => (renderedNodeKeys.has(connection.from) || renderedGroupKeys.has(connection.from)) && (renderedNodeKeys.has(connection.to) || renderedGroupKeys.has(connection.to))), [allConnections, renderedGroupKeys, renderedNodeKeys]);
 
 
-  const culledCount = Math.max(0, filteredNodes.length - renderedNodes.length);
+  const culledCount = Math.max(0, renderableNodes.length - renderedNodes.length);
 
   const captureSnapshot = useCallback(() => currentLayoutSnapshot({ positions: positionsRef.current, viewport: viewportRef.current, settings: settingsRef.current, groups: groupsRef.current, manualLinks: linksRef.current, resourcePlacements: resourcePlacementsRef.current }), []);
   const syncHistoryCounts = useCallback(() => setHistoryCounts({ undo: historyRef.current.undo.length, redo: historyRef.current.redo.length }), []);
@@ -614,7 +656,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   useEffect(() => { resourcePlacementsRef.current = resourcePlacements; }, [resourcePlacements]);
   useEffect(() => { layoutReadyRef.current = layoutReady; }, [layoutReady]);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
-  useEffect(() => { assetCoverageRef.current = { loaded: assets.length, total: Math.max(assets.length, lineageAssetTotal) }; }, [assets.length, lineageAssetTotal]);
+  useEffect(() => { assetCoverageRef.current = { loaded: lineageAssetsLoaded, total: Math.max(lineageAssetsLoaded, lineageAssetTotal) }; }, [lineageAssetsLoaded, lineageAssetTotal]);
 
   const submitLayoutSave = useCallback((targetProjectId = project?.id, targetScope = scope, permitSave = layoutReadyRef.current, updateState = true) => {
     if (!permitSave || !targetProjectId) return;
@@ -808,6 +850,10 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     canvasRef.current?.focus({ preventScroll: true });
     fitItems([node], true, record);
   }, [fitItems]);
+  const selectAccessibleNode = useCallback((node) => {
+    if (!node?.key) return;
+    setSelectedKeys(new Set([node.key]));
+  }, []);
   const focusCurrentContext = useCallback(() => {
     const context = sessionPlanStatus?.context;
     const key = selectedRound ? nodeKey('round', selectedRound.id) : context?.round?.id ? nodeKey('round', context.round.id) : selectedTask ? nodeKey('task', selectedTask.id) : context?.task?.id ? nodeKey('task', context.task.id) : project ? nodeKey('project', project.id) : null;
@@ -1149,7 +1195,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const selectedAssetIdsForBatch = selectedAssetNodes.map((node) => node.entity.id).filter(Boolean);
   const batchBusy = selectedAssetIdsForBatch.some((id) => selectionBusyIds.has(id));
   const contextNode = contextMenu?.nodeKey ? nodeByKey.get(contextMenu.nodeKey) : null;
-  const assetCountLabel = graph.metrics.assets === lineageAssetTotal ? graph.metrics.assets + ' 张资产' : '已加载 ' + graph.metrics.assets + ' / ' + lineageAssetTotal + ' 张资产';
+  const assetCountLabel = lineageAssetLoading ? '正在加载 ' + lineageAssetsLoaded + ' / ' + lineageAssetTotal + ' 张资产' : lineageAssetsLoaded === lineageAssetTotal ? lineageAssetTotal + ' 张资产' : '已加载 ' + lineageAssetsLoaded + ' / ' + lineageAssetTotal + ' 张资产';
   const runItemCountLabel = lineageRunItemsLoaded === lineageRunItemTotal ? lineageRunItemTotal + ' 个运行项' : '已加载 ' + lineageRunItemsLoaded + ' / ' + lineageRunItemTotal + ' 个运行项';
   const searchListId = 'lineage-search-results';
   const activeSearchOptionId = activeNodeSearch ? 'lineage-search-option-' + nodeSearchIndex : undefined;
@@ -1184,6 +1230,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
           </details>
         </>}
         <button type="button" onClick={exportLineageSummary}><Download size={15} />导出摘要</button>
+        <button type="button" className={outlineOpen ? 'is-active' : ''} aria-pressed={outlineOpen} aria-controls="lineage-accessible-view" aria-label={outlineOpen ? '收起列表文字谱系视图' : '打开列表文字谱系视图'} onClick={() => setOutlineOpen((value) => !value)}><BookOpen size={15} />{outlineOpen ? '收起文字谱系' : '文字谱系'}</button>
       </div>
     </header>
     <LineageWorkspaceSummary project={project} selectedTask={selectedTask} selectedRound={selectedRound} runs={runs} sessionPlanStatus={sessionPlanStatus} graph={graph} mode={settings.mode || 'map'} onMode={(mode) => updateSettings({ mode }, false)} onOpenTasks={() => onNavigate({ view: 'tasks', projectId: project?.id || null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })} onCreateTask={onCreateTask} />
@@ -1192,7 +1239,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       <div>{FILTERS.map(([value, label]) => <button type="button" key={value} className={settings.filter === value ? 'is-active' : ''} onClick={() => updateSettings({ filter: value })}>{label}</button>)}</div>
       {editing && <div>{BACKGROUNDS.map(([value, label]) => <button type="button" key={value} className={settings.background === value ? 'is-active' : ''} onClick={() => updateSettings({ background: value })}>{label}</button>)}</div>}
       <span className={'lineage-save-state is-' + saveState.status}><Save size={13} />{saveState.message}</span>
-      <span>{assetCountLabel} · {runItemCountLabel} · {graph.metrics.selected} 张已选 · {graph.metrics.issues} 个异常 · {groups.length} 个分组 · {validManualLinks.length} 条标注{culledCount ? ' · 已裁剪 ' + culledCount + ' 个离屏节点' : ''}{batchBusy ? ' · 批量选片同步中' : ''}</span>
+      <span>{assetCountLabel} · {runItemCountLabel} · {graph.metrics.selected} 张已选 · {graph.metrics.issues} 个异常 · {groups.length} 个分组 · {validManualLinks.length} 条标注{culledCount ? ' · 已虚拟化 ' + culledCount + ' 个节点' : ''}{renderedCanvasModel.limited ? ' · 活动窗口最多渲染 ' + LINEAGE_NODE_RENDER_LIMIT + ' 个画布元素' : ''}{batchBusy ? ' · 批量选片同步中' : ''}</span>
     </div>
 
     <div className="lineage-searchbar" data-lineage-no-zoom>
@@ -1203,10 +1250,8 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       <span>{nodeSearchQuery ? (nodeSearchResults.length ? nodeSearchResults.length + ' 个结果' : '无匹配节点') : '输入关键词快速定位节点'}</span>
       {nodeSearchQuery && nodeSearchResults.length ? <div className="lineage-search-results" id={searchListId} role="listbox" aria-label="谱系节点搜索结果">{nodeSearchResults.map((node, index) => <button type="button" role="option" aria-selected={index === nodeSearchIndex} id={'lineage-search-option-' + index} key={node.key} className={index === nodeSearchIndex ? 'is-active' : ''} onClick={() => { setNodeSearchIndex(index); focusNode(node); }}><strong>{node.title}</strong><small>{nodeTypeLabel(node.entityType)} · {shortId(node.entityId)}</small></button>)}</div> : null}
     </div>
-
-    {layoutError && <div className="lineage-error" role="alert"><AlertTriangle size={15} />{layoutError}</div>}
+    {outlineOpen && <LineageTextView id="lineage-accessible-view" nodes={nodes} connections={allConnections} endpointByKey={endpointByKey} selectedKeys={selectedKeys} scope={scope} coverage={{ assets: { loaded: lineageAssetsLoaded, total: lineageAssetTotal, loading: lineageAssetLoading || !layoutReady }, runItems: { loaded: lineageRunItemsLoaded, total: lineageRunItemTotal, loading: runItemCoverage?.loading === true || !layoutReady } }} onFocus={selectAccessibleNode} onOpen={(node) => openNode(node, { onNavigate, onInspectAsset })} />}
     <div className={'lineage-shell' + (editing && resourcePanelOpen ? ' has-resources' : '')}>
-      {editing && resourcePanelOpen && <ResourcePanel resources={visibleResources} query={resourceQuery} filter={resourceFilter} onQuery={setResourceQuery} onFilter={setResourceFilter} onAdd={addResourceNode} />}
       <div ref={canvasRef} tabIndex={0} className={'lineage-canvas bg-' + settings.background} onPointerDown={handleCanvasPointerDown} onKeyDown={handleKeyDown} onContextMenu={(event) => openContextMenu(event)} onDragOver={(event) => { if (dataTransferHasType(event.dataTransfer, 'application/x-daoge-resource')) event.preventDefault(); }} onDrop={handleResourceDrop} aria-label="创作谱系画布，可拖入资料节点，可用方向键微调选中节点">
         {!layoutReady && <div className="lineage-loading"><LoaderCircle size={18} className="spin" />读取谱系布局</div>}
         <svg className="lineage-edges" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}>
@@ -1220,15 +1265,35 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
           })}
         </svg>
         <div className="lineage-world" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}>
-          {renderedGroups.map((group) => <LineageGroup key={group.id} group={group} memberCount={nodes.filter((node) => node.groupId === group.id).length} onToggle={toggleGroupCollapsed} onUngroup={ungroup} />)}
+          {renderedCanvasGroups.map((group) => <LineageGroup key={group.id} group={group} memberCount={nodes.filter((node) => node.groupId === group.id).length} onToggle={toggleGroupCollapsed} onUngroup={ungroup} />)}
           {renderedNodes.map((node) => <LineageNode key={node.key} node={node} active={selectedKeys.has(node.key)} searchHit={nodeSearchMatchKeys.has(node.key)} searchActive={activeNodeSearch?.key === node.key} onPointerDown={handleNodePointerDown} onSelect={selectNode} onOpen={() => openNode(node, { onNavigate, onInspectAsset })} onContextMenu={openContextMenu} onDragStart={handleNodeDragStart} onDragOver={handleNodeDragOver} onDrop={handleNodeDrop} />)}
           {selectionBox && <div className="lineage-selection-box" style={{ left: Math.min(selectionBox.startX, selectionBox.currentX), top: Math.min(selectionBox.startY, selectionBox.currentY), width: Math.abs(selectionBox.currentX - selectionBox.startX), height: Math.abs(selectionBox.currentY - selectionBox.startY) }} />}
         </div>
-        {editing && settings.minimap && <LineageMinimap nodes={filteredNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
         {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode && !isResourceType(contextNode.entityType))} canGroup={editing && selectedNodes.length > 1} canRemoveResource={editing && contextNode && isResourceType(contextNode.entityType)} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onRemoveResource={() => contextNode && removeResourceNode(contextNode)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
-        {editing && shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
+        {editing && settings.minimap && <LineageMinimap nodes={renderableNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} selectedKeys={selectedKeys} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
       </div>
       <LineageInspector tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} onCreateTask={onCreateTask} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onCreateDelivery={onCreateDelivery} onOpenConfirmation={onOpenConfirmation} />
+    </div>
+  </section>;
+}
+
+function LineageTextView({ id = 'lineage-accessible-view', nodes = EMPTY_ARRAY, connections = EMPTY_ARRAY, endpointByKey = new Map(), selectedKeys = EMPTY_SET, scope = null, coverage = {}, onFocus, onOpen }) {
+  const outline = useMemo(() => createAccessibleLineage({ nodes, connections, endpointByKey, scope, coverage }), [connections, coverage, endpointByKey, nodes, scope]);
+  const nodeByKey = useMemo(() => new Map(nodes.map((node) => [node.key, node])), [nodes]);
+  const titleId = id + '-title';
+  const coverageId = id + '-coverage';
+  const nodeHeadingId = id + '-nodes';
+  const relationHeadingId = id + '-relations';
+  return <section id={id} className="lineage-text-view" data-lineage-no-zoom aria-labelledby={titleId}>
+    <header className="lineage-text-head"><div><p className="eyebrow">非视觉入口</p><h2 id={titleId}>列表 / 文本谱系</h2><span>按当前已加载 graph 数据阅读项目、任务、轮次、计划、运行、运行项、资产和交付；不会把画布虚拟化窗口冒充为完整谱系。</span></div><div className="lineage-text-count"><strong>{outline.nodes.length} 个已加载节点 · {outline.connections.length} 条关系</strong><span>{outline.scope.label} · {outline.scope.shortId}</span></div></header>
+    <section className="lineage-text-coverage" aria-labelledby={coverageId}>
+      <div className="lineage-text-coverage-head"><h3 id={coverageId}>加载覆盖范围</h3><strong>{outline.coverage.complete ? '当前加载范围已覆盖' : '当前为局部加载'}</strong></div>
+      <dl>{outline.coverage.rows.map((row) => <div key={row.id}><dt>{row.label}</dt><dd><strong>{row.loaded} / {row.total}</strong><span>{row.complete ? '已加载' : '仍有未加载'}</span></dd></div>)}</dl>
+      <p role="note">{outline.coverage.message}</p><p>{outline.coverage.canvasNote}</p>
+    </section>
+    <div className="lineage-text-columns">
+      <section aria-labelledby={nodeHeadingId}><h3 id={nodeHeadingId}>节点（当前已加载）</h3>{outline.nodes.length ? <ol className="lineage-text-node-list">{outline.nodes.map((summary) => { const node = nodeByKey.get(summary.key); const selected = selectedKeys.has(summary.key); const state = [summary.status.label, summary.shortId, summary.flags.unavailable ? '媒体不可用' : ''].filter(Boolean).join(' · '); return <li key={summary.key}><button type="button" className={selected ? 'is-active' : ''} aria-pressed={selected} aria-label={`${summary.typeLabel}：${summary.title}，${state}`} onClick={() => node && onFocus?.(node)}><span>{summary.typeLabel} · {summary.title}</span><small>{state}</small><em>{summary.summary}</em></button>{summary.openable && node ? <button type="button" className="lineage-text-open" aria-label={`打开${summary.typeLabel}：${summary.title}`} onClick={() => onOpen?.(node)}>打开</button> : <span className="lineage-text-unavailable">仅摘要</span>}</li>; })}</ol> : <p className="lineage-note">当前加载数据没有节点。</p>}</section>
+      <section aria-labelledby={relationHeadingId}><h3 id={relationHeadingId}>关系（已加载端点）</h3>{outline.connections.length ? <ol className="lineage-text-link-list">{outline.connections.map((connection) => <li key={connection.key}><span title={connection.source.title}>{connection.source.title}</span><b aria-hidden="true">→</b><span title={connection.target.title}>{connection.target.title}</span><small>{connection.label}{connection.unresolved ? ' · 端点未加载' : ''}</small></li>)}</ol> : <p className="lineage-note">当前加载数据没有关系。</p>}</section>
     </div>
   </section>;
 }
@@ -1314,6 +1379,7 @@ function openNode(node, { onNavigate, onInspectAsset }) {
   else if (node.entityType === 'task') onNavigate({ view: 'lineage', taskId: node.entity.id, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
   else if (node.entityType === 'round' || node.entityType === 'plan') onNavigate({ view: 'prompts', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' });
   else if (node.entityType === 'run') onNavigate({ view: 'runs', roundId: node.entity.roundId, compareRoundIds: [node.entity.roundId], runId: node.entity.id, assetScope: 'round' });
+  else if (node.entityType === 'run_item' && (node.roundId || node.entity?.roundId)) { const roundId = node.roundId || node.entity.roundId; onNavigate({ view: 'runs', roundId, compareRoundIds: [roundId], runId: node.runId || node.entity?.runId || null, assetScope: 'round' }); }
   else if (isAssetNode(node)) onInspectAsset(node.entity.id);
   else if (node.entityType === 'delivery') onNavigate({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
 }
@@ -1388,7 +1454,7 @@ function PlanActions({ node, onNavigate, onCopyContext, onOpenConfirmation }) {
   const needsConfirmation = node.entity?.status === 'awaiting_confirmation';
   return <div className="lineage-plan-details">
     <p className="lineage-note">计划节点展示已保存的脱敏计划摘要。待确认时可在这里激活人工确认；预检和运行仍由会话受控执行。</p>
-    <dl><div><dt>操作</dt><dd>{detail.operationLabel}</dd></div><div><dt>数量</dt><dd>{detail.itemCount || 0} 项</dd></div><div><dt>输出</dt><dd>{detail.outputSummary}</dd></div><div><dt>参考/遮罩</dt><dd>{detail.referenceCount || 0} / {detail.maskCount || 0}</dd></div><div><dt>提示词</dt><dd>{detail.prompt}</dd></div></dl>
+    <dl><div><dt>操作</dt><dd>{detail.operationLabel}</dd></div><div><dt>数量</dt><dd>{detail.itemCount || 0} 项</dd></div><div><dt>输出</dt><dd>{detail.outputSummary}</dd></div><div><dt>参考/遮罩</dt><dd>{detail.referenceCount || 0} / {detail.maskCount || 0}</dd></div><div><dt>提示词</dt><dd>{detail.promptNotice || PLAN_PROMPT_PROTECTED_LABEL}</dd></div></dl>
     {needsConfirmation && <section className="lineage-confirmation-callout"><p>当前计划正在等待人工确认。</p><button type="button" className="command-button" onClick={() => onOpenConfirmation?.(node.entity)}><Check size={15} />审阅并确认计划</button></section>}
     <div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => openNode(node, { onNavigate, onInspectAsset: () => undefined })}><Eye size={15} />打开计划版本对比</button><button type="button" className="outline-button" onClick={() => onCopyContext('refinement', [node])}><RefreshCw size={15} />复制优化计划上下文</button><button type="button" className="outline-button" onClick={() => onCopyContext('variation', [node])}><Sparkles size={15} />复制变体计划上下文</button></div>
   </div>;
@@ -1422,7 +1488,8 @@ function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selectedRound, 
 }
 function RunItemActions({ item }) {
   const retryable = ['failed', 'blocked', 'retry_wait'].includes(item.status);
-  return <div className="lineage-inspector-actions"><p>{item.error?.summary || item.error?.message || '该运行项暂无错误。'}</p>{retryable ? <p className="lineage-note">可重试运行项请回到当前 Agent 会话处理；创作谱系只展示状态，不直接执行重试。</p> : item.status === 'outcome_unknown' ? <p className="lineage-note">未知结果需要用户核实，不能自动重放；请回到当前 Agent 会话处理。</p> : null}</div>;
+  const errorSummary = runItemErrorSummary(item) || '该运行项暂无错误。';
+  return <div className="lineage-inspector-actions"><p>{errorSummary}</p>{retryable ? <p className="lineage-note">可重试运行项请回到当前 Agent 会话处理；创作谱系只展示状态，不直接执行重试。</p> : item.status === 'outcome_unknown' ? <p className="lineage-note">未知结果需要用户核实，不能自动重放；请回到当前 Agent 会话处理。</p> : null}</div>;
 }
 function RunActions({ run, onNavigate }) {
   const execution = runExecutionPresentation(run, []);
@@ -1439,12 +1506,13 @@ function NavigationActions({ node, onNavigate, onCreateRound, onOpenReference })
     {isRound && node.entity?.status === 'draft' && <button type="button" className="outline-button" onClick={() => onNavigate(route)}><Image size={15} />设为当前后添加参考</button>}
   </div>;
 }
-function LineageMinimap({ nodes, boundsNodes = nodes, groups = [], viewport, canvasSize, searchMatchKeys = EMPTY_SET, onViewportChange }) {
+function LineageMinimap({ nodes, boundsNodes = nodes, groups = [], viewport, canvasSize, selectedKeys = EMPTY_SET, searchMatchKeys = EMPTY_SET, onViewportChange }) {
   const svgRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const width = MINIMAP_WIDTH;
   const height = MINIMAP_HEIGHT;
   const geometry = useMemo(() => createMinimapGeometry([...boundsNodes, ...groups], width, height), [boundsNodes, groups, width, height]);
+  const minimapItems = useMemo(() => createMinimapItems(nodes, geometry, { groups, selectedKeys, searchMatchKeys, limit: LINEAGE_NODE_RENDER_LIMIT }), [geometry, groups, nodes, searchMatchKeys, selectedKeys]);
   const viewportWidth = Math.max(1, Number.isFinite(canvasSize?.width) ? canvasSize.width : 900);
   const viewportHeight = Math.max(1, Number.isFinite(canvasSize?.height) ? canvasSize.height : 560);
   const updateViewportFromPointer = useCallback((event) => {
@@ -1478,13 +1546,13 @@ function LineageMinimap({ nodes, boundsNodes = nodes, groups = [], viewport, can
   const viewportRect = viewportRectForMinimap(geometry, viewport, { width: viewportWidth, height: viewportHeight });
   return <div className={'lineage-minimap' + (dragging ? ' is-dragging' : ' is-idle')} data-lineage-no-zoom onPointerDown={(event) => event.stopPropagation()} onPointerUp={stopDragging} onPointerCancel={stopDragging}>
     <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} aria-label="画布缩略图，拖动以定位" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={stopDragging} onPointerCancel={stopDragging}>
-      {groups.map((group) => {
-        const p = worldToMinimap(geometry, group.x, group.y);
-        return <rect key={'group-' + group.id} className="group" x={p.x} y={p.y} width={Math.max(3, group.width * geometry.scale)} height={Math.max(3, group.height * geometry.scale)} rx="3" />;
-      })}
-      {nodes.map((node) => {
-        const p = worldToMinimap(geometry, node.x, node.y);
-        return <rect key={node.key} className={searchMatchKeys.has(node.key) ? 'node search-hit' : 'node'} x={p.x} y={p.y} width={Math.max(2, node.width * geometry.scale)} height={Math.max(2, node.height * geometry.scale)} rx="2" />;
+      {minimapItems.map((item) => {
+        const p = worldToMinimap(geometry, item.x, item.y);
+        const isGroup = item.kind === 'group';
+        const isAggregate = item.kind === 'aggregate';
+        const className = (isGroup ? 'group' : 'node') + (isAggregate ? ' aggregate' : '') + (item.searchHit ? ' search-hit' : '') + (item.selected ? ' selected' : '');
+        const size = isGroup ? 3 : 2;
+        return <rect key={item.key} className={className} x={p.x} y={p.y} width={Math.max(size, item.width * geometry.scale)} height={Math.max(size, item.height * geometry.scale)} rx="2" data-member-count={isAggregate ? item.memberCount : undefined} style={item.selected ? { stroke: '#2f6545', strokeWidth: 1.5, opacity: 0.95 } : undefined} />;
       })}
       <rect className="viewport" x={viewportRect.x} y={viewportRect.y} width={viewportRect.width} height={viewportRect.height} />
     </svg>

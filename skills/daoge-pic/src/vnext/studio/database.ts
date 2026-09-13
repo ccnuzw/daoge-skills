@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 
-export const STUDIO_SCHEMA_VERSION = 26;
+export const STUDIO_SCHEMA_VERSION = 32;
 export const STUDIO_EVENT_RETENTION = 2000;
 
 const SCHEMA_V1 = [
@@ -207,6 +207,38 @@ const SCHEMA_V26 = [
   "ALTER TABLE projects ADD COLUMN template_id TEXT",
   "ALTER TABLE projects ADD COLUMN template_version INTEGER"
 ].join(';\n') + ';';
+const SCHEMA_V27 = [
+  "CREATE TABLE IF NOT EXISTS usage_ledger (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), profile_id TEXT, project_id TEXT REFERENCES projects(id), task_id TEXT REFERENCES creative_tasks(id), round_id TEXT REFERENCES creative_rounds(id), run_id TEXT REFERENCES generation_runs(id), run_item_id TEXT REFERENCES run_items(id), unit TEXT NOT NULL, quantity REAL NOT NULL CHECK (quantity > 0), estimated_cost_minor INTEGER CHECK (estimated_cost_minor IS NULL OR estimated_cost_minor >= 0), cost_unit TEXT, billing_state TEXT NOT NULL CHECK (billing_state IN ('estimated', 'billed', 'possibly_billed', 'unknown', 'not_billed')), estimate_source TEXT NOT NULL CHECK (estimate_source IN ('caller', 'provider', 'unknown')), idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(studio_id, idempotency_key), CHECK ((estimated_cost_minor IS NULL AND cost_unit IS NULL) OR (estimated_cost_minor IS NOT NULL AND cost_unit IS NOT NULL)) )",
+  "CREATE INDEX IF NOT EXISTS idx_usage_ledger_studio_created ON usage_ledger(studio_id, created_at, id)",
+  "CREATE INDEX IF NOT EXISTS idx_usage_ledger_attribution ON usage_ledger(studio_id, profile_id, project_id, task_id, round_id, run_id, run_item_id)",
+  "CREATE TABLE IF NOT EXISTS budget_policies (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), profile_id TEXT, limit_cost_minor INTEGER NOT NULL CHECK (limit_cost_minor >= 0), cost_unit TEXT NOT NULL, mode TEXT NOT NULL CHECK (mode IN ('hard')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(studio_id, profile_id))",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_policies_studio_profile ON budget_policies(studio_id, COALESCE(profile_id, ''))"
+].join(';\n') + ';';
+const SCHEMA_V27_DRY_RUN = "ALTER TABLE dry_run_previews ADD COLUMN usage_estimate_json TEXT NOT NULL DEFAULT '{\"unit\":\"unknown\",\"quantity\":0,\"estimatedCostMinor\":null,\"costUnit\":null,\"source\":\"unknown\"}'";
+const SCHEMA_V28 = [
+  "ALTER TABLE review_decisions ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1 CHECK (schema_version IN (1, 2))",
+  "ALTER TABLE review_decisions ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'",
+  "CREATE INDEX IF NOT EXISTS idx_review_decisions_context ON review_decisions(schema_version, updated_at DESC)"
+].join(';\n') + ';';
+const SCHEMA_V29 = [
+  "CREATE TABLE IF NOT EXISTS confirmed_templates (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), template_id TEXT NOT NULL, template_type TEXT NOT NULL CHECK (template_type IN ('task_type', 'style_kit', 'brand_kit')), version INTEGER NOT NULL CHECK (version BETWEEN 1 AND 1000000), name TEXT NOT NULL, definition_json TEXT NOT NULL, source_round_id TEXT NOT NULL REFERENCES creative_rounds(id), source_task_id TEXT NOT NULL REFERENCES creative_tasks(id), source_project_id TEXT NOT NULL REFERENCES projects(id), source_plan_version INTEGER NOT NULL CHECK (source_plan_version >= 1), provenance_json TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('active', 'archived')), created_at TEXT NOT NULL, archived_at TEXT, UNIQUE(studio_id, template_id, version), CHECK ((status = 'active' AND archived_at IS NULL) OR (status = 'archived' AND archived_at IS NOT NULL)))",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_confirmed_templates_active ON confirmed_templates(studio_id, template_id) WHERE status = 'active'",
+  "CREATE INDEX IF NOT EXISTS idx_confirmed_templates_list ON confirmed_templates(studio_id, template_type, template_id, version DESC)",
+  "CREATE TRIGGER IF NOT EXISTS confirmed_templates_immutable_update BEFORE UPDATE OF studio_id, template_id, template_type, version, name, definition_json, source_round_id, source_task_id, source_project_id, source_plan_version, provenance_json, created_at ON confirmed_templates BEGIN SELECT RAISE(ABORT, 'Confirmed template snapshots are immutable.'); END",
+  "CREATE TRIGGER IF NOT EXISTS confirmed_templates_immutable_delete BEFORE DELETE ON confirmed_templates BEGIN SELECT RAISE(ABORT, 'Confirmed template snapshots cannot be deleted.'); END"
+].join(';\n') + ';';
+
+const SCHEMA_V30 = [
+  "CREATE TABLE IF NOT EXISTS provider_concurrency_state (studio_id TEXT NOT NULL REFERENCES studios(id), profile_id TEXT NOT NULL, config_version INTEGER NOT NULL CHECK (config_version >= 1), target INTEGER NOT NULL CHECK (target BETWEEN 1 AND 100), cooldown_until_ms INTEGER NOT NULL CHECK (cooldown_until_ms >= 0), last_adjustment_at_ms INTEGER NOT NULL CHECK (last_adjustment_at_ms >= 0), last_reason TEXT NOT NULL CHECK (last_reason IN ('warmup', 'healthy', 'rate_limited', 'transient', 'unknown', 'memory_pressure')), max_observed_rss_bytes INTEGER NOT NULL CHECK (max_observed_rss_bytes >= 0), max_observed_external_bytes INTEGER NOT NULL CHECK (max_observed_external_bytes >= 0), updated_at TEXT NOT NULL, PRIMARY KEY (studio_id, profile_id, config_version))",
+  "CREATE INDEX IF NOT EXISTS idx_provider_concurrency_state_updated ON provider_concurrency_state(studio_id, updated_at)"
+].join(';\n') + ';';
+
+const SCHEMA_V31 = [
+  "CREATE TABLE IF NOT EXISTS provenance_records (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), asset_id TEXT NOT NULL REFERENCES assets(id), delivery_id TEXT NOT NULL REFERENCES deliveries(id), canonical_json TEXT NOT NULL, retention_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(studio_id, id))",
+  "CREATE INDEX IF NOT EXISTS idx_provenance_records_studio_asset ON provenance_records(studio_id, asset_id)",
+  "CREATE INDEX IF NOT EXISTS idx_provenance_records_studio_delivery ON provenance_records(studio_id, delivery_id)"
+].join(';\n') + ';';
+const SCHEMA_V32 = "ALTER TABLE generation_runs ADD COLUMN usage_estimate_json TEXT NOT NULL DEFAULT '{\"unit\":\"unknown\",\"quantity\":0,\"estimatedCostMinor\":null,\"costUnit\":null,\"source\":\"unknown\"}'";
 
 
 
@@ -260,10 +292,15 @@ const REQUIRED_SCHEMA_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   studios: ['id', 'workspace_root', 'schema_version'],
   studio_sessions: ['id', 'studio_id', 'version'],
   projects: ['id', 'studio_id', 'template_id', 'template_version'],
-  generation_runs: ['id', 'round_id', 'provider_profile_id', 'provider_config_version'],
+  generation_runs: ['id', 'round_id', 'provider_profile_id', 'provider_config_version', 'usage_estimate_json'],
   run_items: ['id', 'run_id', 'status', 'lease_worker_id'],
   assets: ['id', 'studio_id', 'storage_path', 'content_hash', 'media_state', 'missing_at', 'last_verified_at'],
   asset_media_operations: ['id', 'studio_id', 'phase', 'owner_id', 'heartbeat_at'],
+  usage_ledger: ['id', 'studio_id', 'unit', 'quantity', 'billing_state', 'estimate_source', 'idempotency_key'],
+  confirmed_templates: ['id', 'studio_id', 'template_id', 'template_type', 'version', 'name', 'definition_json', 'source_round_id', 'source_task_id', 'source_project_id', 'source_plan_version', 'provenance_json', 'status'],
+  provider_concurrency_state: ['studio_id', 'profile_id', 'config_version', 'target', 'cooldown_until_ms', 'last_adjustment_at_ms', 'last_reason', 'max_observed_rss_bytes', 'max_observed_external_bytes', 'updated_at'],
+  provenance_records: ['id', 'studio_id', 'asset_id', 'delivery_id', 'canonical_json', 'retention_json', 'created_at', 'updated_at'],
+  budget_policies: ['id', 'studio_id', 'limit_cost_minor', 'cost_unit', 'mode'],
   media_commit_journal: ['asset_id', 'studio_id', 'owner_id', 'heartbeat_at'],
   delivery_export_journal: ['studio_id', 'idempotency_key', 'delivery_id'],
   canvas_layouts: ['id', 'studio_id', 'project_id', 'scope_type', 'scope_id'],
@@ -352,13 +389,13 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
   const migrations = [
     { version: 1, sql: SCHEMA_V1 },
     { version: 2, sql: SCHEMA_V2 },
-      { version: 3, sql: SCHEMA_V3 },
-      { version: 4, sql: SCHEMA_V4 },
-      { version: 5, sql: SCHEMA_V5 },
-      { version: 6, sql: SCHEMA_V6 },
-      { version: 7, sql: SCHEMA_V7 },
-      { version: 8, sql: SCHEMA_V8 },
-      { version: 9, sql: SCHEMA_V9 },
+    { version: 3, sql: SCHEMA_V3 },
+    { version: 4, sql: SCHEMA_V4 },
+    { version: 5, sql: SCHEMA_V5 },
+    { version: 6, sql: SCHEMA_V6 },
+    { version: 7, sql: SCHEMA_V7 },
+    { version: 8, sql: SCHEMA_V8 },
+    { version: 9, sql: SCHEMA_V9 },
     { version: 10, sql: SCHEMA_V10 },
     { version: 11, sql: SCHEMA_V11 },
     { version: 12, sql: SCHEMA_V12 },
@@ -375,7 +412,13 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
     { version: 23, sql: SCHEMA_V23 },
     { version: 24, sql: SCHEMA_V24 },
     { version: 25, sql: SCHEMA_V25 },
-    { version: 26, sql: SCHEMA_V26 }
+    { version: 26, sql: SCHEMA_V26 },
+    { version: 27, sql: SCHEMA_V27 },
+    { version: 28, sql: SCHEMA_V28 },
+    { version: 29, sql: SCHEMA_V29 },
+    { version: 30, sql: SCHEMA_V30 },
+    { version: 31, sql: SCHEMA_V31 },
+    { version: 32, sql: SCHEMA_V32 }
   ];
   for (const migration of migrations) {
     const existing = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migration.version) as { version: number } | undefined;
@@ -399,6 +442,19 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
         if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_items'").get()) db.exec(SCHEMA_V25);
       } else if (migration.version === 26) {
         if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'projects'").get()) db.exec(SCHEMA_V26);
+      } else if (migration.version === 27) {
+        db.exec(SCHEMA_V27);
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dry_run_previews'").get()) {
+          const columns = (db.prepare('PRAGMA table_info(dry_run_previews)').all() as Array<{ name: string }>).map((row) => row.name);
+          if (!columns.includes('usage_estimate_json')) db.exec(SCHEMA_V27_DRY_RUN);
+        }
+      } else if (migration.version === 28) {
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'review_decisions'").get()) db.exec(SCHEMA_V28);
+      } else if (migration.version === 32) {
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'generation_runs'").get()) {
+          const columns = (db.prepare('PRAGMA table_info(generation_runs)').all() as Array<{ name: string }>).map((row) => row.name);
+          if (!columns.includes('usage_estimate_json')) db.exec(SCHEMA_V32);
+        }
       } else db.exec(migration.sql);
       if (migration.version === 16 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'assets'").get()) db.exec(SCHEMA_V16_ASSET_BACKFILL);
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());

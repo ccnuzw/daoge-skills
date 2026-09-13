@@ -26,6 +26,14 @@ export interface StudioDaemonOptions {
   workbenchPresence?: WorkbenchPresence;
 }
 
+interface ProviderIdentity {
+  profileId: string;
+  configVersion: number;
+  providerId: string;
+  model: string;
+}
+
+
 interface RuntimeRecord {
   pid: number;
   url: string;
@@ -34,7 +42,7 @@ interface RuntimeRecord {
   workspaceRoot: string;
   startedAt: string;
   heartbeatAt: string;
-  provider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null;
+  provider: ProviderIdentity | null;
   providerConcurrency: ProviderConcurrencySnapshot | null;
   workerPool: { mode: 'child_process'; size: number; pids: number[]; health: ProcessPoolHealth } | null;
   mediaWorkerPool: { mode: 'child_process'; size: number; pids: number[]; health: ProcessPoolHealth } | null;
@@ -92,7 +100,6 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
   let mediaWorkerPool: MediaProcessPool | null = null;
   let restartRequested = false;
   let timer: NodeJS.Timeout | undefined;
-  let heartbeatTimer: NodeJS.Timeout | undefined;
   let inFlightTick: Promise<void> | null = null;
   let lastMaintenanceAt = 0;
   let stopping = false;
@@ -101,7 +108,6 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     if (closePromise) return closePromise;
     stopping = true;
     clearTimeout(timer);
-    clearInterval(heartbeatTimer);
     closePromise = (async (): Promise<void> => {
       const failures: unknown[] = [];
       if (mediaWorkerPool) {
@@ -162,35 +168,52 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     const daemonDb = service.db;
     const daemonProviderDb = service.providerDb;
     let startedUrl = '';
-    let activeProvider: { profileId: string; configVersion: number; providerId: string; model: string; endpoint: string | null } | null = null;
+    let activeProvider: ProviderIdentity | null = null;
     const startedAt = nowIso();
     const workerId = createId('worker_pool');
     const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider, providerConcurrency: workerPool ? workerPool.concurrencySnapshot() : null, workerPool: workerPool ? { mode: 'child_process', size: workerPool.processIds().length, pids: workerPool.processIds(), health: workerPool.healthSnapshot() } : null, mediaWorkerPool: mediaWorkerPool ? { mode: 'child_process', size: mediaWorkerPool.processIds().length, pids: mediaWorkerPool.processIds(), health: mediaWorkerPool.healthSnapshot() } : null });
-    const heartbeat = (): void => { if (startedUrl) writeAtomically(runtimePath, runtimeRecord()); };
 
     const requestedPort = options.port === 0 ? 0 : options.port || rememberedPort(portPath);
     const started = await daemonService.listen(requestedPort);
     startedUrl = started.url;
     writeAtomically(portPath, { port: Number(new URL(startedUrl).port) });
     const pollMs = Math.max(100, Math.min(5000, options.pollMs || 350));
-    const providerIdentity = (snapshot: ReturnType<typeof providerSnapshot> | null): RuntimeRecord['provider'] => snapshot ? { profileId: snapshot.profileId, configVersion: snapshot.configVersion, providerId: snapshot.providerId, model: snapshot.model, endpoint: snapshot.endpoint } : null;
-    const sameProviderIdentity = (left: RuntimeRecord['provider'], right: RuntimeRecord['provider']): boolean => JSON.stringify(left) === JSON.stringify(right);
+    const providerIdentity = (snapshot: Pick<ProviderIdentity, 'profileId' | 'configVersion' | 'providerId' | 'model'> | null): ProviderIdentity | null => snapshot ? { profileId: snapshot.profileId, configVersion: snapshot.configVersion, providerId: snapshot.providerId, model: snapshot.model } : null;
+    const sameProviderIdentity = (left: ProviderIdentity | null, right: ProviderIdentity | null): boolean => JSON.stringify(left) === JSON.stringify(right);
     const logWorkerError = (error: unknown): void => {
       const message = error instanceof Error ? error.message.replace(/[A-Za-z0-9_-]{20,}/g, '[redacted]') : 'unknown daemon worker failure';
       fs.appendFileSync(path.join(runtimeDir, 'daemon.log'), nowIso() + ' ' + message + '\n', { mode: 0o600 });
+    };
+    const heartbeat = (): void => {
+      if (stopping || !startedUrl) return;
+      try {
+        writeAtomically(runtimePath, runtimeRecord());
+      } catch (error) {
+        logWorkerError(error);
+      }
     };
     const activeProviderWork = (provider: RuntimeRecord['provider']): number => {
       if (!provider) return 0;
       const row = daemonDb.prepare("SELECT COUNT(*) AS total FROM run_items item JOIN generation_runs run ON run.id = item.run_id WHERE run.provider_profile_id = ? AND run.provider_config_version = ? AND run.status IN ('queued', 'running', 'pausing') AND item.status IN ('pending', 'leased', 'requesting', 'receiving', 'persisting', 'retry_wait', 'cancel_requested')").get(provider.profileId, provider.configVersion) as { total: number } | undefined;
       return Number(row?.total) || 0;
     };
+    const updateWorkerPoolMetrics = (provider: RuntimeRecord['provider']): void => {
+      if (!workerPool) return;
+      if (!provider) {
+        workerPool.updateQueueMetrics(0, 0);
+        return;
+      }
+      const leaseRiskUntil = new Date(Date.now() + 5000).toISOString();
+      const metrics = daemonDb.prepare("SELECT COALESCE(SUM(CASE WHEN item.status IN ('pending', 'retry_wait') THEN 1 ELSE 0 END), 0) AS queued, COALESCE(SUM(CASE WHEN item.status IN ('leased', 'requesting', 'receiving', 'persisting', 'cancel_requested') AND item.lease_expires_at IS NOT NULL AND item.lease_expires_at <= ? THEN 1 ELSE 0 END), 0) AS lease_risk FROM run_items item JOIN generation_runs run ON run.id = item.run_id WHERE run.provider_profile_id = ? AND run.provider_config_version = ? AND run.status IN ('queued', 'running', 'pausing')").get(leaseRiskUntil, provider.profileId, provider.configVersion) as { queued?: number; lease_risk?: number } | undefined;
+      workerPool.updateQueueMetrics(Number(metrics?.queued) || 0, Number(metrics?.lease_risk) || 0);
+    };
     let deferredProviderKey: string | null = null;
     const initialConfig = resolveActiveProviderConfig(daemonProviderDb, initialized.paths);
     const initialStatus = providerStatus(daemonProviderDb, initialized.paths);
-    activeProvider = providerIdentity(initialConfig ? providerSnapshot(initialConfig) : null);
     workerPool = initialConfig && initialStatus.configured ? new WorkerProcessPool(initialized.paths.workspaceRoot, undefined, initialConfig) : null;
+    activeProvider = providerIdentity(initialConfig ? providerSnapshot(initialConfig) : null);
+    updateWorkerPoolMetrics(activeProvider);
     heartbeat();
-    heartbeatTimer = setInterval(heartbeat, 5000);
     const tick = async (): Promise<void> => {
       if (stopping) return;
       try {
@@ -224,11 +247,13 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
             deferredProviderKey = null;
             appendStudioEvent(daemonDb, { studioId: initialized.manifest.studioId, entityType: 'daemon', entityId: workerId, eventType: 'daemon.provider_config_applied', payload: { hotReloaded: true, previousProvider, activeProvider, workerReady: Boolean(workerPool) } });
             if (previousPool) void previousPool.close().catch(logWorkerError);
-            heartbeat();
+            updateWorkerPoolMetrics(activeProvider);
           }
         }
         if (workerPool) {
+          updateWorkerPoolMetrics(activeProvider);
           const result = await workerPool.processOnce(MAX_GLOBAL_CONCURRENCY);
+          updateWorkerPoolMetrics(activeProvider);
           heartbeat();
           scheduleTick(result.claimed || recoveredLeases || promotedRetries || reconciledRuns ? 30 : pollMs);
           return;
@@ -237,6 +262,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
         const message = error instanceof Error ? error.message.replace(/[A-Za-z0-9_-]{20,}/g, '[redacted]') : 'unknown daemon worker failure';
         fs.appendFileSync(path.join(runtimeDir, 'daemon.log'), nowIso() + ' ' + message + '\n', { mode: 0o600 });
       }
+      heartbeat();
       scheduleTick(pollMs);
     };
     const scheduleTick = (delay: number): void => {

@@ -2,6 +2,25 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic Unreleased
+
+- 修复带任务或轮次上下文的资产评审：评审资产必须属于该上下文项目或已明确共享到当前 Studio，避免跨项目写入误导性评审记录。
+- Provider 成功返回外部请求标识后，在运行项进入后续结果阶段前持久化 `run_items.external_request_id`；显式重试会清理旧标识并生成新的本地请求身份。
+- 限制创作谱系剩余分页请求的并发为 4，并保持分页结果顺序，避免大型项目一次性建立无界 HTTP 请求峰值。
+- 接入 Bearer-only 的确认模板快照 API 与 `template-list`、`template-get`、`template-save`、`template-archive`、`template-rollback` CLI；保存、归档和回滚复用结构化幂等收据，模板版本保持可读且不可变。
+- 新增 usage ledger 与 hard budget 的 vNext API/CLI：`/api/usage`、`/api/usage/summary`、`/api/budget` 及 `usage-list`、`usage-summary`、`budget-get`、`budget-set`；读取按当前 Studio 分层范围校验，未知成本保持显式，预算写入 Bearer-only 且复用幂等收据。
+
+### 冻结前收口
+
+本批功能在冻结前补齐了三处「机制已就位但生产链路不生效」的缺口，并加固了构建闸门：
+
+- **预算闸门真正生效**：计划预检声明的成本估算现在被冻结到 `generation_runs.usage_estimate_json`（Studio Schema v32），运行项记账按序号把该总额摊到每一项，整数余数分给前若干项，因此累计值恰好等于已声明总额。此前 runner 记录的用量成本恒为 `null`，预算的「已花费」累计永远是 0，任何额度都拦不住运行。未声明估算的计划仍在账本里保持显式 unknown，平台不推断价格。
+- **预算闸门覆盖重试路径**：闸门原先只在预检执行一次，重试与恢复可以绕过。现在 `retry` 批量重试前会按预算策略与成本单位聚合候选运行项的已知估算并再次过闸，超额项不进入重试；聚合时仅对「运行状态已占用预算」或「该项已有已知用量记录」的项计入新增预留，避免同一额度被重复预留。
+- **参考图不再静默丢失**：预检新增 `reference_requires_edit`，拒绝「计划声明了参考素材或遮罩，却把 `operation` 设为 `generate`」的计划。此前这类计划会通过关于参考图的全部校验、被写入来源记录并被确认，但 provider 的 generate 请求体只包含提示词，参考图从未上线；结果是用户付费拿到一批未使用参考图的结果。
+- **线协议一致性断言**：新增回归直接断言「同一个请求对象下，`generate` 的 JSON 请求体不携带参考素材，而 `edit` 的 multipart 请求体确实上传了该素材」，把上述不变量固定下来。
+- **构建闸门前置**：`tsconfig.vnext.json` 启用 `noEmitOnError`，`build:vnext` 拆出独立的 `typecheck:vnext` 并在清理 `dist` 之前执行，避免类型错误时留下「看起来构建成功、实际不可用」的半成品 `dist`。
+- **验证证据机器产出**：新增 `npm run verify:evidence`，从真实构建与真实回归生成 `docs/vnext_verification_evidence_zh.md` 的工作树证据区块；`npm run verify:evidence:check` 在区块与代码不一致时失败，取代此前靠人工维护的测试计数。
+
 ## daoge-pic 5.13.0 - 2026-09-12
 
 当前稳定发布包/runtime 版本为 `5.13.0`；`5.12.0` 及更早版本保持为不可变历史发布，旧 daemon 不得与本版本混用。

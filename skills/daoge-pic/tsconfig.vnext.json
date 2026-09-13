@@ -10,6 +10,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "noEmitOnError": true,
     "sourceMap": false,
     "declaration": true,
     "types": ["node"]

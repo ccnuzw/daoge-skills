@@ -5,10 +5,15 @@ import { cleanupProviderResult } from '../media/generated-assets';
 import { redactProviderText, sanitizeProviderImageResult, sanitizeProviderRequestId } from '../providers/response-sanitizer';
 import { ManagedAssetResolver, ResolvedManagedAssets } from '../media/asset-resolver';
 import { InvalidCommandError } from '../domain/studio-commands';
-import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
+import { appendStudioEvent, StudioDatabase } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
-import { ClaimedRunItem, claimRunItems, getGenerationRun, getGenerationRunItem, markRunItemOutcomeUnknown, promoteDueRetryWaitItems, renewRunItemLease, settleTerminalGenerationRun, transitionRunItem } from './run-commands';
+import { ClaimedRunItem, claimRunItems, getGenerationRun, getGenerationRunItem, markRunItemOutcomeUnknown, promoteDueRetryWaitItems, recordRunItemUsage, renewRunItemLease, settleTerminalGenerationRun, transitionRunItem } from './run-commands';
 import { retryDecision, RetryPolicy, DEFAULT_RETRY_POLICY } from './retry-policy';
+import type { UsageBillingState } from '../usage/ledger';
+
+function providerFailureBillingState(kind: ProviderError['kind']): UsageBillingState {
+  return ['invalid_request', 'invalid_config', 'missing_asset', 'permission', 'unsupported', 'cancelled'].includes(kind) ? 'not_billed' : 'possibly_billed';
+}
 
 export interface PersistedImageResult {
   assetId: string;
@@ -154,31 +159,35 @@ export class GenerationWorker {
     }
   }
 
-  private settleCancellation(item: ClaimedRunItem, safeToCancel: boolean): 'cancelled' | 'unknown' {
+  private settleCancellation(item: ClaimedRunItem, safeToCancel: boolean, externalRequestId?: string | null, billingState: UsageBillingState = 'possibly_billed'): 'cancelled' | 'unknown' {
     const current = getGenerationRunItem(this.db, item.id);
     if (!current) throw new InvalidCommandError('Cancelled run item no longer exists.');
     if (current.status === 'cancelled') return 'cancelled';
     if (current.status === 'outcome_unknown') return 'unknown';
     if (current.status !== 'cancel_requested' || !safeToCancel) return this.markUnknown(item, current.status === 'cancel_requested' ? 'cancelled_request_uncertain' : 'lease_ownership_lost');
     try {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'cancelled', emitEvent: false });
+      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'cancelled', externalRequestId, billingState, emitEvent: false });
       return 'cancelled';
     } catch {
       return this.markUnknown(item, 'lease_ownership_lost');
     }
   }
 
-  private transitionAfterProvider(item: ClaimedRunItem, safeToCancel: boolean, input: Parameters<typeof transitionRunItem>[1]): ItemProcessingOutcome | null {
+  private transitionAfterProvider(item: ClaimedRunItem, safeToCancel: boolean, input: Parameters<typeof transitionRunItem>[1], billingState?: UsageBillingState): ItemProcessingOutcome | null {
     try {
-      transitionRunItem(this.db, { ...input, emitEvent: false });
+      transitionRunItem(this.db, { ...input, ...(billingState ? { billingState } : {}), emitEvent: false });
       return null;
     } catch {
       const current = getGenerationRunItem(this.db, item.id);
-      if (current?.status === 'cancel_requested') return this.settleCancellation(item, safeToCancel);
-      if (current?.status === 'cancelled') return 'cancelled';
+      if (current?.status === 'cancel_requested') return this.settleCancellation(item, safeToCancel, input.externalRequestId, billingState || (safeToCancel ? 'billed' : 'possibly_billed'));
+      if (current?.status === 'cancelled') {
+        if (billingState) recordRunItemUsage(this.db, { studioId: item.studioId, runItemId: item.id, requestId: item.requestId, billingState });
+        return 'cancelled';
+      }
       return this.markUnknown(item, 'lease_ownership_lost');
     }
   }
+
 
   private async processClaimedItem(item: ClaimedRunItem): Promise<ItemProcessingOutcome> {
     const run = getGenerationRun(this.db, item.runId);
@@ -212,7 +221,7 @@ export class GenerationWorker {
       managedAssets = this.assetResolver ? await this.assetResolver.resolve({ studioId: item.studioId, projectId: context.project_id, referenceAssetIds: item.promptPayload.referenceAssetIds, maskAssetId: item.promptPayload.maskAssetId }) : { assets: { referenceAssets: [], maskAsset: undefined }, release: () => undefined };
       request = { requestId: item.requestId, idempotencyKey: 'run-request-' + item.requestId, prompt: promptFromItem(item), output: outputFromItem(item), ...managedAssets.assets };
     } catch {
-      const transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'managed_asset_resolution_failed' } });
+      const transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'managed_asset_resolution_failed' } }, 'not_billed');
       return transition || 'blocked';
     }
 
@@ -242,7 +251,7 @@ export class GenerationWorker {
 
     try {
       const initialEvent = observeLease();
-      if (initialEvent?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+      if (initialEvent?.kind === 'cancel_requested') return this.settleCancellation(item, true, null, 'not_billed');
       if (initialEvent?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
       if (initialEvent?.kind === 'shutdown') return this.markUnknown(item, 'daemon_shutdown');
       const providerOperation = Promise.resolve().then(async () => {
@@ -263,50 +272,54 @@ export class GenerationWorker {
       if (providerOutcome.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
       if (providerOutcome.kind === 'shutdown') return this.markUnknown(item, 'daemon_shutdown');
       if (providerOutcome.kind === 'rejected') {
-        const event = monitorEvent || observeLease();
-        if (event?.kind === 'cancel_requested') return this.settleCancellation(item, false);
-        if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
-        if (event?.kind === 'shutdown') return this.markUnknown(item, 'daemon_shutdown');
         const classified: ProviderError = this.provider.classifyError(providerOutcome.reason);
         this.recordProviderOutcome(classified.kind === 'rate_limited' ? 'rate_limited' : classified.kind === 'transient' ? 'transient' : classified.kind === 'unknown_outcome' ? 'unknown' : 'other_failure');
+        const event = monitorEvent || observeLease();
+        if (event?.kind === 'cancel_requested') {
+          if (classified.kind === 'unknown_outcome') return this.settleCancellation(item, false);
+          return this.settleCancellation(item, true, null, providerFailureBillingState(classified.kind));
+        }
+        if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
+        if (event?.kind === 'shutdown') return this.markUnknown(item, 'daemon_shutdown');
         const decision = retryDecision(classified, item.attempts, this.clock(), this.policy);
         const summary = safeErrorSummary(redactProviderText(classified.message, this.providerConfig));
         const error = { kind: sanitizeProviderRequestId(classified.kind, this.providerConfig) || 'unknown_outcome', code: sanitizeProviderRequestId(classified.code, this.providerConfig) || 'provider_error', ...(summary ? { summary } : {}) };
         if (decision.retry) {
-          const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'retry_wait', retryAt: decision.retryAt, error });
+          const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'retry_wait', retryAt: decision.retryAt, error }, 'possibly_billed');
           return transition || 'retrying';
         }
         if (classified.kind === 'unknown_outcome') {
-          const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'outcome_unknown', error });
+          const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'outcome_unknown', error }, 'possibly_billed');
           return transition || 'unknown';
         }
-        const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error });
+        const failureBillingState = providerFailureBillingState(classified.kind);
+        const transition = this.transitionAfterProvider(item, false, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error }, failureBillingState);
         return transition || 'blocked';
       }
       this.recordProviderOutcome('success');
       imageResult = sanitizeProviderImageResult(providerOutcome.value, this.providerConfig);
       let event = monitorEvent || observeLease();
-      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true, imageResult.externalRequestId || null, 'billed');
       if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
-      let transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'receiving' });
+      let transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'receiving', externalRequestId: imageResult.externalRequestId || null });
       if (transition) return transition;
       event = monitorEvent || observeLease();
-      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true, null, 'billed');
       if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
-      transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'persisting' });
+      transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'persisting', externalRequestId: imageResult.externalRequestId || null });
       if (transition) return transition;
 
       const persistenceOperation = Promise.resolve().then(() => this.assetPersister.persistGeneratedImage({ runId: item.runId, itemId: item.id, result: imageResult as ImageResult }));
       const persistenceOutcome = await tracked(persistenceOperation);
       event = monitorEvent || observeLease();
-      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true);
+      if (event?.kind === 'cancel_requested') return this.settleCancellation(item, true, null, 'billed');
       if (event?.kind === 'ownership_lost') return this.markUnknown(item, 'lease_ownership_lost');
       if (persistenceOutcome.kind === 'rejected') {
-        transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'local_persistence_failed' } });
+        transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'blocked', error: { code: 'local_persistence_failed' } }, 'billed');
         return transition || 'blocked';
       }
       const persisted = persistenceOutcome.value;
-      transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'succeeded', result: { assetId: persisted.assetId, mediaType: persisted.mediaType, byteSize: persisted.byteSize, contentHash: persisted.contentHash, externalRequestId: imageResult.externalRequestId || null, revisedPrompt: imageResult.revisedPrompt || null, safeMeta: imageResult.safeMeta || {} } });
+      transition = this.transitionAfterProvider(item, true, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'succeeded', externalRequestId: imageResult.externalRequestId || null, result: { assetId: persisted.assetId, mediaType: persisted.mediaType, byteSize: persisted.byteSize, contentHash: persisted.contentHash, externalRequestId: imageResult.externalRequestId || null, revisedPrompt: imageResult.revisedPrompt || null, safeMeta: imageResult.safeMeta || {} } }, 'billed');
       return transition || 'succeeded';
     } finally {
       this.activeShutdowns.delete(shutdown);

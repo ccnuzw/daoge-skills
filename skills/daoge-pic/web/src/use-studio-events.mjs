@@ -10,7 +10,8 @@ export function studioCursorKey(studioId) {
 
 export function studioEventRefreshPlan(events = []) {
   const values = Array.isArray(events) ? events : [];
-  const global = values.some((event) => (event?.entityType === 'project' && event?.eventType !== 'project.selection_updated') || /^(?:task_type|style_kit|brand_kit|studio)\./.test(event?.eventType || ''));
+  const runtimeProviderEvent = (event) => /^daemon\.provider_config_(?:pending|applied)$/.test(event?.eventType || '');
+  const global = values.some((event) => runtimeProviderEvent(event) || (event?.entityType === 'project' && event?.eventType !== 'project.selection_updated') || /^(?:task_type|style_kit|brand_kit|studio)\./.test(event?.eventType || ''));
   const detailEvent = (event) => ['task', 'creative_round', 'round', 'generation_run', 'run', 'run_item', 'asset', 'review'].includes(event?.entityType) || /^(task|round|run|run_item|asset|review)\./.test(event?.eventType || '');
   const planEvent = (event) => ['creative_round', 'round'].includes(event?.entityType) || /^(round|plan)\./.test(event?.eventType || '');
   const assetEvent = (event) => ['asset', 'review'].includes(event?.entityType) || /^(asset|review)\./.test(event?.eventType || '') || ['run.items_updated', 'project.selection_updated'].includes(event?.eventType);

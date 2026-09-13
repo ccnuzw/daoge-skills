@@ -9,6 +9,7 @@ const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/st
 const { configureProvider } = require('./provider-test-helper');
 const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan } = require('../../dist/vnext/domain/studio-commands');
 const { cancelGenerationRun, createDryRunPreview, queueGenerationRun, getGenerationRun, listGenerationRunItems } = require('../../dist/vnext/runner/run-commands');
+const { listUsageLedger } = require('../../dist/vnext/usage/ledger');
 const { GenerationWorker } = require('../../dist/vnext/runner/worker');
 const { StudioGeneratedAssetPersister } = require('../../dist/vnext/media/generated-assets');
 const { assetFilePath, importStudioAsset, setStudioAssetShared } = require('../../dist/vnext/domain/assets');
@@ -35,7 +36,7 @@ function setupRun(itemCount = 1) {
   const confirmed = confirmRoundPlan(db, { studioId: initialized.manifest.studioId, roundId: round.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'confirm' });
   const dryRun = createDryRunPreview(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, idempotencyKey: 'dry-run' });
   const run = queueGenerationRun(db, { studioId: initialized.manifest.studioId, roundId: confirmed.value.id, providerConfig: config, providerStatus: status, preflightId: dryRun.value.preview.id, idempotencyKey: 'run' });
-  return { workspaceRoot, initialized, db, config, run, projectId: project.value.id };
+  return { workspaceRoot, initialized, db, config, run, projectId: project.value.id, taskId: task.value.id, roundId: confirmed.value.id };
 }
 
 function cleanup(fixture) {
@@ -110,7 +111,11 @@ test('worker persists a successful Provider result and completes its run', async
     assert.equal(persisted.length, 1);
     assert.equal(getGenerationRun(fixture.db, fixture.run.value.id).status, 'completed');
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'succeeded');
+    const usage = listUsageLedger(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id });
+    assert.equal(usage.length, 1);
+    assert.deepEqual({ projectId: usage[0].projectId, taskId: usage[0].taskId, roundId: usage[0].roundId, runId: usage[0].runId, runItemId: usage[0].runItemId, unit: usage[0].unit, quantity: usage[0].quantity, estimatedCostMinor: usage[0].estimatedCostMinor, billingState: usage[0].billingState }, { projectId: fixture.projectId, taskId: fixture.taskId, roundId: fixture.roundId, runId: fixture.run.value.id, runItemId: listGenerationRunItems(fixture.db, fixture.run.value.id)[0].id, unit: 'image', quantity: 1, estimatedCostMinor: null, billingState: 'billed' });
     const storedResult = fixture.db.prepare('SELECT result_json FROM run_items WHERE run_id = ?').get(fixture.run.value.id).result_json;
+    assert.equal(fixture.db.prepare('SELECT external_request_id FROM run_items WHERE run_id = ?').get(fixture.run.value.id).external_request_id, 'remote-success');
     assert.equal(storedResult.includes('memory-only-key'), false);
   } finally {
     cleanup(fixture);
@@ -307,11 +312,63 @@ test('worker schedules a bounded retry for rate limits without persisting an ass
     assert.equal(item.status, 'retry_wait');
     assert.equal(item.retryAt, '2026-01-01T00:00:01.000Z');
     assert.equal(persistenceCalls, 0);
+    const usage = listUsageLedger(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id });
+    assert.equal(usage.length, 1);
+    assert.equal(usage[0].billingState, 'possibly_billed');
   } finally {
     cleanup(fixture);
   }
 });
+test('worker keeps one conservative usage event when a transient retry later succeeds', async () => {
+  const fixture = setupRun();
+  try {
+    let calls = 0;
+    let persistenceCalls = 0;
+    let now = new Date('2026-01-01T00:00:00.000Z');
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-retry-success',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => {
+        calls += 1;
+        if (calls === 1) { const error = new Error('slow down'); error.status = 429; throw error; }
+        return { bytes: png, mediaType: 'image/png', externalRequestId: 'retry-success' };
+      }, (error) => ({ kind: 'rate_limited', code: '429', message: error.message, retryAfterMs: 1000 })),
+      assetPersister: { persistGeneratedImage: async ({ result }) => { persistenceCalls += 1; return { assetId: 'retry-success-asset', mediaType: result.mediaType, byteSize: result.bytes.length, contentHash: 'retry-success-hash' }; } },
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 5000, jitterRatio: 0 },
+      now: () => now
+    });
+    assert.equal((await worker.processOnce()).retrying, 1);
+    now = new Date('2026-01-01T00:00:01.000Z');
+    assert.equal((await worker.processOnce()).succeeded, 1);
+    assert.equal(calls, 2);
+    assert.equal(persistenceCalls, 1);
+    const usage = listUsageLedger(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id });
+    assert.equal(usage.length, 1);
+    assert.equal(usage[0].billingState, 'possibly_billed');
+  } finally { cleanup(fixture); }
+});
 
+
+
+test('worker records a definite Provider failure as not billed', async () => {
+  const fixture = setupRun();
+  try {
+    const worker = new GenerationWorker({
+      db: fixture.db,
+      workerId: 'worker-definite-failure',
+      providerConfig: fixture.config,
+      provider: fakeProvider(async () => { const error = new Error('bad request'); error.status = 400; throw error; }, (error) => ({ kind: 'invalid_request', code: 'invalid_request', message: error.message })),
+      assetPersister: { persistGeneratedImage: async () => { throw new Error('should not persist'); } },
+      now: () => new Date('2026-01-01T00:00:00.000Z')
+    });
+    assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 1, unknown: 0, cancelled: 0 });
+    const usage = listUsageLedger(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id });
+    assert.equal(usage.length, 1);
+    assert.equal(usage[0].billingState, 'not_billed');
+    assert.equal(usage[0].estimatedCostMinor, null);
+  } finally { cleanup(fixture); }
+});
 
 test('worker blocks local persistence failure without classifying or replaying the Provider request', async () => {
   const fixture = setupRun();
@@ -349,6 +406,9 @@ test('worker never automatically replays an unknown Provider outcome', async () 
     assert.deepEqual(second, { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 });
     assert.equal(calls, 1);
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'outcome_unknown');
+    const usage = listUsageLedger(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id });
+    assert.equal(usage.length, 1);
+    assert.equal(usage[0].billingState, 'possibly_billed');
   } finally {
     cleanup(fixture);
   }
@@ -370,6 +430,10 @@ test('worker safely cancels when the Provider returns a definite result after ca
     });
     assert.deepEqual(await worker.processOnce(), { claimed: 1, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 1 });
     assert.equal(listGenerationRunItems(fixture.db, fixture.run.value.id)[0].status, 'cancelled');
+    assert.equal(fixture.db.prepare('SELECT external_request_id FROM run_items WHERE run_id = ?').get(fixture.run.value.id).external_request_id, 'cancelled-result');
+    const usage = listUsageLedger(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: fixture.run.value.id });
+    assert.equal(usage.length, 1);
+    assert.equal(usage[0].billingState, 'billed');
   } finally { cleanup(fixture); }
 });
 

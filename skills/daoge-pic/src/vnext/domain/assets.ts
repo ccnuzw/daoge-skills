@@ -5,6 +5,9 @@ import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { AssetBucket, ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
+import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from './asset-access';
+import { normalizeReviewContext, normalizeReviewFeedback } from './review-contract';
+import type { ReviewAnnotationContext } from './review-contract';
 
 export type AssetKind = 'import' | 'generated' | 'export';
 export type ReviewDecisionValue = 'keep' | 'review' | 'reject' | 'derive';
@@ -576,34 +579,72 @@ export function restoreAsset(db: StudioDatabase, paths: StudioPaths, input: { st
   return { ...asset, storagePath: planned.storagePath, deletedAt: null };
 }
 
-export function setReviewDecision(db: StudioDatabase, input: { studioId: string; assetId: string; decision: ReviewDecisionValue; taskId?: string; roundId?: string; feedback?: Record<string, unknown>; emitEvent?: boolean }): void {
+interface ReviewContextResolution {
+  context: ReviewAnnotationContext;
+  taskId?: string;
+  roundId?: string;
+  projectId?: string;
+}
+
+function resolveReviewContext(db: StudioDatabase, input: { studioId: string; assetIds: readonly string[]; taskId?: string; roundId?: string; context?: unknown; source?: ReviewAnnotationContext['source'] }): ReviewContextResolution {
+  const suppliedContext = normalizeReviewContext(input.context, { source: input.source });
+  if (input.taskId && suppliedContext.taskId && input.taskId !== suppliedContext.taskId) throw new InvalidCommandError('Review context taskId does not match the selected task.');
+  if (input.roundId && suppliedContext.roundId && input.roundId !== suppliedContext.roundId) throw new InvalidCommandError('Review context roundId does not match the selected round.');
+  const taskId = input.taskId || suppliedContext.taskId;
+  const roundId = input.roundId || suppliedContext.roundId;
+  const task = taskId ? db.prepare('SELECT t.id, t.project_id FROM creative_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ? AND p.studio_id = ?').get(taskId, input.studioId) as { id: string; project_id: string } | undefined : undefined;
+  if (taskId && !task) throw new InvalidCommandError('Review task does not belong to this Studio.');
+  const round = roundId ? db.prepare('SELECT cr.id, cr.task_id, p.id AS project_id FROM creative_rounds cr JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE cr.id = ? AND p.studio_id = ?').get(roundId, input.studioId) as { id: string; task_id: string; project_id: string } | undefined : undefined;
+  if (roundId && !round) throw new InvalidCommandError('Review round does not belong to this Studio.');
+  if (round && task && round.task_id !== task.id) throw new InvalidCommandError('Review round does not belong to the selected task.');
+  const run = suppliedContext.runId ? db.prepare('SELECT run.id, run.round_id, round.task_id, project.id AS project_id FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?').get(suppliedContext.runId, input.studioId) as { id: string; round_id: string; task_id: string; project_id: string } | undefined : undefined;
+  if (suppliedContext.runId && !run) throw new InvalidCommandError('Review context runId does not belong to this Studio.');
+  const runItem = suppliedContext.runItemId ? db.prepare('SELECT item.id, item.run_id, round.id AS round_id, round.task_id, project.id AS project_id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?').get(suppliedContext.runItemId, input.studioId) as { id: string; run_id: string; round_id: string; task_id: string; project_id: string } | undefined : undefined;
+  if (suppliedContext.runItemId && !runItem) throw new InvalidCommandError('Review context runItemId does not belong to this Studio.');
+  if (run && runItem && run.id !== runItem.run_id) throw new InvalidCommandError('Review context runItemId does not belong to the selected run.');
+  if ((run && roundId && run.round_id !== roundId) || (runItem && roundId && runItem.round_id !== roundId)) throw new InvalidCommandError('Review context run does not belong to the selected round.');
+  if ((run && taskId && run.task_id !== taskId) || (runItem && taskId && runItem.task_id !== taskId)) throw new InvalidCommandError('Review context run does not belong to the selected task.');
+  const projectId = task?.project_id || round?.project_id || suppliedContext.projectId || run?.project_id || runItem?.project_id;
+  if (suppliedContext.projectId && projectId && suppliedContext.projectId !== projectId) throw new InvalidCommandError('Review context projectId does not match the selected project.');
+  if ((run && projectId && run.project_id !== projectId) || (runItem && projectId && runItem.project_id !== projectId)) throw new InvalidCommandError('Review context run does not belong to the selected project.');
+  if (projectId) {
+    if (!db.prepare('SELECT id FROM projects WHERE id = ? AND studio_id = ?').get(projectId, input.studioId)) throw new InvalidCommandError('Review project does not belong to this Studio.');
+    const access = inspectProjectAssetAccess(db, { studioId: input.studioId, projectId, assetIds: input.assetIds });
+    if (input.assetIds.some((assetId) => !projectAssetReferenceAllowed(access.get(assetId)))) throw new InvalidCommandError(input.assetIds.length === 1 ? 'Review asset does not belong to the selected project.' : 'Review assets do not belong to the selected project.');
+  }
+  const context = normalizeReviewContext(input.context, { source: input.source, projectId, taskId, roundId });
+  return { context, taskId, roundId, projectId };
+}
+
+export function setReviewDecision(db: StudioDatabase, input: { studioId: string; assetId: string; decision: ReviewDecisionValue; taskId?: string; roundId?: string; context?: unknown; feedback?: unknown; emitEvent?: boolean }): void {
   const asset = getStudioAsset(db, input.studioId, input.assetId);
   if (!asset || asset.deletedAt) throw new StudioNotFoundError('Active asset not found: ' + input.assetId);
   if (!['keep', 'review', 'reject', 'derive'].includes(input.decision)) throw new InvalidCommandError('Unsupported review decision.');
-  const task = input.taskId ? db.prepare('SELECT t.id FROM creative_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ? AND p.studio_id = ?').get(input.taskId, input.studioId) as { id: string } | undefined : undefined;
-  if (input.taskId && !task) throw new InvalidCommandError('Review task does not belong to this Studio.');
-  const round = input.roundId ? db.prepare('SELECT cr.id, cr.task_id FROM creative_rounds cr JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE cr.id = ? AND p.studio_id = ?').get(input.roundId, input.studioId) as { id: string; task_id: string } | undefined : undefined;
-  if (input.roundId && !round) throw new InvalidCommandError('Review round does not belong to this Studio.');
-  if (round && task && round.task_id !== task.id) throw new InvalidCommandError('Review round does not belong to the selected task.');
+  const feedback = normalizeReviewFeedback(input.feedback);
+  const { context, taskId, roundId } = resolveReviewContext(db, { ...input, assetIds: [asset.id] });
   withTransaction(db, () => {
     const timestamp = nowIso();
-    db.prepare('INSERT INTO review_decisions (id, asset_id, task_id, round_id, decision, feedback_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(createId('review'), asset.id, input.taskId || null, input.roundId || null, input.decision, JSON.stringify(input.feedback || {}), timestamp, timestamp);
-    if (input.emitEvent !== false) appendStudioEvent(db, { studioId: input.studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.reviewed', payload: { decision: input.decision } });
+    const persistedContext = normalizeReviewContext({ ...context, reviewerId: context.reviewerId || 'studio-user' }, { reviewerId: 'studio-user' });
+    db.prepare('INSERT INTO review_decisions (id, asset_id, task_id, round_id, decision, feedback_json, schema_version, context_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(createId('review'), asset.id, taskId || null, roundId || null, input.decision, JSON.stringify(feedback), persistedContext.schemaVersion, JSON.stringify(persistedContext), timestamp, timestamp);
+    if (input.emitEvent !== false) appendStudioEvent(db, { studioId: input.studioId, entityType: 'asset', entityId: asset.id, eventType: 'asset.reviewed', payload: { decision: input.decision, schemaVersion: persistedContext.schemaVersion } });
   });
 }
 
-export function setReviewDecisions(db: StudioDatabase, input: { studioId: string; assetIds: string[]; decision: ReviewDecisionValue; feedback?: Record<string, unknown>; emitEvent?: boolean }): number {
+export function setReviewDecisions(db: StudioDatabase, input: { studioId: string; assetIds: string[]; decision: ReviewDecisionValue; context?: unknown; feedback?: unknown; emitEvent?: boolean }): number {
   const assetIds = [...new Set(input.assetIds.map((assetId) => String(assetId || '').trim()).filter(Boolean))];
   if (!assetIds.length || assetIds.length > 500) throw new InvalidCommandError('Batch review requires 1 to 500 assets.');
   if (!['keep', 'review', 'reject', 'derive'].includes(input.decision)) throw new InvalidCommandError('Unsupported review decision.');
+  const feedback = normalizeReviewFeedback(input.feedback);
   const placeholders = assetIds.map(() => '?').join(',');
   const active = db.prepare('SELECT id FROM assets WHERE studio_id = ? AND deleted_at IS NULL AND id IN (' + placeholders + ')').all(input.studioId, ...assetIds) as Array<{ id: string }>;
   if (active.length !== assetIds.length) throw new StudioNotFoundError('One or more active assets were not found in this Studio.');
+  const { context, taskId, roundId } = resolveReviewContext(db, { ...input, assetIds, source: 'batch' });
   return withTransaction(db, () => {
     const timestamp = nowIso();
-    const insert = db.prepare('INSERT INTO review_decisions (id, asset_id, task_id, round_id, decision, feedback_json, created_at, updated_at) VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)');
-    for (const assetId of assetIds) insert.run(createId('review'), assetId, input.decision, JSON.stringify(input.feedback || {}), timestamp, timestamp);
-    if (input.emitEvent !== false) appendStudioEvent(db, { studioId: input.studioId, entityType: 'review', entityId: input.studioId, eventType: 'review.batch_updated', payload: { decision: input.decision, count: assetIds.length } });
+    const persistedContext = normalizeReviewContext({ ...context, reviewerId: context.reviewerId || 'studio-user' }, { reviewerId: 'studio-user' });
+    const insert = db.prepare('INSERT INTO review_decisions (id, asset_id, task_id, round_id, decision, feedback_json, schema_version, context_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const assetId of assetIds) insert.run(createId('review'), assetId, taskId || null, roundId || null, input.decision, JSON.stringify(feedback), persistedContext.schemaVersion, JSON.stringify(persistedContext), timestamp, timestamp);
+    if (input.emitEvent !== false) appendStudioEvent(db, { studioId: input.studioId, entityType: 'review', entityId: input.studioId, eventType: 'review.batch_updated', payload: { decision: input.decision, count: assetIds.length, schemaVersion: persistedContext.schemaVersion } });
     return assetIds.length;
   });
 }

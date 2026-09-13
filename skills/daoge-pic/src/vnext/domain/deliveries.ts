@@ -9,6 +9,7 @@ import { executeIdempotent, InvalidCommandError, StudioNotFoundError } from './s
 import { ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 import { createVerifiedSnapshot, createVerifiedSnapshotAsync, openVerifiedManagedFile, openVerifiedManagedFileAsync, VerifiedManagedFile } from '../media/archive';
 import { portablePathSegment } from '../shared/windows';
+import { parseReviewContext } from './review-contract';
 
 export interface DeliveryAssetSnapshot { assetId: string; sequence: number; source: Record<string, unknown>; review: Record<string, unknown>; asset: { id: string; kind: string; mediaType: string; deletedAt: string | null } | null; }
 export interface Delivery { id: string; projectId: string; name: string; status: 'draft' | 'ready' | 'exported'; manifest: Record<string, unknown>; items?: DeliveryAssetSnapshot[]; }
@@ -56,7 +57,26 @@ function activeAssets(db: StudioDatabase, studioId: string, assetIds: string[]):
   });
 }
 
-interface ReviewSnapshotRow { id: string; decision: string; feedback_json: string; task_id: string | null; round_id: string | null; created_at: string; }
+interface ReviewSnapshotRow { id: string; decision: string; feedback_json: string; context_json: string | null; task_id: string | null; round_id: string | null; created_at: string; }
+function reviewSnapshot(row: ReviewSnapshotRow, projectId: string): Record<string, unknown> { const context = parseReviewContext(row.context_json); return { id: row.id, decision: row.decision, feedback: redacted(parse(row.feedback_json)), ...(context?.projectId === projectId ? { context } : {}), taskId: row.task_id, roundId: row.round_id, createdAt: row.created_at }; }
+
+interface ReviewProjectScope { sql: string; params: string[]; }
+
+function reviewProjectScope(alias: string, projectId: string): ReviewProjectScope {
+  const params: string[] = [];
+  const projectParam = () => { params.push(projectId); return '?'; };
+  const taskBelongs = () => `(${alias}.task_id IS NULL OR EXISTS (SELECT 1 FROM creative_tasks scope_task JOIN projects scope_project ON scope_project.id = scope_task.project_id WHERE scope_task.id = ${alias}.task_id AND scope_project.id = ${projectParam()}))`;
+  const roundBelongs = () => `(${alias}.round_id IS NULL OR EXISTS (SELECT 1 FROM creative_rounds scope_round JOIN creative_tasks scope_round_task ON scope_round_task.id = scope_round.task_id JOIN projects scope_round_project ON scope_round_project.id = scope_round_task.project_id WHERE scope_round.id = ${alias}.round_id AND scope_round_project.id = ${projectParam()}))`;
+  const taskRoundConsistent = `(${alias}.task_id IS NULL OR ${alias}.round_id IS NULL OR EXISTS (SELECT 1 FROM creative_rounds scope_consistent_round WHERE scope_consistent_round.id = ${alias}.round_id AND scope_consistent_round.task_id = ${alias}.task_id))`;
+  const assetRelation = () => `EXISTS (SELECT 1 FROM asset_relations scope_relation WHERE scope_relation.asset_id = ${alias}.asset_id AND ((scope_relation.target_type = 'project' AND scope_relation.target_id = ${projectParam()}) OR (scope_relation.target_type = 'creative_task' AND EXISTS (SELECT 1 FROM creative_tasks scope_relation_task WHERE scope_relation_task.id = scope_relation.target_id AND scope_relation_task.project_id = ${projectParam()})) OR (scope_relation.target_type = 'creative_round' AND EXISTS (SELECT 1 FROM creative_rounds scope_relation_round JOIN creative_tasks scope_relation_round_task ON scope_relation_round_task.id = scope_relation_round.task_id WHERE scope_relation_round.id = scope_relation.target_id AND scope_relation_round_task.project_id = ${projectParam()})) OR (scope_relation.target_type = 'run_item' AND scope_relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items scope_relation_item JOIN generation_runs scope_relation_run ON scope_relation_run.id = scope_relation_item.run_id JOIN creative_rounds scope_relation_item_round ON scope_relation_item_round.id = scope_relation_run.round_id JOIN creative_tasks scope_relation_item_task ON scope_relation_item_task.id = scope_relation_item_round.task_id WHERE scope_relation_item.id = scope_relation.target_id AND scope_relation_item_task.project_id = ${projectParam()}))))`;
+  const ownership = () => `(${taskBelongs()} AND ${roundBelongs()} AND ${taskRoundConsistent})`;
+  const contextTaskMatches = `(json_extract(${alias}.context_json, '$.taskId') IS NULL OR json_extract(${alias}.context_json, '$.taskId') = ${alias}.task_id)`;
+  const contextRoundMatches = `(json_extract(${alias}.context_json, '$.roundId') IS NULL OR json_extract(${alias}.context_json, '$.roundId') = ${alias}.round_id)`;
+  const v2 = `(${alias}.schema_version = 2 AND json_valid(${alias}.context_json) = 1 AND json_extract(${alias}.context_json, '$.schemaVersion') = 2 AND json_extract(${alias}.context_json, '$.projectId') = ${projectParam()} AND ${ownership()} AND ${contextTaskMatches} AND ${contextRoundMatches})`;
+  // Reviews written before project-aware attribution, plus the default unscoped v2 annotation, are safe only when the asset itself or its task/round proves this project.
+  const legacy = `(((${alias}.schema_version < 2) OR (${alias}.schema_version = 2 AND json_valid(${alias}.context_json) = 1 AND json_extract(${alias}.context_json, '$.schemaVersion') = 2 AND json_extract(${alias}.context_json, '$.projectId') IS NULL AND json_extract(${alias}.context_json, '$.taskId') IS NULL AND json_extract(${alias}.context_json, '$.roundId') IS NULL AND json_extract(${alias}.context_json, '$.runId') IS NULL AND json_extract(${alias}.context_json, '$.runItemId') IS NULL AND json_extract(${alias}.context_json, '$.source') = 'manual' AND json_extract(${alias}.context_json, '$.reviewerId') = 'studio-user' AND json_type(${alias}.context_json, '$.tags') = 'array' AND json_array_length(${alias}.context_json, '$.tags') = 0 AND json_type(${alias}.context_json, '$.criteria') = 'array' AND json_array_length(${alias}.context_json, '$.criteria') = 0 AND json_extract(${alias}.context_json, '$.rationale') IS NULL AND json_extract(${alias}.context_json, '$.confidence') IS NULL)) AND ${ownership()} AND (${assetRelation()} OR ${alias}.task_id IS NOT NULL OR ${alias}.round_id IS NOT NULL))`;
+  return { sql: `(${v2} OR ${legacy})`, params };
+}
 
 function projectOwnsAsset(db: StudioDatabase, projectId: string, assetId: string): boolean {
   const row = db.prepare("SELECT 1 FROM asset_relations relation WHERE relation.asset_id = ? AND ((relation.target_type = 'project' AND relation.target_id = ?) OR (relation.target_type = 'creative_task' AND EXISTS (SELECT 1 FROM creative_tasks task WHERE task.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'creative_round' AND EXISTS (SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id WHERE round.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'run_item' AND relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.id = relation.target_id AND task.project_id = ?))) LIMIT 1").get(assetId, projectId, projectId, projectId, projectId) as { 1: number } | undefined;
@@ -64,7 +84,8 @@ function projectOwnsAsset(db: StudioDatabase, projectId: string, assetId: string
 }
 
 function latestProjectReview(db: StudioDatabase, projectId: string, assetId: string): ReviewSnapshotRow | null {
-  const row = db.prepare("SELECT review.id, review.decision, review.feedback_json, review.task_id, review.round_id, review.created_at FROM review_decisions review LEFT JOIN creative_tasks task ON task.id = review.task_id LEFT JOIN creative_rounds round ON round.id = review.round_id LEFT JOIN creative_tasks round_task ON round_task.id = round.task_id WHERE review.asset_id = ? AND ((review.task_id IS NULL AND review.round_id IS NULL) OR task.project_id = ? OR round_task.project_id = ?) ORDER BY review.created_at DESC, review.rowid DESC LIMIT 1").get(assetId, projectId, projectId) as ReviewSnapshotRow | undefined;
+  const scope = reviewProjectScope('review', projectId);
+  const row = db.prepare(`SELECT review.id, review.decision, review.feedback_json, review.context_json, review.task_id, review.round_id, review.created_at FROM review_decisions review WHERE review.asset_id = ? AND ${scope.sql} ORDER BY review.created_at DESC, review.rowid DESC LIMIT 1`).get(assetId, ...scope.params) as ReviewSnapshotRow | undefined;
   return row || null;
 }
 
@@ -72,7 +93,7 @@ function deliveryItemSnapshot(db: StudioDatabase, project: ProjectRow, asset: St
   if (!projectOwnsAsset(db, project.id, asset.id)) throw new InvalidCommandError('Delivery asset does not belong to the selected project: ' + asset.id);
   const review = latestProjectReview(db, project.id, asset.id);
   if (!review || review.decision !== 'keep') throw new InvalidCommandError('Delivery asset requires a current keep review: ' + asset.id);
-  return { assetId: asset.id, sequence, source: redacted(asset.source) as Record<string, unknown>, review: { id: review.id, decision: review.decision, feedback: redacted(parse(review.feedback_json)), taskId: review.task_id, roundId: review.round_id, createdAt: review.created_at }, asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt } };
+  return { assetId: asset.id, sequence, source: redacted(asset.source) as Record<string, unknown>, review: reviewSnapshot(review, project.id), asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt } };
 }
 
 function replaceDeliveryAssets(db: StudioDatabase, project: ProjectRow, deliveryId: string, assetIds: string[], timestamp: string): DeliveryAssetSnapshot[] {
@@ -81,13 +102,14 @@ function replaceDeliveryAssets(db: StudioDatabase, project: ProjectRow, delivery
   const placeholders = ids.map(() => '?').join(',');
   const ownedRows = db.prepare("SELECT DISTINCT relation.asset_id FROM asset_relations relation WHERE relation.asset_id IN (" + placeholders + ") AND ((relation.target_type = 'project' AND relation.target_id = ?) OR (relation.target_type = 'creative_task' AND EXISTS (SELECT 1 FROM creative_tasks task WHERE task.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'creative_round' AND EXISTS (SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id WHERE round.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'run_item' AND relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.id = relation.target_id AND task.project_id = ?)))").all(...ids, project.id, project.id, project.id, project.id) as Array<{ asset_id: string }>;
   const owned = new Set(ownedRows.map((row) => row.asset_id));
-  const reviewRows = db.prepare("WITH ranked_reviews AS (SELECT review.asset_id, review.id, review.decision, review.feedback_json, review.task_id, review.round_id, review.created_at, ROW_NUMBER() OVER (PARTITION BY review.asset_id ORDER BY review.created_at DESC, review.rowid DESC) AS position FROM review_decisions review LEFT JOIN creative_tasks task ON task.id = review.task_id LEFT JOIN creative_rounds round ON round.id = review.round_id LEFT JOIN creative_tasks round_task ON round_task.id = round.task_id WHERE review.asset_id IN (" + placeholders + ") AND ((review.task_id IS NULL AND review.round_id IS NULL) OR task.project_id = ? OR round_task.project_id = ?)) SELECT asset_id, id, decision, feedback_json, task_id, round_id, created_at FROM ranked_reviews WHERE position = 1").all(...ids, project.id, project.id) as unknown as Array<ReviewSnapshotRow & { asset_id: string }>;
+  const scope = reviewProjectScope('review', project.id);
+  const reviewRows = db.prepare("WITH ranked_reviews AS (SELECT review.asset_id, review.id, review.decision, review.feedback_json, review.context_json, review.task_id, review.round_id, review.created_at, ROW_NUMBER() OVER (PARTITION BY review.asset_id ORDER BY review.created_at DESC, review.rowid DESC) AS position FROM review_decisions review WHERE review.asset_id IN (" + placeholders + ") AND " + scope.sql + ") SELECT asset_id, id, decision, feedback_json, context_json, task_id, round_id, created_at FROM ranked_reviews WHERE position = 1").all(...ids, ...scope.params) as unknown as Array<ReviewSnapshotRow & { asset_id: string }>;
   const reviews = new Map(reviewRows.map((row) => [row.asset_id, row]));
   const items = assets.map((asset, index) => {
     if (!owned.has(asset.id)) throw new InvalidCommandError('Delivery asset does not belong to the selected project: ' + asset.id);
     const review = reviews.get(asset.id);
     if (!review || review.decision !== 'keep') throw new InvalidCommandError('Delivery asset requires a current keep review: ' + asset.id);
-    return { assetId: asset.id, sequence: index + 1, source: redacted(asset.source) as Record<string, unknown>, review: { id: review.id, decision: review.decision, feedback: redacted(parse(review.feedback_json)), taskId: review.task_id, roundId: review.round_id, createdAt: review.created_at }, asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt } };
+    return { assetId: asset.id, sequence: index + 1, source: redacted(asset.source) as Record<string, unknown>, review: reviewSnapshot(review, project.id), asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt } };
   });
   db.prepare("DELETE FROM asset_relations WHERE relation_type = 'included_in' AND target_type = 'delivery' AND target_id = ?").run(deliveryId);
   db.prepare('DELETE FROM delivery_assets WHERE delivery_id = ?').run(deliveryId);
@@ -198,7 +220,8 @@ function creativeRecord(db: StudioDatabase, project: ProjectRow, deliveryValue: 
   const tasks = db.prepare('SELECT id, name, status, intent_json FROM creative_tasks WHERE project_id = ? ORDER BY created_at').all(project.id) as Array<{ id: string; name: string; status: string; intent_json: string }>;
   const rounds = db.prepare('SELECT cr.id, cr.task_id, cr.purpose, cr.status, cr.plan_version, cr.plan_json FROM creative_rounds cr JOIN creative_tasks t ON t.id = cr.task_id WHERE t.project_id = ? ORDER BY cr.created_at').all(project.id) as Array<{ id: string; task_id: string; purpose: string; status: string; plan_version: number; plan_json: string }>;
   const runs = db.prepare('SELECT r.id, r.round_id, r.status, r.provider_snapshot_json, r.plan_snapshot_json, r.created_at, r.updated_at FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id WHERE t.project_id = ? ORDER BY r.created_at').all(project.id) as Array<{ id: string; round_id: string; status: string; provider_snapshot_json: string; plan_snapshot_json: string; created_at: string; updated_at: string }>;
-  const reviews = db.prepare('SELECT rd.asset_id, rd.decision, rd.feedback_json, rd.updated_at FROM review_decisions rd JOIN assets a ON a.id = rd.asset_id WHERE a.studio_id = ? AND rd.asset_id IN (' + assets.map(() => '?').join(',') + ') ORDER BY rd.updated_at').all(project.studio_id, ...assets.map((asset) => asset.id)) as Array<{ asset_id: string; decision: string; feedback_json: string; updated_at: string }>;
+  const scope = reviewProjectScope('rd', project.id);
+  const reviews = db.prepare('SELECT rd.asset_id, rd.decision, rd.feedback_json, rd.context_json, rd.updated_at FROM review_decisions rd JOIN assets a ON a.id = rd.asset_id WHERE a.studio_id = ? AND rd.asset_id IN (' + assets.map(() => '?').join(',') + ') AND ' + scope.sql + ' ORDER BY rd.updated_at').all(project.studio_id, ...assets.map((asset) => asset.id), ...scope.params) as Array<{ asset_id: string; decision: string; feedback_json: string; context_json: string | null; updated_at: string }>;
   return redacted({
     generatedAt: nowIso(),
     project: { id: project.id, name: project.name },
@@ -206,8 +229,7 @@ function creativeRecord(db: StudioDatabase, project: ProjectRow, deliveryValue: 
     tasks: tasks.map((task) => ({ ...task, intent: parse(task.intent_json), intent_json: undefined })),
     rounds: rounds.map((round) => ({ ...round, plan: parse(round.plan_json), plan_json: undefined })),
     runs: runs.map((run) => ({ ...run, provider: parse(run.provider_snapshot_json), plan: parse(run.plan_snapshot_json), provider_snapshot_json: undefined, plan_snapshot_json: undefined })),
-    assets: assets.map((asset) => ({ id: asset.id, kind: asset.kind, mediaType: asset.mediaType, contentHash: asset.contentHash, byteSize: asset.byteSize, source: asset.source })),
-    reviews: reviews.map((review) => ({ ...review, feedback: parse(review.feedback_json), feedback_json: undefined }))
+    reviews: reviews.map((review) => { const context = parseReviewContext(review.context_json); return { ...review, ...(context?.projectId === project.id ? { context } : {}), feedback: parse(review.feedback_json), feedback_json: undefined, context_json: undefined }; })
   }) as Record<string, unknown>;
 }
 

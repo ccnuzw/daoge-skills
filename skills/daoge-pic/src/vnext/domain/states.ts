@@ -38,12 +38,12 @@ const RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   queued: ['running', 'pausing', 'resume_pending', 'cancelled'],
   running: ['pausing', 'completed', 'partial', 'failed', 'interrupted', 'resume_pending', 'cancelled'],
   pausing: ['paused', 'partial', 'failed', 'resume_pending', 'cancelled'],
-  paused: ['queued', 'cancelled'],
-  interrupted: ['resume_pending'],
-  resume_pending: ['queued', 'cancelled'],
+  paused: ['queued', 'cancelled', 'completed'],
+  interrupted: ['resume_pending', 'completed'],
+  resume_pending: ['queued', 'cancelled', 'completed'],
   partial: ['queued', 'completed', 'cancelled'],
   completed: [],
-  failed: ['queued', 'cancelled'],
+  failed: ['queued', 'cancelled', 'completed'],
   cancelled: []
 };
 
@@ -58,7 +58,7 @@ const RUN_ITEM_TRANSITIONS: Record<RunItemStatus, readonly RunItemStatus[]> = {
   blocked: ['pending', 'failed', 'cancel_requested'],
   cancel_requested: ['cancelled', 'outcome_unknown'],
   cancelled: [],
-  outcome_unknown: ['failed'],
+  outcome_unknown: ['succeeded', 'failed'],
   failed: ['pending']
 };
 

@@ -21,10 +21,12 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 - Studio 直接创建项目、任务、轮次或草稿参考素材，只写 Studio API/SQLite 事实源和草稿上下文；不得生成计划确认、预检、Generation Run 或 Provider 调用。
 - Workbench 可基于当前项目或明确共享素材创建 `variation`、`refinement`、`edit`、`fill` 草稿轮次；该动作仍不得绕过 Agent 计划确认。
 - 参考图和遮罩只能来自当前项目资产，或当前 Studio 明确 `shared_across_projects` 的共享素材；计划写入、确认、预检、排队和 Worker 读取前都必须重复校验。
+- 计划声明了 `referenceAssetIds` 或 `maskAssetId` 时必须使用 `operation: "edit"`。`generate` 请求体不携带参考图与遮罩，Provider 收到的只有提示词；预检会以 `reference_requires_edit` 拒绝这类计划。要做角色、产品或风格一致性时，参考图必须走 `edit`。
 - Provider Profile、密钥引用和 write-only 摘要以 `Provider.db` v3 为唯一运行时事实源；secret 默认可存于受权限保护的 SQLite plaintext，显式 system backend 时使用 macOS Keychain、Windows DPAPI sidecar 或 Linux libsecret；system backend 不可用必须 fail-closed，不得静默退回明文。API Key 与完整 Base URL 不得进入 Studio DB、事件、日志、导出、诊断或回复。
 - 不得输出、记录、复制或要求用户粘贴 capability、bootstrap URL、Cookie、session token、claim token、完整 Provider 请求、内部路径或 API Key。
 - 不得直接写 Studio 文件、SQLite、manifest、journal、runs、SSE 状态或媒体目录；只使用受控 CLI 或当前源码明确列出的同源 Studio API。
 - 大 JSON 用 CLI 的 `--plan @-` 等 stdin 标记传输；每次命令最多一个 `@-`，stdin 必须是 JSON 对象。
+- 用量账本必须区分已知成本与未知成本；`usage-list`、`usage-summary`、`budget-get` 只读取当前 Studio 的层级范围，`budget-set` 仅接受 Bearer Skill/CLI，零额度仍是有效的非负安全整数。预算闸门只在计划声明了已知成本估算时才会硬拒绝：必须通过 `preflight --usage-estimate <json>` 把 `unit`、`quantity`、`estimatedCostMinor`、`costUnit`、`source` 一并声明，该估算会随运行冻结并逐项摊入账本。未声明估算时平台不推断价格，账本保持显式 unknown，`budget-set` 的额度不会凭空拦截任何运行。
 
 ## 最小状态与角色矩阵
 
@@ -124,8 +126,10 @@ node scripts/daoge.js <command> [--workspace <stable-workspace>]
 
 - 启动/诊断：`register-skill`、`doctor`、`studio`、`open`、`restart`、`status`。
 - Provider：`provider-list`、`provider-create`、`provider-update`、`provider-copy`、`provider-activate`、`provider-delete`、`provider-validate`、`provider-test`、`provider-models --workspace <path> --profile <id>`、`provider-import-env`。
+- 用量与预算：`usage-list`、`usage-summary`、`budget-get`、`budget-set --limit <non-negative-minor> --cost-unit <unit>`；读取按当前 Studio 的 profile/project/task/round/run/run-item 范围过滤，预算写入只接受 Bearer Skill/CLI，不能把未知成本当作零。
 - 会话与上下文：`session --conversation <id>`、`session-context`、`project`、`archive-project`、`task`、`round`。
 - 规则资料：`task-type`、`style-kit`、`brand-kit`。
+- 已确认模板快照：`template-list`、`template-get`、`template-save`、`template-archive`、`template-rollback`；读取和写入均只接受 Bearer Skill/CLI 请求，快照必须来自当前 Studio 的已确认轮次。
 - 计划与运行：`plan --plan <json|@->`、`confirm-challenge`、`preflight`、`run`、`pause`、`resume`、`cancel`、`retry`、`resolve-unknown`。
 - 交付：`delivery`、`delivery-update`、`delivery-ready`、`delivery-draft`、`delivery-export`、`delivery-batch`、`delivery-batch-revise`、`delivery-batch-ready`。`delivery-complete` 不是公开 CLI 命令。
 
@@ -139,11 +143,16 @@ node scripts/daoge.js preflight --workspace <path> --round <round-id> --session 
 node scripts/daoge.js run --workspace <path> --round <round-id> --preflight <dry-run-id> --confirm-token <daemon-token>
 node scripts/daoge.js resume --workspace <path> --run <run-id> --session <session-id>
 node scripts/daoge.js resolve-unknown --workspace <path> --run <run-id> --items <item-id,...>
+node scripts/daoge.js template-list --workspace <path> [--type <task_type|style_kit|brand_kit>] [--template <template-id>] [--include-archived <true|false>]
+node scripts/daoge.js template-get --workspace <path> --template <template-id> [--version <n>]
+node scripts/daoge.js template-save --workspace <path> --type <task_type|style_kit|brand_kit> --name <name> --definition <json|@-> --round <round-id> [--template <template-id>] [--provenance <json|@->] [--plan-version <n>]
+node scripts/daoge.js template-archive --workspace <path> --template <template-id>
+node scripts/daoge.js template-rollback --workspace <path> --template <template-id> --version <n>
 ```
 
 同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.13.0` 是当前稳定发布制品/运行时版本，`5.12.0` 及更早版本是历史发布，它们都绝不能当作协议版本。
 
-固定查询端点：`GET /api/studio` 是协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝；Skill 必须改用正确端点或受控 CLI，不得猜测 `/api/studio/...`、旧命令或工作区文件。
+固定查询端点：`GET /api/studio` 是协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History；确认模板读取使用 Bearer-only 的 `/api/confirmed-templates` 列表和详情端点，写入使用其 Bearer-only POST save/archive/rollback 端点。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝；Skill 必须改用正确端点或受控 CLI，不得猜测 `/api/studio/...`、旧命令或工作区文件。
 
 ## 幂等命令恢复
 

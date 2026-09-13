@@ -7,8 +7,10 @@ export const PROVIDER_CONCURRENCY_ADJUSTMENT_MS = 5000;
 export const PROVIDER_RATE_LIMIT_COOLDOWN_MS = 30000;
 export const PROVIDER_TRANSIENT_COOLDOWN_MS = 10000;
 export const PROVIDER_MEMORY_PRESSURE_COOLDOWN_MS = 15000;
-
 export type ProviderOutcome = 'success' | 'rate_limited' | 'transient' | 'unknown' | 'other_failure';
+
+export type ProviderConcurrencyReason = 'warmup' | 'healthy' | 'rate_limited' | 'transient' | 'unknown' | 'memory_pressure';
+
 
 export interface ProviderHealthSample {
   succeeded: number;
@@ -20,11 +22,20 @@ export interface ProviderHealthSample {
   maxExternalBytes: number;
 }
 
+export interface ProviderConcurrencyState {
+  target: number;
+  cooldownUntilMs: number;
+  lastAdjustmentAtMs: number;
+  lastReason: ProviderConcurrencyReason;
+  maxObservedRssBytes: number;
+  maxObservedExternalBytes: number;
+}
+
 export interface ProviderConcurrencySnapshot {
   max: number;
   target: number;
   active: number;
-  lastReason: 'warmup' | 'healthy' | 'rate_limited' | 'transient' | 'unknown' | 'memory_pressure';
+  lastReason: ProviderConcurrencyReason;
   cooldownUntil: string | null;
   maxObservedRssBytes: number;
   maxObservedExternalBytes: number;
@@ -100,6 +111,31 @@ export class ProviderConcurrencyGovernor {
       this.lastReason = 'healthy';
       this.lastAdjustmentAt = now;
     }
+  }
+  /** Returns only non-sensitive state that may be stored in Studio SQLite. */
+  persistedState(): ProviderConcurrencyState {
+    return {
+      target: this.target,
+      cooldownUntilMs: this.cooldownUntilMs,
+      lastAdjustmentAtMs: this.lastAdjustmentAt,
+      lastReason: this.lastReason,
+      maxObservedRssBytes: this.maxObservedRssBytes,
+      maxObservedExternalBytes: this.maxObservedExternalBytes
+    };
+  }
+
+  /** Restores state from the isolated provider/profile/configVersion row. */
+  restore(state: ProviderConcurrencyState): void {
+    const validReason = ['warmup', 'healthy', 'rate_limited', 'transient', 'unknown', 'memory_pressure'].includes(state.lastReason);
+    if (!Number.isSafeInteger(state.target) || state.target < MIN_PROVIDER_CONCURRENCY || !Number.isSafeInteger(state.cooldownUntilMs) || state.cooldownUntilMs < 0 || !Number.isSafeInteger(state.lastAdjustmentAtMs) || state.lastAdjustmentAtMs < 0 || !validReason || !Number.isSafeInteger(state.maxObservedRssBytes) || state.maxObservedRssBytes < 0 || !Number.isSafeInteger(state.maxObservedExternalBytes) || state.maxObservedExternalBytes < 0) {
+      throw new Error('Persisted Provider concurrency state is invalid.');
+    }
+    this.target = Math.min(this.max, state.target);
+    this.cooldownUntilMs = state.cooldownUntilMs;
+    this.lastAdjustmentAt = state.lastAdjustmentAtMs;
+    this.lastReason = state.lastReason;
+    this.maxObservedRssBytes = state.maxObservedRssBytes;
+    this.maxObservedExternalBytes = state.maxObservedExternalBytes;
   }
 
   snapshot(): ProviderConcurrencySnapshot {

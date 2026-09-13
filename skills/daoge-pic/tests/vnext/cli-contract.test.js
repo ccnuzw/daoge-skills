@@ -181,6 +181,13 @@ test('CLI parser preserves an explicit safe idempotency key for every mutation',
   assert.equal(parseCommand(['open', '--workspace', '/tmp/daoge-cli-key', '--force', 'true']).force, true);
   assert.throws(() => parseCommand(['open', '--workspace', '/tmp/daoge-cli-key', '--force', 'yes']), /只能是 true 或 false/);
 });
+test('CLI preflight forwards a caller usage estimate without changing unknown defaults', () => {
+  const estimate = { unit: 'image', quantity: 1, estimatedCostMinor: 101, costUnit: 'USD_minor', source: 'caller' };
+  const withEstimate = parseCommand(['preflight', '--workspace', '/tmp/daoge-cli-budget', '--round', 'round-1', '--session', 'session-1', '--usage-estimate', JSON.stringify(estimate)]);
+  assert.deepEqual(withEstimate.request.body.usageEstimate, estimate);
+  const withoutEstimate = parseCommand(['preflight', '--workspace', '/tmp/daoge-cli-budget', '--round', 'round-1', '--session', 'session-1']);
+  assert.equal(Object.prototype.hasOwnProperty.call(withoutEstimate.request.body, 'usageEstimate'), false);
+});
 
 test('CLI accepts one stdin JSON marker and rejects multiple markers', () => {
   const plan = parseCommand(['plan', '--workspace', '/tmp/daoge-stdin', '--round', 'round-1', '--version', '2', '--plan', '@-', '--operation-name', 'plan:round-1:v2']);

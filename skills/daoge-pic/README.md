@@ -232,6 +232,7 @@ daemon 启动时记录 active Profile 的 `profileId + configVersion`；活动�
 - 每个创作轮次只允许当前已确认计划创建一个 Generation Run。已有运行时必须显式选择并汇报该运行；再次生成需要新建 `variation`、`refinement` 或 `fill` 轮次。
 - Provider 限流或临时故障进入有界重试；认证、模型、参数或权限错误不自动重试。
 - 外部请求结果不明时，运行项进入 `outcome_unknown`，绝不自动重放；用户核实无结果后才可 `resolve-unknown` 结案。
+- 用量账本保留未知成本事件，不把未知计费当作零；`usage-list`、`usage-summary` 和 `budget-get` 只读当前 Studio 的分层范围，`budget-set` 仅接受 Bearer Skill/CLI 写入且 `--limit 0` 合法。
 - daemon 重启后，不安全的在途外部调用进入 `resume_pending`；再次外部调用前必须由会话确认并记录 Studio Session，Workbench 不能绕过。
 - 参考图和遮罩只能引用当前项目资产，或当前 Studio 明确 `shared_across_projects` 的共享素材；计划写入、确认、预检、排队和 Worker 读取前都会重复校验。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。缺失媒体会被持久标记为不可用，恢复确认前不能作为参考图、遮罩或交付候选。
@@ -254,11 +255,13 @@ node scripts/daoge.js <command> --workspace /absolute/workspace
 | 启动 / 复用 Workbench | `open --workspace <path> [--force true] [--allow-nested-studio true]` |
 | 查看 daemon 状态 | `studio --workspace <path>`；`status --workspace <path>` |
 | Provider 管理 | `provider-list`、`provider-create`、`provider-update`、`provider-copy`、`provider-activate`、`provider-delete`、`provider-validate`、`provider-test`、`provider-models`、`provider-import-env` |
+| 用量与预算 | `usage-list [--profile <id>] [--project <id>] [--task <id>] [--round <id>] [--run <id>] [--item <id>] [--limit <n>]`、`usage-summary`、`budget-get [--profile <id>]`、`budget-set [--profile <id>] --limit <n> --cost-unit <unit>` |
 | 会话上下文 | `session --conversation <id>`；`session-context --session <id> [--project <id>] [--task <id>] [--round <id>]` |
 | 创作领域 | `project`、`archive-project`、`task`、`round`、`plan --plan <json\|@->`、`confirm-challenge`、`preflight`、`run` |
 | 运行控制 | `pause`、`resume --session <id>`、`cancel`、`retry [--items <id,...>]`、`resolve-unknown --items <id,...>` |
 | 交付 | `delivery`、`delivery-update`、`delivery-ready`、`delivery-draft`、`delivery-export`、`delivery-batch`、`delivery-batch-revise`、`delivery-batch-ready` |
 | 规则资料 | `task-type`、`style-kit`、`brand-kit` |
+| 已确认模板快照 | `template-list`、`template-get`、`template-save`、`template-archive`、`template-rollback`；仅从当前 Studio 已确认轮次保存安全结构化快照，版本可读、归档和回滚不改写历史。 |
 
 所有 `POST` / `PUT` mutation 可使用命名操作恢复：
 

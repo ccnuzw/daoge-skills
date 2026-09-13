@@ -19,7 +19,7 @@ const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
 type LocalAction = 'status' | 'studio' | 'open' | 'restart' | 'register-skill' | 'doctor';
-type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope';
+type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'non-negative-integer' | 'usage-limit' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
   action?: LocalAction;
@@ -312,12 +312,32 @@ function listValue(values: Record<string, unknown>, name: string): string[] { re
 function numberValue(values: Record<string, unknown>, name: string): number { return values[name] as number; }
 function booleanValue(values: Record<string, unknown>, name: string): boolean { return values[name] === true; }
 function encoded(values: Record<string, unknown>, name: string): string { return encodeURIComponent(textValue(values, name)); }
+function query(values: Record<string, unknown>, entries: Array<[string, string]>): string {
+  const params = entries.flatMap(([flag, name]) => {
+    const value = values[flag];
+    return value === undefined ? [] : [encodeURIComponent(name) + '=' + encodeURIComponent(String(value))];
+  });
+  return params.length ? '?' + params.join('&') : '';
+}
 
 const commandSchemas: Record<string, CommandSchema> = {
   status: { action: 'status', flags: {} }, studio: { action: 'studio', flags: {} }, open: { action: 'open', flags: { '--force': { kind: 'boolean' }, '--allow-nested-studio': { kind: 'boolean' } } }, restart: { action: 'restart', flags: {} },
   'register-skill': { action: 'register-skill', flags: { '--scope': { kind: 'scope', required: true } } },
   doctor: { action: 'doctor', flags: { '--json': { kind: 'boolean' }, '--redacted': { kind: 'boolean' } } },
   'provider-list': { method: 'GET', flags: {}, pathname: () => '/api/providers' },
+  'backup-manifest': { method: 'GET', flags: {}, pathname: () => '/api/backup/manifest' },
+  'backup-restore-dry-run': { method: 'POST', flags: { '--source-root': { kind: 'text', required: true }, '--manifest': { kind: 'json', required: true }, '--expected-studio': { kind: 'json' } }, pathname: () => '/api/backup/restore-dry-run', body: (v) => ({ sourceRoot: textValue(v, '--source-root'), manifest: v['--manifest'], ...(v['--expected-studio'] === undefined ? {} : { expectedStudio: v['--expected-studio'] }) }) },
+  'backup-upgrade-assess': { method: 'POST', flags: { '--current-runtime-version': { kind: 'text', required: true }, '--target-runtime-version': { kind: 'text', required: true }, '--current-schema-version': { kind: 'non-negative-integer', required: true }, '--target-schema-version': { kind: 'non-negative-integer', required: true }, '--supported-schema-version': { kind: 'non-negative-integer', required: true }, '--target-protocol-version': { kind: 'text', required: true }, '--supported-protocol-range': { kind: 'text' }, '--rollback-point': { kind: 'json' } }, pathname: () => '/api/backup/upgrade-assess', body: (v) => ({ currentRuntimeVersion: textValue(v, '--current-runtime-version'), targetRuntimeVersion: textValue(v, '--target-runtime-version'), currentSchemaVersion: numberValue(v, '--current-schema-version'), targetSchemaVersion: numberValue(v, '--target-schema-version'), supportedSchemaVersion: numberValue(v, '--supported-schema-version'), targetProtocolVersion: textValue(v, '--target-protocol-version'), ...(v['--supported-protocol-range'] === undefined ? {} : { supportedProtocolRange: textValue(v, '--supported-protocol-range') }), ...(v['--rollback-point'] === undefined ? {} : { rollbackPoint: v['--rollback-point'] }) }) },
+  'backup-rollback-point': { method: 'POST', flags: { '--manifest': { kind: 'json', required: true }, '--runtime-version': { kind: 'text', required: true }, '--schema-version': { kind: 'non-negative-integer', required: true }, '--created-at': { kind: 'text' } }, pathname: () => '/api/backup/rollback-point', body: (v) => ({ manifest: v['--manifest'], runtimeVersion: textValue(v, '--runtime-version'), schemaVersion: numberValue(v, '--schema-version'), ...(v['--created-at'] === undefined ? {} : { createdAt: textValue(v, '--created-at') }) }) },
+  'usage-list': { method: 'GET', flags: { '--profile': { kind: 'text' }, '--project': { kind: 'text' }, '--task': { kind: 'text' }, '--round': { kind: 'text' }, '--run': { kind: 'text' }, '--item': { kind: 'text' }, '--limit': { kind: 'usage-limit' } }, pathname: (v) => '/api/usage' + query(v, [['--profile', 'profileId'], ['--project', 'projectId'], ['--task', 'taskId'], ['--round', 'roundId'], ['--run', 'runId'], ['--item', 'runItemId'], ['--limit', 'limit']]) },
+  'usage-summary': { method: 'GET', flags: { '--profile': { kind: 'text' }, '--project': { kind: 'text' }, '--task': { kind: 'text' }, '--round': { kind: 'text' }, '--run': { kind: 'text' }, '--item': { kind: 'text' } }, pathname: (v) => '/api/usage/summary' + query(v, [['--profile', 'profileId'], ['--project', 'projectId'], ['--task', 'taskId'], ['--round', 'roundId'], ['--run', 'runId'], ['--item', 'runItemId']]) },
+  'budget-get': { method: 'GET', flags: { '--profile': { kind: 'text' } }, pathname: (v) => '/api/budget' + query(v, [['--profile', 'profileId']]) },
+  'budget-set': { method: 'POST', flags: { '--profile': { kind: 'text' }, '--limit': { kind: 'non-negative-integer', required: true }, '--cost-unit': { kind: 'text', required: true } }, pathname: () => '/api/budget', body: (v) => ({ ...(v['--profile'] === undefined ? {} : { profileId: v['--profile'] }), limitCostMinor: numberValue(v, '--limit'), costUnit: textValue(v, '--cost-unit') }) },
+  'template-list': { method: 'GET', flags: { '--type': { kind: 'text' }, '--template': { kind: 'text' }, '--include-archived': { kind: 'boolean' } }, pathname: (v) => '/api/confirmed-templates' + query(v, [['--type', 'templateType'], ['--template', 'templateId'], ['--include-archived', 'includeArchived']]) },
+  'template-get': { method: 'GET', flags: { '--template': { kind: 'text', required: true }, '--version': { kind: 'positive-integer' } }, pathname: (v) => '/api/confirmed-templates/' + encoded(v, '--template') + query(v, [['--version', 'version']]) },
+  'template-save': { method: 'POST', flags: { '--type': { kind: 'text', required: true }, '--name': { kind: 'text', required: true }, '--definition': { kind: 'json', required: true }, '--round': { kind: 'text', required: true }, '--template': { kind: 'text' }, '--provenance': { kind: 'json' }, '--plan-version': { kind: 'positive-integer' } }, pathname: () => '/api/confirmed-templates', body: (v) => ({ templateType: textValue(v, '--type'), name: textValue(v, '--name'), definition: v['--definition'], roundId: textValue(v, '--round'), ...(v['--template'] === undefined ? {} : { templateId: v['--template'] }), ...(v['--provenance'] === undefined ? {} : { provenance: v['--provenance'] }), ...(v['--plan-version'] === undefined ? {} : { planVersion: v['--plan-version'] }) }) },
+  'template-archive': { method: 'POST', flags: { '--template': { kind: 'text', required: true } }, pathname: (v) => '/api/confirmed-templates/' + encoded(v, '--template') + '/archive', body: () => ({}) },
+  'template-rollback': { method: 'POST', flags: { '--template': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true } }, pathname: (v) => '/api/confirmed-templates/' + encoded(v, '--template') + '/rollback', body: (v) => ({ version: numberValue(v, '--version') }) },
   'provider-import-env': { method: 'POST', flags: {}, pathname: () => '/api/providers/import-env', body: () => ({}) },
   'provider-create': { method: 'POST', flags: { '--name': { kind: 'text', required: true }, '--provider': { kind: 'text', required: true }, '--model': { kind: 'text', required: true }, '--base-url': { kind: 'text', required: true }, '--api-key-stdin': { kind: 'secret-stdin', required: true }, '--endpoint-trust-mode': { kind: 'text' }, '--options': { kind: 'json' }, '--limits': { kind: 'json' }, '--active': { kind: 'boolean' } }, pathname: () => '/api/providers', body: (v) => ({ name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: v['--base-url'], apiKey: v['--api-key-stdin'], endpointTrustMode: v['--endpoint-trust-mode'], options: v['--options'], limits: v['--limits'], active: v['--active'] === true }) },
   'provider-update': { method: 'PUT', flags: { '--profile': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--name': { kind: 'text' }, '--provider': { kind: 'text' }, '--model': { kind: 'text' }, '--base-url-action': { kind: 'text', required: true }, '--base-url': { kind: 'text' }, '--api-key-action': { kind: 'text', required: true }, '--api-key-stdin': { kind: 'secret-stdin' }, '--endpoint-trust-mode': { kind: 'text' }, '--options': { kind: 'json' }, '--limits': { kind: 'json' } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile'), body: (v) => ({ expectedConfigVersion: v['--version'], name: v['--name'], providerId: v['--provider'], model: v['--model'], baseUrl: { action: v['--base-url-action'], ...(v['--base-url'] ? { value: v['--base-url'] } : {}) }, apiKey: { action: v['--api-key-action'], ...(v['--api-key-stdin'] ? { value: v['--api-key-stdin'] } : {}) }, endpointTrustMode: v['--endpoint-trust-mode'], options: v['--options'], limits: v['--limits'] }) },
@@ -346,13 +366,14 @@ const commandSchemas: Record<string, CommandSchema> = {
   round: { method: 'POST', flags: { '--task': { kind: 'text', required: true }, '--purpose': { kind: 'purpose', required: true }, '--parent': { kind: 'text' }, '--session': { kind: 'text' } }, pathname: () => '/api/rounds', body: (v) => ({ taskId: textValue(v, '--task'), purpose: textValue(v, '--purpose'), parentRoundId: v['--parent'], sessionId: v['--session'] }) },
   plan: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--plan': { kind: 'json', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/plan', body: (v) => ({ expectedVersion: numberValue(v, '--version'), plan: jsonValue(v, '--plan') }) },
   'confirm-challenge': { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/confirmation-challenge', body: (v) => ({ sessionId: textValue(v, '--session') }) },
-  preflight: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true }, '--concurrency': { kind: 'execution-concurrency' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/preflight', body: (v) => ({ sessionId: textValue(v, '--session'), executionConcurrency: v['--concurrency'] }) },
+  preflight: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true }, '--concurrency': { kind: 'execution-concurrency' }, '--usage-estimate': { kind: 'json' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/preflight', body: (v) => ({ sessionId: textValue(v, '--session'), executionConcurrency: v['--concurrency'], ...(v['--usage-estimate'] === undefined ? {} : { usageEstimate: v['--usage-estimate'] }) }) },
   run: { method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--preflight': { kind: 'text', required: true }, '--confirm-token': { kind: 'text', required: true } }, pathname: () => '/api/runs', body: (v) => ({ roundId: textValue(v, '--round'), preflightId: textValue(v, '--preflight'), confirmToken: textValue(v, '--confirm-token') }) },
   pause: { method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/pause', body: () => ({}) },
   resume: { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/resume', body: (v) => ({ sessionId: textValue(v, '--session') }) },
   cancel: { method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/cancel', body: () => ({}) },
   retry: { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--items': { kind: 'list' } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/retry', body: (v) => ({ itemIds: v['--items'] }) },
-  'resolve-unknown': { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--items': { kind: 'list', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/outcomes/resolve', body: (v) => ({ itemIds: listValue(v, '--items') }) }
+  'resolve-unknown': { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--items': { kind: 'list', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/outcomes/resolve', body: (v) => ({ itemIds: listValue(v, '--items') }) },
+  'reconcile-external': { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--item': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/items/' + encoded(v, '--item') + '/reconcile', body: () => ({}) },
 };
 
 function validateFlag(name: string, raw: string, kind: FlagKind): unknown {
@@ -375,7 +396,9 @@ function validateFlag(name: string, raw: string, kind: FlagKind): unknown {
   if (kind === 'purpose') { if (!['exploration', 'refinement', 'variation', 'edit', 'fill'].includes(value)) throw new Error(name + ' 不是支持的创作目的。'); return value; }
   if (kind === 'execution-concurrency') return strictExecutionConcurrency(value);
   if (kind === 'scope') { if (value !== 'project' && value !== 'user') throw new Error(name + ' 只能是 project 或 user。'); return value; }
-  const integer = Number(value); if (!Number.isInteger(integer) || integer < 1) throw new Error(name + ' 必须是正整数。'); return integer;
+  const integer = Number(value);
+  if (!Number.isSafeInteger(integer) || (kind === 'non-negative-integer' ? integer < 0 : integer < 1) || (kind === 'usage-limit' && integer > 10000)) throw new Error(name + ' 必须是' + (kind === 'non-negative-integer' ? '非负安全整数' : kind === 'usage-limit' ? '1 到 10000 的安全整数' : '正整数') + '。');
+  return integer;
 }
 
 function explicitIdempotencyKey(raw: string): string {
@@ -473,11 +496,24 @@ function usage(): string {
   return [
     'DAOGE Pic vNext Studio',
     'daoge register-skill --scope project --workspace <path>  # 注册当前安装包到项目 .agents/skills；目标已存在则拒绝',
+    'daoge backup-manifest --workspace <path>  # 输出仅含安全相对路径的当前 Studio manifest',
+    'daoge backup-restore-dry-run --workspace <path> --source-root <path> --manifest <json|@-> [--expected-studio <json|@->]  # 仅 dry-run，不写入目标 Studio',
+    'daoge backup-upgrade-assess --workspace <path> --current-runtime-version <version> --target-runtime-version <version> --current-schema-version <n> --target-schema-version <n> --supported-schema-version <n> --target-protocol-version <version> [--supported-protocol-range <range>] [--rollback-point <json|@->]',
+    'daoge backup-rollback-point --workspace <path> --manifest <json|@-> --runtime-version <version> --schema-version <n> [--created-at <timestamp>]',
     'daoge register-skill --scope user  # 注册当前安装包到当前用户 ~/.codex/skills；目标已存在则拒绝',
     'daoge doctor --workspace <path> [--json true] [--redacted true]  # 不调用 Provider；检查工作区、SQLite、权限、sharp 与 Windows volume',
     'daoge studio --workspace <path>',
     'daoge open --workspace <path> [--force true] [--allow-nested-studio true]  # 默认复用唯一 Workbench；嵌套 Studio 必须由用户显式允许',
     'daoge provider-list --workspace <path>',
+    'daoge usage-list --workspace <path> [--profile <id>] [--project <id>] [--task <id>] [--round <id>] [--run <id>] [--item <id>] [--limit <1..10000>]',
+    'daoge usage-summary --workspace <path> [--profile <id>] [--project <id>] [--task <id>] [--round <id>] [--run <id>] [--item <id>]',
+    'daoge budget-get --workspace <path> [--profile <id>]',
+    'daoge budget-set --workspace <path> [--profile <id>] --limit <non-negative-minor> --cost-unit <unit>',
+    'daoge template-list --workspace <path> [--type <type>] [--template <id>] [--include-archived <true|false>]',
+    'daoge template-get --workspace <path> --template <id> [--version <n>]',
+    'daoge template-save --workspace <path> --type <type> --name <name> --definition <json|@-> --round <round-id> [--template <id>] [--provenance <json|@->] [--plan-version <n>]',
+    'daoge template-archive --workspace <path> --template <id>',
+    'daoge template-rollback --workspace <path> --template <id> --version <n>',
     'daoge provider-import-env --workspace <path>  # 显式导入工作区 daoge-studio/provider.env',
     'daoge provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key-stdin @- [--endpoint-trust-mode <mode>] [--limits <json>] [--active true]  # 密钥只从 stdin 读取',
     'daoge provider-update --workspace <path> --profile <id> --version <n> --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear> [--endpoint-trust-mode <mode>] [--limits <json>] [--api-key-stdin @-]  # replace 时密钥只从 stdin 读取',
@@ -502,13 +538,14 @@ function usage(): string {
     'daoge round --workspace <path> --task <id> --purpose <exploration|refinement|variation|edit|fill> [--session <id>]',
     'daoge plan --workspace <path> --round <id> --version <n> --plan <json|@->  # @- 从 stdin 读取 JSON',
     'daoge confirm-challenge --workspace <path> --round <id> --session <session-id>  # 只创建 Workbench 人工确认挑战',
-    'daoge preflight --workspace <path> --round <id> --session <session-id> [--concurrency <1..1000>]  # 只接受已人工确认会话',
+    'daoge preflight --workspace <path> --round <id> --session <session-id> [--concurrency <1..1000>] [--usage-estimate <json|@->]  # 只接受已人工确认会话',
     'daoge run --workspace <path> --round <id> --preflight <dry-run-id> --confirm-token <daemon-token>',
     'daoge pause --workspace <path> --run <id>',
     'daoge resume --workspace <path> --run <id> --session <session-id>',
     'daoge cancel --workspace <path> --run <id>',
     'daoge retry --workspace <path> --run <id> [--items <item-id,...>]',
     'daoge resolve-unknown --workspace <path> --run <id> --items <item-id,...>',
+    'daoge reconcile-external --workspace <path> --run <id> --item <item-id>  # 显式外部请求恢复；只查询 Provider，不生成、编辑或自动重放。',
     'daoge status --workspace <path>',
     'POST/PUT 可使用 --operation-name <verb:scope> 由 daemon 派生稳定 key；高级恢复仍可使用 --idempotency-key <key>，两者互斥。'
   ].join('\n');

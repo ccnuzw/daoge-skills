@@ -1,8 +1,11 @@
+import { createHash } from 'node:crypto';
 import { StudioDatabase } from '../studio/database';
 import { StudioAsset, getStudioAsset } from './assets';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
 import { publicRunPlanSnapshot, publicRunRequestSummary } from './queries';
 import { safeErrorDetail } from '../shared/safe-error';
+import { normalizeReviewFeedback, parseReviewContext } from './review-contract';
+import { buildStudioProvenance, getPersistedStudioProvenance } from '../provenance/studio';
 
 type JsonRecord = Record<string, unknown>;
 type TaskRow = { id: string; project_id: string; name: string; status: string; intent_json: string; project_name: string; };
@@ -15,6 +18,15 @@ function safeValue(value: unknown): unknown {
   const result: JsonRecord = {};
   for (const [key, item] of Object.entries(value as JsonRecord)) if (!/(api[_-]?key|authorization|secret|token|base[_-]?url|endpoint|password|external.*request|storage.*path|content.*hash)/i.test(key)) result[key] = safeValue(item);
   return result;
+}
+function reviewFeedbackHash(value: string | null | undefined): string | undefined {
+  try {
+    const normalized = normalizeReviewFeedback(JSON.parse(value || '{}'));
+    if (!Object.keys(normalized).length) return undefined;
+    return createHash('sha256').update(JSON.stringify(normalized), 'utf8').digest('hex');
+  } catch {
+    return undefined;
+  }
 }
 function taskRow(db: StudioDatabase, studioId: string, taskId: string): TaskRow {
   const value = db.prepare('SELECT task.id, task.project_id, task.name, task.status, task.intent_json, project.name AS project_name FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?').get(taskId, studioId) as TaskRow | undefined;
@@ -91,9 +103,12 @@ export function listAssetsWithReviewSummaries(db: StudioDatabase, assets: Studio
   const reviews = new Map<string, JsonRecord>();
   const displays = assetDisplayContexts(db, assets);
   const placeholders = assets.map(() => '?').join(',');
-  const scope = projectId ? " AND ((review.task_id IS NULL AND review.round_id IS NULL) OR task.project_id = ? OR round_task.project_id = ?)" : '';
-  const rows = db.prepare("WITH ranked_reviews AS (SELECT review.asset_id, review.decision, review.created_at, ROW_NUMBER() OVER (PARTITION BY review.asset_id ORDER BY review.created_at DESC, review.rowid DESC) AS position FROM review_decisions review LEFT JOIN creative_tasks task ON task.id = review.task_id LEFT JOIN creative_rounds round ON round.id = review.round_id LEFT JOIN creative_tasks round_task ON round_task.id = round.task_id WHERE review.asset_id IN (" + placeholders + ")" + scope + ') SELECT asset_id, decision, created_at FROM ranked_reviews WHERE position = 1').all(...assets.map((asset) => asset.id), ...(projectId ? [projectId, projectId] : [])) as Array<{ asset_id: string; decision: string; created_at: string }>;
-  for (const row of rows) reviews.set(row.asset_id, { decision: row.decision, createdAt: row.created_at });
+  const scope = projectId ? " AND (((review.task_id IS NULL AND review.round_id IS NULL) AND (review.schema_version < 2 OR (json_valid(review.context_json) = 1 AND (json_extract(review.context_json, '$.projectId') IS NULL OR json_extract(review.context_json, '$.projectId') = ?)))) OR task.project_id = ? OR round_task.project_id = ?)" : '';
+  const rows = db.prepare("WITH ranked_reviews AS (SELECT review.asset_id, review.decision, review.context_json, review.created_at, ROW_NUMBER() OVER (PARTITION BY review.asset_id ORDER BY review.created_at DESC, review.rowid DESC) AS position FROM review_decisions review LEFT JOIN creative_tasks task ON task.id = review.task_id LEFT JOIN creative_rounds round ON round.id = review.round_id LEFT JOIN creative_tasks round_task ON round_task.id = round.task_id WHERE review.asset_id IN (" + placeholders + ")" + scope + ') SELECT asset_id, decision, context_json, created_at FROM ranked_reviews WHERE position = 1').all(...assets.map((asset) => asset.id), ...(projectId ? [projectId, projectId, projectId] : [])) as Array<{ asset_id: string; decision: string; context_json: string | null; created_at: string }>;
+  for (const row of rows) {
+    const context = parseReviewContext(row.context_json);
+    reviews.set(row.asset_id, { decision: row.decision, createdAt: row.created_at, ...(context ? { context } : {}) });
+  }
   return assets.map((asset) => ({ ...asset, review: reviews.get(asset.id) || null, display: displays.get(asset.id) || { label: '素材', selectionText: '素材' } }));
 }
 
@@ -188,10 +203,22 @@ export function getAssetProvenance(db: StudioDatabase, studioId: string, assetId
   const asset = getStudioAsset(db, studioId, assetId);
   if (!asset) throw new StudioNotFoundError('Studio asset not found: ' + assetId);
   const outputs = db.prepare('SELECT item.id AS item_id, item.sequence AS item_sequence, item.status AS item_status, run.id AS run_id, run.status AS run_status, round.id AS round_id, round.purpose AS round_purpose, task.id AS task_id, task.name AS task_name, project.id AS project_id, project.name AS project_name FROM asset_relations relation JOIN run_items item ON item.id = relation.target_id JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE relation.asset_id = ? AND relation.relation_type = \'output_of\' AND relation.target_type = \'run_item\' AND project.studio_id = ? ORDER BY run.created_at, item.sequence').all(asset.id, studioId) as Array<{ item_id: string; item_sequence: number; item_status: string; run_id: string; run_status: string; round_id: string; round_purpose: string; task_id: string; task_name: string; project_id: string; project_name: string }>;
-  const reviews = db.prepare('SELECT review.id, review.decision, review.feedback_json, review.task_id, review.round_id, review.created_at FROM review_decisions review WHERE review.asset_id = ? ORDER BY review.created_at, review.rowid').all(asset.id) as Array<{ id: string; decision: string; feedback_json: string; task_id: string | null; round_id: string | null; created_at: string }>;
+  const reviews = db.prepare('SELECT review.id, review.decision, review.feedback_json, review.context_json, review.created_at FROM review_decisions review WHERE review.asset_id = ? ORDER BY review.created_at, review.rowid').all(asset.id) as Array<{ id: string; decision: string; feedback_json: string; context_json: string | null; created_at: string }>;
   const relations = db.prepare('SELECT relation_type, target_type, target_id, created_at FROM asset_relations WHERE asset_id = ? AND NOT (relation_type = \'output_of\' AND target_type = \'run_item\') ORDER BY created_at, id').all(asset.id) as Array<{ relation_type: string; target_type: string; target_id: string; created_at: string }>;
   const deliveries = db.prepare('SELECT delivery.id, delivery.name, delivery.status, delivery.project_id FROM delivery_assets item JOIN deliveries delivery ON delivery.id = item.delivery_id WHERE item.asset_id = ? ORDER BY delivery.updated_at DESC').all(asset.id) as Array<{ id: string; name: string; status: string; project_id: string }>;
   const lineages = outputs.map((output) => ({ runId: output.run_id, ...lineage(db, studioId, roundRow(db, studioId, output.round_id)) }));
-  const batches = db.prepare("SELECT batch.id, batch.name, version.id AS version_id, version.version_no, version.status FROM delivery_assets delivery_asset JOIN delivery_batch_version_deliveries member ON member.delivery_id = delivery_asset.delivery_id JOIN delivery_batch_versions version ON version.id = member.version_id JOIN delivery_batches batch ON batch.id = version.batch_id JOIN projects project ON project.id = batch.project_id WHERE delivery_asset.asset_id = ? AND project.studio_id = ? ORDER BY batch.updated_at DESC, version.version_no DESC").all(asset.id, studioId) as Array<{ id: string; name: string; version_id: string; version_no: number; status: string }>;
-  return { asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, byteSize: asset.byteSize, deletedAt: asset.deletedAt, source: safeValue(asset.source) }, outputs: outputs.map((output) => ({ runItem: { id: output.item_id, sequence: output.item_sequence, status: output.item_status }, run: { id: output.run_id, status: output.run_status }, round: { id: output.round_id, purpose: output.round_purpose }, task: { id: output.task_id, name: output.task_name }, project: { id: output.project_id, name: output.project_name } })), lineages, reviews: reviews.map((review) => ({ id: review.id, decision: review.decision, feedback: safeValue(parseRecord(review.feedback_json)), taskId: review.task_id, roundId: review.round_id, createdAt: review.created_at })), relations, deliveries: deliveries.map((delivery) => ({ id: delivery.id, name: delivery.name, status: delivery.status, projectId: delivery.project_id })), deliveryBatches: batches.map((batch) => ({ id: batch.id, name: batch.name, versionId: batch.version_id, versionNo: batch.version_no, status: batch.status })) };
+  const batches = (db.prepare("SELECT batch.id, batch.name, version.id AS version_id, version.version_no, version.status FROM delivery_assets delivery_asset JOIN delivery_batch_version_deliveries member ON member.delivery_id = delivery_asset.delivery_id JOIN delivery_batch_versions version ON version.id = member.version_id JOIN delivery_batches batch ON batch.id = version.batch_id JOIN projects project ON project.id = batch.project_id WHERE delivery_asset.asset_id = ? AND project.studio_id = ? ORDER BY batch.updated_at DESC, version.version_no DESC").all(asset.id, studioId) as Array<{ id: string; name: string; version_id: string; version_no: number; status: string }>).map((batch) => ({ id: batch.id, name: batch.name, versionId: batch.version_id, versionNo: batch.version_no, status: batch.status }));
+  const canonical = buildStudioProvenance(db, studioId, asset.id);
+  const persisted = canonical.records.flatMap((entry) => {
+    try {
+      const stored = getPersistedStudioProvenance(db, studioId, entry.record.recordId);
+      return [{ recordId: stored.record.recordId, assetId: stored.assetId, deliveryId: stored.deliveryId, persistedAt: stored.persistedAt, createdAt: stored.createdAt, updatedAt: stored.updatedAt }];
+    } catch (error) {
+      if (error instanceof StudioNotFoundError) return [];
+      throw error;
+    }
+  });
+  const persistedById = new Map(persisted.map((entry) => [entry.recordId, entry]));
+  const canonicalProvenance = { ...canonical, records: canonical.records.map((entry) => ({ ...entry, ...(persistedById.get(entry.record.recordId) ? { persistedAt: persistedById.get(entry.record.recordId)!.persistedAt, updatedAt: persistedById.get(entry.record.recordId)!.updatedAt, createdAt: persistedById.get(entry.record.recordId)!.createdAt } : {}) })), persistedRecords: persisted };
+  return { asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, byteSize: asset.byteSize, deletedAt: asset.deletedAt, source: safeValue(asset.source) }, outputs: outputs.map((output) => ({ runItem: { id: output.item_id, sequence: output.item_sequence, status: output.item_status }, run: { id: output.run_id, status: output.run_status }, round: { id: output.round_id, purpose: output.round_purpose }, task: { id: output.task_id, name: output.task_name }, project: { id: output.project_id, name: output.project_name } })), lineages, reviews: reviews.map((review) => { const feedbackHash = reviewFeedbackHash(review.feedback_json) || reviewFeedbackHash(review.context_json); return { id: review.id, decision: review.decision, ...(feedbackHash ? { feedbackHash } : {}), createdAt: review.created_at }; }), relations, deliveries, deliveryBatches: batches, persisted: persistedById.size ? persisted : undefined, canonicalProvenance };
 }

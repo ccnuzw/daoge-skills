@@ -32,3 +32,21 @@ test('Workbench diagnostic summary excludes paths, URLs, authorization values, a
   assert.equal(summary.providerConfigured, true);
   assert.equal(summary.connected, false);
 });
+
+test('generation worker pool exposes durable queue and lease-risk metrics before dispatch', async () => {
+  const { WorkerProcessPool } = require('../../dist/vnext/runtime/worker-pool');
+  const pool = new WorkerProcessPool('/tmp/daoge-pic-health-metrics', 1);
+  pool.updateQueueMetrics(17, 3);
+  let health = pool.healthSnapshot();
+  assert.equal(health.queuedCount, 17);
+  assert.equal(health.leaseRiskCount, 3);
+  assert.equal(health.dispatchReason, 'not_started');
+  assert.equal(health.lastTickAt, null);
+  assert.equal(health.lastTickResult, null);
+  pool.updateQueueMetrics(Infinity, -4);
+  health = pool.healthSnapshot();
+  assert.equal(health.queuedCount, 0);
+  assert.equal(health.leaseRiskCount, 0);
+  await pool.close();
+  assert.equal(pool.healthSnapshot().dispatchReason, 'stopping');
+});

@@ -36,6 +36,7 @@ import { workbenchConversationId } from './workbench-session.mjs';
 import { CREATIVE_DERIVED_ACTIONS, CREATIVE_DERIVED_ACTION_BY_ID, creativeDerivedActionForPurpose } from './creative-actions.mjs';
 import { installBrowserErrorGuard } from './browser-error-guard.mjs';
 import { redactedRuntimeDiagnostic, runtimeHealthPresentation } from './runtime-health.mjs';
+import { canRetryWorkbenchError, errorPresentation, normalizeWorkbenchError } from './error-model.mjs';
 import './styles.css';
 
 const EMPTY = [];
@@ -43,36 +44,129 @@ const EMPTY = [];
 installBrowserErrorGuard();
 
 function isAbortError(error) {
-  return error instanceof DOMException && error.name === 'AbortError';
+  return error?.name === 'AbortError' || typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError';
+}
+
+function isReadRequest(method) {
+  return ['GET', 'HEAD', 'OPTIONS'].includes(method);
+}
+
+function apiErrorOptions(options, overrides = {}) {
+  const modelOptions = {};
+  for (const key of ['category', 'code', 'requestId', 'phase', 'operation', 'resource', 'retryable', 'safeToRetry', 'mayHaveCommitted', 'possibleCommitted']) {
+    if (options?.[key] !== undefined) modelOptions[key] = options[key];
+  }
+  return { ...modelOptions, ...overrides };
+}
+
+function createWorkbenchError(input, options = {}, retry = null) {
+  const normalized = normalizeWorkbenchError(input, options);
+  const error = new Error(normalized.message);
+  Object.assign(error, normalized);
+  if (typeof retry === 'function' && canRetryWorkbenchError(normalized)) Object.defineProperty(error, 'retry', { configurable: true, value: retry });
+  return error;
+}
+function normalizeRequestError(value, fallback, options = {}) {
+  if (hasWorkbenchErrorMetadata(value)) return value;
+  const input = typeof value === 'string' ? { message: value } : value || { message: fallback };
+  return createWorkbenchError(input, options);
+}
+
+
+function retryOptions(options) {
+  const next = { ...options };
+  delete next.signal;
+  delete next.retry;
+  return next;
+}
+
+function safeApiError(payload) {
+  const source = payload?.error && typeof payload.error === 'object' && !Array.isArray(payload.error) ? payload.error : payload;
+  const rawDetails = source?.details ?? payload?.details;
+  const details = rawDetails && typeof rawDetails === 'object' && !Array.isArray(rawDetails) ? rawDetails : null;
+  const value = (key) => source?.[key] ?? payload?.[key];
+  return {
+    code: value('code'),
+    kind: value('kind'),
+    category: value('category'),
+    message: value('message'),
+    requestId: value('requestId') ?? details?.requestId,
+    retryable: value('retryable'),
+    safeToRetry: value('safeToRetry'),
+    phase: value('phase'),
+    mayHaveCommitted: value('mayHaveCommitted'),
+    possibleCommitted: value('possibleCommitted'),
+    partial: value('partial'),
+    succeeded: value('succeeded'),
+    failed: value('failed'),
+    succeededCount: value('succeededCount'),
+    failedCount: value('failedCount'),
+    details: details ? {
+      code: details.code,
+      phase: details.phase,
+      partial: details.partial,
+      succeeded: details.succeeded,
+      failed: details.failed,
+      succeededCount: details.succeededCount,
+      failedCount: details.failedCount,
+      requestId: details.requestId
+    } : undefined
+  };
+}
+
+function payloadPhase(payload) {
+  return payload?.error?.phase || payload?.phase || payload?.details?.phase || '';
 }
 
 async function api(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const readRequest = isReadRequest(method);
+  const hasRawBody = Object.prototype.hasOwnProperty.call(options, 'rawBody');
+  const hasJsonBody = !hasRawBody && options.body !== undefined;
+  const requestOptions = retryOptions(options);
+  const canReplay = readRequest || Boolean(options.idempotencyKey);
+  const retry = canReplay ? (typeof options.retry === 'function' ? options.retry : () => api(path, requestOptions)) : null;
   let response;
   try {
     response = await fetch(path, {
-      method: options.method || 'GET',
+      method,
       headers: {
         accept: 'application/json',
         'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0',
-        ...(options.body ? { 'content-type': 'application/json' } : {}),
+        ...(hasJsonBody ? { 'content-type': 'application/json' } : {}),
+        ...(options.contentType ? { 'content-type': options.contentType } : {}),
+        ...(options.headers || {}),
         ...(options.idempotencyKey ? { 'idempotency-key': options.idempotencyKey } : {})
       },
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: hasRawBody ? options.rawBody : hasJsonBody ? JSON.stringify(options.body) : undefined,
       signal: options.signal
     });
   } catch (error) {
     if (isAbortError(error)) throw error;
-    const connectionFailure = new Error('无法连接到本地 Studio。请刷新到当前 Studio 地址后重试。');
-    connectionFailure.category = 'connection';
-    throw connectionFailure;
+    throw createWorkbenchError({ category: 'connection', message: error?.message }, apiErrorOptions(options, {
+      category: 'connection',
+      phase: options.phase || (readRequest ? 'loading' : 'requesting'),
+      ...(options.mayHaveCommitted === undefined ? { mayHaveCommitted: !readRequest && !options.idempotencyKey } : {})
+    }), retry);
   }
   let payload;
   try {
     payload = await response.json();
-  } catch {
-    throw new Error(response.ok ? '本地 Studio 返回了无效响应。' : '本地 Studio 暂时不可用。');
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw createWorkbenchError({ code: 'invalid_response', status: response.status, headers: response.headers }, apiErrorOptions(options, {
+      code: 'invalid_response',
+      phase: options.phase || (readRequest ? 'loading' : 'receiving'),
+      ...(options.mayHaveCommitted === undefined ? { mayHaveCommitted: !readRequest && !options.idempotencyKey } : {})
+    }), retry);
   }
-  if (!response.ok || !payload.ok) throw new Error(payload?.error?.message || '本地 Studio 请求失败。');
+  if (!response.ok || !payload?.ok) {
+    const unsafeReplay = !readRequest && !options.idempotencyKey;
+    throw createWorkbenchError({ error: safeApiError(payload), status: response.status, headers: response.headers }, apiErrorOptions(options, {
+      phase: options.phase || payloadPhase(payload) || 'response',
+      ...(unsafeReplay ? { safeToRetry: false } : {})
+    }), retry);
+  }
   return payload.data;
 }
 
@@ -133,6 +227,7 @@ const DELIVERY_COMPLETION_PREFIX = 'daoge-pic:delivery-completion:';
 const ASSET_PAGE_SIZE_KEY = 'daoge-pic:asset-page-size';
 const ASSET_PREVIEW_FIT_KEY = 'daoge-pic:asset-preview-fit';
 const RAIL_COLLAPSE_KEY = 'daoge-pic:rail-collapsed';
+const EMPTY_LINEAGE_ASSET_COVERAGE = Object.freeze({ loaded: 0, total: 0, loading: true });
 
 const ASSET_SCOPE_LABELS = { round: '当前轮次', task: '当前任务', project: '当前项目', studio: '全部 Studio' };
 const ROUND_PURPOSE_LABELS = { exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' };
@@ -580,7 +675,7 @@ function ManagedTaskList({ tasks, pageSize, actionLabel, emptyMessage, onOpenTas
   return <><div className="workspace-list-toolbar is-task"><label className="workspace-list-search"><Search size={15} /><input type="search" value={query} placeholder="搜索任务名称" onChange={(event) => { setQuery(event.target.value); setPage(1); }} />{query && <IconButton label="清空任务搜索" onClick={() => { setQuery(''); setPage(1); }}><X size={14} /></IconButton>}</label><div className="workspace-list-filters" aria-label="任务状态">{[['open', '进行中'], ['completed', '已完成'], ['archived', '已归档'], ['all', '全部']].map(([value, label]) => <button type="button" key={value} className={status === value ? 'is-active' : ''} onClick={() => { setStatus(value); setPage(1); }}>{label}</button>)}</div></div>{pagination.items.length ? <><div className="project-task-list is-full">{pagination.items.map((task) => <button type="button" key={task.id} onClick={() => onOpenTask(task.id)}><span><b>{task.name}</b><small>{taskPresentation(task).label}</small></span><span>{actionLabel}</span></button>)}</div><ListPager page={pagination.page} totalPages={pagination.totalPages} total={pagination.total} onPageChange={setPage} /></> : <div className="empty-stage"><FolderKanban size={26} strokeWidth={1.15} /><p>{tasks.length ? '没有符合当前搜索与状态筛选的任务。' : emptyMessage}</p></div>}</>;
 }
 
-function ProjectOverview({ project, projectTemplates = EMPTY, tasks, selectedCount, onOpenTasks, onOpenAssets, onOpenDeliveries, onOpenTask, onCreateTask, onArchive }) {
+function ProjectOverview({ project, projectTemplates = EMPTY, tasks, selectedCount, qualityMetrics, qualityMetricsLoading, qualityMetricsError, onRefreshQualityMetrics, onOpenTasks, onOpenAssets, onOpenDeliveries, onOpenTask, onCreateTask, onArchive }) {
   const archived = project.status === 'archived';
   const activeTasks = tasks.filter((task) => !['archived', 'completed'].includes(task.status));
   const recentTasks = (activeTasks.length ? activeTasks : tasks).slice(0, TASK_OVERVIEW_PAGE_SIZE);
@@ -591,9 +686,46 @@ function ProjectOverview({ project, projectTemplates = EMPTY, tasks, selectedCou
       <div className="project-overview-actions"><StatusPill value={project.status} scope="project" />{!archived && <><button type="button" className="command-button" onClick={onCreateTask}><FolderKanban size={16} />新建任务</button><button type="button" className="outline-button" onClick={onArchive}>归档项目</button></>}</div>
     </header>
     <div className="project-status-strip"><button type="button" onClick={onOpenTasks}><span>任务</span><b>{tasks.length}</b><small>{activeTasks.length ? activeTasks.length + ' 个可继续' : '没有待处理任务'}</small></button><button type="button" onClick={onOpenAssets}><span>已选图片</span><b>{selectedCount}</b><small>用于交付的成果</small></button><button type="button" onClick={onOpenDeliveries}><span>交付</span><b>打开</b><small>下载与交付包</small></button></div>
+    <ProjectQualityMetrics metrics={qualityMetrics} loading={qualityMetricsLoading} error={qualityMetricsError} onRefresh={() => void onRefreshQualityMetrics()} />
     <section className="project-task-panel is-recent"><header><div><p className="eyebrow">最近任务</p><h3>选择一个目标</h3></div><div className="project-task-panel-actions"><button type="button" className="outline-button" onClick={onOpenTasks}>全部任务</button>{!archived && <button type="button" className="command-button" onClick={onCreateTask}>新建任务</button>}</div></header>{recentTasks.length ? <div className="project-task-list is-compact">{recentTasks.map((task) => <button type="button" key={task.id} onClick={() => onOpenTask(task.id)}><span><b>{task.name}</b><small>{taskPresentation(task).label}</small></span><span>继续</span></button>)}</div> : <div className="empty-stage"><FolderKanban size={26} strokeWidth={1.15} /><p>{archived ? '项目已归档，没有可继续的任务。' : '这个项目还没有任务。可以直接在 Studio 新建任务，生成前仍由 Agent 整理计划。'}</p></div>}</section>
   </section>;
 }
+function safeMetricCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? String(Math.trunc(count)) : '0';
+}
+
+function metricRate(value) {
+  if (value === null || value === undefined) return '暂无';
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= 0 && rate <= 1 ? Math.round(rate * 100) + '%' : '暂无';
+}
+
+function ProjectQualityMetrics({ metrics, loading, error, onRefresh }) {
+  const runItems = metrics?.runItems || {};
+  const reviews = metrics?.reviews || {};
+  const patterns = (Array.isArray(metrics?.failurePatterns) ? metrics.failurePatterns : []).filter((pattern) => pattern && typeof pattern === 'object').slice(0, 3);
+  const attentionCount = ['failed', 'blocked', 'retryWait', 'unknownOutcome'].reduce((total, key) => total + Number(runItems[key] || 0), 0);
+  return <section className="quality-metrics-panel" aria-labelledby="quality-metrics-title">
+    <header className="quality-metrics-head">
+      <div><p className="eyebrow">运营摘要</p><h3 id="quality-metrics-title">质量指标</h3><span>只显示当前项目的聚合结果；失败模式仅保留安全的分类代码，不展示原始错误内容。</span></div>
+      <button type="button" className="outline-button" disabled={loading} onClick={onRefresh}><RefreshCw size={14} className={loading ? 'spin' : ''} />{loading ? '正在刷新' : '刷新指标'}</button>
+    </header>
+    {loading && <p className="quality-metrics-empty" role="status" aria-live="polite">正在读取当前项目质量指标。</p>}
+    {error && <div className="quality-metrics-error" role="alert" aria-live="assertive"><CircleAlert size={15} aria-hidden="true" /><span>{errorMessageForDisplay(error, '无法读取项目质量指标。')}</span><button type="button" className="outline-button" onClick={onRefresh}>重试</button></div>}
+    {!loading && !error && metrics && <>
+      <div className="quality-metrics-grid">
+        <div className="quality-metrics-stat"><span>终局成功率</span><strong>{metricRate(runItems.successRate)}</strong><small>{safeMetricCount(runItems.successful)} 成功 / {safeMetricCount(runItems.terminal)} 个终局</small></div>
+        <div className="quality-metrics-stat"><span>运行项</span><strong>{safeMetricCount(runItems.total)}</strong><small>{safeMetricCount(metrics.runs?.total)} 次运行</small></div>
+        <div className="quality-metrics-stat"><span>需关注</span><strong>{safeMetricCount(attentionCount)}</strong><small>失败 · 阻塞 · 等待重试 · 待核实</small></div>
+        <div className="quality-metrics-stat"><span>保留率</span><strong>{metricRate(reviews.keepRate)}</strong><small>{safeMetricCount(reviews.total)} 条评审记录</small></div>
+      </div>
+      <section className="quality-metrics-patterns" aria-labelledby="quality-metrics-patterns-title"><h4 id="quality-metrics-patterns-title">常见失败模式</h4>{patterns.length ? <ul>{patterns.map((pattern, index) => { const kind = typeof pattern.kind === 'string' ? pattern.kind : ''; const code = typeof pattern.code === 'string' ? pattern.code : '未分类'; return <li key={(pattern.key || code) + '-' + index}>{kind ? kind + ' · ' : ''}{code} <b>{safeMetricCount(pattern.count)} 次</b></li>; })}</ul> : <p className="quality-metrics-empty">当前没有可分类的失败模式。</p>}</section>
+    </>}
+    {!loading && !error && !metrics && <p className="quality-metrics-empty">暂无质量指标。</p>}
+  </section>;
+}
+
 
 function ProjectTaskList({ project, tasks, onOpenTask, onCreateTask }) {
   return <section className="project-tasks-stage"><header className="workspace-section-head"><div><p className="eyebrow">{project.name}</p><h2>任务</h2><span>搜索、按状态筛选并分页管理每个独立创作目标。常用目标直接选择，特殊目标再自定义。</span></div>{project.status !== 'archived' && <button type="button" className="command-button" onClick={onCreateTask}><FolderKanban size={16} />新建任务</button>}</header><ManagedTaskList tasks={tasks} pageSize={TASK_PAGE_SIZE} actionLabel="查看轮次" emptyMessage="这个项目还没有任务。创作者可以在 Studio 直接新建任务，并把它设为当前工作上下文。" onOpenTask={onOpenTask} /></section>;
@@ -623,8 +755,45 @@ function WorkspaceContextBar({ project, tasks = EMPTY, task, rounds, selectedRou
   </div>;
 }
 
+function hasWorkbenchErrorMetadata(value) {
+  return value !== null && typeof value === 'object' && typeof value.category === 'string' && typeof value.safeToRetry === 'boolean' && Array.isArray(value.actions);
+}
+
+function errorMessageForDisplay(value, fallback = '') {
+  if (!value) return fallback;
+  if (typeof value === 'string') return value;
+  const normalized = hasWorkbenchErrorMetadata(value) ? value : normalizeWorkbenchError(value);
+  return errorPresentation(normalized).detail || fallback;
+}
+
+function WorkbenchErrorAlert({ error, className = 'error-strip', icon: Icon = CircleAlert, dismissLabel = '关闭请求错误', onDismiss, onRetry, onReconnect }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  useEffect(() => setDetailsOpen(false), [error]);
+  if (!error) return null;
+  const presentation = typeof error === 'string' ? null : errorPresentation(error);
+  const retryAllowed = presentation ? canRetryWorkbenchError(error) && typeof error?.retry === 'function' : false;
+  const handlers = {
+    ...(typeof onRetry === 'function' && retryAllowed ? { retry: onRetry } : {}),
+    ...(typeof onReconnect === 'function' ? { reconnect: onReconnect } : {}),
+    ...(typeof onDismiss === 'function' ? { continue: onDismiss } : {}),
+    'view-details': () => setDetailsOpen((current) => !current)
+  };
+  const actions = presentation ? presentation.actions.filter((action) => action.id !== 'retry' || retryAllowed).filter((action) => typeof handlers[action.id] === 'function') : [];
+  return <div className={className} role="alert" aria-live="assertive">
+    <Icon size={16} aria-hidden="true" />
+    <div className="workbench-error-content">
+      {presentation?.title && <strong>{presentation.title}</strong>}
+      <span>{errorMessageForDisplay(error, '无法完成当前操作。')}</span>
+      {detailsOpen && presentation && <dl className="workbench-error-details"><div><dt>代码</dt><dd>{presentation.code || '未记录'}</dd></div><div><dt>请求标识</dt><dd>{presentation.requestId || '未记录'}</dd></div><div><dt>阶段</dt><dd>{presentation.phase || 'unknown'}</dd></div><div><dt>结果</dt><dd>{presentation.outcome || 'unknown'}</dd></div><div><dt>操作</dt><dd>{presentation.operation || '未记录'}</dd></div><div><dt>资源</dt><dd>{presentation.resource || '未记录'}</dd></div><div><dt>重试</dt><dd>{presentation.safeToRetry ? '仅可安全重试' : '不可自动重试'}</dd></div></dl>}
+      {actions.length > 0 && <div className="workbench-error-actions">{actions.map((action) => <button type="button" className="outline-button" key={action.id} onClick={() => void handlers[action.id]()}>{action.label}</button>)}</div>}
+    </div>
+    {onDismiss && <IconButton label={dismissLabel} onClick={onDismiss}><X size={15} /></IconButton>}
+  </div>;
+}
+
 function CreationError({ error }) {
-  return error ? <div className="creation-form-error" role="alert" aria-live="assertive"><CircleAlert size={15} /><span>{error}</span></div> : null;
+  const message = errorMessageForDisplay(error);
+  return message ? <div className="creation-form-error" role="alert" aria-live="assertive"><CircleAlert size={15} /><span>{message}</span></div> : null;
 }
 
 function ExecutionBoundaryNote({ children = CREATION_BOUNDARY_COPY }) {
@@ -859,6 +1028,7 @@ function ReferenceAssetDialog({ project, task, round, sharedAssets, selectedMate
       setLoadError('');
       return undefined;
     }
+    const controller = new AbortController();
     let cancelled = false;
     const params = new URLSearchParams({ scope, limit: String(pageSize), offset: String((page - 1) * pageSize) });
     if (project?.id) params.set('projectId', project.id);
@@ -867,16 +1037,16 @@ function ReferenceAssetDialog({ project, task, round, sharedAssets, selectedMate
     if (kind !== 'all') params.set('kind', kind);
     setLoading(true);
     setLoadError('');
-    api('/api/assets?' + params.toString()).then((data) => {
+    api('/api/assets?' + params.toString(), { signal: controller.signal }).then((data) => {
       if (cancelled) return;
       setCandidates(data.assets || EMPTY);
       setTotal(data.total || 0);
     }).catch((nextError) => {
-      if (!cancelled) setLoadError(nextError.message || '无法读取素材列表。');
+      if (!cancelled && !isAbortError(nextError)) setLoadError(errorMessageForDisplay(normalizeRequestError(nextError, '无法读取素材列表。', { operation: 'load-reference-assets', phase: 'loading' }), '无法读取素材列表。'));
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [scope, kind, page, project?.id, task?.id, round?.id, sharedAssets.length]);
   useEffect(() => { setPage(1); }, [scope, kind]);
   const sourceAssets = scope === 'shared' ? sharedAssets : candidates;
@@ -1066,7 +1236,7 @@ function DerivedRoundDialog({ project, task, rounds, currentRound, assets, initi
         return next;
       });
     } catch (nextError) {
-      setMaskImportError(nextError.message || '无法导入遮罩图。');
+      setMaskImportError(errorMessageForDisplay(nextError, '无法导入遮罩图。'));
     } finally {
       setMaskImporting(false);
       if (maskInputRef.current) maskInputRef.current.value = '';
@@ -1366,7 +1536,7 @@ function LocalStudioAuthorizationGate() {
     void bootstrapLocalStudioSession().then(() => {
       if (current) setAuthorized(true);
     }).catch((nextError) => {
-      if (current) setAuthorizationError(nextError?.message || '本地 Studio 授权失败。请重试。');
+      if (current) setAuthorizationError(errorMessageForDisplay(nextError, '本地 Studio 授权失败。请重试。'));
     });
     return () => { current = false; };
   }, [attempt]);
@@ -1428,6 +1598,9 @@ function App() {
   const [creationBusy, setCreationBusy] = useState(false);
   const [creationError, setCreationError] = useState('');
   const [referenceDialog, setReferenceDialog] = useState(null);
+  const [qualityMetrics, setQualityMetrics] = useState(null);
+  const [qualityMetricsLoading, setQualityMetricsLoading] = useState(false);
+  const [qualityMetricsError, setQualityMetricsError] = useState(null);
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [referenceError, setReferenceError] = useState('');
   const [referenceAssets, setReferenceAssets] = useState(EMPTY);
@@ -1447,13 +1620,13 @@ function App() {
   const [runItemPage, setRunItemPage] = useState(EMPTY_RUN_ITEM_PAGE);
   const [lineageRunItems, setLineageRunItems] = useState(EMPTY);
   const [lineageRunItemCoverage, setLineageRunItemCoverage] = useState(EMPTY_LINEAGE_RUN_ITEM_COVERAGE);
+  const [lineageAssetCoverage, setLineageAssetCoverage] = useState(EMPTY_LINEAGE_ASSET_COVERAGE);
   const [selectedRunItemIds, setSelectedRunItemIds] = useState(new Set());
   const [runItemDetailId, setRunItemDetailId] = useState(null);
   const [session, setSession] = useState(null);
   const [route, setRoute] = useState(() => parseWorkbenchRoute(window.location.search));
   const [contextError, setContextError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [uploadProgress, setUploadProgress] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [connectionError, setConnectionError] = useState('');
@@ -1461,6 +1634,7 @@ function App() {
   const [recoveryPhase, setRecoveryPhase] = useState('ready');
   const [pendingDerivedAfterTask, setPendingDerivedAfterTask] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0, canvasLayout: 0 });
   const inputRef = useRef(null);
@@ -1486,11 +1660,14 @@ function App() {
   const planVersionRequests = useRef(null);
   const advancedDetailRequests = useRef(null);
   const assetRequests = useRef(null);
+  const assetProvenanceRequests = useRef(null);
+  const sessionRefreshRequests = useRef(null);
   const selectionRequests = useRef(null);
   const recoveryPhaseRef = useRef('ready');
   const recoveryTimerRef = useRef(null);
   const restartMonitorEpoch = useRef(0);
   const sharedAssetRequests = useRef(null);
+  const qualityMetricsRequests = useRef(null);
   const eventRefreshQueueRef = useRef(null);
   const eventRefreshCallbacks = useRef(null);
   taskOverviewRequests.current ||= createLatestRequestGate();
@@ -1499,20 +1676,29 @@ function App() {
   planVersionRequests.current ||= createLatestRequestGate();
   advancedDetailRequests.current ||= createLatestRequestGate();
   assetRequests.current ||= createLatestRequestGate();
+  assetProvenanceRequests.current ||= createLatestRequestGate();
+  sessionRefreshRequests.current ||= createLatestRequestGate();
   selectionRequests.current ||= createLatestRequestGate();
   sharedAssetRequests.current ||= createLatestRequestGate();
+  qualityMetricsRequests.current ||= createLatestRequestGate();
   deliveryInteractionRef.current ||= createDeliveryInteractionGuard();
   searchCoordinatorRef.current ||= createStudioSearchCoordinator({
     request: async (query, signal) => (await api('/api/search?q=' + encodeURIComponent(query) + '&limit=12', { signal })).results || [],
     schedule: (callback, delay) => window.setTimeout(callback, delay),
     cancelSchedule: (timer) => window.clearTimeout(timer)
   });
-  useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); }, []);
+  useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); assetProvenanceRequests.current?.cancel(); sessionRefreshRequests.current?.cancel(); qualityMetricsRequests.current?.cancel(); }, []);
   const { view, projectId: activeProjectId, taskId: activeTaskId, roundId: activeRoundId, compareRoundIds = EMPTY, runId: activeRunId, assetScope, runItemFilter: activeRunItemFilter = DEFAULT_RUN_ITEM_FILTER, runItemPage: activeRunItemPage = 1, runItemPageSize: activeRunItemPageSize = DEFAULT_RUN_ITEM_PAGE_SIZE, runItemSequence: activeRunItemSequence = null } = route;
   const routeView = rendererForWorkbenchView(view);
   const studioView = isStudioView(view);
   activeProjectIdRef.current = activeProjectId;
   sessionRef.current = session;
+  const reportRequestError = useCallback((value, fallback, options = {}) => {
+    const normalized = normalizeRequestError(value, fallback, options);
+    if (normalized.category === 'connection') setConnectionError(normalized);
+    else setError(normalized);
+    return normalized;
+  }, []);
 
   const navigateRoute = useCallback((changes, replace = false) => {
     const next = updateWorkbenchRoute(route, changes);
@@ -1537,19 +1723,26 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     if (!session) void openWorkbenchSession().catch((nextError) => {
-      if (!cancelled) setError(nextError.message || '无法建立当前 Workbench 会话。');
+      if (!cancelled) reportRequestError(nextError, '无法建立当前 Workbench 会话。', { operation: 'open-workbench-session', phase: 'requesting' });
     });
     return () => { cancelled = true; };
-  }, [openWorkbenchSession, session]);
+  }, [openWorkbenchSession, reportRequestError, session]);
 
   const refreshWorkbenchSession = useCallback(async (sessionId) => {
-    const data = await api('/api/sessions/' + encodeURIComponent(sessionId));
-    const nextSession = data.session;
-    if (nextSession) {
-      sessionRef.current = nextSession;
-      setSession(nextSession);
+    const request = sessionRefreshRequests.current.begin(String(sessionId));
+    try {
+      const data = await api('/api/sessions/' + encodeURIComponent(sessionId), { signal: request.signal });
+      if (!request.isCurrent()) return null;
+      const nextSession = data.session;
+      if (nextSession) {
+        sessionRef.current = nextSession;
+        setSession(nextSession);
+      }
+      return nextSession || null;
+    } catch (nextError) {
+      if (isAbortError(nextError) || !request.isCurrent()) return null;
+      throw normalizeRequestError(nextError, '无法读取当前 Workbench 会话。', { operation: 'refresh-workbench-session', phase: 'loading' });
     }
-    return nextSession || null;
   }, []);
 
 
@@ -1591,10 +1784,34 @@ function App() {
       setLineageRunItems(EMPTY);
       setLineageRunItemCoverage(EMPTY_LINEAGE_RUN_ITEM_COVERAGE);
     };
+    const loadLineageRunItems = async (lineageRuns) => {
+      setLineageRunItems(EMPTY);
+      setLineageRunItemCoverage(EMPTY_LINEAGE_RUN_ITEM_COVERAGE);
+      let streamedItems = [];
+      const onPage = ({ items, total, loading, replace }) => {
+        if (replace) streamedItems = [...items];
+        else streamedItems = [...streamedItems, ...items];
+        setLineageRunItems(streamedItems);
+        setLineageRunItemCoverage({ loaded: streamedItems.length, total: Math.max(streamedItems.length, Number(total) || 0), loading: loading === true });
+      };
+      const result = await loadCompleteLineageRunItems(lineageRuns, load, requireCurrent, onPage);
+      requireCurrent();
+      setLineageRunItems(result.items);
+      setLineageRunItemCoverage({ loaded: result.loaded, total: result.total });
+      return result;
+    };
+    const loadLineageRunItemsInBackground = (lineageRuns) => {
+      void loadLineageRunItems(lineageRuns).catch((nextError) => {
+        if (isAbortError(nextError) || !request.isCurrent()) return;
+        const normalized = normalizeRequestError(nextError, '无法读取谱系运行项。', { operation: 'load-lineage-run-items', phase: 'loading' });
+        if (normalized.category === 'connection') setConnectionError(normalized);
+        else setError(normalized);
+      });
+    };
     const selectedProject = activeProjectId ? (knownProjects || []).find((project) => project.id === activeProjectId) || null : null;
     const loadLineageRuns = async (lineageRounds) => {
       if (view !== 'lineage' || !lineageRounds.length) return EMPTY;
-      const runLists = await Promise.all(lineageRounds.map((round) => load('/api/rounds/' + encodeURIComponent(round.id) + '/runs').then((data) => data.runs || EMPTY)));
+      const runLists = await mapWithConcurrency(lineageRounds, (round) => load('/api/rounds/' + encodeURIComponent(round.id) + '/runs').then((data) => data.runs || EMPTY), ASSET_IMPORT_CONCURRENCY);
       requireCurrent();
       return runLists.flat();
     };
@@ -1627,16 +1844,13 @@ function App() {
     }
     if (!selectedTask) {
       if (view === 'lineage') {
-        const roundLists = await Promise.all(nextTasks.map((task) => load('/api/tasks/' + encodeURIComponent(task.id) + '/rounds').then((data) => data.rounds || EMPTY)));
+        const roundLists = await mapWithConcurrency(nextTasks, (task) => load('/api/tasks/' + encodeURIComponent(task.id) + '/rounds').then((data) => data.rounds || EMPTY), ASSET_IMPORT_CONCURRENCY);
         const projectRounds = roundLists.flat();
         setRounds(projectRounds);
         const projectRuns = await loadLineageRuns(projectRounds);
         setRuns(projectRuns);
         setRunItemPage(EMPTY_RUN_ITEM_PAGE);
-        const lineage = await loadCompleteLineageRunItems(projectRuns, load, requireCurrent);
-        requireCurrent();
-        setLineageRunItems(lineage.items);
-        setLineageRunItemCoverage({ loaded: lineage.loaded, total: lineage.total });
+        loadLineageRunItemsInBackground(projectRuns);
         setContextError('');
         return;
       }
@@ -1658,10 +1872,7 @@ function App() {
         const taskRuns = await loadLineageRuns(nextRounds);
         setRuns(taskRuns);
         setRunItemPage(EMPTY_RUN_ITEM_PAGE);
-        const lineage = await loadCompleteLineageRunItems(taskRuns, load, requireCurrent);
-        requireCurrent();
-        setLineageRunItems(lineage.items);
-        setLineageRunItemCoverage({ loaded: lineage.loaded, total: lineage.total });
+        loadLineageRunItemsInBackground(taskRuns);
         setContextError('');
         return;
       }
@@ -1680,10 +1891,7 @@ function App() {
     const selectedRun = activeRunId ? nextRuns.find((run) => run.id === activeRunId) || null : null;
     if (view === 'lineage') {
       setRunItemPage(EMPTY_RUN_ITEM_PAGE);
-      const lineage = await loadCompleteLineageRunItems(nextRuns, load, requireCurrent);
-      requireCurrent();
-      setLineageRunItems(lineage.items);
-      setLineageRunItemCoverage({ loaded: lineage.loaded, total: lineage.total });
+      loadLineageRunItemsInBackground(nextRuns);
       setContextError(activeRunId && !selectedRun ? '该运行不属于当前轮次，或已不存在。' : '');
       return;
     }
@@ -1703,28 +1911,43 @@ function App() {
   }, [activeProjectId, activeTaskId, activeRoundId, activeRunId, activeRunItemFilter, activeRunItemPage, activeRunItemPageSize, activeRunItemSequence, view]);
 
   const refreshAssets = useCallback(async () => {
+    const lineageView = view === 'lineage';
     if (!['assets', 'trash', 'deliveries', 'lineage'].includes(view)) {
       assetRequests.current.cancel();
       setAssets(EMPTY);
       setAssetTotal(0);
       return true;
     }
-    const pagination = ['assets', 'trash'].includes(view) ? { page: assetPage, pageSize: assetPageSize, filter: assetFilter } : view === 'lineage' ? { page: 1, pageSize: LINEAGE_ASSET_PAGE_SIZE, filter: 'all' } : null;
+    const pagination = ['assets', 'trash'].includes(view) ? { page: assetPage, pageSize: assetPageSize, filter: assetFilter } : lineageView ? { page: 1, pageSize: LINEAGE_ASSET_PAGE_SIZE, filter: 'all' } : null;
     const path = assetRefreshPath(route, pagination);
     if (!path) {
       setAssets(EMPTY);
       setAssetTotal(0);
+      if (lineageView) setLineageAssetCoverage(EMPTY_LINEAGE_ASSET_COVERAGE);
       return true;
     }
     const request = assetRequests.current.begin(path);
+    if (lineageView) setLineageAssetCoverage(EMPTY_LINEAGE_ASSET_COVERAGE);
+    let streamedAssets = [];
+    const onPage = ({ assets: pageAssets, total, replace }) => {
+      if (!request.isCurrent()) return;
+      streamedAssets = replace ? [...pageAssets] : [...streamedAssets, ...pageAssets];
+      const nextTotal = Number.isInteger(total) ? Math.max(streamedAssets.length, total) : streamedAssets.length;
+      setAssets(streamedAssets);
+      setAssetTotal(nextTotal);
+      if (lineageView) setLineageAssetCoverage({ loaded: streamedAssets.length, total: nextTotal, loading: true });
+    };
     try {
-      const data = view === 'lineage' ? await loadCompleteLineageAssets(route, (nextPath) => api(nextPath, { signal: request.signal }), () => { if (!request.isCurrent()) throw new DOMException('Stale refresh', 'AbortError'); }) : await api(path, { signal: request.signal });
+      const data = lineageView ? await loadCompleteLineageAssets(route, (nextPath) => api(nextPath, { signal: request.signal }), () => { if (!request.isCurrent()) throw new DOMException('Stale refresh', 'AbortError'); }, onPage) : await api(path, { signal: request.signal });
       if (!request.isCurrent()) return false;
       const nextAssets = data.assets || EMPTY;
+      const nextTotal = Number.isInteger(data.total) ? Math.max(nextAssets.length, data.total) : nextAssets.length;
       setAssets(nextAssets);
-      setAssetTotal(Number.isInteger(data.total) ? data.total : nextAssets.length);
+      setAssetTotal(nextTotal);
+      if (lineageView) setLineageAssetCoverage({ loaded: nextAssets.length, total: nextTotal, loading: false });
       return true;
     } catch (nextError) {
+      if (lineageView && request.isCurrent()) setLineageAssetCoverage((current) => ({ ...current, loading: true }));
       if (!isAbortError(nextError) && request.isCurrent()) reportRefreshError(nextError);
       return false;
     }
@@ -1745,10 +1968,10 @@ function App() {
       applyProjectSelection(data.selection);
       return true;
     } catch (nextError) {
-      if (!isAbortError(nextError) && request.isCurrent()) setError(nextError.message || '无法读取当前选片。');
+      if (!isAbortError(nextError) && request.isCurrent()) reportRequestError(nextError, '无法读取当前选片。', { operation: 'load-selection', phase: 'loading' });
       return false;
     }
-  }, [activeProjectId]);
+  }, [activeProjectId, reportRequestError]);
 
   const refreshSharedAssets = useCallback(async () => {
     const request = sharedAssetRequests.current.begin('shared-assets');
@@ -1758,15 +1981,14 @@ function App() {
       setSharedAssets(data.assets || EMPTY);
       return true;
     } catch (nextError) {
-      if (!isAbortError(nextError) && request.isCurrent()) setError(nextError.message || '无法读取共享素材。');
+      if (!isAbortError(nextError) && request.isCurrent()) reportRequestError(nextError, '无法读取共享素材。', { operation: 'load-shared-assets', phase: 'loading' });
       return false;
     }
-  }, []);
+  }, [reportRequestError]);
 
   const reportRefreshError = useCallback((nextError) => {
-    if (nextError?.category === 'connection') setConnectionError(nextError.message || '无法连接本地 Studio。');
-    else setError(nextError?.message || '无法读取本地 Studio。');
-  }, []);
+    reportRequestError(nextError, '无法刷新当前 Workbench。', { operation: 'refresh-workbench', phase: 'loading' });
+  }, [reportRequestError]);
   const { refreshAll, refreshContext: refreshCurrentContext } = useRouteRefresh({
     route,
     beforeRefresh: openWorkbenchSession,
@@ -1840,7 +2062,7 @@ function App() {
         }
       } catch { /* daemon is inside the expected restart gap */ }
     }
-    if (restartMonitorEpoch.current === epoch) setError('Studio 重启超时。请复制脱敏诊断并检查本地 daemon 日志。');
+    if (restartMonitorEpoch.current === epoch) setError(createWorkbenchError({ category: 'connection', message: 'Studio 重启超时。请复制脱敏诊断并检查本地 daemon 日志。' }, { category: 'connection', phase: 'reconnecting', safeToRetry: false }));
   }, [finishStudioRecovery]);
   const beginStudioRestart = useCallback(() => {
     if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
@@ -1849,17 +2071,48 @@ function App() {
     void monitorStudioRestart(epoch, studio?.runtime?.startedAt || null);
   }, [monitorStudioRestart, studio?.runtime?.startedAt, updateRecoveryPhase]);
   const handleConnectionError = useCallback((message) => {
-    setConnectionError(message);
-    if (message) updateRecoveryPhase('reconnecting');
+    if (!message) {
+      setConnectionError('');
+      return;
+    }
+    setConnectionError(createWorkbenchError({ category: 'connection', message: errorMessageForDisplay(message) }, { category: 'connection', phase: 'streaming', safeToRetry: false }));
+    updateRecoveryPhase('reconnecting');
   }, [updateRecoveryPhase]);
+  const handleStreamRequestError = useCallback((message) => {
+    if (message) setError(createWorkbenchError({ category: 'connection', message: errorMessageForDisplay(message) }, { category: 'connection', phase: 'streaming', safeToRetry: false }));
+  }, []);
   const handleReconnected = useCallback(async () => { await finishStudioRecovery(); }, [finishStudioRecovery]);
+  const reconnectStudio = useCallback(async () => {
+    setConnectionError('');
+    updateRecoveryPhase('reconnecting');
+    return finishStudioRecovery();
+  }, [finishStudioRecovery, updateRecoveryPhase]);
+  const reconnectWorkbenchError = useCallback((nextError, clear) => {
+    clear('');
+    if (nextError?.category === 'auth') {
+      window.location.reload();
+      return;
+    }
+    void reconnectStudio();
+  }, [reconnectStudio]);
+  const retryWorkbenchError = useCallback(async (nextError, clear) => {
+    if (!hasWorkbenchErrorMetadata(nextError) || !canRetryWorkbenchError(nextError) || typeof nextError.retry !== 'function') return;
+    clear('');
+    try {
+      await nextError.retry();
+      await refresh();
+    } catch (retryError) {
+      const safeRetryError = !retryError ? '无法重试当前工作台请求。' : typeof retryError === 'string' ? retryError : hasWorkbenchErrorMetadata(retryError) ? retryError : createWorkbenchError(retryError, { operation: 'retry-workbench', phase: 'retrying' });
+      clear(safeRetryError);
+    }
+  }, [refresh]);
   useStudioEvents({
     studioId: studio?.studioId || null,
     onEventBatch: refreshForEvents,
     onSnapshot: refreshSnapshot,
     onConnectionError: handleConnectionError,
     onReconnected: handleReconnected,
-    onRequestError: setError
+    onRequestError: handleStreamRequestError
   });
 
   const copyRuntimeDiagnostic = async () => {
@@ -1868,7 +2121,7 @@ function App() {
       if (!navigator.clipboard?.writeText) throw new Error('当前浏览器未提供剪贴板权限。');
       await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
       setNotice('已复制脱敏运行诊断；内容不含 Provider 密钥或工作区路径。');
-    } catch (nextError) { setError(nextError.message || '无法复制脱敏诊断。'); }
+    } catch (nextError) { reportRequestError(nextError, '无法复制脱敏诊断。', { operation: 'copy-runtime-diagnostic', phase: 'committing' }); }
   };
   const repairRuntime = async () => {
     if (runtimeRepairing) return;
@@ -1876,19 +2129,59 @@ function App() {
     try {
       await api('/api/restart', { method: 'POST', idempotencyKey: uniqueKey('runtime-repair'), body: {} });
       beginStudioRestart();
-    } catch (nextError) { setError(nextError.message || '无法安全重启 Studio。'); }
+    } catch (nextError) { reportRequestError(nextError, '无法安全重启 Studio。', { operation: 'restart-studio', phase: 'requesting' }); }
     finally { setRuntimeRepairing(false); }
   };
   useEffect(() => {
     if (!session) { setSessionPlanStatus(null); return undefined; }
     const controller = new AbortController();
-     void api('/api/sessions/' + encodeURIComponent(session.id) + '/plan-status', { signal: controller.signal }).then(setSessionPlanStatus).catch((nextError) => {
-       if (!isAbortError(nextError)) setError(nextError.message || '无法读取当前会话计划状态。');
-     });
-     return () => controller.abort();
-  }, [session?.id, session?.version, eventRevision.planVersions, eventRevision.creativeRecord, eventRevision.runs]);
+    let current = true;
+    void api('/api/sessions/' + encodeURIComponent(session.id) + '/plan-status', { signal: controller.signal }).then((data) => {
+      if (current) setSessionPlanStatus(data);
+    }).catch((nextError) => {
+      if (current && !isAbortError(nextError)) reportRequestError(nextError, '无法读取当前会话计划状态。', { operation: 'load-session-plan-status', phase: 'loading' });
+    });
+    return () => { current = false; controller.abort(); };
+  }, [session?.id, session?.version, eventRevision.planVersions, eventRevision.creativeRecord, eventRevision.runs, reportRequestError]);
 
   const selectedProject = useMemo(() => activeProjectId ? projects.find((project) => project.id === activeProjectId) || null : null, [projects, activeProjectId]);
+  const refreshQualityMetrics = useCallback(async () => {
+    const projectId = selectedProject?.id;
+    if (!projectId) {
+      qualityMetricsRequests.current.cancel();
+      setQualityMetrics(null);
+      setQualityMetricsError(null);
+      setQualityMetricsLoading(false);
+      return false;
+    }
+    const request = qualityMetricsRequests.current.begin(projectId);
+    setQualityMetricsLoading(true);
+    setQualityMetricsError(null);
+    setQualityMetrics(null);
+    try {
+      const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/quality-metrics', { signal: request.signal });
+      if (!request.isCurrent()) return false;
+      setQualityMetrics(data.metrics || null);
+      return true;
+    } catch (nextError) {
+      if (isAbortError(nextError) || !request.isCurrent()) return false;
+      setQualityMetricsError(normalizeRequestError(nextError, '无法读取项目质量指标。', { operation: 'load-quality-metrics', phase: 'loading' }));
+      return false;
+    } finally {
+      if (request.isCurrent()) setQualityMetricsLoading(false);
+    }
+  }, [selectedProject?.id]);
+  useEffect(() => {
+    if (view !== 'project-overview' || !selectedProject) {
+      qualityMetricsRequests.current.cancel();
+      setQualityMetrics(null);
+      setQualityMetricsError(null);
+      setQualityMetricsLoading(false);
+      return undefined;
+    }
+    void refreshQualityMetrics();
+    return () => qualityMetricsRequests.current.cancel();
+  }, [refreshQualityMetrics, selectedProject?.id, view]);
   const selectedTask = useMemo(() => activeTaskId ? tasks.find((task) => task.id === activeTaskId) || null : null, [tasks, activeTaskId]);
   const selectedRound = useMemo(() => activeRoundId ? rounds.find((round) => round.id === activeRoundId) || null : null, [rounds, activeRoundId]);
   const activeRun = useMemo(() => activeRunId ? runs.find((run) => run.id === activeRunId) || null : null, [runs, activeRunId]);
@@ -1939,13 +2232,16 @@ function App() {
   useEffect(() => {
     if (!selectedProject || !referenceAssetIds.length) { setReferenceAssets(EMPTY); return undefined; }
     const controller = new AbortController();
+    let current = true;
     const params = new URLSearchParams({ projectId: selectedProject.id });
     for (const assetId of referenceAssetIds) params.append('assetId', assetId);
-    void api('/api/assets/by-id?' + params.toString(), { signal: controller.signal }).then((data) => setReferenceAssets(data.assets || EMPTY)).catch((nextError) => {
-      if (!isAbortError(nextError)) setReferenceError(nextError.message || '无法读取参考素材。');
+    void api('/api/assets/by-id?' + params.toString(), { signal: controller.signal }).then((data) => {
+      if (current) setReferenceAssets(data.assets || EMPTY);
+    }).catch((nextError) => {
+      if (current && !isAbortError(nextError)) setReferenceError(errorMessageForDisplay(normalizeRequestError(nextError, '无法读取参考素材。', { operation: 'load-reference-assets-by-id', phase: 'loading' }), '无法读取参考素材。'));
     });
-    return () => controller.abort();
-  }, [selectedProject?.id, referenceAssetIds.join('|')]);
+    return () => { current = false; controller.abort(); };
+  }, [reportRequestError, selectedProject?.id, referenceAssetIds.join('|')]);
 
   const eligibleDeliveryIds = useMemo(() => new Set(deliveries.filter((delivery) => ['ready', 'exported'].includes(delivery.status)).map((delivery) => delivery.id)), [deliveries]);
 
@@ -2011,10 +2307,10 @@ function App() {
     void api('/api/tasks/' + encodeURIComponent(selectedTask.id) + '/overview', { signal: request.signal }).then((data) => {
       if (request.isCurrent()) setTaskOverview(data.overview || null);
     }).catch((nextError) => {
-      if (request.isCurrent() && !isAbortError(nextError)) setError(nextError.message || '无法读取任务创作概览。');
+      if (request.isCurrent() && !isAbortError(nextError)) reportRequestError(nextError, '无法读取任务创作概览。', { operation: 'load-task-overview', phase: 'loading' });
     });
     return () => request.abort();
-  }, [selectedTask?.id, eventRevision.taskOverview]);
+  }, [reportRequestError, selectedTask?.id, eventRevision.taskOverview]);
   useEffect(() => {
     if (!selectedRound) { creativeRecordRequests.current.cancel(); setCreativeRecord(null); return undefined; }
     const params = new URLSearchParams();
@@ -2025,10 +2321,10 @@ function App() {
     void api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/creative-record?' + params.toString(), { signal: request.signal }).then((data) => {
       if (request.isCurrent()) setCreativeRecord(data.record || null);
     }).catch((nextError) => {
-      if (request.isCurrent() && !isAbortError(nextError)) setError(nextError.message || '无法读取轮次创作记录。');
+      if (request.isCurrent() && !isAbortError(nextError)) reportRequestError(nextError, '无法读取轮次创作记录。', { operation: 'load-creative-record', phase: 'loading' });
     });
     return () => request.abort();
-  }, [selectedRound?.id, activeRunId, eventRevision.creativeRecord]);
+  }, [reportRequestError, selectedRound?.id, activeRunId, eventRevision.creativeRecord]);
   useEffect(() => {
     if (view !== 'studio-overview' || !selectedTask) { studioOverviewRequests.current.cancel(); setStudioOverview(null); return undefined; }
     const signature = [view, selectedTask.id, compareRoundIds.join('|'), eventRevision.studioOverview].join(':');
@@ -2038,10 +2334,10 @@ function App() {
     void api('/api/tasks/' + encodeURIComponent(selectedTask.id) + '/studio-overview?' + params.toString(), { signal: request.signal }).then((data) => {
       if (request.isCurrent()) setStudioOverview(data.overview || null);
     }).catch((nextError) => {
-      if (request.isCurrent() && !isAbortError(nextError)) setError(nextError.message || '无法读取任务轮次比较。');
+      if (request.isCurrent() && !isAbortError(nextError)) reportRequestError(nextError, '无法读取任务轮次比较。', { operation: 'load-studio-overview', phase: 'loading' });
     });
     return () => request.abort();
-  }, [view, selectedTask?.id, compareRoundIds.join('|'), eventRevision.studioOverview]);
+  }, [reportRequestError, view, selectedTask?.id, compareRoundIds.join('|'), eventRevision.studioOverview]);
 
   useEffect(() => {
     if (assetProvenance && !assets.some((asset) => asset.id === assetProvenance.asset?.id)) setAssetProvenance(null);
@@ -2068,7 +2364,7 @@ function App() {
         setSession(next);
       } catch (nextError) {
         contextSignature.current = '';
-        setError(nextError.message || '无法保存工作上下文。');
+        reportRequestError(nextError, '无法保存工作上下文。', { operation: 'save-workbench-context', phase: 'committing' });
       }
     });
   }, [session, selectedProject, selectedTask, selectedRound, activeTaskId, activeRoundId]);
@@ -2085,22 +2381,20 @@ function App() {
       setUploading(true); setUploadProgress({ completed: 0, total: images.length }); setError(''); setNotice('');
       await mapWithConcurrency(images, async (file) => {
         try {
-          const response = await fetch('/api/assets/import', {
+          const data = await api('/api/assets/import', {
             method: 'POST',
+            idempotencyKey: uniqueKey('upload'),
+            contentType: file.type || 'application/octet-stream',
             headers: {
-              'content-type': file.type || 'application/octet-stream',
-              'idempotency-key': uniqueKey('upload'),
               'x-daoge-filename': encodeURIComponent(file.name),
               ...(uploadTarget ? { 'x-daoge-target-type': uploadTarget.type, 'x-daoge-target-id': uploadTarget.id } : {}),
               ...(uploadMaterialNeed ? { 'x-daoge-material-need': encodeURIComponent(uploadMaterialNeed), 'x-daoge-material-usage': uploadMaterialPreset.usage } : {})
             },
-            body: file
+            rawBody: file
           });
-          const payload = await response.json();
-          if (!response.ok || !payload.ok) throw new Error(payload?.error?.message || '无法导入图片。');
-          if (payload?.data?.id) importedAssets.push(payload.data);
+          if (data?.id) importedAssets.push(data);
         } catch (nextError) {
-          failed.push({ name: file.name, message: nextError.message || '无法导入图片。' });
+          failed.push({ name: file.name, message: errorMessageForDisplay(nextError, '无法导入图片。') });
         }
         setUploadProgress((current) => ({ completed: Math.min(images.length, (current?.completed || 0) + 1), total: images.length }));
       }, ASSET_IMPORT_CONCURRENCY);
@@ -2123,28 +2417,26 @@ function App() {
   const importDerivedMaskAsset = async (file) => {
     if (!selectedProject) throw new Error('请先选择项目，再导入遮罩图。');
     if (!file?.type?.startsWith('image/')) throw new Error('请选择图片文件作为遮罩。');
-    const response = await fetch('/api/assets/import', {
+    const data = await api('/api/assets/import', {
       method: 'POST',
+      idempotencyKey: uniqueKey('mask-upload'),
+      contentType: file.type || 'application/octet-stream',
       headers: {
-        'content-type': file.type || 'application/octet-stream',
-        'idempotency-key': uniqueKey('mask-upload'),
         'x-daoge-filename': encodeURIComponent(file.name || 'mask.png'),
         'x-daoge-target-type': 'project',
         'x-daoge-target-id': selectedProject.id
       },
-      body: file
+      rawBody: file
     });
-    const payload = await response.json();
-    if (!response.ok || !payload.ok) throw new Error(payload?.error?.message || '无法导入遮罩图。');
     await refresh();
-    return payload.data;
+    return data;
   };
 
   const review = async (assetId, decision, feedback = {}) => {
     try {
       await api('/api/assets/' + encodeURIComponent(assetId) + '/review', { method: 'POST', idempotencyKey: uniqueKey('review'), body: { decision, taskId: selectedTask?.id, roundId: selectedRound?.id, feedback } });
       await refresh();
-    } catch (nextError) { setError(nextError.message || '无法保存选择。'); }
+    } catch (nextError) { reportRequestError(nextError, '无法保存选择。', { operation: 'save-asset-review', phase: 'committing' }); }
   };
   const moveAssetToTrash = async (assetId) => {
     await api('/api/assets/' + encodeURIComponent(assetId) + '/trash', { method: 'POST', idempotencyKey: uniqueKey('trash'), body: {} });
@@ -2159,9 +2451,9 @@ function App() {
         return;
       }
       await moveAssetToTrash(assetId);
-    } catch (nextError) { setError(nextError.message || '无法移入回收站。'); }
+    } catch (nextError) { reportRequestError(nextError, '无法移入回收站。', { operation: 'trash-asset', phase: 'committing' }); }
   };
-  const restore = async (assetId) => { try { await api('/api/assets/' + encodeURIComponent(assetId) + '/restore', { method: 'POST', idempotencyKey: uniqueKey('restore'), body: {} }); await refresh(); } catch (nextError) { setError(nextError.message || '无法恢复资产。'); } };
+  const restore = async (assetId) => { try { await api('/api/assets/' + encodeURIComponent(assetId) + '/restore', { method: 'POST', idempotencyKey: uniqueKey('restore'), body: {} }); await refresh(); } catch (nextError) { reportRequestError(nextError, '无法恢复资产。', { operation: 'restore-asset', phase: 'committing' }); } };
   const applyProjectSelection = (selection) => {
     const nextAssets = selection?.assets || EMPTY;
     const ids = new Set(nextAssets.map((asset) => asset.id));
@@ -2183,7 +2475,7 @@ function App() {
     selectionWriteQueue.current = operation.catch(() => undefined);
     void operation.catch(async (nextError) => {
       if (selectionProjectIdRef.current !== projectId || epoch !== selectionMutationEpoch.current) return;
-      setError(nextError.message || fallbackMessage);
+      reportRequestError(nextError, fallbackMessage, { operation: 'save-asset-selection', phase: 'committing' });
       await refresh();
     }).finally(() => { if (selectionProjectIdRef.current === projectId) markSelectionBusy(assetIds, false); });
   };
@@ -2247,10 +2539,20 @@ function App() {
       const uniqueIds = [...new Set(assetIds)].filter(Boolean);
       for (const assetId of uniqueIds) await api('/api/assets/' + encodeURIComponent(assetId) + '/review', { method: 'POST', idempotencyKey: uniqueKey('canvas-review'), body: { decision, taskId: selectedTask?.id, roundId: selectedRound?.id, feedback: {} } });
       await refresh();
-    } catch (nextError) { setError(nextError.message || '无法批量保存评审。'); }
+    } catch (nextError) { reportRequestError(nextError, '无法批量保存评审。', { operation: 'save-batch-review', phase: 'committing' }); }
   };
   const inspectAsset = async (assetId) => {
-    try { const data = await api('/api/assets/' + encodeURIComponent(assetId) + '/provenance'); setAssetProvenance(data.provenance || null); } catch (nextError) { setError(nextError.message || '无法读取素材来源与评审记录。'); }
+    const request = assetProvenanceRequests.current.begin(String(assetId));
+    try {
+      const data = await api('/api/assets/' + encodeURIComponent(assetId) + '/provenance', { signal: request.signal });
+      if (!request.isCurrent()) return false;
+      setAssetProvenance(data.provenance || null);
+      return true;
+    } catch (nextError) {
+      if (isAbortError(nextError) || !request.isCurrent()) return false;
+      reportRequestError(nextError, '无法读取素材来源与评审记录。', { operation: 'inspect-asset-provenance', phase: 'loading' });
+      return false;
+    }
   };
   const downloadAsset = (asset) => {
     const link = document.createElement('a');
@@ -2280,7 +2582,7 @@ function App() {
       await api('/api/assets/' + encodeURIComponent(asset.id) + '/shared', { method: 'POST', idempotencyKey: uniqueKey('asset-shared'), body: { shared } });
       setNotice(shared ? '图片已加入跨项目共享素材。' : '图片已从跨项目共享素材移除。');
       await refresh();
-    } catch (nextError) { setError(nextError.message || '无法更新跨项目共享素材。'); }
+    } catch (nextError) { reportRequestError(nextError, '无法更新跨项目共享素材。', { operation: 'set-asset-shared', phase: 'committing' }); }
   };
   const copyAsset = async (asset) => {
     const fileUrl = asset.fileUrl || assetOriginalUrl(asset);
@@ -2298,7 +2600,7 @@ function App() {
         return;
       }
       throw new Error('当前浏览器未提供剪贴板权限。');
-    } catch (nextError) { setError(nextError.message || '无法复制图片，请使用下载原图。'); }
+    } catch (nextError) { reportRequestError(nextError, '无法复制图片，请使用下载原图。', { operation: 'copy-asset', phase: 'requesting' }); }
   };
   const completeDelivery = async () => {
     if (!selectedProject) { setError('请先打开一个项目。'); return; }
@@ -2342,7 +2644,7 @@ function App() {
         await refresh();
       }
     } catch (nextError) {
-      if (isDeliveryOperationCurrent({ activeProjectId: activeProjectIdRef.current, projectId, currentEpoch: deliveryOperationEpoch.current, operationEpoch })) setError(nextError.message || '无法继续交付；当前阶段已保留，可重试。');
+      if (isDeliveryOperationCurrent({ activeProjectId: activeProjectIdRef.current, projectId, currentEpoch: deliveryOperationEpoch.current, operationEpoch })) reportRequestError(nextError, '无法继续交付；当前阶段已保留，可重试。', { operation: 'complete-delivery', phase: 'committing' });
     } finally {
       if (isDeliveryOperationCurrent({ activeProjectId: activeProjectIdRef.current, projectId, currentEpoch: deliveryOperationEpoch.current, operationEpoch })) {
         deliveryInteractionRef.current.end();
@@ -2361,7 +2663,7 @@ function App() {
         await api('/api/deliveries/' + encodeURIComponent(delivery.id) + path, { method: 'POST', idempotencyKey: uniqueKey('delivery-' + action), body: {} });
       }
       await refresh();
-    } catch (nextError) { setError(nextError.message || '无法更新交付状态。'); } finally { setDeliveryBusyId(null); }
+    } catch (nextError) { reportRequestError(nextError, '无法更新交付状态。', { operation: 'delivery-action', phase: 'committing' }); } finally { setDeliveryBusyId(null); }
   };
   const toggleComparedRound = (roundId) => {
     const next = compareRoundIds.includes(roundId) ? compareRoundIds.filter((id) => id !== roundId) : [...compareRoundIds, roundId].slice(0, 12);
@@ -2409,7 +2711,7 @@ function App() {
       await refresh();
       navigateRoute(selectProject(route, project.id));
     } catch (nextError) {
-      setCreationError(nextError.message || '无法创建项目。');
+      setCreationError(errorMessageForDisplay(nextError, '无法创建项目。'));
     } finally {
       setCreationBusy(false);
     }
@@ -2434,7 +2736,7 @@ function App() {
       await refresh();
       navigateRoute(createdRound ? { view: 'lineage', projectId: selectedProject.id, taskId: createdTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' } : selectTask(route, createdTask.id));
     } catch (nextError) {
-      setCreationError(nextError.message || '无法创建任务。');
+      setCreationError(errorMessageForDisplay(nextError, '无法创建任务。'));
     } finally {
       setCreationBusy(false);
     }
@@ -2457,7 +2759,7 @@ function App() {
           const plan = planWithReferenceMaterials(createdRound.plan || {}, [...materialMap.values()]);
           await api('/api/rounds/' + encodeURIComponent(createdRound.id) + '/draft-context', { method: 'PUT', idempotencyKey: uniqueKey('round-reference-create'), body: { plan, expectedVersion: createdRound.version } });
         } catch (nextError) {
-          referenceAttachError = nextError.message || '参考素材未能自动加入。';
+          referenceAttachError = errorMessageForDisplay(nextError, '参考素材未能自动加入。');
         }
         setPendingReferenceAfterRound(null);
       }
@@ -2467,7 +2769,7 @@ function App() {
       await refresh();
       navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: selectedTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' });
     } catch (nextError) {
-      setCreationError(nextError.message || '无法创建轮次。');
+      setCreationError(errorMessageForDisplay(nextError, '无法创建轮次。'));
     } finally {
       setCreationBusy(false);
     }
@@ -2536,8 +2838,8 @@ function App() {
       setEventRevision((current) => ({ ...current, planVersions: current.planVersions + 1, creativeRecord: current.creativeRecord + 1 }));
       return true;
     } catch (nextError) {
-      setReferenceError(nextError.message || '无法保存参考素材。');
-      setError(nextError.message || '无法保存参考素材。');
+      setReferenceError(errorMessageForDisplay(nextError, '无法保存参考素材。'));
+      reportRequestError(nextError, '无法保存参考素材。', { operation: 'save-reference-materials', phase: 'committing' });
       return false;
     } finally {
       setReferenceBusy(false);
@@ -2618,7 +2920,7 @@ function App() {
       await refresh();
       navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: selectedTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' });
     } catch (nextError) {
-      setDerivedError(nextError.message || '无法基于图片创建下一轮。');
+      setDerivedError(errorMessageForDisplay(nextError, '无法基于图片创建下一轮。'));
     } finally {
       setDerivedBusy(false);
     }
@@ -2635,7 +2937,7 @@ function App() {
         const availableRounds = await loadReferenceRounds(candidateTasks);
         target = referenceTargetForAssets(sourceAssets, availableRounds);
       } catch (nextError) {
-        setError(nextError.message || '无法读取可用草稿轮次，请刷新后重试。');
+        reportRequestError(nextError, '无法读取可用草稿轮次，请刷新后重试。', { operation: 'load-reference-rounds', phase: 'loading' });
         return false;
       }
     }
@@ -2692,7 +2994,7 @@ function App() {
       if (!addAsNegative) await refresh();
       setNotice(negativeSaved ? '不采用原因已保存，并已作为当前草稿轮次反例参考。' : '不采用原因已保存。');
     } catch (nextError) {
-      setRejectError(nextError.message || '无法保存不采用原因。');
+      setRejectError(errorMessageForDisplay(nextError, '无法保存不采用原因。'));
     } finally {
       setRejectBusy(false);
     }
@@ -2719,7 +3021,7 @@ function App() {
       batchOperationRef.current = null;
       await refresh();
     } catch (nextError) {
-      setError(nextError.message || '无法更新交付批次。');
+      reportRequestError(nextError, '无法更新交付批次。', { operation: 'update-delivery-batch', phase: 'committing' });
     } finally {
       batchBusyRef.current = false;
       setBatchBusy(false);
@@ -2773,7 +3075,7 @@ function App() {
       if (!prompt) throw new Error('当前运行没有可复制的提示词。');
       await navigator.clipboard.writeText(prompt);
       setNotice(copiedItemCount ? '已复制 ' + copiedItemCount + ' 条逐图完整提示词。' : prompt.length > summaryPrompt.length ? '已复制本次运行的完整提示词。' : '已复制本次运行的提示词。');
-    } catch (nextError) { setError(nextError.message || '无法复制本次提示词。'); }
+    } catch (nextError) { reportRequestError(nextError, '无法复制本次提示词。', { operation: 'copy-run-prompt', phase: 'requesting' }); }
   };
   const openGenerationConfirmation = async (targetRound = selectedRound) => {
     if (!targetRound || targetRound.status !== 'awaiting_confirmation') return;
@@ -2789,7 +3091,7 @@ function App() {
       if (!status.pendingConfirmation || status.context?.round?.id !== targetRound.id) throw new Error('请先由当前智能体会话发起这个计划的确认挑战。');
       setGenerationConfirmation({ challenge: status.pendingConfirmation, round: targetRound });
     } catch (nextError) {
-      setError(nextError.message || '无法读取本次生成确认挑战。');
+      reportRequestError(nextError, '无法读取本次生成确认挑战。', { operation: 'load-generation-confirmation', phase: 'loading' });
     } finally {
       setGenerationConfirmationBusy(false);
     }
@@ -2811,7 +3113,7 @@ function App() {
       await refresh();
       return true;
     } catch (nextError) {
-      setGenerationConfirmationError(nextError.message || '确认计划失败。');
+      setGenerationConfirmationError(errorMessageForDisplay(nextError, '确认计划失败。'));
       return false;
     } finally {
       setGenerationConfirmationBusy(false);
@@ -2839,7 +3141,7 @@ function App() {
       }
       setConfirmation(null);
     } catch (nextError) {
-      setConfirmationError(nextError.message || (confirmation.kind === 'trash' ? '无法移入回收站。' : '无法归档项目。'));
+      setConfirmationError(errorMessageForDisplay(nextError, confirmation.kind === 'trash' ? '无法移入回收站。' : '无法归档项目。'));
     } finally { setConfirmationBusy(false); }
   };
   const openProviderDetails = () => { setProviderDetails({ open: true }); };
@@ -2849,7 +3151,7 @@ function App() {
     try {
       const [plans, dryRuns] = await Promise.all([api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/plan-versions', { signal: request.signal }), api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/dry-runs', { signal: request.signal })]);
       if (request.isCurrent()) setAdvancedDetails(normalizeAdvancedDetails({ plans: plans.planVersions, dryRuns: dryRuns.dryRuns }));
-    } catch (nextError) { if (request.isCurrent() && !isAbortError(nextError)) setError(nextError.message || '无法读取高级详情。'); }
+    } catch (nextError) { if (request.isCurrent() && !isAbortError(nextError)) reportRequestError(nextError, '无法读取高级详情。', { operation: 'load-advanced-details', phase: 'loading' }); }
   };
   useEffect(() => {
     advancedDetailRequests.current.cancel();
@@ -2862,7 +3164,7 @@ function App() {
       setPlanVersionsLoading(true);
       const plans = await api('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/plan-versions', { signal: request.signal });
       if (request.isCurrent()) setPlanVersions(plans.planVersions || EMPTY);
-    } catch (nextError) { if (request.isCurrent() && !isAbortError(nextError)) setError(nextError.message || '无法读取计划版本。'); } finally { if (request.isCurrent()) setPlanVersionsLoading(false); }
+    } catch (nextError) { if (request.isCurrent() && !isAbortError(nextError)) reportRequestError(nextError, '无法读取计划版本。', { operation: 'load-plan-versions', phase: 'loading' }); } finally { if (request.isCurrent()) setPlanVersionsLoading(false); }
   };
   useEffect(() => {
     if (view !== 'prompts' || !selectedRound) {
@@ -2904,7 +3206,7 @@ function App() {
   </section>;
   const viewRenderers = {
     projects: () => <ProjectIndex projects={projects} projectTemplates={projectTemplates} onCreateProject={() => openCreationDialog('project')} onOpenProject={(projectId) => navigateRoute(selectProject(route, projectId))} />,
-    'project-overview': () => selectedProject ? <ProjectOverview project={selectedProject} projectTemplates={projectTemplates} tasks={tasks} selectedCount={selectedAssets.length} onCreateTask={() => openCreationDialog('task')} onArchive={openArchiveConfirmation} onOpenTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenAssets={() => navigateRoute({ view: 'assets', assetScope: 'project', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenDeliveries={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null,
+    'project-overview': () => selectedProject ? <ProjectOverview project={selectedProject} projectTemplates={projectTemplates} tasks={tasks} selectedCount={selectedAssets.length} qualityMetrics={qualityMetrics} qualityMetricsLoading={qualityMetricsLoading} qualityMetricsError={qualityMetricsError} onRefreshQualityMetrics={refreshQualityMetrics} onCreateTask={() => openCreationDialog('task')} onArchive={openArchiveConfirmation} onOpenTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenAssets={() => navigateRoute({ view: 'assets', assetScope: 'project', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenDeliveries={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null,
     lineage: () => selectedProject ? <CreativeLineageCanvas
       request={api}
       project={selectedProject}
@@ -2918,6 +3220,7 @@ function App() {
       runItemCoverage={lineageRunItemCoverage}
       assets={visibleAssets}
       assetTotal={assetTotal}
+      assetCoverage={lineageAssetCoverage}
       sharedAssets={sharedAssets}
       selectedAssetIds={selectedAssetIds}
       selectionBusyIds={selectionBusyIds}
@@ -2985,9 +3288,9 @@ function App() {
         </> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={restoreSessionContext} />}
       </div>
       <RuntimeHealthAlertStrip studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
-      {connectionError && <div className="connection-error-strip" role="alert" aria-live="assertive"><CloudOff size={16} /><span>{connectionError}</span></div>}
-      {error && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={16} /><span>{error}</span><IconButton label="关闭请求错误" onClick={() => setError('')}><X size={15} /></IconButton></div>}
-      {contextError && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={16} /><span>{contextError}</span><IconButton label="关闭上下文错误" onClick={() => setContextError('')}><X size={15} /></IconButton></div>}
+      {connectionError && <WorkbenchErrorAlert error={connectionError} className="connection-error-strip" icon={CloudOff} dismissLabel="关闭连接错误" onDismiss={() => setConnectionError('')} onRetry={() => void retryWorkbenchError(connectionError, setConnectionError)} onReconnect={() => void reconnectWorkbenchError(connectionError, setConnectionError)} />}
+      {error && <WorkbenchErrorAlert error={error} className="error-strip" onDismiss={() => setError('')} onRetry={() => void retryWorkbenchError(error, setError)} onReconnect={() => void reconnectWorkbenchError(error, setError)} />}
+      {contextError && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={15} aria-hidden="true" /><span>{errorMessageForDisplay(contextError, '无法恢复当前工作上下文。')}</span><button type="button" className="outline-button" onClick={() => setContextError('')}>关闭上下文错误</button></div>}
       {notice && <div className="notice-strip" role="status" aria-live="polite"><Check size={16} /><span>{notice}</span><IconButton label="关闭通知" onClick={() => setNotice('')}><X size={15} /></IconButton></div>}
       {renderActiveView()}
     </section>

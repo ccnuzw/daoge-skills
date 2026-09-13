@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { closeStudioDatabase, openStudioDatabase } = require('../../dist/vnext/studio/database');
 const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan } = require('../../dist/vnext/domain/studio-commands');
-const { assetFilePath, getAssetImpact, importStudioAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
+const { assetFilePath, getAssetImpact, importStudioAsset, setReviewDecision, setStudioAssetShared } = require('../../dist/vnext/domain/assets');
 const { createDelivery, exportDelivery, exportDeliveryAsync, getDelivery, openDeliveryExportFile, prepareDelivery } = require('../../dist/vnext/domain/deliveries');
 const { configureProvider } = require('./provider-test-helper');
 const { portablePathSegment } = require('../../dist/vnext/shared/windows');
@@ -156,6 +156,37 @@ test('exports managed assets with a contact sheet and redacted creative record',
     assert.equal(defaultManifest.includes(asset.id), false);
     assert.equal(defaultContactSheet.includes(asset.id), false);
     assert.equal(fs.readdirSync(defaultExport.directory).some((file) => file.includes(asset.id)), false);
+  } finally {
+    closeStudioDatabase(db);
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('delivery creative record excludes foreign reviews on a shared asset', () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-review-scope-'));
+  const initialized = initializeStudio({ workspaceRoot });
+  const db = openStudioDatabase(initialized.paths, initialized.manifest);
+  try {
+    const project = createProject(db, { studioId: initialized.manifest.studioId, name: '当前交付项目', idempotencyKey: 'review-scope-project' }).value;
+    const foreignProject = createProject(db, { studioId: initialized.manifest.studioId, name: '其他项目', idempotencyKey: 'review-scope-foreign-project' }).value;
+    const asset = importStudioAsset(db, initialized.paths, { studioId: initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: project.id });
+    setStudioAssetShared(db, { studioId: initialized.manifest.studioId, assetId: asset.id, shared: true });
+    setReviewDecision(db, { studioId: initialized.manifest.studioId, assetId: asset.id, decision: 'keep', context: { projectId: project.id, rationale: '当前项目评审' }, feedback: { note: '当前项目反馈' } });
+    setReviewDecision(db, { studioId: initialized.manifest.studioId, assetId: asset.id, decision: 'reject', context: { projectId: foreignProject.id, rationale: '其他项目评审' }, feedback: { note: '其他项目反馈' } });
+
+    const draft = createDelivery(db, { studioId: initialized.manifest.studioId, projectId: project.id, name: '范围交付', assetIds: [asset.id], includeCreativeRecord: true, idempotencyKey: 'review-scope-delivery' });
+    assert.equal(draft.items[0].review.context.projectId, project.id);
+    assert.equal(draft.items[0].review.feedback.note, '当前项目反馈');
+    assert.equal(JSON.stringify(draft).includes('其他项目'), false);
+    const prepared = prepareDelivery(db, { studioId: initialized.manifest.studioId, deliveryId: draft.id, idempotencyKey: 'review-scope-ready' });
+    const exported = exportDelivery(db, initialized.paths, { studioId: initialized.manifest.studioId, deliveryId: prepared.id, idempotencyKey: 'review-scope-export' });
+    const record = JSON.parse(fs.readFileSync(path.join(exported.directory, 'creative-record.json'), 'utf8'));
+    assert.equal(record.reviews.length, 1);
+    assert.equal(record.reviews[0].context.projectId, project.id);
+    assert.equal(record.reviews[0].feedback.note, '当前项目反馈');
+    assert.equal(JSON.stringify(record).includes(foreignProject.id), false);
+    assert.equal(JSON.stringify(record).includes('其他项目评审'), false);
+    assert.equal(JSON.stringify(record).includes('其他项目反馈'), false);
   } finally {
     closeStudioDatabase(db);
     fs.rmSync(workspaceRoot, { recursive: true, force: true });

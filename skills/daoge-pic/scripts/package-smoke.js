@@ -123,7 +123,7 @@ function isSensitivePackagePath(file) {
 
 function assertPackagePaths(paths) {
   const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/cli/daemon-shutdown.js', 'dist/vnext/cli/daemon-shutdown.d.ts', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'protocol-version.json', 'references/provider.env.example', 'docs/daoge_pic_vnext_upgrade_spec_zh.md', 'docs/vnext_verification_evidence_zh.md'];
-  const allowed = /^(dist\/(?:vnext\/(?:api|cli|domain|media|providers|runner|runtime|shared|studio)\/[A-Za-z0-9._/-]+|workbench\/(?:index\.html|assets\/[A-Za-z0-9._-]+))$|scripts\/daoge\.js$|references\/provider\.env\.example$|docs\/(?:daoge_pic_vnext_upgrade_spec_zh|vnext_verification_evidence_zh)\.md$|README\.md$|SKILL\.md$|protocol-version\.json$|LICENSE$|package\.json$)/;
+  const allowed = /^(dist\/(?:vnext\/(?:api|backup|cli|domain|media|provenance|providers|runner|runtime|shared|studio|usage)\/[A-Za-z0-9._/-]+|workbench\/(?:index\.html|assets\/[A-Za-z0-9._-]+))$|scripts\/daoge\.js$|references\/provider\.env\.example$|docs\/(?:daoge_pic_vnext_upgrade_spec_zh|vnext_verification_evidence_zh)\.md$|README\.md$|SKILL\.md$|protocol-version\.json$|LICENSE$|package\.json$)/;
   const missing = required.filter((file) => !paths.includes(file));
   const unexpected = paths.filter((file) => !allowed.test(file));
   const maps = paths.filter((file) => file.endsWith('.map'));

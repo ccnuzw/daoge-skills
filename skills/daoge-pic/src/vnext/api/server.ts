@@ -6,27 +6,35 @@ import { URL } from 'node:url';
 import { Readable } from 'node:stream';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase, subscribeStudioEvents, withTransaction } from '../studio/database';
 import { hardenStudioAccess, ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
-import { isProviderId, ProviderCapabilities, ProviderId, providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
-import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
+import { isProviderId, providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
+import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
 import { isProviderEndpointTrustMode, providerDescriptor, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, referenceEnabledForProvider } from '../providers/descriptors';
 import { createImageProvider, requestEndpointFor } from '../providers/http-adapters';
+import type { ImageProvider } from '../providers/contracts';
 import { probeHttpEndpoint } from '../providers/http-safety';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getRound, getStudioSession, getTask, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateRoundDraftContext, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, getDryRunPreview, getGenerationRun, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
 import { StateTransitionError } from '../domain/states';
 import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listScopedStudioAssetsByIds, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
-import { getLatestRun, listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
+import { getQualityMetrics } from '../domain/quality-metrics';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
+import { getLatestRun, listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { listProjectTemplates } from '../domain/project-templates';
+import { archiveConfirmedTemplate, getConfirmedTemplate, listConfirmedTemplates, rollbackConfirmedTemplate, saveConfirmedTemplate, type ConfirmedTemplateType, type SaveConfirmedTemplateInput } from '../domain/confirmed-templates';
+import { configureBudget, getBudgetPolicy } from '../usage/budget';
+import { listUsageLedger, summarizeUsage, type UsageAttribution, type UsageEstimate } from '../usage/ledger';
 import { completeDeliveryStepAsync, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDeliveryAsync, getDelivery, listDeliveries, openDeliveryExportFileAsync, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
 import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
 import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
+import { getPersistedStudioProvenance } from '../provenance/studio';
 import { listProjectSelectionAssets, setProjectAssetSelected, setProjectAssetsSelected } from '../domain/project-selections';
 import { getCanvasLayout, saveCanvasLayout, CanvasLayoutScopeType } from '../domain/canvas-layouts';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { studioEventWindow } from './events';
 import { discardStagedImage, MediaArchiveError, MediaValidationError, openVerifiedManagedFileAsync, stageImageStream, VerifiedManagedFile } from '../media/archive';
+import { StudioGeneratedAssetPersister } from '../media/generated-assets';
+import { reconcileExternalRunItem } from '../runner/external-reconciliation';
 import { thumbnailEtag } from '../media/thumbnails';
 import { MediaJobResult, MediaProcessPool, MediaSource, MediaZipEntry } from '../runtime/media-worker-pool';
 import { daemonRestartAvailable, daemonShutdownAvailable, requestDaemonRestart, requestDaemonShutdown } from '../runtime/restart';
@@ -34,8 +42,11 @@ import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrenc
 import type { ProcessPoolHealth } from '../runtime/worker-pool';
 import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName, LocalAuthentication } from './local-auth';
 import { ConfirmationGate, canonicalValue, planHash } from './confirmation-gate';
-import { isSupportedProtocolVersion, protocolStatus, SKILL_PROTOCOL_NAME, SUPPORTED_PROTOCOL_RANGE } from '../shared/protocol';
+import { isSupportedProtocolVersion, protocolStatus, RUNTIME_VERSION, SKILL_PROTOCOL_NAME, SUPPORTED_PROTOCOL_RANGE } from '../shared/protocol';
 import { WorkbenchPresence } from '../runtime/workbench-presence';
+import { createBackupManifest, type BackupManifest, type BackupManifestEntryInput } from '../backup/manifest';
+import { createRestoreDryRun } from '../backup/restore';
+import { buildUpgradeRollbackPoint, evaluateUpgradeCompatibility } from '../backup/upgrade';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -44,6 +55,195 @@ const MAX_ARCHIVE_BYTES = 150 * 1024 * 1024;
 const MAX_BATCH_IDS = 500;
 
 type JsonBody = Record<string, unknown>;
+
+function workspaceRelativePath(root: string, target: string): string {
+  const relative = path.relative(root, target);
+  if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new InvalidCommandError('当前 Studio 路径无法安全纳入 backup manifest。');
+  return relative.split(path.sep).join('/');
+}
+
+function backupReceiptRequest(body: JsonBody, rootFields: readonly string[] = []): JsonBody {
+  const safe = { ...body };
+  for (const field of rootFields) {
+    if (typeof safe[field] === 'string') safe[field] = createHash('sha256').update(safe[field] as string, 'utf8').digest('hex');
+  }
+  return safe;
+}
+
+function backupError(message: string): InvalidCommandError {
+  return new InvalidCommandError(message);
+}
+
+function safeControlledAssetPath(root: string, value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) throw backupError('当前 Studio 没有可安全生成 backup manifest。');
+  const absolute = path.resolve(root, value);
+  const relative = workspaceRelativePath(root, absolute);
+  if (!relative.startsWith('daoge-assets/')) throw backupError('当前 Studio 没有可安全生成 backup manifest。');
+  return relative;
+}
+interface BackupDeliveryExportFile {
+  path: string;
+  contentHash: string;
+  byteSize: number;
+}
+
+function assertBackupNoSymlinkHierarchy(root: string, target: string): void {
+  const relative = path.relative(root, target);
+  if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw backupError('Backup manifest 交付路径无法安全管理。');
+  let current = root;
+  const rootStat = (() => {
+    try { return fs.lstatSync(current); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw backupError('Backup manifest 交付路径缺失。');
+      throw backupError('Backup manifest 无法读取交付路径。');
+    }
+  })();
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw backupError('Backup manifest 交付路径不安全。');
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(current); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw backupError('Backup manifest 已导出交付文件缺失。');
+      throw backupError('Backup manifest 无法读取已导出交付文件。');
+    }
+    if (stat.isSymbolicLink()) throw backupError('Backup manifest 拒绝包含符号链接交付文件。');
+  }
+}
+
+function safeDeliveryExportDirectory(paths: InitializeStudioResult['paths'], value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.includes('\0') || value.includes('\\') || path.isAbsolute(value)) throw backupError('Backup manifest 已导出交付目录无效。');
+  const segments = value.split('/');
+  if (segments.length < 2 || segments[0] !== 'daoge-deliveries' || segments.some((segment) => !segment || segment === '.' || segment === '..')) throw backupError('Backup manifest 已导出交付目录无效。');
+  const directory = path.resolve(paths.workspaceRoot, ...segments);
+  const deliveriesRoot = path.resolve(paths.deliveriesRoot);
+  const withinRoot = path.relative(deliveriesRoot, directory);
+  if (!withinRoot || withinRoot === '..' || withinRoot.startsWith('..' + path.sep) || path.isAbsolute(withinRoot)) throw backupError('Backup manifest 已导出交付目录超出受管目录。');
+  const relative = workspaceRelativePath(paths.workspaceRoot, directory);
+  if (relative !== segments.join('/')) throw backupError('Backup manifest 已导出交付目录无效。');
+  assertBackupNoSymlinkHierarchy(paths.workspaceRoot, directory);
+  let stat: fs.Stats;
+  try { stat = fs.lstatSync(directory); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw backupError('Backup manifest 已导出交付目录缺失。');
+    throw backupError('Backup manifest 无法读取已导出交付目录。');
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw backupError('Backup manifest 已导出交付目录无效。');
+  return relative;
+}
+
+function safeDeliveryExportFileName(value: unknown): string {
+  if (typeof value !== 'string' || !value || value === '.' || value === '..' || value.includes('/') || value.includes('\\') || value.includes('\0') || path.isAbsolute(value) || /^[A-Za-z]:/.test(value) || Buffer.byteLength(value, 'utf8') > 255) throw backupError('Backup manifest 已导出交付文件名无效。');
+  return value;
+}
+
+function exportedDeliveryBackupEntries(db: StudioDatabase, paths: InitializeStudioResult['paths'], studioId: string, seenPaths: Set<string>): { entries: BackupManifestEntryInput[]; identities: BackupDeliveryExportFile[] } {
+  const rows = db.prepare("SELECT delivery.id, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE project.studio_id = ? AND delivery.status = 'exported' ORDER BY delivery.id").all(studioId) as Array<{ id: string; manifest_json: string }>;
+  const entries: BackupManifestEntryInput[] = [];
+  const identities: BackupDeliveryExportFile[] = [];
+  for (const row of rows) {
+    let manifest: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(row.manifest_json) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid');
+      manifest = parsed as Record<string, unknown>;
+    } catch {
+      throw backupError('Backup manifest 已导出交付清单无效。');
+    }
+    const directory = safeDeliveryExportDirectory(paths, manifest.exportDirectory);
+    if (!Array.isArray(manifest.exportFiles) || !manifest.exportFiles.length) throw backupError('Backup manifest 已导出交付冻结文件清单无效。');
+    const names = new Set<string>();
+    for (const item of manifest.exportFiles) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw backupError('Backup manifest 已导出交付冻结文件身份无效。');
+      const file = item as Record<string, unknown>;
+      const name = safeDeliveryExportFileName(file.name);
+      if (names.has(name)) throw backupError('Backup manifest 已导出交付冻结文件重复。');
+      names.add(name);
+      const contentHash = typeof file.contentHash === 'string' ? file.contentHash : '';
+      const byteSize = file.byteSize;
+      if (!/^[a-f0-9]{64}$/.test(contentHash) || !Number.isSafeInteger(byteSize) || Number(byteSize) < 0) throw backupError('Backup manifest 已导出交付冻结文件身份无效。');
+      const relativePath = directory + '/' + name;
+      if (seenPaths.has(relativePath)) throw backupError('Backup manifest 已导出交付路径重复。');
+      seenPaths.add(relativePath);
+      const absolutePath = path.join(paths.workspaceRoot, ...relativePath.split('/'));
+      assertBackupNoSymlinkHierarchy(paths.workspaceRoot, absolutePath);
+      let stat: fs.Stats;
+      try { stat = fs.lstatSync(absolutePath); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw backupError('Backup manifest 已导出交付文件缺失。');
+        throw backupError('Backup manifest 无法读取已导出交付文件。');
+      }
+      if (stat.isSymbolicLink() || !stat.isFile()) throw backupError('Backup manifest 拒绝包含非普通交付文件。');
+      entries.push({ path: relativePath, category: 'media', required: true });
+      identities.push({ path: relativePath, contentHash, byteSize: Number(byteSize) });
+    }
+  }
+  return { entries, identities };
+}
+
+function assertDeliveryBackupIdentities(manifest: BackupManifest, identities: readonly BackupDeliveryExportFile[]): void {
+  const actual = new Map(manifest.entries.map((entry) => [entry.path, entry]));
+  for (const expected of identities) {
+    const entry = actual.get(expected.path);
+    if (!entry || entry.required !== true || entry.byteSize !== expected.byteSize || entry.sha256 !== expected.contentHash) throw backupError('Backup manifest 已导出交付文件身份与冻结记录不一致。');
+  }
+}
+
+function assertBackupWalEmpty(databasePath: string): void {
+  const walPath = databasePath + '-wal';
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(walPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw backupError('Backup manifest 无法确认 studio.db WAL 状态；为避免返回不完整数据库已拒绝。');
+  }
+  if (stat.isSymbolicLink() || !stat.isFile() || stat.size !== 0) throw backupError('Backup manifest 拒绝返回：studio.db WAL 未清空。');
+}
+
+function checkpointBackupDatabase(db: StudioDatabase, databasePath: string): void {
+  try {
+    const checkpoint = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy?: unknown; log?: unknown } | undefined;
+    const busy = Number(checkpoint?.busy);
+    const log = Number(checkpoint?.log);
+    if (!checkpoint || !Number.isInteger(busy) || !Number.isInteger(log) || busy !== 0 || log !== 0) throw backupError('Backup manifest 无法完成 studio.db WAL checkpoint；为避免返回不完整数据库已拒绝。');
+  } catch (error) {
+    if (error instanceof InvalidCommandError) throw error;
+    throw backupError('Backup manifest 无法完成 studio.db WAL checkpoint；为避免返回不完整数据库已拒绝。');
+  }
+  assertBackupWalEmpty(databasePath);
+}
+
+function withBackupManifestLock<T>(db: StudioDatabase, databasePath: string, inventory: () => T): T {
+  checkpointBackupDatabase(db, databasePath);
+  try {
+    db.exec('BEGIN IMMEDIATE');
+  } catch {
+    throw backupError('Backup manifest 无法锁定 studio.db；为避免返回不完整数据库已拒绝。');
+  }
+  try {
+    // A writer may have committed between the checkpoint and BEGIN IMMEDIATE. Recheck
+    // while the write lock is held so the database file cannot be paired with a WAL.
+    assertBackupWalEmpty(databasePath);
+    const result = inventory();
+    try {
+      db.exec('COMMIT');
+    } catch {
+      try { db.exec('ROLLBACK'); } catch { /* best effort: the response remains fail-closed */ }
+      throw backupError('Backup manifest 无法提交一致性锁；已拒绝返回。');
+    }
+    return result;
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch { /* best effort: the response remains fail-closed */ }
+    if (error instanceof InvalidCommandError) throw error;
+    throw backupError('Backup manifest inventory 无法安全读取；已拒绝返回。');
+  }
+}
+function normalizeBackupInputError(operation: string, error: unknown): never {
+  if (error instanceof InvalidCommandError) throw error;
+  throw backupError(operation + ' 输入无法安全处理。');
+}
+
 
 function boundedIds(value: unknown, label: string, options: { optional?: boolean; max?: number } = {}): string[] | undefined {
   if (value === undefined && options.optional) return undefined;
@@ -177,6 +377,37 @@ function assetScope(value: string | null): AssetScope | null {
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+function nonNegativeSafeInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new InvalidCommandError(label + ' 必须是非负安全整数。');
+  return value;
+}
+
+function assertAllowedBodyKeys(body: JsonBody, allowed: readonly string[], label: string): void {
+  const allowedSet = new Set(allowed);
+  for (const key of Object.keys(body)) if (!allowedSet.has(key)) throw new InvalidCommandError(label + ' 请求体包含不支持的字段：' + key + '。');
+}
+
+function optionalQueryText(parsed: URL, name: string): string | undefined {
+  const value = text(parsed.searchParams.get(name));
+  return value || undefined;
+}
+
+function usageAttributionFromQuery(studioId: string, parsed: URL): UsageAttribution {
+  return {
+    studioId,
+    profileId: optionalQueryText(parsed, 'profileId'),
+    projectId: optionalQueryText(parsed, 'projectId'),
+    taskId: optionalQueryText(parsed, 'taskId'),
+    roundId: optionalQueryText(parsed, 'roundId'),
+    runId: optionalQueryText(parsed, 'runId'),
+    runItemId: optionalQueryText(parsed, 'runItemId')
+  };
+}
+
+function usageLimitFromQuery(parsed: URL): number | undefined {
+  const value = optionalQueryText(parsed, 'limit');
+  return value === undefined ? undefined : numberValue(value);
 }
 
 function draftProviderConfig(input: Record<string, unknown>): ResolvedProviderConfig {
@@ -503,20 +734,10 @@ export function streamVerifiedFileResponse(request: IncomingMessage, response: S
 
 interface ActiveDaemonRuntime {
   startedAt?: unknown;
-  provider?: { profileId?: unknown; configVersion?: unknown; providerId?: unknown; model?: unknown; endpoint?: unknown } | null;
+  provider?: { profileId?: unknown; configVersion?: unknown; providerId?: unknown; model?: unknown } | null;
   providerConcurrency?: ProviderConcurrencySnapshot | null;
   workerPool?: { health?: ProcessPoolHealth } | null;
   mediaWorkerPool?: { health?: ProcessPoolHealth } | null;
-}
-interface SafeProviderSnapshot {
-  profileId: string;
-  profileName: string;
-  configVersion: number;
-  providerId: ProviderId;
-  model: string;
-  referenceEnabled: boolean;
-  endpoint: string | null;
-  capabilities: ProviderCapabilities;
 }
 
 function readActiveDaemonRuntime(runtimeDir: string): ActiveDaemonRuntime | null {
@@ -629,29 +850,56 @@ export class LocalStudioService {
     const run = this.db.prepare("SELECT id FROM generation_runs WHERE provider_profile_id = ? AND status NOT IN ('completed', 'failed', 'cancelled') LIMIT 1").get(profileId) as { id: string } | undefined;
     if (run) throw new InvalidCommandError('该 Provider Profile 仍有未完成运行；请先完成、取消或恢复运行后再' + action + '。');
   }
+  private assertProviderProfileInWorkspace(value: unknown): string | null {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value !== 'string') throw new InvalidCommandError('profileId 必须是字符串。');
+    const profileId = value.trim();
+    if (!profileId) return null;
+    if (profileId.length > 256) throw new InvalidCommandError('profileId 过长。');
+    if (!this.providerDb.prepare('SELECT id FROM provider_profiles WHERE id = ?').get(profileId)) throw new StudioNotFoundError('Provider Profile 不属于当前 workspace。');
+    return profileId;
+  }
 
   private runtimeStatus() {
     const record = readActiveDaemonRuntime(this.initialized.paths.runtimeDir);
-    const active = record?.provider && typeof record.provider.profileId === 'string' && Number.isInteger(record.provider.configVersion) && typeof record.provider.providerId === 'string' && typeof record.provider.model === 'string' ? {
+    const activeIdentity = record?.provider && typeof record.provider.profileId === 'string' && Number.isInteger(record.provider.configVersion) && typeof record.provider.providerId === 'string' && typeof record.provider.model === 'string' ? {
       profileId: record.provider.profileId,
       configVersion: Number(record.provider.configVersion),
       providerId: record.provider.providerId,
       model: record.provider.model,
-      endpoint: typeof record.provider.endpoint === 'string' ? record.provider.endpoint : null
     } : null;
     const config = resolveActiveProviderConfig(this.providerDb, this.initialized.paths);
     const desired = config ? providerSnapshot(config) : null;
-    const desiredIdentity = desired ? { profileId: desired.profileId, configVersion: desired.configVersion, providerId: desired.providerId, model: desired.model, endpoint: desired.endpoint } : null;
-    const reconfigurationPending = Boolean(record && JSON.stringify(active) !== JSON.stringify(desiredIdentity));
+    const desiredIdentity = desired ? { profileId: desired.profileId, configVersion: desired.configVersion, providerId: desired.providerId, model: desired.model } : null;
+    const reconfigurationPending = Boolean(record && JSON.stringify(activeIdentity) !== JSON.stringify(desiredIdentity));
     const daemon = {
       mode: record ? 'daemon' : 'standalone',
       startedAt: typeof record?.startedAt === 'string' ? record.startedAt : null,
       workerPool: record?.workerPool?.health || null,
       mediaWorkerPool: record?.mediaWorkerPool?.health || this.mediaWorkerPool.healthSnapshot()
     };
+    const safeDesired = desired ? {
+      profileId: desired.profileId,
+      profileName: desired.profileName,
+      configVersion: desired.configVersion,
+      providerId: desired.providerId,
+      model: desired.model,
+      referenceEnabled: desired.referenceEnabled,
+      endpointTrustMode: desired.endpointTrustMode,
+      limits: desired.limits,
+      descriptorVersion: desired.descriptorVersion,
+      adapterVersion: desired.adapterVersion,
+      capabilities: desired.capabilities
+    } : null;
+    const safeActive = activeIdentity ? {
+      profileId: activeIdentity.profileId,
+      configVersion: activeIdentity.configVersion,
+      providerId: activeIdentity.providerId,
+      model: activeIdentity.model
+    } : null;
     return {
-      desired,
-      active,
+      desired: safeDesired,
+      active: safeActive,
       restartRequired: false,
       reconfigurationPending,
       providerConcurrency: record?.providerConcurrency || null,
@@ -719,7 +967,96 @@ export class LocalStudioService {
       }
       if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { descriptors: providerDescriptorSummaries(), profiles: listProviderProfiles(this.providerDb, this.initialized.paths), status: providerStatus(this.providerDb, this.initialized.paths), runtime: this.runtimeStatus() });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
+      if (request.method === 'GET' && parsed.pathname === '/api/backup/manifest') {
+        const studioId = this.initialized.manifest.studioId;
+        try {
+          const manifest = withBackupManifestLock(this.db, this.initialized.paths.databasePath, () => {
+            const assetCount = countStudioAssets(this.db, studioId, { includeDeleted: true });
+            if (assetCount > 500) throw new InvalidCommandError('当前 Studio 素材数量超过安全 backup manifest 上限；请先缩小范围。');
+            const databasePath = workspaceRelativePath(this.initialized.paths.workspaceRoot, this.initialized.paths.databasePath);
+            const metadataPath = workspaceRelativePath(this.initialized.paths.workspaceRoot, this.initialized.paths.manifestPath);
+            const entries: BackupManifestEntryInput[] = [
+              { path: databasePath, category: 'database' },
+              { path: metadataPath, category: 'metadata' }
+            ];
+            const seenPaths = new Set<string>([databasePath, metadataPath]);
+            for (const asset of listStudioAssets(this.db, studioId, { includeDeleted: true, limit: 500 })) {
+              const relativePath = safeControlledAssetPath(this.initialized.paths.workspaceRoot, asset.storagePath);
+              if (seenPaths.has(relativePath)) throw backupError('Backup manifest 路径重复。');
+              seenPaths.add(relativePath);
+              entries.push({ path: relativePath, category: 'media' });
+            }
+            const deliveries = exportedDeliveryBackupEntries(this.db, this.initialized.paths, studioId, seenPaths);
+            entries.push(...deliveries.entries);
+            const result = createBackupManifest({
+              workspaceRoot: this.initialized.paths.workspaceRoot,
+              studio: { studioId, protocolName: SKILL_PROTOCOL_NAME, protocolVersion: protocolStatus().version, runtimeVersion: RUNTIME_VERSION },
+              entries
+            });
+            assertDeliveryBackupIdentities(result, deliveries.identities);
+            return result;
+          });
+          return success(response, { manifest });
+        } catch (error) {
+          normalizeBackupInputError('Backup manifest', error);
+        }
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/quality-metrics') return success(response, { metrics: getQualityMetrics(this.db, this.initialized.manifest.studioId) });
+      const projectQualityMetricsMatch = /^\/api\/projects\/([^/]+)\/quality-metrics$/.exec(parsed.pathname);
+      if (request.method === 'GET' && projectQualityMetricsMatch) {
+        this.assertProjectInStudio(projectQualityMetricsMatch[1]);
+        return success(response, { metrics: getQualityMetrics(this.db, this.initialized.manifest.studioId, { projectId: projectQualityMetricsMatch[1] }) });
+      }
       if (request.method === 'GET' && parsed.pathname === '/api/project-templates') return success(response, { templates: listProjectTemplates() });
+      if (request.method === 'GET' && parsed.pathname === '/api/confirmed-templates') {
+        if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed templates require Skill/CLI authentication.');
+        const includeArchivedValue = parsed.searchParams.get('includeArchived');
+        let includeArchived: boolean | undefined;
+        if (includeArchivedValue !== null) {
+          if (includeArchivedValue === 'true' || includeArchivedValue === '1') includeArchived = true;
+          else if (includeArchivedValue === 'false' || includeArchivedValue === '0') includeArchived = false;
+          else throw new InvalidCommandError('includeArchived must be true, false, 1, or 0.');
+        }
+        const templates = listConfirmedTemplates(this.db, {
+          studioId: this.initialized.manifest.studioId,
+          templateType: (parsed.searchParams.get('templateType') ?? undefined) as ConfirmedTemplateType | undefined,
+          templateId: parsed.searchParams.get('templateId') ?? undefined,
+          includeArchived
+        });
+        return success(response, { templates: templates.map(publicValue) });
+      }
+      const confirmedTemplateDetailMatch = /^\/api\/confirmed-templates\/([^/]+)$/.exec(parsed.pathname);
+      if (request.method === 'GET' && confirmedTemplateDetailMatch) {
+        if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed templates require Skill/CLI authentication.');
+        const versionValue = parsed.searchParams.get('version');
+        const template = getConfirmedTemplate(this.db, {
+          studioId: this.initialized.manifest.studioId,
+          templateId: confirmedTemplateDetailMatch[1],
+          version: versionValue === null ? undefined : numberValue(versionValue)
+        });
+        if (!template) throw new StudioNotFoundError('Confirmed template is not available in this Studio.');
+        return success(response, { template: publicValue(template) });
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/usage') {
+        const attribution = usageAttributionFromQuery(this.initialized.manifest.studioId, parsed);
+        attribution.profileId = this.assertProviderProfileInWorkspace(attribution.profileId);
+        const events = listUsageLedger(this.db, { ...attribution, limit: usageLimitFromQuery(parsed) });
+        const summary = summarizeUsage(this.db, attribution);
+        return success(response, { events: events.map(publicValue), summary: publicValue(summary) });
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/usage/summary') {
+        const attribution = usageAttributionFromQuery(this.initialized.manifest.studioId, parsed);
+        attribution.profileId = this.assertProviderProfileInWorkspace(attribution.profileId);
+        return success(response, { summary: publicValue(summarizeUsage(this.db, attribution)) });
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/budget') {
+        const requestedProfileId = this.assertProviderProfileInWorkspace(optionalQueryText(parsed, 'profileId'));
+        const studioId = this.initialized.manifest.studioId;
+        const profilePolicy = getBudgetPolicy(this.db, { studioId, profileId: requestedProfileId });
+        const policy = profilePolicy || (requestedProfileId ? getBudgetPolicy(this.db, { studioId, profileId: null }) : null);
+        const usage = summarizeUsage(this.db, { studioId, profileId: policy ? policy.profileId : requestedProfileId });
+        return success(response, { policy: publicValue(policy), usage: publicValue(usage) });
+      }
       if (request.method === 'GET' && parsed.pathname === '/api/search') { const query = parsed.searchParams.get('q') || ''; if (query.length > 256) throw new InvalidCommandError('Search query exceeds the 256 character limit.'); return success(response, { results: searchStudio(this.db, this.initialized.manifest.studioId, query, parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 25) }); }
       if (request.method === 'GET' && parsed.pathname === '/api/task-types') return success(response, { taskTypes: listTaskTypes(this.db, this.initialized.manifest.studioId).map(publicValue) });
       if (request.method === 'GET' && parsed.pathname === '/api/style-kits') return success(response, { styleKits: listStyleKits(this.db, this.initialized.manifest.studioId).map(publicValue) });
@@ -772,6 +1109,8 @@ export class LocalStudioService {
       if (request.method === 'GET' && assetImpactMatch) return success(response, { impact: getAssetImpact(this.db, this.initialized.manifest.studioId, assetImpactMatch[1]) });
       const assetProvenanceMatch = /^\/api\/assets\/([^/]+)\/provenance$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetProvenanceMatch) return success(response, { provenance: getAssetProvenance(this.db, this.initialized.manifest.studioId, assetProvenanceMatch[1]) });
+      const persistedProvenanceMatch = /^\/api\/provenance\/([^/]+)$/.exec(parsed.pathname);
+      if (request.method === 'GET' && persistedProvenanceMatch) return success(response, { provenance: getPersistedStudioProvenance(this.db, this.initialized.manifest.studioId, persistedProvenanceMatch[1]) });
       const projectArchiveMatch = /^\/api\/projects\/([^/]+)\/assets\/archive$/.exec(parsed.pathname);
       if (request.method === 'GET' && projectArchiveMatch) { const assetIds = parsed.searchParams.getAll('assetId'); if (assetIds.length > MAX_BATCH_IDS) throw new InvalidCommandError('assetId 不能超过 ' + MAX_BATCH_IDS + ' 项。'); return await this.projectAssetArchive(request, response, projectArchiveMatch[1], assetIds); }
       const deliveryArchiveMatch = /^\/api\/deliveries\/([^/]+)\/archive$/.exec(parsed.pathname);
@@ -822,6 +1161,8 @@ export class LocalStudioService {
       const assetThumbnailMatch = /^\/api\/assets\/([^/]+)\/thumbnail$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetThumbnailMatch) return await this.assetThumbnail(request, response, assetThumbnailMatch[1]);
       if (request.method === 'GET' && parsed.pathname === '/api/events') return this.events(request, response, parsed);
+      if (request.method === 'POST' && (parsed.pathname === '/api/confirmed-templates' || /^\/api\/confirmed-templates\/[^/]+\/(?:archive|rollback)$/.test(parsed.pathname)) && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
+      if (request.method === 'POST' && parsed.pathname === '/api/budget' && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Budget writes require Skill/CLI authentication.');
       if (request.method !== 'POST' && request.method !== 'PUT') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
       if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
       assertJsonContentType(request);
@@ -833,9 +1174,109 @@ export class LocalStudioService {
   }
 
   private async write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody, authentication: LocalAuthentication): Promise<void> {
+    const confirmedTemplateMutation = pathname === '/api/confirmed-templates' || /^\/api\/confirmed-templates\/[^/]+\/(?:archive|rollback)$/.test(pathname);
+    if (confirmedTemplateMutation && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
     const key = idempotencyKey(request, body);
     const putAllowed = /^\/api\/providers\/[^/]+$/.test(pathname) || /^\/api\/deliveries\/[^/]+\/items$/.test(pathname) || /^\/api\/rounds\/[^/]+\/draft-context$/.test(pathname);
     if (request.method === 'PUT' && !putAllowed) return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
+    if (pathname === '/api/backup/restore-dry-run' && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup restore dry-run requires Skill/CLI authentication.');
+      assertAllowedBodyKeys(body, ['sourceRoot', 'manifest', 'expectedStudio'], 'Backup restore dry-run');
+      const expectedStudio = body.expectedStudio === undefined ? {
+        studioId: this.initialized.manifest.studioId,
+        protocolName: SKILL_PROTOCOL_NAME,
+        protocolVersion: protocolStatus().version,
+        runtimeVersion: RUNTIME_VERSION
+      } : body.expectedStudio;
+      try {
+        const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'backup.restore_dry_run', () => createRestoreDryRun({
+          sourceRoot: text(body.sourceRoot),
+          targetRoot: this.initialized.paths.workspaceRoot,
+          manifest: body.manifest,
+          expectedStudio: expectedStudio as never
+        }), backupReceiptRequest(body, ['sourceRoot']));
+        return success(response, { value: receipt.value, replayed: receipt.replayed });
+      } catch (error) {
+        normalizeBackupInputError('Backup restore dry-run', error);
+      }
+    }
+    if (pathname === '/api/backup/upgrade-assess' && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup upgrade assessment requires Skill/CLI authentication.');
+      assertAllowedBodyKeys(body, ['currentRuntimeVersion', 'targetRuntimeVersion', 'currentSchemaVersion', 'targetSchemaVersion', 'supportedSchemaVersion', 'targetProtocolVersion', 'supportedProtocolRange', 'rollbackPoint'], 'Backup upgrade assessment');
+      try {
+        const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'backup.upgrade_assess', () => evaluateUpgradeCompatibility({
+          currentRuntimeVersion: text(body.currentRuntimeVersion),
+          targetRuntimeVersion: text(body.targetRuntimeVersion),
+          currentSchemaVersion: numberValue(body.currentSchemaVersion),
+          targetSchemaVersion: numberValue(body.targetSchemaVersion),
+          supportedSchemaVersion: numberValue(body.supportedSchemaVersion),
+          targetProtocolVersion: text(body.targetProtocolVersion),
+          supportedProtocolRange: body.supportedProtocolRange === undefined ? undefined : text(body.supportedProtocolRange),
+          rollbackPoint: body.rollbackPoint === undefined ? undefined : body.rollbackPoint as never
+        }), backupReceiptRequest(body));
+        return success(response, { value: receipt.value, replayed: receipt.replayed });
+      } catch (error) {
+        normalizeBackupInputError('Backup upgrade assessment', error);
+      }
+    }
+    if (pathname === '/api/backup/rollback-point' && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup rollback point requires Skill/CLI authentication.');
+      assertAllowedBodyKeys(body, ['manifest', 'runtimeVersion', 'schemaVersion', 'createdAt'], 'Backup rollback point');
+      try {
+        const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'backup.rollback_point', () => buildUpgradeRollbackPoint({
+          manifest: body.manifest as never,
+          runtimeVersion: text(body.runtimeVersion),
+          schemaVersion: numberValue(body.schemaVersion),
+          createdAt: body.createdAt === undefined ? undefined : text(body.createdAt)
+        }), backupReceiptRequest(body));
+        return success(response, { value: receipt.value, replayed: receipt.replayed });
+      } catch (error) {
+        normalizeBackupInputError('Backup rollback point', error);
+      }
+    }
+    if (pathname === '/api/budget' && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Budget writes require Skill/CLI authentication.');
+      assertAllowedBodyKeys(body, ['profileId', 'limitCostMinor', 'costUnit'], 'Budget');
+      const input = {
+        studioId: this.initialized.manifest.studioId,
+        profileId: this.assertProviderProfileInWorkspace(body.profileId),
+        limitCostMinor: nonNegativeSafeInteger(body.limitCostMinor, 'limitCostMinor'),
+        costUnit: body.costUnit as string
+      };
+      const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'budget.configure', () => configureBudget(this.db, input), input);
+      return success(response, { value: publicValue(receipt.value), replayed: receipt.replayed });
+    }
+    if (pathname === '/api/confirmed-templates' && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
+      const input: SaveConfirmedTemplateInput = {
+        studioId: this.initialized.manifest.studioId,
+        templateType: text(body.templateType) as ConfirmedTemplateType,
+        name: text(body.name),
+        definition: body.definition,
+        roundId: body.roundId === undefined ? undefined : text(body.roundId),
+        sourceRoundId: body.sourceRoundId === undefined ? undefined : text(body.sourceRoundId),
+        templateId: body.templateId === undefined ? undefined : text(body.templateId),
+        provenance: body.provenance as SaveConfirmedTemplateInput['provenance'],
+        planVersion: body.planVersion === undefined ? undefined : numberValue(body.planVersion),
+        sourcePlanVersion: body.sourcePlanVersion === undefined ? undefined : numberValue(body.sourcePlanVersion)
+      };
+      const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'confirmed_templates.save', () => saveConfirmedTemplate(this.db, input), input);
+      return success(response, { value: publicValue(receipt.value), replayed: receipt.replayed });
+    }
+    const confirmedTemplateArchiveMatch = /^\/api\/confirmed-templates\/([^/]+)\/archive$/.exec(pathname);
+    if (confirmedTemplateArchiveMatch && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
+      const input = { studioId: this.initialized.manifest.studioId, templateId: confirmedTemplateArchiveMatch[1] };
+      const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'confirmed_templates.archive', () => archiveConfirmedTemplate(this.db, input), input);
+      return success(response, { value: publicValue(receipt.value), replayed: receipt.replayed });
+    }
+    const confirmedTemplateRollbackMatch = /^\/api\/confirmed-templates\/([^/]+)\/rollback$/.exec(pathname);
+    if (confirmedTemplateRollbackMatch && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
+      const input = { studioId: this.initialized.manifest.studioId, templateId: confirmedTemplateRollbackMatch[1], version: numberValue(body.version) };
+      const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'confirmed_templates.rollback', () => rollbackConfirmedTemplate(this.db, input), input);
+      return success(response, { value: publicValue(receipt.value), replayed: receipt.replayed });
+    }
     if (pathname === '/api/restart' && request.method === 'POST') {
       if (!daemonRestartAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法从 Workbench 重启。');
       success(response, { restarting: true });
@@ -939,7 +1380,7 @@ export class LocalStudioService {
       const selected = body.selected === true;
       const keepAssetIds = (boundedIds(body.keepAssetIds, 'keepAssetIds', { optional: true }) || []).filter((assetId) => assetIds.includes(assetId));
       const updated = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'projects.selection_batch', () => withTransaction(this.db, () => {
-        if (selected && keepAssetIds.length) setReviewDecisions(this.db, { studioId: this.initialized.manifest.studioId, assetIds: keepAssetIds, decision: 'keep', emitEvent: false });
+        if (selected && keepAssetIds.length) setReviewDecisions(this.db, { studioId: this.initialized.manifest.studioId, assetIds: keepAssetIds, decision: 'keep', context: { source: 'batch', projectId }, emitEvent: false });
         return setProjectAssetsSelected(this.db, { studioId: this.initialized.manifest.studioId, projectId, assetIds, selected });
       }), { projectId, assetIds, selected, keepAssetIds });
       return success(response, { ...updated.value, selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectId) });
@@ -1081,12 +1522,14 @@ export class LocalStudioService {
     const preflightMatch = /^\/api\/rounds\/([^/]+)\/preflight$/.exec(pathname);
     if (preflightMatch) {
       if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '预检必须由当前智能体会话在用户确认后提交。');
+      assertAllowedBodyKeys(body, ['sessionId', 'executionConcurrency', 'concurrencySource', 'usageEstimate'], 'Preflight');
       this.assertRoundInStudio(preflightMatch[1]);
       this.assertConfirmedRoundSession(preflightMatch[1], text(body.sessionId));
+      const usageEstimate = body.usageEstimate === undefined ? undefined : body.usageEstimate as UsageEstimate;
       const config = resolveActiveProviderConfig(this.providerDb, this.initialized.paths);
       const status = providerStatus(this.providerDb, this.initialized.paths);
-      if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerStatus: status }) });
-      const receipt = createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: status, executionConcurrency: body.executionConcurrency, concurrencySource: body.concurrencySource, idempotencyKey: key });
+      if (!config) return success(response, { preview: null, preflight: preflightRound(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerStatus: status, usageEstimate }) });
+      const receipt = createDryRunPreview(this.db, { studioId: this.initialized.manifest.studioId, roundId: preflightMatch[1], providerConfig: config, providerStatus: status, executionConcurrency: body.executionConcurrency, concurrencySource: body.concurrencySource, usageEstimate, idempotencyKey: key });
       if (!receipt.value.preview) return success(response, receipt);
       const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: text(body.sessionId) });
       const consent = this.confirmationGate.consentFor(preflightMatch[1], session.id);
@@ -1126,6 +1569,35 @@ export class LocalStudioService {
         throw error;
       }
     }
+    const externalReconciliationMatch = /^\/api\/runs\/([^/]+)\/items\/([^/]+)\/reconcile$/.exec(pathname);
+    if (externalReconciliationMatch && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '外部请求对账必须由当前 Skill/CLI 显式发起。');
+      const runId = externalReconciliationMatch[1];
+      const itemId = externalReconciliationMatch[2];
+      this.assertRunInStudio(runId);
+      this.assertRunItemInStudio(itemId);
+      this.assertRunItemBelongsToRunInStudio(runId, itemId);
+      const providerConfig = this.resolveRunProviderConfig(runId);
+      let provider: ImageProvider | null = null;
+      if (providerConfig) {
+        try {
+          provider = createImageProvider(providerConfig);
+        } catch {
+          provider = null;
+        }
+      }
+      const result = await reconcileExternalRunItem({
+        db: this.db,
+        studioId: this.initialized.manifest.studioId,
+        runId,
+        itemId,
+        idempotencyKey: key,
+        provider,
+        providerConfig,
+        assetPersister: new StudioGeneratedAssetPersister({ db: this.db, paths: this.initialized.paths, studioId: this.initialized.manifest.studioId })
+      });
+      return success(response, result);
+    }
     const pauseMatch = /^\/api\/runs\/([^/]+)\/pause$/.exec(pathname);
     if (pauseMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); this.assertRunInStudio(pauseMatch[1]); return success(response, pauseGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: pauseMatch[1], idempotencyKey: key })); }
     const resolveUnknownMatch = /^\/api\/runs\/([^/]+)\/outcomes\/resolve$/.exec(pathname);
@@ -1148,15 +1620,16 @@ export class LocalStudioService {
     const cancelMatch = /^\/api\/runs\/([^/]+)\/cancel$/.exec(pathname);
     if (cancelMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); this.assertRunInStudio(cancelMatch[1]); return success(response, cancelGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: cancelMatch[1], idempotencyKey: key })); }
     const reviewMatch = /^\/api\/assets\/([^/]+)\/review$/.exec(pathname);
-    if (reviewMatch) {
+    if (reviewMatch && request.method === 'POST') {
+      assertAllowedBodyKeys(body, ['decision', 'taskId', 'roundId', 'context', 'feedback'], 'Review');
       this.assertAssetInStudio(reviewMatch[1]);
       if (text(body.taskId)) this.assertTaskInStudio(text(body.taskId));
       if (text(body.roundId)) this.assertRoundInStudio(text(body.roundId));
       const reviewed = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'assets.review', () => {
         const decision = text(body.decision) as 'keep' | 'review' | 'reject' | 'derive';
-        setReviewDecision(this.db, { studioId: this.initialized.manifest.studioId, assetId: reviewMatch[1], decision, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined, feedback: record(body.feedback) });
+        setReviewDecision(this.db, { studioId: this.initialized.manifest.studioId, assetId: reviewMatch[1], decision, taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined, context: body.context, feedback: body.feedback });
         return { assetId: reviewMatch[1], decision };
-      }, { assetId: reviewMatch[1], decision: text(body.decision), taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined, feedback: record(body.feedback) });
+      }, { assetId: reviewMatch[1], decision: text(body.decision), taskId: text(body.taskId) || undefined, roundId: text(body.roundId) || undefined, context: body.context, feedback: body.feedback });
       return success(response, reviewed.value);
     }
     const sharedAssetMatch = /^\/api\/assets\/([^/]+)\/shared$/.exec(pathname);
@@ -1197,6 +1670,20 @@ export class LocalStudioService {
   private assertRoundInStudio(roundId: string): void { this.assertScopedId(roundId, 'Creative round', 'SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?'); }
   private assertRunInStudio(runId: string): void { this.assertScopedId(runId, 'Generation run', 'SELECT 1 FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?'); }
   private assertRunItemInStudio(itemId: string): void { this.assertScopedId(itemId, 'Generation run item', 'SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?'); }
+  private assertRunItemBelongsToRunInStudio(runId: string, itemId: string): void {
+    const row = this.db.prepare('SELECT item.id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND item.run_id = ? AND project.studio_id = ?').get(itemId, runId, this.initialized.manifest.studioId);
+    if (!row) throw new StudioNotFoundError('Generation run item not found in this run: ' + itemId);
+  }
+  private resolveRunProviderConfig(runId: string): ResolvedProviderConfig | null {
+    const row = this.db.prepare('SELECT run.provider_profile_id, run.provider_config_version FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?').get(runId, this.initialized.manifest.studioId) as { provider_profile_id: string | null; provider_config_version: number | null } | undefined;
+    if (!row || typeof row.provider_profile_id !== 'string' || !row.provider_profile_id.trim() || !Number.isSafeInteger(Number(row.provider_config_version)) || Number(row.provider_config_version) < 1) return null;
+    try {
+      return resolveProviderProfileConfig(this.providerDb, row.provider_profile_id, this.initialized.paths);
+    } catch {
+      return null;
+    }
+  }
+
   private assertAssetInStudio(assetId: string): void { this.assertScopedId(assetId, 'Asset', 'SELECT 1 FROM assets WHERE id = ? AND studio_id = ?'); }
   private assertDeliveryBatchInStudio(batchId: string): void { this.assertScopedId(batchId, 'Delivery batch', 'SELECT 1 FROM delivery_batches batch JOIN projects project ON project.id = batch.project_id WHERE batch.id = ? AND project.studio_id = ?'); }
   private assertDeliveryBatchVersionInStudio(versionId: string): void { this.assertScopedId(versionId, 'Delivery batch version', 'SELECT 1 FROM delivery_batch_versions version JOIN delivery_batches batch ON batch.id = version.batch_id JOIN projects project ON project.id = batch.project_id WHERE version.id = ? AND project.studio_id = ?'); }

@@ -152,6 +152,8 @@ test('daemon hot-loads active Provider changes without a controlled restart', as
     const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
     await waitFor(() => fs.existsSync(runtimePath), 'daemon runtime record');
     const initialRuntime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    assert.equal(Object.hasOwn(initialRuntime.provider || {}, 'endpoint'), false);
+    assert.equal(JSON.stringify(initialRuntime).includes(providerBase), false);
     const started = { url: initialRuntime.url, access: { bearerToken: initialRuntime.capability } };
     const activated = await requestJson(started, '/api/providers/' + encodeURIComponent(alternate.id) + '/activate', { method: 'POST', idempotencyKey: 'activate-alternate-provider', body: {} });
     assert.equal(activated.status, 200, JSON.stringify(activated.body));
@@ -160,6 +162,9 @@ test('daemon hot-loads active Provider changes without a controlled restart', as
       const current = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
       return current.pid === initialRuntime.pid && current.provider?.profileId === alternate.id;
     }, 'daemon hot-loaded Provider identity');
+    const reloadedRuntime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    assert.equal(Object.hasOwn(reloadedRuntime.provider || {}, 'endpoint'), false);
+    assert.equal(JSON.stringify(reloadedRuntime).includes(providerBase), false);
     assert.equal(livePid(initialRuntime.pid), true);
 
     const session = await requestJson(started, '/api/sessions/open', { method: 'POST', idempotencyKey: 'hot-provider-session', body: { conversationId: 'hot-provider-conversation' } });
@@ -503,6 +508,32 @@ test('controlled restart preserves its port and Workbench authorization only ins
     assert.notEqual(second.capability, first.capability);
     assert.equal(JSON.parse(fs.readFileSync(portPath, 'utf8')).port, first.port);
     assert.equal((await fetch(second.url + '/api/health')).status, 200);
+  } finally {
+    await stopDaemon(daemon, workspaceRoot);
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('daemon heartbeat advances without an active Provider worker pool', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
+  let daemon;
+  try {
+    daemon = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await waitFor(() => fs.existsSync(runtimePath), 'daemon runtime record without Provider');
+    const first = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    assert.equal(first.provider, null);
+    assert.equal(first.workerPool, null);
+    const firstHeartbeat = Date.parse(first.heartbeatAt);
+    assert.ok(Number.isFinite(firstHeartbeat));
+    await waitFor(() => {
+      try {
+        const current = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+        return Date.parse(current.heartbeatAt) > firstHeartbeat;
+      } catch {
+        return false;
+      }
+    }, 'no-provider daemon heartbeat update');
   } finally {
     await stopDaemon(daemon, workspaceRoot);
     fs.rmSync(workspaceRoot, { recursive: true, force: true });

@@ -60,6 +60,18 @@ test('preflight rejects malformed plan shapes without throwing or coercing opera
   assert.ok(invalidMask.issues.some((issue) => issue.code === 'invalid_mask_asset_id'));
 });
 
+test('preflight refuses generate plans that declare managed references or a mask', () => {
+  const provider = { providerId: 'openai-images', configured: true, missing: [], model: 'gpt-image-2', endpoint: 'https://images.example.test', capabilities: { generate: true, edit: true, referenceImage: true, mask: true } };
+  const withReference = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'safe', referenceAssetIds: ['asset-1'] }, provider);
+  assert.equal(withReference.valid, false);
+  assert.ok(withReference.issues.some((issue) => issue.code === 'reference_requires_edit'));
+  const withMask = preflightGenerationPlan({ operation: 'generate', itemCount: 1, prompt: 'safe', maskAssetId: 'asset-mask' }, provider);
+  assert.equal(withMask.valid, false);
+  assert.ok(withMask.issues.some((issue) => issue.code === 'reference_requires_edit'));
+  const editReference = preflightGenerationPlan({ operation: 'edit', itemCount: 1, prompt: 'safe', referenceAssetIds: ['asset-1'] }, provider);
+  assert.equal(editReference.valid, true);
+});
+
 test('preflight caps OpenAI GPT image final per-item prompts at 32000 characters', () => {
   const provider = { providerId: 'openai-images', configured: true, missing: [], model: 'gpt-image-2', endpoint: 'https://images.example.test', capabilities: { generate: true, edit: true, referenceImage: true, mask: true } };
   const basePrompt = 'a'.repeat(31900);
@@ -376,12 +388,14 @@ test('retries only explicit safe failed items and never requeues unknown outcome
     const items = listGenerationRunItems(fixture.db, queued.value.id);
     const originalRequestId = items[0].requestId;
     fixture.db.prepare("UPDATE run_items SET status = 'failed' WHERE id = ?").run(items[0].id);
+    fixture.db.prepare("UPDATE run_items SET external_request_id = 'stale-provider-request' WHERE id = ?").run(items[0].id);
     fixture.db.prepare("UPDATE run_items SET status = 'outcome_unknown' WHERE id = ?").run(items[1].id);
     const retried = retryGenerationRunItems(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, itemIds: [items[0].id], idempotencyKey: 'retry-one' });
     assert.deepEqual(retried.value.retriedItemIds, [items[0].id]);
     assert.equal(getGenerationRun(fixture.db, queued.value.id).status, 'queued');
     assert.equal(listGenerationRunItems(fixture.db, queued.value.id)[0].status, 'pending');
     assert.notEqual(listGenerationRunItems(fixture.db, queued.value.id)[0].requestId, originalRequestId);
+    assert.equal(fixture.db.prepare('SELECT external_request_id FROM run_items WHERE id = ?').get(items[0].id).external_request_id, null);
     assert.equal(listGenerationRunItems(fixture.db, queued.value.id)[1].status, 'outcome_unknown');
     assert.throws(() => retryGenerationRunItems(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'retry-unknown' }), InvalidCommandError);
     resolveUnknownRunItems(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'resolve-for-retry-guard' });

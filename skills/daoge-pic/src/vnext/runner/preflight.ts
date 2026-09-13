@@ -125,5 +125,12 @@ export function preflightGenerationPlan(plan: PreflightPlan | unknown, providerS
     if (capabilities && !capabilities.referenceEdit) issues.push({ code: 'reference_edit_unsupported', message: '当前生成配置不支持参考图编辑。', field: 'referenceAssetIds' });
   }
   if (normalizedPlan.maskAssetId && capabilities && !capabilities.maskEdit) issues.push({ code: 'mask_unsupported', message: '当前生成配置不支持遮罩编辑。', field: 'maskAssetId' });
+  if (normalizedPlan.operation !== 'edit' && (referenceCount > 0 || normalizedPlan.maskAssetId)) {
+    issues.push({
+      code: 'reference_requires_edit',
+      message: '计划声明了参考素材或遮罩，但 operation 是 generate；generate 请求不会携带参考图或遮罩，Provider 收到的只有提示词。请把 operation 改为 edit 后重新确认计划。',
+      field: 'operation'
+    });
+  }
   return { valid: issues.length === 0, issues, normalizedPlan };
 }

@@ -472,3 +472,31 @@ test('Provider download aborts while DNS resolution remains pending', async () =
   setTimeout(() => controller.abort(new Error('test abort')), 10);
   await assert.rejects(Promise.race([pending, new Promise((_, reject) => setTimeout(() => reject(new Error('DNS abort did not settle')), 250))]), /test abort/);
 });
+
+test('vNext generate never carries the managed references that the same edit request uploads', async () => {
+  const seen = [];
+  await withServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      seen.push({ url: request.url, contentType: String(request.headers['content-type'] || ''), body: Buffer.concat(chunks) });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(responseFor('openai-images')));
+    });
+  }, async (baseUrl) => {
+    const provider = createImageProvider({ providerId: 'openai-images', baseUrl, apiKey: 'fixture-key', model: 'gpt-image-2.5', referenceEnabled: true });
+    const reference = { assetId: 'asset-reference', mediaType: 'image/png', bytes: png };
+    const request = { requestId: 'reference-parity', idempotencyKey: 'reference-parity-key', prompt: 'fixture prompt', output: { size: '1024x1024' }, referenceAssets: [reference] };
+    await provider.generate(request, { abortSignal: new AbortController().signal });
+    await provider.edit(request, { abortSignal: new AbortController().signal });
+  });
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0].url, '/v1/images/generations');
+  assert.match(seen[0].contentType, /^application\/json/);
+  const generateBody = seen[0].body.toString('utf8');
+  assert.equal(Object.hasOwn(JSON.parse(generateBody), 'image'), false);
+  assert.equal(generateBody.includes('asset-reference'), false);
+  assert.equal(seen[1].url, '/v1/images/edits');
+  assert.match(seen[1].contentType, /^multipart\/form-data; boundary=/);
+  assert.equal(seen[1].body.includes(Buffer.from('asset-reference.png')), true);
+});

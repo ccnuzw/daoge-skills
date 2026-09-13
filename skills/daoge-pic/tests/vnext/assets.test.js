@@ -7,7 +7,9 @@ const assert = require('node:assert/strict');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { openStudioDatabase, closeStudioDatabase } = require('../../dist/vnext/studio/database');
 const { createProject, createRoundDraft, createTaskDraft } = require('../../dist/vnext/domain/studio-commands');
-const { countScopedStudioAssets, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, assetFilePath, recoverAssetMediaOperations, setStudioAssetShared, softDeleteAsset, restoreAsset, setReviewDecision } = require('../../dist/vnext/domain/assets');
+const { countScopedStudioAssets, importStudioAsset, listScopedStudioAssets, listSharedStudioAssets, listStudioAssets, assetFilePath, recoverAssetMediaOperations, setStudioAssetShared, softDeleteAsset, restoreAsset, setReviewDecision, setReviewDecisions } = require('../../dist/vnext/domain/assets');
+const { getAssetProvenance, listAssetsWithReviewSummaries } = require('../../dist/vnext/domain/creative-records');
+const { normalizeReviewContext, normalizeReviewFeedback, parseReviewContext } = require('../../dist/vnext/domain/review-contract');
 const { archiveStagedImage, plannedArchivePath, stageImage } = require('../../dist/vnext/media/archive');
 const { setProjectAssetSelected } = require('../../dist/vnext/domain/project-selections');
 
@@ -103,6 +105,92 @@ test('soft deletes and restores assets without encoding review state in folders'
   } finally {
     cleanup(value);
   }
+});
+
+test('rejects review decisions attributed to an unrelated project context', () => {
+  const value = fixture();
+  try {
+    const task = createTaskDraft(value.db, { studioId: value.initialized.manifest.studioId, projectId: value.project.value.id, name: '当前任务', intent: {}, idempotencyKey: 'review-context-task' }).value;
+    const otherProject = createProject(value.db, { studioId: value.initialized.manifest.studioId, name: '另一评审项目', idempotencyKey: 'review-context-project' }).value;
+    const otherTask = createTaskDraft(value.db, { studioId: value.initialized.manifest.studioId, projectId: otherProject.id, name: '其他任务', intent: {}, idempotencyKey: 'review-context-other-task' }).value;
+    const otherRound = createRoundDraft(value.db, { studioId: value.initialized.manifest.studioId, taskId: otherTask.id, purpose: 'exploration', plan: {}, idempotencyKey: 'review-context-other-round' }).value;
+    const asset = importStudioAsset(value.db, value.initialized.paths, { studioId: value.initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: value.project.value.id });
+    assert.throws(() => setReviewDecision(value.db, { studioId: value.initialized.manifest.studioId, assetId: asset.id, decision: 'keep', taskId: otherTask.id }), /does not belong/);
+    assert.throws(() => setReviewDecision(value.db, { studioId: value.initialized.manifest.studioId, assetId: asset.id, decision: 'keep', roundId: otherRound.id }), /does not belong/);
+    setReviewDecision(value.db, { studioId: value.initialized.manifest.studioId, assetId: asset.id, decision: 'review', taskId: task.id });
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS total FROM review_decisions WHERE asset_id = ?').get(asset.id).total, 1);
+  } finally { cleanup(value); }
+});
+
+test('persists Review v2 context without exposing it through unscoped asset provenance', () => {
+  const value = fixture();
+  try {
+    const task = createTaskDraft(value.db, { studioId: value.initialized.manifest.studioId, projectId: value.project.value.id, name: '标注任务', intent: {}, idempotencyKey: 'review-v2-task' }).value;
+    const round = createRoundDraft(value.db, { studioId: value.initialized.manifest.studioId, taskId: task.id, purpose: 'exploration', plan: {}, idempotencyKey: 'review-v2-round' }).value;
+    const asset = importStudioAsset(value.db, value.initialized.paths, { studioId: value.initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: value.project.value.id });
+    setReviewDecision(value.db, {
+      studioId: value.initialized.manifest.studioId,
+      assetId: asset.id,
+      decision: 'keep',
+      context: {
+        schemaVersion: 2,
+        source: 'agent',
+        reviewerId: 'agent-reviewer',
+        projectId: value.project.value.id,
+        taskId: task.id,
+        roundId: round.id,
+        confidence: 'high',
+        rationale: '主体边界清晰，适合作为交付候选。',
+        tags: ['Composition', 'approved'],
+        criteria: [{ id: 'composition', outcome: 'pass', label: '构图', note: '主体完整' }]
+      }
+    });
+    const stored = value.db.prepare('SELECT schema_version, context_json FROM review_decisions WHERE asset_id = ?').get(asset.id);
+    assert.equal(stored.schema_version, 2);
+    const provenance = getAssetProvenance(value.db, value.initialized.manifest.studioId, asset.id);
+    assert.equal(provenance.reviews.length, 1);
+    assert.equal(provenance.reviews[0].decision, 'keep');
+    assert.match(provenance.reviews[0].feedbackHash, /^[a-f0-9]{64}$/);
+    assert.equal(Object.hasOwn(provenance.reviews[0], 'context'), false);
+    assert.equal(Object.hasOwn(provenance.reviews[0], 'taskId'), false);
+    assert.equal(Object.hasOwn(provenance.reviews[0], 'roundId'), false);
+    assert.equal(JSON.stringify(provenance).includes('主体边界清晰'), false);
+    assert.throws(() => setReviewDecision(value.db, { studioId: value.initialized.manifest.studioId, assetId: asset.id, decision: 'review', context: { projectId: value.project.value.id }, feedback: { note: 'https://provider.invalid/review' } }), /不能包含 URL/);
+    assert.throws(() => normalizeReviewFeedback({ apiKey: 'secret-never-store' }), /不安全字段名/);
+    assert.throws(() => setReviewDecision(value.db, { studioId: value.initialized.manifest.studioId, assetId: asset.id, decision: 'review', context: { projectId: value.project.value.id }, feedback: ['not-an-object'] }), /必须是对象/);
+    assert.throws(() => setReviewDecision(value.db, { studioId: value.initialized.manifest.studioId, assetId: asset.id, decision: 'review', context: { projectId: value.project.value.id, rationale: 'https://provider.invalid/review' } }), /不能包含 URL/);
+  } finally { cleanup(value); }
+});
+
+test('rejects malformed Review v2 context and keeps project-scoped batch reviews isolated', () => {
+  assert.deepEqual(normalizeReviewContext({ source: 'agent', tags: ['Composition', 'composition'], criteria: [{ id: 'quality', outcome: 'unknown' }] }), {
+    schemaVersion: 2,
+    source: 'agent',
+    tags: ['composition'],
+    criteria: [{ id: 'quality', outcome: 'unknown' }]
+  });
+  assert.equal(parseReviewContext(JSON.stringify({ schemaVersion: 1 })), null);
+  assert.throws(() => normalizeReviewContext('not-an-object'), /必须是对象/);
+  assert.throws(() => normalizeReviewContext({ rationale: '/private/review.txt' }), /不能包含 URL/);
+  assert.throws(() => normalizeReviewContext({ tags: ['unsafe tag'] }), /只能包含安全标识/);
+  const value = fixture();
+  try {
+    const otherProject = createProject(value.db, { studioId: value.initialized.manifest.studioId, name: '共享评审项目', idempotencyKey: 'review-v2-batch-project' }).value;
+    const asset = importStudioAsset(value.db, value.initialized.paths, { studioId: value.initialized.manifest.studioId, bytes: png, mediaType: 'image/png', targetType: 'project', targetId: value.project.value.id });
+    setStudioAssetShared(value.db, { studioId: value.initialized.manifest.studioId, assetId: asset.id, shared: true });
+    assert.equal(setReviewDecisions(value.db, { studioId: value.initialized.manifest.studioId, assetIds: [asset.id], decision: 'reject', context: { projectId: value.project.value.id }, emitEvent: false }), 1);
+    setReviewDecision(value.db, { studioId: value.initialized.manifest.studioId, assetId: asset.id, decision: 'keep', context: { projectId: otherProject.id, reviewerId: 'foreign-reviewer', rationale: 'foreign project review' }, feedback: { note: 'foreign feedback must not leak' }, emitEvent: false });
+    assert.equal(listAssetsWithReviewSummaries(value.db, [asset], value.project.value.id)[0].review.decision, 'reject');
+    assert.equal(listAssetsWithReviewSummaries(value.db, [asset], otherProject.id)[0].review.decision, 'keep');
+    const provenance = getAssetProvenance(value.db, value.initialized.manifest.studioId, asset.id);
+    assert.equal(provenance.reviews.length, 2);
+    assert.equal(provenance.reviews.every((review) => !Object.hasOwn(review, 'context') && !Object.hasOwn(review, 'taskId') && !Object.hasOwn(review, 'roundId')), true);
+    const provenanceText = JSON.stringify(provenance);
+    assert.equal(provenanceText.includes('foreign-reviewer'), false);
+    assert.equal(provenanceText.includes('foreign project review'), false);
+    assert.equal(provenanceText.includes('foreign feedback must not leak'), false);
+    assert.equal(value.db.prepare('SELECT COUNT(*) AS total FROM review_decisions WHERE asset_id = ?').get(asset.id).total, 2);
+  } finally { cleanup(value); }
 });
 
 test('lists assets by round, task, project, and Studio without cross-project leakage or duplicates', () => {
