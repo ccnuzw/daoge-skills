@@ -31,6 +31,13 @@
 - **已确认模板读取不再重跑敏感内容扫描**：读取路径原先复用写入期的校验（含敏感键/值正则，键名单包含 `prompt`、`provider`、`url`、`path`、`file` 等），规则一旦收紧，历史快照会让 `listConfirmedTemplates` 整体抛错、模板列表与 rollback 全部不可用。现在写入路径保持完整校验，读取路径只做结构校验（形状、深度、大小、控制字符），因此真实损坏仍被拒绝而历史快照不再连带失效。
 - **重试预算闸门的错误码透传**：原先恒抛 `budget_exceeded`，`budget_cost_unit_mismatch` 等真实原因被吞。现在透传闸门真实 code 并带未通过项数。同时把「`failed` 运行不保留预留、由重试路径把候选项份额加回并重新过闸」这一有意设计写进注释并补了回归，避免被误当作缺陷改坏。
 
+### 本地代理信任模式与重试超时（第 2 轮）
+
+- **`local_proxy` 真正支持 TUN／虚拟网卡代理**：该模式原先只放行 127/8，因此本机 Loon 一类 TUN 代理把域名解析成 fake-IP（198.18.0.0/15）时，请求会在发出前被拒。现在 `local_proxy` 放行 loopback、CGNAT/overlay（100.64.0.0/10）、RFC 2544 benchmark 段（198.18.0.0/15）与 IPv6 ULA；link-local、云元数据、文档、多播与保留段**在任何模式下都不放行**。`compatible_public` 下拒绝 fake-IP 解析是安全正确行为，因此这一放行必须由操作者显式选择信任模式，不做静默放宽。
+- **图片下载补齐端点信任模式**：`downloadHttpResource`／`downloadHttpResourceToFile` 既不把策略传给 DNS 校验、也用 `assertPublicAddress` 硬校验远端地址，于是私有地址模式下的 API 调用能通、图片下载却必失败。现在下载路径与 API 路径消费同一份策略。
+- **`retry` 支持覆盖请求超时**：新增 `retry --timeout-ms <1000..600000>`（API `POST /api/runs/<id>/retry` 的 `timeoutMs`）。它只改写该项的请求 payload，不改写已确认的计划快照，并把覆盖值记入 `run.queued`／`run.items_retried` 事件。此前超时（最常见的 Provider 失败）无法通过重试修复，只能新建轮次并重新确认计划。
+- **质量指标口径修正**：终局成功率原先把「主动取消」计入分母，取消一批会表现为质量下降。现在成功率基于 `settled`（终局减去已取消），并把 `settled` 与已取消数量一并返回，Workbench 相应显示「N 成功 / M 个已判定（另有 K 个已取消）」。
+
 ## daoge-pic 5.13.0 - 2026-09-12
 
 当前稳定发布包/runtime 版本为 `5.13.0`；`5.12.0` 及更早版本保持为不可变历史发布，旧 daemon 不得与本版本混用。

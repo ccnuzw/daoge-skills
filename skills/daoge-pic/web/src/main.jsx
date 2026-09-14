@@ -715,7 +715,7 @@ function ProjectQualityMetrics({ metrics, loading, error, onRefresh }) {
     {error && <div className="quality-metrics-error" role="alert" aria-live="assertive"><CircleAlert size={15} aria-hidden="true" /><span>{errorMessageForDisplay(error, '无法读取项目质量指标。')}</span><button type="button" className="outline-button" onClick={onRefresh}>重试</button></div>}
     {!loading && !error && metrics && <>
       <div className="quality-metrics-grid">
-        <div className="quality-metrics-stat"><span>终局成功率</span><strong>{metricRate(runItems.successRate)}</strong><small>{safeMetricCount(runItems.successful)} 成功 / {safeMetricCount(runItems.terminal)} 个终局</small></div>
+        <div className="quality-metrics-stat"><span>终局成功率</span><strong>{metricRate(runItems.successRate)}</strong><small>{safeMetricCount(runItems.successful)} 成功 / {safeMetricCount(runItems.settled)} 个已判定{Number(runItems.cancelled) > 0 ? '（另有 ' + safeMetricCount(runItems.cancelled) + ' 个已取消）' : ''}</small></div>
         <div className="quality-metrics-stat"><span>运行项</span><strong>{safeMetricCount(runItems.total)}</strong><small>{safeMetricCount(metrics.runs?.total)} 次运行</small></div>
         <div className="quality-metrics-stat"><span>需关注</span><strong>{safeMetricCount(attentionCount)}</strong><small>失败 · 阻塞 · 等待重试 · 待核实</small></div>
         <div className="quality-metrics-stat"><span>保留率</span><strong>{metricRate(reviews.keepRate)}</strong><small>{safeMetricCount(reviews.total)} 条评审记录</small></div>

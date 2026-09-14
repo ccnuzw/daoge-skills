@@ -173,3 +173,38 @@ test('quality metrics reject projects outside the current Studio', () => {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+test('cancelled run items do not count against the terminal success rate', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
+    const db = started.service.db;
+    const studioId = initialized.manifest.studioId;
+    const project = createProject(db, { studioId, name: 'Cancel project', idempotencyKey: 'cancel-project' }).value;
+    const task = createTaskDraft(db, { studioId, projectId: project.id, name: 'Cancel task', idempotencyKey: 'cancel-task' }).value;
+    const round = createRoundDraft(db, { studioId, taskId: task.id, purpose: 'exploration', idempotencyKey: 'cancel-round' }).value;
+    const timestamp = '2026-09-14T00:00:00.000Z';
+    insertRun(db, 'cancel-run', round.id, 'partial', timestamp);
+    insertItem(db, 'cancel-success', 'cancel-run', 1, 'succeeded', null, timestamp);
+    insertItem(db, 'cancel-failed', 'cancel-run', 2, 'failed', { kind: 'provider', code: 'timeout' }, timestamp);
+    insertItem(db, 'cancel-cancelled-a', 'cancel-run', 3, 'cancelled', null, timestamp);
+    insertItem(db, 'cancel-cancelled-b', 'cancel-run', 4, 'cancelled', null, timestamp);
+
+    const metrics = getQualityMetrics(db, studioId, { projectId: project.id });
+    assert.equal(metrics.runItems.total, 4);
+    assert.equal(metrics.runItems.terminal, 4);
+    assert.equal(metrics.runItems.cancelled, 2);
+    assert.equal(metrics.runItems.settled, 2);
+    assert.equal(metrics.runItems.successRate, 0.5);
+
+    const api = await requestJson(started, '/api/projects/' + project.id + '/quality-metrics');
+    assert.equal(api.status, 200, JSON.stringify(api.body));
+    assert.equal(api.body.data.metrics.runItems.settled, 2);
+    assert.equal(api.body.data.metrics.runItems.successRate, 0.5);
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});

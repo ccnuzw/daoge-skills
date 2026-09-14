@@ -488,3 +488,35 @@ test('recovers expired leased work as pending and every post-request phase as an
     cleanup(fixture.workspaceRoot);
   }
 });
+
+test('retry accepts a timeout override without rewriting the confirmed plan', () => {
+  const fixture = configuredStudio();
+  try {
+    const studioId = fixture.initialized.manifest.studioId;
+    const round = confirmedRound(fixture, { operation: 'generate', itemCount: 1, prompt: 'timeout retry', output: { aspectRatio: '1:1' } }, 'retry-timeout');
+    const preview = createDryRunPreview(fixture.db, { studioId, roundId: round.value.id, providerConfig: fixture.config, providerStatus: fixture.status, idempotencyKey: 'retry-timeout-preview' });
+    const run = queueGenerationRun(fixture.db, { studioId, roundId: round.value.id, providerConfig: fixture.config, providerStatus: fixture.status, preflightId: preview.value.preview.id, idempotencyKey: 'retry-timeout-run' }).value;
+    const item = listGenerationRunItems(fixture.db, run.id)[0];
+    const payloadOf = (id) => JSON.parse(fixture.db.prepare('SELECT prompt_payload_json FROM run_items WHERE id = ?').get(id).prompt_payload_json);
+    assert.equal(payloadOf(item.id).output.timeoutMs, undefined);
+
+    fixture.db.prepare("UPDATE generation_runs SET status = 'failed' WHERE id = ?").run(run.id);
+    fixture.db.prepare("UPDATE run_items SET status = 'failed' WHERE id = ?").run(item.id);
+    assert.throws(() => retryGenerationRunItems(fixture.db, { studioId, runId: run.id, timeoutMs: 10, idempotencyKey: 'retry-timeout-too-small' }), /Retry timeout/);
+    assert.throws(() => retryGenerationRunItems(fixture.db, { studioId, runId: run.id, timeoutMs: 600001, idempotencyKey: 'retry-timeout-too-large' }), /Retry timeout/);
+
+    const retried = retryGenerationRunItems(fixture.db, { studioId, runId: run.id, timeoutMs: 300000, idempotencyKey: 'retry-timeout-ok' });
+    assert.equal(retried.value.timeoutMsOverrideMs, 300000);
+    assert.deepEqual(retried.value.retriedItemIds, [item.id]);
+    assert.equal(payloadOf(item.id).output.timeoutMs, 300000);
+    assert.equal(payloadOf(item.id).output.aspectRatio, '1:1');
+
+    const planSnapshot = JSON.parse(fixture.db.prepare('SELECT plan_snapshot_json FROM generation_runs WHERE id = ?').get(run.id).plan_snapshot_json);
+    assert.equal(planSnapshot.output.timeoutMs, undefined);
+    const overrideEvent = fixture.db.prepare("SELECT payload_json FROM events WHERE entity_id = ? AND event_type IN ('run.queued', 'run.items_retried') ORDER BY id DESC LIMIT 1").get(run.id);
+    assert.equal(JSON.parse(overrideEvent.payload_json).timeoutMsOverrideMs, 300000);
+  } finally {
+    closeStudioDatabase(fixture.db);
+    cleanup(fixture.workspaceRoot);
+  }
+});

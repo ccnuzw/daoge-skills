@@ -735,9 +735,39 @@ export function resolveUnknownRunItems(db: StudioDatabase, input: { studioId: st
 }
 
 
-export function retryGenerationRunItems(db: StudioDatabase, input: { studioId: string; runId: string; itemIds?: string[]; idempotencyKey: string }): CommandReceipt<{ runId: string; retriedItemIds: string[] }> {
+const MIN_RETRY_TIMEOUT_MS = 1000;
+const MAX_RETRY_TIMEOUT_MS = 10 * 60 * 1000;
+
+function normalizedRetryTimeout(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const timeoutMs = Number(value);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_RETRY_TIMEOUT_MS || timeoutMs > MAX_RETRY_TIMEOUT_MS) {
+    throw new InvalidCommandError('Retry timeout must be an integer between ' + MIN_RETRY_TIMEOUT_MS + ' and ' + MAX_RETRY_TIMEOUT_MS + ' milliseconds.');
+  }
+  return timeoutMs;
+}
+
+/**
+ * Rewrites only the per-item request payload, which is what actually reaches the provider. The confirmed plan
+ * snapshot stays untouched, and the override is reported in the result and the studio event so the run keeps an
+ * honest record of the timeout that was really used.
+ *
+ * A timeout is an operational retry parameter, not a creative change: the prompt, references and count are all
+ * unchanged, so requiring a fresh confirmed round would be ceremony. Before this the only way to recover from a
+ * too-short timeout -- the most common provider failure -- was to create a new round and re-confirm the plan.
+ */
+function applyRetryTimeout(db: StudioDatabase, itemId: string, timeoutMs: number, timestamp: string): void {
+  const row = db.prepare('SELECT prompt_payload_json FROM run_items WHERE id = ?').get(itemId) as { prompt_payload_json: string } | undefined;
+  if (!row) return;
+  const payload = parseObject(row.prompt_payload_json);
+  const output = payload.output && typeof payload.output === 'object' && !Array.isArray(payload.output) ? payload.output as Record<string, unknown> : {};
+  db.prepare('UPDATE run_items SET prompt_payload_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify({ ...payload, output: { ...output, timeoutMs } }), timestamp, itemId);
+}
+
+export function retryGenerationRunItems(db: StudioDatabase, input: { studioId: string; runId: string; itemIds?: string[]; timeoutMs?: number; idempotencyKey: string }): CommandReceipt<{ runId: string; retriedItemIds: string[]; timeoutMsOverrideMs?: number }> {
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'runs.retry', () => {
     const runId = requireValue(input.runId, 'runId');
+    const timeoutMs = normalizedRetryTimeout(input.timeoutMs);
     const run = resolveRunInStudio(db, requireValue(input.studioId, 'studioId'), runId);
     if (run.status === 'resume_pending') throw new InvalidCommandError('Restart recovery must be confirmed through a Studio Session before retrying.');
     if (!['queued', 'running', 'paused', 'partial', 'failed'].includes(run.status)) throw new InvalidCommandError('This generation run cannot be retried in its current state.');
@@ -754,13 +784,15 @@ export function retryGenerationRunItems(db: StudioDatabase, input: { studioId: s
       if (item.error_json && item.error_json.includes('user_resolved_unknown_outcome')) throw new InvalidCommandError('An outcome resolved as unknown cannot be retried; create a new round after reviewing the result.');
       assertRunItemTransition(item.status, 'pending');
       db.prepare("UPDATE run_items SET status = 'pending', request_id = ?, external_request_id = NULL, retry_at = NULL, lease_token = NULL, lease_worker_id = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?").run(createId('request'), timestamp, item.id);
+      if (timeoutMs !== undefined) applyRetryTimeout(db, item.id, timeoutMs, timestamp);
     }
+    const override = timeoutMs === undefined ? {} : { timeoutMsOverrideMs: timeoutMs };
     if (['paused', 'partial', 'failed'].includes(run.status)) {
       assertRunTransition(run.status, 'queued');
       db.prepare("UPDATE generation_runs SET status = 'queued', worker_id = NULL, version = version + 1, updated_at = ? WHERE id = ?").run(timestamp, runId);
-      appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.queued', payload: { retried: true, itemCount: candidates.length } });
-    } else appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.items_retried', payload: { itemCount: candidates.length } });
-    return { runId, retriedItemIds: candidates.map((item) => item.id) };
+      appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.queued', payload: { retried: true, itemCount: candidates.length, ...override } });
+    } else appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.items_retried', payload: { itemCount: candidates.length, ...override } });
+    return { runId, retriedItemIds: candidates.map((item) => item.id), ...override };
   }, input);
 }
 

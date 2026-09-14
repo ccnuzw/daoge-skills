@@ -371,7 +371,7 @@ const commandSchemas: Record<string, CommandSchema> = {
   pause: { method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/pause', body: () => ({}) },
   resume: { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/resume', body: (v) => ({ sessionId: textValue(v, '--session') }) },
   cancel: { method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/cancel', body: () => ({}) },
-  retry: { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--items': { kind: 'list' } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/retry', body: (v) => ({ itemIds: v['--items'] }) },
+  retry: { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--items': { kind: 'list' }, '--timeout-ms': { kind: 'non-negative-integer' } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/retry', body: (v) => ({ itemIds: v['--items'], ...(v['--timeout-ms'] === undefined ? {} : { timeoutMs: numberValue(v, '--timeout-ms') }) }) },
   'resolve-unknown': { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--items': { kind: 'list', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/outcomes/resolve', body: (v) => ({ itemIds: listValue(v, '--items') }) },
   'reconcile-external': { method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--item': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/items/' + encoded(v, '--item') + '/reconcile', body: () => ({}) },
 };
@@ -543,7 +543,7 @@ function usage(): string {
     'daoge pause --workspace <path> --run <id>',
     'daoge resume --workspace <path> --run <id> --session <session-id>',
     'daoge cancel --workspace <path> --run <id>',
-    'daoge retry --workspace <path> --run <id> [--items <item-id,...>]',
+    'daoge retry --workspace <path> --run <id> [--items <item-id,...>] [--timeout-ms <1000..600000>]  # 超时属于重试参数，改它不需要重新确认计划',
     'daoge resolve-unknown --workspace <path> --run <id> --items <item-id,...>',
     'daoge reconcile-external --workspace <path> --run <id> --item <item-id>  # 显式外部请求恢复；只查询 Provider，不生成、编辑或自动重放。',
     'daoge status --workspace <path>',

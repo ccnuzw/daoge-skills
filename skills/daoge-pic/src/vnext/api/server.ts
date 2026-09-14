@@ -1645,7 +1645,15 @@ export class LocalStudioService {
     const resolveUnknownMatch = /^\/api\/runs\/([^/]+)\/outcomes\/resolve$/.exec(pathname);
     if (resolveUnknownMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); const itemIds = boundedIds(body.itemIds, 'itemIds') || []; this.assertRunInStudio(resolveUnknownMatch[1]); for (const itemId of itemIds) this.assertRunItemInStudio(itemId); return success(response, resolveUnknownRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: resolveUnknownMatch[1], itemIds, idempotencyKey: key })); }
     const retryMatch = /^\/api\/runs\/([^/]+)\/retry$/.exec(pathname);
-    if (retryMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); const itemIds = boundedIds(body.itemIds, 'itemIds', { optional: true }); this.assertRunInStudio(retryMatch[1]); for (const itemId of itemIds || []) this.assertRunItemInStudio(itemId); return success(response, retryGenerationRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: retryMatch[1], itemIds, idempotencyKey: key })); }
+    if (retryMatch) {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。');
+      assertAllowedBodyKeys(body, ['itemIds', 'timeoutMs'], 'Run retry');
+      const itemIds = boundedIds(body.itemIds, 'itemIds', { optional: true });
+      const timeoutMs = body.timeoutMs === undefined ? undefined : numberValue(body.timeoutMs);
+      this.assertRunInStudio(retryMatch[1]);
+      for (const itemId of itemIds || []) this.assertRunItemInStudio(itemId);
+      return success(response, retryGenerationRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: retryMatch[1], itemIds, timeoutMs, idempotencyKey: key }));
+    }
     const resumeMatch = /^\/api\/runs\/([^/]+)\/resume$/.exec(pathname);
     if (resumeMatch) {
       if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行恢复必须由当前 Skill/CLI 在用户重新确认后提交。');

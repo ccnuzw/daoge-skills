@@ -204,7 +204,7 @@ export function providerEndpointPolicyIssues(providerId: ProviderId, baseUrl: st
     if (parsed.protocol !== 'https:') issues.push({ level: 'error', code: 'public_endpoint_requires_https', message: '公开兼容端点必须使用 HTTPS；如需 HTTP 代理请切换到本地代理或企业内网模式。' });
     if (localLikeHost(parsed.hostname)) issues.push({ level: 'warning', code: 'public_endpoint_looks_private', message: '该端点看起来像本机或内网；如使用代理请切换到本地代理或企业内网模式。' });
   }
-  if (trustMode === 'local_proxy' && !localLikeHost(parsed.hostname)) issues.push({ level: 'warning', code: 'local_proxy_not_local', message: '本地代理模式通常应指向 localhost 或内网回环地址。' });
+  if (trustMode === 'local_proxy' && !localLikeHost(parsed.hostname)) issues.push({ level: 'warning', code: 'local_proxy_not_local', message: '本地代理模式通常应指向 localhost 或内网回环地址。若你使用 TUN／虚拟网卡代理（本地代理接管 DNS 并返回 fake-IP，例如 198.18.0.0/15），公有主机名在该模式下同样受支持。' });
   if (trustMode === 'enterprise_private' && parsed.protocol !== 'https:') issues.push({ level: 'warning', code: 'enterprise_endpoint_prefers_https', message: '企业内网端点建议使用 HTTPS，避免密钥在网络中明文传输。' });
   return issues;
 }

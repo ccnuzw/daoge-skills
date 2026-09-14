@@ -30,6 +30,7 @@ export interface QualityMetrics {
   runItems: {
     total: number;
     terminal: number;
+    settled: number;
     successful: number;
     failed: number;
     blocked: number;
@@ -184,6 +185,10 @@ export function getQualityMetrics(db: StudioDatabase, studioId: string, input: Q
 
   const totalItems = RUN_ITEM_STATUSES.reduce((total, status) => total + itemStatusCounts[status], 0);
   const terminal = [...TERMINAL_ITEM_STATUSES].reduce((total, status) => total + itemStatusCounts[status], 0);
+  // A cancelled item is never a verdict on the run: the operator stopped it. Counting it in the denominator
+  // made "cancel a batch" look like a quality regression, so the rate is taken over settled items only and the
+  // denominator is exposed so a reader can see what it was computed from.
+  const settled = terminal - itemStatusCounts.cancelled;
   const totalReviews = Object.values(byDecision).reduce((total, count) => total + count, 0);
   const successful = itemStatusCounts.succeeded;
   return {
@@ -193,13 +198,14 @@ export function getQualityMetrics(db: StudioDatabase, studioId: string, input: Q
     runItems: {
       total: totalItems,
       terminal,
+      settled,
       successful,
       failed: itemStatusCounts.failed,
       blocked: itemStatusCounts.blocked,
       retryWait: itemStatusCounts.retry_wait,
       unknownOutcome: itemStatusCounts.outcome_unknown,
       cancelled: itemStatusCounts.cancelled,
-      successRate: terminal ? successful / terminal : null,
+      successRate: settled ? successful / settled : null,
       byStatus: itemStatusCounts
     },
     reviews: { total: totalReviews, byDecision, keepRate: totalReviews ? byDecision.keep / totalReviews : null },

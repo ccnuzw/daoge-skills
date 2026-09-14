@@ -500,3 +500,54 @@ test('vNext generate never carries the managed references that the same edit req
   assert.match(seen[1].contentType, /^multipart\/form-data; boundary=/);
   assert.equal(seen[1].body.includes(Buffer.from('asset-reference.png')), true);
 });
+
+test('local proxy trust mode accepts fake-IP and overlay ranges but never special-use ranges', async () => {
+  const accepted = ['198.18.0.5', '100.64.0.1', '127.0.0.1', 'fd00::1', '::1'];
+  for (const address of accepted) {
+    let requested = 0;
+    const result = await downloadHttpResource('https://tun.example/provider.png', {
+      signal: new AbortController().signal,
+      maxBytes: 4096,
+      privateAddressPolicy: 'local_proxy',
+      resolveHost: async () => [address],
+      request: async () => {
+        requested += 1;
+        return { response: new Response(png, { status: 200, headers: { 'content-type': 'image/png' } }), remoteAddress: address };
+      }
+    });
+    assert.equal(requested, 1, address + ' should reach the transport');
+    assert.equal(result.bytes.length, png.length, address);
+  }
+
+  const rejected = ['169.254.169.254', '192.0.2.1', '198.51.100.1', '203.0.113.1', '240.0.0.1', 'fe80::1', '::ffff:8.8.8.8'];
+  for (const address of rejected) {
+    let requested = 0;
+    await assert.rejects(() => downloadHttpResource('https://tun.example/provider.png', {
+      signal: new AbortController().signal,
+      maxBytes: 4096,
+      privateAddressPolicy: 'local_proxy',
+      resolveHost: async () => [address],
+      request: async () => { requested += 1; throw new Error('transport must not run'); }
+    }), /forbidden private|non-public/, address);
+    assert.equal(requested, 0, address + ' must be rejected before the transport');
+  }
+
+  // `enterprise_private` covers RFC1918 and IPv6 ULA only; fake-IP and CGNAT space stay out of it.
+  const enterpriseRejected = ['198.18.0.5', '100.64.0.1'];
+  for (const address of enterpriseRejected) {
+    await assert.rejects(() => downloadHttpResource('https://corp.example/provider.png', {
+      signal: new AbortController().signal,
+      maxBytes: 4096,
+      privateAddressPolicy: 'enterprise_private',
+      resolveHost: async () => [address],
+      request: async () => { throw new Error('transport must not run'); }
+    }), /forbidden private|non-public/, address);
+  }
+
+  await assert.rejects(() => downloadHttpResource('https://plain.example/provider.png', {
+    signal: new AbortController().signal,
+    maxBytes: 4096,
+    resolveHost: async () => ['198.18.0.5'],
+    request: async () => { throw new Error('transport must not run'); }
+  }), /forbidden private|non-public/);
+});

@@ -24,6 +24,8 @@ export interface SafeDownloadOptions {
   maxRedirects?: number;
   request?: PinnedHttpTransport;
   resolveHost?: HostResolver;
+  allowPrivate?: boolean;
+  privateAddressPolicy?: PrivateAddressPolicy;
 }
 
 export interface DownloadedResource {
@@ -469,6 +471,24 @@ function isPrivateIpv4(bytes: readonly number[]): boolean {
 function isLoopbackIpv6(bytes: readonly number[]): boolean { return bytes.slice(0, 15).every((value) => value === 0) && bytes[15] === 1; }
 function isPrivateIpv6(bytes: readonly number[]): boolean { return (bytes[0] & 0xfe) === 0xfc; }
 
+/**
+ * Ranges a local proxy or TUN adapter legitimately presents to this process: loopback, RFC 2544 benchmark space
+ * (the usual fake-IP range a TUN resolver hands out) and CGNAT/overlay space used by mesh VPNs. Link-local and
+ * metadata addresses, documentation ranges, multicast and reserved space stay forbidden, so choosing
+ * `local_proxy` never widens access to them. Before this, a TUN fake-IP such as 198.18.x was rejected on every
+ * request even though the operator had deliberately selected the local-proxy trust mode.
+ */
+const LOCAL_PROXY_IPV4_PREFIXES: ReadonlyArray<readonly [number, number]> = [
+  [0x7f000000, 8],
+  [0x64400000, 10],
+  [0xc6120000, 15]
+];
+
+function isLocalProxyIpv4(bytes: readonly number[]): boolean {
+  const value = (((bytes[0] * 0x1000000) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3]) >>> 0);
+  return LOCAL_PROXY_IPV4_PREFIXES.some(([network, prefixLength]) => (value >>> (32 - prefixLength)) === (network >>> (32 - prefixLength)));
+}
+
 function assertAllowedAddress(address: string, policy: PrivateAddressPolicy | null): void {
   if (!policy) {
     assertPublicAddress(address);
@@ -478,14 +498,14 @@ function assertAllowedAddress(address: string, policy: PrivateAddressPolicy | nu
   const ipv4 = ipv4Bytes(address);
   if (ipv4) {
     if (!isForbiddenIpv4(ipv4)) return;
-    if (policy === 'local_proxy' && isLoopbackIpv4(ipv4)) return;
+    if (policy === 'local_proxy' && isLocalProxyIpv4(ipv4)) return;
     if (policy === 'enterprise_private' && isPrivateIpv4(ipv4)) return;
     throw new Error('Provider endpoint resolved to a forbidden private or reserved address.');
   }
   const ipv6 = ipv6Bytes(address);
   if (ipv6) {
     if (!isForbiddenIpv6(ipv6)) return;
-    if (policy === 'local_proxy' && isLoopbackIpv6(ipv6)) return;
+    if (policy === 'local_proxy' && (isLoopbackIpv6(ipv6) || isPrivateIpv6(ipv6))) return;
     if (policy === 'enterprise_private' && isPrivateIpv6(ipv6)) return;
     throw new Error('Provider endpoint resolved to a forbidden private or reserved address.');
   }
@@ -615,11 +635,15 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
   const request = options.request || pinnedHttpTransport;
   const resolver = options.resolveHost || defaultHostResolver;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  // Image downloads used to ignore the endpoint trust mode entirely: neither the DNS check nor the
+  // remote-address check honoured it, so a `local_proxy` or `enterprise_private` profile could reach the API
+  // and then fail on the image host. The policy now travels with the download.
+  const privateAddressPolicy = options.privateAddressPolicy || (options.allowPrivate === true ? 'enterprise_private' : null);
   if (!Number.isInteger(maxRedirects) || maxRedirects < 0) throw new Error('A non-negative redirect limit is required.');
 
   let current = value;
   for (let redirects = 0; ; redirects += 1) {
-    const target = await assertSafeUrl(current, resolver, options.signal);
+    const target = await assertSafeUrl(current, resolver, options.signal, privateAddressPolicy);
     let result: PinnedHttpResponse;
     try {
       result = await request(target.url, target.addresses, {
@@ -632,7 +656,7 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
     }
     const { response, remoteAddress } = result;
     try {
-      assertPublicAddress(hostnameWithoutBrackets(remoteAddress));
+      assertAllowedAddress(hostnameWithoutBrackets(remoteAddress), privateAddressPolicy);
       if (!target.addresses.some((address) => sameAddress(address, remoteAddress))) {
         throw new Error('Provider image connection remote address did not match the pinned DNS result.');
       }
@@ -668,10 +692,11 @@ export async function downloadHttpResourceToFile(value: string, destination: str
   const request = options.request || pinnedHttpTransport;
   const resolver = options.resolveHost || defaultHostResolver;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const privateAddressPolicy = options.privateAddressPolicy || (options.allowPrivate === true ? 'enterprise_private' : null);
   if (!Number.isInteger(maxRedirects) || maxRedirects < 0) throw new Error('A non-negative redirect limit is required.');
   let current = value;
   for (let redirects = 0; ; redirects += 1) {
-    const target = await assertSafeUrl(current, resolver, options.signal);
+    const target = await assertSafeUrl(current, resolver, options.signal, privateAddressPolicy);
     let result: PinnedHttpResponse;
     try {
       result = await request(target.url, target.addresses, { headers: { accept: 'image/png, image/jpeg, image/webp' }, signal: options.signal });
@@ -681,7 +706,7 @@ export async function downloadHttpResourceToFile(value: string, destination: str
     }
     const { response, remoteAddress } = result;
     try {
-      assertPublicAddress(hostnameWithoutBrackets(remoteAddress));
+      assertAllowedAddress(hostnameWithoutBrackets(remoteAddress), privateAddressPolicy);
       if (!target.addresses.some((address) => sameAddress(address, remoteAddress))) throw new Error('Provider image connection remote address did not match the pinned DNS result.');
     } catch (error) {
       await cancelBody(response);

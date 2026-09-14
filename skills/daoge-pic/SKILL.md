@@ -102,6 +102,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 - 运行时目录形态固定为 `<workspace>/daoge-studio`、`<workspace>/daoge-assets`、`<workspace>/daoge-deliveries`。`studio.db` 是业务事实源；`Provider.db` 是 Provider Profile、密钥引用与 write-only 摘要的唯一运行时事实源。
 - Provider 能力、端点信任、参考图/遮罩能力、媒体类型和输出规格来自版本化 Provider Descriptor；Profile store、API、Workbench、预检和 HTTP adapter 必须消费同一份 Descriptor。
 - Workbench 可管理 Profile、模型、端点信任模式和限额；API Key 与完整 Base URL 只写不回显。页面打开、加载或保存不得自动连接 Provider；显式连接测试和模型列表读取只在用户点击时访问 Provider。`compatible_public` 必须使用 HTTPS；需要 HTTP 时只能显式选择 `local_proxy` 或 `enterprise_private`，并接受对应私网地址策略。
+- 端点信任模式决定允许解析到哪些非公有地址：`local_proxy` 放行 loopback、CGNAT/overlay（100.64.0.0/10，含 Tailscale 等）、RFC 2544 benchmark 段（198.18.0.0/15，即 TUN／虚拟网卡代理常用的 fake-IP）与 IPv6 ULA 和回环；`enterprise_private` 放行 RFC1918、IPv6 ULA 与回环。**任何模式都不放行** link-local、云元数据（169.254.169.254）、文档、多播与保留段。使用 TUN 代理（本地代理接管 DNS 并返回 fake-IP）时必须显式选择 `local_proxy`，此时公有主机名的告警是正常的。
 
 ## 本地访问授权与打开 Workbench
 
@@ -162,6 +163,7 @@ node scripts/daoge.js template-rollback --workspace <path> --template <template-
 ## 运行恢复与媒体边界
 
 - Provider 限流或临时故障进入有界重试；认证、模型、参数或权限错误不自动重试。
+- 超时可以只在重试时覆盖：`retry --timeout-ms <1000..600000>`。它只改写该项的请求 payload，**不改写已确认的计划快照**，并把覆盖值记进 `run.queued` / `run.items_retried` 事件；因此超时属于重试参数，不需要重新确认计划。请求超时默认 120000 ms，上限 10 分钟。
 - 外部请求结果不明时，运行项进入 `outcome_unknown`，绝不自动重放。用户核实无结果后，才可用 `resolve-unknown` 将指定项结案。
 - daemon 重启时，未安全完成的运行进入 `resume_pending`；再次外部调用前必须在会话中得到用户确认，并以 `resume --session <session-id>` 记录。Workbench 只能显示等待状态，不能绕过会话继续。
 - `retry` 只允许 `failed`、`blocked` 或 `retry_wait`；`outcome_unknown` 不可直接重试。

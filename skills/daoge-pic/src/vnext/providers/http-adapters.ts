@@ -213,7 +213,7 @@ async function imageSourceFromResponse(response: Response, signal: AbortSignal, 
     let byteSize = Number(parsed.byteSize) || 0;
     if (!parsed.filePath) {
       if (!parsed.url) throw new Error('Provider response did not include image bytes.');
-      const downloaded = await downloadHttpResourceToFile(parsed.url, filePath, { signal, maxBytes: MAX_DOWNLOAD_BYTES, request: transport.downloadRequest, resolveHost: transport.resolveHost, maxRedirects: transport.maxDownloadRedirects });
+      const downloaded = await downloadHttpResourceToFile(parsed.url, filePath, { signal, maxBytes: MAX_DOWNLOAD_BYTES, request: transport.downloadRequest, resolveHost: transport.resolveHost, maxRedirects: transport.maxDownloadRedirects, privateAddressPolicy: transport.privateAddressPolicy || undefined });
       mediaType = imageMediaType(downloaded.contentType);
       byteSize = downloaded.byteSize;
     }
