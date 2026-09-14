@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase, STUDIO_SCHEMA_VERSION, studioSchemaVersion, subscribeStudioEvents, withTransaction } from '../studio/database';
 import { hardenStudioAccess, ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { isProviderId, providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
-import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
+import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileConfig, updateProviderProfile } from '../studio/provider-store';
 import { isProviderEndpointTrustMode, providerDescriptor, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, referenceEnabledForProvider } from '../providers/descriptors';
 import { createImageProvider, requestEndpointFor } from '../providers/http-adapters';
 import type { ImageProvider } from '../providers/contracts';
@@ -27,7 +27,7 @@ import { listUsageLedger, summarizeUsage, type UsageAttribution, type UsageEstim
 import { completeDeliveryStepAsync, createDelivery, DeliveryCompletionPhase, DeliveryCompletionResult, DeliveryExportResult, exportDeliveryAsync, getDelivery, listDeliveries, openDeliveryExportFileAsync, prepareDelivery, returnDeliveryToDraft, updateDeliveryDraft } from '../domain/deliveries';
 import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeliveryBatchVersion, reviseDeliveryBatch } from '../domain/delivery-batches';
 import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
-import { getPersistedStudioProvenance } from '../provenance/studio';
+import { getPersistedStudioProvenance, getStudioProvenanceVersion, listStudioProvenanceVersions } from '../provenance/studio';
 import { listProjectSelectionAssets, setProjectAssetSelected, setProjectAssetsSelected } from '../domain/project-selections';
 import { getCanvasLayout, saveCanvasLayout, CanvasLayoutScopeType } from '../domain/canvas-layouts';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
@@ -41,7 +41,8 @@ import { daemonRestartAvailable, daemonShutdownAvailable, requestDaemonRestart, 
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
 import type { ProcessPoolHealth } from '../runtime/worker-pool';
 import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName, LocalAuthentication } from './local-auth';
-import { ConfirmationGate, canonicalValue, planHash } from './confirmation-gate';
+import { ConfirmationGate, planHash } from './confirmation-gate';
+import { canonicalJson } from '../shared/canonical-json';
 import { isSupportedProtocolVersion, protocolStatus, RUNTIME_VERSION, SKILL_PROTOCOL_NAME, SUPPORTED_PROTOCOL_RANGE } from '../shared/protocol';
 import { WorkbenchPresence } from '../runtime/workbench-presence';
 import { createBackupManifest, snapshotBackupFile, type BackupManifest, type BackupManifestEntryInput } from '../backup/manifest';
@@ -286,6 +287,7 @@ export interface StudioServiceOptions {
   workbenchDir?: string;
   capability?: string;
   workbenchPresence?: WorkbenchPresence;
+  confirmationGate?: ConfirmationGate;
   providerProbe?: typeof probeHttpEndpoint;
   mediaWorkerPool?: MediaProcessPool;
 }
@@ -315,7 +317,7 @@ function idempotencyKey(request: IncomingMessage, body: JsonBody): string {
   if (explicit && operationName) throw new InvalidCommandError('idempotency-key 与 operation-name 不能同时使用。');
   if (explicit) return explicit;
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(operationName)) throw new InvalidCommandError('写入操作需要 idempotency-key 或安全的 operation-name。');
-  return 'operation:' + createHash('sha256').update(request.method || 'POST').update('\0').update(request.url || '/').update('\0').update(operationName).update('\0').update(canonicalValue(body)).digest('hex');
+  return 'operation:' + createHash('sha256').update(request.method || 'POST').update('\0').update(request.url || '/').update('\0').update(operationName).update('\0').update(canonicalJson(body)).digest('hex');
 }
 
 async function readBody(request: IncomingMessage): Promise<JsonBody> {
@@ -456,33 +458,46 @@ function draftProviderConfig(input: Record<string, unknown>): ResolvedProviderCo
   };
 }
 
-function providerModelConfigFromProfile(current: ResolvedProviderConfig, input: Record<string, unknown>): ResolvedProviderConfig {
+function immutableProviderConfig(config: ResolvedProviderConfig): ResolvedProviderConfig {
+  const finalConfig = {
+    ...config,
+    options: Object.freeze({ ...config.options }),
+    limits: Object.freeze({ ...config.limits })
+  };
+  return Object.freeze(finalConfig);
+}
+
+function providerModelConfigFromProfile(current: ResolvedProviderConfig, input: Record<string, unknown>, allowFreshKeyEndpointOverride = false): ResolvedProviderConfig {
+  const hasEndpointOverride = ['providerId', 'baseUrl', 'endpointTrustMode'].some((field) => Object.prototype.hasOwnProperty.call(input, field));
+  const freshApiKey = input.apiKey === undefined ? '' : text(input.apiKey);
+  if (hasEndpointOverride && (!allowFreshKeyEndpointOverride || !freshApiKey)) throw new InvalidCommandError('使用 Provider Profile 覆盖端点、Provider 类型或信任策略时必须同时提供新的 API Key。');
   const providerIdInput = text(input.providerId);
-  const providerId = providerIdInput ? providerIdInput : current.providerId;
+  const providerId = providerIdInput || current.providerId;
   if (!isProviderId(providerId)) throw new InvalidCommandError('Provider 类型无效。');
   const descriptor = providerDescriptor(providerId);
   const endpointTrustModeInput = text(input.endpointTrustMode);
   const endpointTrustMode = endpointTrustModeInput || (providerId === current.providerId ? current.endpointTrustMode : descriptor.endpoint.defaultTrustMode);
   if (!isProviderEndpointTrustMode(endpointTrustMode)) throw new InvalidCommandError('Provider 端点信任模式无效。');
   const options = input.options === undefined ? current.options : record(input.options);
-  return {
+  return immutableProviderConfig({
     ...current,
     providerId,
     model: text(input.model) || (providerId === current.providerId ? current.model : descriptor.modelExamples[0]) || descriptor.modelExamples[0] || 'model-list-probe',
     baseUrl: input.baseUrl === undefined ? current.baseUrl : text(input.baseUrl),
-    apiKey: input.apiKey === undefined ? current.apiKey : text(input.apiKey),
+    apiKey: input.apiKey === undefined ? current.apiKey : freshApiKey,
     options,
     referenceEnabled: referenceEnabledForProvider(providerId, options.referenceEnabled === true),
     endpointTrustMode,
     descriptorVersion: PROVIDER_DESCRIPTOR_VERSION,
     adapterVersion: PROVIDER_ADAPTER_VERSION
-  };
+  });
 }
 
 async function listProviderModelsForConfig(config: ResolvedProviderConfig): Promise<{ models: unknown[] }> {
-  const provider = createImageProvider(config);
+  const finalConfig = immutableProviderConfig(config);
+  const provider = createImageProvider(finalConfig);
   if (!provider.listModels) throw new InvalidCommandError('该 Provider adapter 不支持模型列表。');
-  const validation = provider.validateConfig(config);
+  const validation = provider.validateConfig(finalConfig);
   if (!validation.valid) throw new InvalidCommandError('Provider 配置无效：' + [...validation.missing, ...(validation.errors || [])].join(', '));
   const controller = new AbortController();
   let timedOut = false;
@@ -823,7 +838,7 @@ export class LocalStudioService {
     this.cookieName = localSessionCookieName(this.initialized.manifest.studioId, this.capability);
     this.workbenchPresence = options.workbenchPresence || new WorkbenchPresence();
     this.providerProbe = options.providerProbe || probeHttpEndpoint;
-    this.confirmationGate = new ConfirmationGate();
+    this.confirmationGate = options.confirmationGate || new ConfirmationGate();
   }
 
   async listen(port = 0, host = '127.0.0.1'): Promise<StartedStudioService> {
@@ -1146,6 +1161,13 @@ export class LocalStudioService {
       if (request.method === 'GET' && assetProvenanceMatch) return success(response, { provenance: getAssetProvenance(this.db, this.initialized.manifest.studioId, assetProvenanceMatch[1]) });
       const persistedProvenanceMatch = /^\/api\/provenance\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && persistedProvenanceMatch) return success(response, { provenance: getPersistedStudioProvenance(this.db, this.initialized.manifest.studioId, persistedProvenanceMatch[1]) });
+      // Frozen bodies are addressed by content hash, which is what makes an
+      // anchor (recordId + contentHash) resolvable even after the current
+      // record has moved on.
+      const provenanceVersionsMatch = /^\/api\/provenance\/([^/]+)\/versions$/.exec(parsed.pathname);
+      if (request.method === 'GET' && provenanceVersionsMatch) return success(response, { versions: listStudioProvenanceVersions(this.db, this.initialized.manifest.studioId, provenanceVersionsMatch[1]) });
+      const provenanceVersionMatch = /^\/api\/provenance\/([^/]+)\/versions\/([A-Fa-f0-9]{64})$/.exec(parsed.pathname);
+      if (request.method === 'GET' && provenanceVersionMatch) return success(response, { version: getStudioProvenanceVersion(this.db, this.initialized.manifest.studioId, provenanceVersionMatch[1], provenanceVersionMatch[2].toLowerCase()) });
       const projectArchiveMatch = /^\/api\/projects\/([^/]+)\/assets\/archive$/.exec(parsed.pathname);
       if (request.method === 'GET' && projectArchiveMatch) { const assetIds = parsed.searchParams.getAll('assetId'); if (assetIds.length > MAX_BATCH_IDS) throw new InvalidCommandError('assetId 不能超过 ' + MAX_BATCH_IDS + ' 项。'); return await this.projectAssetArchive(request, response, projectArchiveMatch[1], assetIds); }
       const deliveryArchiveMatch = /^\/api\/deliveries\/([^/]+)\/archive$/.exec(parsed.pathname);
@@ -1211,6 +1233,8 @@ export class LocalStudioService {
   private async write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody, authentication: LocalAuthentication): Promise<void> {
     const confirmedTemplateMutation = pathname === '/api/confirmed-templates' || /^\/api\/confirmed-templates\/[^/]+\/(?:archive|rollback)$/.test(pathname);
     if (confirmedTemplateMutation && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
+    const providerSecretAction = pathname === '/api/provider-models' || /^\/api\/providers\/[^/]+\/(?:validate|test|models)$/.test(pathname);
+    if (providerSecretAction && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Provider credential actions require Skill/CLI authentication.');
     const key = idempotencyKey(request, body);
     const putAllowed = /^\/api\/providers\/[^/]+$/.test(pathname) || /^\/api\/deliveries\/[^/]+\/items$/.test(pathname) || /^\/api\/rounds\/[^/]+\/draft-context$/.test(pathname);
     if (request.method === 'PUT' && !putAllowed) return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
@@ -1234,6 +1258,10 @@ export class LocalStudioService {
       } catch (error) {
         normalizeBackupInputError('Backup restore dry-run', error);
       }
+    }
+    if (pathname === '/api/backup/restore' && request.method === 'POST') {
+      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup restore requires Skill/CLI authentication.');
+      return json(response, 409, { ok: false, error: { code: 'restore_requires_offline', message: 'Backup restore cannot be applied by a live Studio daemon. Stop the daemon and use the offline CLI action.' } });
     }
     if (pathname === '/api/backup/upgrade-assess' && request.method === 'POST') {
       if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup upgrade assessment requires Skill/CLI authentication.');
@@ -1337,7 +1365,7 @@ export class LocalStudioService {
     }
     if (pathname === '/api/provider-models' && request.method === 'POST') {
       const profileId = text(body.profileId);
-      const config = profileId ? providerModelConfigFromProfile(resolveProviderProfileForTest(this.providerDb, profileId, { paths: this.initialized.paths }), body) : draftProviderConfig(body);
+      const config = profileId ? providerModelConfigFromProfile(resolveProviderProfileConfig(this.providerDb, profileId, this.initialized.paths), body) : immutableProviderConfig(draftProviderConfig(body));
       return success(response, await listProviderModelsForConfig(config));
     }
     const providerUpdateMatch = /^\/api\/providers\/([^/]+)$/.exec(pathname);
@@ -1356,13 +1384,15 @@ export class LocalStudioService {
     }
     const providerValidateMatch = /^\/api\/providers\/([^/]+)\/validate$/.exec(pathname);
     if (providerValidateMatch && request.method === 'POST') {
-      const config = resolveProviderProfileForTest(this.providerDb, providerValidateMatch[1], { baseUrl: body.baseUrl, apiKey: body.apiKey, paths: this.initialized.paths });
+      const current = resolveProviderProfileConfig(this.providerDb, providerValidateMatch[1], this.initialized.paths);
+      const config = providerModelConfigFromProfile(current, body, true);
       const validation = createImageProvider(config).validateConfig(config);
       return success(response, { valid: validation.valid, missing: validation.missing, descriptorVersion: config.descriptorVersion, adapterVersion: config.adapterVersion, warnings: config.baseUrl ? config.baseUrl.startsWith('http://') ? ['该 Provider endpoint 使用 HTTP；请确认这是受控测试或代理。'] : [] : [] });
     }
     const providerTestMatch = /^\/api\/providers\/([^/]+)\/test$/.exec(pathname);
     if (providerTestMatch && request.method === 'POST') {
-      const config = resolveProviderProfileForTest(this.providerDb, providerTestMatch[1], { baseUrl: body.baseUrl, apiKey: body.apiKey, paths: this.initialized.paths });
+      const current = resolveProviderProfileConfig(this.providerDb, providerTestMatch[1], this.initialized.paths);
+      const config = providerModelConfigFromProfile(current, body, true);
       const validation = createImageProvider(config).validateConfig(config);
       if (!validation.valid) throw new InvalidCommandError('Provider 配置无效：' + [...validation.missing, ...(validation.errors || [])].join(', '));
       const controller = new AbortController();
@@ -1385,8 +1415,8 @@ export class LocalStudioService {
     }
     const providerModelsMatch = /^\/api\/providers\/([^/]+)\/models$/.exec(pathname);
     if (providerModelsMatch && request.method === 'POST') {
-      const current = resolveProviderProfileForTest(this.providerDb, providerModelsMatch[1], { paths: this.initialized.paths });
-      return success(response, await listProviderModelsForConfig(providerModelConfigFromProfile(current, body)));
+      const current = resolveProviderProfileConfig(this.providerDb, providerModelsMatch[1], this.initialized.paths);
+      return success(response, await listProviderModelsForConfig(providerModelConfigFromProfile(current, body, true)));
     }
     if (pathname === '/api/sessions/open') {
       const conversationId = text(body.conversationId);

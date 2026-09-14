@@ -2,7 +2,9 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
-## daoge-pic Unreleased
+## daoge-pic 5.14.0 - 2026-09-15
+
+- 版本元数据收口到 package/runtime `5.14.0`，Skill protocol 保持 `2.0.0`，运行时兼容范围更新为 `>=5.14.0 <6.0.0`；正式制品 `daoge-pic-5.14.0.tgz` 为 599,181 bytes，npm shasum 为 262a83a071f744e62024d90cc8cc9aba49fa8fa2，SHA-256 为 4113d15995c92c78d95b4777436c4071dcd06bdec315b6a59e57580838c9d43b。
 
 - 修复带任务或轮次上下文的资产评审：评审资产必须属于该上下文项目或已明确共享到当前 Studio，避免跨项目写入误导性评审记录。
 - Provider 成功返回外部请求标识后，在运行项进入后续结果阶段前持久化 `run_items.external_request_id`；显式重试会清理旧标识并生成新的本地请求身份。
@@ -28,8 +30,50 @@
 - **备份 manifest 不再静默截断**：`listStudioAssets` 内部把每页钳到 500 行，而备份清单只调用一次，于是超过 500 个素材的 Studio 会得到一个「看起来完整、实际缺一半」的清单。现在按 offset 分页枚举到上限为止，实测本机 Studio 的 1114 个素材全部进入清单。
 - **备份 manifest 兼容旧版交付冻结清单**：早期运行时把已导出交付的冻结文件记在 `files`（键为 `file`，且没有 `byteSize`），当前代码只认 `exportFiles`，因此只要 Studio 里有一个旧交付，整个备份清单请求就会失败。现在两种形状都接受——`name`/`file` 互为别名，缺失的字节数由磁盘实测补齐，而冻结记录里的 `contentHash` 仍是强校验锚点。
 - **备份能力表述诚实化**：`backup/restore.ts` 仍然只有 dry-run 规划，不存在 apply/恢复执行器。已在模块头注释、SKILL.md 命令分组与 CLI 帮助中明确写出，并禁止向用户承诺这些命令可以回滚 Studio（真实回滚只能靠文件级快照替换）。
+
+### 安全默认与口径统一
+
+- **Provider 密钥不再默认明文入库**：`createProviderSecretStore` 的默认档由「显式要求系统后端才启用」翻转为「平台支持就用系统后端，不支持时显式告警降级」。此前未设 `DAOGE_PIC_PROVIDER_SECRET_BACKEND=system` 时，API Key 一律以明文写进 SQLite。同时修复 macOS Keychain 写入：原实现把 `-w` 放在参数末尾，而 `security add-generic-password` 的 `-w` 末位语义是**交互式提示**，写入会永久挂起等待 tty——因为这个路径从未被默认启用所以一直没暴露；现在值作为 `-w` 的实参传入，并为所有子进程调用加了超时，避免系统钥匙串等待授权时把 daemon 卡死。列表路径（`apiKeyConfigured`）不再解密密钥，只读引用判断存在性，并对解密结果按 `configVersion` 缓存，避免 daemon 每 350ms 一次 tick 都同步 spawn 子进程。
+- **JSON 规范化与哈希收敛为单一实现**：仓内原有 5 份 `canonicalValue` / `canonicalJson` / `stableJson` / `digestJson` 实现，口径互不相同——最严重的是 provenance 的 `digestJson` 直接用 `JSON.stringify` 不排序，导致语义完全相同、仅键顺序不同的评审反馈或计划会得到不同的 `feedbackHash` / `planHash`。现统一到 `shared/canonical-json.ts`（键排序、去 `undefined`、其余位置 `undefined`→`null`、非有限数→`null`，`strict` 模式改为抛错）。统一口径刻意与原先的 `canonicalValue` 保持一致，因此幂等键与 provenance `contentHash` 的既有锚定值不变；备份 manifest 保留其严格语义，通过 `strict` 选项表达而不是再写一份。
+- **支持 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`**：Provider 传输层自行解析 DNS 并连接固定地址（不走 `fetch`），因此既有的代理环境变量对它完全无效——在只有企业 HTTP 代理出口的网络里，所有 Provider 调用都会在连接阶段失败。现在按标准规则读取代理：`https_proxy` 只对 https 目标生效、`all_proxy` 作为兜底；HTTP 目标以绝对 URI 转发，HTTPS 目标用 CONNECT 隧道（TLS 仍然端到端终止在 Provider，不在代理）；`NO_PROXY` 支持域名、`.` 前缀、通配符、`host:port` 与 `*`，且按每一跳重定向重新判定。两个安全边界是刻意的：代理地址按端点信任模式校验（并额外接受回环/CGNAT/overlay，因为企业代理与本机透明代理本就位于内网地址，要求公网代理会让常规用法直接失败），而链路本地、云元数据、多播与保留段在任何模式下都禁止；目标若为字面 IP，即使走代理也仍然过本地策略，因此「元数据地址一律拒绝」不会因配置了代理而失效。
+- **Studio 迁移拆出独立模块 + 迁移契约测试**：`database.ts` 里 34 个版本的建表/改表 SQL 与逐版本特例逻辑整体移到 `studio/migrations.ts`（`database.ts` 577 → 230 行），连接、完整性校验与事件管道留在原处。新增 `tests/vnext/studio-schema-contract.test.js`：迁移版本必须连续且唯一、最高版本必须等于 `STUDIO_SCHEMA_VERSION`（漏改版本号会让新迁移永远不被应用，此前只有在打开数据库时才会暴露）、重复迁移必须是幂等的（二次迁移后 `sqlite_master` 完全不变）、新开 Studio 的迁移账本必须是 1..N。
+- **枚举与 SQLite CHECK 的漂移有了防呆**：多份枚举同时写在 SQL CHECK 与 TypeScript 两处，改一边漏一边要到「应用层写入被数据库拒绝」时才暴露。现在 `ROUND_PURPOSES`、`ASSET_KINDS` 成为单一运行时常量，契约测试直接解析 `sqlite_master` 里的 CHECK 列表与之比对。**没有**把这些 CHECK 移除：SQLite 无法直接删除列约束，任何现有 Studio 都要重建整表才能去掉，风险远大于收益；因此选择让两者保持同步并有测试守着。
+- **backup restore 有了真正的执行器**：此前 `backup/restore.ts` 只有 dry-run 规划，文档与帮助里明确写着「不得承诺可回滚」。现在新增 `applyBackupRestore`（Bearer-only 端点 `/api/backup/restore` 与 CLI `backup-restore`）：把改动文件先写入目标工作区内的暂存目录并逐文件校验 SHA-256（校验的就是实际写入的字节），全部就绪后用原子 rename 替换；任一步失败即按日志逆序把已替换的文件还原回去，新建的文件则删除，暂存目录无论成败都会清理。两个硬前置条件是执行器自己保证的：目标 Studio 的 daemon 必须已经关闭（在运行中的 daemon 底下替换 `studio.db` 只会得到损坏的 Studio，恢复前检查 `daoge-studio/runtime/daemon.json`），以及源文件的哈希必须与 manifest 一致。恢复只覆盖 manifest 记录的文件，不会删除目标里未记录的文件。回归覆盖：正常恢复、源被篡改、替换中途失败回滚（含「目标原本没有、被新建」的文件要被删掉）、暂存后失败、daemon 在跑、计划未就绪。
+- **「一轮次最多一个进行中的运行」成为数据库约束**（Studio Schema v34）：此前这只是应用层约定——`assertRoundHasNoGenerationRun` 先读后插，两个入队请求同时到达可以同时通过检查，而内存里的 `BEGIN IMMEDIATE` 之外没有第二道防线。现在加部分唯一索引 `idx_generation_runs_round_open`。之所以是**部分**索引而非全量 `UNIQUE(round_id)`：本机真实 Studio 里就有 4 个轮次各有 2 条运行（completed+completed、partial+partial、partial+completed），全量唯一会让迁移直接失败、daemon 起不来。索引覆盖的状态是「Studio 会自行推进」的那些（draft / awaiting_confirmation / queued / running / pausing / paused / interrupted / resume_pending）；`partial` 与 `failed` 被排除——它们只有用户显式恢复/重试才会继续，且恰恰是历史重复数据所在。迁移若发现已有的进行中重复，会发出 `DAOGE_PIC_OPEN_RUN_CONFLICT` 警告并跳过建索引，而不是让 Studio 打不开（数据问题不该变成停机）。入队插入捕获唯一约束冲突并转回与原先一致的中文冲突错误。
+- **回归不再受宿主机代理影响**：`--env-file` 无法覆盖已存在的环境变量，而 agent 运行时/CI 镜像普遍注入 `HTTP_PROXY`，会把整套 Provider 测试静默改道、让 DNS 固定断言全部失真。新增 `scripts/run-tests.js` 作为测试入口，在启动 runner 前删除代理变量（跨平台，不依赖 shell）。
+
+- **Provider 返回的图片以字节魔数定类型，不再只信 content-type**：`imageMediaType` 原先只对 content-type 做字符串嗅探、默认回落到 `image/png` 且完全漏掉 GIF（GIF 会被标成 PNG）。现在 provider 响应路径复用媒体层已有的魔数检测，只读前 16 字节即可判定。这修掉了一类「已付费但提交失败」的问题：Provider 声明 `image/jpeg` 却返回 PNG 字节时，归档层的 `validateImageBytes` 会因「声明类型与内容不符」抛错，运行项在写入前失败；现在以真实字节为准，能正常落库。返回非图片内容（如网关错误页）的 200 响应现在会被明确拒绝，而不是存成一个打不开的 `.png` 资产。
 - **已确认模板读取不再重跑敏感内容扫描**：读取路径原先复用写入期的校验（含敏感键/值正则，键名单包含 `prompt`、`provider`、`url`、`path`、`file` 等），规则一旦收紧，历史快照会让 `listConfirmedTemplates` 整体抛错、模板列表与 rollback 全部不可用。现在写入路径保持完整校验，读取路径只做结构校验（形状、深度、大小、控制字符），因此真实损坏仍被拒绝而历史快照不再连带失效。
 - **重试预算闸门的错误码透传**：原先恒抛 `budget_exceeded`，`budget_cost_unit_mismatch` 等真实原因被吞。现在透传闸门真实 code 并带未通过项数。同时把「`failed` 运行不保留预留、由重试路径把候选项份额加回并重新过闸」这一有意设计写进注释并补了回归，避免被误当作缺陷改坏。
+
+### Provider 密钥默认改用系统凭据存储（第 6 轮）
+
+- **默认不再把 Provider 凭据明文写进 SQLite**：`createProviderSecretStore` 的 `auto` 档现在优先使用系统凭据存储（macOS 钥匙串 / Windows DPAPI / Linux libsecret），只有在平台确实没有可用后端、或调用方未提供 Studio 路径时才回落明文，且回落时会发出 `DAOGE_PIC_SECRET_BACKEND_DEGRADED` 警告而不是静默降级。要保留明文需显式设置 `DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext`；设为 `system` 则要求必须使用系统存储，不可用时直接报错而不是降级。**已有配置不受影响**：每条 Profile 记录自己的 backend，先前以明文写入的凭据仍按明文读取。
+- **修复 macOS 钥匙串写入实际上从未可用的缺陷**：`security add-generic-password` 的 `-w` 被放在参数末尾，而该工具在 `-w` 为最后一个选项时会转为**交互式提示**——非交互调用因此永久挂起（不是报错）。由于默认一直是明文，这条路径从未被执行过，缺陷被掩盖至今。现改为 `-w <value>`。需要说明的是，macOS 没有以 stdin 非交互喂密码的方式，因此密码会短暂出现在 argv 中：这仍显著优于写入 SQLite（后者持久留存、任何能打开数据库的人都能读到，而 argv 暴露仅持续毫秒级且需同用户在同一瞬间采样进程表）。
+- **所有系统凭据存储调用现在都有 15 秒超时**：任何转为交互式提示的后端都会快速失败，而不是把 daemon 挂死。
+- **凭据读取不再拖慢 daemon**：daemon 每 350 ms 轮询一次并解析活跃 Provider 配置，而每次密钥读取都要同步拉起一个子进程（实测 macOS 约 27 ms），即约 15% 的事件循环被同步等待占用。现加入按 `config_version` 键控的有界读缓存（TTL 5 秒 / 上限 64 条）；`config_version` 在凭据变更时递增，因此轮换密钥即时生效，不会等到 TTL 过期。
+- **列表接口不再解密凭据**：`listProviderProfiles` 原本对每行都解密 API key，只为回答「是否已配置」这个布尔问题（能力推导只用到 providerId 与 referenceEnabled）。现改为只判断存在性，列表路径的子进程调用减半，且密钥不再进入一个会被批量展示的代码路径。
+- **回归不再污染真实钥匙串**：测试通过 `tests/vnext/test.env` 固定为明文后端（`npm run test:vnext` 与 `verification-evidence.js` 均已注入），系统后端由 `provider-secrets.test.js` 显式覆盖。
+
+### provenance 记录改为不可变（第 5 轮）
+
+- **provenance 锚点不再会被静默改写**：`persistStudioProvenance` 原先是 `ON CONFLICT(id) DO UPDATE SET canonical_json = excluded.canonical_json`，而 canonical body 里嵌着「该资产最新一条评审」（`reviewForProject` 取 `ORDER BY created_at DESC LIMIT 1`）。于是**再评审一次**就会在同一个 recordId 下改写内容——已经对外锚定的 `\`recordId → canonicalHash\`` 关系会在无人察觉的情况下失效，而表面上记录 id 并没变。现在内容一旦漂移，先把当前 body 冻结进新表 `provenance_record_versions`（Studio schema **v33**，按 `(studio_id, record_id, content_hash)` 唯一），再写入新值：`GET /api/provenance/<id>/versions` 列出全部历史，`GET /api/provenance/<id>/versions/<sha256>` 按内容哈希取回**当时那一份**数据。对外应锚定 `(recordId, contentHash)`；`PersistedStudioProvenanceRecord` 新增 `contentHash` / `versionCount` / `superseded`，`versionCount > 1` 即表示该记录漂移过。
+- **重复写入同一内容仍然幂等**：不产生新版本、不递增 `version_count`，但 `updated_at` 照常刷新以保持「最后一次被 touch」的语义。
+- **迁移前的历史行同样受保护**：`content_hash` 列为空时由 `canonical_json` 现算，因此 v33 之前写入的记录也能正确锚定与冻结。
+- 组件 sqlite 的事实源仍为单一 SQLite 文件，本次仅为追加表与两列，未改动既有列。
+
+### Worker 生命周期同源化与池熔断自愈（第 4 轮）
+
+- **看门狗、租约与请求超时改为单一事实源**：此前 `runtime/worker-pool.ts` 的 tick 看门狗写死 12 分钟、`runner/worker.ts` 的条目租约写死 30 秒、`providers/http-adapters.ts` 的默认请求超时却是 120 秒——三者互不相干且相差 24 倍。后果是一条会在生产里真实发生的路径：子进程仍在处理 HTTP 调用时租约先过期，`recoverExpiredLeases` 把条目判成 `outcome_unknown` 并计 `possibly_billed`，而 Provider 侧的请求仍在跑并照常计费，形成**重复计费窗口**；父进程却因为看门狗才走到 12 分钟的一半而完全不知情。现在这三者都由 `studio/runtime-settings.ts` 的常量组派生：租约 = `max(60s, 请求超时 + 1s)`、上限取 `"max lease"`（10 分钟，与 `MAX_RETRY_TIMEOUT_MS` 一致），池看门狗 = `max lease + 2 分钟宽限`（落在原来的 12 分钟，但现在是算出来的）。媒体池原先各自写死 15 分钟，也改为同一份派生值，两个池从此不会再各自漂移。
+- **租约按 Provider 配置放大**：`GenerationWorker` 现在从 `providerConfig.limits.requestTimeoutMs` 推导租约（显式传入的 `leaseMs` 仍原样保留，测试与集成不受影响）。把 Provider 超时调到 5 分钟时，租约会跟着变成 5 分 1 秒，而不是继续用不足覆盖一次请求的 30 秒。
+- **Worker 池熔断改为半开自愈**：原先任一子进程连续失败 8 次即把整个池标记为 `exhausted`，此后所有 `ensureCapacity` 直接返回，只能重启 daemon 才能恢复——一次 Provider 配置抖动就可能让运行永久卡住。现在熔断后退避 60 秒尝试半开：起一个探测子进程，存活即解除熔断，失败则重新计一次退避。生成池与媒体池行为一致。
+- **熔断时不再留下悬挂定时器**：半开探测定时器在 `close()` 时被清理，避免已关闭的池在进程退出阶段继续持有句柄。
+
+### 重启连续性（第 3 轮）
+
+- **daemon 重启不再让已打开的 Workbench 标签失效**：capability、session token 与确认门签名密钥原先每个进程重新生成，而 Workbench 的 Cookie 名由 capability 派生、值即 session token，因此一次重启就让所有标签 401、并丢弃全部已提交的确认挑战与已签发的 `confirm_token`。现在这三项连同 Workbench presence 按工作区持久化在 `daoge-studio/runtime/`（0600，与 `daemon.json` 同级同权限），由运行时统一加载与复用；`open` 在重启后同样报告复用现有 Workbench 而不是再开一个标签。主动轮换仍可做到：删除 `runtime/daemon-identity.json` 并重启，旧 Cookie 与旧 token 立即失效。
+- **授权状态不进入业务数据库**：确认门状态、presence 与身份文件都放在 0700 的 `runtime/` 目录而不是 `studio.db`，因此对 Studio 数据的备份或复制不会顺带带走有效的授权凭据。
+- **确认门与 presence 的持久化是可选的**：`ConfirmationGate` / `WorkbenchPresence` 不传 persistence 时行为与之前完全一致（内存态），仅 daemon 运行时注入文件持久化；过期清理在恢复时同样生效，单次使用的 token 预留（`operationKey`）也跨重启保持。
 
 ### 本地代理信任模式与重试超时（第 2 轮）
 

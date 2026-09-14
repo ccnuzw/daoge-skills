@@ -2,6 +2,7 @@ import { createId, nowIso, sha256 } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from './asset-access';
 import { isProjectTemplateId } from './project-templates';
+import { canonicalJson } from '../shared/canonical-json';
 export class StudioNotFoundError extends Error {}
 export class VersionConflictError extends Error {}
 export class InvalidCommandError extends Error {}
@@ -197,12 +198,6 @@ function assertVersion(actual: number, expectedVersion: number): void {
 }
 
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
-  if (value && typeof value === 'object') return '{' + Object.keys(value as Record<string, unknown>).sort().map((key) => JSON.stringify(key) + ':' + canonicalJson((value as Record<string, unknown>)[key])).join(',') + '}';
-  return JSON.stringify(value === undefined ? null : value);
-}
-
 export function executeIdempotent<T>(db: StudioDatabase, studioId: string, idempotencyKey: string, commandName: string, operation: () => T, request: unknown = null): CommandReceipt<T> {
   const scopedStudioId = requireValue(studioId, 'studioId');
   requireValue(idempotencyKey, 'idempotencyKey');
@@ -376,12 +371,19 @@ export function createTaskDraft(db: StudioDatabase, input: { studioId: string; p
   }, input);
 }
 
+/**
+ * Round purposes accepted by the command layer. `creative_rounds.purpose` also
+ * carries a SQLite CHECK built from this same list; tests/vnext/studio-schema-contract.test.js
+ * fails when the two drift apart, because adding a purpose here without a
+ * migration would let the application write rows the database rejects.
+ */
+export const ROUND_PURPOSES = ['exploration', 'refinement', 'variation', 'edit', 'fill'] as const;
+
 export function createRoundDraft(db: StudioDatabase, input: { studioId: string; taskId: string; purpose: CreativeRound['purpose']; parentRoundId?: string; plan?: Record<string, unknown>; sessionId?: string; idempotencyKey: string }): CommandReceipt<CreativeRound> {
   return executeIdempotent(db, input.studioId, input.idempotencyKey, 'rounds.create_draft', () => {
     const task = resolveTaskInStudio(db, input.studioId, input.taskId);
     if (task.status === 'archived' || task.project_status === 'archived') throw new InvalidCommandError('Cannot create a round in archived creative context.');
-    const allowedPurposes: CreativeRound['purpose'][] = ['exploration', 'refinement', 'variation', 'edit', 'fill'];
-    if (!allowedPurposes.includes(input.purpose)) throw new InvalidCommandError('Unsupported round purpose.');
+    if (!(ROUND_PURPOSES as readonly string[]).includes(input.purpose)) throw new InvalidCommandError('Unsupported round purpose.');
     if (input.parentRoundId) {
       const parent = resolveRoundInStudio(db, input.studioId, input.parentRoundId, 'Parent creative round');
       if (parent.task_id !== task.id) throw new InvalidCommandError('Parent creative round must belong to the same task.');

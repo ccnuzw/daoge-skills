@@ -6,6 +6,7 @@ import { ProviderId, ResolvedProviderConfig } from '../studio/provider-config';
 import { providerDescriptor, providerEndpointPolicyIssues } from './descriptors';
 import { OutputTransport, resolveOutputSpec } from './output-spec';
 import { HostResolver, HttpFetch, PinnedHttpTransport, PrivateAddressPolicy, downloadHttpResourceToFile, readJsonImageResponseToFile, readBoundedResponse, requestPinnedHttpEndpoint } from './http-safety';
+import { detectedMediaType } from '../media/archive';
 
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 4 * Math.ceil(MAX_DOWNLOAD_BYTES / 3) + 1024 * 1024;
@@ -135,11 +136,31 @@ async function credentialedModelListFetch(transport: HttpTransport, target: stri
 
 function extension(mediaType: string): string { if (mediaType === 'image/jpeg') return '.jpg'; if (mediaType === 'image/webp') return '.webp'; if (mediaType === 'image/gif') return '.gif'; return '.png'; }
 
+/** Longest signature we check (RIFF....WEBP needs 12 bytes). */
+const IMAGE_SIGNATURE_BYTES = 16;
+
 function imageMediaType(value: unknown): string {
   const text = String(value || '').toLowerCase();
   if (text.includes('jpeg') || text.includes('jpg')) return 'image/jpeg';
   if (text.includes('webp')) return 'image/webp';
+  if (text.includes('gif')) return 'image/gif';
   return 'image/png';
+}
+
+/**
+ * Confirms the bytes a Provider returned are actually an image we support.
+ * Only the leading bytes are read, so a mislabelled response is rejected
+ * before the full body is buffered into memory or archived.
+ */
+async function detectFileImageMediaType(filePath: string): Promise<string | null> {
+  const handle = await fsp.open(filePath, 'r');
+  try {
+    const head = Buffer.alloc(IMAGE_SIGNATURE_BYTES);
+    const { bytesRead } = await handle.read(head, 0, IMAGE_SIGNATURE_BYTES, 0);
+    return detectedMediaType(head.subarray(0, bytesRead));
+  } finally {
+    await handle.close();
+  }
 }
 
 function outputTransport(config: ResolvedProviderConfig, output: Record<string, unknown>): OutputTransport {
@@ -222,6 +243,12 @@ async function imageSourceFromResponse(response: Response, signal: AbortSignal, 
       byteSize = stat.size;
     }
     if (!byteSize) throw new Error('Provider response returned empty image bytes.');
+    // The declared content type is only a hint: the archive later re-checks the
+    // bytes, so anything that is not really a supported image has to fail here
+    // rather than become a .png asset that no reader can open.
+    const detected = await detectFileImageMediaType(filePath);
+    if (!detected) throw new Error('Provider response did not contain a recognisable PNG, JPEG, WebP or GIF image.');
+    if (detected !== mediaType) mediaType = detected;
     const safeMeta = { ...(parsed.responseModel ? { responseModel: parsed.responseModel } : {}), ...(parsed.usage ? { usage: parsed.usage } : {}) };
     if (byteSize <= MAX_IN_MEMORY_IMAGE_BYTES) {
       const bytes = await fsp.readFile(filePath);

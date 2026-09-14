@@ -10,6 +10,8 @@ const { decodeBoundedBase64, downloadHttpResource, probeHttpEndpoint, readBounde
 
 const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==';
 const png = Buffer.from(pngBase64, 'base64');
+const jpegBase64 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwcJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPDs0NDX/wAALCAABAAEBAREA/8QAFAABAQAAAAAAAAAAAAAAAAAAAAr/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJQA/9k=';
+const jpeg = Buffer.from(jpegBase64, 'base64');
 
 async function withServer(handler, operation) {
   const server = http.createServer(handler);
@@ -27,7 +29,7 @@ function responseFor(providerId) {
   if (providerId === 'gemini-image') {
     return { candidates: [{ content: { parts: [{ inlineData: { data: pngBase64, mimeType: 'image/png' } }] } }] };
   }
-  if (providerId === 'xai-grok-image') return { created: 1, model: 'xai-response-model', usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 }, data: [{ b64_json: pngBase64, mime_type: 'image/jpeg', revised_prompt: 'fixture revised prompt' }] };
+  if (providerId === 'xai-grok-image') return { created: 1, model: 'xai-response-model', usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 }, data: [{ b64_json: jpegBase64, mime_type: 'image/jpeg', revised_prompt: 'fixture revised prompt' }] };
   return { created: 1, model: 'fixture-model', data: [{ b64_json: pngBase64, revised_prompt: 'fixture revised prompt' }] };
 }
 
@@ -46,7 +48,7 @@ for (const providerId of ['openai-images', 'gemini-image', 'gemini-openai-compat
       const config = { providerId, baseUrl, apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false };
       const provider = createImageProvider(config);
       const result = await provider.generate({ requestId: 'request-1', idempotencyKey: 'idempotency-1', prompt: 'fixture prompt', output: { size: '1024x1024', format: 'png' }, referenceAssets: [] }, { abortSignal: new AbortController().signal });
-      assert.deepEqual(result.bytes, png);
+      assert.deepEqual(result.bytes, providerId === 'xai-grok-image' ? jpeg : png);
       assert.equal(result.mediaType, providerId === 'xai-grok-image' ? 'image/jpeg' : 'image/png');
       assert.equal(provider.validateConfig(config).valid, true);
       assert.equal(provider.capabilities(config).textToImage, true);
@@ -101,6 +103,65 @@ test('large Provider Base64 results stream to a temporary file instead of return
   assert.equal(fs.existsSync(result.filePath), false);
 });
 
+
+test('a Provider response is typed by its bytes, not by the declared content type', async () => {
+  await withServer((request, response) => {
+    request.resume();
+    request.on('end', () => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      // The Provider claims JPEG; the bytes are PNG. The archive refuses to
+      // commit a declared type that contradicts the content, so believing the
+      // header would turn a paid result into a failed run item.
+      response.end(JSON.stringify({ data: [{ b64_json: pngBase64, mime_type: 'image/jpeg' }] }));
+    });
+  }, async (baseUrl) => {
+    const provider = createImageProvider({ providerId: 'openai-images', baseUrl, apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false });
+    const result = await provider.generate({ requestId: 'mislabelled', idempotencyKey: 'mislabelled-key', prompt: 'mislabelled', output: {}, referenceAssets: [] }, { abortSignal: new AbortController().signal });
+    assert.equal(result.mediaType, 'image/png');
+    assert.deepEqual(result.bytes, png);
+  });
+});
+
+test('a Provider 200 response that is not an image is rejected instead of archived as a broken .png', async () => {
+  await withServer((request, response) => {
+    request.resume();
+    request.on('end', () => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ data: [{ b64_json: Buffer.from('<!doctype html><html><body>gateway error</body></html>').toString('base64') }] }));
+    });
+  }, async (baseUrl) => {
+    const provider = createImageProvider({ providerId: 'openai-images', baseUrl, apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false });
+    await assert.rejects(() => provider.generate({ requestId: 'not-an-image', idempotencyKey: 'not-an-image-key', prompt: 'not an image', output: {}, referenceAssets: [] }, { abortSignal: new AbortController().signal }), /recognisable PNG, JPEG, WebP or GIF/);
+  });
+});
+
+test('a downloaded image URL is also confirmed by its signature, and GIF is no longer mislabelled as PNG', async () => {
+  const gif = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(64, 0)]);
+  let result = null;
+  let origin = '';
+  await withServer((request, response) => {
+    request.resume();
+    request.on('end', () => {
+      if (request.url === '/v1/images/generations') {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ data: [{ url: origin + '/download' }] }));
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/octet-stream' });
+      response.end(gif);
+    });
+  }, async (baseUrl) => {
+    origin = baseUrl;
+    const provider = createImageProvider({ providerId: 'openai-images', baseUrl, apiKey: 'fixture-key', model: 'fixture-model', referenceEnabled: false });
+    result = await provider.generate({ requestId: 'gif-download', idempotencyKey: 'gif-download-key', prompt: 'gif download', output: {}, referenceAssets: [] }, { abortSignal: new AbortController().signal });
+  });
+  try {
+    assert.equal(result.mediaType, 'image/gif');
+    assert.deepEqual(result.bytes, gif);
+  } finally {
+    if (result) await cleanupProviderResult(result);
+  }
+});
 
 test('vNext OpenAI adapter sends managed reference and mask bytes as multipart editing input', async () => {
   let received = null;
@@ -163,7 +224,7 @@ test('vNext Grok adapter sends managed references as JSON editing input', async 
   }, async (baseUrl) => {
     const provider = createImageProvider({ providerId: 'xai-grok-image', baseUrl, apiKey: 'fixture-key', model: 'grok-imagine-image-2.0', referenceEnabled: false });
     const result = await provider.edit({ requestId: 'xai-edit', idempotencyKey: 'xai-edit-key', prompt: 'preserve character, change lighting', output: { aspectRatio: 'auto', resolution: '1K', quality: 'low' }, referenceAssets: [{ assetId: 'asset-reference-1', mediaType: 'image/png', bytes: png }, { assetId: 'asset-reference-2', mediaType: 'image/webp', bytes: png }] }, { abortSignal: new AbortController().signal });
-    assert.deepEqual(result.bytes, png);
+    assert.deepEqual(result.bytes, jpeg);
     assert.equal(result.mediaType, 'image/jpeg');
     assert.equal(result.externalRequestId, 'xai-edit-request-1');
     assert.equal(result.safeMeta.managedReferenceCount, 2);

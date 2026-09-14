@@ -72,12 +72,79 @@ export interface VerifiedManagedFile {
 export class MediaValidationError extends Error {}
 export class MediaArchiveError extends Error {}
 
-function detectedMediaType(bytes: Buffer): string | null {
+/**
+ * Detects the real image type from the leading bytes. Exported because a
+ * content type declared by a remote party is a claim, not a fact: every path
+ * that accepts bytes from a Provider must confirm them here rather than trust
+ * the header.
+ */
+export function detectedMediaType(bytes: Buffer): string | null {
   if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
   if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return 'image/jpeg';
   if (bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
   if (bytes.length >= 6 && (bytes.subarray(0, 6).toString('ascii') === 'GIF87a' || bytes.subarray(0, 6).toString('ascii') === 'GIF89a')) return 'image/gif';
   return null;
+}
+
+function structurallyValidImage(bytes: Buffer, mediaType: string): boolean {
+  if (mediaType === 'image/png') {
+    if (bytes.length < 33) return false;
+    let offset = 8;
+    let sawHeader = false;
+    let sawEnd = false;
+    while (offset + 12 <= bytes.length) {
+      const length = bytes.readUInt32BE(offset);
+      const end = offset + 12 + length;
+      if (end > bytes.length) return false;
+      const type = bytes.toString('ascii', offset + 4, offset + 8);
+      if (type === 'IHDR') {
+        if (length !== 13 || sawHeader || bytes.readUInt32BE(offset + 8) === 0 || bytes.readUInt32BE(offset + 12) === 0) return false;
+        sawHeader = true;
+      }
+      if (type === 'IEND') {
+        if (length !== 0 || !sawHeader) return false;
+        sawEnd = true;
+        break;
+      }
+      offset = end;
+    }
+    return sawEnd;
+  }
+  if (mediaType === 'image/gif') {
+    return bytes.length >= 14 && bytes.readUInt16LE(6) > 0 && bytes.readUInt16LE(8) > 0 && bytes[bytes.length - 1] === 0x3b;
+  }
+  if (mediaType === 'image/webp') {
+    if (bytes.length < 20 || bytes.readUInt32LE(4) !== bytes.length - 8) return false;
+    let offset = 12;
+    let sawImageChunk = false;
+    while (offset + 8 <= bytes.length) {
+      const length = bytes.readUInt32LE(offset + 4);
+      const end = offset + 8 + length + (length & 1);
+      if (end > bytes.length) return false;
+      const type = bytes.toString('ascii', offset, offset + 4);
+      if (type === 'VP8 ' || type === 'VP8L' || type === 'VP8X') sawImageChunk = true;
+      offset = end;
+    }
+    return offset === bytes.length && sawImageChunk;
+  }
+  if (mediaType === 'image/jpeg') {
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) return false;
+    let offset = 2;
+    while (offset < bytes.length - 2) {
+      if (bytes[offset] !== 0xff) return false;
+      while (offset < bytes.length && bytes[offset] === 0xff) offset++;
+      const marker = bytes[offset++];
+      if (marker === 0xd9) return offset === bytes.length;
+      if (marker === 0xda) return true;
+      if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      if (offset + 2 > bytes.length) return false;
+      const length = bytes.readUInt16BE(offset);
+      if (length < 2 || offset + length > bytes.length) return false;
+      offset += length;
+    }
+    return false;
+  }
+  return false;
 }
 
 function assertSafeAssetId(assetId: string): string {
@@ -194,6 +261,18 @@ function assertExpectedIdentity(identity: { mediaType: string | null; contentHas
   if (expected.byteSize !== undefined && (!Number.isSafeInteger(expected.byteSize) || identity.byteSize !== expected.byteSize)) throw new MediaArchiveError('Managed media size does not match its expected identity.');
 }
 
+function assertStructurallyValidImage(bytes: Buffer, mediaType: string | null): void {
+  if (!mediaType || !structurallyValidImage(bytes, mediaType)) throw new MediaArchiveError('Managed media image bytes are truncated or structurally invalid.');
+}
+
+function assertImageFileStructure(filePath: string, mediaType: string | null): void {
+  assertStructurallyValidImage(fs.readFileSync(filePath), mediaType);
+}
+
+async function assertImageFileStructureAsync(filePath: string, mediaType: string | null): Promise<void> {
+  assertStructurallyValidImage(await fsp.readFile(filePath), mediaType);
+}
+
 export function openVerifiedManagedFile(filePath: string, expected: ManagedFileExpectation = {}): VerifiedManagedFile {
   let descriptor: number | undefined;
   try {
@@ -224,6 +303,7 @@ export function openVerifiedManagedFile(filePath: string, expected: ManagedFileE
     if (offset !== before.size || after.size !== before.size || after.dev !== before.dev || after.ino !== before.ino || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new MediaArchiveError('Managed media changed during verification.');
     const identity = { mediaType: detectedMediaType(header.subarray(0, headerBytes)), contentHash: hash.digest('hex'), byteSize: before.size };
     assertExpectedIdentity(identity, expected);
+    if (expected.requireImage) assertImageFileStructure(filePath, identity.mediaType);
     const openDescriptor = descriptor;
     descriptor = undefined;
     return createVerifiedHandle(openDescriptor, path.resolve(filePath), identity);
@@ -268,6 +348,7 @@ export async function openVerifiedManagedFileAsync(filePath: string, expected: M
     if (!afterPath.isFile() || afterPath.isSymbolicLink() || afterPath.dev !== before.dev || afterPath.ino !== before.ino || offset !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new MediaArchiveError('Managed media changed during verification.');
     const identity = { mediaType: detectedMediaType(header.subarray(0, headerBytes)), contentHash: hash.digest('hex'), byteSize: before.size };
     assertExpectedIdentity(identity, expected);
+    if (expected.requireImage) await assertImageFileStructureAsync(filePath, identity.mediaType);
     const reader = source;
     source = undefined;
     return createVerifiedHandle(reader.fd, path.resolve(filePath), identity, () => { void reader.close().catch(() => undefined); });
@@ -470,6 +551,7 @@ export function validateImageBytes(bytes: Buffer, declaredMediaType?: string): {
   const mediaType = detectedMediaType(bytes);
   if (!mediaType) throw new MediaValidationError('Only PNG, JPEG, WebP, and GIF images can be imported.');
   if (declaredMediaType && declaredMediaType !== mediaType) throw new MediaValidationError('Declared image type does not match file content.');
+  if (!structurallyValidImage(bytes, mediaType)) throw new MediaValidationError('Image bytes are truncated or structurally invalid.');
   return { mediaType, contentHash: sha256(bytes), byteSize: bytes.length };
 }
 
@@ -519,6 +601,7 @@ export async function stageImageStream(paths: StudioPaths, source: AsyncIterable
     const mediaType = detectedMediaType(header.subarray(0, headerBytes));
     if (!options.deferValidation && !mediaType) throw new MediaValidationError('Only PNG, JPEG, WebP, and GIF images can be imported.');
     if (!options.deferValidation && declaredMediaType && declaredMediaType !== mediaType) throw new MediaValidationError('Declared image type does not match file content.');
+    if (!options.deferValidation) assertStructurallyValidImage(await fsp.readFile(stagingPath), mediaType);
     await handle.sync();
     await handle.close();
     handle = undefined;

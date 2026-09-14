@@ -10,6 +10,7 @@ import { assertRunItemTransition, assertRunTransition, RunItemStatus, RunStatus 
 import { cleanupProviderResult } from '../media/generated-assets';
 import type { GeneratedAssetPersister, PersistedImageResult } from './worker';
 import { recordRunItemUsage } from './run-commands';
+import { canonicalJson } from '../shared/canonical-json';
 import type { SafeErrorDetail } from '../shared/safe-error';
 
 const IMAGE_MEDIA_TYPES: Record<string, true> = {
@@ -112,15 +113,6 @@ function parseObject(value: string | null): Record<string, unknown> | null {
   }
 }
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    return '{' + Object.keys(record).filter((key) => record[key] !== undefined).sort().map((key) => JSON.stringify(key) + ':' + stableJson(record[key])).join(',') + '}';
-  }
-  const serialized = JSON.stringify(value);
-  return serialized === undefined ? 'null' : serialized;
-}
 
 function loadCandidate(db: StudioDatabase, studioId: string, runId: string, itemId: string): ReconciliationCandidate | null {
   const row = db.prepare('SELECT run.id AS run_id, run.status AS run_status, run.provider_snapshot_json, run.provider_profile_id, run.provider_config_version, item.id AS item_id, item.sequence, item.status AS item_status, item.request_id, item.external_request_id, item.lease_token, item.lease_worker_id, item.lease_expires_at, item.error_json, item.result_json FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND item.run_id = ? AND project.studio_id = ?').get(itemId, runId, studioId) as {
@@ -172,7 +164,7 @@ function providerSnapshotMatches(candidate: ReconciliationCandidate, config: Res
     if (candidate.providerProfileId !== config.profileId || candidate.providerConfigVersion !== config.configVersion) return false;
     const stored = parseObject(candidate.providerSnapshotJson);
     if (!stored) return false;
-    return stableJson(stored) === stableJson(providerSnapshot(config));
+    return canonicalJson(stored) === canonicalJson(providerSnapshot(config));
   } catch {
     return false;
   }

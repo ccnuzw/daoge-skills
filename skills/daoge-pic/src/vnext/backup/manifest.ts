@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { CanonicalJsonError, canonicalJsonValue } from '../shared/canonical-json';
 
 /** The on-disk shape of a backup manifest is intentionally independent of the Studio manifest. */
 export const BACKUP_MANIFEST_SCHEMA_VERSION = 1;
@@ -502,15 +503,14 @@ export function validateBackupManifest(first: ValidateBackupManifestInput | stri
 }
 
 function canonicalValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalValue);
-  if (!isRecord(value)) {
-    if (typeof value === 'number' && !Number.isFinite(value)) throw new BackupManifestError('invalid-entry', 'Backup manifest contains a non-finite value.');
-    if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') throw new BackupManifestError('invalid-entry', 'Backup manifest contains a non-JSON value.');
-    return value;
+  try {
+    return canonicalJsonValue(value, { strict: true });
+  } catch (error) {
+    if (error instanceof CanonicalJsonError) {
+      throw new BackupManifestError('invalid-entry', error.reason === 'non-finite-number' ? 'Backup manifest contains a non-finite value.' : 'Backup manifest contains a non-JSON value.');
+    }
+    throw error;
   }
-  const output: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) output[key] = canonicalValue(value[key]);
-  return output;
 }
 
 function serializableManifest(manifest: BackupManifest): Record<string, unknown> {

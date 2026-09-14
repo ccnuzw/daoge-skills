@@ -7,6 +7,7 @@ const { once } = require('node:events');
 const { PassThrough, Writable } = require('node:stream');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const sharp = require('sharp');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService, streamVerifiedFileResponse } = require('../../dist/vnext/api/server');
@@ -413,13 +414,44 @@ test('Provider API lists models only through explicit safe action without leakin
     started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const listed = await requestJson(started, '/api/providers');
     const profile = listed.body.data.profiles[0];
+    const cookie = await workbenchCookie(started);
+    const attackerBaseUrl = 'http://127.0.0.1:' + address.port + '/attacker/v1';
+    for (const [pathname, idempotencyKey] of [
+      ['/api/provider-models', 'cookie-provider-models'],
+      ['/api/providers/' + encodeURIComponent(profile.id) + '/models', 'cookie-provider-profile-models'],
+      ['/api/providers/' + encodeURIComponent(profile.id) + '/test', 'cookie-provider-test'],
+      ['/api/providers/' + encodeURIComponent(profile.id) + '/validate', 'cookie-provider-validate']
+    ]) {
+      const blocked = await requestJsonAsWorkbench(started, pathname, {
+        cookie,
+        method: 'POST',
+        idempotencyKey,
+        body: { profileId: profile.id, providerId: 'gemini-image', baseUrl: attackerBaseUrl, endpointTrustMode: 'local_proxy' }
+      });
+      assert.equal(blocked.status, 403, pathname + ' must be bearer-only');
+      assert.equal(blocked.body.error.code, 'forbidden');
+      assert.doesNotMatch(JSON.stringify(blocked.body), /model-list-secret|attacker/);
+    }
+    assert.deepEqual(requests, [], 'cookie attacks must not reach a Provider endpoint');
     const models = await requestJson(started, '/api/provider-models', { method: 'POST', idempotencyKey: 'provider-models', body: { profileId: profile.id } });
     assert.equal(models.status, 200, JSON.stringify(models.body));
     assert.deepEqual(models.body.data.models, [{ id: 'gpt-image-2', label: 'gpt-image-2', ownedBy: 'openai' }, { id: 'gpt-image-1', label: 'gpt-image-1', ownedBy: null }]);
     const draftModels = await requestJson(started, '/api/provider-models', { method: 'POST', idempotencyKey: 'provider-draft-models', body: { providerId: 'openai-images', baseUrl: 'http://127.0.0.1:' + address.port + '/v1/images/generations', apiKey: 'draft-model-secret', endpointTrustMode: 'local_proxy' } });
     assert.equal(draftModels.status, 200, JSON.stringify(draftModels.body));
     assert.deepEqual(draftModels.body.data.models, models.body.data.models);
-    assert.deepEqual(requests, [{ url: '/v1/models', authorization: 'Bearer model-list-secret' }, { url: '/v1/models', authorization: 'Bearer draft-model-secret' }]);
+    const rejectedProfileOverride = await requestJson(started, '/api/provider-models', { method: 'POST', idempotencyKey: 'provider-profile-override-rejected', body: { profileId: profile.id, providerId: 'gemini-image', baseUrl: attackerBaseUrl, endpointTrustMode: 'local_proxy' } });
+    assert.equal(rejectedProfileOverride.status, 400, JSON.stringify(rejectedProfileOverride.body));
+    assert.equal(rejectedProfileOverride.body.error.code, 'invalid_command');
+    assert.doesNotMatch(JSON.stringify(rejectedProfileOverride.body), /model-list-secret|attacker/);
+    const directModels = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/models', { method: 'POST', idempotencyKey: 'provider-profile-models', body: {} });
+    assert.equal(directModels.status, 200, JSON.stringify(directModels.body));
+    assert.deepEqual(directModels.body.data.models, models.body.data.models);
+    assert.deepEqual(requests, [
+      { url: '/v1/models', authorization: 'Bearer model-list-secret' },
+      { url: '/v1/models', authorization: 'Bearer draft-model-secret' },
+      { url: '/v1/models', authorization: 'Bearer model-list-secret' }
+    ]);
+
     assert.equal(JSON.stringify(models.body).includes('model-list-secret'), false);
     assert.equal(JSON.stringify(draftModels.body).includes('draft-model-secret'), false);
   } finally {
@@ -614,7 +646,7 @@ test('local Studio service serves the built Workbench and managed image files', 
     assert.equal(media.status, 200);
     assert.equal(media.headers.get('content-type'), 'image/png');
     assert.deepEqual(Buffer.from(await media.arrayBuffer()), image);
-    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const jpeg = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#ffffff' } }).jpeg().toBuffer();
     const jpegUpload = await fetchStudio(started, '/api/assets/import', {
       method: 'POST',
       headers: { 'content-type': 'image/jpeg', 'idempotency-key': 'binary-jpeg-upload', 'x-daoge-filename': 'fixture.jpg' },
@@ -648,8 +680,7 @@ test('delivery export API awaits the asynchronous large-file export path', async
     initializeStudio({ workspaceRoot });
     started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'async-api-project', body: { name: '异步 API 交付' } });
-    const largePng = Buffer.alloc(8 * 1024 * 1024, 0);
-    Buffer.from('iVBORw0KGgo=', 'base64').copy(largePng);
+    const largePng = await sharp({ create: { width: 2048, height: 2048, channels: 3, background: '#4f765c' } }).png({ compressionLevel: 0 }).toBuffer();
     const uploaded = await fetchStudio(started, '/api/assets/import', {
       method: 'POST',
       headers: { 'content-type': 'image/png', 'idempotency-key': 'async-api-upload', 'x-daoge-target-type': 'project', 'x-daoge-target-id': project.body.data.value.id },

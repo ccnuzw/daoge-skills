@@ -57,8 +57,7 @@ test('asynchronous verified reads yield while hashing large media', async () => 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-async-verify-'));
   const filePath = path.join(directory, 'large.png');
   try {
-    const bytes = Buffer.alloc(32 * 1024 * 1024);
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes);
+    const bytes = await sharp({ create: { width: 4096, height: 4096, channels: 3, background: '#4f765c' } }).png({ compressionLevel: 0 }).toBuffer();
     fs.writeFileSync(filePath, bytes);
     let eventLoopTurned = false;
     setImmediate(() => { eventLoopTurned = true; });
@@ -74,8 +73,7 @@ test('generated and imported media staging plus archival yield between large chu
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-async-stage-'));
   try {
     const initialized = initializeStudio({ workspaceRoot });
-    const bytes = Buffer.alloc(32 * 1024 * 1024);
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes);
+    const bytes = await sharp({ create: { width: 4096, height: 4096, channels: 3, background: '#4f765c' } }).png({ compressionLevel: 0 }).toBuffer();
     let stagingYielded = false;
     setImmediate(() => { stagingYielded = true; });
     const staged = await stageImageBytesAsync(initialized.paths, bytes, 'image/png');

@@ -5,7 +5,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 # DAOGE Pic vNext
 
-当前稳定正式版本是 [`5.13.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0)。`5.12.0` 及更早版本保持为不可变历史发布；不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/2.0.0`，运行时兼容范围为 `>=5.13.0 <6.0.0`，二者都独立于制品版本；`5.13.0` 和历史制品版本绝不能当作协议版本。
+当前源码、运行时与最新不可变正式发布版本均为 `5.14.0`。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/2.0.0`，运行时兼容范围为 `>=5.14.0 <6.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
 
 本文件是 Agent 执行协议，不是完整产品规格。产品、架构、Schema、Worker、ZIP、安全实现和验证证据分别以 `docs/daoge_pic_vnext_upgrade_spec_zh.md`、`docs/vnext_verification_evidence_zh.md`、源码与测试为准。用户可见沟通使用中文。
 
@@ -115,6 +115,8 @@ node scripts/daoge.js open --workspace <path> [--allow-nested-studio true]
 
 Workbench 通过 URL fragment bootstrap 换取 `HttpOnly`、`SameSite=Strict` Cookie 后清除 fragment；CLI 使用 Bearer capability。除最小健康检查外，API、媒体、ZIP 和 SSE 都要求当前 Studio 授权，写入还校验 Host、Origin 和 Content-Type。`status` 只能返回脱敏 daemon 信息。
 
+daemon 的 capability、session token、确认门签名密钥与 Workbench presence 按工作区持久化在 `daoge-studio/runtime/` 下（0600），因此**重启 daemon 不会让已打开的 Workbench 标签失效，也不会丢弃已提交的确认挑战与已签发的 `confirm_token`**；`open` 在重启后同样会报告复用现有 Workbench。需要主动轮换凭据时删除 `daoge-studio/runtime/daemon-identity.json` 并重启，此后旧 Cookie 与旧 token 立即失效。这些文件绝不能被输出、复制或读取回显。
+
 ## 受控命令
 
 统一入口：
@@ -133,7 +135,7 @@ node scripts/daoge.js <command> [--workspace <stable-workspace>]
 - 已确认模板快照：`template-list`、`template-get`、`template-save`、`template-archive`、`template-rollback`；读取和写入均只接受 Bearer Skill/CLI 请求，快照必须来自当前 Studio 的已确认轮次。
 - 计划与运行：`plan --plan <json|@->`、`confirm-challenge`、`preflight`、`run`、`pause`、`resume`、`cancel`、`retry`、`resolve-unknown`。
 - 交付：`delivery`、`delivery-update`、`delivery-ready`、`delivery-draft`、`delivery-export`、`delivery-batch`、`delivery-batch-revise`、`delivery-batch-ready`。`delivery-complete` 不是公开 CLI 命令。
-- 备份与升级评估：`backup-manifest`、`backup-restore-dry-run`、`backup-upgrade-assess`、`backup-rollback-point`。**当前不存在恢复执行器**：`restore` 只有 dry-run 规划，不会创建、替换或删除任何文件，因此不得向用户承诺这些命令能回滚或还原 Studio；真实回滚只能靠文件级快照替换。升级评估的「当前运行时与支持范围」由 daemon 自证（`--current-*` 与 `--supported-*` 参数已移除，不受调用方声明影响）。
+- 备份与升级评估：`backup-manifest`、`backup-restore-dry-run`、`backup-restore`、`backup-upgrade-assess`、`backup-rollback-point`。`backup-restore-dry-run` 只产出计划、不写入任何文件；`backup-restore` 是真正的执行器：先把改动文件写入同目录暂存区并按 manifest 逐文件校验哈希，再用原子 rename 替换，任一步失败即把已替换的文件按原样回滚（新建的文件会被删除）。执行前会拒绝「目标 Studio 的 daemon 正在运行」这一情形——在运行中的 daemon 底下替换 `studio.db` 只会得到损坏的 Studio。恢复范围仅限 manifest 记录的文件，未记录的现有文件不会被删除。升级评估的「当前运行时与支持范围」由 daemon 自证（`--current-*` 与 `--supported-*` 参数已移除，不受调用方声明影响）。
 
 高风险命令必须按完整签名执行，缺失参数时停止并补齐，不得猜测默认值或把 secret 写入 argv：
 
@@ -152,7 +154,7 @@ node scripts/daoge.js template-archive --workspace <path> --template <template-i
 node scripts/daoge.js template-rollback --workspace <path> --template <template-id> --version <n>
 ```
 
-同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.13.0` 是当前稳定发布制品/运行时版本，`5.12.0` 及更早版本是历史发布，它们都绝不能当作协议版本。
+同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.14.0` 是当前源码/运行时版本，`5.13.0` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
 
 固定查询端点：`GET /api/studio` 是协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History；确认模板读取使用 Bearer-only 的 `/api/confirmed-templates` 列表和详情端点，写入使用其 Bearer-only POST save/archive/rollback 端点。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝；Skill 必须改用正确端点或受控 CLI，不得猜测 `/api/studio/...`、旧命令或工作区文件。
 

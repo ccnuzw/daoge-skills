@@ -9,6 +9,7 @@ import { appendStudioEvent, StudioDatabase } from '../studio/database';
 import { providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
 import { ClaimedRunItem, claimRunItems, getGenerationRun, getGenerationRunItem, markRunItemOutcomeUnknown, promoteDueRetryWaitItems, recordRunItemUsage, renewRunItemLease, settleTerminalGenerationRun, transitionRunItem } from './run-commands';
 import { retryDecision, RetryPolicy, DEFAULT_RETRY_POLICY } from './retry-policy';
+import { resolveWorkerLeaseMs } from '../studio/runtime-settings';
 import type { UsageBillingState } from '../usage/ledger';
 
 function providerFailureBillingState(kind: ProviderError['kind']): UsageBillingState {
@@ -95,7 +96,16 @@ export class GenerationWorker {
     this.assetPersister = options.assetPersister;
     this.assetResolver = options.assetResolver;
     this.manageRetries = options.manageRetries !== false;
-    this.leaseMs = options.leaseMs || 30000;
+    const explicitLeaseMs = Number(options.leaseMs);
+    if (Number.isFinite(explicitLeaseMs) && explicitLeaseMs > 0) {
+      // Honor explicit values verbatim — tests and integrations rely on
+      // being able to dial the lease down to sub-second windows.
+      this.leaseMs = Math.floor(explicitLeaseMs);
+    } else {
+      const configuredTimeoutMs = Number(options.providerConfig.limits?.requestTimeoutMs);
+      const source = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0 ? configuredTimeoutMs : undefined;
+      this.leaseMs = resolveWorkerLeaseMs(source);
+    }
     this.policy = options.retryPolicy || DEFAULT_RETRY_POLICY;
     this.clock = options.now || (() => new Date());
     this.onProviderOutcome = options.onProviderOutcome || (() => undefined);

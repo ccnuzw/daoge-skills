@@ -3,6 +3,7 @@ import os from 'node:os';
 import { spawn, ChildProcess } from 'node:child_process';
 import type { MediaReconciliationResult } from '../media/reconcile';
 import { safeErrorSummary } from '../shared/safe-error';
+import { WORKER_POOL_JOB_TIMEOUT_MS } from '../studio/runtime-settings';
 import type { ProcessPoolHealth, ProcessPoolState } from './worker-pool';
 
 export interface MediaSourceIdentity {
@@ -56,6 +57,7 @@ interface PendingJob {
   reject: (error: Error) => void;
   signal?: AbortSignal;
   timeout: NodeJS.Timeout | undefined;
+  queueTimeout: NodeJS.Timeout | undefined;
   abort: () => void;
 }
 
@@ -66,13 +68,24 @@ interface WorkerSlot {
   entry: string;
   restartTimer: NodeJS.Timeout | null;
   healthyTimer: NodeJS.Timeout | undefined;
+  startupTimer: NodeJS.Timeout | undefined;
   restartAttempts: number;
   failed: boolean;
+  halfOpen: boolean;
 }
 const MAX_MEDIA_WORKER_POOL_SIZE = 4;
 const MAX_MEDIA_QUEUE_LENGTH = 256;
 const MEDIA_HEALTHY_WINDOW_MS = 30 * 1000;
-const MEDIA_JOB_TIMEOUT_MS = 15 * 60 * 1000;
+// Keep the media watchdog on the same single-source-of-truth scale as
+// the generation worker pool — see `studio/runtime-settings.ts`. It was
+// previously a free-standing 15 minutes; deriving it means both pools
+// agree on how long a stuck child may live.
+export const MEDIA_JOB_TIMEOUT_MS = WORKER_POOL_JOB_TIMEOUT_MS;
+// Half-open breaker mirrors `worker-pool.ts` so the media path heals
+// on the same schedule as the generation path.
+export const MEDIA_HALF_OPEN_BACKOFF_MS = 60_000;
+export const MEDIA_RECOVERY_WAIT_TIMEOUT_MS = MEDIA_HALF_OPEN_BACKOFF_MS * 3;
+export const MAX_MEDIA_RESTART_ATTEMPTS = 8;
 
 function defaultPoolSize(parallelism = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length): number {
   return Math.max(1, Math.min(MAX_MEDIA_WORKER_POOL_SIZE, parallelism - 1));
@@ -95,6 +108,8 @@ export class MediaProcessPool {
   private lastError: string | null = null;
   private readonly entry: string;
   private readonly maxSize: number;
+  private halfOpenTimer: NodeJS.Timeout | null = null;
+  private halfOpenProbe: WorkerSlot | null = null;
 
   constructor(private readonly workspaceRoot: string, size = defaultPoolSize()) {
     this.entry = path.resolve(__dirname, '../runner/media-worker-process.js');
@@ -113,7 +128,6 @@ export class MediaProcessPool {
 
   run<T extends MediaJobResult>(job: MediaJob, signal?: AbortSignal): Promise<T> {
     if (this.stopping) return Promise.reject(new Error('Media worker pool is shutting down.'));
-    if (this.exhausted) return Promise.reject(new Error('Media worker pool is unavailable until the Studio daemon restarts.'));
     this.activated = true;
     if (signal?.aborted) return Promise.reject(abortError());
     if (this.queue.length >= MAX_MEDIA_QUEUE_LENGTH) return Promise.reject(new Error('Media worker queue is full; retry after current work completes.'));
@@ -125,10 +139,15 @@ export class MediaProcessPool {
         reject,
         signal,
         timeout: undefined,
+        queueTimeout: undefined,
         abort: () => this.abort(pending)
       };
       signal?.addEventListener('abort', pending.abort, { once: true });
       this.queue.push(pending);
+      if (this.exhausted) {
+        this.armRecoveryTimeout(pending);
+        this.scheduleHalfOpenProbe();
+      }
       this.ensureCapacity();
       this.dispatch();
     });
@@ -137,6 +156,7 @@ export class MediaProcessPool {
   async close(): Promise<void> {
     if (this.stopping) return;
     this.stopping = true;
+    this.cancelHalfOpenProbe();
     const error = new Error('Media worker pool is shutting down.');
     for (const pending of this.queue.splice(0)) this.finish(pending, error);
     const exits = this.slots.map((slot) => new Promise<void>((resolve) => {
@@ -144,32 +164,62 @@ export class MediaProcessPool {
         clearTimeout(slot.restartTimer);
         slot.restartTimer = null;
       }
+      clearTimeout(slot.startupTimer);
+      slot.startupTimer = undefined;
       const timeout = setTimeout(() => { slot.child.kill('SIGKILL'); resolve(); }, 3000);
       slot.child.once('exit', () => { clearTimeout(timeout); resolve(); });
       if (slot.active) {
         this.finish(slot.active, error);
         slot.active = null;
       }
-      if (slot.child.connected) slot.child.send?.({ type: 'shutdown' });
+      if (slot.child.connected) {
+        try {
+          if (typeof slot.child.send !== 'function') throw new Error('Media worker IPC channel is unavailable.');
+          slot.child.send({ type: 'shutdown' }, (error) => { if (error) this.failSlot(slot, error); });
+        } catch (error) {
+          this.failSlot(slot, error instanceof Error ? error : new Error('Unable to shut down media worker process.'));
+          if (slot.child.exitCode === null) slot.child.kill('SIGTERM');
+        }
+      }
       else if (slot.child.exitCode === null) slot.child.kill('SIGTERM');
       else { clearTimeout(timeout); resolve(); }
     }));
     await Promise.all(exits);
   }
 
-  private ensureCapacity(): void {
-    if (this.stopping || this.exhausted) return;
+  private ensureCapacity(options: { halfOpen?: boolean } = {}): void {
+    if (this.stopping) return;
+    if (this.exhausted && !options.halfOpen) return;
+    if (options.halfOpen) {
+      if (this.halfOpenProbe || this.slots.some((slot) => slot.halfOpen)) return;
+      const probe = this.startSlot(this.entry, 0, true);
+      this.halfOpenProbe = probe;
+      this.slots.push(probe);
+      return;
+    }
     const active = this.slots.filter((slot) => slot.active).length;
     const target = Math.min(this.maxSize, Math.max(1, this.queue.length + active));
     while (this.slots.length < target) this.slots.push(this.startSlot(this.entry));
   }
 
-  private startSlot(entry: string, restartAttempts = 0): WorkerSlot {
+  private startSlot(entry: string, restartAttempts = 0, halfOpen = false): WorkerSlot {
     const child = spawn(process.execPath, [entry, '--workspace', this.workspaceRoot], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
-    const slot: WorkerSlot = { child, ready: false, active: null, entry, restartTimer: null, healthyTimer: undefined, restartAttempts, failed: false };
+    const slot: WorkerSlot = { child, ready: false, active: null, entry, restartTimer: null, healthyTimer: undefined, startupTimer: undefined, restartAttempts, failed: false, halfOpen };
+    slot.startupTimer = setTimeout(() => this.failSlot(slot, new Error('Media worker startup watchdog expired.')), MEDIA_HALF_OPEN_BACKOFF_MS);
     child.on('message', (message: { type?: unknown; jobId?: unknown; result?: MediaJobResult; message?: unknown }) => {
       if (message?.type === 'ready') {
+        if (slot.failed || !slot.child.connected) {
+          this.failSlot(slot, new Error('Media worker reported ready after its IPC channel closed.'));
+          return;
+        }
         slot.ready = true;
+        clearTimeout(slot.startupTimer);
+        slot.startupTimer = undefined;
+        if (slot.halfOpen) {
+          slot.halfOpen = false;
+          this.halfOpenProbe = null;
+          this.exhausted = false;
+        }
         this.lastError = null;
         clearTimeout(slot.healthyTimer);
         slot.healthyTimer = setTimeout(() => { slot.restartAttempts = 0; slot.healthyTimer = undefined; }, MEDIA_HEALTHY_WINDOW_MS);
@@ -187,6 +237,7 @@ export class MediaProcessPool {
       this.dispatch();
     });
     child.on('error', (error) => this.failSlot(slot, error));
+    child.on('disconnect', () => this.failSlot(slot, new Error('Media worker IPC channel closed.')));
     child.on('exit', () => this.failSlot(slot, new Error('Media worker process exited.')));
     return slot;
   }
@@ -194,9 +245,12 @@ export class MediaProcessPool {
   private dispatch(): void {
     if (this.stopping) return;
     for (const slot of this.slots) {
+      if (slot.ready && !slot.child.connected) this.failSlot(slot, new Error('Media worker IPC channel closed.'));
       const pending = this.queue[0];
-      if (!pending || !slot.ready || slot.active || !slot.child.connected) continue;
+      if (!pending || !slot.ready || slot.active || !slot.child.connected || slot.failed) continue;
       this.queue.shift();
+      clearTimeout(pending.queueTimeout);
+      pending.queueTimeout = undefined;
       if (pending.signal?.aborted) {
         this.finish(pending, abortError());
         continue;
@@ -204,16 +258,12 @@ export class MediaProcessPool {
       slot.active = pending;
       pending.timeout = setTimeout(() => this.failSlot(slot, new Error('Media worker job watchdog expired.')), MEDIA_JOB_TIMEOUT_MS);
       try {
-        slot.child.send?.({ type: 'media-job', jobId: pending.id, job: pending.job }, (error) => {
-          if (error && slot.active === pending) {
-            slot.active = null;
-            this.finish(pending, error);
-            this.dispatch();
-          }
+        if (typeof slot.child.send !== 'function') throw new Error('Media worker IPC is unavailable.');
+        slot.child.send({ type: 'media-job', jobId: pending.id, job: pending.job }, (error) => {
+          if (error && slot.active === pending) this.failSlot(slot, error);
         });
       } catch (error) {
-        slot.active = null;
-        this.finish(pending, error instanceof Error ? error : new Error('Unable to send media worker job.'));
+        this.failSlot(slot, error instanceof Error ? error : new Error('Unable to send media worker job.'));
       }
     }
   }
@@ -226,7 +276,16 @@ export class MediaProcessPool {
       return;
     }
     const slot = this.slots.find((candidate) => candidate.active === pending);
-    if (slot?.child.connected) slot.child.send?.({ type: 'cancel', jobId: pending.id });
+    if (slot?.child.connected) {
+      try {
+        if (typeof slot.child.send !== 'function') throw new Error('Media worker IPC is unavailable.');
+        slot.child.send({ type: 'cancel', jobId: pending.id }, (error) => {
+          if (error && slot.active === pending) this.failSlot(slot, error);
+        });
+      } catch (error) {
+        this.failSlot(slot, error instanceof Error ? error : new Error('Unable to cancel media worker job.'));
+      }
+    }
   }
 
   private failSlot(slot: WorkerSlot, error: Error): void {
@@ -236,17 +295,31 @@ export class MediaProcessPool {
     this.lastError = safeErrorSummary(error.message) || 'Media worker process failed.';
     clearTimeout(slot.healthyTimer);
     slot.healthyTimer = undefined;
+    clearTimeout(slot.startupTimer);
+    slot.startupTimer = undefined;
     if (slot.active) {
       this.finish(slot.active, error);
       slot.active = null;
     }
     if (this.stopping) return;
     if (slot.child.exitCode === null && slot.child.signalCode === null) slot.child.kill(error.message === 'Media worker job watchdog expired.' ? 'SIGKILL' : 'SIGTERM');
-    if (slot.restartAttempts >= 8) {
+    if (slot.halfOpen) {
+      const index = this.slots.indexOf(slot);
+      if (index >= 0) this.slots.splice(index, 1);
+      this.halfOpenProbe = null;
+      this.exhausted = true;
+      for (const pending of this.queue) this.armRecoveryTimeout(pending);
+      this.scheduleHalfOpenProbe();
+      return;
+    }
+    if (slot.restartAttempts >= MAX_MEDIA_RESTART_ATTEMPTS) {
       const index = this.slots.indexOf(slot);
       if (index >= 0) this.slots.splice(index, 1);
       this.exhausted = true;
-      for (const pending of this.queue.splice(0)) this.finish(pending, new Error('Media worker pool is unavailable after repeated child-process failures.'));
+      // Keep queued jobs for the bounded half-open recovery protocol, but
+      // never leave callers waiting forever if every probe keeps failing.
+      for (const pending of this.queue) this.armRecoveryTimeout(pending);
+      this.scheduleHalfOpenProbe();
       return;
     }
     const delay = Math.min(30000, 100 * 2 ** Math.min(slot.restartAttempts, 8));
@@ -258,15 +331,51 @@ export class MediaProcessPool {
       const index = this.slots.indexOf(slot);
       if (index < 0) return;
       this.slots[index] = this.startSlot(slot.entry, nextAttempts);
+      this.dispatch();
     }, delay);
+  }
+
+  private armRecoveryTimeout(pending: PendingJob): void {
+    if (pending.queueTimeout) return;
+    pending.queueTimeout = setTimeout(() => {
+      pending.queueTimeout = undefined;
+      const index = this.queue.indexOf(pending);
+      if (index < 0) return;
+      this.queue.splice(index, 1);
+      this.finish(pending, new Error('Media worker pool did not recover before the bounded retry window expired.'));
+      this.dispatch();
+    }, MEDIA_RECOVERY_WAIT_TIMEOUT_MS);
   }
 
   private finish(pending: PendingJob, error?: unknown, result?: MediaJobResult): void {
     clearTimeout(pending.timeout);
+    clearTimeout(pending.queueTimeout);
     pending.timeout = undefined;
+    pending.queueTimeout = undefined;
     pending.signal?.removeEventListener('abort', pending.abort);
     if (error) pending.reject(error instanceof Error ? error : new Error('Media worker failed.'));
     else if (result) pending.resolve(result);
     else pending.reject(new Error('Media worker returned no result.'));
+  }
+
+  private scheduleHalfOpenProbe(): void {
+    if (this.stopping || this.halfOpenTimer) return;
+    this.halfOpenTimer = setTimeout(() => {
+      this.halfOpenTimer = null;
+      if (this.stopping || !this.exhausted) return;
+      this.ensureCapacity({ halfOpen: true });
+      if (!this.slots.length) {
+        this.scheduleHalfOpenProbe();
+        return;
+      }
+      this.dispatch();
+    }, MEDIA_HALF_OPEN_BACKOFF_MS);
+  }
+
+  private cancelHalfOpenProbe(): void {
+    if (this.halfOpenTimer) {
+      clearTimeout(this.halfOpenTimer);
+      this.halfOpenTimer = null;
+    }
   }
 }

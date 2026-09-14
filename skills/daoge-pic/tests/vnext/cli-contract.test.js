@@ -354,7 +354,7 @@ function studioStatusResponse(studioId, protocol = {}) {
       protocol: {
         name: protocol.name || 'daoge-pic-skill-protocol',
         version: protocol.version || '2.0.0',
-        runtimeVersion: protocol.runtimeVersion || '5.13.0',
+        runtimeVersion: protocol.runtimeVersion || '5.14.0',
         supportedRange: protocol.supportedRange || '>=2.0.0 <3.0.0'
       }
     }

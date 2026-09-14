@@ -6,7 +6,7 @@ import { openWorkbenchUrl } from './open-workbench';
 import { MAX_GLOBAL_CONCURRENCY, MIN_EXECUTION_CONCURRENCY } from '../studio/runtime-settings';
 import { healthStudioId, shutdownVerifiedDaemon } from './daemon-shutdown';
 import { readStudioManifest, sameWorkspaceRoot, studioPaths } from '../studio/workspace';
-import { isSupportedProtocolVersion, isSupportedRuntimeVersion, SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
+import { isSupportedProtocolVersion, isSupportedRuntimeVersion, RUNTIME_VERSION, SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
 import { registerSkill, SkillRegistrationScope } from './register-skill';
 import { assertWorkspaceSupported, doctorWorkspace, formatDoctorReport, redactDoctorReport } from './doctor';
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
@@ -18,7 +18,7 @@ const STDIN_SECRET_MARKER = Object.freeze({ __daogeSecretStdin: true });
 const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
-type LocalAction = 'status' | 'studio' | 'open' | 'restart' | 'register-skill' | 'doctor';
+type LocalAction = 'status' | 'studio' | 'open' | 'restart' | 'register-skill' | 'doctor' | 'backup-restore';
 type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'non-negative-integer' | 'usage-limit' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
@@ -38,6 +38,7 @@ interface ParsedCommand {
   scope?: SkillRegistrationScope;
   jsonOutput?: boolean;
   redactedOutput?: boolean;
+  restoreInput?: JsonObject;
 }
 
 function workspaceRoot(value: string | undefined): string {
@@ -190,6 +191,27 @@ async function stopRecordedDaemon(workspaceRoot: string, existing: RuntimeRecord
   }
   await waitForDaemonRelease(workspaceRoot, existing);
 }
+async function runOfflineRestoreHelper(workspaceRoot: string, sourceRoot: string, manifest: unknown, expectedStudio: JsonObject): Promise<number> {
+  const existing = readRuntime(workspaceRoot);
+  if (existing && livePid(existing.pid)) await stopRecordedDaemon(workspaceRoot, existing);
+  const helper = path.resolve(__dirname, 'restore-helper.js');
+  return await new Promise<number>((resolve, reject) => {
+    const child = spawn(process.execPath, [helper], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, DAOGE_OFFLINE_RESTORE: '1' } });
+    let settled = false;
+    const finish = (error?: Error, code = 1): void => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(code);
+    };
+    child.once('error', (error) => finish(error instanceof Error ? error : new Error('无法启动离线 restore helper。')));
+    child.once('close', (code) => finish(undefined, code === null ? 1 : code));
+    child.stdout.on('data', (chunk) => process.stdout.write(chunk));
+    child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+    child.stdin.end(JSON.stringify({ sourceRoot, targetRoot: workspaceRoot, manifest, expectedStudio }));
+  });
+}
+
 async function stopSpawnedDaemon(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((resolve, reject) => {
@@ -327,6 +349,7 @@ const commandSchemas: Record<string, CommandSchema> = {
   'provider-list': { method: 'GET', flags: {}, pathname: () => '/api/providers' },
   'backup-manifest': { method: 'GET', flags: {}, pathname: () => '/api/backup/manifest' },
   'backup-restore-dry-run': { method: 'POST', flags: { '--source-root': { kind: 'text', required: true }, '--manifest': { kind: 'json', required: true }, '--expected-studio': { kind: 'json' } }, pathname: () => '/api/backup/restore-dry-run', body: (v) => ({ sourceRoot: textValue(v, '--source-root'), manifest: v['--manifest'], ...(v['--expected-studio'] === undefined ? {} : { expectedStudio: v['--expected-studio'] }) }) },
+  'backup-restore': { action: 'backup-restore', flags: { '--source-root': { kind: 'text', required: true }, '--manifest': { kind: 'json', required: true } }, body: (v) => ({ sourceRoot: textValue(v, '--source-root'), manifest: v['--manifest'] }) },
   'backup-upgrade-assess': { method: 'POST', flags: { '--target-runtime-version': { kind: 'text', required: true }, '--target-schema-version': { kind: 'non-negative-integer', required: true }, '--target-protocol-version': { kind: 'text', required: true }, '--rollback-point': { kind: 'json' } }, pathname: () => '/api/backup/upgrade-assess', body: (v) => ({ targetRuntimeVersion: textValue(v, '--target-runtime-version'), targetSchemaVersion: numberValue(v, '--target-schema-version'), targetProtocolVersion: textValue(v, '--target-protocol-version'), ...(v['--rollback-point'] === undefined ? {} : { rollbackPoint: v['--rollback-point'] }) }) },
   'backup-rollback-point': { method: 'POST', flags: { '--manifest': { kind: 'json', required: true }, '--runtime-version': { kind: 'text', required: true }, '--schema-version': { kind: 'non-negative-integer', required: true }, '--created-at': { kind: 'text' } }, pathname: () => '/api/backup/rollback-point', body: (v) => ({ manifest: v['--manifest'], runtimeVersion: textValue(v, '--runtime-version'), schemaVersion: numberValue(v, '--schema-version'), ...(v['--created-at'] === undefined ? {} : { createdAt: textValue(v, '--created-at') }) }) },
   'usage-list': { method: 'GET', flags: { '--profile': { kind: 'text' }, '--project': { kind: 'text' }, '--task': { kind: 'text' }, '--round': { kind: 'text' }, '--run': { kind: 'text' }, '--item': { kind: 'text' }, '--limit': { kind: 'usage-limit' } }, pathname: (v) => '/api/usage' + query(v, [['--profile', 'profileId'], ['--project', 'projectId'], ['--task', 'taskId'], ['--round', 'roundId'], ['--run', 'runId'], ['--item', 'runItemId'], ['--limit', 'limit']]) },
@@ -485,7 +508,7 @@ function parseCommand(args: string[]): ParsedCommand {
   const root = userRegistration && rawValues['--workspace'] === undefined ? undefined : workspaceRoot(rawValues['--workspace']);
   const markerCount = Object.values(values).filter((value) => value === STDIN_JSON_MARKER).length;
   if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
-  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}) };
+  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}) };
   const method = schema.method as HttpMethod;
   const operationName = method === 'GET' || rawValues['--idempotency-key'] ? undefined : rawValues['--operation-name'] ? explicitOperationName(rawValues['--operation-name']) : undefined;
   const idempotencyKey = method === 'GET' || operationName ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
@@ -498,6 +521,7 @@ function usage(): string {
     'daoge register-skill --scope project --workspace <path>  # 注册当前安装包到项目 .agents/skills；目标已存在则拒绝',
     'daoge backup-manifest --workspace <path>  # 输出仅含安全相对路径的当前 Studio manifest',
     'daoge backup-restore-dry-run --workspace <path> --source-root <path> --manifest <json|@-> [--expected-studio <json|@->]  # 仅 dry-run，不写入目标 Studio',
+    'daoge backup-restore --workspace <path> --source-root <path> --manifest <json|@->  # 离线执行恢复（不会启动 daemon；失败自动回滚）',
     'daoge backup-upgrade-assess --workspace <path> --target-runtime-version <version> --target-schema-version <n> --target-protocol-version <version> [--rollback-point <json|@->]  # 当前运行时与支持范围由 daemon 自证，不接受调用方声明',
     'daoge backup-rollback-point --workspace <path> --manifest <json|@-> --runtime-version <version> --schema-version <n> [--created-at <timestamp>]',
     'daoge register-skill --scope user  # 注册当前安装包到当前用户 ~/.codex/skills；目标已存在则拒绝',
@@ -571,6 +595,18 @@ export async function main(): Promise<void> {
   }
   const manifest = readStudioManifest(studioPaths(root));
   if (manifest && !sameWorkspaceRoot(manifest.workspaceRoot, root)) throw new Error('当前 Studio manifest workspaceRoot 与请求工作区不匹配。');
+  if (parsed.action === 'backup-restore') {
+    if (!manifest) throw new Error('目标工作区不是已初始化的 DAOGE Pic Studio。');
+    const input = materializeStdinJson(parsed.restoreInput as JsonObject);
+    const exitCode = await runOfflineRestoreHelper(
+      root,
+      String(input.sourceRoot || ''),
+      input.manifest,
+      { studioId: manifest.studioId, protocolName: SKILL_PROTOCOL_NAME, protocolVersion: SKILL_PROTOCOL_VERSION, runtimeVersion: RUNTIME_VERSION }
+    );
+    if (exitCode !== 0) process.exitCode = exitCode;
+    return;
+  }
   if (parsed.action === 'status') {
     const record = readRuntime(root);
     process.stdout.write(JSON.stringify({ workspaceRoot: root, daemon: publicRuntime(record), healthy: Boolean(record && await healthy(record.url)) }, null, 2) + '\n');

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { canonicalJson } from '../shared/canonical-json';
 
 /** The schema is intentionally independent from the Studio database schema. */
 export const PROVENANCE_SCHEMA_VERSION = 1 as const;
@@ -188,14 +189,6 @@ export interface RetentionDecision {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
-  if (isRecord(value)) {
-    return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + canonicalJson(value[key])).join(',') + '}';
-  }
-  return JSON.stringify(value === undefined ? null : value);
 }
 
 /** Hashes transient prompt input; the prompt itself is never returned or stored. */

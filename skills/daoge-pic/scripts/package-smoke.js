@@ -3,6 +3,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const zlib = require('node:zlib');
+const { withLockSync, resolveLockPath } = require('./build-lock');
+
 
 function parsePackJson(output) {
   const text = String(output || '');
@@ -133,7 +135,7 @@ function assertPackagePaths(paths) {
   return { missing, unexpected, maps, retired, sensitive };
 }
 
-function main({ runCommand = run, makeTemp = fs.mkdtempSync, removeSync = fs.rmSync, skillRoot = path.resolve(__dirname, '..'), requireReleaseArtifact = true } = {}) {
+function runPackageSmoke({ runCommand, makeTemp, removeSync, skillRoot, requireReleaseArtifact }) {
   const packageJson = JSON.parse(fs.readFileSync(path.join(skillRoot, 'package.json'), 'utf8'));
   const currentArtifact = path.join(skillRoot, 'daoge-pic-' + packageJson.version + '.tgz');
   if (requireReleaseArtifact && !fs.existsSync(currentArtifact)) throw new Error('Required release artifact does not exist: ' + currentArtifact);
@@ -181,6 +183,19 @@ function main({ runCommand = run, makeTemp = fs.mkdtempSync, removeSync = fs.rmS
   } finally {
     removeSync(workRoot, { recursive: true, force: true });
   }
+}
+
+function main(options = {}) {
+  const config = {
+    runCommand: run,
+    makeTemp: fs.mkdtempSync,
+    removeSync: fs.rmSync,
+    skillRoot: path.resolve(__dirname, '..'),
+    requireReleaseArtifact: true,
+    ...options
+  };
+  config.skillRoot = path.resolve(config.skillRoot);
+  return withLockSync(resolveLockPath(config.skillRoot), () => runPackageSmoke(config), { label: 'package-smoke' });
 }
 
 module.exports = { parsePackJson, tarEntries, assertPackagePaths, assertReleaseArtifact, main };

@@ -5,7 +5,7 @@ import { createId, nowIso } from '../shared/ids';
 import { InvalidCommandError, StudioNotFoundError, VersionConflictError } from '../domain/studio-commands';
 import { capabilitiesForProvider, configFromProviderEnv, endpointPolicyWarnings, isProviderId, parseProviderEnv, providerSnapshot, ProviderCapabilities, ProviderEndpointTrustMode, ProviderId, ProviderProfileLimits, ResolvedProviderConfig, SafeProviderStatus } from './provider-config';
 import { providerDescriptor, providerEndpointPolicyIssues, referenceEnabledForProvider, safeProviderDescriptors, isProviderEndpointTrustMode, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, SafeProviderDescriptor } from '../providers/descriptors';
-import { createProviderSecretStore, ProviderSecretBackend, ProviderSecretStore, storeProviderSecret } from './provider-secrets';
+import { createProviderSecretStore, providerSecretBackendPolicy, ProviderSecretBackend, ProviderSecretStore, storeProviderSecret } from './provider-secrets';
 import { StudioPaths } from './workspace';
 
 const PROVIDER_SCHEMA_VERSION = 3;
@@ -57,12 +57,12 @@ export interface SafeProviderProfile {
 interface StoredProfile {
   id: string; name: string; provider_id: string; model: string; base_url: string; api_key: string;
   options_json: string; config_version: number; active: number; created_at: string; updated_at: string;
-  secret_backend: string; base_url_secret_ref: string; api_key_secret_ref: string; endpoint_trust_mode: string;
+  secret_backend: string; secret_backend_origin: string; base_url_secret_ref: string; api_key_secret_ref: string; endpoint_trust_mode: string;
   max_run_items: number | null; max_execution_concurrency: number | null; request_timeout_ms: number | null; max_retry_attempts: number | null;
   last_test_config_version: number | null; last_tested_at: string | null; last_test_status: number | null; last_test_reachable: number | null; last_test_descriptor_version: number | null; last_test_adapter_version: string | null; last_test_warning_json: string | null;
 }
 
-const PROFILE_COLUMNS = 'id, name, provider_id, model, base_url, api_key, options_json, config_version, active, created_at, updated_at, secret_backend, base_url_secret_ref, api_key_secret_ref, endpoint_trust_mode, max_run_items, max_execution_concurrency, request_timeout_ms, max_retry_attempts, last_test_config_version, last_tested_at, last_test_status, last_test_reachable, last_test_descriptor_version, last_test_adapter_version, last_test_warning_json';
+const PROFILE_COLUMNS = 'id, name, provider_id, model, base_url, api_key, options_json, config_version, active, created_at, updated_at, secret_backend, secret_backend_origin, base_url_secret_ref, api_key_secret_ref, endpoint_trust_mode, max_run_items, max_execution_concurrency, request_timeout_ms, max_retry_attempts, last_test_config_version, last_tested_at, last_test_status, last_test_reachable, last_test_descriptor_version, last_test_adapter_version, last_test_warning_json';
 
 interface PendingSecretCleanup {
   backend: ProviderSecretBackend;
@@ -151,13 +151,72 @@ function backend(row: StoredProfile): ProviderSecretBackend {
   return 'sqlite-plaintext';
 }
 
+/**
+ * The daemon polls at ~350 ms and resolves the active Provider config on every
+ * tick. With an OS secret backend each read spawns a child process
+ * (`security`, PowerShell, `secret-tool`) *synchronously*, so an uncached read
+ * would stall the event loop several times a second. The cache key includes
+ * `config_version`, which is bumped whenever a credential changes, so a
+ * rotated key is picked up immediately rather than after the TTL.
+ */
+const SECRET_READ_CACHE_TTL_MS = 5_000;
+const SECRET_READ_CACHE_MAX_ENTRIES = 64;
+const secretReadCache = new Map<string, { value: string; expiresAt: number }>();
+
+function evictExpiredSecretCacheEntries(now: number): void {
+  for (const [key, entry] of secretReadCache) if (entry.expiresAt <= now) secretReadCache.delete(key);
+  while (secretReadCache.size >= SECRET_READ_CACHE_MAX_ENTRIES) {
+    const oldest = secretReadCache.keys().next();
+    if (oldest.done === true) break;
+    secretReadCache.delete(oldest.value);
+  }
+}
+
 function readSecret(row: StoredProfile, kind: 'base_url' | 'api_key', paths?: StudioPaths): string {
   const selectedBackend = backend(row);
-  if (selectedBackend === 'sqlite-plaintext') return kind === 'base_url' ? row.base_url : row.api_key;
+  if (selectedBackend === 'sqlite-plaintext') {
+    // Databases created before system secret storage existed have no origin
+    // marker and are grandfathered as legacy. They remain readable for
+    // compatibility, but the active system policy must not expose newly
+    // written plaintext rows.
+    if (providerSecretBackendPolicy() === 'system' && row.secret_backend_origin !== 'legacy') {
+      throw new Error('Plaintext Provider credentials are disabled by the active secret backend policy.');
+    }
+    return kind === 'base_url' ? row.base_url : row.api_key;
+  }
   const reference = kind === 'base_url' ? row.base_url_secret_ref : row.api_key_secret_ref;
   if (!reference) return '';
   if (!paths) throw new Error('Provider secret backend requires Studio paths.');
-  return secretStore(paths, selectedBackend).read(reference);
+  // The same backend/reference/configVersion can exist in different Studios.
+  // Include the workspace/service identity so one Studio can never reuse another
+  // Studio's decrypted value from this module-global cache.
+  const cacheKey = selectedBackend + '\u0000' + paths.workspaceRoot + '\u0000' + paths.studioDir + '\u0000' + reference + '\u0000' + row.config_version;
+  const now = Date.now();
+  const cached = secretReadCache.get(cacheKey);
+  if (cached) {
+    if (cached.expiresAt > now) return cached.value;
+    secretReadCache.delete(cacheKey);
+  }
+  const value = secretStore(paths, selectedBackend).read(reference);
+  evictExpiredSecretCacheEntries(now);
+  secretReadCache.set(cacheKey, { value, expiresAt: now + SECRET_READ_CACHE_TTL_MS });
+  return value;
+}
+
+/** Test seam: drops cached credential reads so a change is observable. */
+export function clearProviderSecretCache(): void {
+  secretReadCache.clear();
+}
+
+/**
+ * Answers "is a secret present" *without* decrypting it. Listing profiles used
+ * to call `readSecret` for every row, which spawned one OS secret-store child
+ * process per secret — synchronously, on the daemon's event loop. Whether a
+ * credential exists is answerable from the row alone.
+ */
+function hasSecret(row: StoredProfile, kind: 'base_url' | 'api_key'): boolean {
+  if (backend(row) === 'sqlite-plaintext') return Boolean(kind === 'base_url' ? row.base_url : row.api_key);
+  return Boolean(kind === 'base_url' ? row.base_url_secret_ref : row.api_key_secret_ref);
 }
 
 function deleteStoredSecrets(db: ProviderDatabase, row: StoredProfile, paths?: StudioPaths): void {
@@ -203,9 +262,13 @@ function safeProfile(row: StoredProfile, paths?: StudioPaths): SafeProviderProfi
   const descriptor = providerDescriptor(providerId);
   const profileOptions = options(row.options_json);
   const referenceEnabled = referenceEnabledForProvider(providerId, profileOptions.referenceEnabled === true);
+  // Listing must not decrypt credentials. The endpoint is decrypted because
+  // it is shown and policy-checked, but the API key is only ever *counted*:
+  // `capabilitiesForProvider` needs providerId/referenceEnabled, not the key.
+  // Dropping it here halves the OS secret-store round-trips per row and keeps
+  // secrets out of a path whose output is displayed in bulk.
   const baseUrl = readSecret(row, 'base_url', paths);
-  const apiKey = readSecret(row, 'api_key', paths);
-  const config: ResolvedProviderConfig = { profileId: row.id, profileName: row.name, configVersion: Number(row.config_version), providerId, model: row.model, baseUrl, apiKey, options: profileOptions, referenceEnabled, endpointTrustMode: trustMode(row), limits: limitsFromRow(row), descriptorVersion: PROVIDER_DESCRIPTOR_VERSION, adapterVersion: PROVIDER_ADAPTER_VERSION };
+  const config: ResolvedProviderConfig = { profileId: row.id, profileName: row.name, configVersion: Number(row.config_version), providerId, model: row.model, baseUrl, apiKey: '', options: profileOptions, referenceEnabled, endpointTrustMode: trustMode(row), limits: limitsFromRow(row), descriptorVersion: PROVIDER_DESCRIPTOR_VERSION, adapterVersion: PROVIDER_ADAPTER_VERSION };
   return {
     id: row.id,
     name: row.name,
@@ -215,7 +278,7 @@ function safeProfile(row: StoredProfile, paths?: StudioPaths): SafeProviderProfi
     endpointSummary: endpointSummary(baseUrl),
     endpointTrustMode: config.endpointTrustMode,
     endpointPolicyWarnings: endpointPolicyWarnings(config),
-    apiKeyConfigured: Boolean(apiKey),
+    apiKeyConfigured: hasSecret(row, 'api_key'),
     referenceEnabled,
     capabilities: capabilitiesForProvider(config),
     descriptorVersion: PROVIDER_DESCRIPTOR_VERSION,
@@ -339,8 +402,11 @@ function ensureProviderSchema(db: ProviderDatabase): void {
   db.exec('CREATE TABLE IF NOT EXISTS provider_schema (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);');
   const schema = db.prepare('SELECT MAX(version) AS version FROM provider_schema').get() as { version: number | null };
   if (schema.version !== null && Number(schema.version) > PROVIDER_SCHEMA_VERSION) throw new Error('Provider database schema is newer than this DAOGE Pic runtime supports.');
-  db.exec("CREATE TABLE IF NOT EXISTS provider_profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider_id TEXT NOT NULL CHECK (provider_id IN ('openai-images','gemini-image','gemini-openai-compatible','xai-grok-image')), model TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, options_json TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1, active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0,1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, secret_backend TEXT NOT NULL DEFAULT 'sqlite-plaintext', base_url_secret_ref TEXT NOT NULL DEFAULT '', api_key_secret_ref TEXT NOT NULL DEFAULT '', endpoint_trust_mode TEXT NOT NULL DEFAULT 'compatible_public', max_run_items INTEGER, max_execution_concurrency INTEGER, request_timeout_ms INTEGER, max_retry_attempts INTEGER, last_test_config_version INTEGER, last_tested_at TEXT, last_test_status INTEGER, last_test_reachable INTEGER, last_test_descriptor_version INTEGER, last_test_adapter_version TEXT, last_test_warning_json TEXT NOT NULL DEFAULT '[]'); CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_profiles_one_active ON provider_profiles(active) WHERE active = 1; CREATE TABLE IF NOT EXISTS provider_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS provider_receipts (idempotency_key TEXT PRIMARY KEY, operation TEXT NOT NULL, request_hash TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS provider_secret_cleanup (backend TEXT NOT NULL, reference TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (backend, reference));");
+  db.exec("CREATE TABLE IF NOT EXISTS provider_profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider_id TEXT NOT NULL CHECK (provider_id IN ('openai-images','gemini-image','gemini-openai-compatible','xai-grok-image')), model TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL, options_json TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1, active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0,1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, secret_backend TEXT NOT NULL DEFAULT 'sqlite-plaintext', secret_backend_origin TEXT NOT NULL DEFAULT 'explicit', base_url_secret_ref TEXT NOT NULL DEFAULT '', api_key_secret_ref TEXT NOT NULL DEFAULT '', endpoint_trust_mode TEXT NOT NULL DEFAULT 'compatible_public', max_run_items INTEGER, max_execution_concurrency INTEGER, request_timeout_ms INTEGER, max_retry_attempts INTEGER, last_test_config_version INTEGER, last_tested_at TEXT, last_test_status INTEGER, last_test_reachable INTEGER, last_test_descriptor_version INTEGER, last_test_adapter_version TEXT, last_test_warning_json TEXT NOT NULL DEFAULT '[]'); CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_profiles_one_active ON provider_profiles(active) WHERE active = 1; CREATE TABLE IF NOT EXISTS provider_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS provider_receipts (idempotency_key TEXT PRIMARY KEY, operation TEXT NOT NULL, request_hash TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS provider_secret_cleanup (backend TEXT NOT NULL, reference TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (backend, reference));");
   addColumnIfMissing(db, 'provider_profiles', 'secret_backend', "TEXT NOT NULL DEFAULT 'sqlite-plaintext'");
+  // Rows predating this marker are the only plaintext credentials grandfathered
+  // under the default system policy. New rows always write origin=explicit.
+  addColumnIfMissing(db, 'provider_profiles', 'secret_backend_origin', "TEXT NOT NULL DEFAULT 'legacy'");
   addColumnIfMissing(db, 'provider_profiles', 'base_url_secret_ref', "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(db, 'provider_profiles', 'api_key_secret_ref', "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(db, 'provider_profiles', 'endpoint_trust_mode', "TEXT NOT NULL DEFAULT 'compatible_public'");
@@ -398,7 +464,11 @@ export function openProviderDatabase(paths: StudioPaths, options: { attachOnly?:
   }
 }
 
-export function closeProviderDatabase(db: ProviderDatabase | null | undefined): void { if (db) db.close(); }
+export function closeProviderDatabase(db: ProviderDatabase | null | undefined): void {
+  if (db) db.close();
+  // Decrypted values must not outlive the Studio database session.
+  clearProviderSecretCache();
+}
 
 function insertProfile(db: ProviderDatabase, input: { id: string; fields: { name: string; providerId: ProviderId; model: string; baseUrl: string; apiKey: string; endpointTrustMode: ProviderEndpointTrustMode }; options: Record<string, unknown>; active: boolean; limits: ProviderProfileLimits; paths?: StudioPaths; secretBackend?: ProviderSecretBackend; timestamp: string }): SafeProviderProfile {
   const store = secretStore(input.paths, input.secretBackend);
@@ -408,7 +478,7 @@ function insertProfile(db: ProviderDatabase, input: { id: string; fields: { name
     if (baseUrlSecret.ref) references.push(baseUrlSecret.ref);
     const apiKeySecret = storeProviderSecret(store, input.id, 'api_key', input.fields.apiKey);
     if (apiKeySecret.ref) references.push(apiKeySecret.ref);
-    db.prepare('INSERT INTO provider_profiles (id, name, provider_id, model, base_url, api_key, options_json, config_version, active, created_at, updated_at, secret_backend, base_url_secret_ref, api_key_secret_ref, endpoint_trust_mode, max_run_items, max_execution_concurrency, request_timeout_ms, max_retry_attempts) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(input.id, input.fields.name, input.fields.providerId, input.fields.model, input.fields.baseUrl ? baseUrlSecret.valueForPlaintextColumn : '', input.fields.apiKey ? apiKeySecret.valueForPlaintextColumn : '', JSON.stringify(input.options), input.active ? 1 : 0, input.timestamp, input.timestamp, store.backend, baseUrlSecret.ref, apiKeySecret.ref, input.fields.endpointTrustMode, input.limits.maxRunItems ?? null, input.limits.maxExecutionConcurrency ?? null, input.limits.requestTimeoutMs ?? null, input.limits.maxRetryAttempts ?? null);
+    db.prepare('INSERT INTO provider_profiles (id, name, provider_id, model, base_url, api_key, options_json, config_version, active, created_at, updated_at, secret_backend, secret_backend_origin, base_url_secret_ref, api_key_secret_ref, endpoint_trust_mode, max_run_items, max_execution_concurrency, request_timeout_ms, max_retry_attempts) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(input.id, input.fields.name, input.fields.providerId, input.fields.model, input.fields.baseUrl ? baseUrlSecret.valueForPlaintextColumn : '', input.fields.apiKey ? apiKeySecret.valueForPlaintextColumn : '', JSON.stringify(input.options), input.active ? 1 : 0, input.timestamp, input.timestamp, store.backend, 'explicit', baseUrlSecret.ref, apiKeySecret.ref, input.fields.endpointTrustMode, input.limits.maxRunItems ?? null, input.limits.maxExecutionConcurrency ?? null, input.limits.requestTimeoutMs ?? null, input.limits.maxRetryAttempts ?? null);
     return safeProfile(row(db, input.id), input.paths);
   } catch (error) {
     if (store.backend !== 'sqlite-plaintext') {
@@ -528,6 +598,9 @@ export function updateProviderProfile(db: ProviderDatabase, id: string, input: {
   try {
     const profile = mutation(db, input.idempotencyKey, 'provider.update', { id, name: input.name, providerId: input.providerId, model: input.model, baseUrl: input.baseUrl, apiKey: input.apiKey, options: input.options, expectedConfigVersion: input.expectedConfigVersion, endpointTrustMode: input.endpointTrustMode, limits: input.limits }, () => {
       const current = row(db, id);
+      if (backend(current) === 'sqlite-plaintext' && providerSecretBackendPolicy() === 'system') {
+        throw new Error('Plaintext Provider credentials are read-only legacy data under the active secret backend policy.');
+      }
       const currentBaseUrl = readSecret(current, 'base_url', input.paths);
       const currentApiKey = readSecret(current, 'api_key', input.paths);
       const baseUrl = secret(currentBaseUrl, input.baseUrl, 'Base URL');
@@ -546,12 +619,15 @@ export function updateProviderProfile(db: ProviderDatabase, id: string, input: {
       if (baseUrlSecret.ref) stagedReferences.push(baseUrlSecret.ref);
       if (apiKeySecret.ref) stagedReferences.push(apiKeySecret.ref);
       const timestamp = nowIso();
-      const changed = db.prepare('UPDATE provider_profiles SET name = ?, provider_id = ?, model = ?, base_url = ?, api_key = ?, options_json = ?, config_version = config_version + 1, updated_at = ?, secret_backend = ?, base_url_secret_ref = ?, api_key_secret_ref = ?, endpoint_trust_mode = ?, max_run_items = ?, max_execution_concurrency = ?, request_timeout_ms = ?, max_retry_attempts = ?, last_test_config_version = NULL, last_tested_at = NULL, last_test_status = NULL, last_test_reachable = NULL, last_test_descriptor_version = NULL, last_test_adapter_version = NULL, last_test_warning_json = ? WHERE id = ? AND config_version = ?').run(fields.name, fields.providerId, fields.model, baseUrlSecret.valueForPlaintextColumn, apiKeySecret.valueForPlaintextColumn, JSON.stringify(profileOptions), timestamp, store.backend, baseUrlSecret.ref, apiKeySecret.ref, fields.endpointTrustMode, limits.maxRunItems ?? null, limits.maxExecutionConcurrency ?? null, limits.requestTimeoutMs ?? null, limits.maxRetryAttempts ?? null, '[]', id, expected);
+      const changed = db.prepare('UPDATE provider_profiles SET name = ?, provider_id = ?, model = ?, base_url = ?, api_key = ?, options_json = ?, config_version = config_version + 1, updated_at = ?, secret_backend = ?, secret_backend_origin = ?, base_url_secret_ref = ?, api_key_secret_ref = ?, endpoint_trust_mode = ?, max_run_items = ?, max_execution_concurrency = ?, request_timeout_ms = ?, max_retry_attempts = ?, last_test_config_version = NULL, last_tested_at = NULL, last_test_status = NULL, last_test_reachable = NULL, last_test_descriptor_version = NULL, last_test_adapter_version = NULL, last_test_warning_json = ? WHERE id = ? AND config_version = ?').run(fields.name, fields.providerId, fields.model, baseUrlSecret.valueForPlaintextColumn, apiKeySecret.valueForPlaintextColumn, JSON.stringify(profileOptions), timestamp, store.backend, 'explicit', baseUrlSecret.ref, apiKeySecret.ref, fields.endpointTrustMode, limits.maxRunItems ?? null, limits.maxExecutionConcurrency ?? null, limits.requestTimeoutMs ?? null, limits.maxRetryAttempts ?? null, '[]', id, expected);
       if (Number(changed.changes) !== 1) throw new VersionConflictError('Provider Profile configVersion 已变化，请刷新后重试。');
       const profile = safeProfile(row(db, id), input.paths);
       if (current.active) profile.impact = { wasActive: true, restartRequired: false, newRunsBlockedUntilRestart: false, message: '活动 Provider Profile 已更新；daemon 将自动热加载，已完成的预检需重新预检后再运行。' };
       return profile;
     });
+    // Rotation must remove the previous decrypted values immediately rather
+    // than leaving them resident until their TTL happens to expire.
+    clearProviderSecretCache();
     const committedStore = stagedStore as ProviderSecretStore | null;
     if (committedStore && committedStore.backend !== 'sqlite-plaintext') {
       cleanupExternalReferences(db, committedStore, obsoleteReferences.filter((reference) => !stagedReferences.includes(reference)));

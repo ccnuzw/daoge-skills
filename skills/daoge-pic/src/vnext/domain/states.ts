@@ -75,6 +75,34 @@ export class StateTransitionError extends Error {
   }
 }
 
+/**
+ * Run states in which the Studio still drives the run forward by itself, so at
+ * most one of them may exist per round — two would mean two runs claiming the
+ * same round and paying for it twice.
+ *
+ * `partial` and `failed` are deliberately absent: a run parked there only moves
+ * again after an explicit user action (resume / retry), which the command layer
+ * serialises. They are also the states where historical databases already hold
+ * more than one run per round, so including them here would make the migration
+ * fail on data that exists today.
+ */
+export const OPEN_RUN_STATUSES = [
+  'draft',
+  'awaiting_confirmation',
+  'queued',
+  'running',
+  'pausing',
+  'paused',
+  'interrupted',
+  'resume_pending'
+] as const;
+
+export type OpenRunStatus = typeof OPEN_RUN_STATUSES[number];
+
+export function isOpenRunStatus(value: string): boolean {
+  return (OPEN_RUN_STATUSES as readonly string[]).includes(value);
+}
+
 export function canTransitionRun(from: RunStatus, to: RunStatus): boolean {
   return RUN_TRANSITIONS[from].includes(to);
 }

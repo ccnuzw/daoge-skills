@@ -441,7 +441,7 @@ test('standalone service startup performs explicit idempotent recovery without c
 });
 
 
-test('controlled restart preserves its port and Workbench authorization only inside the daemon process', async () => {
+test('controlled restart preserves its port and Workbench authorization across daemon processes', async () => {
   const workspaceRoot = temporaryWorkspace();
   const runtimePath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.json');
   const portPath = path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon.port.json');
@@ -505,9 +505,20 @@ test('controlled restart preserves its port and Workbench authorization only ins
     const second = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
     assert.equal(second.url, first.url);
     assert.equal(second.port, first.port);
-    assert.notEqual(second.capability, first.capability);
+    assert.equal(second.capability, first.capability, 'a new daemon process must reuse the persisted capability so already-open tabs keep working');
+    assert.equal((await fetchEventually(second.url + '/api/studio', { headers: { cookie } })).status, 200, 'the cookie minted by the previous daemon process must still authenticate');
     assert.equal(JSON.parse(fs.readFileSync(portPath, 'utf8')).port, first.port);
     assert.equal((await fetch(second.url + '/api/health')).status, 200);
+
+    // Removing the recorded identity is the deliberate rotation path.
+    await stopDaemon(daemon, workspaceRoot);
+    daemon = null;
+    fs.rmSync(path.join(workspaceRoot, 'daoge-studio', 'runtime', 'daemon-identity.json'), { force: true });
+    daemon = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await waitFor(() => fs.existsSync(runtimePath), 'rotated daemon runtime record');
+    const rotated = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    assert.notEqual(rotated.capability, first.capability, 'deleting the identity file must rotate the capability');
+    assert.equal((await fetchEventually(rotated.url + '/api/studio', { headers: { cookie } })).status, 401);
   } finally {
     await stopDaemon(daemon, workspaceRoot);
     fs.rmSync(workspaceRoot, { recursive: true, force: true });

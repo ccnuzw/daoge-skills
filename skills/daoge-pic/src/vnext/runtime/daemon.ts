@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { LocalStudioService } from '../api/server';
-import { createLocalCapability } from '../api/local-auth';
 import { promoteDueRetryWaitItems, reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { createId, nowIso } from '../shared/ids';
@@ -12,7 +11,10 @@ import { MAX_GLOBAL_CONCURRENCY } from '../studio/runtime-settings';
 import { ensureRuntimeDirectory, initializeStudio, studioPaths } from '../studio/workspace';
 import { installDaemonLifecycleHandlers } from './restart';
 import { WorkbenchPresence } from './workbench-presence';
+import { createConfirmationGatePersistence, createWorkbenchPresencePersistence, loadOrCreateDaemonIdentity } from './daemon-state';
+import { ConfirmationGate } from '../api/confirmation-gate';
 import { acquireDaemonLock } from './daemon-lock';
+import { recoverPendingBackupRestore } from '../backup/restore';
 import { WorkerProcessPool } from './worker-pool';
 import { MediaProcessPool } from './media-worker-pool';
 import type { ProcessPoolHealth } from './worker-pool';
@@ -157,10 +159,18 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
   process.on('SIGHUP', stop);
 
   try {
+    recoverPendingBackupRestore(paths.workspaceRoot);
     const initialized = initializeStudio({ workspaceRoot: paths.workspaceRoot, hardenAccess: false });
-    const capability = options.capability || createLocalCapability();
-    const sessionToken = options.sessionToken || createLocalCapability();
-    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, initialized, capability, sessionToken, workbenchPresence: options.workbenchPresence });
+    // Capability, session token and gate secret are workspace-scoped authorization state that has to outlive a
+    // process restart: the capability names the Workbench session cookie, the session token is its value, and the
+    // gate secret signs confirmation tokens. Reusing them keeps already-open tabs and already-answered
+    // confirmation challenges valid instead of forcing the operator to redo the confirm dance after every restart.
+    const identity = loadOrCreateDaemonIdentity(runtimeDir);
+    const capability = options.capability || identity.capability;
+    const sessionToken = options.sessionToken || identity.sessionToken;
+    const workbenchPresence = options.workbenchPresence || new WorkbenchPresence({ persistence: createWorkbenchPresencePersistence(runtimeDir) });
+    const confirmationGate = new ConfirmationGate(identity.gateSecret, undefined, createConfirmationGatePersistence(runtimeDir));
+    service = new LocalStudioService({ workspaceRoot: initialized.paths.workspaceRoot, initialized, capability, sessionToken, workbenchPresence, confirmationGate });
     mediaWorkerPool = service.mediaWorkerPool;
     await recoverStudioStartupAsync(service.db, initialized.paths, initialized.manifest.studioId, new Date(), { mediaWorkerPool });
 

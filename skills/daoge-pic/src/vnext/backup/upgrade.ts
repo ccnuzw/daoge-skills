@@ -114,7 +114,9 @@ export function evaluateUpgradeCompatibility(input: UpgradeCompatibilityInput): 
   if (versionsValid && input.targetSchemaVersion > input.supportedSchemaVersion) issues.push({ code: 'schema_unsupported' });
   const protocolRange = input.supportedProtocolRange || SUPPORTED_PROTOCOL_RANGE;
   if (versionsValid && !isVersionInRange(input.targetProtocolVersion, protocolRange)) issues.push({ code: 'protocol_incompatible' });
-  if (versionsValid && !isVersionInRange(input.targetRuntimeVersion, RUNTIME_COMPATIBILITY_RANGE)) issues.push({ code: 'invalid_version' });
+  if (versionsValid
+    && compareVersions(input.targetRuntimeVersion, input.currentRuntimeVersion) !== 0
+    && !isVersionInRange(input.targetRuntimeVersion, RUNTIME_COMPATIBILITY_RANGE)) issues.push({ code: 'invalid_version' });
 
   const requiresRollbackPoint = schemaChanges || (versionsValid && compareVersions(input.currentRuntimeVersion, input.targetRuntimeVersion) !== 0);
   const rollbackReady = validateUpgradeRollbackPoint(input.rollbackPoint)

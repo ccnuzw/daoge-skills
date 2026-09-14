@@ -10,6 +10,9 @@ import { normalizeReviewContext, normalizeReviewFeedback } from './review-contra
 import type { ReviewAnnotationContext } from './review-contract';
 
 export type AssetKind = 'import' | 'generated' | 'export';
+
+/** Mirrors the CHECK on `assets.kind`; the schema contract test keeps them equal. */
+export const ASSET_KINDS: readonly AssetKind[] = ['import', 'generated', 'export'];
 export type ReviewDecisionValue = 'keep' | 'review' | 'reject' | 'derive';
 export type AssetScope = 'round' | 'task' | 'project' | 'studio';
 
@@ -378,7 +381,7 @@ function assetVisibilitySql(prefix: string, input: { includeDeleted?: boolean; d
 }
 function assetKindCondition(prefix: string, kind?: AssetKind): { sql: string; values: AssetKind[] } {
   if (!kind) return { sql: '1 = 1', values: [] };
-  if (!['import', 'generated', 'export'].includes(kind)) throw new InvalidCommandError('Unknown asset kind.');
+  if (!(ASSET_KINDS as readonly string[]).includes(kind)) throw new InvalidCommandError('Unknown asset kind.');
   return { sql: (prefix ? prefix + '.' : '') + 'kind = ?', values: [kind] };
 }
 

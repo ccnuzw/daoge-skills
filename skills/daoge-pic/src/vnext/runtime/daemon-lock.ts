@@ -33,6 +33,13 @@ export interface DaemonLockDependencies {
   databaseConstructor?: DatabaseSyncConstructor;
 }
 
+export class DaemonLockBusyError extends Error {
+  constructor() {
+    super('Studio daemon is already running for this workspace.');
+    this.name = 'DaemonLockBusyError';
+  }
+}
+
 function databaseConstructor(): DatabaseSyncConstructor {
   return require('node:sqlite').DatabaseSync as DatabaseSyncConstructor;
 }
@@ -117,6 +124,7 @@ function releaseLockDatabase(database: LockDatabase): void {
 }
 
 export function acquireDaemonLock(paths: DaemonLockPaths, dependencies: DaemonLockDependencies = {}): DaemonLockHandle {
+  fs.mkdirSync(path.dirname(paths.databasePath), { recursive: true, mode: 0o700 });
   assertCoordinationDatabasePath(paths.databasePath);
   const DatabaseSync = dependencies.databaseConstructor || databaseConstructor();
   const database = new DatabaseSync(paths.databasePath);
@@ -155,7 +163,7 @@ export function acquireDaemonLock(paths: DaemonLockPaths, dependencies: DaemonLo
       if (transactionHeld) database.exec('ROLLBACK');
     } catch { /* closing the connection still releases every SQLite lock */ }
     try { database.close(); } catch { /* preserve the acquisition failure */ }
-    if (isSqliteBusy(error)) throw new Error('Studio daemon is already running for this workspace.');
+    if (isSqliteBusy(error)) throw new DaemonLockBusyError();
     throw error;
   }
 }

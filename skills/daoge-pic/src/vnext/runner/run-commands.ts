@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../shared/ids';
-import { assertRunItemTransition, assertRunTransition, RunItemStatus, RunStatus } from '../domain/states';
+import { assertRunItemTransition, assertRunTransition, OPEN_RUN_STATUSES, RunItemStatus, RunStatus } from '../domain/states';
 import { CommandReceipt, executeIdempotent, InvalidCommandError, StudioNotFoundError, VersionConflictError } from '../domain/studio-commands';
 import { ImageOperation, MAX_IMAGE_REQUEST_MEDIA_BYTES } from '../providers/contracts';
 import { providerDescriptor } from '../providers/descriptors';
@@ -10,10 +10,12 @@ import { ConcurrencySource, MAX_GLOBAL_CONCURRENCY, resolveExecutionConcurrency 
 import { getStudioAsset, isStudioAssetMediaAvailable } from '../domain/assets';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { SafeErrorDetail, safeErrorDetail } from '../shared/safe-error';
+import { canonicalJson } from '../shared/canonical-json';
 import { evaluateBudgetGate, getBudgetPolicy, unknownUsageEstimate } from '../usage/budget';
 import { budgetReservesRunStatus, parseStoredUsageEstimate, recordUsageEvent, UsageBillingState, UsageEstimate } from '../usage/ledger';
 
 const MEDIA_TYPES_BY_ID = (values: readonly string[]): Record<string, true> => Object.fromEntries(values.map((value) => [value, true]));
+const OPEN_RUN_STATUSES_SQL = '(' + OPEN_RUN_STATUSES.map((status) => "'" + status + "'").join(', ') + ')';
 export interface GenerationRun {
   id: string;
   roundId: string;
@@ -110,17 +112,8 @@ function parsePlan(value: string): PreflightPlan {
   };
 }
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map((item) => stableJson(item)).join(',') + ']';
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    return '{' + Object.keys(record).filter((key) => record[key] !== undefined).sort().map((key) => JSON.stringify(key) + ':' + stableJson(record[key])).join(',') + '}';
-  }
-  return JSON.stringify(value);
-}
-
 function storedSnapshotMatches(serialized: string, expected: unknown): boolean {
-  try { return stableJson(JSON.parse(serialized)) === stableJson(expected); } catch { return false; }
+  try { return canonicalJson(JSON.parse(serialized)) === canonicalJson(expected); } catch { return false; }
 }
 
 function promptPayloadForSequence(plan: PreflightPlan, sequence: number): Record<string, unknown> {
@@ -324,6 +317,50 @@ function assertRoundHasNoGenerationRun(db: StudioDatabase, roundId: string): voi
   if (existing) throw new VersionConflictError('当前轮次已创建生成运行 ' + existing.id + '（' + existing.status + '）。请在 Generation History 查看；如需再次生成，请创建新的变体、优化或补图轮次。');
 }
 
+function assertRoundHasNoOpenSibling(db: StudioDatabase, roundId: string, runId: string): void {
+  const sibling = db.prepare('SELECT id, status FROM generation_runs WHERE round_id = ? AND id <> ? AND status IN ' + OPEN_RUN_STATUSES_SQL + ' ORDER BY created_at, id LIMIT 1').get(roundId, runId) as { id: string; status: RunStatus } | undefined;
+  if (sibling) throw new VersionConflictError('当前轮次存在另一个正在进行的生成运行 ' + sibling.id + '（' + sibling.status + '）。请先在 Generation History 处理该运行，再恢复或重试。');
+}
+
+function assertNoDegradedOpenRunConflicts(db: StudioDatabase): void {
+  const conflicts = db.prepare('SELECT round_id, COUNT(*) AS open_runs FROM generation_runs WHERE status IN ' + OPEN_RUN_STATUSES_SQL + ' GROUP BY round_id HAVING open_runs > 1 ORDER BY round_id LIMIT 20').all() as Array<{ round_id: string; open_runs: number }>;
+  if (conflicts.length) throw new InvalidCommandError('Generation worker is paused because migration v34 is pending in degraded mode for conflicted round(s): ' + conflicts.map((row) => row.round_id).join(', ') + '. Resolve duplicate open runs by cancelling or otherwise terminally closing all but one, then reopen the Studio.');
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  const code = String((error as { code?: string } | null)?.code || '');
+  return code.startsWith('SQLITE_CONSTRAINT') || /UNIQUE constraint failed/i.test(String((error as Error | null)?.message || ''));
+}
+
+/**
+ * The read-then-insert above is only a friendly error, not a guarantee: two
+ * queue requests can pass it together. The database carries the real
+ * constraint, so a violation there has to come back as the same conflict rather
+ * than as a raw SQLite error.
+ */
+function insertQueuedRun(db: StudioDatabase, input: {
+  id: string;
+  roundId: string;
+  snapshotJson: string;
+  planJson: string;
+  profileId: string | null;
+  configVersion: number | null;
+  executionConcurrency: number;
+  concurrencySource: ConcurrencySource;
+  estimateJson: string;
+  timestamp: string;
+}): void {
+  try {
+    db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, provider_profile_id, provider_config_version, execution_concurrency, concurrency_source, usage_estimate_json, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)').run(input.id, input.roundId, 'queued', input.snapshotJson, input.planJson, input.profileId, input.configVersion, input.executionConcurrency, input.concurrencySource, input.estimateJson, input.timestamp, input.timestamp);
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    const existing = db.prepare('SELECT id, status FROM generation_runs WHERE round_id = ? ORDER BY created_at, id LIMIT 1').get(input.roundId) as { id: string; status: RunStatus } | undefined;
+    throw new VersionConflictError(existing
+      ? '当前轮次已创建生成运行 ' + existing.id + '（' + existing.status + '）。请在 Generation History 查看；如需再次生成，请创建新的变体、优化或补图轮次。'
+      : '当前轮次已有正在进行的生成运行，请稍后重试。');
+  }
+}
+
 function validateManagedAssets(db: StudioDatabase, studioId: string, projectId: string, result: PreflightResult, providerStatus: SafeProviderStatus): PreflightResult {
   const descriptor = providerStatus.providerId ? providerDescriptor(providerStatus.providerId) : null;
   const accepted = MEDIA_TYPES_BY_ID(descriptor?.reference.acceptedMediaTypes || []);
@@ -463,7 +500,7 @@ export function queueGenerationRun(db: StudioDatabase, input: { studioId: string
     if (!gate.result.valid) throw new InvalidCommandError('Generation budget gate failed: ' + gate.result.issues.map((issue) => issue.code).join(', '));
     const id = createId('run');
     const timestamp = nowIso();
-    db.prepare('INSERT INTO generation_runs (id, round_id, status, provider_snapshot_json, plan_snapshot_json, provider_profile_id, provider_config_version, execution_concurrency, concurrency_source, usage_estimate_json, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)').run(id, round.id, 'queued', JSON.stringify(snapshot), JSON.stringify(preflight.normalizedPlan), snapshot.profileId, snapshot.configVersion, preview.execution_concurrency, preview.concurrency_source, JSON.stringify(estimate), timestamp, timestamp);
+    insertQueuedRun(db, { id, roundId: round.id, snapshotJson: JSON.stringify(snapshot), planJson: JSON.stringify(preflight.normalizedPlan), profileId: snapshot.profileId, configVersion: snapshot.configVersion, executionConcurrency: preview.execution_concurrency, concurrencySource: preview.concurrency_source, estimateJson: JSON.stringify(estimate), timestamp });
     const insertItem = db.prepare('INSERT INTO run_items (id, run_id, sequence, status, prompt_payload_json, request_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     for (let sequence = 1; sequence <= preflight.normalizedPlan.itemCount; sequence += 1) insertItem.run(createId('item'), id, sequence, 'pending', JSON.stringify(promptPayloadForSequence(preflight.normalizedPlan, sequence)), createId('request'), timestamp, timestamp);
     const frozen = { executionConcurrency: Number(preview.execution_concurrency), concurrencySource: preview.concurrency_source };
@@ -570,11 +607,12 @@ export function claimRunItems(db: StudioDatabase, input: { workerId: string; lim
   const nowValue = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
   return withTransaction(db, () => {
+    assertNoDegradedOpenRunConflicts(db);
     const globalInFlight = db.prepare("SELECT COUNT(*) AS total FROM run_items WHERE status IN ('leased', 'requesting', 'receiving', 'persisting', 'cancel_requested')").get() as { total: number };
     const availableSlots = Math.max(0, Math.min(input.limit, globalLimit - Number(globalInFlight.total)));
     if (!availableSlots) return [];
     const providerFilter = input.providerSnapshot ? ' AND r.provider_profile_id = ? AND r.provider_config_version = ?' : '';
-    const sql = "WITH ranked_candidates AS (SELECT i.id, i.run_id, i.sequence, i.status, i.prompt_payload_json, i.request_id, i.lease_token, i.lease_expires_at, i.attempts, i.retry_at, i.lease_worker_id, r.status AS run_status, r.execution_concurrency, r.round_id, r.created_at AS run_created_at, p.studio_id, ROW_NUMBER() OVER (PARTITION BY i.run_id ORDER BY i.sequence) AS candidate_rank FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'pending' AND r.status IN ('queued', 'running') AND (i.retry_at IS NULL OR i.retry_at <= ?)" + providerFilter + ") SELECT * FROM ranked_candidates WHERE candidate_rank <= MIN(execution_concurrency, ?) ORDER BY run_created_at, run_id, sequence";
+    const sql = "WITH ranked_candidates AS (SELECT i.id, i.run_id, i.sequence, i.status, i.prompt_payload_json, i.request_id, i.lease_token, i.lease_expires_at, i.attempts, i.retry_at, i.lease_worker_id, r.status AS run_status, r.execution_concurrency, r.round_id, r.created_at AS run_created_at, p.studio_id, ROW_NUMBER() OVER (PARTITION BY i.run_id ORDER BY i.sequence) AS candidate_rank FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.status = 'pending' AND r.status IN ('queued', 'running') AND (i.retry_at IS NULL OR i.retry_at <= ?) AND NOT EXISTS (SELECT 1 FROM generation_runs conflict_run WHERE conflict_run.round_id = r.round_id AND conflict_run.id <> r.id AND conflict_run.status IN " + OPEN_RUN_STATUSES_SQL + ")" + providerFilter + ") SELECT * FROM ranked_candidates WHERE candidate_rank <= MIN(execution_concurrency, ?) ORDER BY run_created_at, run_id, sequence";
     const params: Array<string | number> = [nowValue];
     if (input.providerSnapshot) params.push(input.providerSnapshot.profileId, input.providerSnapshot.configVersion);
     params.push(Math.min(MAX_GLOBAL_CONCURRENCY, availableSlots));
@@ -788,6 +826,7 @@ export function retryGenerationRunItems(db: StudioDatabase, input: { studioId: s
     }
     const override = timeoutMs === undefined ? {} : { timeoutMsOverrideMs: timeoutMs };
     if (['paused', 'partial', 'failed'].includes(run.status)) {
+      assertRoundHasNoOpenSibling(db, run.round_id, run.id);
       assertRunTransition(run.status, 'queued');
       db.prepare("UPDATE generation_runs SET status = 'queued', worker_id = NULL, version = version + 1, updated_at = ? WHERE id = ?").run(timestamp, runId);
       appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: runId, eventType: 'run.queued', payload: { retried: true, itemCount: candidates.length, ...override } });
@@ -807,6 +846,7 @@ export function resumeGenerationRun(db: StudioDatabase, input: { studioId: strin
       if (!session || session.active_round_id !== run.round_id) throw new InvalidCommandError('A Studio Session confirmation for this creative round is required before resuming after restart.');
       db.prepare('INSERT INTO run_resume_confirmations (id, run_id, session_id, confirmed_at) VALUES (?, ?, ?, ?) ON CONFLICT(run_id, session_id) DO NOTHING').run(createId('resumeconfirm'), run.id, sessionId, nowIso());
     }
+    assertRoundHasNoOpenSibling(db, run.round_id, run.id);
     assertRunTransition(run.status, 'queued');
     db.prepare('UPDATE generation_runs SET status = ?, worker_id = NULL, version = version + 1, updated_at = ? WHERE id = ?').run('queued', nowIso(), run.id);
     appendStudioEvent(db, { studioId: input.studioId, entityType: 'generation_run', entityId: run.id, eventType: 'run.queued', payload: { resumed: true, sessionId: input.sessionId || null } });

@@ -16,11 +16,17 @@ const END = '<!-- verification:worktree:end -->';
 const DOC = path.join(__dirname, '..', 'docs', 'vnext_verification_evidence_zh.md');
 const workspace = path.join(__dirname, '..');
 
-const withPackage = process.argv.includes('--with-package');
 const checkOnly = process.argv.includes('--check');
+const withPackage = process.argv.includes('--with-package');
 
 function run(command, args, label) {
-  const result = spawnSync(command, args, { cwd: workspace, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, shell: process.platform === 'win32' });
+  // Regression runs pin the plaintext secret backend: the default prefers the
+  // platform credential store, which a test suite must not write into.
+  // Proxy variables are removed for the same reason of determinism — an ambient
+  // HTTP_PROXY would reroute the Provider transport tests through it.
+  const env = { ...process.env, DAOGE_PIC_PROVIDER_SECRET_BACKEND: 'plaintext' };
+  for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy']) delete env[name];
+  const result = spawnSync(command, args, { cwd: workspace, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, shell: process.platform === 'win32' });
   const output = String(result.stdout || '') + String(result.stderr || '');
   if (result.status !== 0) {
     process.stderr.write('[' + label + '] failed with exit code ' + result.status + '\n');
@@ -64,8 +70,8 @@ const lines = [
 ];
 if (withPackage) {
   const packageOutput = run('npm', ['run', 'test:package'], 'npm run test:package');
-  const listed = /(\d+) 个文件|(\d+) files/.exec(packageOutput);
-  lines.push('- `npm run test:package`：通过；发布清单 ' + (listed ? (listed[1] || listed[2]) + ' 个文件' : '已检查') + '，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；临时安装、真实 bin、help、register-skill、doctor 与 `sharp` 均通过。');
+  const listed = /"files"\s*:\s*(\d+)/.exec(packageOutput) || /(\d+) 个文件|(\d+) files/.exec(packageOutput);
+  lines.push('- `npm run test:package`：通过；发布清单 ' + (listed ? (listed[1] || listed[2] || listed[3]) + ' 个文件' : '已检查') + '，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；临时安装、真实 bin、help、register-skill、doctor 与 `sharp` 均通过。');
 }
 if (counts.fail !== 0) lines.push('- 注意：本次回归存在失败项，该结果不得作为冻结证据。');
 
@@ -86,7 +92,11 @@ const existing = document.slice(beginIndex, endIndex + END.length).trimEnd();
 const next = document.slice(0, beginIndex) + block + document.slice(endIndex + END.length);
 
 if (checkOnly) {
-  const stable = (value) => value.replace(/^- 生成时间：.*$/m, '');
+  const stable = (value) => {
+    let normalized = value.replace(/^- 生成时间：.*$/m, '');
+    if (!withPackage) normalized = normalized.replace(/^- `npm run test:package`：.*\n?/m, '');
+    return normalized;
+  };
   if (stable(existing) !== stable(block)) {
     process.stderr.write('verification evidence block is stale; run `npm run verify:evidence`.\n');
     process.stderr.write('expected:\n' + block + '\n\nfound:\n' + existing + '\n');

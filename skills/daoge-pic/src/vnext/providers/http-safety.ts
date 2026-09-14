@@ -4,8 +4,10 @@ import fsp from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import http, { IncomingMessage } from 'node:http';
 import https from 'node:https';
-import { isIP, LookupFunction } from 'node:net';
+import { isIP, LookupFunction, Socket } from 'node:net';
 import { Readable } from 'node:stream';
+import tls from 'node:tls';
+import { proxyAuthorization, resolveProxyFor } from './proxy-config';
 
 export type HttpFetch = typeof fetch;
 
@@ -16,7 +18,22 @@ export interface PinnedHttpResponse {
   remoteAddress: string;
 }
 
-export type PinnedHttpTransport = (url: URL, addresses: readonly string[], init: { signal: AbortSignal; headers: Readonly<Record<string, string>>; method?: string; body?: Uint8Array | string }) => Promise<PinnedHttpResponse>;
+export interface PinnedRequestInit {
+  signal: AbortSignal;
+  headers: Readonly<Record<string, string>>;
+  method?: string;
+  body?: Uint8Array | string;
+  /**
+   * Proxy to dial instead of the target. When set, `addresses` are the proxy's
+   * resolved addresses and the request is issued in proxy form (absolute URI
+   * for HTTP, CONNECT tunnel for HTTPS).
+   */
+  proxy?: URL;
+  /** Target addresses validated locally and used as the proxy destination. */
+  targetAddresses?: readonly string[];
+}
+
+export type PinnedHttpTransport = (url: URL, addresses: readonly string[], init: PinnedRequestInit) => Promise<PinnedHttpResponse>;
 
 export interface SafeDownloadOptions {
   signal: AbortSignal;
@@ -26,6 +43,8 @@ export interface SafeDownloadOptions {
   resolveHost?: HostResolver;
   allowPrivate?: boolean;
   privateAddressPolicy?: PrivateAddressPolicy;
+  /** Overrides the proxy resolved from the environment; `null` forces a direct request. */
+  proxy?: URL | null;
 }
 
 export interface DownloadedResource {
@@ -489,27 +508,51 @@ function isLocalProxyIpv4(bytes: readonly number[]): boolean {
   return LOCAL_PROXY_IPV4_PREFIXES.some(([network, prefixLength]) => (value >>> (32 - prefixLength)) === (network >>> (32 - prefixLength)));
 }
 
+/** Whether an address may be dialled under a trust mode, without throwing. */
+function permittedByPolicy(address: string, policy: PrivateAddressPolicy | null): boolean {
+  if (address.includes('%')) return false;
+  const ipv4 = ipv4Bytes(address);
+  if (ipv4) {
+    if (!isForbiddenIpv4(ipv4)) return true;
+    if (policy === 'local_proxy' && isLocalProxyIpv4(ipv4)) return true;
+    if (policy === 'enterprise_private' && isPrivateIpv4(ipv4)) return true;
+    return false;
+  }
+  const ipv6 = ipv6Bytes(address);
+  if (ipv6) {
+    if (!isForbiddenIpv6(ipv6)) return true;
+    if (policy === 'local_proxy' && (isLoopbackIpv6(ipv6) || isPrivateIpv6(ipv6))) return true;
+    if (policy === 'enterprise_private' && isPrivateIpv6(ipv6)) return true;
+    return false;
+  }
+  return false;
+}
+
 function assertAllowedAddress(address: string, policy: PrivateAddressPolicy | null): void {
   if (!policy) {
     assertPublicAddress(address);
     return;
   }
   if (address.includes('%')) throw new Error('Provider endpoint resolved to a non-public address.');
-  const ipv4 = ipv4Bytes(address);
-  if (ipv4) {
-    if (!isForbiddenIpv4(ipv4)) return;
-    if (policy === 'local_proxy' && isLocalProxyIpv4(ipv4)) return;
-    if (policy === 'enterprise_private' && isPrivateIpv4(ipv4)) return;
-    throw new Error('Provider endpoint resolved to a forbidden private or reserved address.');
-  }
-  const ipv6 = ipv6Bytes(address);
-  if (ipv6) {
-    if (!isForbiddenIpv6(ipv6)) return;
-    if (policy === 'local_proxy' && (isLoopbackIpv6(ipv6) || isPrivateIpv6(ipv6))) return;
-    if (policy === 'enterprise_private' && isPrivateIpv6(ipv6)) return;
-    throw new Error('Provider endpoint resolved to a forbidden private or reserved address.');
-  }
-  throw new Error('Provider endpoint resolution returned an invalid address.');
+  if (permittedByPolicy(address, policy)) return;
+  if (!ipv4Bytes(address) && !ipv6Bytes(address)) throw new Error('Provider endpoint resolution returned an invalid address.');
+  throw new Error('Provider endpoint resolved to a forbidden private or reserved address.');
+}
+
+/**
+ * A proxy is an egress hop the operator named by hand, so it is accepted
+ * wherever the endpoint trust mode allows it *or* wherever a local proxy
+ * legitimately lives (loopback, CGNAT/overlay, TUN fake-IP). Requiring a public
+ * proxy address would break the ordinary case — corporate proxies and local
+ * transparent proxies sit on private addresses. Link-local, metadata,
+ * multicast and reserved ranges stay forbidden under every mode.
+ */
+function assertAllowedProxyAddress(address: string, _policy: PrivateAddressPolicy | null): void {
+  // The proxy is a separately configured network hop, not the request target.
+  // Permit normal corporate/private and local/TUN proxy ranges regardless of
+  // the target trust mode, while retaining the common reserved-range denylist.
+  if (permittedByPolicy(address, 'enterprise_private') || permittedByPolicy(address, 'local_proxy')) return;
+  throw new Error('Configured HTTP proxy resolved to a forbidden address.');
 }
 
 
@@ -528,25 +571,20 @@ function sameAddress(left: string, right: string): boolean {
   return Boolean(leftBytes && rightBytes && leftBytes.length === rightBytes.length && leftBytes.every((value, index) => value === rightBytes[index]));
 }
 
-interface SafeUrlTarget { url: URL; addresses: readonly string[]; }
+interface SafeUrlTarget {
+  url: URL;
+  /** Addresses of the next hop: target for direct requests, proxy otherwise. */
+  addresses: readonly string[];
+  /** Locally validated target pins, including for proxied requests. */
+  targetAddresses: readonly string[];
+  proxy: URL | null;
+}
 
-async function assertSafeUrl(value: string, resolver: HostResolver, signal: AbortSignal, privateAddressPolicy: PrivateAddressPolicy | null = null): Promise<SafeUrlTarget> {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new Error('Provider image URL is invalid.');
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Provider image URL must use HTTP or HTTPS.');
-  if (parsed.username || parsed.password) throw new Error('Provider image URL must not contain credentials.');
-
-  const hostname = hostnameWithoutBrackets(parsed.hostname);
-  if (!hostname) throw new Error('Provider image URL requires a host.');
+async function resolveAllowedHost(hostname: string, resolver: HostResolver, signal: AbortSignal, privateAddressPolicy: PrivateAddressPolicy | null, assert: (address: string, policy: PrivateAddressPolicy | null) => void = assertAllowedAddress): Promise<readonly string[]> {
   if (isIP(hostname)) {
-    assertAllowedAddress(hostname, privateAddressPolicy);
-    return { url: parsed, addresses: [hostname] };
+    assert(hostname, privateAddressPolicy);
+    return [hostname];
   }
-
   let addresses: readonly string[];
   try {
     const timeout = AbortSignal.timeout(DNS_TIMEOUT_MS);
@@ -560,19 +598,181 @@ async function assertSafeUrl(value: string, resolver: HostResolver, signal: Abor
     throw new Error('Provider image host DNS resolution failed.');
   }
   if (!addresses.length) throw new Error('Provider image host DNS resolution returned no addresses.');
-  for (const address of addresses) assertAllowedAddress(address, privateAddressPolicy);
-  return { url: parsed, addresses: [...new Set(addresses)] };
+  for (const address of addresses) assert(address, privateAddressPolicy);
+  return [...new Set(addresses)];
 }
 
-export const pinnedHttpTransport: PinnedHttpTransport = async (url, addresses, init) => {
+/**
+ * Validates every target locally before either a direct or proxy request. A
+ * proxy must never become a DNS-policy bypass: target pins are passed to the
+ * proxy transport, while the separately resolved proxy pins identify the only
+ * local next hop that may be dialled.
+ */
+async function assertSafeUrl(value: string, resolver: HostResolver, signal: AbortSignal, privateAddressPolicy: PrivateAddressPolicy | null = null, proxy: URL | null = null): Promise<SafeUrlTarget> {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('Provider image URL is invalid.');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Provider image URL must use HTTP or HTTPS.');
+  if (parsed.username || parsed.password) throw new Error('Provider image URL must not contain credentials.');
+
+  const hostname = hostnameWithoutBrackets(parsed.hostname);
+  if (!hostname) throw new Error('Provider image URL requires a host.');
+  const targetAddresses = await resolveAllowedHost(hostname, resolver, signal, privateAddressPolicy);
+  if (!proxy) return { url: parsed, addresses: targetAddresses, targetAddresses, proxy: null };
+
+  const proxyHostname = hostnameWithoutBrackets(proxy.hostname);
+  if (!proxyHostname) throw new Error('Configured HTTP proxy is missing a host.');
+  const proxyAddresses = await resolveAllowedHost(proxyHostname, resolver, signal, privateAddressPolicy, assertAllowedProxyAddress);
+  return { url: parsed, addresses: proxyAddresses, targetAddresses, proxy };
+}
+
+function pinnedLookup(addresses: readonly string[]): LookupFunction {
   const pinned = addresses.map((address) => ({ address, family: isIP(address) }));
   if (pinned.some((entry) => entry.family !== 4 && entry.family !== 6)) {
     throw new Error('Provider image host resolution returned an invalid address.');
   }
-  const lookupPinned: LookupFunction = (_hostname, options, callback) => {
+  return (_hostname, options, callback) => {
     if (options.all) callback(null, pinned);
     else callback(null, pinned[0].address, pinned[0].family);
   };
+}
+
+function proxyPort(proxy: URL): number {
+  return proxy.port ? Number(proxy.port) : proxy.protocol === 'https:' ? 443 : 80;
+}
+
+function authorityForHost(hostname: string, port: number): string {
+  return (isIP(hostname) === 6 ? '[' + hostname + ']' : hostname) + ':' + port;
+}
+
+function proxyDestinationUrl(url: URL, address: string): string {
+  const destination = new URL(url.toString());
+  destination.hostname = isIP(address) === 6 ? '[' + address + ']' : address;
+  return destination.toString();
+}
+
+function proxyAgent(proxy: URL): http.Agent {
+  return proxy.protocol === 'https:'
+    ? new https.Agent({ keepAlive: false, maxCachedSessions: 0 })
+    : new http.Agent({ keepAlive: false });
+}
+
+/**
+ * An HTTPS Agent whose only socket is an already-established CONNECT tunnel.
+ * Node 22 does not honor a per-request createConnection hook when agent:false;
+ * overriding the Agent method makes a direct target connection impossible.
+ */
+class TunnelHttpsAgent extends https.Agent {
+  private tunnel: Socket | null;
+
+  constructor(tunnel: Socket) {
+    super({ keepAlive: false, maxCachedSessions: 0 });
+    this.tunnel = tunnel;
+  }
+
+  override createConnection(options: https.RequestOptions): tls.TLSSocket {
+    const tunnel = this.tunnel;
+    if (!tunnel) throw new Error('HTTP proxy tunnel was already consumed.');
+    this.tunnel = null;
+    return tls.connect({
+      socket: tunnel,
+      servername: options.servername,
+      rejectUnauthorized: options.rejectUnauthorized,
+      ca: options.ca,
+      cert: options.cert,
+      key: options.key,
+      ALPNProtocols: ['http/1.1']
+    });
+  }
+}
+
+/** Opens a pinned HTTP(S)-proxy connection and requests a CONNECT tunnel. */
+function openProxyTunnel(proxy: URL, proxyAddresses: readonly string[], targetHost: string, targetAddresses: readonly string[] | undefined, targetPort: number, authorization: string | null, signal: AbortSignal): Promise<Socket> {
+  const host = hostnameWithoutBrackets(proxy.hostname);
+  // CONNECT by the locally pinned target IP, while TLS SNI remains targetHost.
+  // This prevents a proxy-side DNS rebinding from selecting a different host.
+  const targetAddress = targetAddresses?.[0] || targetHost;
+  const authority = authorityForHost(targetAddress, targetPort);
+  const requestModule = proxy.protocol === 'https:' ? https : http;
+  const request = requestModule.request({
+    host,
+    port: proxyPort(proxy),
+    method: 'CONNECT',
+    path: authority,
+    headers: { host: authority, ...(authorization ? { 'proxy-authorization': authorization } : {}) },
+    signal,
+    agent: proxyAgent(proxy),
+    lookup: pinnedLookup(proxyAddresses),
+    ...(proxy.protocol === 'https:' ? { servername: host } : {})
+  });
+  return new Promise<Socket>((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    request.once('connect', (response, socket, head) => {
+      if (settled) {
+        socket.destroy();
+        return;
+      }
+      if (response.statusCode !== 200) {
+        socket.destroy();
+        fail(new Error('HTTP proxy refused the CONNECT tunnel with status ' + response.statusCode + '.'));
+        return;
+      }
+      if (head.length) {
+        socket.destroy();
+        fail(new Error('HTTP proxy sent unexpected bytes before target TLS negotiation.'));
+        return;
+      }
+      settled = true;
+      resolve(socket);
+    });
+    request.once('error', fail);
+    request.end();
+  });
+}
+
+export const pinnedHttpTransport: PinnedHttpTransport = async (url, addresses, init) => {
+  const lookupPinned = pinnedLookup(addresses);
+  if (init.proxy) {
+    const authorization = proxyAuthorization(init.proxy);
+    const targetHost = hostnameWithoutBrackets(url.hostname);
+    if (url.protocol === 'https:') {
+      const targetPort = url.port ? Number(url.port) : 443;
+      const tunnel = await openProxyTunnel(init.proxy, addresses, targetHost, init.targetAddresses, targetPort, authorization, init.signal);
+      const servername = hostnameWithoutBrackets(url.hostname);
+      const request = https.request(url, {
+        method: init.method || 'GET',
+        headers: init.headers,
+        signal: init.signal,
+        servername,
+        agent: new TunnelHttpsAgent(tunnel)
+      });
+      return finishRequest(request, init);
+    }
+    const requestModule = init.proxy.protocol === 'https:' ? https : http;
+    const request = requestModule.request({
+      host: hostnameWithoutBrackets(init.proxy.hostname),
+      port: proxyPort(init.proxy),
+      method: init.method || 'GET',
+      // The target hostname was independently resolved and policy-checked
+      // before the proxy receives this absolute URI. Host preserves virtual
+      // hosting; the proxy remains the configured network trust boundary.
+      path: proxyDestinationUrl(url, init.targetAddresses?.[0] || targetHost),
+      headers: { ...init.headers, host: url.host, ...(authorization ? { 'proxy-authorization': authorization } : {}) },
+      signal: init.signal,
+      agent: proxyAgent(init.proxy),
+      lookup: lookupPinned,
+      ...(init.proxy.protocol === 'https:' ? { servername: hostnameWithoutBrackets(init.proxy.hostname) } : {})
+    });
+    return finishRequest(request, init);
+  }
   const request = (url.protocol === 'https:' ? https : http).request(url, {
     method: init.method || 'GET',
     headers: init.headers,
@@ -580,6 +780,10 @@ export const pinnedHttpTransport: PinnedHttpTransport = async (url, addresses, i
     lookup: lookupPinned,
     ...(url.protocol === 'https:' ? { servername: hostnameWithoutBrackets(url.hostname) } : {})
   });
+  return finishRequest(request, init);
+};
+
+async function finishRequest(request: ReturnType<typeof http.request>, init: PinnedRequestInit): Promise<PinnedHttpResponse> {
   if (init.body !== undefined) request.write(init.body);
   request.end();
   const [incoming] = await once(request, 'response', { signal: init.signal }) as [IncomingMessage];
@@ -602,22 +806,37 @@ export interface PinnedEndpointRequestOptions {
   privateAddressPolicy?: PrivateAddressPolicy;
   request?: PinnedHttpTransport;
   resolveHost?: HostResolver;
+  /** Overrides the proxy resolved from the environment; `null` forces a direct request. */
+  proxy?: URL | null;
+}
+
+function parseTargetUrl(value: string): URL {
+  try {
+    return new URL(value);
+  } catch {
+    throw new Error('Provider image URL is invalid.');
+  }
+}
+
+function proxyOption(explicit: URL | null | undefined, target: URL): URL | null {
+  return explicit === undefined ? resolveProxyFor(target) : explicit;
 }
 
 export async function requestPinnedHttpEndpoint(value: string, options: PinnedEndpointRequestOptions): Promise<PinnedHttpResponse> {
   const request = options.request || pinnedHttpTransport;
   const resolver = options.resolveHost || defaultHostResolver;
   const privateAddressPolicy = options.privateAddressPolicy || (options.allowPrivate === true ? 'enterprise_private' : null);
-  const target = await assertSafeUrl(value, resolver, options.signal, privateAddressPolicy);
+  const proxy = proxyOption(options.proxy, parseTargetUrl(value));
+  const target = await assertSafeUrl(value, resolver, options.signal, privateAddressPolicy, proxy);
   let result: PinnedHttpResponse;
   try {
-    result = await request(target.url, target.addresses, { headers: options.headers, signal: options.signal, method: options.method, body: options.body });
+    result = await request(target.url, target.addresses, { headers: options.headers, signal: options.signal, method: options.method, body: options.body, ...(target.proxy ? { proxy: target.proxy, targetAddresses: target.targetAddresses } : {}) });
   } catch (error) {
     if (options.signal.aborted) throw error;
     throw new Error('Provider endpoint request failed.');
   }
   try {
-    assertAllowedAddress(hostnameWithoutBrackets(result.remoteAddress), privateAddressPolicy);
+    (target.proxy ? assertAllowedProxyAddress : assertAllowedAddress)(hostnameWithoutBrackets(result.remoteAddress), privateAddressPolicy);
     if (!target.addresses.some((address) => sameAddress(address, result.remoteAddress))) throw new Error('Provider connection remote address did not match the pinned DNS result.');
     return result;
   } catch (error) {
@@ -643,12 +862,15 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
 
   let current = value;
   for (let redirects = 0; ; redirects += 1) {
-    const target = await assertSafeUrl(current, resolver, options.signal, privateAddressPolicy);
+    // NO_PROXY is evaluated per hop: a redirect can leave the exempted host,
+    // and then the new target has to go through the proxy like any other.
+    const target = await assertSafeUrl(current, resolver, options.signal, privateAddressPolicy, proxyOption(options.proxy, parseTargetUrl(current)));
     let result: PinnedHttpResponse;
     try {
       result = await request(target.url, target.addresses, {
         headers: { accept: 'image/png, image/jpeg, image/webp' },
-        signal: options.signal
+        signal: options.signal,
+        ...(target.proxy ? { proxy: target.proxy, targetAddresses: target.targetAddresses } : {})
       });
     } catch (error) {
       if (options.signal.aborted) throw error;
@@ -656,7 +878,7 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
     }
     const { response, remoteAddress } = result;
     try {
-      assertAllowedAddress(hostnameWithoutBrackets(remoteAddress), privateAddressPolicy);
+      (target.proxy ? assertAllowedProxyAddress : assertAllowedAddress)(hostnameWithoutBrackets(remoteAddress), privateAddressPolicy);
       if (!target.addresses.some((address) => sameAddress(address, remoteAddress))) {
         throw new Error('Provider image connection remote address did not match the pinned DNS result.');
       }
@@ -696,17 +918,17 @@ export async function downloadHttpResourceToFile(value: string, destination: str
   if (!Number.isInteger(maxRedirects) || maxRedirects < 0) throw new Error('A non-negative redirect limit is required.');
   let current = value;
   for (let redirects = 0; ; redirects += 1) {
-    const target = await assertSafeUrl(current, resolver, options.signal, privateAddressPolicy);
+    const target = await assertSafeUrl(current, resolver, options.signal, privateAddressPolicy, proxyOption(options.proxy, parseTargetUrl(current)));
     let result: PinnedHttpResponse;
     try {
-      result = await request(target.url, target.addresses, { headers: { accept: 'image/png, image/jpeg, image/webp' }, signal: options.signal });
+      result = await request(target.url, target.addresses, { headers: { accept: 'image/png, image/jpeg, image/webp' }, signal: options.signal, ...(target.proxy ? { proxy: target.proxy, targetAddresses: target.targetAddresses } : {}) });
     } catch (error) {
       if (options.signal.aborted) throw error;
       throw new Error('Provider image download request failed.');
     }
     const { response, remoteAddress } = result;
     try {
-      assertAllowedAddress(hostnameWithoutBrackets(remoteAddress), privateAddressPolicy);
+      (target.proxy ? assertAllowedProxyAddress : assertAllowedAddress)(hostnameWithoutBrackets(remoteAddress), privateAddressPolicy);
       if (!target.addresses.some((address) => sameAddress(address, remoteAddress))) throw new Error('Provider image connection remote address did not match the pinned DNS result.');
     } catch (error) {
       await cancelBody(response);
@@ -731,12 +953,12 @@ export async function downloadHttpResourceToFile(value: string, destination: str
   }
 }
 export async function probeHttpEndpoint(value: string, headers: Readonly<Record<string, string>>, signal: AbortSignal, allowPrivate = false, privateAddressPolicy?: PrivateAddressPolicy): Promise<{ reachable: boolean; status: number }> {
-  const policy = privateAddressPolicy || (allowPrivate ? 'enterprise_private' : null);
-  const target = await assertSafeUrl(value, defaultHostResolver, signal, policy);
-  const result = await pinnedHttpTransport(target.url, target.addresses, { headers, signal });
+  const result = await requestPinnedHttpEndpoint(value, {
+    headers,
+    signal,
+    privateAddressPolicy: privateAddressPolicy || (allowPrivate ? 'enterprise_private' : undefined)
+  });
   try {
-    assertAllowedAddress(hostnameWithoutBrackets(result.remoteAddress), policy);
-    if (!target.addresses.some((address) => sameAddress(address, result.remoteAddress))) throw new Error('Provider connection remote address did not match the pinned DNS result.');
     const status = result.response.status;
     return { reachable: !(status >= 300 && status < 400) && status !== 401 && status !== 403 && status < 500, status };
   } finally {

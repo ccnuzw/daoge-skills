@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { canonicalJsonHash } from '../shared/canonical-json';
 
 export interface ConfirmationChallenge {
   challenge: string;
@@ -27,18 +28,30 @@ export interface ConfirmationTokenClaims {
   conversationId: string;
 }
 
-interface StoredChallenge extends ConfirmationChallenge {
+export interface StoredChallenge extends ConfirmationChallenge {
   challengeHash: string;
 }
 
-interface StoredConsent extends ConfirmationConsent {
+export interface StoredConsent extends ConfirmationConsent {
   challengeHash: string;
 }
 
-interface IssuedToken {
+export interface IssuedToken {
   claims: ConfirmationTokenClaims;
   expiresAt: number;
   operationKey?: string;
+}
+
+/** Everything the gate must keep across a daemon restart so an answered challenge is not thrown away. */
+export interface ConfirmationGateState {
+  challenges: StoredChallenge[];
+  consents: StoredConsent[];
+  issuedTokens: Array<{ key: string; token: IssuedToken }>;
+}
+
+export interface ConfirmationGatePersistence {
+  load(): ConfirmationGateState | null;
+  save(state: ConfirmationGateState): void;
 }
 
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -84,25 +97,61 @@ function decodeClaims(value: string): ConfirmationTokenClaims | null {
 }
 
 export function planHash(plan: unknown): string {
-  return digest(canonicalValue(plan));
-}
-
-export function canonicalValue(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(canonicalValue).join(',') + ']';
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    return '{' + Object.keys(record).filter((key) => record[key] !== undefined).sort().map((key) => JSON.stringify(key) + ':' + canonicalValue(record[key])).join(',') + '}';
-  }
-  return JSON.stringify(value === undefined ? null : value);
+  return canonicalJsonHash(plan);
 }
 
 export class ConfirmationGate {
   private readonly challenges = new Map<string, StoredChallenge>();
   private readonly consents = new Map<string, StoredConsent>();
   private readonly issuedTokens = new Map<string, IssuedToken>();
+  private readonly secret: string;
+  private readonly now: () => Date;
+  private readonly persistence: ConfirmationGatePersistence | null;
 
-  constructor(private readonly secret: string = randomBytes(32).toString('base64url'), private readonly now: () => Date = () => new Date()) {
-    if (secret.length < 32) throw new Error('Confirmation gate secret must have high entropy.');
+  constructor(secret?: string, now?: () => Date, persistence?: ConfirmationGatePersistence) {
+    if (secret !== undefined && secret.length < 32) throw new Error('Confirmation gate secret must have high entropy.');
+    this.secret = secret !== undefined ? secret : randomBytes(32).toString('base64url');
+    this.now = now || (() => new Date());
+    this.persistence = persistence || null;
+    this.restore();
+  }
+
+  /** Restores only well-formed, unexpired entries; anything else is dropped rather than trusted. */
+  private restore(): void {
+    if (!this.persistence) return;
+    let state: ConfirmationGateState | null = null;
+    try { state = this.persistence.load(); } catch { state = null; }
+    if (!state) return;
+    for (const challenge of state.challenges || []) {
+      if (!challenge || typeof challenge.roundId !== 'string' || typeof challenge.challenge !== 'string' || typeof challenge.challengeHash !== 'string') continue;
+      if (typeof challenge.sessionId !== 'string' || typeof challenge.conversationId !== 'string' || typeof challenge.planHash !== 'string') continue;
+      if (!Number.isInteger(challenge.expectedVersion) || typeof challenge.expiresAt !== 'string') continue;
+      this.challenges.set(challenge.roundId, challenge);
+    }
+    for (const consent of state.consents || []) {
+      if (!consent || typeof consent.roundId !== 'string' || typeof consent.sessionId !== 'string') continue;
+      if (typeof consent.conversationId !== 'string' || typeof consent.planHash !== 'string') continue;
+      if (typeof consent.confirmedAt !== 'string' || typeof consent.expiresAt !== 'string') continue;
+      this.consents.set(consent.roundId, consent);
+    }
+    for (const entry of state.issuedTokens || []) {
+      if (!entry || typeof entry.key !== 'string' || !entry.token || typeof entry.token !== 'object') continue;
+      const issued = entry.token as IssuedToken;
+      if (!issued.claims || !Number.isFinite(issued.expiresAt)) continue;
+      this.issuedTokens.set(entry.key, { claims: issued.claims, expiresAt: issued.expiresAt, ...(issued.operationKey ? { operationKey: issued.operationKey } : {}) });
+    }
+    this.purgeExpired();
+  }
+
+  private persist(): void {
+    if (!this.persistence) return;
+    try {
+      this.persistence.save({
+        challenges: [...this.challenges.values()],
+        consents: [...this.consents.values()],
+        issuedTokens: [...this.issuedTokens.entries()].map(([key, token]) => ({ key, token }))
+      });
+    } catch { /* the gate stays authoritative in memory; a failed write must not break the request */ }
   }
 
   createChallenge(input: { roundId: string; sessionId: string; conversationId: string; planHash: string; expectedVersion: number }): ConfirmationChallenge {
@@ -128,6 +177,7 @@ export class ConfirmationGate {
       expiresAt: expiresAt.toISOString()
     };
     this.challenges.set(stored.roundId, stored);
+    this.persist();
     return { challenge: stored.challenge, roundId: stored.roundId, sessionId: stored.sessionId, conversationId: stored.conversationId, planHash: stored.planHash, expectedVersion: stored.expectedVersion, expiresAt: stored.expiresAt };
   }
 
@@ -159,6 +209,7 @@ export class ConfirmationGate {
     };
     this.consents.set(consent.roundId, consent);
     this.challenges.delete(consent.roundId);
+    this.persist();
     return { roundId: consent.roundId, sessionId: consent.sessionId, conversationId: consent.conversationId, planHash: consent.planHash, confirmedAt: consent.confirmedAt, expiresAt: consent.expiresAt };
   }
 
@@ -176,6 +227,7 @@ export class ConfirmationGate {
     const claims: ConfirmationTokenClaims = { version: 1, roundId: assertTokenPart(input.roundId, 'roundId'), preflightId: assertTokenPart(input.preflightId, 'preflightId'), planHash: assertTokenPart(input.planHash, 'planHash'), conversationId: assertTokenPart(input.conversationId, 'conversationId') };
     const token = TOKEN_PREFIX + '.' + encodeClaims(claims) + '.' + sign(this.secret, claims);
     this.issuedTokens.set(digest(token), { claims, expiresAt: Date.parse(consent.expiresAt) });
+    this.persist();
     return token;
   }
 
@@ -194,12 +246,13 @@ export class ConfirmationGate {
       throw new Error('The confirmation token has already authorized another execution operation.');
     }
     issued.operationKey = normalizedOperationKey;
+    this.persist();
     return { replayed: false };
   }
 
   releaseToken(token: string, operationKey: string): void {
     const issued = this.issuedTokens.get(digest(String(token || '')));
-    if (issued?.operationKey === operationKey) issued.operationKey = undefined;
+    if (issued?.operationKey === operationKey) { issued.operationKey = undefined; this.persist(); }
   }
 
   private issuedToken(token: string, expected: { roundId: string; preflightId: string; planHash: string; conversationId: string }): IssuedToken | null {

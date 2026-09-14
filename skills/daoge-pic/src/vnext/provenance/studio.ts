@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { StudioDatabase, withTransaction } from '../studio/database';
-import { StudioNotFoundError } from '../domain/studio-commands';
+import { InvalidCommandError, StudioNotFoundError } from '../domain/studio-commands';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { buildCanonicalProvenance, evaluateRetention, RETENTION_CATEGORIES, RetentionCategory, RetentionDecision, RetentionPolicy, ProvenanceRecord, ValidationIssue } from './contract';
 import { parseReviewContext } from '../domain/review-contract';
+import { canonicalJsonHash } from '../shared/canonical-json';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -73,6 +74,16 @@ export interface PersistedStudioProvenanceRecord {
   persistedAt: string;
   createdAt: string;
   updatedAt: string;
+  /** SHA-256 of `canonicalJson`. Together with `recordId` this is the
+   * externally anchorable identity: unlike `recordId` alone it changes when
+   * the content does, and unlike either alone it always resolves back to the
+   * exact body that was anchored. */
+  contentHash: string;
+  /** How many distinct canonical bodies this recordId has had. 1 means the
+   * record has never drifted. */
+  versionCount: number;
+  /** True when this persist call replaced an older body. */
+  superseded: boolean;
 }
 
 export interface PersistedStudioProvenanceResult {
@@ -85,12 +96,31 @@ export interface PersistedStudioProvenanceResult {
 export interface StoredStudioProvenanceRecord {
   record: ProvenanceRecord;
   canonicalJson: string;
+  contentHash: string;
+  versionCount: number;
   retention: Readonly<Record<RetentionCategory, RetentionDecision>>;
   persistedAt: string;
   assetId: string;
   deliveryId: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A frozen historical body. Reading one always yields the content that was
+ * written under this exact hash. */
+export interface StoredStudioProvenanceVersion {
+  recordId: string;
+  assetId: string;
+  deliveryId: string;
+  contentHash: string;
+  versionNo: number;
+  canonicalJson: string;
+  /** Same shape as `StoredStudioProvenanceRecord.record` so callers read
+   * history and current with identical code. */
+  record: ProvenanceRecord;
+  retention: Readonly<Record<RetentionCategory, RetentionDecision>>;
+  recordedAt: string;
+  supersededAt: string | null;
 }
 
 function parseObject(value: string | null | undefined): JsonRecord {
@@ -106,8 +136,23 @@ function digest(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+function validateStoredCanonicalJson(value: string, expectedHash?: string | null): { canonicalJson: string; record: ProvenanceRecord; contentHash: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('Stored provenance record is invalid.');
+  }
+  const canonical = buildCanonicalProvenance(parsed);
+  if (!canonical.ok) throw new Error('Stored provenance record is invalid.');
+  if (value !== canonical.canonicalJson) throw new Error('Stored provenance canonical JSON is not canonical.');
+  const contentHash = digest(canonical.canonicalJson);
+  if (expectedHash && expectedHash !== contentHash) throw new Error('Stored provenance content hash does not match canonical JSON.');
+  return { canonicalJson: canonical.canonicalJson, record: canonical.record, contentHash };
+}
+
 function digestJson(value: unknown): string {
-  return digest(JSON.stringify(value) || 'null');
+  return canonicalJsonHash(value);
 }
 
 function text(value: unknown): string | null {
@@ -265,25 +310,92 @@ function studioIdForAsset(db: StudioDatabase, assetId: string): string {
   return row.studio_id;
 }
 
+function validateProvenanceEntryScope(db: StudioDatabase, studioId: string, resultAssetId: string, entry: StudioProvenanceRecord): { record: ProvenanceRecord; canonicalJson: string; contentHash: string } {
+  if (entry.assetId !== resultAssetId) throw new InvalidCommandError('Provenance entry asset does not match the result asset.');
+  const canonical = validateStoredCanonicalJson(entry.canonicalJson);
+  const entryRecord = buildCanonicalProvenance(entry.record);
+  if (!entryRecord.ok || entryRecord.canonicalJson !== canonical.canonicalJson) throw new InvalidCommandError('Provenance entry record does not match its canonical JSON.');
+  const scoped = db.prepare("SELECT 1 FROM assets asset JOIN asset_relations relation ON relation.asset_id = asset.id AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item' JOIN run_items item ON item.id = relation.target_id JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id JOIN delivery_assets member ON member.asset_id = asset.id JOIN deliveries delivery ON delivery.id = member.delivery_id AND delivery.project_id = project.id WHERE asset.id = ? AND asset.studio_id = ? AND delivery.id = ? AND project.studio_id = ? AND project.id = ? AND task.id = ? AND round.id = ? AND run.id = ? AND item.id = ? AND item.sequence = ?").get(entry.assetId, studioId, entry.deliveryId, studioId, canonical.record.projectId, canonical.record.taskId, canonical.record.roundId, canonical.record.run.runId, canonical.record.run.itemId, canonical.record.run.itemSequence);
+  if (!scoped) throw new InvalidCommandError('Provenance entry asset, delivery, or canonical body is outside the Studio lineage.');
+  return canonical;
+}
+
 export function persistStudioProvenance(db: StudioDatabase, result: StudioProvenanceResult, now = new Date()): PersistedStudioProvenanceResult {
   const studioId = studioIdForAsset(db, result.assetId);
   const persistedAt = now.toISOString();
   const retentionJson = JSON.stringify(result.retention);
   const records = withTransaction(db, () => result.records.map((entry) => {
-    db.prepare('INSERT INTO provenance_records (id, studio_id, asset_id, delivery_id, canonical_json, retention_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET asset_id = excluded.asset_id, delivery_id = excluded.delivery_id, canonical_json = excluded.canonical_json, retention_json = excluded.retention_json, updated_at = excluded.updated_at WHERE provenance_records.studio_id = excluded.studio_id').run(entry.record.recordId, studioId, entry.assetId, entry.deliveryId, entry.canonicalJson, retentionJson, persistedAt, persistedAt);
-    const row = db.prepare('SELECT created_at, updated_at FROM provenance_records WHERE id = ? AND studio_id = ?').get(entry.record.recordId, studioId) as { created_at: string; updated_at: string } | undefined;
-    if (!row) throw new StudioNotFoundError('Studio provenance record not found: ' + entry.record.recordId);
-    return { recordId: entry.record.recordId, assetId: entry.assetId, deliveryId: entry.deliveryId, persistedAt: row.updated_at, createdAt: row.created_at, updatedAt: row.updated_at };
+    const validated = validateProvenanceEntryScope(db, studioId, result.assetId, entry);
+    const recordId = validated.record.recordId;
+    const contentHash = validated.contentHash;
+    const existing = db.prepare('SELECT asset_id, delivery_id, canonical_json, retention_json, content_hash, version_count, created_at, updated_at FROM provenance_records WHERE id = ? AND studio_id = ?').get(recordId, studioId) as { asset_id: string; delivery_id: string; canonical_json: string; retention_json: string; content_hash: string | null; version_count: number | null; created_at: string; updated_at: string } | undefined;
+    let superseded = false;
+    let versionCount = 1;
+    if (existing) {
+      const current = validateStoredCanonicalJson(existing.canonical_json, existing.content_hash);
+      const history = db.prepare('SELECT content_hash, version_no FROM provenance_record_versions WHERE record_id = ? AND studio_id = ? ORDER BY version_no').all(recordId, studioId) as Array<{ content_hash: string; version_no: number }>;
+      const historicalVersion = new Map(history.map((row) => [row.content_hash, Number(row.version_no)]));
+      const currentVersionNo = historicalVersion.get(current.contentHash) || history.reduce((maximum, row) => Math.max(maximum, Number(row.version_no)), 0) + 1;
+      const distinctCurrentBodies = new Set([...history.map((row) => row.content_hash), current.contentHash]).size;
+      // Pre-v33 rows have a blank content_hash. Compare against a digest of
+      // their canonical body first, otherwise their first unchanged persist is
+      // incorrectly treated as drift and creates a bogus frozen version.
+      if (current.contentHash === contentHash) {
+        // Idempotent re-persist of the same body: nothing to freeze, and the
+        // version count stays put. We still fall through to the upsert so
+        // `updated_at` reflects the touch — the returned values must always
+        // agree with what a later read would find.
+        versionCount = distinctCurrentBodies;
+      } else {
+        // The body is changing. Freeze what is currently there first so an
+        // anchor handed out earlier still resolves to exactly that content.
+        db.prepare('INSERT OR IGNORE INTO provenance_record_versions (id, studio_id, record_id, asset_id, delivery_id, content_hash, canonical_json, retention_json, version_no, recorded_at, superseded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(recordId + '-v' + currentVersionNo, studioId, recordId, existing.asset_id, existing.delivery_id, current.contentHash, current.canonicalJson, existing.retention_json, currentVersionNo, existing.updated_at, persistedAt);
+        superseded = true;
+        versionCount = distinctCurrentBodies + (historicalVersion.has(contentHash) ? 0 : 1);
+      }
+    }
+    db.prepare('INSERT INTO provenance_records (id, studio_id, asset_id, delivery_id, canonical_json, retention_json, content_hash, version_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET asset_id = excluded.asset_id, delivery_id = excluded.delivery_id, canonical_json = excluded.canonical_json, retention_json = excluded.retention_json, content_hash = excluded.content_hash, version_count = excluded.version_count, updated_at = excluded.updated_at WHERE provenance_records.studio_id = excluded.studio_id').run(recordId, studioId, entry.assetId, entry.deliveryId, validated.canonicalJson, retentionJson, contentHash, versionCount, persistedAt, persistedAt);
+    const row = db.prepare('SELECT created_at, updated_at, version_count FROM provenance_records WHERE id = ? AND studio_id = ?').get(recordId, studioId) as { created_at: string; updated_at: string; version_count: number } | undefined;
+    if (!row) throw new StudioNotFoundError('Studio provenance record not found: ' + recordId);
+    return { recordId, assetId: entry.assetId, deliveryId: entry.deliveryId, persistedAt: row.updated_at, createdAt: row.created_at, updatedAt: row.updated_at, contentHash, versionCount: Number(row.version_count) || versionCount, superseded };
   }));
   return { assetId: result.assetId, records, issues: result.issues, retention: result.retention };
 }
 
 export function getPersistedStudioProvenance(db: StudioDatabase, studioId: string, recordId: string): StoredStudioProvenanceRecord {
-  const row = db.prepare('SELECT id, asset_id, delivery_id, canonical_json, retention_json, created_at, updated_at FROM provenance_records WHERE id = ? AND studio_id = ?').get(recordId, studioId) as { id: string; asset_id: string; delivery_id: string; canonical_json: string; retention_json: string; created_at: string; updated_at: string } | undefined;
+  const row = db.prepare('SELECT id, asset_id, delivery_id, canonical_json, retention_json, content_hash, version_count, created_at, updated_at FROM provenance_records WHERE id = ? AND studio_id = ?').get(recordId, studioId) as { id: string; asset_id: string; delivery_id: string; canonical_json: string; retention_json: string; content_hash: string | null; version_count: number | null; created_at: string; updated_at: string } | undefined;
   if (!row) throw new StudioNotFoundError('Studio provenance record not found: ' + recordId);
-  const canonical = buildCanonicalProvenance(JSON.parse(row.canonical_json));
-  if (!canonical.ok) throw new Error('Stored provenance record is invalid.');
-  return { record: canonical.record, canonicalJson: canonical.canonicalJson, retention: parseRetentionJson(row.retention_json), persistedAt: row.updated_at, assetId: row.asset_id, deliveryId: row.delivery_id, createdAt: row.created_at, updatedAt: row.updated_at };
+  const canonical = validateStoredCanonicalJson(row.canonical_json, row.content_hash);
+  return { record: canonical.record, canonicalJson: canonical.canonicalJson, contentHash: canonical.contentHash, versionCount: Number(row.version_count) || 1, retention: parseRetentionJson(row.retention_json), persistedAt: row.updated_at, assetId: row.asset_id, deliveryId: row.delivery_id, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
+/**
+ * Resolves an external anchor `(recordId, contentHash)` back to the exact body
+ * that was anchored. This is what makes a provenance anchor trustworthy even
+ * though the current record under the same id may have moved on.
+ */
+export function getStudioProvenanceVersion(db: StudioDatabase, studioId: string, recordId: string, contentHash: string): StoredStudioProvenanceVersion {
+  const current = db.prepare('SELECT content_hash, asset_id, delivery_id, canonical_json, retention_json, version_count, created_at, updated_at FROM provenance_records WHERE id = ? AND studio_id = ?').get(recordId, studioId) as { content_hash: string | null; asset_id: string; delivery_id: string; canonical_json: string; retention_json: string; version_count: number | null; created_at: string; updated_at: string } | undefined;
+  if (current) {
+    const canonical = validateStoredCanonicalJson(current.canonical_json, current.content_hash);
+    if (canonical.contentHash === contentHash) {
+      const historical = db.prepare('SELECT version_no FROM provenance_record_versions WHERE record_id = ? AND studio_id = ? AND content_hash = ?').get(recordId, studioId, contentHash) as { version_no: number } | undefined;
+      return { recordId, assetId: current.asset_id, deliveryId: current.delivery_id, contentHash: canonical.contentHash, versionNo: historical ? Number(historical.version_no) : Number(current.version_count) || 1, canonicalJson: canonical.canonicalJson, record: canonical.record, retention: parseRetentionJson(current.retention_json), recordedAt: current.updated_at, supersededAt: null };
+    }
+  }
+  const row = db.prepare('SELECT asset_id, delivery_id, content_hash, canonical_json, retention_json, version_no, recorded_at, superseded_at FROM provenance_record_versions WHERE record_id = ? AND studio_id = ? AND content_hash = ?').get(recordId, studioId, contentHash) as { asset_id: string; delivery_id: string; content_hash: string; canonical_json: string; retention_json: string; version_no: number; recorded_at: string; superseded_at: string | null } | undefined;
+  if (!row) throw new StudioNotFoundError('Studio provenance record version not found: ' + recordId + '@' + contentHash.slice(0, 12));
+  const canonical = validateStoredCanonicalJson(row.canonical_json, row.content_hash);
+  return { recordId, assetId: row.asset_id, deliveryId: row.delivery_id, contentHash: canonical.contentHash, versionNo: Number(row.version_no), canonicalJson: canonical.canonicalJson, record: canonical.record, retention: parseRetentionJson(row.retention_json), recordedAt: row.recorded_at, supersededAt: row.superseded_at };
+}
+
+/** All frozen bodies ever recorded under a recordId, oldest first. */
+export function listStudioProvenanceVersions(db: StudioDatabase, studioId: string, recordId: string): readonly StoredStudioProvenanceVersion[] {
+  const rows = db.prepare('SELECT asset_id, delivery_id, content_hash, canonical_json, retention_json, version_no, recorded_at, superseded_at FROM provenance_record_versions WHERE record_id = ? AND studio_id = ? ORDER BY version_no').all(recordId, studioId) as Array<{ asset_id: string; delivery_id: string; content_hash: string; canonical_json: string; retention_json: string; version_no: number; recorded_at: string; superseded_at: string | null }>;
+  return rows.map((row) => {
+    const canonical = validateStoredCanonicalJson(row.canonical_json, row.content_hash);
+    return { recordId, assetId: row.asset_id, deliveryId: row.delivery_id, contentHash: canonical.contentHash, versionNo: Number(row.version_no), canonicalJson: canonical.canonicalJson, record: canonical.record, retention: parseRetentionJson(row.retention_json), recordedAt: row.recorded_at, supersededAt: row.superseded_at };
+  });
 }
 
 export const buildStudioProvenance = projectAssetProvenance;

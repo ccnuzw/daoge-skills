@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn, ChildProcess } from 'node:child_process';
-import { MAX_GLOBAL_CONCURRENCY, MAX_PROVIDER_CONCURRENCY } from '../studio/runtime-settings';
+import { MAX_GLOBAL_CONCURRENCY, MAX_PROVIDER_CONCURRENCY, WORKER_POOL_JOB_TIMEOUT_MS } from '../studio/runtime-settings';
 import { ProviderConcurrencyGovernor, ProviderConcurrencySnapshot, ProviderHealthSample, ProviderConcurrencyState } from './provider-concurrency';
 import type { ResolvedProviderConfig } from '../studio/provider-config';
 import { safeErrorSummary } from '../shared/safe-error';
@@ -48,8 +48,10 @@ interface WorkerSlot {
   entry: string;
   restartTimer: NodeJS.Timeout | null;
   healthyTimer: NodeJS.Timeout | undefined;
+  startupTimer: NodeJS.Timeout | undefined;
   restartAttempts: number;
   failed: boolean;
+  halfOpen: boolean;
 }
 export const MAX_GENERATION_WORKER_POOL_SIZE = 8;
 
@@ -58,9 +60,26 @@ export function generationWorkerPoolSize(parallelism = typeof os.availableParall
 }
 const EMPTY_RESULT: WorkerPoolTick = { claimed: 0, succeeded: 0, retrying: 0, blocked: 0, unknown: 0, cancelled: 0 };
 const EMPTY_PROVIDER_STATS: ProviderHealthSample = { succeeded: 0, rateLimited: 0, transient: 0, unknown: 0, otherFailure: 0, maxRssBytes: 0, maxExternalBytes: 0 };
-const WORKER_TICK_TIMEOUT_MS = 12 * 60 * 1000;
-const WORKER_HEALTHY_WINDOW_MS = 30 * 1000;
-const MAX_RESTART_ATTEMPTS = 8;
+// Tick watchdog is now derived from the lease ceiling via
+// `WORKER_POOL_JOB_TIMEOUT_MS` (10 min max lease + 2 min grace) rather
+// than being hard-coded to 12 minutes. They coincidentally coincide
+// today, but they stay consistent by construction instead of by luck:
+// raising `WORKER_MAX_LEASE_MS` widens the watchdog automatically, which
+// is what keeps a child from having its lease reclaimed while the parent
+// still trusts the watchdog — the duplicate-billing window §5.2 of the
+// optimization review calls out.
+export const WORKER_TICK_TIMEOUT_MS = WORKER_POOL_JOB_TIMEOUT_MS;
+export const WORKER_HEALTHY_WINDOW_MS = 30 * 1000;
+export const MAX_RESTART_ATTEMPTS = 8;
+// Half-open circuit breaker: after the pool trips exhausted, wait this
+// long before attempting a single new child. The probe runs at most
+// once; success unsticks the pool, failure re-trips for another window.
+export const WORKER_HALF_OPEN_BACKOFF_MS = 60_000;
+// A child that never establishes its ready handshake must not leave the
+// pool in starting forever. The failure follows the same restart path as
+// IPC send/close failures, so callers get progression instead of relying
+// on the tick watchdog.
+export const WORKER_STARTUP_TIMEOUT_MS = WORKER_HALF_OPEN_BACKOFF_MS;
 function nonNegativeMetric(value: unknown): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
@@ -89,6 +108,12 @@ export class WorkerProcessPool {
   private lastTickAt: string | null = null;
   private lastTickDurationMs: number | null = null;
   private lastTickResult: WorkerPoolTick | null = null;
+  // Half-open circuit breaker bookkeeping. `halfOpenTimer` is set only
+  // after the breaker trips; firing it runs a single probe (one new
+  // child). If the probe survives `WORKER_HEALTHY_WINDOW_MS` the breaker
+  // resets; if it fails, the timer re-arms for `WORKER_HALF_OPEN_BACKOFF_MS`.
+  private halfOpenTimer: NodeJS.Timeout | null = null;
+  private halfOpenAttempts = 0;
 
   processIds(): number[] {
     return this.slots.flatMap((slot) => typeof slot.child.pid === 'number' && slot.child.pid > 0 ? [slot.child.pid] : []);
@@ -168,6 +193,13 @@ export class WorkerProcessPool {
       return EMPTY_RESULT;
     }
     this.activated = true;
+    // The circuit breaker is open: surface as failed but still allow
+    // the half-open probe to fire so the pool can self-heal.
+    if (this.exhausted && !this.halfOpenTimer) {
+      this.dispatchReason = 'failed';
+      this.recordTick(EMPTY_RESULT, startedAt);
+      return EMPTY_RESULT;
+    }
     if (!this.probeProviderState()) {
       this.dispatchReason = 'failed';
       this.recordTick(EMPTY_RESULT, startedAt);
@@ -179,7 +211,10 @@ export class WorkerProcessPool {
       return EMPTY_RESULT;
     }
     this.ensureCapacity(1);
-    const ready = this.slots.filter((slot) => slot.ready && !slot.busy && slot.child.connected);
+    for (const slot of this.slots) {
+      if (slot.ready && !slot.child.connected) this.failSlot(slot, new Error('Worker process IPC channel closed.'));
+    }
+    const ready = this.slots.filter((slot) => slot.ready && !slot.busy && slot.child.connected && !slot.failed);
     if (!ready.length) {
       this.dispatchReason = 'starting';
       this.recordTick(EMPTY_RESULT, startedAt);
@@ -202,14 +237,16 @@ export class WorkerProcessPool {
       slot.busy = true;
       tasks.push(new Promise<WorkerTickResponse>((resolve, reject) => {
         const timeout = setTimeout(() => this.failSlot(slot, new Error('Worker tick watchdog expired.')), WORKER_TICK_TIMEOUT_MS);
-        slot.pending = { resolve, reject, timeout };
-        slot.child.send?.({ type: 'tick', capacity, globalLimit: boundedLimit }, (error) => {
-          if (!error) return;
-          clearTimeout(timeout);
-          slot.busy = false;
-          slot.pending = null;
-          reject(error);
-        });
+        const pending = { resolve, reject, timeout };
+        slot.pending = pending;
+        try {
+          if (typeof slot.child.send !== 'function') throw new Error('Worker process IPC channel is unavailable.');
+          slot.child.send({ type: 'tick', capacity, globalLimit: boundedLimit }, (error) => {
+            if (error && slot.pending === pending) this.failSlot(slot, error);
+          });
+        } catch (error) {
+          this.failSlot(slot, error instanceof Error ? error : new Error('Unable to send worker tick.'));
+        }
       }));
     }
     this.governor.begin(boundedLimit);
@@ -255,11 +292,14 @@ export class WorkerProcessPool {
     if (this.stopping) return;
     this.stopping = true;
     this.dispatchReason = 'stopping';
+    this.cancelHalfOpenProbe();
     const exits = this.slots.map((slot) => new Promise<void>((resolve) => {
       if (slot.restartTimer) {
         clearTimeout(slot.restartTimer);
         slot.restartTimer = null;
       }
+      clearTimeout(slot.startupTimer);
+      slot.startupTimer = undefined;
       const timeout = setTimeout(() => { slot.child.kill('SIGKILL'); resolve(); }, 3000);
       slot.child.once('exit', () => { clearTimeout(timeout); resolve(); });
       if (slot.pending) {
@@ -267,7 +307,15 @@ export class WorkerProcessPool {
         slot.pending.reject(new Error('Worker pool is shutting down.'));
         slot.pending = null;
       }
-      if (slot.child.connected) slot.child.send?.({ type: 'shutdown' });
+      if (slot.child.connected) {
+        try {
+          if (typeof slot.child.send !== 'function') throw new Error('Worker process IPC channel is unavailable.');
+          slot.child.send({ type: 'shutdown' }, (error) => { if (error) this.failSlot(slot, error); });
+        } catch (error) {
+          this.failSlot(slot, error instanceof Error ? error : new Error('Unable to shut down worker process.'));
+          if (slot.child.exitCode === null) slot.child.kill('SIGTERM');
+        }
+      }
       else if (slot.child.exitCode === null) slot.child.kill('SIGTERM');
       else { clearTimeout(timeout); resolve(); }
     }));
@@ -276,19 +324,31 @@ export class WorkerProcessPool {
     closeStudioDatabase(this.providerStateDb);
   }
 
-  private ensureCapacity(target: number): void {
-    if (this.stopping || this.exhausted) return;
+  private ensureCapacity(target: number, options: { halfOpen?: boolean } = {}): void {
+    if (this.stopping) return;
+    if (this.exhausted && !options.halfOpen) return;
     const bounded = Math.min(this.maxSize, Math.max(1, target));
-    while (this.slots.length < bounded) this.slots.push(this.startSlot(this.entry));
+    while (this.slots.length < bounded) this.slots.push(this.startSlot(this.entry, 0, Boolean(options.halfOpen)));
   }
-  private startSlot(entry: string, restartAttempts = 0): WorkerSlot {
+  private startSlot(entry: string, restartAttempts = 0, halfOpen = false): WorkerSlot {
     const args = [entry, '--workspace', this.workspaceRoot];
     if (this.providerConfig) args.push('--provider-profile-id', this.providerConfig.profileId, '--provider-config-version', String(this.providerConfig.configVersion), '--provider-config-ipc');
     const child = spawn(process.execPath, args, { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
-    const slot: WorkerSlot = { child, ready: false, busy: false, pending: null, entry, restartTimer: null, healthyTimer: undefined, restartAttempts, failed: false };
+    const slot: WorkerSlot = { child, ready: false, busy: false, pending: null, entry, restartTimer: null, healthyTimer: undefined, startupTimer: undefined, restartAttempts, failed: false, halfOpen };
+    slot.startupTimer = setTimeout(() => this.failSlot(slot, new Error('Worker process startup watchdog expired.')), WORKER_STARTUP_TIMEOUT_MS);
     child.on('message', (message: { type?: unknown; result?: WorkerPoolTick; providerStats?: ProviderHealthSample; message?: unknown }) => {
       if (message?.type === 'ready') {
+        if (slot.failed || !slot.child.connected) {
+          this.failSlot(slot, new Error('Worker process reported ready after its IPC channel closed.'));
+          return;
+        }
         slot.ready = true;
+        clearTimeout(slot.startupTimer);
+        slot.startupTimer = undefined;
+        if (slot.halfOpen) {
+          slot.halfOpen = false;
+          this.exhausted = false;
+        }
         this.lastError = null;
         clearTimeout(slot.healthyTimer);
         slot.healthyTimer = setTimeout(() => { slot.restartAttempts = 0; slot.healthyTimer = undefined; }, WORKER_HEALTHY_WINDOW_MS);
@@ -307,13 +367,19 @@ export class WorkerProcessPool {
       else pending.reject(new Error(typeof message?.message === 'string' ? message.message : 'Worker process failed.'));
     });
     child.on('error', (error) => this.failSlot(slot, error));
+    child.on('disconnect', () => this.failSlot(slot, new Error('Worker process IPC channel closed.')));
     child.on('exit', () => this.failSlot(slot, new Error('Worker process exited.')));
     if (this.providerConfig) {
       child.once('spawn', () => {
         if (!child.connected) return this.failSlot(slot, new Error('Worker process IPC channel is unavailable.'));
-        child.send?.({ type: 'configure-provider', config: this.providerConfig }, (error) => {
-          if (error) this.failSlot(slot, error);
-        });
+        try {
+          if (typeof child.send !== 'function') throw new Error('Worker process IPC channel is unavailable.');
+          child.send({ type: 'configure-provider', config: this.providerConfig }, (error) => {
+            if (error) this.failSlot(slot, error);
+          });
+        } catch (error) {
+          this.failSlot(slot, error instanceof Error ? error : new Error('Unable to configure worker Provider.'));
+        }
       });
     }
     return slot;
@@ -334,10 +400,18 @@ export class WorkerProcessPool {
     }
     if (this.stopping) return;
     if (slot.child.exitCode === null && slot.child.signalCode === null) slot.child.kill(error.message === 'Worker tick watchdog expired.' ? 'SIGKILL' : 'SIGTERM');
+    if (slot.halfOpen) {
+      const index = this.slots.indexOf(slot);
+      if (index >= 0) this.slots.splice(index, 1);
+      this.exhausted = true;
+      this.scheduleHalfOpenProbe();
+      return;
+    }
     if (slot.restartAttempts >= MAX_RESTART_ATTEMPTS) {
       const index = this.slots.indexOf(slot);
       if (index >= 0) this.slots.splice(index, 1);
       this.exhausted = true;
+      this.scheduleHalfOpenProbe();
       return;
     }
     const delay = Math.min(30000, 100 * 2 ** Math.min(slot.restartAttempts, 8));
@@ -356,5 +430,33 @@ export class WorkerProcessPool {
 
   private dispatchAfterRestart(): void {
     if (!this.stopping) this.processOnce().catch(() => undefined);
+  }
+
+  private scheduleHalfOpenProbe(): void {
+    if (this.stopping || this.halfOpenTimer) return;
+    this.halfOpenTimer = setTimeout(() => {
+      this.halfOpenTimer = null;
+      if (this.stopping || !this.exhausted) return;
+      this.halfOpenAttempts += 1;
+      // Spawn exactly one probe child. If it reports `ready` and stays
+      // alive past WORKER_HEALTHY_WINDOW_MS, the breaker is closed by
+      // the existing `startSlot` message handler (it clears the failure
+      // counters and the `failed` flag on every healthy slot).
+      this.ensureCapacity(1, { halfOpen: true });
+      if (!this.slots.length) {
+        this.scheduleHalfOpenProbe();
+        return;
+      }
+      // Keep the breaker open until the single probe actually reports
+      // ready. A synchronous spawn/IPC failure therefore cannot expose
+      // normal dispatch prematurely.
+    }, WORKER_HALF_OPEN_BACKOFF_MS);
+  }
+
+  private cancelHalfOpenProbe(): void {
+    if (this.halfOpenTimer) {
+      clearTimeout(this.halfOpenTimer);
+      this.halfOpenTimer = null;
+    }
   }
 }

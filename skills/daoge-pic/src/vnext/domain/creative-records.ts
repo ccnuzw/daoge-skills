@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { StudioDatabase } from '../studio/database';
 import { StudioAsset, getStudioAsset } from './assets';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
@@ -6,6 +5,7 @@ import { publicRunPlanSnapshot, publicRunRequestSummary } from './queries';
 import { safeErrorDetail } from '../shared/safe-error';
 import { normalizeReviewFeedback, parseReviewContext } from './review-contract';
 import { buildStudioProvenance, getPersistedStudioProvenance } from '../provenance/studio';
+import { canonicalJsonHash } from '../shared/canonical-json';
 
 type JsonRecord = Record<string, unknown>;
 type TaskRow = { id: string; project_id: string; name: string; status: string; intent_json: string; project_name: string; };
@@ -23,7 +23,7 @@ function reviewFeedbackHash(value: string | null | undefined): string | undefine
   try {
     const normalized = normalizeReviewFeedback(JSON.parse(value || '{}'));
     if (!Object.keys(normalized).length) return undefined;
-    return createHash('sha256').update(JSON.stringify(normalized), 'utf8').digest('hex');
+    return canonicalJsonHash(normalized);
   } catch {
     return undefined;
   }
@@ -212,7 +212,7 @@ export function getAssetProvenance(db: StudioDatabase, studioId: string, assetId
   const persisted = canonical.records.flatMap((entry) => {
     try {
       const stored = getPersistedStudioProvenance(db, studioId, entry.record.recordId);
-      return [{ recordId: stored.record.recordId, assetId: stored.assetId, deliveryId: stored.deliveryId, persistedAt: stored.persistedAt, createdAt: stored.createdAt, updatedAt: stored.updatedAt }];
+      return [{ recordId: stored.record.recordId, assetId: stored.assetId, deliveryId: stored.deliveryId, persistedAt: stored.persistedAt, createdAt: stored.createdAt, updatedAt: stored.updatedAt, contentHash: stored.contentHash, versionCount: stored.versionCount }];
     } catch (error) {
       if (error instanceof StudioNotFoundError) return [];
       throw error;
