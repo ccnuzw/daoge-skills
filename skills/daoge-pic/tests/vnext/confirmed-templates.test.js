@@ -173,3 +173,33 @@ test('rejects unsupported types, sensitive values, malformed context, and oversi
     dispose(fixture);
   }
 });
+
+test('reading a stored snapshot never re-applies the sensitive-content scan', () => {
+  const fixture = createFixture();
+  try {
+    assert.throws(() => saveConfirmedTemplate(fixture.db, saveInput(fixture, { definition: { fileFormat: 'webp' } })), /sensitive|unsupported/i);
+
+    const timestamp = new Date().toISOString();
+    const legacyDefinition = JSON.stringify({ fileFormat: 'webp', promptStyle: 'cinematic', notes: ['kept'] });
+    const provenance = JSON.stringify({ kind: 'confirmed_round_plan', summary: '旧规则下写入的快照。', confirmedAt: timestamp });
+    fixture.db.prepare('INSERT INTO confirmed_templates (id, studio_id, template_id, template_type, version, name, definition_json, source_round_id, source_task_id, source_project_id, source_plan_version, provenance_json, status, created_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)')
+      .run('template_legacy_row', fixture.studioId, 'template_legacy', 'task_type', 1, '旧快照', legacyDefinition, fixture.round.id, fixture.task.id, fixture.project.id, 1, provenance, 'active', timestamp);
+
+    const read = getConfirmedTemplate(fixture.db, { studioId: fixture.studioId, templateId: 'template_legacy' });
+    assert.equal(read?.templateId, 'template_legacy');
+    assert.deepEqual(read?.definition, { fileFormat: 'webp', notes: ['kept'], promptStyle: 'cinematic' });
+
+    const listed = listConfirmedTemplates(fixture.db, { studioId: fixture.studioId });
+    assert.equal(listed.some((item) => item.templateId === 'template_legacy'), true);
+
+    // Structural validation is deliberately kept on the read path: records are immutable once written, so
+    // this row can only be produced by out-of-contract database edits.
+    let tooDeep = { leaf: true };
+    for (let depth = 0; depth < CONFIRMED_TEMPLATE_LIMITS.maxDepth + 1; depth += 1) tooDeep = { nested: tooDeep };
+    fixture.db.prepare('INSERT INTO confirmed_templates (id, studio_id, template_id, template_type, version, name, definition_json, source_round_id, source_task_id, source_project_id, source_plan_version, provenance_json, status, created_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)')
+      .run('template_corrupt_row', fixture.studioId, 'template_corrupt', 'task_type', 1, '越界快照', JSON.stringify(tooDeep), fixture.round.id, fixture.task.id, fixture.project.id, 1, provenance, 'active', timestamp);
+    assert.throws(() => getConfirmedTemplate(fixture.db, { studioId: fixture.studioId, templateId: 'template_corrupt' }), /nesting|unsupported/i);
+  } finally {
+    dispose(fixture);
+  }
+});

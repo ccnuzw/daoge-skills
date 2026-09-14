@@ -10,6 +10,8 @@ const { importStudioAsset, softDeleteAsset } = require('../../dist/vnext/domain/
 const { recordUsageEvent } = require('../../dist/vnext/usage/ledger');
 const { createBackupManifest } = require('../../dist/vnext/backup/manifest');
 const { parseCommand, materializeStdinJson } = require('../../dist/vnext/cli/daoge');
+const { STUDIO_SCHEMA_VERSION } = require('../../dist/vnext/studio/database');
+const { RUNTIME_VERSION, SKILL_PROTOCOL_VERSION } = require('../../dist/vnext/shared/protocol');
 const { configureProvider } = require('./provider-test-helper');
 const { fetchStudio, requestJson, requestJsonAsWorkbench, workbenchCookie } = require('./local-studio-test-helper');
 
@@ -204,9 +206,21 @@ test('backup POST APIs are Bearer-only, enforce allowlists, and keep source path
     assert.equal(rollback.status, 400);
     assert.equal(JSON.stringify(rollback.body).includes(source), false);
 
-    const upgrade = await requestJson(started, '/api/backup/upgrade-assess', { method: 'POST', idempotencyKey: 'backup-upgrade', body: { currentRuntimeVersion: '5.13.0', targetRuntimeVersion: '5.13.0', currentSchemaVersion: 1, targetSchemaVersion: 1, supportedSchemaVersion: 1, targetProtocolVersion: '2.0.0', rollbackPoint: null } });
+    const upgrade = await requestJson(started, '/api/backup/upgrade-assess', { method: 'POST', idempotencyKey: 'backup-upgrade', body: { targetRuntimeVersion: RUNTIME_VERSION, targetSchemaVersion: STUDIO_SCHEMA_VERSION, targetProtocolVersion: SKILL_PROTOCOL_VERSION, rollbackPoint: null } });
     assert.equal(upgrade.status, 200, JSON.stringify(upgrade.body));
     assert.equal(upgrade.body.data.value.allowed, true);
+    assert.equal(upgrade.body.data.runtimeFacts.currentSchemaVersion, STUDIO_SCHEMA_VERSION);
+    assert.equal(upgrade.body.data.runtimeFacts.supportedSchemaVersion, STUDIO_SCHEMA_VERSION);
+    assert.equal(upgrade.body.data.runtimeFacts.currentRuntimeVersion, RUNTIME_VERSION);
+    assert.equal(upgrade.body.data.runtimeFacts.supportedProtocolRange, '>=2.0.0 <3.0.0');
+
+    const selfCertified = await requestJson(started, '/api/backup/upgrade-assess', { method: 'POST', idempotencyKey: 'backup-upgrade-self', body: { targetRuntimeVersion: RUNTIME_VERSION, targetSchemaVersion: 9999, targetProtocolVersion: SKILL_PROTOCOL_VERSION, supportedSchemaVersion: 9999 } });
+    assert.equal(selfCertified.status, 400);
+
+    const future = await requestJson(started, '/api/backup/upgrade-assess', { method: 'POST', idempotencyKey: 'backup-upgrade-future', body: { targetRuntimeVersion: RUNTIME_VERSION, targetSchemaVersion: STUDIO_SCHEMA_VERSION + 1, targetProtocolVersion: SKILL_PROTOCOL_VERSION } });
+    assert.equal(future.status, 200, JSON.stringify(future.body));
+    assert.equal(future.body.data.value.allowed, false);
+    assert.ok(future.body.data.value.issues.some((item) => item.code === 'schema_unsupported'));
   } finally {
     if (started) await started.service.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -229,10 +243,82 @@ test('backup CLI schemas are JSON-only and preserve path/body marker conventions
   assert.equal(manifest.request.method, 'GET');
   assert.equal(manifest.request.pathname, '/api/backup/manifest');
   assert.deepEqual(manifest.request.body, {});
-  const upgrade = parseCommand(['backup-upgrade-assess', '--workspace', root, '--current-runtime-version', '5.13.0', '--target-runtime-version', '5.14.0', '--current-schema-version', '1', '--target-schema-version', '2', '--supported-schema-version', '2', '--target-protocol-version', '2.0.0', '--rollback-point', '@-']);
+  const upgrade = parseCommand(['backup-upgrade-assess', '--workspace', root, '--target-runtime-version', '5.14.0', '--target-schema-version', '33', '--target-protocol-version', '2.0.0', '--rollback-point', '@-']);
   assert.deepEqual(upgrade.request.body.rollbackPoint, { __daogeJsonStdin: true });
+  assert.equal(upgrade.request.body.currentSchemaVersion, undefined);
+  assert.equal(upgrade.request.body.supportedSchemaVersion, undefined);
+  assert.equal(upgrade.request.body.supportedProtocolRange, undefined);
+  assert.throws(() => parseCommand(['backup-upgrade-assess', '--workspace', root, '--current-runtime-version', '5.13.0', '--target-runtime-version', '5.14.0', '--target-schema-version', '33', '--target-protocol-version', '2.0.0']), /未知参数|--current-runtime-version/);
   const rollback = parseCommand(['backup-rollback-point', '--workspace', root, '--manifest', '{}', '--runtime-version', '5.13.0', '--schema-version', '1']);
   assert.equal(rollback.request.pathname, '/api/backup/rollback-point');
   assert.equal(rollback.request.body.runtimeVersion, '5.13.0');
   assert.equal(rollback.request.body.schemaVersion, 1);
+});
+
+test('backup manifest accepts delivery exports written with the legacy frozen-file shape', async () => {
+  const root = workspace('daoge-pic-backup-legacy-delivery-');
+  let started;
+  try {
+    initializeStudio({ workspaceRoot: root });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot: root, ssePollMs: 20 });
+    const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'legacy-delivery-project', body: { name: 'Legacy delivery project' } });
+    const projectId = project.body.data.value.id;
+    const upload = await fetchStudio(started, '/api/assets/import', {
+      method: 'POST',
+      headers: { 'content-type': 'image/png', 'idempotency-key': 'legacy-delivery-upload', 'x-daoge-target-type': 'project', 'x-daoge-target-id': projectId },
+      body: png
+    });
+    const asset = (await upload.json()).data;
+    await requestJson(started, '/api/assets/' + asset.id + '/review', { method: 'POST', idempotencyKey: 'legacy-delivery-review', body: { decision: 'keep' } });
+    const delivery = await requestJson(started, '/api/deliveries', { method: 'POST', idempotencyKey: 'legacy-delivery-create', body: { projectId, name: 'Legacy delivery', assetIds: [asset.id], includeCreativeRecord: false } });
+    const deliveryId = delivery.body.data.id;
+    await requestJson(started, '/api/deliveries/' + deliveryId + '/ready', { method: 'POST', idempotencyKey: 'legacy-delivery-ready', body: {} });
+    const exported = await requestJson(started, '/api/deliveries/' + deliveryId + '/export', { method: 'POST', idempotencyKey: 'legacy-delivery-export', body: {} });
+    assert.equal(exported.status, 200, JSON.stringify(exported.body));
+
+    const stored = JSON.parse(started.service.db.prepare('SELECT manifest_json FROM deliveries WHERE id = ?').get(deliveryId).manifest_json);
+    assert.ok(Array.isArray(stored.exportFiles) && stored.exportFiles.every((file) => typeof file.contentHash === 'string'));
+    const legacy = {
+      ...stored,
+      files: stored.exportFiles.map((file, index) => ({ sequence: index + 1, file: file.name, mediaType: 'image/png', contentHash: file.contentHash }))
+    };
+    delete legacy.exportFiles;
+    started.service.db.prepare('UPDATE deliveries SET manifest_json = ? WHERE id = ?').run(JSON.stringify(legacy), deliveryId);
+
+    const manifest = await requestJsonAsWorkbench(started, '/api/backup/manifest');
+    assert.equal(manifest.status, 200, JSON.stringify(manifest.body));
+    const paths = manifest.body.data.manifest.entries.map((entry) => entry.path);
+    assert.ok(paths.includes(stored.exportDirectory + '/001.png'), JSON.stringify(paths.slice(0, 8)));
+    assert.equal(JSON.stringify(manifest.body).includes(root), false);
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('backup manifest pages past the 500-row asset clamp instead of truncating silently', async () => {
+  const root = workspace('daoge-pic-backup-page-');
+  let started;
+  try {
+    const initialized = initializeStudio({ workspaceRoot: root });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot: root, ssePollMs: 20 });
+    const studioId = initialized.manifest.studioId;
+    const timestamp = new Date().toISOString();
+    const total = 620;
+    const insert = started.service.db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, deleted_at, created_at, updated_at, media_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)');
+    for (let index = 0; index < total; index += 1) {
+      const relative = 'daoge-assets/generated/seed-' + String(index).padStart(4, '0') + '.png';
+      const absolute = path.join(root, ...relative.split('/'));
+      fs.mkdirSync(path.dirname(absolute), { recursive: true });
+      fs.writeFileSync(absolute, 'seed-' + index);
+      insert.run('asset_seed_' + index, studioId, 'generated', 'image/png', relative, index.toString(16).padStart(64, '0'), 8, '{}', timestamp, timestamp, 'available');
+    }
+    const manifest = await requestJsonAsWorkbench(started, '/api/backup/manifest');
+    assert.equal(manifest.status, 200, JSON.stringify(manifest.body));
+    const seeded = manifest.body.data.manifest.entries.filter((entry) => entry.path.includes('seed-'));
+    assert.equal(seeded.length, total);
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

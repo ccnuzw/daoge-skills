@@ -132,6 +132,7 @@ node scripts/daoge.js <command> [--workspace <stable-workspace>]
 - 已确认模板快照：`template-list`、`template-get`、`template-save`、`template-archive`、`template-rollback`；读取和写入均只接受 Bearer Skill/CLI 请求，快照必须来自当前 Studio 的已确认轮次。
 - 计划与运行：`plan --plan <json|@->`、`confirm-challenge`、`preflight`、`run`、`pause`、`resume`、`cancel`、`retry`、`resolve-unknown`。
 - 交付：`delivery`、`delivery-update`、`delivery-ready`、`delivery-draft`、`delivery-export`、`delivery-batch`、`delivery-batch-revise`、`delivery-batch-ready`。`delivery-complete` 不是公开 CLI 命令。
+- 备份与升级评估：`backup-manifest`、`backup-restore-dry-run`、`backup-upgrade-assess`、`backup-rollback-point`。**当前不存在恢复执行器**：`restore` 只有 dry-run 规划，不会创建、替换或删除任何文件，因此不得向用户承诺这些命令能回滚或还原 Studio；真实回滚只能靠文件级快照替换。升级评估的「当前运行时与支持范围」由 daemon 自证（`--current-*` 与 `--supported-*` 参数已移除，不受调用方声明影响）。
 
 高风险命令必须按完整签名执行，缺失参数时停止并补齐，不得猜测默认值或把 secret 写入 argv：
 

@@ -3,6 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BackupManifestEntry, BackupManifestStudioIdentityInput, BackupManifestValidation, validateBackupManifest } from './manifest';
 
+/**
+ * Restore stays plan-only: this module produces a validated operation list against a manifest and never
+ * creates, replaces or deletes a single file. There is deliberately no apply/restore executor yet, so callers
+ * must not treat a backup manifest as something this runtime can roll back from. Do not add one without an
+ * atomic write -> verify -> swap sequence plus fail-closed rollback and its own regression.
+ */
+
 export type RestoreOperation = {
   path: string;
   category: BackupManifestEntry['category'];

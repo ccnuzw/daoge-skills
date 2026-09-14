@@ -179,12 +179,12 @@ function safeName(value: unknown): string {
   return name;
 }
 
-function normalizeJsonValue(value: unknown, label: string, depth: number, state: JsonNormalizationState, seen: WeakSet<object>): JsonValue {
+function normalizeJsonValue(value: unknown, label: string, depth: number, state: JsonNormalizationState, seen: WeakSet<object>, scanContent: boolean): JsonValue {
   state.nodes += 1;
   if (state.nodes > CONFIRMED_TEMPLATE_LIMITS.maxValueNodes) invalid(label + ' exceeds the value limit.');
   if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'string') {
-    if (value.length > CONFIRMED_TEMPLATE_LIMITS.maxStringLength || CONTROL_CHARACTERS.test(value) || SENSITIVE_VALUE.test(value)) invalid(label + ' contains unsupported or sensitive content.');
+    if (value.length > CONFIRMED_TEMPLATE_LIMITS.maxStringLength || CONTROL_CHARACTERS.test(value) || (scanContent && SENSITIVE_VALUE.test(value))) invalid(label + ' contains unsupported or sensitive content.');
     return value;
   }
   if (typeof value === 'number') {
@@ -198,7 +198,7 @@ function normalizeJsonValue(value: unknown, label: string, depth: number, state:
   try {
     if (Array.isArray(value)) {
       if (value.length > CONFIRMED_TEMPLATE_LIMITS.maxArrayItems) invalid(label + ' exceeds the array item limit.');
-      return value.map((item, index) => normalizeJsonValue(item, label + '[' + index + ']', depth + 1, state, seen));
+      return value.map((item, index) => normalizeJsonValue(item, label + '[' + index + ']', depth + 1, state, seen, scanContent));
     }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) invalid(label + ' must contain plain objects.');
@@ -207,8 +207,8 @@ function normalizeJsonValue(value: unknown, label: string, depth: number, state:
     const output: JsonObject = {};
     const objectValue = value as JsonObject;
     for (const key of keys.sort()) {
-      if (!key || key.length > 64 || CONTROL_CHARACTERS.test(key) || SENSITIVE_KEY.test(key)) invalid(label + ' contains an unsupported or sensitive field.');
-      output[key] = normalizeJsonValue(objectValue[key], label + '.' + key, depth + 1, state, seen);
+      if (!key || key.length > 64 || CONTROL_CHARACTERS.test(key) || (scanContent && SENSITIVE_KEY.test(key))) invalid(label + ' contains an unsupported or sensitive field.');
+      output[key] = normalizeJsonValue(objectValue[key], label + '.' + key, depth + 1, state, seen, scanContent);
     }
     return output;
   } finally {
@@ -217,8 +217,22 @@ function normalizeJsonValue(value: unknown, label: string, depth: number, state:
 }
 
 function normalizeSafeObject(value: unknown, label: string, maxBytes: number): { value: JsonObject; json: string } {
+  return normalizeObject(value, label, maxBytes, true);
+}
+
+/**
+ * Structural validation only, for values already stored by this runtime. Stored content passed the sensitive
+ * scan when it was written, so re-running that scan on read cannot add safety -- it only turns rows written
+ * under older rules into rows that abort an entire listing. Structural checks (shape, depth, size, control
+ * characters) still run so real corruption is still rejected.
+ */
+function normalizeStoredObject(value: unknown, label: string, maxBytes: number): { value: JsonObject; json: string } {
+  return normalizeObject(value, label, maxBytes, false);
+}
+
+function normalizeObject(value: unknown, label: string, maxBytes: number, scanContent: boolean): { value: JsonObject; json: string } {
   if (!isObject(value)) invalid(label + ' must be an object.');
-  const normalized = normalizeJsonValue(value, label, 0, { nodes: 0 }, new WeakSet<object>());
+  const normalized = normalizeJsonValue(value, label, 0, { nodes: 0 }, new WeakSet<object>(), scanContent);
   if (!isObject(normalized)) invalid(label + ' must be an object.');
   const json = JSON.stringify(normalized);
   if (Buffer.byteLength(json, 'utf8') > maxBytes) invalid(label + ' exceeds the size limit.');
@@ -228,7 +242,15 @@ function normalizeSafeObject(value: unknown, label: string, maxBytes: number): {
 function parseStoredObject(value: string, label: string, maxBytes: number): JsonObject {
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { invalid(label + ' is not valid JSON.'); }
-  return normalizeSafeObject(parsed, label, maxBytes).value;
+  return normalizeStoredObject(parsed, label, maxBytes).value;
+}
+
+/** Read path counterpart of `safeName`: structural limits only, no content scan. */
+function safeStoredName(value: unknown): string {
+  if (typeof value !== 'string') invalid('Stored template name must be a string.');
+  const name = value.trim();
+  if (!name || name.length > CONFIRMED_TEMPLATE_LIMITS.maxNameLength || CONTROL_CHARACTERS.test(name)) invalid('Stored template name contains unsupported content.');
+  return name;
 }
 
 function normalizeProvenance(value: ConfirmedTemplateProvenanceInput | undefined, confirmedAt: string | null): { value: ConfirmedTemplateProvenance; json: string } {
@@ -278,7 +300,7 @@ function rowToTemplate(row: StoredConfirmedTemplate): ConfirmedTemplate {
   const templateId = requireSafeId(row.template_id, 'stored template');
   const templateType = requireTemplateType(row.template_type);
   const version = requireVersion(row.version, 'stored version');
-  const name = safeName(row.name);
+  const name = safeStoredName(row.name);
   const definition = parseStoredObject(row.definition_json, 'Stored template definition', CONFIRMED_TEMPLATE_LIMITS.maxDefinitionBytes);
   const source = {
     roundId: requireSafeId(row.source_round_id, 'stored source round'),

@@ -9,7 +9,7 @@ const { recordUsageEvent, listUsageLedger, summarizeUsage } = require('../../dis
 const { configureBudget, evaluateBudgetGate } = require('../../dist/vnext/usage/budget');
 const { configureProvider } = require('./provider-test-helper');
 const { createProject, createTaskDraft, createRoundDraft, prepareRoundForConfirmation, confirmRoundPlan } = require('../../dist/vnext/domain/studio-commands');
-const { preflightRound, createDryRunPreview, queueGenerationRun, recordRunItemUsage, listGenerationRunItems } = require('../../dist/vnext/runner/run-commands');
+const { preflightRound, createDryRunPreview, queueGenerationRun, recordRunItemUsage, listGenerationRunItems, retryGenerationRunItems } = require('../../dist/vnext/runner/run-commands');
 
 function fixture() {
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-usage-'));
@@ -249,5 +249,37 @@ test('global budgets include profile-backed and profile-null usage while profile
     assert.equal(profileGate.allowed, true);
     assert.equal(profileGate.code, 'budget_ok');
     assert.equal(profileGate.committedCostMinor, 80);
+  } finally { closeStudioDatabase(fixtureValue.db); fs.rmSync(fixtureValue.workspaceRoot, { recursive: true, force: true }); }
+});
+
+test('a failed run releases its reservation and the retry path re-clears the gate with the real code', () => {
+  const fixtureValue = fixture();
+  try {
+    const studioId = fixtureValue.initialized.manifest.studioId;
+    const configured = configureProvider(fixtureValue.initialized, { model: 'gpt-image-2', apiKey: 'provider-key-not-for-db' });
+    const project = createProject(fixtureValue.db, { studioId, name: '重试闸门项目', idempotencyKey: 'retry-gate-project' });
+    const task = createTaskDraft(fixtureValue.db, { studioId, projectId: project.value.id, name: '重试闸门任务', idempotencyKey: 'retry-gate-task' });
+    const draft = createRoundDraft(fixtureValue.db, { studioId, taskId: task.value.id, purpose: 'exploration', idempotencyKey: 'retry-gate-round' });
+    const prepared = prepareRoundForConfirmation(fixtureValue.db, { studioId, roundId: draft.value.id, plan: { operation: 'generate', itemCount: 1, prompt: 'retry gate' }, expectedVersion: draft.value.version, idempotencyKey: 'retry-gate-prepare' });
+    const round = confirmRoundPlan(fixtureValue.db, { studioId, roundId: draft.value.id, expectedVersion: prepared.value.version, idempotencyKey: 'retry-gate-confirm' }).value;
+    configureBudget(fixtureValue.db, { studioId, limitCostMinor: 1000, costUnit: 'USD_minor' });
+    const preview = createDryRunPreview(fixtureValue.db, { studioId, roundId: round.id, providerConfig: configured.config, providerStatus: configured.status, usageEstimate: { unit: 'image', quantity: 1, estimatedCostMinor: 100, costUnit: 'USD_minor', source: 'caller' }, idempotencyKey: 'retry-gate-preview' });
+    const run = queueGenerationRun(fixtureValue.db, { studioId, roundId: round.id, providerConfig: configured.config, providerStatus: configured.status, preflightId: preview.value.preview.id, idempotencyKey: 'retry-gate-run' }).value;
+    const item = listGenerationRunItems(fixtureValue.db, run.id)[0];
+
+    // A failed run holds no reservation, so it cannot block unrelated work while the operator decides.
+    fixtureValue.db.prepare("UPDATE generation_runs SET status = 'failed' WHERE id = ?").run(run.id);
+    fixtureValue.db.prepare("UPDATE run_items SET status = 'failed' WHERE id = ?").run(item.id);
+    const freeAfterFailure = evaluateBudgetGate(fixtureValue.db, { studioId, projectId: project.value.id, roundId: round.id, estimate: { unit: 'image', quantity: 1, estimatedCostMinor: 900, costUnit: 'USD_minor', source: 'caller' } });
+    assert.equal(freeAfterFailure.allowed, true);
+
+    // Retrying that run must re-clear the gate, and a unit mismatch must surface its own code instead of `budget_exceeded`.
+    configureBudget(fixtureValue.db, { studioId, limitCostMinor: 1000, costUnit: 'EUR_minor' });
+    assert.throws(() => retryGenerationRunItems(fixtureValue.db, { studioId, runId: run.id, idempotencyKey: 'retry-gate-mismatch' }), /budget_cost_unit_mismatch/);
+
+    configureBudget(fixtureValue.db, { studioId, limitCostMinor: 1000, costUnit: 'USD_minor' });
+    const retried = retryGenerationRunItems(fixtureValue.db, { studioId, runId: run.id, idempotencyKey: 'retry-gate-ok' });
+    assert.deepEqual(retried.value.retriedItemIds, [item.id]);
+    assert.equal(fixtureValue.db.prepare('SELECT status FROM generation_runs WHERE id = ?').get(run.id).status, 'queued');
   } finally { closeStudioDatabase(fixtureValue.db); fs.rmSync(fixtureValue.workspaceRoot, { recursive: true, force: true }); }
 });

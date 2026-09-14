@@ -220,16 +220,23 @@ function retryBudgetCandidates(db: StudioDatabase, studioId: string, run: Genera
   }));
 }
 
-function retryBudgetDecisions(db: StudioDatabase, studioId: string, run: GenerationRun, items: Array<{ id: string }>): { allowed: Set<string>; blocked: Set<string> } {
+/**
+ * Decides which retry candidates may run again. `budgetReservesRunStatus` deliberately excludes `failed`, so a
+ * failed run releases its reservation instead of blocking new work until the operator resolves it; the retry
+ * path re-clears the gate instead by adding each candidate's own share back as a reservation. The two halves are
+ * one design -- do not "fix" one without the other.
+ */
+function retryBudgetDecisions(db: StudioDatabase, studioId: string, run: GenerationRun, items: Array<{ id: string }>): { allowed: Set<string>; blocked: Set<string>; blockedCodes: string[] } {
   const candidates = retryBudgetCandidates(db, studioId, run, items);
   const allowed = new Set(candidates.map((candidate) => candidate.itemId));
   const blocked = new Set<string>();
+  const blockedCodes = new Set<string>();
   const groups = new Map<string, RetryBudgetGroup>();
   const runProfileId = typeof run.providerSnapshot.profileId === 'string' && run.providerSnapshot.profileId.trim() ? run.providerSnapshot.profileId : null;
   const explicitPolicy = runProfileId ? getBudgetPolicy(db, { studioId, profileId: runProfileId }) : null;
   const globalPolicy = explicitPolicy ? null : getBudgetPolicy(db, { studioId, profileId: null });
   const policy = explicitPolicy || globalPolicy;
-  if (!policy) return { allowed, blocked };
+  if (!policy) return { allowed, blocked, blockedCodes: [] };
   for (const candidate of candidates) {
     if (candidate.estimate.estimatedCostMinor === null || candidate.estimate.costUnit === null) continue;
     const key = policy.id + '\u0000' + candidate.estimate.costUnit;
@@ -265,16 +272,19 @@ function retryBudgetDecisions(db: StudioDatabase, studioId: string, run: Generat
       }
     });
     if (gate.allowed) continue;
+    blockedCodes.add(gate.code);
     for (const candidate of group.candidates) {
       allowed.delete(candidate.itemId);
       blocked.add(candidate.itemId);
     }
   }
-  return { allowed, blocked };
+  return { allowed, blocked, blockedCodes: [...blockedCodes] };
 }
 
 function assertRetryBudget(db: StudioDatabase, studioId: string, run: GenerationRun, items: Array<{ id: string }>): void {
-  if (retryBudgetDecisions(db, studioId, run, items).blocked.size) throw new InvalidCommandError('Generation budget gate failed: budget_exceeded.');
+  const decisions = retryBudgetDecisions(db, studioId, run, items);
+  if (!decisions.blocked.size) return;
+  throw new InvalidCommandError('Generation budget gate failed: ' + decisions.blockedCodes.join(', ') + '（本次重试有 ' + decisions.blocked.size + ' 项未通过预算闸门）。');
 }
 
 export function recordRunItemUsage(db: StudioDatabase, input: { studioId: string; runItemId: string; requestId: string; billingState: UsageBillingState }): void {

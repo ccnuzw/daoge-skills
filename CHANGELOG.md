@@ -21,6 +21,16 @@
 - **构建闸门前置**：`tsconfig.vnext.json` 启用 `noEmitOnError`，`build:vnext` 拆出独立的 `typecheck:vnext` 并在清理 `dist` 之前执行，避免类型错误时留下「看起来构建成功、实际不可用」的半成品 `dist`。
 - **验证证据机器产出**：新增 `npm run verify:evidence`，从真实构建与真实回归生成 `docs/vnext_verification_evidence_zh.md` 的工作树证据区块；`npm run verify:evidence:check` 在区块与代码不一致时失败，取代此前靠人工维护的测试计数。
 
+### 按复核建议的后续修正
+
+- **`backup-upgrade-assess` 不再自我认证**：`supportedSchemaVersion`、`supportedProtocolRange`、`currentSchemaVersion`、`currentRuntimeVersion` 原先全部由请求体提供，调用方传一个更大的支持范围即可把任何目标判为兼容。现在这些「本运行时能力」由 daemon 自证（读取自身的 `STUDIO_SCHEMA_VERSION`、数据库实际 schema、`RUNTIME_VERSION` 与协议范围），请求体只接受目标声明；CLI 相应移除 `--current-*` 与 `--supported-*` 参数，响应新增 `runtimeFacts` 便于核对。
+- **备份 manifest 在真实 Studio 上可用**：原先素材数硬限 500，而本机 Studio 有 1114 个素材（合计约 5.2 GiB），`/api/backup/manifest` 直接 400 不可用。根因是清单哈希在 `BEGIN IMMEDIATE` 写锁内进行，5 GiB 内容会让所有写入阻塞约 20 秒。现在清单只把「checkpoint + 证明无待写 WAL + 哈希 studio.db」放在写锁内，素材与交付冻结文件改为在锁外哈希并复用同一份观测（`createBackupManifest` 新增可选 `snapshot` 入参），上限提升为 `MAX_BACKUP_MANIFEST_ASSETS` 并给出可操作提示。
+- **备份 manifest 不再静默截断**：`listStudioAssets` 内部把每页钳到 500 行，而备份清单只调用一次，于是超过 500 个素材的 Studio 会得到一个「看起来完整、实际缺一半」的清单。现在按 offset 分页枚举到上限为止，实测本机 Studio 的 1114 个素材全部进入清单。
+- **备份 manifest 兼容旧版交付冻结清单**：早期运行时把已导出交付的冻结文件记在 `files`（键为 `file`，且没有 `byteSize`），当前代码只认 `exportFiles`，因此只要 Studio 里有一个旧交付，整个备份清单请求就会失败。现在两种形状都接受——`name`/`file` 互为别名，缺失的字节数由磁盘实测补齐，而冻结记录里的 `contentHash` 仍是强校验锚点。
+- **备份能力表述诚实化**：`backup/restore.ts` 仍然只有 dry-run 规划，不存在 apply/恢复执行器。已在模块头注释、SKILL.md 命令分组与 CLI 帮助中明确写出，并禁止向用户承诺这些命令可以回滚 Studio（真实回滚只能靠文件级快照替换）。
+- **已确认模板读取不再重跑敏感内容扫描**：读取路径原先复用写入期的校验（含敏感键/值正则，键名单包含 `prompt`、`provider`、`url`、`path`、`file` 等），规则一旦收紧，历史快照会让 `listConfirmedTemplates` 整体抛错、模板列表与 rollback 全部不可用。现在写入路径保持完整校验，读取路径只做结构校验（形状、深度、大小、控制字符），因此真实损坏仍被拒绝而历史快照不再连带失效。
+- **重试预算闸门的错误码透传**：原先恒抛 `budget_exceeded`，`budget_cost_unit_mismatch` 等真实原因被吞。现在透传闸门真实 code 并带未通过项数。同时把「`failed` 运行不保留预留、由重试路径把候选项份额加回并重新过闸」这一有意设计写进注释并补了回归，避免被误当作缺陷改坏。
+
 ## daoge-pic 5.13.0 - 2026-09-12
 
 当前稳定发布包/runtime 版本为 `5.13.0`；`5.12.0` 及更早版本保持为不可变历史发布，旧 daemon 不得与本版本混用。

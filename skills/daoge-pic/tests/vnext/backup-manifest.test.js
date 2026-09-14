@@ -9,6 +9,7 @@ const {
   backupManifestChecksum,
   createBackupManifest,
   serializeBackupManifest,
+  snapshotBackupFile,
   validateBackupManifest
 } = require('../../dist/vnext/backup/manifest');
 
@@ -108,6 +109,46 @@ test('manifest stores only safe references and never file contents or credential
     assert.match(serialized, /provider-profile\.json/);
     assert.doesNotMatch(serialized, /sk-secret-value|provider\.example\.test|apiKey/);
     assert.doesNotMatch(serialized, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a supplied snapshot is honoured instead of re-reading the file', () => {
+  const root = temporaryWorkspace();
+  try {
+    writeFile(root, 'media/big.bin', 'actual bytes on disk');
+    const observed = snapshotBackupFile(root, 'media/big.bin');
+    assert.equal(observed.byteSize, 'actual bytes on disk'.length);
+    assert.match(observed.sha256, /^[a-f0-9]{64}$/);
+
+    const reused = createBackupManifest({
+      workspaceRoot: root,
+      studio,
+      entries: [{ path: 'media/big.bin', category: 'media', required: true, snapshot: observed }]
+    });
+    assert.equal(reused.entries[0].sha256, observed.sha256);
+    assert.equal(reused.entries[0].byteSize, observed.byteSize);
+
+    const asserted = { byteSize: 7, sha256: '1'.repeat(64) };
+    const substituted = createBackupManifest({
+      workspaceRoot: root,
+      studio,
+      entries: [{ path: 'media/big.bin', category: 'media', required: true, snapshot: asserted }]
+    });
+    assert.equal(substituted.entries[0].sha256, asserted.sha256);
+    assert.equal(substituted.entries[0].byteSize, 7);
+
+    for (const snapshot of [{ byteSize: -1, sha256: '1'.repeat(64) }, { byteSize: 3, sha256: 'not-a-hash' }, 'nope']) {
+      assert.throws(() => createBackupManifest({
+        workspaceRoot: root,
+        studio,
+        entries: [{ path: 'media/big.bin', category: 'media', required: true, snapshot }]
+      }), /snapshot/);
+    }
+
+    assert.equal(snapshotBackupFile(root, 'media/missing.bin'), null);
+    assert.throws(() => snapshotBackupFile(root, '../escape.bin'), /relative|path|escape/i);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

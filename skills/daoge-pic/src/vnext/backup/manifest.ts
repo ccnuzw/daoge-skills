@@ -52,6 +52,12 @@ export interface BackupManifestEntryInput {
   path?: string;
   category: BackupManifestCategory;
   required?: boolean;
+  /**
+   * A caller that already hashed this file may supply the observation instead of making this module read it
+   * again. The daemon uses it to keep multi-gigabyte media hashing outside its database write lock while the
+   * database file itself is still hashed under that lock.
+   */
+  snapshot?: { byteSize: number; sha256: string };
 }
 
 type CategoryFileInput = string | Omit<BackupManifestEntryInput, 'category'>;
@@ -236,6 +242,26 @@ function prepareWorkspaceRoot(workspaceRoot: unknown): string {
   return root;
 }
 
+/** Validates a caller-supplied observation so an entry can skip the read without weakening the manifest shape. */
+function suppliedSnapshot(value: unknown): FileSnapshot | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw new BackupManifestError('invalid-entry', 'Backup manifest entry snapshot is invalid.');
+  const byteSize = value.byteSize;
+  const sha256 = value.sha256;
+  if (typeof byteSize !== 'number' || !Number.isSafeInteger(byteSize) || byteSize < 0) throw new BackupManifestError('invalid-entry', 'Backup manifest entry snapshot size is invalid.');
+  if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256)) throw new BackupManifestError('invalid-entry', 'Backup manifest entry snapshot hash is invalid.');
+  return { byteSize, sha256 };
+}
+
+/**
+ * Observes one regular file the same way manifest creation does, so a caller can hash large media outside a
+ * database lock and then hand the observation to `createBackupManifest`. Returns null when the file is absent.
+ */
+export function snapshotBackupFile(workspaceRoot: string, relativePath: string): { byteSize: number; sha256: string } | null {
+  const snapshot = snapshotFile(prepareWorkspaceRoot(workspaceRoot), assertSafeRelativePath(relativePath));
+  return snapshot ? { byteSize: snapshot.byteSize, sha256: snapshot.sha256 } : null;
+}
+
 /** Reads only regular files after checking every parent component with lstat. */
 function snapshotFile(root: string, relativePath: string): FileSnapshot | null {
   let current = root;
@@ -333,7 +359,8 @@ export function createBackupManifest(first: CreateBackupManifestInput | string, 
     const relativePath = assertSafeRelativePath(entryPathInput(source));
     if (seen.has(relativePath)) throw new BackupManifestError('invalid-entry', 'Backup manifest entries may not contain duplicate paths.');
     seen.add(relativePath);
-    const snapshot = snapshotFile(root, relativePath);
+    const supplied = suppliedSnapshot(source.snapshot);
+    const snapshot = supplied || snapshotFile(root, relativePath);
     if (!snapshot) {
       if (!required) continue;
       throw new BackupManifestError('missing-file', 'A required backup manifest file does not exist.');

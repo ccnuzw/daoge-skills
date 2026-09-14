@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import http, { IncomingMessage, OutgoingHttpHeaders, Server, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { Readable } from 'node:stream';
-import { closeStudioDatabase, openStudioDatabase, StudioDatabase, subscribeStudioEvents, withTransaction } from '../studio/database';
+import { closeStudioDatabase, openStudioDatabase, StudioDatabase, STUDIO_SCHEMA_VERSION, studioSchemaVersion, subscribeStudioEvents, withTransaction } from '../studio/database';
 import { hardenStudioAccess, ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { isProviderId, providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
 import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileConfig, resolveProviderProfileForTest, updateProviderProfile } from '../studio/provider-store';
@@ -44,7 +44,7 @@ import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authent
 import { ConfirmationGate, canonicalValue, planHash } from './confirmation-gate';
 import { isSupportedProtocolVersion, protocolStatus, RUNTIME_VERSION, SKILL_PROTOCOL_NAME, SUPPORTED_PROTOCOL_RANGE } from '../shared/protocol';
 import { WorkbenchPresence } from '../runtime/workbench-presence';
-import { createBackupManifest, type BackupManifest, type BackupManifestEntryInput } from '../backup/manifest';
+import { createBackupManifest, snapshotBackupFile, type BackupManifest, type BackupManifestEntryInput } from '../backup/manifest';
 import { createRestoreDryRun } from '../backup/restore';
 import { buildUpgradeRollbackPoint, evaluateUpgradeCompatibility } from '../backup/upgrade';
 
@@ -53,6 +53,10 @@ const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_ARCHIVE_IMAGE_COUNT = 100;
 const MAX_ARCHIVE_BYTES = 150 * 1024 * 1024;
 const MAX_BATCH_IDS = 500;
+/** Upper bound for one backup manifest request. Media hashing no longer holds the write lock, so this only bounds response time. */
+const MAX_BACKUP_MANIFEST_ASSETS = 5000;
+/** Page size for asset enumeration; `listStudioAssets` clamps every page to this many rows. */
+const ASSET_PAGE_SIZE = 500;
 
 type JsonBody = Record<string, unknown>;
 
@@ -151,17 +155,23 @@ function exportedDeliveryBackupEntries(db: StudioDatabase, paths: InitializeStud
       throw backupError('Backup manifest 已导出交付清单无效。');
     }
     const directory = safeDeliveryExportDirectory(paths, manifest.exportDirectory);
-    if (!Array.isArray(manifest.exportFiles) || !manifest.exportFiles.length) throw backupError('Backup manifest 已导出交付冻结文件清单无效。');
+    // `exportFiles` is the current frozen-file shape. Deliveries exported by earlier runtimes recorded the same
+    // evidence as `files`, keyed `file` instead of `name` and without a byte size. Both are accepted because the
+    // content hash -- the actual integrity anchor -- is present in each; otherwise one legacy delivery would make
+    // every backup manifest request fail for the whole Studio.
+    const frozenFiles = Array.isArray(manifest.exportFiles) ? manifest.exportFiles : Array.isArray(manifest.files) ? manifest.files : null;
+    if (!frozenFiles || !frozenFiles.length) throw backupError('Backup manifest 已导出交付冻结文件清单无效。');
     const names = new Set<string>();
-    for (const item of manifest.exportFiles) {
+    for (const item of frozenFiles) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) throw backupError('Backup manifest 已导出交付冻结文件身份无效。');
       const file = item as Record<string, unknown>;
-      const name = safeDeliveryExportFileName(file.name);
+      const name = safeDeliveryExportFileName(file.name === undefined ? file.file : file.name);
       if (names.has(name)) throw backupError('Backup manifest 已导出交付冻结文件重复。');
       names.add(name);
       const contentHash = typeof file.contentHash === 'string' ? file.contentHash : '';
-      const byteSize = file.byteSize;
-      if (!/^[a-f0-9]{64}$/.test(contentHash) || !Number.isSafeInteger(byteSize) || Number(byteSize) < 0) throw backupError('Backup manifest 已导出交付冻结文件身份无效。');
+      const recordedSize = file.byteSize;
+      if (!/^[a-f0-9]{64}$/.test(contentHash)) throw backupError('Backup manifest 已导出交付冻结文件身份无效。');
+      if (recordedSize !== undefined && (!Number.isSafeInteger(recordedSize) || Number(recordedSize) < 0)) throw backupError('Backup manifest 已导出交付冻结文件身份无效。');
       const relativePath = directory + '/' + name;
       if (seenPaths.has(relativePath)) throw backupError('Backup manifest 已导出交付路径重复。');
       seenPaths.add(relativePath);
@@ -174,8 +184,11 @@ function exportedDeliveryBackupEntries(db: StudioDatabase, paths: InitializeStud
         throw backupError('Backup manifest 无法读取已导出交付文件。');
       }
       if (stat.isSymbolicLink() || !stat.isFile()) throw backupError('Backup manifest 拒绝包含非普通交付文件。');
+      // A recorded size is authoritative; a legacy record has none, so the file on disk defines the expectation
+      // while the frozen content hash still has to match what is actually hashed.
+      const byteSize = recordedSize === undefined ? stat.size : Number(recordedSize);
       entries.push({ path: relativePath, category: 'media', required: true });
-      identities.push({ path: relativePath, contentHash, byteSize: Number(byteSize) });
+      identities.push({ path: relativePath, contentHash, byteSize });
     }
   }
   return { entries, identities };
@@ -239,6 +252,15 @@ function withBackupManifestLock<T>(db: StudioDatabase, databasePath: string, inv
     throw backupError('Backup manifest inventory 无法安全读取；已拒绝返回。');
   }
 }
+/**
+ * Hashes one workspace file for a manifest entry outside any database lock. An absent file stays absent so
+ * `createBackupManifest` keeps applying the entry's own required/optional rule.
+ */
+function observedBackupEntry(workspaceRoot: string, relativePath: string): { snapshot?: { byteSize: number; sha256: string } } {
+  const snapshot = snapshotBackupFile(workspaceRoot, relativePath);
+  return snapshot ? { snapshot } : {};
+}
+
 function normalizeBackupInputError(operation: string, error: unknown): never {
   if (error instanceof InvalidCommandError) throw error;
   throw backupError(operation + ' 输入无法安全处理。');
@@ -969,33 +991,46 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
       if (request.method === 'GET' && parsed.pathname === '/api/backup/manifest') {
         const studioId = this.initialized.manifest.studioId;
+        const workspaceRoot = this.initialized.paths.workspaceRoot;
         try {
-          const manifest = withBackupManifestLock(this.db, this.initialized.paths.databasePath, () => {
-            const assetCount = countStudioAssets(this.db, studioId, { includeDeleted: true });
-            if (assetCount > 500) throw new InvalidCommandError('当前 Studio 素材数量超过安全 backup manifest 上限；请先缩小范围。');
-            const databasePath = workspaceRelativePath(this.initialized.paths.workspaceRoot, this.initialized.paths.databasePath);
-            const metadataPath = workspaceRelativePath(this.initialized.paths.workspaceRoot, this.initialized.paths.manifestPath);
-            const entries: BackupManifestEntryInput[] = [
-              { path: databasePath, category: 'database' },
-              { path: metadataPath, category: 'metadata' }
-            ];
-            const seenPaths = new Set<string>([databasePath, metadataPath]);
-            for (const asset of listStudioAssets(this.db, studioId, { includeDeleted: true, limit: 500 })) {
-              const relativePath = safeControlledAssetPath(this.initialized.paths.workspaceRoot, asset.storagePath);
+          // Phase 1 -- inventory the workspace and hash every media and delivery file with no lock held.
+          // A real Studio holds gigabytes of content; hashing it inside BEGIN IMMEDIATE would block every
+          // other writer for tens of seconds, which is why this used to be capped at a few hundred assets.
+          const assetCount = countStudioAssets(this.db, studioId, { includeDeleted: true });
+          if (assetCount > MAX_BACKUP_MANIFEST_ASSETS) throw new InvalidCommandError('当前 Studio 素材数量 ' + assetCount + ' 超过 backup manifest 上限 ' + MAX_BACKUP_MANIFEST_ASSETS + '；请先归档或清理素材后重试。');
+          const databasePath = workspaceRelativePath(workspaceRoot, this.initialized.paths.databasePath);
+          const metadataPath = workspaceRelativePath(workspaceRoot, this.initialized.paths.manifestPath);
+          const seenPaths = new Set<string>([databasePath, metadataPath]);
+          const entries: BackupManifestEntryInput[] = [
+            { path: metadataPath, category: 'metadata', ...observedBackupEntry(workspaceRoot, metadataPath) }
+          ];
+          // `listStudioAssets` clamps each page to 500 rows internally, so a single call would silently truncate
+          // a larger Studio and present an incomplete manifest as a complete one. Page until the cap instead.
+          for (let offset = 0; offset < MAX_BACKUP_MANIFEST_ASSETS; offset += ASSET_PAGE_SIZE) {
+            const page = listStudioAssets(this.db, studioId, { includeDeleted: true, limit: ASSET_PAGE_SIZE, offset });
+            if (!page.length) break;
+            for (const asset of page) {
+              const relativePath = safeControlledAssetPath(workspaceRoot, asset.storagePath);
               if (seenPaths.has(relativePath)) throw backupError('Backup manifest 路径重复。');
               seenPaths.add(relativePath);
-              entries.push({ path: relativePath, category: 'media' });
+              entries.push({ path: relativePath, category: 'media', ...observedBackupEntry(workspaceRoot, relativePath) });
             }
-            const deliveries = exportedDeliveryBackupEntries(this.db, this.initialized.paths, studioId, seenPaths);
-            entries.push(...deliveries.entries);
+            if (page.length < ASSET_PAGE_SIZE) break;
+          }
+          const deliveries = exportedDeliveryBackupEntries(this.db, this.initialized.paths, studioId, seenPaths);
+          for (const entry of deliveries.entries) entries.push({ ...entry, ...observedBackupEntry(workspaceRoot, String(entry.path)) });
+
+          // Phase 2 -- hold the write lock only long enough to checkpoint, prove no WAL is pending, and hash
+          // studio.db against that exact state. Everything above is already observed.
+          const manifest = withBackupManifestLock(this.db, this.initialized.paths.databasePath, () => {
             const result = createBackupManifest({
-              workspaceRoot: this.initialized.paths.workspaceRoot,
+              workspaceRoot,
               studio: { studioId, protocolName: SKILL_PROTOCOL_NAME, protocolVersion: protocolStatus().version, runtimeVersion: RUNTIME_VERSION },
-              entries
+              entries: [{ path: databasePath, category: 'database', ...observedBackupEntry(workspaceRoot, databasePath) }, ...entries]
             });
-            assertDeliveryBackupIdentities(result, deliveries.identities);
             return result;
           });
+          assertDeliveryBackupIdentities(manifest, deliveries.identities);
           return success(response, { manifest });
         } catch (error) {
           normalizeBackupInputError('Backup manifest', error);
@@ -1202,19 +1237,26 @@ export class LocalStudioService {
     }
     if (pathname === '/api/backup/upgrade-assess' && request.method === 'POST') {
       if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup upgrade assessment requires Skill/CLI authentication.');
-      assertAllowedBodyKeys(body, ['currentRuntimeVersion', 'targetRuntimeVersion', 'currentSchemaVersion', 'targetSchemaVersion', 'supportedSchemaVersion', 'targetProtocolVersion', 'supportedProtocolRange', 'rollbackPoint'], 'Backup upgrade assessment');
+      assertAllowedBodyKeys(body, ['targetRuntimeVersion', 'targetSchemaVersion', 'targetProtocolVersion', 'rollbackPoint'], 'Backup upgrade assessment');
+      // The caller declares only the target. Every "what can this runtime do" fact below is read from this
+      // daemon, so a caller can no longer certify its own upgrade by claiming a wider supported range.
+      const runtimeFacts = {
+        currentRuntimeVersion: RUNTIME_VERSION,
+        // The daemon migrated this database on open, so the ledger is never empty here; fall back to the
+        // schema this runtime guarantees rather than letting a null reach the assessment.
+        currentSchemaVersion: studioSchemaVersion(this.db) ?? STUDIO_SCHEMA_VERSION,
+        supportedSchemaVersion: STUDIO_SCHEMA_VERSION,
+        supportedProtocolRange: SUPPORTED_PROTOCOL_RANGE
+      };
       try {
         const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'backup.upgrade_assess', () => evaluateUpgradeCompatibility({
-          currentRuntimeVersion: text(body.currentRuntimeVersion),
+          ...runtimeFacts,
           targetRuntimeVersion: text(body.targetRuntimeVersion),
-          currentSchemaVersion: numberValue(body.currentSchemaVersion),
           targetSchemaVersion: numberValue(body.targetSchemaVersion),
-          supportedSchemaVersion: numberValue(body.supportedSchemaVersion),
           targetProtocolVersion: text(body.targetProtocolVersion),
-          supportedProtocolRange: body.supportedProtocolRange === undefined ? undefined : text(body.supportedProtocolRange),
           rollbackPoint: body.rollbackPoint === undefined ? undefined : body.rollbackPoint as never
         }), backupReceiptRequest(body));
-        return success(response, { value: receipt.value, replayed: receipt.replayed });
+        return success(response, { value: receipt.value, replayed: receipt.replayed, runtimeFacts });
       } catch (error) {
         normalizeBackupInputError('Backup upgrade assessment', error);
       }
