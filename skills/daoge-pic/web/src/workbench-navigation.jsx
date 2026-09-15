@@ -53,7 +53,7 @@ function RuntimeStatusCard({ studio, recoveryPhase, repairing, onCopy, onRefresh
       <div className="runtime-health-actions">
         {repairable && <button type="button" className="outline-button" disabled={repairing} onClick={onRepair}><RefreshCw size={15} className={repairing ? 'spin' : ''} />{repairing ? '正在重启' : '安全重启'}</button>}
         <button type="button" className="outline-button" onClick={onRefresh}><RefreshCw size={15} />刷新状态</button>
-        <button type="button" className="outline-button" onClick={onCopy}><Copy size={15} />复制脱敏诊断</button>
+        <button type="button" className="outline-button" onClick={onCopy}><Copy size={15} />复制隐去隐私的诊断</button>
       </div>
     </div>
   </details>;

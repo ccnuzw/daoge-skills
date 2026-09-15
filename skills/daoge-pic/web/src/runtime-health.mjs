@@ -12,7 +12,7 @@ function safeDiagnosticText(value) {
 export function runtimeHealthPresentation(runtime, recoveryPhase = 'ready') {
   if (recoveryPhase === 'stopping') return { tone: 'warning', title: '正在安全关闭后台任务', detail: '后台任务、HTTP 服务与本地数据库正在按顺序释放。', live: true };
   if (recoveryPhase === 'reconnecting') return { tone: 'warning', title: 'Studio 正在重连', detail: '保留当前页面状态；连接恢复后将刷新权威快照。', live: true };
-  if (recoveryPhase === 'restored') return { tone: 'ready', title: 'Studio 已恢复', detail: '授权与页面上下文已复用，实时更新已重新连接。', live: true };
+  if (recoveryPhase === 'restored') return { tone: 'ready', title: 'Studio 已恢复', detail: '授权和页面状态已复用，实时更新已重新连接。', live: true };
   const generation = runtime?.workerPool;
   const media = runtime?.mediaWorkerPool;
   if (generation?.state === 'failed' || media?.state === 'failed') return { tone: 'danger', title: '后台处理池需要重启', detail: [generation?.lastError, media?.lastError].filter(Boolean).map(safeDiagnosticText).join(' · ') || '子进程连续恢复失败；保存的运行和资产状态未丢失。', live: true };

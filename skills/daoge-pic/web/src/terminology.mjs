@@ -56,8 +56,24 @@ export const TERMS = Object.freeze([
   { internal: 'API', level: '保留', scope: 'config' }
 ]);
 
+// 技术详情层白名单。
+// 工程词在「技术详情」里是允许的（视觉隔离 + 按需展开 + 每条值配一句人话且可复制），
+// 所以第二批之后唯一剩下的「预检」就在这三处。但必须**逐条登记**：
+// 不许因为「反正是技术详情」就整文件放行，否则白名单会悄悄长成一整块。
+export const ADVANCED_DETAILS_ALLOWED_COPY = Object.freeze([
+  '预检通过',      // advanced-details.mjs：证据卡的状态文案
+  '计划与预检证据', // main.jsx：技术详情面板标题
+  '预检',          // main.jsx：技术详情里该区块的小标题
+  '没有预检记录。'  // main.jsx：该区块的空态
+]);
+
 export function termsAtLevel(level) {
   return TERMS.filter((term) => term.level === level);
+}
+
+// 创作者面应该用自然说法的词（译好 + 收回）。
+export function translatedInVisibleCopy() {
+  return TERMS.filter((term) => term.level === '译好' || term.forbidInCreator).map((term) => term.internal);
 }
 
 // creator 面禁用的词。守卫据此扫可见文案。

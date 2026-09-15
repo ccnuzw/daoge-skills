@@ -90,11 +90,11 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /setTargetCount\(selectedGoal\.defaultCount \|\| ''\)/);
   assert.doesNotMatch(main, /TASK_CREATION_GOALS/);
   assert.doesNotMatch(main, /ROUND_CREATION_PURPOSES/);
-  assert.match(main, /双入口、单工作流/);
+  assert.match(main, /两条入口、一条流程/);
   assert.match(main, /新建项目/);
   assert.match(main, /新建任务/);
   assert.match(main, /新建轮次/);
-  assert.match(main, /同时创建首个轮次并设为当前上下文/);
+  assert.match(main, /同时创建首个轮次，并设为当前轮次/);
   assert.match(main, /api\('\/api\/project-templates'/);
   assert.match(main, /templateVersion/);
   assert.match(main, /creation-selection-detail/);
@@ -143,7 +143,7 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /api\('\/api\/projects'/);
   assert.match(main, /api\('\/api\/tasks'/);
   assert.match(main, /api\('\/api\/rounds'/);
-  assert.match(main, /Studio 创建的结构化上下文草稿/);
+  assert.match(main, /这是 Studio 记下的草稿/);
   assert.match(styles, /\.creation-dialog/);
   assert.match(styles, /\.creation-choice-grid/);
   assert.match(styles, /\.creation-summary/);
@@ -163,7 +163,7 @@ test('Workbench exposes a creator-facing reference material selector for draft r
   assert.match(main, /选择本轮参考素材/);
   assert.match(main, /主体参考/);
   assert.match(main, /api\('\/api\/rounds\/'.*\/draft-context/);
-  assert.match(main, /回到当前上下文/);
+  assert.match(main, /回到当前选择/);
   assert.match(styles, /\.reference-panel/);
   assert.match(styles, /\.reference-candidate-grid/);
   assert.match(main, /assets: \(\) => renderAssetsView\(\)/);
@@ -173,7 +173,7 @@ test('Workbench exposes a creator-facing reference material selector for draft r
   assert.match(main, /素材导入引导/);
   assert.match(main, /x-daoge-material-need/);
   assert.match(main, /x-daoge-material-usage/);
-  assert.match(main, /导入成功后会按用途自动加入当前草稿轮次参考素材/);
+  assert.match(main, /导入成功后会按用途自动加入当前这一轮的参考素材/);
   assert.match(styles, /\.material-need-checklist/);
   assert.match(styles, /\.material-import-guide/);
 });
@@ -210,8 +210,8 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(lineage, /import \{ CreativeActionLauncher \} from '\.\/creative-action-launcher\.jsx'/);
   assert.match(lineage, /<CreativeActionLauncher/);
   assert.match(launcher, /export function CreativeActionLauncher/);
-  assert.match(launcher, /先选用途，再选草稿轮次/);
-  assert.match(launcher, /未锁定轮次：点击用途后先选择或创建草稿轮次/);
+  assert.match(launcher, /先选用途，再选还没开工的轮次/);
+  assert.match(launcher, /未锁定轮次：点击用途后先选一个还没开工的轮次/);
   // 动作面板必须继续声明「这些动作不出图」，但改用全站唯一那句人话（见 boundary-copy.mjs）。
   // 旧文案「不会确认、预检、创建 Generation Run 或访问 Provider」是工程话，已随第一批术语治理收敛。
   assert.match(launcher, /import \{ DRAFT_BOUNDARY_COPY \} from '\.\/boundary-copy\.mjs'/);
@@ -227,7 +227,7 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(main, /chooseReferenceTask/);
   assert.match(main, /reference-task-options/);
   assert.match(main, /allDraftRounds\.length === 1/);
-  assert.match(main, /新建草稿轮次并加入/);
+  assert.match(main, /新建一轮并加入/);
   assert.match(main, /从不采用原因创建下一轮/);
   assert.match(main, /feedbackToNextRound/);
   assert.match(main, /actionLabel/);
@@ -238,7 +238,7 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(main, /primaryAssetId/);
   assert.match(main, /REJECT_REASON_OPTIONS/);
   assert.match(main, /为什么不采用/);
-  assert.match(main, /同时加入当前草稿轮次作为反例参考/);
+  assert.match(main, /同时加入当前这一轮作为反例参考/);
   assert.match(lineage, /LineageAssetGetActions/);
   assert.doesNotMatch(lineage, /function LineageContinueMenu|function LineageReferenceActions|function LineageCreativeActions/);
   assert.match(styles, /\.creative-action-launcher/);
@@ -401,8 +401,8 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /<CreativeActionLauncher/);
   assert.match(lineage, /反例参考/);
   assert.match(lineage, /label: '不采用'/);
-  assert.match(lineage, /设为当前上下文/);
-  assert.match(lineage, /不会预检、运行或访问 Provider/);
+  assert.match(lineage, /设为当前轮次/);
+  assert.match(lineage, /不会真的出图/);
   assert.match(lineage, /lineage-context-actions/);
   assert.match(lineage, /任务列表/);
   assert.match(lineage, /lineage-mode-grid" role="radiogroup"/);
@@ -418,7 +418,8 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /PlanActions\(\{ node, onNavigate, onCopyContext, onOpenConfirmation \}\)/);
   assert.match(lineage, /node\.entity\?\.status === 'awaiting_confirmation'/);
   assert.match(lineage, /审阅并确认计划/);
-  assert.match(lineage, /只展示状态，不直接执行重试/);
+  // 意图不变：画布只展示状态，不直接执行重试。文案随术语治理收成人话（去掉「运行项」）。
+  assert.match(lineage, /只展示状态，不直接重试/);
   assert.match(lineage, /暂停、恢复或取消运行请回到当前 Agent 会话处理/);
   assert.doesNotMatch(lineage, /onControlRun\('(?:pause|resume|cancel)'/);
   assert.doesNotMatch(lineage, /onRetryRunItem\(item\.id\)/);
@@ -427,5 +428,5 @@ test('lineage canvas is the creator-first project workspace', () => {
 test('Workbench renders route context errors as live alerts', () => {
   const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
   assert.match(main, /contextError && <div className="error-strip" role="alert" aria-live="assertive"/);
-  assert.match(main, /关闭上下文错误/);
+  assert.match(main, /关闭错误提示/);
 });

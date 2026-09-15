@@ -63,7 +63,7 @@ export const CREATIVE_ACTION_ENTRIES = Object.freeze([
     shortLabel: '问题转下一轮',
     purpose: 'refinement',
     usage: 'negative',
-    description: '把淘汰原因整理成反例、修正目标和保持约束，创建新的草稿轮次。',
+    description: '把淘汰原因整理成反例、修正目标和保持约束，新建一轮还没开工的草稿。',
     defaultRefinementGoals: ['修正不采用原因', '提升可用度'],
     defaultKeepConstraints: ['主体', '品牌约束', '构图大方向']
   }

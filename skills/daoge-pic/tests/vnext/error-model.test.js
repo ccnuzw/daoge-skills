@@ -48,7 +48,7 @@ test('surfaces a Provider secret-backend mismatch as actionable configuration co
   assert.doesNotMatch(normalized.message, /无法连接到本地 Studio/);
 
   const presentation = errorPresentation(normalized);
-  assert.equal(presentation.title, 'Provider 凭据后端不匹配');
+  assert.equal(presentation.title, '生成服务密钥读不到');
   assert.equal(presentation.failure, true);
 });
 

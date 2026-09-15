@@ -242,7 +242,7 @@ const PROJECT_TEMPLATE_UNAVAILABLE = Object.freeze({
   descriptionPrompt: '说明客户、产品、使用渠道或交付目标。',
   recommendedTasks: [],
   aspectRatios: [],
-  referenceHint: '模板加载后会显示官方素材建议；此处仍只写入项目上下文。',
+  referenceHint: '模板加载后会显示官方素材建议；这里只是把信息记进项目。',
   exampleDescriptions: [],
   taskDefaults: []
 });
@@ -268,7 +268,7 @@ const REFERENCE_USAGE_OPTIONS = [
   { id: 'composition', label: '构图参考', description: '参考画面布局、视角和主体位置。' },
   { id: 'color', label: '色彩参考', description: '参考配色、明暗关系和整体氛围。' },
   { id: 'brand', label: '品牌参考', description: '参考 Logo、产品、品牌色或固定视觉规范。' },
-  { id: 'mask', label: '遮罩图', description: '用于局部编辑范围；生成前仍会按 Provider 能力校验。' },
+  { id: 'mask', label: '遮罩图', description: '用于局部编辑范围；生成前仍会按生成服务的能力校验。' },
   { id: 'negative', label: '反例 / 不要这样', description: '说明不希望出现的方向，由 Agent 在计划中转成约束。' }
 ];
 const REFERENCE_USAGE_LABELS = Object.fromEntries(REFERENCE_USAGE_OPTIONS.map((option) => [option.id, option.label]));
@@ -295,7 +295,7 @@ const DERIVED_REFERENCE_USAGE_NOTES = {
   negative: '反例：下一轮需要避免这种方向'
 };
 const MATERIAL_NEED_USAGE_RULES = [
-  { pattern: /遮罩|蒙版|修改区域|重绘区域/, usage: 'mask', hint: '适合导入黑白或透明遮罩；生成前仍会按 Provider 能力预检。' },
+  { pattern: /遮罩|蒙版|修改区域|重绘区域/, usage: 'mask', hint: '适合导入黑白或透明遮罩；生成前仍会按生成服务的能力核算一遍。' },
   { pattern: /Logo|品牌|规范|色板|品牌包/i, usage: 'brand', hint: '适合导入 Logo、品牌色、品牌规范截图或固定视觉规范。' },
   { pattern: /风格|竞品|历史视觉|系列参考|参考封面|画法|质感/, usage: 'style', hint: '适合导入风格样张；Agent 只提取画风、质感和语气。' },
   { pattern: /构图|版式|安全区|尺寸|规格|平台|渠道|场景关键词/, usage: 'composition', hint: '适合导入版式、安全区、平台规格或构图参考截图。' },
@@ -421,7 +421,7 @@ function MaterialImportGuide({ materialNeeds, selectedNeed, completedCounts = {}
   const roundLocked = Boolean(selectedRound && assetScope === 'round' && selectedRound.status !== 'draft');
   return <section className="material-import-guide" aria-label="素材导入引导">
     <header>
-      <div><p className="eyebrow">素材导入引导</p><h3>本次导入准备什么？</h3><span>{roundDraft ? '导入成功后会按用途自动加入当前草稿轮次参考素材。' : roundLocked ? '当前轮次已进入确认或运行流程，导入只保存素材，不改参考上下文。' : '先给导入批次选择用途，后续 Agent 能按素材需求理解上下文。'}</span></div>
+      <div><p className="eyebrow">素材导入引导</p><h3>本次导入准备什么？</h3><span>{roundDraft ? '导入成功后会按用途自动加入当前这一轮的参考素材。' : roundLocked ? '当前轮次已进入确认或出图流程，导入只保存素材，不改参考信息。' : '先给这批导入选用途，后续会话能按素材需求理解你的意图。'}</span></div>
     </header>
     <div className="material-need-selector" role="radiogroup" aria-label="本次导入素材需求">
       {values.map((need) => {
@@ -607,7 +607,7 @@ function RuntimeHealthAlertStrip({ studio, recoveryPhase, repairing, onCopy, onR
     <div className="runtime-health-actions">
       {repairable && <button type="button" className="outline-button" disabled={repairing} onClick={onRepair}><RefreshCw size={15} className={repairing ? 'spin' : ''} />{repairing ? '正在重启' : '安全重启'}</button>}
       <button type="button" className="outline-button" onClick={onRefresh}><RefreshCw size={15} />刷新状态</button>
-      <button type="button" className="outline-button" onClick={onCopy}><Copy size={15} />复制脱敏诊断</button>
+      <button type="button" className="outline-button" onClick={onCopy}><Copy size={15} />复制隐去隐私的诊断</button>
     </div>
   </aside>;
 }
@@ -630,7 +630,7 @@ function SessionPlanSummary({ sessionPlanStatus, onRestoreContext }) {
   return <details ref={detailsRef} className={'session-plan-summary ' + (!context ? 'is-empty' : '')}>
     <summary><LockKeyhole size={14} aria-hidden="true" /><span>当前会话</span><b>{compactLabel}</b></summary>
     <div className="session-plan-popover" aria-label="当前会话只读计划摘要">
-      {context ? <><p className="eyebrow">当前上下文</p><h3>{context.project.name} / {context.task.name}</h3><span>{purpose} · 计划 v{context.round.planVersion}</span><div className="session-plan-state"><StatusPill value={context.round.status} scope="round" /><span>{sessionPlanStatus.confirmation?.confirmed ? '当前计划已由用户确认' : '当前计划尚未人工确认'}</span>{sessionPlanStatus.latestRun && <span>最近运行：{statusLabel(sessionPlanStatus.latestRun.status)}</span>}</div><button type="button" className="outline-button" onClick={onRestoreContext}>回到当前上下文</button></> : <><p className="eyebrow">当前会话</p><h3>未绑定活动轮次</h3><span>确认计划前，请先选择项目、任务和草稿轮次。</span></>}
+      {context ? <><p className="eyebrow">当前选择</p><h3>{context.project.name} / {context.task.name}</h3><span>{purpose} · 计划 v{context.round.planVersion}</span><div className="session-plan-state"><StatusPill value={context.round.status} scope="round" /><span>{sessionPlanStatus.confirmation?.confirmed ? '当前计划已由用户确认' : '当前计划尚未人工确认'}</span>{sessionPlanStatus.latestRun && <span>最近运行：{statusLabel(sessionPlanStatus.latestRun.status)}</span>}</div><button type="button" className="outline-button" onClick={onRestoreContext}>回到当前选择</button></> : <><p className="eyebrow">当前会话</p><h3>未绑定活动轮次</h3><span>确认计划前，请先选择项目、任务和还没开工的轮次。</span></>}
     </div>
   </details>;
 }
@@ -657,7 +657,7 @@ function ProjectIndex({ projects, projectTemplates = EMPTY, onOpenProject, onOpe
   const pagination = useMemo(() => paginateWorkspaceItems(filtered, page, PROJECT_PAGE_SIZE), [filtered, page]);
   useEffect(() => { if (pagination.page !== page) setPage(pagination.page); }, [page, pagination.page]);
   return <section className="project-index-stage">
-    <header className="workspace-section-head"><div><p className="eyebrow">Studio 项目</p><h2>继续创作</h2><span>双入口、单工作流：Studio 直接创建只写结构化上下文；真正生成仍回到 Agent 计划、确认、预检和运行。</span></div><button type="button" className="command-button" onClick={onCreateProject}><FolderKanban size={16} />新建项目</button></header>
+    <header className="workspace-section-head"><div><p className="eyebrow">Studio 项目</p><h2>继续创作</h2><span>两条入口、一条流程：在 Studio 直接创建只记下条件；真正出图仍走会话——计划、你确认、核算、出图。</span></div><button type="button" className="command-button" onClick={onCreateProject}><FolderKanban size={16} />新建项目</button></header>
     <div className="workspace-list-toolbar"><label className="workspace-list-search"><Search size={15} /><input type="search" value={query} placeholder="搜索项目名称或说明" onChange={(event) => { setQuery(event.target.value); setPage(1); }} />{query && <IconButton label="清空项目搜索" onClick={() => { setQuery(''); setPage(1); }}><X size={14} /></IconButton>}</label><div className="workspace-list-filters" aria-label="项目状态">{[['active', '进行中'], ['archived', '已归档'], ['all', '全部']].map(([value, label]) => <button type="button" key={value} className={status === value ? 'is-active' : ''} onClick={() => { setStatus(value); setPage(1); }}>{label}</button>)}</div></div>
     {pagination.items.length ? <><div className="project-index-list">{pagination.items.map((project) => { const template = projectTemplates.find((item) => item.id === project.templateId); return <div className="project-index-row" key={project.id}><button type="button" className="project-index-main" onClick={() => onOpenProject(project.id)}><FolderKanban size={16} /><span><b>{project.name}</b><small>{project.description || '暂无说明'}</small></span><span className="project-index-open">{template?.name || (project.templateId ? '模板未加载' : '未绑定模板')}</span></button><button type="button" className="project-index-overview" title={'只看“' + project.name + '”的总览'} aria-label={'查看“' + project.name + '”的项目总览'} onClick={() => onOpenProjectOverview(project.id)}><PanelTop size={14} />总览</button></div>; })}</div><ListPager page={pagination.page} totalPages={pagination.totalPages} total={pagination.total} onPageChange={setPage} /></> : <div className="empty-stage"><FolderKanban size={28} strokeWidth={1.15} /><p>还没有匹配项目。</p></div>}
   </section>;
@@ -716,7 +716,7 @@ function ProjectQualityMetrics({ metrics, loading, error, onRefresh }) {
     {!loading && !error && metrics && <>
       <div className="quality-metrics-grid">
         <div className="quality-metrics-stat"><span>终局成功率</span><strong>{metricRate(runItems.successRate)}</strong><small>{safeMetricCount(runItems.successful)} 成功 / {safeMetricCount(runItems.settled)} 个已判定{Number(runItems.cancelled) > 0 ? '（另有 ' + safeMetricCount(runItems.cancelled) + ' 个已取消）' : ''}</small></div>
-        <div className="quality-metrics-stat"><span>运行项</span><strong>{safeMetricCount(runItems.total)}</strong><small>{safeMetricCount(metrics.runs?.total)} 次运行</small></div>
+        <div className="quality-metrics-stat"><span>单张出图</span><strong>{safeMetricCount(runItems.total)}</strong><small>{safeMetricCount(metrics.runs?.total)} 次运行</small></div>
         <div className="quality-metrics-stat"><span>需关注</span><strong>{safeMetricCount(attentionCount)}</strong><small>失败 · 阻塞 · 等待重试 · 待核实</small></div>
         <div className="quality-metrics-stat"><span>保留率</span><strong>{metricRate(reviews.keepRate)}</strong><small>{safeMetricCount(reviews.total)} 条评审记录</small></div>
       </div>
@@ -728,7 +728,7 @@ function ProjectQualityMetrics({ metrics, loading, error, onRefresh }) {
 
 
 function ProjectTaskList({ project, tasks, onOpenTask, onCreateTask }) {
-  return <section className="project-tasks-stage"><header className="workspace-section-head"><div><p className="eyebrow">{project.name}</p><h2>任务</h2><span>搜索、按状态筛选并分页管理每个独立创作目标。常用目标直接选择，特殊目标再自定义。</span></div>{project.status !== 'archived' && <button type="button" className="command-button" onClick={onCreateTask}><FolderKanban size={16} />新建任务</button>}</header><ManagedTaskList tasks={tasks} pageSize={TASK_PAGE_SIZE} actionLabel="查看轮次" emptyMessage="这个项目还没有任务。创作者可以在 Studio 直接新建任务，并把它设为当前工作上下文。" onOpenTask={onOpenTask} /></section>;
+  return <section className="project-tasks-stage"><header className="workspace-section-head"><div><p className="eyebrow">{project.name}</p><h2>任务</h2><span>搜索、按状态筛选并分页管理每个独立创作目标。常用目标直接选择，特殊目标再自定义。</span></div>{project.status !== 'archived' && <button type="button" className="command-button" onClick={onCreateTask}><FolderKanban size={16} />新建任务</button>}</header><ManagedTaskList tasks={tasks} pageSize={TASK_PAGE_SIZE} actionLabel="查看轮次" emptyMessage="这个项目还没有任务。创作者可以在 Studio 直接新建任务，并把它设为当前工作对象。" onOpenTask={onOpenTask} /></section>;
 }
 
 
@@ -835,13 +835,13 @@ function ProjectCreationDialog({ projectTemplates = EMPTY, busy, error, onDismis
   };
   return <AccessibleDialog className="creation-dialog" label="新建项目" onDismiss={onDismiss}>
     <form className="creation-form" onSubmit={submit}>
-      <header><div><p className="eyebrow">Studio 直接创建</p><h2>新建项目</h2><span>项目模板来自 Studio；这里只建立结构化上下文。</span></div><IconButton label="关闭新建项目" onClick={onDismiss}><X size={16} /></IconButton></header>
+      <header><div><p className="eyebrow">Studio 直接创建</p><h2>新建项目</h2><span>项目模板来自 Studio；这里只是把信息记下来。</span></div><IconButton label="关闭新建项目" onClick={onDismiss}><X size={16} /></IconButton></header>
       <ExecutionBoundaryNote />
       <section className="creation-section"><h3>选择项目类型</h3><div className="creation-choice-grid" role="radiogroup" aria-label="项目类型">{availableTemplates.map((option) => <button type="button" key={option.id || 'no-template'} className={templateId === option.id ? 'is-active' : ''} aria-pressed={templateId === option.id} onClick={() => chooseTemplate(option)}><b>{projectTemplateName(option)}</b><span>{option.description}</span></button>)}</div></section>
       <section className="creation-section creation-selection-detail"><div><b>{selectedName}</b><span>{selectedTemplate.description}</span></div><div className="creation-detail-grid"><span><strong>模板来源</strong>{templateBound ? 'Studio API · 模板 v' + (selectedTemplate.version || 1) : '未绑定模板'}</span><span><strong>推荐任务</strong>{listItems(selectedTemplate.recommendedTasks).join('、') || '根据项目说明由 Agent 判断'}</span><span><strong>推荐画幅</strong>{listItems(selectedTemplate.aspectRatios).join('、') || '由 Agent 判断'}</span><span><strong>参考提示</strong>{selectedTemplate.referenceHint || '可在创建后从当前项目素材中选择参考。'}</span></div><CreationInfoList label="优先准备的素材" items={materialNeeds} /></section>
-      <section className="creation-section"><h3>基础信息</h3><label><span>项目名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：茶饮新品夏季视觉" autoFocus /><small>{templateBound ? '已按 Studio 模板填入默认名称，可直接改成客户、品牌或产品名。' : '模板未加载时创建不绑定官方模板，后续仍可由 Agent 补充上下文。'}</small></label><label><span>项目说明</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={selectedTemplate.descriptionPrompt || '说明客户、产品、使用渠道或交付目标。'} /></label><CreationSuggestionChips label="项目说明示例" options={descriptionExamples} onChoose={setDescription} /></section>
+      <section className="creation-section"><h3>基础信息</h3><label><span>项目名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：茶饮新品夏季视觉" autoFocus /><small>{templateBound ? '已按 Studio 模板填入默认名称，可直接改成客户、品牌或产品名。' : '模板未加载时创建的项不绑定官方模板，后续仍可由会话补充信息。'}</small></label><label><span>项目说明</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={selectedTemplate.descriptionPrompt || '说明客户、产品、使用渠道或交付目标。'} /></label><CreationSuggestionChips label="项目说明示例" options={descriptionExamples} onChoose={setDescription} /></section>
       <section className="creation-summary"><p className="eyebrow">创建摘要</p><strong>{name.trim() || '未填写项目名称'}</strong><span>{templateBound ? selectedName + ' · 模板 v' + (selectedTemplate.version || 1) : '不绑定项目模板'}</span><span>{description.trim() || selectedTemplate.description}</span></section>
-      <p className="creation-hint">创建后会打开该项目，并设为当前 Studio 标签页上下文；后续可在项目工作区继续新建任务、导入素材或整理计划。</p><CreationError error={error} /><footer><button type="button" className="outline-button" onClick={onDismiss} disabled={busy}>取消</button><button type="submit" className="command-button" disabled={busy || !name.trim()}>{busy ? '正在创建' : '创建项目'}</button></footer>
+      <p className="creation-hint">创建后会打开该项目，并设为当前 Studio 标签页的对象；后续可在项目工作区继续新建任务、导入素材或整理计划。</p><CreationError error={error} /><footer><button type="button" className="outline-button" onClick={onDismiss} disabled={busy}>取消</button><button type="submit" className="command-button" disabled={busy || !name.trim()}>{busy ? '正在创建' : '创建项目'}</button></footer>
     </form>
   </AccessibleDialog>;
 }
@@ -908,7 +908,7 @@ function TaskCreationDialog({ project, projectTemplates = EMPTY, taskTypes, styl
     const count = targetCount ? Number(targetCount) : undefined;
     const context = compactRecord({ projectTemplateId: selectedProjectTemplate?.id, projectTemplateName: selectedProjectTemplate ? projectTemplateName(selectedProjectTemplate) : undefined, goalType: goalId, goalLabel: selectedGoal.label, templateRecommended: selectedGoal.templateRecommended, recommendedInputs: listItems(selectedGoal.recommendedInputs), materialNeeds, brief: brief.trim(), targetCount: count, aspectRatio, taskTypeId, taskTypeName: selectedTaskType?.name, styleKitId, styleKitName: selectedStyleKit?.name, brandKitId, brandKitName: selectedBrandKit?.name, variationAxes, keepConstraints, refinementGoals, editInstruction: editInstruction.trim(), preserveInstruction: preserveInstruction.trim() });
     const intent = compactRecord({ createdFrom: 'workbench', ...context });
-    const plan = compactRecord({ createdFrom: 'workbench', draftKind: 'studio-task-context', roundPurposeLabel: selectedRoundPurpose.label, ...context, note: 'Studio 创建的结构化上下文草稿；生成前仍需 Agent 形成可确认计划。' });
+    const plan = compactRecord({ createdFrom: 'workbench', draftKind: 'studio-task-context', roundPurposeLabel: selectedRoundPurpose.label, ...context, note: '这是 Studio 记下的草稿；出图前仍需会话整理成可确认的计划。' });
     onCreate({ name: name.trim(), goalLabel: selectedGoal.label, projectTemplateId: selectedProjectTemplate?.id, projectTemplateName: selectedProjectTemplate ? projectTemplateName(selectedProjectTemplate) : undefined, materialNeeds, taskTypeId, styleKitId, brandKitId, intent, createRound, roundPurpose, roundPurposeLabel: selectedRoundPurpose.label, plan });
   };
   const quickBriefs = listItems(selectedGoal.quickBriefs);
@@ -920,14 +920,14 @@ function TaskCreationDialog({ project, projectTemplates = EMPTY, taskTypes, styl
       <section className="creation-template-bridge"><div><p className="eyebrow">项目模板联动</p><strong>{projectTemplateLabel}</strong><span>{selectedProjectTemplate ? selectedProjectTemplate.referenceHint : '可以先从项目详情补充模板或直接用自定义任务。'}</span></div><CreationInfoList label="该项目类型常用任务" items={selectedProjectTemplate?.recommendedTasks} /></section>
       <section className="creation-section"><h3>你现在想做什么？</h3><div className="creation-choice-grid is-goal" role="radiogroup" aria-label="任务目标">{taskGoalOptions.map((option) => <button type="button" key={option.id} className={goalId === option.id ? 'is-active' : ''} aria-pressed={goalId === option.id} onClick={() => chooseGoal(option)}><b>{option.label}</b><span>{option.description}</span>{option.templateRecommended && <small>模板推荐 · {creationDefaultSummary(option)}</small>}</button>)}</div></section>
       <section className="creation-section creation-selection-detail"><div><b>{selectedGoal.label}</b><span>{selectedGoal.description}</span></div><div className="creation-detail-grid"><span><strong>模板推荐默认值</strong>{creationDefaultSummary(selectedGoal)}</span><span><strong>首个轮次</strong>{selectedRoundPurpose.label}</span><span><strong>需要补充</strong>{listItems(selectedGoal.recommendedInputs).join('、') || '无固定字段'}</span><span><strong>素材需求</strong>{materialNeeds.join('、') || '可创建后再导入素材'}</span></div><CreationInfoList label="建议先准备的素材" items={materialNeeds} /><button type="button" className="outline-button creation-apply-defaults" onClick={applyRecommendedDefaults}>套用推荐默认值</button></section>
-      <section className="creation-section is-two-columns"><label><span>任务名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={selectedGoal.defaultName} autoFocus /><small>默认名称来自当前项目模板，建议改成“对象 + 目标”。</small></label><label><span>任务类型</span><select value={taskTypeId} onChange={(event) => setTaskTypeId(event.target.value)}><option value="">不绑定任务类型</option>{taskTypes.map((type) => <option value={type.id} key={type.id}>{type.name}{type.source === 'official' ? ' · 官方' : ' · 自定义'}</option>)}</select><small>{taskTypes.length ? '选择后会把该类型的字段建议带入上下文。' : '暂无任务类型；可先创建任务，稍后在规则资料补充。'}</small></label><label><span>目标数量</span><select value={targetCount} onChange={(event) => setTargetCount(event.target.value)}>{CREATION_COUNT_OPTIONS.map((value) => <option value={value} key={value || 'auto'}>{value ? value + ' 张' : '让 Agent 决定'}</option>)}</select></label><label><span>画幅</span><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>{CREATION_ASPECT_OPTIONS.map((value) => <option value={value} key={value || 'auto'}>{value || '让 Agent 决定'}</option>)}</select></label><label><span>风格包</span><select value={styleKitId} onChange={(event) => setStyleKitId(event.target.value)}><option value="">不绑定风格包</option>{styleKits.map((kit) => <option value={kit.id} key={kit.id}>{kit.name}</option>)}</select><small>可选；用于固定画风、质感和关键词。</small></label><label><span>品牌包</span><select value={brandKitId} onChange={(event) => setBrandKitId(event.target.value)}><option value="">不绑定品牌包</option>{brandKits.map((kit) => <option value={kit.id} key={kit.id}>{kit.name}</option>)}</select><small>可选；用于品牌色、Logo 和禁忌约束。</small></label></section>
+      <section className="creation-section is-two-columns"><label><span>任务名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={selectedGoal.defaultName} autoFocus /><small>默认名称来自当前项目模板，建议改成“对象 + 目标”。</small></label><label><span>任务类型</span><select value={taskTypeId} onChange={(event) => setTaskTypeId(event.target.value)}><option value="">不绑定任务类型</option>{taskTypes.map((type) => <option value={type.id} key={type.id}>{type.name}{type.source === 'official' ? ' · 官方' : ' · 自定义'}</option>)}</select><small>{taskTypes.length ? '选择后会把该类型的字段建议带进来。' : '暂无任务类型；可先创建任务，稍后在规则资料补充。'}</small></label><label><span>目标数量</span><select value={targetCount} onChange={(event) => setTargetCount(event.target.value)}>{CREATION_COUNT_OPTIONS.map((value) => <option value={value} key={value || 'auto'}>{value ? value + ' 张' : '让 Agent 决定'}</option>)}</select></label><label><span>画幅</span><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>{CREATION_ASPECT_OPTIONS.map((value) => <option value={value} key={value || 'auto'}>{value || '让 Agent 决定'}</option>)}</select></label><label><span>风格包</span><select value={styleKitId} onChange={(event) => setStyleKitId(event.target.value)}><option value="">不绑定风格包</option>{styleKits.map((kit) => <option value={kit.id} key={kit.id}>{kit.name}</option>)}</select><small>可选；用于固定画风、质感和关键词。</small></label><label><span>品牌包</span><select value={brandKitId} onChange={(event) => setBrandKitId(event.target.value)}><option value="">不绑定品牌包</option>{brandKits.map((kit) => <option value={kit.id} key={kit.id}>{kit.name}</option>)}</select><small>可选；用于品牌色、Logo 和禁忌约束。</small></label></section>
       {(selectedTaskType || selectedStyleKit || selectedBrandKit) && <section className="creation-section creation-selection-detail"><div className="creation-detail-grid">{selectedTaskType && <span><strong>任务类型</strong>{libraryDefinitionSummary(selectedTaskType, selectedTaskType.name)}{Array.isArray(selectedTaskType.definition?.fields) && selectedTaskType.definition.fields.length > 0 && <small>建议信息：{selectedTaskType.definition.fields.join('、')}</small>}</span>}{selectedStyleKit && <span><strong>风格包：{selectedStyleKit.name}</strong>{libraryDefinitionSummary(selectedStyleKit, '将作为风格约束供 Agent 参考。')}</span>}{selectedBrandKit && <span><strong>品牌包：{selectedBrandKit.name}</strong>{libraryDefinitionSummary(selectedBrandKit, '将作为品牌约束供 Agent 参考。')}</span>}</div></section>}
       {goalId === 'variation' && <section className="creation-section"><CreationChoiceList label="希望变化的维度" values={variationAxes} options={DERIVED_VARIATION_AXES} onChange={setVariationAxes} /><CreationChoiceList label="希望保持不变" values={keepConstraints} options={DERIVED_KEEP_CONSTRAINTS} onChange={setKeepConstraints} /></section>}
       {goalId === 'refinement' && <section className="creation-section"><CreationChoiceList label="希望精修的目标" values={refinementGoals} options={DERIVED_REFINEMENT_GOALS} onChange={setRefinementGoals} /><CreationChoiceList label="希望保持不变" values={keepConstraints} options={DERIVED_KEEP_CONSTRAINTS} onChange={setKeepConstraints} /></section>}
       {goalId === 'edit' && <section className="creation-section is-two-columns"><label><span>要修改什么</span><textarea value={editInstruction} onChange={(event) => setEditInstruction(event.target.value)} placeholder="例如：替换背景中的植物和文字区域。" /></label><label><span>哪些内容保持不变</span><textarea value={preserveInstruction} onChange={(event) => setPreserveInstruction(event.target.value)} placeholder="例如：人物身份、产品轮廓、Logo 和主体光线。" /></label></section>}
-      <section className="creation-section"><label><span>创作意图 <small>可选；自定义要求请写清输入、限制和使用渠道</small></span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={briefPlaceholder} /></label><CreationSuggestionChips options={quickBriefs} onChoose={setBrief} /><p className="creation-hint">Agent 会在后续会话中把项目模板、素材需求和任务目标整理为可审阅的生成计划；这里不会把文本直接发送给 Provider。</p></section>
-      <section className="creation-inline-option"><label><input type="checkbox" checked={createRound} onChange={(event) => setCreateRound(event.target.checked)} /><span>同时创建首个轮次并设为当前上下文</span></label>{createRound && <select value={roundPurpose} onChange={(event) => setRoundPurpose(event.target.value)} aria-label="首个轮次目的">{ROUND_PURPOSE_OPTIONS.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select>}</section>
-      <section className="creation-summary"><p className="eyebrow">创建摘要</p><strong>{name.trim() || '未填写任务名称'}</strong><span>{projectTemplateLabel} · {selectedGoal.label} · {targetCount ? targetCount + ' 张' : '数量由 Agent 决定'} · {aspectRatio || '画幅由 Agent 决定'}</span><span>{materialNeeds.length ? '素材需求：' + materialNeeds.join('、') : '暂无固定素材需求'}</span><span>{selectedTaskType?.name || '未绑定任务类型'} · {selectedStyleKit?.name || '未绑定风格包'} · {selectedBrandKit?.name || '未绑定品牌包'}</span><span>{createRound ? '会创建“' + selectedRoundPurpose.label + '”草稿轮次' : '只创建任务，不创建轮次'}</span></section>
+      <section className="creation-section"><label><span>创作意图 <small>可选；自定义要求请写清输入、限制和使用渠道</small></span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={briefPlaceholder} /></label><CreationSuggestionChips options={quickBriefs} onChoose={setBrief} /><p className="creation-hint">Agent 会在后续会话中把项目模板、素材需求和任务目标整理为可审阅的生成计划；这里不会把文本直接发给生成服务。</p></section>
+      <section className="creation-inline-option"><label><input type="checkbox" checked={createRound} onChange={(event) => setCreateRound(event.target.checked)} /><span>同时创建首个轮次，并设为当前轮次</span></label>{createRound && <select value={roundPurpose} onChange={(event) => setRoundPurpose(event.target.value)} aria-label="首个轮次目的">{ROUND_PURPOSE_OPTIONS.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select>}</section>
+      <section className="creation-summary"><p className="eyebrow">创建摘要</p><strong>{name.trim() || '未填写任务名称'}</strong><span>{projectTemplateLabel} · {selectedGoal.label} · {targetCount ? targetCount + ' 张' : '数量由 Agent 决定'} · {aspectRatio || '画幅由 Agent 决定'}</span><span>{materialNeeds.length ? '素材需求：' + materialNeeds.join('、') : '暂无固定素材需求'}</span><span>{selectedTaskType?.name || '未绑定任务类型'} · {selectedStyleKit?.name || '未绑定风格包'} · {selectedBrandKit?.name || '未绑定品牌包'}</span><span>{createRound ? '会创建“' + selectedRoundPurpose.label + '”这一轮草稿' : '只创建任务，不创建轮次'}</span></section>
       <CreationError error={error} /><footer><button type="button" className="outline-button" onClick={onDismiss} disabled={busy}>取消</button><button type="submit" className="command-button" disabled={busy || !name.trim()}>{busy ? '正在创建' : '创建任务'}</button></footer>
     </form>
   </AccessibleDialog>;
@@ -972,7 +972,7 @@ function RoundCreationDialog({ task, rounds, currentRound, busy, error, onDismis
   const submit = (event) => {
     event.preventDefault();
     const count = targetCount ? Number(targetCount) : undefined;
-    const plan = compactRecord({ createdFrom: 'workbench', draftKind: 'studio-round-context', purposeLabel: selectedPurpose.label, recommendedInputs: listItems(selectedPurpose.recommendedInputs), brief: brief.trim(), targetCount: count, aspectRatio, parentRoundId, variationAxes, keepConstraints, refinementGoals, editInstruction: editInstruction.trim(), preserveInstruction: preserveInstruction.trim(), fillInstruction: fillInstruction.trim(), fillPreserveInstruction: fillPreserveInstruction.trim(), note: 'Studio 创建的轮次上下文草稿；生成前仍需 Agent 形成可确认计划。' });
+    const plan = compactRecord({ createdFrom: 'workbench', draftKind: 'studio-round-context', purposeLabel: selectedPurpose.label, recommendedInputs: listItems(selectedPurpose.recommendedInputs), brief: brief.trim(), targetCount: count, aspectRatio, parentRoundId, variationAxes, keepConstraints, refinementGoals, editInstruction: editInstruction.trim(), preserveInstruction: preserveInstruction.trim(), fillInstruction: fillInstruction.trim(), fillPreserveInstruction: fillPreserveInstruction.trim(), note: '这是 Studio 记下的轮次草稿；出图前仍需会话整理成可确认的计划。' });
     onCreate({ purpose, purposeLabel: selectedPurpose.label, parentRoundId, plan });
   };
   return <AccessibleDialog className="creation-dialog is-wide" label="新建轮次" onDismiss={onDismiss}>
@@ -986,7 +986,7 @@ function RoundCreationDialog({ task, rounds, currentRound, busy, error, onDismis
       {purpose === 'refinement' && <section className="creation-section"><CreationChoiceList label="希望精修的目标" values={refinementGoals} options={DERIVED_REFINEMENT_GOALS} onChange={setRefinementGoals} /><CreationChoiceList label="希望保持不变" values={keepConstraints} options={DERIVED_KEEP_CONSTRAINTS} onChange={setKeepConstraints} /></section>}
       {purpose === 'edit' && <section className="creation-section is-two-columns"><label><span>要修改什么</span><textarea value={editInstruction} onChange={(event) => setEditInstruction(event.target.value)} placeholder="例如：替换背景中的植物和文字区域。" /></label><label><span>哪些内容保持不变</span><textarea value={preserveInstruction} onChange={(event) => setPreserveInstruction(event.target.value)} placeholder="例如：人物身份、产品轮廓、Logo 和主体光线。" /></label></section>}
       {purpose === 'fill' && <section className="creation-section is-two-columns"><label><span>扩展或补充方向</span><textarea value={fillInstruction} onChange={(event) => setFillInstruction(event.target.value)} placeholder="例如：向左右扩展环境，补齐桌面和背景留白。" /></label><label><span>补图时保持不变</span><textarea value={fillPreserveInstruction} onChange={(event) => setFillPreserveInstruction(event.target.value)} placeholder="例如：主体位置、产品比例、光影方向不变。" /></label></section>}
-      <section className="creation-section"><label><span>本轮目标 <small>可选；特殊要求请说明输入、限制和交付用途</small></span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={briefPlaceholder} /></label><CreationSuggestionChips options={quickBriefs} onChoose={setBrief} /><p className="creation-hint">后续由 Agent 把轮次上下文整理为可审阅计划；Studio 不会把这段文字直接发送给 Provider。</p></section>
+      <section className="creation-section"><label><span>本轮目标 <small>可选；特殊要求请说明输入、限制和交付用途</small></span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={briefPlaceholder} /></label><CreationSuggestionChips options={quickBriefs} onChoose={setBrief} /><p className="creation-hint">后续由会话把这一轮记下的内容整理成可审阅的计划；Studio 不会把这段文字直接发给生成服务。</p></section>
       <section className="creation-summary"><p className="eyebrow">创建摘要</p><strong>{selectedPurpose.label}</strong><span>{targetCount ? targetCount + ' 张' : '数量由 Agent 决定'} · {aspectRatio || '画幅由 Agent 决定'}</span><span>{parentRoundId ? '已绑定父轮次' : '不绑定父轮次'} · 草稿轮次</span></section>
       <CreationError error={error} /><footer><button type="button" className="outline-button" onClick={onDismiss} disabled={busy}>取消</button><button type="submit" className="command-button" disabled={busy}>{busy ? '正在创建' : '创建轮次'}</button></footer>
     </form>
@@ -1080,7 +1080,7 @@ function ReferenceAssetDialog({ project, task, round, sharedAssets, selectedMate
   const selected = [...draft.values()];
   return <AccessibleDialog className="reference-dialog" label="选择参考素材" onDismiss={onDismiss}>
     <div className="reference-dialog-body">
-      <header><div><p className="eyebrow">{project.name} / {task.name}</p><h2>选择本轮参考素材</h2><span>选择素材并标注用途；Studio 会保存这份结构化上下文。</span></div><IconButton label="关闭参考素材选择" onClick={onDismiss}><X size={16} /></IconButton></header>
+      <header><div><p className="eyebrow">{project.name} / {task.name}</p><h2>选择本轮参考素材</h2><span>选择素材并标注用途；Studio 会把这份选择记下来。</span></div><IconButton label="关闭参考素材选择" onClick={onDismiss}><X size={16} /></IconButton></header>
       <ExecutionBoundaryNote>{DRAFT_BOUNDARY_COPY + '已确认或正在出图的轮次，要回会话里改计划。'}</ExecutionBoundaryNote>
       <section className="reference-toolbar" aria-label="素材筛选">
         <div className="workspace-list-filters">{[['project', '当前项目'], ['task', '当前任务'], ['round', '当前轮次'], ['shared', '共享素材']].map(([value, label]) => <button type="button" key={value} className={scope === value ? 'is-active' : ''} disabled={(value === 'task' && !task) || (value === 'round' && !round)} onClick={() => setScope(value)}>{label}</button>)}</div>
@@ -1111,23 +1111,23 @@ function ReferenceRoundResolverDialog({ project, task = null, tasks = EMPTY, dra
   const selectedTask = task || (taskList.length === 1 ? taskList[0] : null);
   const createTargetTask = selectedTask;
   const context = [project.name, selectedTask?.name].filter(Boolean).join(' / ');
-  const helper = draftRounds.length ? '选择一个草稿轮次后，Studio 会直接写入参考素材。' : createTargetTask ? '当前任务还没有可直接写入的草稿轮次，可以新建草稿轮次后自动加入。' : '先选择任务，再选择已有草稿轮次或新建轮次。';
-  return <AccessibleDialog className="reference-dialog reference-round-resolver" label="选择草稿轮次" onDismiss={onDismiss}>
+  const helper = draftRounds.length ? '选择一个还没开工的轮次后，Studio 会直接写入参考素材。' : createTargetTask ? '当前任务还没有可直接写入的轮次，可以新建一轮后自动加入。' : '先选择任务，再选一个已有轮次或新建一轮。';
+  return <AccessibleDialog className="reference-dialog reference-round-resolver" label="选择还没开工的轮次" onDismiss={onDismiss}>
     <div className="reference-dialog-body">
-      <header><div><p className="eyebrow">{context || project.name}</p><h2>把图片作为{usageLabel}</h2><span>{helper}</span></div><IconButton label="关闭草稿轮次选择" onClick={onDismiss}><X size={16} /></IconButton></header>
+      <header><div><p className="eyebrow">{context || project.name}</p><h2>把图片作为{usageLabel}</h2><span>{helper}</span></div><IconButton label="关闭轮次选择" onClick={onDismiss}><X size={16} /></IconButton></header>
       <ExecutionBoundaryNote>{DRAFT_BOUNDARY_COPY + '计划由会话整理，你确认后才开始。'}</ExecutionBoundaryNote>
       <section className="derived-source-strip is-compact" aria-label="待加入参考的图片">{assets.map((asset) => <article key={asset.id}><button type="button" onClick={() => onPreview([asset])}><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button><div className="derived-source-copy"><b>{asset.display?.label || (asset.kind === 'generated' ? '生成结果' : '导入素材')}</b><span>{asset.id}</span></div></article>)}</section>
-      {!selectedTask && taskList.length > 1 && <section className="reference-round-options reference-task-options" aria-label="选择任务"><p className="eyebrow">先选择任务</p>{taskList.map((item) => <button type="button" key={item.id} className="outline-button" disabled={busy} onClick={() => onSelectTask(item.id)}><GitFork size={15} /><span><b>{item.name}</b><small>{item.status === 'archived' ? '已归档' : '在这个任务里选择或新建草稿轮次'}</small></span></button>)}</section>}
+      {!selectedTask && taskList.length > 1 && <section className="reference-round-options reference-task-options" aria-label="选择任务"><p className="eyebrow">先选择任务</p>{taskList.map((item) => <button type="button" key={item.id} className="outline-button" disabled={busy} onClick={() => onSelectTask(item.id)}><GitFork size={15} /><span><b>{item.name}</b><small>{item.status === 'archived' ? '已归档' : '在这个任务里选一轮，或新建一轮'}</small></span></button>)}</section>}
       {selectedTask && taskList.length > 1 && <p className="reference-task-current">当前任务：<strong>{selectedTask.name}</strong></p>}
-      <section className="reference-round-options" aria-label="可写入的草稿轮次">
+      <section className="reference-round-options" aria-label="可写入的轮次">
         {draftRounds.length ? draftRounds.map((round) => {
           const roundTask = taskById.get(round.taskId) || selectedTask;
           const roundTaskLabel = roundTask && (!selectedTask || roundTask.id !== selectedTask.id) ? roundTask.name + ' / ' : '';
-          return <button type="button" key={round.id} className="outline-button" disabled={busy} onClick={() => onUseRound(round.id)}><GitFork size={15} /><span><b>{roundTaskLabel}{ROUND_PURPOSE_LABELS[round.purpose] || round.purpose} · 计划 v{round.planVersion}</b><small>{round.description || round.plan?.brief || '加入这个草稿轮次'}</small></span></button>;
-        }) : <div className="empty-stage"><GitFork size={24} /><p>{createTargetTask ? '当前任务还没有可直接写入的草稿轮次。' : '选择任务后即可新建草稿轮次。'}</p></div>}
+          return <button type="button" key={round.id} className="outline-button" disabled={busy} onClick={() => onUseRound(round.id)}><GitFork size={15} /><span><b>{roundTaskLabel}{ROUND_PURPOSE_LABELS[round.purpose] || round.purpose} · 计划 v{round.planVersion}</b><small>{round.description || round.plan?.brief || '加入这一轮'}</small></span></button>;
+        }) : <div className="empty-stage"><GitFork size={24} /><p>{createTargetTask ? '当前任务还没有可直接写入的轮次。' : '选择任务后即可新建一轮。'}</p></div>}
       </section>
       <CreationError error={error} />
-      <footer><button type="button" className="outline-button" disabled={busy} onClick={onDismiss}>取消</button><button type="button" className="command-button" disabled={busy || !createTargetTask} onClick={onCreateRound}><GitFork size={16} />{createTargetTask ? '新建草稿轮次并加入' : '先选择任务'}</button></footer>
+      <footer><button type="button" className="outline-button" disabled={busy} onClick={onDismiss}>取消</button><button type="button" className="command-button" disabled={busy || !createTargetTask} onClick={onCreateRound}><GitFork size={16} />{createTargetTask ? '新建一轮并加入' : '先选择任务'}</button></footer>
     </div>
   </AccessibleDialog>;
 }
@@ -1262,11 +1262,11 @@ function DerivedRoundDialog({ project, task, rounds, currentRound, assets, initi
   };
   return <AccessibleDialog className="creation-dialog is-wide derived-round-dialog" label="基于图片创建下一轮" onDismiss={onDismiss}>
     <form className="creation-form" onSubmit={submit}>
-      <header><div><p className="eyebrow">{project.name} / {task.name}</p><h2>基于图片创建下一轮</h2><span>Studio 会创建草稿轮次和参考关系。</span></div><IconButton label="关闭图片迭代" onClick={onDismiss}><X size={16} /></IconButton></header>
+      <header><div><p className="eyebrow">{project.name} / {task.name}</p><h2>基于图片创建下一轮</h2><span>Studio 会新建一轮草稿和参考关系。</span></div><IconButton label="关闭图片迭代" onClick={onDismiss}><X size={16} /></IconButton></header>
       <ExecutionBoundaryNote />
       <section className="creation-section"><h3>你想如何继续？</h3><div className="creation-choice-grid" role="radiogroup" aria-label="图片迭代动作">{DERIVED_ROUND_ACTIONS.map((option) => <button type="button" key={option.id} className={selectedActionId === option.id ? 'is-active' : ''} aria-pressed={selectedActionId === option.id} onClick={() => choosePurpose(option)}><b>{option.label}</b><span>{option.description}</span></button>)}</div></section>
       <section className="creation-section derived-purpose-board"><header><div><h3>多图用途编排</h3><p>先套用常见创作关系，再逐张微调用途和说明；Agent 会读取这些结构化角色。</p></div><span>{sourceAssets.length} 张来源图</span></header><div className="derived-arrangement-grid" role="radiogroup" aria-label="多图用途编排模板">{applicablePresets.map((preset) => <button type="button" key={preset.id} className={arrangementMode === preset.id ? 'is-active' : ''} aria-pressed={arrangementMode === preset.id} onClick={() => applyPreset(preset)}><b>{preset.label}</b><span>{preset.description}</span></button>)}<button type="button" className={arrangementMode === 'custom' ? 'is-active' : ''} aria-pressed={arrangementMode === 'custom'} onClick={() => setArrangementMode('custom')}><b>自定义编排</b><span>逐张指定主体、风格、构图、色彩、品牌、遮罩或反例用途。</span></button></div><div className="derived-usage-summary" aria-label="当前用途统计">{REFERENCE_USAGE_OPTIONS.filter((option) => usageCounts[option.id]).map((option) => <span key={option.id}><b>{usageCounts[option.id]}</b>{option.label}</span>)}</div></section>
-      {purpose === 'edit' && <section className="creation-section mask-lite-panel" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); void importMaskFiles(event.dataTransfer.files); }} onPaste={(event) => { const files = [...event.clipboardData.files].filter((item) => item.type.startsWith('image/')); if (files.length) { event.preventDefault(); event.stopPropagation(); void importMaskFiles(files); } }} tabIndex={0} aria-label="轻量遮罩准备"><div><h3>轻量遮罩准备</h3><p>不做画笔编辑器：可以把已选图指定为遮罩，也可以导入、拖入或粘贴一张黑白 / 透明遮罩图。生成前仍由预检校验 Provider 能力和遮罩资产。</p></div><div className="mask-lite-actions"><button type="button" className="command-button" disabled={maskImporting} onClick={() => maskInputRef.current?.click()}><ImagePlus size={15} />{maskImporting ? '正在导入遮罩' : '导入遮罩图'}</button><button type="button" className="outline-button" disabled={sourceAssets.length < 2} onClick={() => { setArrangementMode('custom'); setMaterialPatch(sourceAssets[1].id, { usage: 'mask', note: '遮罩图；白色区域通常表示需要修改，黑色或透明区域保持。' }); }}>第 2 张设为遮罩</button></div><input ref={maskInputRef} className="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void importMaskFiles(event.target.files)} /><div className="mask-lite-status"><span>{maskMaterials.length ? '已选择 ' + maskMaterials.length + ' 张遮罩图' : '尚未选择遮罩图；也可以先创建草稿，让 Agent 后续提示补齐。'}</span><small>遮罩不会作为非遮罩参考传给 Provider。</small></div>{maskImportError && <div className="creation-form-error" role="alert"><CircleAlert size={15} /><span>{maskImportError}</span></div>}</section>}
+      {purpose === 'edit' && <section className="creation-section mask-lite-panel" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); void importMaskFiles(event.dataTransfer.files); }} onPaste={(event) => { const files = [...event.clipboardData.files].filter((item) => item.type.startsWith('image/')); if (files.length) { event.preventDefault(); event.stopPropagation(); void importMaskFiles(files); } }} tabIndex={0} aria-label="轻量遮罩准备"><div><h3>轻量遮罩准备</h3><p>不做画笔编辑器：可以把已选图指定为遮罩，也可以导入、拖入或粘贴一张黑白 / 透明遮罩图。生成前仍会核算生成服务的能力和遮罩素材。</p></div><div className="mask-lite-actions"><button type="button" className="command-button" disabled={maskImporting} onClick={() => maskInputRef.current?.click()}><ImagePlus size={15} />{maskImporting ? '正在导入遮罩' : '导入遮罩图'}</button><button type="button" className="outline-button" disabled={sourceAssets.length < 2} onClick={() => { setArrangementMode('custom'); setMaterialPatch(sourceAssets[1].id, { usage: 'mask', note: '遮罩图；白色区域通常表示需要修改，黑色或透明区域保持。' }); }}>第 2 张设为遮罩</button></div><input ref={maskInputRef} className="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void importMaskFiles(event.target.files)} /><div className="mask-lite-status"><span>{maskMaterials.length ? '已选择 ' + maskMaterials.length + ' 张遮罩图' : '尚未选择遮罩图；也可以先创建草稿，让 Agent 后续提示补齐。'}</span><small>遮罩不会当成普通参考图发给生成服务。</small></div>{maskImportError && <div className="creation-form-error" role="alert"><CircleAlert size={15} /><span>{maskImportError}</span></div>}</section>}
       <section className="derived-source-strip is-board" aria-label="本次参考图片">{sourceAssets.map((asset, index) => {
         const material = materials.get(asset.id) || { assetId: asset.id, usage: action.usage, note: '' };
         const assetLabel = asset.display?.label || (asset.kind === 'generated' ? '生成结果' : '导入素材');
@@ -1279,7 +1279,7 @@ function DerivedRoundDialog({ project, task, rounds, currentRound, assets, initi
       {purpose === 'refinement' && <section className="creation-section"><h3>精修目标</h3><ToggleButtonList label="精修目标" options={DERIVED_REFINEMENT_GOALS} value={refinementGoals} onChange={setRefinementGoals} /></section>}
       <section className="creation-section"><h3>保持不变</h3><ToggleButtonList label="保持不变" options={DERIVED_KEEP_CONSTRAINTS} value={keepConstraints} onChange={setKeepConstraints} /></section>
       <CreationError error={error} />
-      <footer><button type="button" className="outline-button" onClick={onDismiss} disabled={busy}>取消</button><button type="submit" className="command-button" disabled={busy || !sourceAssets.length}>{busy ? '正在创建' : '创建草稿轮次'}</button></footer>
+      <footer><button type="button" className="outline-button" onClick={onDismiss} disabled={busy}>取消</button><button type="submit" className="command-button" disabled={busy || !sourceAssets.length}>{busy ? '正在创建' : '创建轮次'}</button></footer>
     </form>
   </AccessibleDialog>;
 }
@@ -1299,7 +1299,7 @@ function RejectReviewDialog({ assets, canAddNegative, canCreateNextRound, initia
       <ExecutionBoundaryNote>{DRAFT_BOUNDARY_COPY + '反馈会写进评审记录，方便下一轮参考。'}</ExecutionBoundaryNote>
       <section className="derived-source-strip is-compact" aria-label="不采用图片">{assets.map((asset) => <article key={asset.id}><button type="button" onClick={() => onPreview([asset])} aria-label="预览不采用图片"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button><div><b>{asset.display?.label || '素材'}</b><span>{asset.kind === 'generated' ? '生成结果' : '导入素材'}</span></div></article>)}</section>
       <section className="creation-section"><h3>选择原因</h3><div className="derived-toggle-list" aria-label="不采用原因">{REJECT_REASON_OPTIONS.map((option) => { const active = reasonIds.includes(option.id); return <button type="button" key={option.id} className={active ? 'is-active' : ''} aria-pressed={active} onClick={() => setReasonIds((current) => active ? current.filter((id) => id !== option.id) : [...current, option.id])}>{option.label}</button>; })}</div></section>
-      <section className="creation-section"><label><span>补充说明</span><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：主体形态偏离品牌角色；下轮不要再使用这种廉价金属质感。" /></label>{canAddNegative && <label className="creation-inline-checkbox"><input type="checkbox" checked={addNegative} disabled={createNextRound} onChange={(event) => setAddNegative(event.target.checked)} /><span>同时加入当前草稿轮次作为反例参考</span></label>}{canCreateNextRound && <label className="creation-inline-checkbox"><input type="checkbox" checked={createNextRound} onChange={(event) => { const checked = event.target.checked; setCreateNextRound(checked); if (checked) setAddNegative(false); }} /><span>从不采用原因创建下一轮草稿</span></label>}<p className="creation-field-hint">勾选后会新建一轮草稿，可以在创作平台继续改。</p></section>
+      <section className="creation-section"><label><span>补充说明</span><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：主体形态偏离品牌角色；下轮不要再使用这种廉价金属质感。" /></label>{canAddNegative && <label className="creation-inline-checkbox"><input type="checkbox" checked={addNegative} disabled={createNextRound} onChange={(event) => setAddNegative(event.target.checked)} /><span>同时加入当前这一轮作为反例参考</span></label>}{canCreateNextRound && <label className="creation-inline-checkbox"><input type="checkbox" checked={createNextRound} onChange={(event) => { const checked = event.target.checked; setCreateNextRound(checked); if (checked) setAddNegative(false); }} /><span>从不采用原因创建下一轮草稿</span></label>}<p className="creation-field-hint">勾选后会新建一轮草稿，可以在创作平台继续改。</p></section>
       <CreationError error={error} />
       <footer><button type="button" className="outline-button" disabled={busy} onClick={onDismiss}>取消</button><button type="submit" className="command-button" disabled={busy || !reasonIds.length}>{busy ? '正在保存' : createNextRound ? '保存并创建下一轮' : '保存不采用原因'}</button></footer>
     </form>
@@ -1382,8 +1382,8 @@ function RunItemDetailDialog({ item, onDismiss, onInspect, onRetry }) {
   if (!item) return null;
   const recovery = runItemRecovery(item);
   const retryable = retryableRunItems([item]).length > 0;
-  return <AccessibleDialog label={'第 ' + item.sequence + ' 项运行详情'} onDismiss={onDismiss} className="run-item-detail-dialog">
-    <header><div><p className="eyebrow">运行项详情</p><h2>第 {item.sequence} 项</h2></div><IconButton label="关闭运行项详情" onClick={onDismiss}><X size={16} /></IconButton></header>
+  return <AccessibleDialog label={'第 ' + item.sequence + ' 项出图详情'} onDismiss={onDismiss} className="run-item-detail-dialog">
+    <header><div><p className="eyebrow">出图详情</p><h2>第 {item.sequence} 项</h2></div><IconButton label="关闭出图详情" onClick={onDismiss}><X size={16} /></IconButton></header>
     <div className="run-item-detail-grid"><section><h3>状态</h3><StatusPill value={item.status} scope="run_item" /><p>已尝试 {Number.isInteger(item.attempts) ? item.attempts : 0} 次{item.retryAt ? '，下次重试 ' + item.retryAt : ''}。</p>{item.updatedAt && <p>最后更新：{new Date(item.updatedAt).toLocaleString('zh-CN')}</p>}</section><section><h3>恢复建议</h3>{recovery.error ? <p className="run-item-error">{recovery.error}</p> : <p>没有安全错误摘要。</p>}{recovery.advice && <p className="run-item-recovery">{recovery.advice}</p>}</section><section className="run-item-detail-assets"><h3>输出资产</h3>{item.outputAssets?.length ? <div>{item.outputAssets.map((asset) => <button type="button" key={asset.id} onClick={() => void onInspect(asset.id)}><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /><span>{asset.mediaType || 'image'} · {asset.mediaState || 'available'}</span></button>)}</div> : <p>这一项还没有输出资产。</p>}</section></div>
     {retryable && <footer><button type="button" className="command-button" onClick={() => void onRetry(item.id)}><RefreshCw size={16} />回到会话重试此项</button></footer>}
   </AccessibleDialog>;
@@ -1393,7 +1393,7 @@ function RunItemProgressBar({ page }) {
   const progress = runItemProgress(page.statusCounts);
   const total = Math.max(0, Number(page.allTotal || page.total || 0));
   const segments = [{ key: 'succeeded', label: '完成', value: progress.succeeded }, { key: 'active', label: '进行中', value: progress.active }, { key: 'waiting', label: '等待', value: progress.waiting }, { key: 'attention', label: '需处理', value: progress.attention }, { key: 'cancelled', label: '取消', value: progress.cancelled }].filter((segment) => segment.value > 0);
-  return <div className="run-item-progress" role="progressbar" aria-label={'运行项完成进度：' + progress.succeeded + ' / ' + total} aria-valuemin="0" aria-valuemax={total || 1} aria-valuenow={Math.min(progress.succeeded, total || 1)}>
+  return <div className="run-item-progress" role="progressbar" aria-label={'完成进度：' + progress.succeeded + ' / ' + total} aria-valuemin="0" aria-valuemax={total || 1} aria-valuenow={Math.min(progress.succeeded, total || 1)}>
     <div>{segments.length ? segments.map((segment) => <span key={segment.key} className={'is-' + segment.key} style={{ width: Math.max(2, (segment.value / Math.max(1, total)) * 100) + '%' }} />) : <span className="is-empty" />}</div>
     <p>{progress.succeeded} 完成 · {progress.active} 进行中 · {progress.attention} 需处理 · 共 {total} 项</p>
   </div>;
@@ -1442,9 +1442,9 @@ function DryRunEvidenceCard({ dryRun }) {
   const capabilityItems = [['生成', capabilities.generate], ['编辑', capabilities.edit], ['参考图', capabilities.referenceImage], ['遮罩', capabilities.mask]].filter(([, value]) => value !== undefined);
   return <article className="advanced-dry-run-card">
     <header><div><strong>{evidence.status}</strong><span>计划 v{evidence.planVersion || '未知'}</span></div><time>{evidenceDate(details.createdAt)}</time></header>
-    <EvidenceFacts items={[["运行项", details.itemCount ?? planSnapshot.itemCount], ["操作", planSnapshot.operation === 'edit' ? '编辑' : '生成'], ["Provider", provider.providerId], ["模型", provider.model], ["参考素材", planSnapshot.referenceAssetIds?.length ?? planSnapshot.referenceCount], ["逐图提示词", planSnapshot.itemPrompts?.length || 0]]} />
+    <EvidenceFacts items={[["单张出图", details.itemCount ?? planSnapshot.itemCount], ["操作", planSnapshot.operation === 'edit' ? '编辑' : '生成'], ["Provider", provider.providerId], ["模型", provider.model], ["参考素材", planSnapshot.referenceAssetIds?.length ?? planSnapshot.referenceCount], ["逐图提示词", planSnapshot.itemPrompts?.length || 0]]} />
     <div className="advanced-preflight-breakdown">
-      <section><h5>输出规格</h5>{Object.keys(output).length ? <EvidenceFacts items={Object.entries(output).map(([key, value]) => [key, value])} /> : <p>由 Provider 默认能力决定。</p>}</section>
+      <section><h5>输出规格</h5>{Object.keys(output).length ? <EvidenceFacts items={Object.entries(output).map(([key, value]) => [key, value])} /> : <p>由生成服务的默认能力决定。</p>}</section>
       <section><h5>能力快照</h5>{capabilityItems.length ? <div className="advanced-capability-list">{capabilityItems.map(([label, value]) => <span key={label} className={value ? 'is-on' : 'is-off'}>{label}：{value ? '支持' : '不支持'}</span>)}</div> : <p>没有能力快照。</p>}</section>
     </div>
     <details className="advanced-raw-evidence"><summary>查看原始摘要</summary><pre>{JSON.stringify(evidence.details, null, 2)}</pre></details>
@@ -1472,7 +1472,7 @@ function GenerationHistory({ selectedRound, runs, activeRunId, activeRun, runExe
           <span className="run-history-index">{String(index + 1).padStart(2, '0')}</span>
           <span className="run-history-entry"><b>计划 v{run.planVersion ?? '?'}</b><small>{run.createdAt ? new Date(run.createdAt).toLocaleString('zh-CN') : '时间未知'} · {String(run.id || '').slice(-8) || '未知标识'}</small></span>
           <StatusPill value={run.status} scope="run" />
-        </button>)}</div> : <p className="empty-copy">当前轮次还没有生成运行。</p> : <p className="empty-copy">从上方选择一个轮次后，再查看生成历史。</p>}
+        </button>)}</div> : <p className="empty-copy">当前轮次还没有出图。</p> : <p className="empty-copy">从上方选择一个轮次后，再查看生成历史。</p>}
       </aside>
 
       <section className="run-detail-panel">
@@ -1485,7 +1485,7 @@ function GenerationHistory({ selectedRound, runs, activeRunId, activeRun, runExe
           <section className="run-prompt-card">
             <header><div className="run-prompt-title"><MessageSquareText size={17} aria-hidden="true" /><div><span>本次提示词</span><small>{plan.operation} · {plan.output}</small></div></div><button type="button" className="run-copy-button" onClick={() => void onCopyPrompt(activeRun)} disabled={!hasPrompt}><Copy size={15} />复制完整提示词</button></header>
             <p>{plan.prompt}</p>
-            <div className="run-plan-facts"><span>计划产出 <b>{plan.itemCount ?? '未记录'}</b></span><span>参考素材 <b>{activeRun.planSnapshot?.referenceCount ?? plan.references.length}</b></span><span>执行并发 <b>{activeRun.executionConcurrency || '未记录'}</b></span></div>
+            <div className="run-plan-facts"><span>计划产出 <b>{plan.itemCount ?? '未记录'}</b></span><span>参考素材 <b>{activeRun.planSnapshot?.referenceCount ?? plan.references.length}</b></span><span>同时出图 <b>{activeRun.executionConcurrency || '未记录'}</b></span></div>
           </section>
 
           <section className="run-overview-strip" aria-label="运行概览">
@@ -1506,13 +1506,13 @@ function GenerationHistory({ selectedRound, runs, activeRunId, activeRun, runExe
             <header className="run-items-heading"><div><p className="eyebrow">生成结果</p><h3>结果队列</h3></div><span>{bounds.start ? bounds.start + '-' + bounds.end : '0'} / {runItemPage.total} 项{runItemPage.allTotal !== runItemPage.total ? ' · 总 ' + runItemPage.allTotal : ''}</span></header>
             <RunItemProgressBar page={runItemPage} />
             <div className="run-item-toolbar">
-              <div className="run-item-filters" aria-label="运行项状态筛选">{RUN_ITEM_FILTER_OPTIONS.map((option) => <button type="button" key={option.id} className={normalizedFilter === option.id ? 'is-active' : ''} onClick={() => onSetRunItemFilter(option.id)}>{option.label}<small>{runItemFilterCount(runItemPage.statusCounts, option.id)}</small></button>)}</div>
+              <div className="run-item-filters" aria-label="按状态筛选">{RUN_ITEM_FILTER_OPTIONS.map((option) => <button type="button" key={option.id} className={normalizedFilter === option.id ? 'is-active' : ''} onClick={() => onSetRunItemFilter(option.id)}>{option.label}<small>{runItemFilterCount(runItemPage.statusCounts, option.id)}</small></button>)}</div>
               <label className="run-item-sequence"><Search size={14} /><span>序号</span><input type="number" min="1" inputMode="numeric" value={normalizedSequence || ''} onChange={(event) => onSetRunItemSequence(event.target.value)} placeholder="任意" />{normalizedSequence !== null && <button type="button" aria-label="清除序号筛选" onClick={() => onSetRunItemSequence(null)}><X size={13} /></button>}</label>
-              <label className="run-item-page-size"><span>每页</span><select aria-label="每页运行项数量" value={normalizedPageSize} onChange={(event) => onSetRunItemPageSize(event.target.value)}>{RUN_ITEM_PAGE_SIZES.map((size) => <option value={size} key={size}>{size}</option>)}</select></label>
+              <label className="run-item-page-size"><span>每页</span><select aria-label="每页数量" value={normalizedPageSize} onChange={(event) => onSetRunItemPageSize(event.target.value)}>{RUN_ITEM_PAGE_SIZES.map((size) => <option value={size} key={size}>{size}</option>)}</select></label>
               <div className="run-item-bulk"><button type="button" className="outline-button" disabled={!retryablePageItems.length} onClick={() => onSelectRetryablePageItems(!allRetryableSelected)}><Check size={15} />{allRetryableSelected ? '取消本页' : '选择可重试'}</button><button type="button" className="command-button" disabled={!selectedRetryableIds.length} onClick={() => void onRetrySelectedItems(selectedRetryableIds)}><RefreshCw size={15} />回到会话重试 {selectedRetryableIds.length || ''}</button></div>
             </div>
-            <div className="run-item-list">{visibleRunItems.length ? visibleRunItems.map((item) => <RunItemRow key={item.id} item={item} selected={selectedRunItemIds.has(item.id)} onToggleSelected={onToggleRunItemSelection} onOpenDetail={onOpenRunItemDetail} onInspect={onInspectAsset} onRetry={onRetryItem} />) : <p className="empty-copy">当前筛选没有运行项。</p>}</div>
-            <nav className="run-item-pagination" aria-label="运行项分页"><button type="button" className="outline-button" disabled={runItemPage.page <= 1} onClick={() => onSetRunItemPage(runItemPage.page - 1)}><ChevronLeft size={15} />上一页</button><span>第 {runItemPage.page} / {runItemPage.totalPages} 页</span><button type="button" className="outline-button" disabled={runItemPage.page >= runItemPage.totalPages} onClick={() => onSetRunItemPage(runItemPage.page + 1)}>下一页<ChevronRight size={15} /></button></nav>
+            <div className="run-item-list">{visibleRunItems.length ? visibleRunItems.map((item) => <RunItemRow key={item.id} item={item} selected={selectedRunItemIds.has(item.id)} onToggleSelected={onToggleRunItemSelection} onOpenDetail={onOpenRunItemDetail} onInspect={onInspectAsset} onRetry={onRetryItem} />) : <p className="empty-copy">当前筛选没有记录。</p>}</div>
+            <nav className="run-item-pagination" aria-label="分页"><button type="button" className="outline-button" disabled={runItemPage.page <= 1} onClick={() => onSetRunItemPage(runItemPage.page - 1)}><ChevronLeft size={15} />上一页</button><span>第 {runItemPage.page} / {runItemPage.totalPages} 页</span><button type="button" className="outline-button" disabled={runItemPage.page >= runItemPage.totalPages} onClick={() => onSetRunItemPage(runItemPage.page + 1)}>下一页<ChevronRight size={15} /></button></nav>
           </section>
 
           {advancedDetails && <AdvancedDetailsPanel details={advancedDetails} onClose={onCloseAdvanced} />}
@@ -1815,7 +1815,7 @@ function App() {
     const loadLineageRunItemsInBackground = (lineageRuns) => {
       void loadLineageRunItems(lineageRuns).catch((nextError) => {
         if (isAbortError(nextError) || !request.isCurrent()) return;
-        const normalized = normalizeRequestError(nextError, '无法读取谱系运行项。', { operation: 'load-lineage-run-items', phase: 'loading' });
+        const normalized = normalizeRequestError(nextError, '无法读取谱系里的单张出图。', { operation: 'load-lineage-run-items', phase: 'loading' });
         if (normalized.category === 'connection') setConnectionError(normalized);
         else setError(normalized);
       });
@@ -1889,12 +1889,12 @@ function App() {
         return;
       }
       setRuns(EMPTY); setRunItemPage(EMPTY_RUN_ITEM_PAGE); clearLineageRunData();
-      setContextError(activeRunId ? '请先打开生成运行视图，再继续查看运行。' : '');
+      setContextError(activeRunId ? '请先打开出图视图，再继续查看。' : '');
       return;
     }
     if (!['runs', 'lineage'].includes(view)) {
       setRuns(EMPTY); setRunItemPage(EMPTY_RUN_ITEM_PAGE); clearLineageRunData();
-      setContextError(activeRunId ? '请先打开生成运行视图，再继续查看运行。' : '');
+      setContextError(activeRunId ? '请先打开出图视图，再继续查看。' : '');
       return;
     }
     const runData = await load('/api/rounds/' + encodeURIComponent(selectedRound.id) + '/runs');
@@ -2074,7 +2074,7 @@ function App() {
         }
       } catch { /* daemon is inside the expected restart gap */ }
     }
-    if (restartMonitorEpoch.current === epoch) setError(createWorkbenchError({ category: 'connection', message: 'Studio 重启超时。请复制脱敏诊断，并查看后台服务日志。' }, { category: 'connection', phase: 'reconnecting', safeToRetry: false }));
+    if (restartMonitorEpoch.current === epoch) setError(createWorkbenchError({ category: 'connection', message: 'Studio 重启超时。请复制隐去隐私的诊断信息，并查看后台服务日志。' }, { category: 'connection', phase: 'reconnecting', safeToRetry: false }));
   }, [finishStudioRecovery]);
   const beginStudioRestart = useCallback(() => {
     if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
@@ -2132,8 +2132,8 @@ function App() {
       const diagnostic = redactedRuntimeDiagnostic({ studio, provider, recoveryPhase, connectionError });
       if (!navigator.clipboard?.writeText) throw new Error('当前浏览器未提供剪贴板权限。');
       await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
-      setNotice('已复制脱敏运行诊断；内容不含 Provider 密钥或工作区路径。');
-    } catch (nextError) { reportRequestError(nextError, '无法复制脱敏诊断。', { operation: 'copy-runtime-diagnostic', phase: 'committing' }); }
+      setNotice('已复制隐去隐私的运行诊断；内容不含生成服务密钥或工作区路径。');
+    } catch (nextError) { reportRequestError(nextError, '无法复制诊断信息。', { operation: 'copy-runtime-diagnostic', phase: 'committing' }); }
   };
   const repairRuntime = async () => {
     if (runtimeRepairing) return;
@@ -2376,7 +2376,7 @@ function App() {
         setSession(next);
       } catch (nextError) {
         contextSignature.current = '';
-        reportRequestError(nextError, '无法保存工作上下文。', { operation: 'save-workbench-context', phase: 'committing' });
+        reportRequestError(nextError, '无法保存当前工作对象。', { operation: 'save-workbench-context', phase: 'committing' });
       }
     });
   }, [session, selectedProject, selectedTask, selectedRound, activeTaskId, activeRoundId]);
@@ -2420,7 +2420,7 @@ function App() {
         for (const asset of importedAssets) materialMap.set(asset.id, { assetId: asset.id, usage, note });
         referenceSaved = await saveRoundReferenceMaterials([...materialMap.values()], false);
       }
-      if (succeeded) setNotice('已导入 ' + succeeded + ' 张图片' + (referenceSaved ? '，并已按用途加入当前草稿轮次参考素材' : '') + (failed.length ? '，' + failed.length + ' 张失败。' : '。'));
+      if (succeeded) setNotice('已导入 ' + succeeded + ' 张图片' + (referenceSaved ? '，并已按用途加入当前这一轮的参考素材' : '') + (failed.length ? '，' + failed.length + ' 张失败。' : '。'));
       if (failed.length) setError('有 ' + failed.length + ' 张图片导入失败：' + failed.slice(0, 3).map((item) => item.name).join('、') + (failed.length > 3 ? ' 等' : '') + '。');
     } finally {
       setUploading(false); setUploadProgress(null); if (inputRef.current) inputRef.current.value = '';
@@ -2845,7 +2845,7 @@ function App() {
       const plan = planWithReferenceMaterials(round.plan || {}, materials);
       await api('/api/rounds/' + encodeURIComponent(round.id) + '/draft-context', { method: 'PUT', idempotencyKey: uniqueKey('round-reference'), body: { plan, expectedVersion: round.version } });
       if (close) setReferenceDialog(null);
-      setNotice(message || (materials.length ? '参考素材已保存到当前轮次上下文。请回到 Agent 整理并确认生成计划。' : '当前轮次参考素材已清空。'));
+      setNotice(message || (materials.length ? '参考素材已保存到当前轮次。请回到会话整理并确认计划。' : '当前轮次参考素材已清空。'));
       await refresh();
       setEventRevision((current) => ({ ...current, planVersions: current.planVersions + 1, creativeRecord: current.creativeRecord + 1 }));
       return true;
@@ -2874,7 +2874,7 @@ function App() {
   const chooseReferenceRound = async (roundId) => {
     if (!referenceResolver) return;
     const round = rounds.find((item) => item.id === roundId) || referenceResolver.draftRounds.find((item) => item.id === roundId) || null;
-    if (!round || round.status !== 'draft') { setReferenceError('这个草稿轮次已不可用，请刷新后重试。'); return; }
+    if (!round || round.status !== 'draft') { setReferenceError('这一轮已不可用，请刷新后重试。'); return; }
     const targetTask = taskForId(round.taskId) || referenceResolver.task || selectedTask;
     const label = (ROUND_PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion;
     const saved = await addAssetsToRoundReferences(round, referenceResolver.assets, referenceResolver.usage, '参考素材已加入“' + label + '”。请回到 Agent 整理并确认生成计划。');
@@ -2886,7 +2886,7 @@ function App() {
   const createRoundForPendingReference = () => {
     if (!referenceResolver) return;
     const targetTask = referenceResolver.task || (referenceResolver.tasks?.length === 1 ? referenceResolver.tasks[0] : null);
-    if (!targetTask) { setReferenceError('请先进入一个任务，再新建草稿轮次。'); return; }
+    if (!targetTask) { setReferenceError('请先进入一个任务，再新建一轮。'); return; }
     setPendingReferenceAfterRound({ assets: referenceResolver.assets, usage: referenceResolver.usage });
     setReferenceResolver(null);
     if (!selectedTask || selectedTask.id !== targetTask.id) navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: targetTask.id, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
@@ -2928,7 +2928,7 @@ function App() {
       const createdRound = receipt.value;
       await afterCreationContext(currentSession, selectedProject.id, selectedTask.id, createdRound.id);
       setDerivedDialog(null);
-      setNotice('已基于图片创建下一轮草稿，并设为当前上下文。已回到创作谱系；请让 Agent 整理可确认计划。');
+      setNotice('已基于图片创建下一轮草稿，并设为当前轮次。已回到创作平台；请让会话整理可确认的计划。');
       await refresh();
       navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: selectedTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' });
     } catch (nextError) {
@@ -2949,7 +2949,7 @@ function App() {
         const availableRounds = await loadReferenceRounds(candidateTasks);
         target = referenceTargetForAssets(sourceAssets, availableRounds);
       } catch (nextError) {
-        reportRequestError(nextError, '无法读取可用草稿轮次，请刷新后重试。', { operation: 'load-reference-rounds', phase: 'loading' });
+        reportRequestError(nextError, '无法读取可用的轮次，请刷新后重试。', { operation: 'load-reference-rounds', phase: 'loading' });
         return false;
       }
     }
@@ -2957,11 +2957,11 @@ function App() {
       const round = target.draftRounds[0];
       const targetTask = target.task || taskForId(round.taskId);
       const label = (ROUND_PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion;
-      const saved = await addAssetsToRoundReferences(round, sourceAssets, usage, '已自动加入草稿轮次“' + label + '”。请回到 Agent 整理并确认生成计划。');
+      const saved = await addAssetsToRoundReferences(round, sourceAssets, usage, '已自动加入这一轮“' + label + '”。请回到 Agent 整理并确认生成计划。');
       if (saved) navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: targetTask?.id || round.taskId, roundId: round.id, compareRoundIds: [round.id], runId: null, assetScope: 'round' });
       return saved;
     }
-    if (!target.task && !target.draftRounds.length && !target.tasks.length) { setError('请先新建任务和草稿轮次，再把图片作为参考。'); return false; }
+    if (!target.task && !target.draftRounds.length && !target.tasks.length) { setError('请先新建任务和轮次，再把图片作为参考。'); return false; }
     setError('');
     setReferenceError('');
     setPreviewAssets(EMPTY);
@@ -2997,14 +2997,14 @@ function App() {
         const receipt = await api('/api/rounds/derived', { method: 'POST', idempotencyKey: uniqueKey('reject-derived-round'), body: { ...form, taskId: selectedTask.id, sessionId: currentSession?.id } });
         const createdRound = receipt.value;
         await afterCreationContext(currentSession, selectedProject.id, selectedTask.id, createdRound.id);
-        setNotice('不采用原因已保存，并已创建带反例参考的下一轮草稿。请让 Agent 基于新上下文整理计划。');
+        setNotice('不采用原因已保存，并已创建带反例参考的下一轮草稿。请让会话基于新的信息整理计划。');
         await refresh();
         navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: selectedTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' });
         return;
       }
       const negativeSaved = addAsNegative ? await addAssetsToCurrentRoundReferences(rejectedAssets, 'negative') : false;
       if (!addAsNegative) await refresh();
-      setNotice(negativeSaved ? '不采用原因已保存，并已作为当前草稿轮次反例参考。' : '不采用原因已保存。');
+      setNotice(negativeSaved ? '不采用原因已保存，并已作为当前这一轮的反例参考。' : '不采用原因已保存。');
     } catch (nextError) {
       setRejectError(errorMessageForDisplay(nextError, '无法保存不采用原因。'));
     } finally {
@@ -3057,7 +3057,7 @@ function App() {
     if (!activeRun) return;
     const retryIds = [...new Set(itemIds)].filter(Boolean);
     if (!retryIds.length) return;
-    setError('运行项重试需要回到当前智能体会话，由受控 CLI/Agent 在确认后执行。');
+    setError('重试需要回到会话，由会话在你确认后执行。');
   };
   const retryRunItem = async (itemId) => retryRunItemsByIds([itemId]);
   const controlRun = async (action, runId = activeRun?.id) => {
@@ -3121,7 +3121,7 @@ function App() {
       const confirmationSessionId = generationConfirmation.challenge.sessionId;
       await api('/api/rounds/' + encodeURIComponent(generationConfirmation.round.id) + '/confirm', { method: 'POST', idempotencyKey: uniqueKey('user-confirm'), body: { expectedVersion: generationConfirmation.challenge.expectedVersion, sessionId: confirmationSessionId, challenge: generationConfirmation.challenge.challenge } });
       setGenerationConfirmation(null);
-      setNotice('计划已由当前用户确认。请返回当前智能体会话，由会话执行预检并创建运行。');
+      setNotice('计划已确认。请回到会话，由会话核算一遍后开始出图。');
       await refresh();
       return true;
     } catch (nextError) {
@@ -3214,7 +3214,7 @@ function App() {
     </div>
     {routeView === 'assets' && selectedProject && <MaterialImportGuide materialNeeds={contextMaterialNeeds} selectedNeed={selectedImportNeed} completedCounts={materialNeedCounts} assetScope={assetScope} selectedRound={selectedRound} onSelectNeed={setSelectedImportNeed} />}
     {routeView === 'assets' && selectedProject && selectedAssets.length > 0 && <AssetSelectionStrip assets={selectedAssets} selectedTask={selectedTask} selectedRound={selectedRound} onRemove={toggleSelection} onClear={() => void clearSelection()} onDownloadArchive={() => downloadProjectArchive(selectedAssets.map((asset) => asset.id))} onDeliver={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} />}
-    {visibleAssets.length ? <><div className={'asset-grid is-preview-' + assetPreviewFit}>{visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} selected={selectedAssetIds.has(asset.id)} selectionBusy={selectionBusyIds.has(asset.id)} shared={sharedAssetIds.has(asset.id)} previewFit={assetPreviewFit} selectedTask={selectedTask} fallbackTask={taskForId(asset?.display?.taskId || asset?.source?.taskId || asset?.source?.creativeTaskId)} selectedRound={selectedRound} onToggleSelect={markAsDeliverable} onReview={review} onTrash={trash} onRestore={restore} onInspect={inspectAsset} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />)}</div><nav className="asset-pagination" aria-label="资产分页"><button type="button" className="outline-button" disabled={assetPage <= 1} onClick={() => setAssetPage((current) => Math.max(1, current - 1))}><ChevronLeft size={15} />上一页</button><span>第 <b>{assetPage}</b> / {totalAssetPages} 页 · 共 {assetTotal} 张</span><button type="button" className="outline-button" disabled={assetPage >= totalAssetPages} onClick={() => setAssetPage((current) => Math.min(totalAssetPages, current + 1))}>下一页<ChevronRight size={15} /></button></nav></> : <div className="empty-stage asset-empty">{routeView === 'trash' ? <Archive size={30} strokeWidth={1.15} /> : <Inbox size={30} strokeWidth={1.15} />}<p>{routeView === 'trash' ? '当前项目回收站为空' : (assetScope === 'round' && !selectedRound ? '请先从任务上下文选择轮次，再查看本轮结果。' : '当前范围内暂未找到资产。')}</p>{routeView === 'assets' && <button type="button" className="outline-button" onClick={() => inputRef.current?.click()}><Upload size={16} />导入图片</button>}</div>}
+    {visibleAssets.length ? <><div className={'asset-grid is-preview-' + assetPreviewFit}>{visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} selected={selectedAssetIds.has(asset.id)} selectionBusy={selectionBusyIds.has(asset.id)} shared={sharedAssetIds.has(asset.id)} previewFit={assetPreviewFit} selectedTask={selectedTask} fallbackTask={taskForId(asset?.display?.taskId || asset?.source?.taskId || asset?.source?.creativeTaskId)} selectedRound={selectedRound} onToggleSelect={markAsDeliverable} onReview={review} onTrash={trash} onRestore={restore} onInspect={inspectAsset} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />)}</div><nav className="asset-pagination" aria-label="资产分页"><button type="button" className="outline-button" disabled={assetPage <= 1} onClick={() => setAssetPage((current) => Math.max(1, current - 1))}><ChevronLeft size={15} />上一页</button><span>第 <b>{assetPage}</b> / {totalAssetPages} 页 · 共 {assetTotal} 张</span><button type="button" className="outline-button" disabled={assetPage >= totalAssetPages} onClick={() => setAssetPage((current) => Math.min(totalAssetPages, current + 1))}>下一页<ChevronRight size={15} /></button></nav></> : <div className="empty-stage asset-empty">{routeView === 'trash' ? <Archive size={30} strokeWidth={1.15} /> : <Inbox size={30} strokeWidth={1.15} />}<p>{routeView === 'trash' ? '当前项目回收站为空' : (assetScope === 'round' && !selectedRound ? '请先从任务里选择轮次，再查看本轮结果。' : '当前范围内暂未找到资产。')}</p>{routeView === 'assets' && <button type="button" className="outline-button" onClick={() => inputRef.current?.click()}><Upload size={16} />导入图片</button>}</div>}
   </section>;
   const viewRenderers = {
     projects: () => <ProjectIndex projects={projects} projectTemplates={projectTemplates} onCreateProject={() => openCreationDialog('project')} onOpenProject={(projectId) => navigateRoute(selectProject(route, projectId))} onOpenProjectOverview={(projectId) => navigateRoute({ view: 'project-overview', projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })} />,
@@ -3266,9 +3266,9 @@ function App() {
     tasks: () => selectedProject ? <ProjectTaskList project={selectedProject} tasks={tasks} onCreateTask={() => openCreationDialog('task')} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null,
     'studio-overview': () => <section className="overview-stage">
       <div className="overview-head"><div><p className="eyebrow">同一任务内的显式对比</p><h2>{selectedTask ? selectedTask.name : '请选择任务'}</h2><span>{studioOverview?.availableRounds?.length || 0} 个可比较轮次。比较不会推断或启动运行。</span></div>{taskOverview && <div className="overview-metrics"><span>轮次 {taskOverview.summary?.roundCount || 0}</span><span>运行 {taskOverview.summary?.runCount || 0}</span><span>结果 {taskOverview.summary?.resultCount || 0}</span></div>}</div>
-      {selectedTask ? <><div className="compare-selector">{(studioOverview?.availableRounds || rounds).map((round) => <label key={round.id}><input type="checkbox" checked={compareRoundIds.includes(round.id)} onChange={() => toggleComparedRound(round.id)} /><span>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[round.purpose] || round.purpose} · 计划 v{round.planVersion}</span></label>)}</div>{studioOverview?.comparisons?.length ? <div className="comparison-grid">{studioOverview.comparisons.map((comparison) => <article key={comparison.round.id} className="comparison-column"><header><div><p>轮次 {comparison.round.planVersion}</p><h3>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[comparison.round.purpose] || comparison.round.purpose}</h3></div><StatusPill value={comparison.round.status} scope="round" /></header><dl><div><dt>上游</dt><dd>{comparison.lineage?.rounds?.length ? '承接 ' + comparison.lineage.rounds.length + ' 个轮次' : '首个方向'}</dd></div><div><dt>计划</dt><dd>{comparison.round.plan?.operation === 'edit' ? '编辑' : '生成'} · {comparison.round.plan?.itemCount || 0} 项</dd></div><div><dt>产出</dt><dd>{comparison.summary?.resultCount || 0} 个结果</dd></div></dl>{comparison.runsTruncated && <p className="comparison-truncated">仅显示最近 24 次运行</p>}<div className="comparison-runs">{comparison.runs?.map((run) => <section key={run.id}><button type="button" className="trace-link" onClick={() => navigateRoute({ view: 'runs', projectId: selectedProject?.id, taskId: selectedTask.id, roundId: comparison.round.id, compareRoundIds: [comparison.round.id], runId: run.id })}><b>运行项 {run.items?.length || 0}</b><StatusPill value={run.status} scope="run" /></button><div className="comparison-assets">{run.items?.flatMap((item) => item.outputAssets || []).map((asset) => <button type="button" key={asset.id} title="查看资产来源与评审" onClick={() => void inspectAsset(asset.id)}><img src={assetThumbnailUrl(asset)} alt="轮次结果" loading="lazy" decoding="async" /><span>{asset.review?.decision === 'keep' ? '保留' : asset.review?.decision === 'review' ? '待复核' : '未评审'}</span></button>)}</div></section>)}</div></article>)}</div> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>勾选一个或多个轮次后，比较计划、运行、结果和当前评审。</p></div>}</> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>请先选择项目和任务，再打开创作总览。</p></div>}
+      {selectedTask ? <><div className="compare-selector">{(studioOverview?.availableRounds || rounds).map((round) => <label key={round.id}><input type="checkbox" checked={compareRoundIds.includes(round.id)} onChange={() => toggleComparedRound(round.id)} /><span>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[round.purpose] || round.purpose} · 计划 v{round.planVersion}</span></label>)}</div>{studioOverview?.comparisons?.length ? <div className="comparison-grid">{studioOverview.comparisons.map((comparison) => <article key={comparison.round.id} className="comparison-column"><header><div><p>轮次 {comparison.round.planVersion}</p><h3>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[comparison.round.purpose] || comparison.round.purpose}</h3></div><StatusPill value={comparison.round.status} scope="round" /></header><dl><div><dt>上游</dt><dd>{comparison.lineage?.rounds?.length ? '承接 ' + comparison.lineage.rounds.length + ' 个轮次' : '首个方向'}</dd></div><div><dt>计划</dt><dd>{comparison.round.plan?.operation === 'edit' ? '编辑' : '生成'} · {comparison.round.plan?.itemCount || 0} 项</dd></div><div><dt>产出</dt><dd>{comparison.summary?.resultCount || 0} 个结果</dd></div></dl>{comparison.runsTruncated && <p className="comparison-truncated">仅显示最近 24 次运行</p>}<div className="comparison-runs">{comparison.runs?.map((run) => <section key={run.id}><button type="button" className="trace-link" onClick={() => navigateRoute({ view: 'runs', projectId: selectedProject?.id, taskId: selectedTask.id, roundId: comparison.round.id, compareRoundIds: [comparison.round.id], runId: run.id })}><b>出图 {run.items?.length || 0}</b><StatusPill value={run.status} scope="run" /></button><div className="comparison-assets">{run.items?.flatMap((item) => item.outputAssets || []).map((asset) => <button type="button" key={asset.id} title="查看资产来源与评审" onClick={() => void inspectAsset(asset.id)}><img src={assetThumbnailUrl(asset)} alt="轮次结果" loading="lazy" decoding="async" /><span>{asset.review?.decision === 'keep' ? '保留' : asset.review?.decision === 'review' ? '待复核' : '未评审'}</span></button>)}</div></section>)}</div></article>)}</div> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>勾选一个或多个轮次后，比较计划、运行、结果和当前评审。</p></div>}</> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>请先选择项目和任务，再打开创作总览。</p></div>}
     </section>,
-    prompts: () => <><PromptWorkspace round={selectedRound} planVersions={planVersions} loading={planVersionsLoading} onRefresh={() => void refreshPlanVersions()} />{selectedRound?.status === 'awaiting_confirmation' && <section className="human-confirmation-gate"><div><p className="eyebrow">人工确认闸门 · 可写操作</p><h3>等待当前用户确认计划</h3><span>这是独立于只读摘要的写入闸门。Skill 只能创建挑战；此 Workbench 标签只负责激活计划，确认后由当前智能体会话执行预检并创建唯一运行。</span></div><button type="button" className="command-button" onClick={() => void openGenerationConfirmation()} disabled={!session || generationConfirmationBusy}><LockKeyhole size={16} />{generationConfirmationBusy ? '正在准备确认' : '审阅并确认计划'}</button></section>}</>,
+    prompts: () => <><PromptWorkspace round={selectedRound} planVersions={planVersions} loading={planVersionsLoading} onRefresh={() => void refreshPlanVersions()} />{selectedRound?.status === 'awaiting_confirmation' && <section className="human-confirmation-gate"><div><p className="eyebrow">人工确认闸门 · 可写操作</p><h3>等待当前用户确认计划</h3><span>确认必须由你本人在这里点。会话只能发起确认请求；确认后由会话核算一遍，再开始出图。</span></div><button type="button" className="command-button" onClick={() => void openGenerationConfirmation()} disabled={!session || generationConfirmationBusy}><LockKeyhole size={16} />{generationConfirmationBusy ? '正在准备确认' : '审阅并确认计划'}</button></section>}</>,
     runs: () => <GenerationHistory selectedRound={selectedRound} runs={runs} activeRunId={activeRunId} activeRun={activeRun} runExecutionStatus={runExecutionStatus} runLifecycleStatus={runLifecycleStatus} taskOverview={taskOverview} creativeRecord={creativeRecord} visibleRunItems={visibleRunItems} runItemPage={runItemPage} runItemFilter={activeRunItemFilter} runItemPageSize={activeRunItemPageSize} runItemSequence={activeRunItemSequence} selectedRunItemIds={selectedRunItemIds} runItemDetail={runItemDetail} canCancelActiveRun={canCancelActiveRun} advancedDetails={advancedDetails} onSelectRun={(runId) => navigateRoute({ runId, runItemFilter: DEFAULT_RUN_ITEM_FILTER, runItemPage: 1, runItemPageSize: DEFAULT_RUN_ITEM_PAGE_SIZE, runItemSequence: null })} onControlRun={controlRun} onRetryItem={retryRunItem} onInspectAsset={inspectAsset} onSetRunItemFilter={setRunItemFilter} onSetRunItemPage={setRunItemPageNumber} onSetRunItemPageSize={setRunItemPageSizeValue} onSetRunItemSequence={setRunItemSequenceValue} onToggleRunItemSelection={toggleRunItemSelection} onSelectRetryablePageItems={selectRetryablePageItems} onRetrySelectedItems={retryRunItemsByIds} onOpenRunItemDetail={(item) => setRunItemDetailId(item.id)} onCloseRunItemDetail={() => setRunItemDetailId(null)} onToggleAdvanced={() => advancedDetails ? setAdvancedDetails(null) : void openAdvancedDetails()} onCloseAdvanced={() => setAdvancedDetails(null)} onCopyPrompt={copyRunPrompt} />,
     guide: () => <LearningCenter onDismiss={dismissGuide} onNavigate={(nextView) => navigateRoute({ view: nextView })} />,
     library: () => <CreativeLibrary taskTypes={taskTypes} styleKits={styleKits} brandKits={brandKits} sharedAssets={sharedAssets} onOpenProjects={() => navigateRoute({ view: 'projects' })} onOpenSharedAssets={() => navigateRoute({ view: 'shared-assets' })} />,
@@ -3302,13 +3302,13 @@ function App() {
       <RuntimeHealthAlertStrip studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
       {connectionError && <WorkbenchErrorAlert error={connectionError} className="connection-error-strip" icon={CloudOff} dismissLabel="关闭连接错误" onDismiss={() => setConnectionError('')} onRetry={() => void retryWorkbenchError(connectionError, setConnectionError)} onReconnect={() => void reconnectWorkbenchError(connectionError, setConnectionError)} />}
       {error && <WorkbenchErrorAlert error={error} className="error-strip" onDismiss={() => setError('')} onRetry={() => void retryWorkbenchError(error, setError)} onReconnect={() => void reconnectWorkbenchError(error, setError)} />}
-      {contextError && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={15} aria-hidden="true" /><span>{errorMessageForDisplay(contextError, '无法恢复当前工作上下文。')}</span><button type="button" className="outline-button" onClick={() => setContextError('')}>关闭上下文错误</button></div>}
+      {contextError && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={15} aria-hidden="true" /><span>{errorMessageForDisplay(contextError, '无法恢复当前工作对象。')}</span><button type="button" className="outline-button" onClick={() => setContextError('')}>关闭错误提示</button></div>}
       {notice && <div className="notice-strip" role="status" aria-live="polite"><Check size={16} /><span>{notice}</span><IconButton label="关闭通知" onClick={() => setNotice('')}><X size={15} /></IconButton></div>}
       {renderActiveView()}
     </section>
 
-    {assetProvenance && <aside className="asset-inspector" aria-label="资产来源与评审记录"><div className="asset-inspector-head"><div><p className="eyebrow">资产检查器</p><h2>{assetProvenance.asset?.kind === 'generated' ? '生成结果来源链' : '导入素材来源链'}</h2></div><IconButton label="关闭资产检查器" onClick={() => setAssetProvenance(null)}><X size={16} /></IconButton></div><div className="asset-inspector-section"><span>来源</span><p>{assetProvenance.asset?.kind === 'generated' ? '由已确认轮次中的运行项保存' : '导入到当前 Studio 的素材'}</p>{assetProvenance.outputs?.map((output) => <button type="button" key={output.runItem.id} className="trace-link" onClick={() => { navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id }); setAssetProvenance(null); }}><span>{output.project.name} / {output.task.name}</span><b>{output.round.purpose} · 运行项 {output.runItem.sequence}</b></button>)}</div><div className="asset-inspector-section"><span>评审历史</span>{assetProvenance.reviews?.length ? assetProvenance.reviews.map((review) => <p key={review.id}><b>{review.decision === 'keep' ? '保留' : review.decision === 'review' ? '待复核' : review.decision === 'reject' ? '不采用' : '衍生方向'}</b> · {review.createdAt}</p>) : <p>尚未记录评审。</p>}</div><div className="asset-inspector-section"><span>交付引用</span>{assetProvenance.deliveries?.length ? assetProvenance.deliveries.map((delivery) => <p key={delivery.id}>{delivery.name} · {delivery.status}</p>) : <p>尚未加入交付草稿。</p>}</div><div className="asset-inspector-section"><span>批次版本</span>{assetProvenance.deliveryBatches?.length ? assetProvenance.deliveryBatches.map((batch) => <p key={batch.versionId}>{batch.name} · v{batch.versionNo} · {batch.status === 'ready' ? '已准备' : batch.status === 'draft' ? '草稿' : '已被新修订版本替代'}</p>) : <p>尚未加入版本化交付批次。</p>}</div></aside>}
-    {generationConfirmation && <ConfirmationDialog label="确认创作计划" title={'确认这版计划（v' + generationConfirmation.round.planVersion + '）？'} message={confirmationPlanSummary(generationConfirmation.round)} note="确认会把这版计划绑定到当前 conversation 与计划哈希；确认本身不会调用生成服务，需要回到会话继续预检与生成。" confirmLabel="确认计划" busy={generationConfirmationBusy} error={generationConfirmationError} tone="warning" onCancel={dismissGenerationConfirmation} onConfirm={confirmGenerationPlan} />}
+    {assetProvenance && <aside className="asset-inspector" aria-label="资产来源与评审记录"><div className="asset-inspector-head"><div><p className="eyebrow">资产检查器</p><h2>{assetProvenance.asset?.kind === 'generated' ? '生成结果来源链' : '导入素材来源链'}</h2></div><IconButton label="关闭资产检查器" onClick={() => setAssetProvenance(null)}><X size={16} /></IconButton></div><div className="asset-inspector-section"><span>来源</span><p>{assetProvenance.asset?.kind === 'generated' ? '由已确认轮次中的出图保存' : '导入到当前 Studio 的素材'}</p>{assetProvenance.outputs?.map((output) => <button type="button" key={output.runItem.id} className="trace-link" onClick={() => { navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id }); setAssetProvenance(null); }}><span>{output.project.name} / {output.task.name}</span><b>{output.round.purpose} · 出图 {output.runItem.sequence}</b></button>)}</div><div className="asset-inspector-section"><span>评审历史</span>{assetProvenance.reviews?.length ? assetProvenance.reviews.map((review) => <p key={review.id}><b>{review.decision === 'keep' ? '保留' : review.decision === 'review' ? '待复核' : review.decision === 'reject' ? '不采用' : '衍生方向'}</b> · {review.createdAt}</p>) : <p>尚未记录评审。</p>}</div><div className="asset-inspector-section"><span>交付引用</span>{assetProvenance.deliveries?.length ? assetProvenance.deliveries.map((delivery) => <p key={delivery.id}>{delivery.name} · {delivery.status}</p>) : <p>尚未加入交付草稿。</p>}</div><div className="asset-inspector-section"><span>批次版本</span>{assetProvenance.deliveryBatches?.length ? assetProvenance.deliveryBatches.map((batch) => <p key={batch.versionId}>{batch.name} · v{batch.versionNo} · {batch.status === 'ready' ? '已准备' : batch.status === 'draft' ? '草稿' : '已被新修订版本替代'}</p>) : <p>尚未加入版本化交付批次。</p>}</div></aside>}
+    {generationConfirmation && <ConfirmationDialog label="确认创作计划" title={'确认这版计划（v' + generationConfirmation.round.planVersion + '）？'} message={confirmationPlanSummary(generationConfirmation.round)} note="确认会把这版计划绑定到当前 conversation 与计划哈希；确认本身不会调用生成服务，需要回到会话继续核算与出图。" confirmLabel="确认计划" busy={generationConfirmationBusy} error={generationConfirmationError} tone="warning" onCancel={dismissGenerationConfirmation} onConfirm={confirmGenerationPlan} />}
     {previewAssets.length > 0 && <ImageInspectorDialog assets={previewAssets} zoom={previewZoom} selectedAssetIds={selectedAssetIds} selectionBusyIds={selectionBusyIds} selectedProject={selectedProject} selectedTask={selectedTask} fallbackTask={previewAssets.length === 1 ? taskForId(previewAssets[0]?.display?.taskId || previewAssets[0]?.source?.taskId || previewAssets[0]?.source?.creativeTaskId) : null} selectedRound={selectedRound} onClose={() => setPreviewAssets([])} onZoom={setPreviewZoom} onToggleDeliverable={markAsDeliverable} onReview={review} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} />}
     {rejectDialog && <RejectReviewDialog assets={rejectDialog.assets} canAddNegative={Boolean(selectedRound && selectedRound.status === 'draft')} canCreateNextRound={Boolean(selectedProject && selectedTask)} initialCreateNextRound={rejectDialog.createNextRound} busy={rejectBusy} error={rejectError} onDismiss={dismissRejectDialog} onSave={saveRejectReview} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
     {providerDetails && <ProviderSettings request={api} onDismiss={() => setProviderDetails(null)} onChanged={refresh} />}

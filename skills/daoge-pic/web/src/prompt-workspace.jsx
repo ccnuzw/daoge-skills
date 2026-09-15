@@ -163,7 +163,7 @@ function PlanVersionCard({ version, current = false, review = false }) {
     <dl><div><dt>操作</dt><dd>{presentation.operation}</dd></div><div><dt>计划数量</dt><dd>{presentation.itemCount === null ? '未设置' : presentation.itemCount + ' 张'}</dd></div><div><dt>画面比例</dt><dd>{presentation.aspectRatio}</dd></div><div><dt>分辨率</dt><dd>{presentation.resolution}</dd></div><div><dt>输出尺寸</dt><dd>{presentation.size}</dd></div><div><dt>像素尺寸</dt><dd>{presentation.dimensions}</dd></div><div><dt>参考素材</dt><dd>{presentation.references.length ? presentation.references.length + ' 张已绑定' : '无'}</dd></div></dl>
     <section className="prompt-copy"><span>通用提示词</span><p>{presentation.prompt}</p></section>
     {review && <PlanReviewPanel plan={version.plan} />}
-    {presentation.references.length > 0 && <div className="prompt-references"><ImagePlus size={14} /><span>已绑定参考素材，生成前会由预检验证能力。</span></div>}
+    {presentation.references.length > 0 && <div className="prompt-references"><ImagePlus size={14} /><span>已绑定参考素材，生成前会核算一遍能不能跑通。</span></div>}
   </article>;
 }
 
@@ -173,7 +173,7 @@ function PlanReviewPanel({ plan }) {
   const prompt = text(asRecord(plan).prompt);
   return <section className="prompt-review-panel" aria-label="确认前计划审阅">
     <div className="prompt-review-metrics">{promptReviewMetrics(plan).map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
-    <section className="prompt-item-prompts"><header><div><p className="eyebrow">确认前必看</p><h4>逐图提示词 {entries.length ? entries.length + ' 张' : '无逐图差异'}</h4></div><span>{entries.length ? '展开任意图片查看最终会发送给 Provider 的完整提示词。' : itemCount && itemCount > 1 ? itemCount + ' 张共用同一条通用提示词。' : '这一版只生成一张或尚未提供逐图差异。'}</span></header>{entries.length ? <ol>{entries.map((entry) => <li key={entry.index}><details className="prompt-item-card"><summary><b>#{String(entry.index).padStart(3, '0')}</b><span>{entry.itemPrompt}</span><small>{entry.charCount} 字符</small></summary><pre>{entry.finalPrompt}</pre></details></li>)}</ol> : <p className="prompt-shared-note">{prompt ? '最终提示词就是上方通用提示词；多张图会分别用同一条提示词发起请求。' : '还没有可执行提示词。'}</p>}</section>
+    <section className="prompt-item-prompts"><header><div><p className="eyebrow">确认前必看</p><h4>逐图提示词 {entries.length ? entries.length + ' 张' : '无逐图差异'}</h4></div><span>{entries.length ? '展开任意图片，查看最终会发给生成服务的完整提示词。' : itemCount && itemCount > 1 ? itemCount + ' 张共用同一条通用提示词。' : '这一版只生成一张或尚未提供逐图差异。'}</span></header>{entries.length ? <ol>{entries.map((entry) => <li key={entry.index}><details className="prompt-item-card"><summary><b>#{String(entry.index).padStart(3, '0')}</b><span>{entry.itemPrompt}</span><small>{entry.charCount} 字符</small></summary><pre>{entry.finalPrompt}</pre></details></li>)}</ol> : <p className="prompt-shared-note">{prompt ? '最终提示词就是上方通用提示词；多张图会分别用同一条提示词发起请求。' : '还没有可执行提示词。'}</p>}</section>
     <StructuredPlanDetails plan={plan} />
   </section>;
 }

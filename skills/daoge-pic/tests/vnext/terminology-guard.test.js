@@ -130,6 +130,36 @@ test('创作者面的可见文案里没有「收回」级术语', () => {
   assert.deepEqual(violations, [], '这些创作者面文案里还留着实现词，换成人话或下沉到技术详情层：\n' + violations.join('\n'));
 });
 
+test('创作者面的可见文案里也没有「译好」级术语（技术详情层白名单除外）', () => {
+  const translated = terminology.translatedInVisibleCopy();
+  const allowed = [...terminology.ADVANCED_DETAILS_ALLOWED_COPY];
+  const violations = [];
+  for (const name of CREATOR_FACE) {
+    for (const copy of visibleCopyStrings(read(name))) {
+      if (allowed.includes(copy)) continue; // 技术详情层：逐条登记，不许整文件放行
+      const hits = translated.filter((word) => copy.includes(word));
+      if (hits.length) violations.push(name + ' | ' + hits.join(',') + ' | ' + JSON.stringify(copy));
+    }
+  }
+  assert.deepEqual(violations, [], '这些创作者面文案还在用内部说法，换成术语单里的创作者说法：\n' + violations.join('\n'));
+});
+
+test('技术详情层白名单没有悄悄长成一整块', () => {
+  const allowed = [...terminology.ADVANCED_DETAILS_ALLOWED_COPY];
+  // 白名单只服务「技术详情」这一层：每条都必须是「预检」相关的短字符串，
+  // 且总量有上限 —— 否则就说明有人在用白名单绕过治理。
+  assert.ok(allowed.length <= 6, '技术详情白名单已经膨胀到 ' + allowed.length + ' 条，检查一下是不是整文件放行了');
+  for (const copy of allowed) {
+    assert.ok(copy.length <= 12, '白名单条目过长，不像技术详情层的短标签：' + copy);
+    assert.ok(allowed.filter((item) => item === copy).length === 1, '白名单条目重复：' + copy);
+  }
+  // 白名单里的每一条都必须在源码里真的存在，防止留下失效条目。
+  for (const copy of allowed) {
+    const owners = listSources().filter((name) => read(name).includes(copy));
+    assert.notDeepEqual(owners, [], '白名单条目在源码里已经找不到了：' + copy);
+  }
+});
+
 test('扫描器只看可见文案，不看标识符与注释', () => {
   // 这条守的是「口径」本身：上一轮把 providerId / assetScope 这类标识符算进密度表，
   // 得出的数字是虚高的、也没法改。口径必须在测试里钉死。

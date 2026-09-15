@@ -5,8 +5,8 @@ const NODE_TYPE_LABELS = Object.freeze({
   task: '任务',
   round: '轮次',
   plan: '计划',
-  run: '生成运行',
-  run_item: '运行项',
+  run: '本次出图',
+  run_item: '单张出图',
   asset: '项目资产',
   shared_asset: '共享素材',
   delivery: '交付',
@@ -71,17 +71,17 @@ function statusForNode(node) {
 
 function safeSummary(node) {
   const type = node?.entityType;
-  if (type === 'project') return '项目工作区；列表只展示结构化关系和脱敏状态。';
+  if (type === 'project') return '项目工作区；列表只展示结构化关系和隐去隐私的状态。';
   if (type === 'task') return '任务节点；计划、轮次和结果通过谱系关系查看。';
-  if (type === 'plan') return '计划摘要已脱敏；提示词等受保护字段不在此视图展示。';
+  if (type === 'plan') return '计划摘要已隐去隐私；提示词等受保护字段不在此视图展示。';
   if (type === 'task_type' || type === 'style_kit' || type === 'brand_kit') return '结构化资料节点；具体内容不在此视图展示。';
   if (type === 'run_item') {
     const recovery = runItemRecovery(node.entity);
     const error = redactLineageText(recovery.error, 120);
-    return error && !SENSITIVE_FIELD.test(error) ? '脱敏错误摘要：' + error : '运行项状态已脱敏；异常详情请通过既有检查器查看。';
+    return error && !SENSITIVE_FIELD.test(error) ? '隐去隐私的错误摘要：' + error : '这张的状态已隐去隐私；异常详情请通过检查器查看。';
   }
   const candidate = redactLineageText(node?.subtitle, 160);
-  if (!candidate || SENSITIVE_FIELD.test(candidate)) return '结构化摘要已脱敏。';
+  if (!candidate || SENSITIVE_FIELD.test(candidate)) return '摘要已隐去隐私。';
   return candidate;
 }
 
@@ -176,7 +176,7 @@ export function createAccessibleLineage({ nodes = [], connections = [], endpoint
   }).filter(Boolean);
   const coverageRows = [
     { id: 'assets', label: '资产数据', ...safeCoverage(coverage.assets, sourceNodes.filter((node) => node.entityType === 'asset' || node.entityType === 'shared_asset').length) },
-    { id: 'run-items', label: '运行项数据', ...safeCoverage(coverage.runItems, sourceNodes.filter((node) => node.entityType === 'run_item').length) }
+    { id: 'run-items', label: '单张出图数据', ...safeCoverage(coverage.runItems, sourceNodes.filter((node) => node.entityType === 'run_item').length) }
   ];
   const unresolvedRelations = publicConnections.filter((connection) => connection.unresolved).length;
   const complete = coverageRows.every((row) => row.complete) && unresolvedRelations === 0;
@@ -191,7 +191,7 @@ export function createAccessibleLineage({ nodes = [], connections = [], endpoint
       complete,
       unresolvedRelations,
       message: complete
-        ? '当前列表来自已加载的谱系数据；资产与运行项分页均已覆盖，连线已解析。'
+        ? '当前列表来自已加载的谱系数据；资产与单张出图分页均已覆盖，连线已解析。'
         : '当前仅展示已加载数据；loaded / total 未覆盖的分页节点不代表不存在，未加载的连线也不会被冒充为完整谱系。',
       canvasNote: '画布活动窗口的虚拟化只限制画布 DOM；此列表不把虚拟化窗口冒充为完整数据。'
     }

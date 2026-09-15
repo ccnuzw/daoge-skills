@@ -41,7 +41,7 @@ export function planPresentation(plan) {
     size,
     dimensions,
     quality,
-    output: [aspectRatio, resolution, size, dimensions, quality].filter((item) => item !== '未设置').join(' · ') || '由 Provider 能力决定',
+    output: [aspectRatio, resolution, size, dimensions, quality].filter((item) => item !== '未设置').join(' · ') || '由生成服务的能力决定',
     constraintCount: prompt ? prompt.split('.').map((item) => item.trim()).filter(Boolean).length : 0
   };
 }

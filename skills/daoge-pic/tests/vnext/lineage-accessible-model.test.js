@@ -79,9 +79,9 @@ test('uses existing safe status semantics for media and exceptional run states',
   assert.equal(outline.nodes[1].status.label, '媒体不可用');
   assert.equal(outline.nodes[1].status.tone, 'danger');
   assert.equal(outline.nodes[2].status.label, '失败');
-  assert.match(outline.nodes[2].summary, /脱敏错误摘要/);
+  assert.match(outline.nodes[2].summary, /隐去隐私的错误摘要/);
   assert.equal(outline.nodes[3].status.label, '需核实结果');
-  assert.match(outline.nodes[3].summary, /运行项状态已脱敏/);
+  assert.match(outline.nodes[3].summary, /这张的状态已隐去隐私/);
 });
 
 test('marks complete loaded coverage without claiming a virtualized window is the graph', async () => {
