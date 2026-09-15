@@ -42,6 +42,7 @@ import { daemonRestartAvailable, daemonShutdownAvailable, requestDaemonRestart, 
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
 import type { ProcessPoolHealth } from '../runtime/worker-pool';
 import { assertJsonContentType, assertLocalHost, assertLocalWriteOrigin, authenticateLocalRequest, constantTimeTokenEqual, createLocalCapability, imageUploadMediaType, LocalAccessError, localSessionCookie, localSessionCookieName, LocalAuthentication } from './local-auth';
+import { assertRouteAuthorization } from './route-authorization';
 import { ConfirmationGate, planHash } from './confirmation-gate';
 import { canonicalJson } from '../shared/canonical-json';
 import { isSupportedProtocolVersion, protocolStatus, RUNTIME_VERSION, SKILL_PROTOCOL_NAME, SUPPORTED_PROTOCOL_RANGE } from '../shared/protocol';
@@ -991,6 +992,7 @@ export class LocalStudioService {
       assertProtocolCompatibility(request, authentication === 'bearer');
       if (request.method === 'POST' || request.method === 'PUT') assertLocalWriteOrigin(request, this.origin, authentication);
       if (authentication === 'cookie') this.workbenchPresence.recordAuthenticatedConnection();
+      assertRouteAuthorization(parsed.pathname, request.method || 'GET', authentication);
       if (request.method === 'POST' && (parsed.pathname === '/api/workbench/open-claim' || parsed.pathname === '/api/workbench/open-claim/release')) {
         assertJsonContentType(request);
         const body = await readBody(request);
@@ -1060,7 +1062,6 @@ export class LocalStudioService {
       }
       if (request.method === 'GET' && parsed.pathname === '/api/project-templates') return success(response, { templates: listProjectTemplates() });
       if (request.method === 'GET' && parsed.pathname === '/api/confirmed-templates') {
-        if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed templates require Skill/CLI authentication.');
         const includeArchivedValue = parsed.searchParams.get('includeArchived');
         let includeArchived: boolean | undefined;
         if (includeArchivedValue !== null) {
@@ -1078,7 +1079,6 @@ export class LocalStudioService {
       }
       const confirmedTemplateDetailMatch = /^\/api\/confirmed-templates\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && confirmedTemplateDetailMatch) {
-        if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed templates require Skill/CLI authentication.');
         const versionValue = parsed.searchParams.get('version');
         const template = getConfirmedTemplate(this.db, {
           studioId: this.initialized.manifest.studioId,
@@ -1219,8 +1219,6 @@ export class LocalStudioService {
       const assetThumbnailMatch = /^\/api\/assets\/([^/]+)\/thumbnail$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetThumbnailMatch) return await this.assetThumbnail(request, response, assetThumbnailMatch[1]);
       if (request.method === 'GET' && parsed.pathname === '/api/events') return this.events(request, response, parsed);
-      if (request.method === 'POST' && (parsed.pathname === '/api/confirmed-templates' || /^\/api\/confirmed-templates\/[^/]+\/(?:archive|rollback)$/.test(parsed.pathname)) && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
-      if (request.method === 'POST' && parsed.pathname === '/api/budget' && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Budget writes require Skill/CLI authentication.');
       if (request.method !== 'POST' && request.method !== 'PUT') return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
       if (request.method === 'POST' && parsed.pathname === '/api/assets/import') return await this.importAsset(request, response);
       assertJsonContentType(request);
@@ -1232,8 +1230,6 @@ export class LocalStudioService {
   }
 
   private async write(request: IncomingMessage, response: ServerResponse, pathname: string, body: JsonBody, authentication: LocalAuthentication): Promise<void> {
-    const confirmedTemplateMutation = pathname === '/api/confirmed-templates' || /^\/api\/confirmed-templates\/[^/]+\/(?:archive|rollback)$/.test(pathname);
-    if (confirmedTemplateMutation && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
     const providerSecretAction = pathname === '/api/provider-models' || /^\/api\/providers\/[^/]+\/(?:validate|test|models)$/.test(pathname);
     // 这三个端点会读取 Provider 密钥、并以它发起真实出网请求，所以必须确认请求来自本机这个页面。
     //
@@ -1252,7 +1248,6 @@ export class LocalStudioService {
     const putAllowed = /^\/api\/providers\/[^/]+$/.test(pathname) || /^\/api\/deliveries\/[^/]+\/items$/.test(pathname) || /^\/api\/rounds\/[^/]+\/draft-context$/.test(pathname);
     if (request.method === 'PUT' && !putAllowed) return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
     if (pathname === '/api/backup/restore-dry-run' && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup restore dry-run requires Skill/CLI authentication.');
       assertAllowedBodyKeys(body, ['sourceRoot', 'manifest', 'expectedStudio'], 'Backup restore dry-run');
       const expectedStudio = body.expectedStudio === undefined ? {
         studioId: this.initialized.manifest.studioId,
@@ -1273,11 +1268,9 @@ export class LocalStudioService {
       }
     }
     if (pathname === '/api/backup/restore' && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup restore requires Skill/CLI authentication.');
       return json(response, 409, { ok: false, error: { code: 'restore_requires_offline', message: 'Backup restore cannot be applied by a live Studio daemon. Stop the daemon and use the offline CLI action.' } });
     }
     if (pathname === '/api/backup/upgrade-assess' && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup upgrade assessment requires Skill/CLI authentication.');
       assertAllowedBodyKeys(body, ['targetRuntimeVersion', 'targetSchemaVersion', 'targetProtocolVersion', 'rollbackPoint'], 'Backup upgrade assessment');
       // The caller declares only the target. Every "what can this runtime do" fact below is read from this
       // daemon, so a caller can no longer certify its own upgrade by claiming a wider supported range.
@@ -1303,7 +1296,6 @@ export class LocalStudioService {
       }
     }
     if (pathname === '/api/backup/rollback-point' && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Backup rollback point requires Skill/CLI authentication.');
       assertAllowedBodyKeys(body, ['manifest', 'runtimeVersion', 'schemaVersion', 'createdAt'], 'Backup rollback point');
       try {
         const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'backup.rollback_point', () => buildUpgradeRollbackPoint({
@@ -1318,7 +1310,6 @@ export class LocalStudioService {
       }
     }
     if (pathname === '/api/budget' && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Budget writes require Skill/CLI authentication.');
       assertAllowedBodyKeys(body, ['profileId', 'limitCostMinor', 'costUnit'], 'Budget');
       const input = {
         studioId: this.initialized.manifest.studioId,
@@ -1330,7 +1321,6 @@ export class LocalStudioService {
       return success(response, { value: publicValue(receipt.value), replayed: receipt.replayed });
     }
     if (pathname === '/api/confirmed-templates' && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
       const input: SaveConfirmedTemplateInput = {
         studioId: this.initialized.manifest.studioId,
         templateType: text(body.templateType) as ConfirmedTemplateType,
@@ -1348,14 +1338,12 @@ export class LocalStudioService {
     }
     const confirmedTemplateArchiveMatch = /^\/api\/confirmed-templates\/([^/]+)\/archive$/.exec(pathname);
     if (confirmedTemplateArchiveMatch && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
       const input = { studioId: this.initialized.manifest.studioId, templateId: confirmedTemplateArchiveMatch[1] };
       const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'confirmed_templates.archive', () => archiveConfirmedTemplate(this.db, input), input);
       return success(response, { value: publicValue(receipt.value), replayed: receipt.replayed });
     }
     const confirmedTemplateRollbackMatch = /^\/api\/confirmed-templates\/([^/]+)\/rollback$/.exec(pathname);
     if (confirmedTemplateRollbackMatch && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
       const input = { studioId: this.initialized.manifest.studioId, templateId: confirmedTemplateRollbackMatch[1], version: numberValue(body.version) };
       const receipt = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'confirmed_templates.rollback', () => rollbackConfirmedTemplate(this.db, input), input);
       return success(response, { value: publicValue(receipt.value), replayed: receipt.replayed });
@@ -1367,7 +1355,6 @@ export class LocalStudioService {
       return;
     }
     if (pathname === '/api/shutdown' && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '只有当前 Skill/CLI 可以关闭 Studio daemon。');
       if (!daemonShutdownAvailable()) throw new InvalidCommandError('当前服务不是受控 daemon，无法关闭。');
       success(response, { shuttingDown: true });
       setImmediate(() => requestDaemonShutdown());
@@ -1586,7 +1573,6 @@ export class LocalStudioService {
     const confirmMatch = /^\/api\/rounds\/([^/]+)\/confirm$/.exec(pathname);
     if (confirmMatch) {
       this.assertRoundInStudio(confirmMatch[1]);
-      if (authentication !== 'cookie') throw new LocalAccessError(403, 'forbidden', '创作确认必须由已授权 Workbench 中的真实用户完成。');
       const roundId = confirmMatch[1];
       const sessionId = text(body.sessionId);
       const expectedVersion = numberValue(body.expectedVersion);
@@ -1618,7 +1604,6 @@ export class LocalStudioService {
     }
     const preflightMatch = /^\/api\/rounds\/([^/]+)\/preflight$/.exec(pathname);
     if (preflightMatch) {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '预检必须由当前智能体会话在用户确认后提交。');
       assertAllowedBodyKeys(body, ['sessionId', 'executionConcurrency', 'concurrencySource', 'usageEstimate'], 'Preflight');
       this.assertRoundInStudio(preflightMatch[1]);
       this.assertConfirmedRoundSession(preflightMatch[1], text(body.sessionId));
@@ -1636,7 +1621,6 @@ export class LocalStudioService {
       return success(response, { ...receipt, value: { ...receipt.value, confirmToken } });
     }
     if (pathname === '/api/runs') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '生成运行必须由当前智能体会话在用户确认后提交。');
       const roundId = text(body.roundId);
        const preflightId = text(body.preflightId);
        this.assertRoundInStudio(roundId);
@@ -1668,7 +1652,6 @@ export class LocalStudioService {
     }
     const externalReconciliationMatch = /^\/api\/runs\/([^/]+)\/items\/([^/]+)\/reconcile$/.exec(pathname);
     if (externalReconciliationMatch && request.method === 'POST') {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '外部请求对账必须由当前 Skill/CLI 显式发起。');
       const runId = externalReconciliationMatch[1];
       const itemId = externalReconciliationMatch[2];
       this.assertRunInStudio(runId);
@@ -1696,12 +1679,11 @@ export class LocalStudioService {
       return success(response, result);
     }
     const pauseMatch = /^\/api\/runs\/([^/]+)\/pause$/.exec(pathname);
-    if (pauseMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); this.assertRunInStudio(pauseMatch[1]); return success(response, pauseGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: pauseMatch[1], idempotencyKey: key })); }
+    if (pauseMatch) { this.assertRunInStudio(pauseMatch[1]); return success(response, pauseGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: pauseMatch[1], idempotencyKey: key })); }
     const resolveUnknownMatch = /^\/api\/runs\/([^/]+)\/outcomes\/resolve$/.exec(pathname);
-    if (resolveUnknownMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); const itemIds = boundedIds(body.itemIds, 'itemIds') || []; this.assertRunInStudio(resolveUnknownMatch[1]); for (const itemId of itemIds) this.assertRunItemInStudio(itemId); return success(response, resolveUnknownRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: resolveUnknownMatch[1], itemIds, idempotencyKey: key })); }
+    if (resolveUnknownMatch) { const itemIds = boundedIds(body.itemIds, 'itemIds') || []; this.assertRunInStudio(resolveUnknownMatch[1]); for (const itemId of itemIds) this.assertRunItemInStudio(itemId); return success(response, resolveUnknownRunItems(this.db, { studioId: this.initialized.manifest.studioId, runId: resolveUnknownMatch[1], itemIds, idempotencyKey: key })); }
     const retryMatch = /^\/api\/runs\/([^/]+)\/retry$/.exec(pathname);
     if (retryMatch) {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。');
       assertAllowedBodyKeys(body, ['itemIds', 'timeoutMs'], 'Run retry');
       const itemIds = boundedIds(body.itemIds, 'itemIds', { optional: true });
       const timeoutMs = body.timeoutMs === undefined ? undefined : numberValue(body.timeoutMs);
@@ -1711,7 +1693,6 @@ export class LocalStudioService {
     }
     const resumeMatch = /^\/api\/runs\/([^/]+)\/resume$/.exec(pathname);
     if (resumeMatch) {
-      if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行恢复必须由当前 Skill/CLI 在用户重新确认后提交。');
       this.assertRunInStudio(resumeMatch[1]);
       const sessionId = text(body.sessionId);
       this.assertResumeSession(resumeMatch[1], sessionId);
@@ -1723,7 +1704,7 @@ export class LocalStudioService {
       return success(response, resumeGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: resumeMatch[1], sessionId, idempotencyKey: key }));
     }
     const cancelMatch = /^\/api\/runs\/([^/]+)\/cancel$/.exec(pathname);
-    if (cancelMatch) { if (authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', '运行控制必须由当前 Skill/CLI 发起。'); this.assertRunInStudio(cancelMatch[1]); return success(response, cancelGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: cancelMatch[1], idempotencyKey: key })); }
+    if (cancelMatch) { this.assertRunInStudio(cancelMatch[1]); return success(response, cancelGenerationRun(this.db, { studioId: this.initialized.manifest.studioId, runId: cancelMatch[1], idempotencyKey: key })); }
     const reviewMatch = /^\/api\/assets\/([^/]+)\/review$/.exec(pathname);
     if (reviewMatch && request.method === 'POST') {
       assertAllowedBodyKeys(body, ['decision', 'taskId', 'roundId', 'context', 'feedback'], 'Review');

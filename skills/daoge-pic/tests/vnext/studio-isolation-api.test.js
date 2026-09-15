@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { startLocalStudioService } = require('../../dist/vnext/api/server');
-const { requestJson } = require('./local-studio-test-helper');
+const { requestJson, requestJsonAsWorkbench } = require('./local-studio-test-helper');
 
 
 
@@ -63,7 +63,9 @@ test('public project, task, round, run, and run-item APIs reject foreign Studio 
       ['/api/tasks', { method: 'POST', idempotencyKey: 'foreign-task', body: { projectId: 'project_foreign_matrix', name: 'Blocked' } }],
       ['/api/rounds', { method: 'POST', idempotencyKey: 'foreign-round', body: { taskId: 'task_foreign_matrix', purpose: 'exploration' } }],
       ['/api/rounds/round_foreign_matrix/plan', { method: 'POST', idempotencyKey: 'foreign-prepare', body: { expectedVersion: 1, plan: {} } }],
-      ['/api/rounds/round_foreign_matrix/confirm', { method: 'POST', idempotencyKey: 'foreign-confirm', body: { expectedVersion: 1 } }],
+      // 创作确认只接受 Workbench 真人会话，所以智能体令牌在鉴权这一步就被拦下（403），
+      // 根本走不到轮次归属校验。它作为 cookie 调用方的隔离性由下面的单独一项覆盖。
+      ['/api/rounds/round_foreign_matrix/confirm', { method: 'POST', idempotencyKey: 'foreign-confirm', body: { expectedVersion: 1 } }, { status: 403, code: 'forbidden' }],
       ['/api/rounds/round_foreign_matrix/preflight', { method: 'POST', idempotencyKey: 'foreign-preflight', body: {} }],
       ['/api/runs', { method: 'POST', idempotencyKey: 'foreign-queue', body: { roundId: 'round_foreign_matrix', preflightId: 'dryrun_foreign_matrix' } }],
       ['/api/runs/run_foreign_matrix/pause', { method: 'POST', idempotencyKey: 'foreign-pause', body: {} }],
@@ -74,11 +76,15 @@ test('public project, task, round, run, and run-item APIs reject foreign Studio 
       ['/api/projects/project_foreign_matrix/canvas-layout', { method: 'POST', idempotencyKey: 'foreign-layout', body: { scopeType: 'project', scopeId: 'project_foreign_matrix', viewport: { x: 0, y: 0, k: 1 }, nodes: [] } }]
     ];
 
-    for (const [pathname, options] of checks) {
+    for (const [pathname, options, expected = { status: 404, code: 'not_found' }] of checks) {
       const response = await requestJson(started, pathname, options);
-      assert.equal(response.status, 404, pathname);
-      assert.equal(response.body.error.code, 'not_found', pathname);
+      assert.equal(response.status, expected.status, pathname);
+      assert.equal(response.body.error.code, expected.code, pathname);
     }
+    // 确认端点换回它真正的调用方（Workbench 会话）后，仍然要按轮次归属拒绝。
+    const confirmAsWorkbench = await requestJsonAsWorkbench(started, '/api/rounds/round_foreign_matrix/confirm', { method: 'POST', idempotencyKey: 'foreign-confirm-cookie', body: { expectedVersion: 1 } });
+    assert.equal(confirmAsWorkbench.status, 404, '/api/rounds/round_foreign_matrix/confirm (cookie)');
+    assert.equal(confirmAsWorkbench.body.error.code, 'not_found', '/api/rounds/round_foreign_matrix/confirm (cookie)');
     assert.deepEqual(databaseCounts(db), before);
   } finally {
     if (started) await started.service.close();
