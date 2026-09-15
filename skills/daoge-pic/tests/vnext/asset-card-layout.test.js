@@ -1,14 +1,12 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readSource, readStyles } = require('./source-text');
 
-const skillRoot = path.resolve(__dirname, '../..');
 
 test('asset cards tuck status help away, keep action labels readable, and show full thumbnails', () => {
-  const source = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
-  const legend = fs.readFileSync(path.join(skillRoot, 'web/src/asset-state-legend.jsx'), 'utf8');
+  const source = readFrontendSource();
+  const styles = readStyles();
+  const legend = readFrontendSource();
   const assetCard = source.slice(source.indexOf('function AssetCard('), source.indexOf('class WorkbenchErrorBoundary'));
   const previewEnd = assetCard.search(/\r?\n    <\/div>\r?\n    \{menuOpen && <div className="asset-action-menu"/);
   assert.ok(previewEnd > 0);
@@ -52,7 +50,7 @@ test('asset cards tuck status help away, keep action labels readable, and show f
   assert.match(styles, /\.asset-action-menu \.creative-action-card b,\.asset-action-menu \.creative-action-card small \{ overflow:visible; text-overflow:clip; white-space:normal; \}/);
   assert.match(styles, /\.asset-action-menu \.creative-action-panel \{ gap:10px; padding:10px; max-height:none; overflow:visible; \}/);
   assert.match(source, /<div className="project-index-list">/);
-  assert.doesNotMatch(source, /project-index-grid/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /project-index-grid/);
   assert.doesNotMatch(styles, /project-index-grid/);
   assert.match(styles, /\.selection-strip-items article > button\.selection-remove \{ position:absolute; top:7px; right:7px;.*width:24px; height:24px;/);
   assert.match(source, /Activity, Archive, Bookmark/);

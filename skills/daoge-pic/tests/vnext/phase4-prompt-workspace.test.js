@@ -1,9 +1,8 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource } = require('./source-text');
 
 test('PromptWorkspace clears the selected version comparison when its round changes', () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '../../web/src/prompt-workspace.jsx'), 'utf8');
+  const source = readFrontendSource();
   assert.match(source, /useEffect\(\(\) => \{ setComparison\(\[\]\); \}, \[round\?\.id\]\)/);
 });

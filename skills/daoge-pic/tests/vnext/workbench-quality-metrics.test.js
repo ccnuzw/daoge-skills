@@ -1,12 +1,10 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource } = require('./source-text');
 
-const skillRoot = path.resolve(__dirname, '../..');
 
 function source() {
-  return fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  return readFrontendSource();
 }
 
 test('project overview exposes scoped quality metrics with recoverable loading', () => {

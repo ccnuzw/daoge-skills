@@ -1,14 +1,12 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readSource } = require('./source-text');
 
-const skillRoot = path.resolve(__dirname, '../..');
 
 test('creator delivery is the unique registered delivery renderer', () => {
-  const source = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  const source = readFrontendSource();
   assert.match(source, /const viewRenderers = \{/);
   assert.match(source, /deliveries: \(\) => <CreatorDelivery/);
   assert.match(source, /const renderActiveView = viewRenderers\[routeView\]/);
-  assert.doesNotMatch(source, /__legacy_deliveries__|DeliveryComposer/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /__legacy_deliveries__|DeliveryComposer/);
 });

@@ -1,13 +1,11 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readSource } = require('./source-text');
 
-const skillRoot = path.resolve(__dirname, '../..');
 
 test('creator delivery keeps the normal path focused and exposes direct picture access', () => {
-  const delivery = fs.readFileSync(path.join(skillRoot, 'web/src/creator-delivery.jsx'), 'utf8');
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  const delivery = readFrontendSource();
+  const main = readFrontendSource();
   assert.match(delivery, /挑选图片/);
   assert.match(delivery, /按草稿、准备、导出三个阶段完成交付/);
   assert.match(delivery, /创建唯一草稿/);
@@ -27,5 +25,5 @@ test('creator delivery keeps the normal path focused and exposes direct picture 
   assert.match(delivery, /creator-asset-archive-select/);
   assert.match(main, /projectArchiveUrl/);
   assert.match(main, /deliveryArchiveUrl/);
-  assert.doesNotMatch(main, /__legacy_deliveries__|DeliveryComposer/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /__legacy_deliveries__|DeliveryComposer/);
 });

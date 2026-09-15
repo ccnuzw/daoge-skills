@@ -1,10 +1,9 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readSource } = require('./source-text');
 
 test('Workbench exposes the confirmation gate on the current pending plan view', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../web/src/main.jsx'), 'utf8');
+  const source = readFrontendSource();
   assert.match(source, /prompts: \(\) => <>.*human-confirmation-gate/s);
   assert.match(source, /selectedRound\?\.status === 'awaiting_confirmation'/);
   assert.match(source, /审阅并确认计划/);
@@ -12,7 +11,7 @@ test('Workbench exposes the confirmation gate on the current pending plan view',
 });
 
 test('Workbench confirms a plan without preflighting or queueing a generation run', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../web/src/main.jsx'), 'utf8');
+  const source = readFrontendSource();
   const start = source.indexOf('const confirmGenerationPlan = async () => {');
   const end = source.indexOf('const openArchiveConfirmation =', start);
   assert.notEqual(start, -1);
@@ -24,6 +23,6 @@ test('Workbench confirms a plan without preflighting or queueing a generation ru
   // 工程细节搬进技术详情层（note），人话在上：确认之后会怎样，见 confirmationPlanSummary。
   assert.match(source, /确认本身不会调用生成服务/);
   assert.match(source, /confirmationPlanSummary\(generationConfirmation\.round\)/);
-  assert.doesNotMatch(source, /确认不会调用 Provider/);
-  assert.doesNotMatch(source, /确认并开始生成/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /确认不会调用 Provider/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /确认并开始生成/);
 });

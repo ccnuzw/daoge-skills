@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readSource } = require('./source-text');
 
 test('learning center covers every core Studio domain with structured guidance', async () => {
   const { LEARNING_FILTERS, LEARNING_PHASES, LEARNING_TOPICS } = await import('../../web/src/learning-center-content.mjs');
@@ -83,13 +84,12 @@ test('learning center matches the stable session, Provider, preflight, history, 
   assert.match(library, /项目内打开规则资料不关闭当前项目/);
   assert.match(library, /不绑定任务、轮次、计划或运行/);
 });
-const fs = require('node:fs');
 const path = require('node:path');
 
 test('learning center only deep-links to Studio-global views', () => {
   const skillRoot = path.resolve(__dirname, '../..');
-  const source = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const content = fs.readFileSync(path.join(skillRoot, 'web/src/learning-center-content.mjs'), 'utf8');
+  const source = readFrontendSource();
+  const content = readSource('web/src/learning-center-content.mjs');
   assert.match(source, /<LearningCenter onDismiss=\{dismissGuide\} onNavigate=\{\([^)]*\) => navigateRoute\(\{ view: [^}]+ \}\)\} \/>/);
   assert.match(content, /action: 'projects'/);
   assert.doesNotMatch(content, /action: 'library'/);

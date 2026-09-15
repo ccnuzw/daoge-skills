@@ -1,10 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readFrontendSource, readSource } = require('./source-text');
 
 const modelPath = '../../web/src/lineage-accessible-model.mjs';
-const skillRoot = path.resolve(__dirname, '../..');
 
 function node(entityType, entityId, extra = {}) {
   return { key: entityType + ':' + entityId, entityType, entityId, title: entityType + ' title', subtitle: '', status: 'active', ...extra };
@@ -102,7 +100,7 @@ test('marks complete loaded coverage without claiming a virtualized window is th
 });
 
 test('ordinary lineage canvas keeps raw plan prompts, errors, paths, and keys out of UI/search contracts', () => {
-  const lineage = fs.readFileSync(path.join(skillRoot, 'web/src/creative-lineage-canvas.jsx'), 'utf8');
+  const lineage = readFrontendSource();
   const haystack = lineage.match(/function nodeSearchHaystack[\s\S]*?\n}/)?.[0] || '';
   const details = lineage.match(/function roundPlanDetails[\s\S]*?\n}/)?.[0] || '';
   const actions = lineage.match(/function PlanActions[\s\S]*?function LineageAssetGetActions/)?.[0] || '';
@@ -119,7 +117,7 @@ test('ordinary lineage canvas keeps raw plan prompts, errors, paths, and keys ou
   assert.doesNotMatch(details, /prompt\s*=\s*.*plan\.description/);
   assert.doesNotMatch(actions, /detail\.prompt(?!Notice)/);
   assert.doesNotMatch(haystack, /prompt|description|error|brief/);
-  assert.doesNotMatch(lineage, /node\.planDetail\?\.prompt/);
-  assert.doesNotMatch(lineage, /<p>\{item\.error/);
-  assert.doesNotMatch(lineage, /project\.description \|\| '项目工作区'\)\.slice/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /node\.planDetail\?\.prompt/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /<p>\{item\.error/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /project\.description \|\| '项目工作区'\)\.slice/);
 });

@@ -2,12 +2,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readSource, readStyles } = require('./source-text');
 
 const skillRoot = path.resolve(__dirname, '../..');
 
 test('project assets expose page selection, configurable pagination, and multi-file import', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
+  const main = readFrontendSource();
+  const styles = readStyles();
   assert.match(main, /全选本页/);
   assert.match(main, /取消全选本页/);
   assert.match(main, /ASSET_PAGE_SIZES/);
@@ -24,7 +25,7 @@ test('project assets expose page selection, configurable pagination, and multi-f
   assert.match(main, />创作平台<\/button>/);
   assert.match(main, />生成历史<\/button>/);
   assert.match(main, />轮次对比<\/button>/);
-  assert.doesNotMatch(main, /className="task-more-tabs"/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /className="task-more-tabs"/);
   assert.match(main, /if \(!session\) void openWorkbenchSession\(\)\.catch/);
   assert.match(main, /\[session\?\.id, session\?\.version, eventRevision\.planVersions/);
   assert.match(main, /复制完整提示词/);
@@ -38,13 +39,13 @@ test('project assets expose page selection, configurable pagination, and multi-f
   assert.match(main, /advanced-dry-run-card/);
   assert.match(main, /advanced-fact-grid/);
   assert.match(main, /查看原始摘要/);
-  assert.doesNotMatch(main, /JSON\.stringify\(evidence\.details\)<\/p>/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /JSON\.stringify\(evidence\.details\)<\/p>/);
   assert.match(styles, /\.advanced-preflight-breakdown/);
 });
 
 test('current plan review exposes per-image prompts before confirmation', () => {
-  const promptWorkspace = fs.readFileSync(path.join(skillRoot, 'web/src/prompt-workspace.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
+  const promptWorkspace = readFrontendSource();
+  const styles = readStyles();
   assert.match(promptWorkspace, /function PlanReviewPanel/);
   assert.match(promptWorkspace, /逐图提示词/);
   assert.match(promptWorkspace, /Specific scene direction for this image:/);
@@ -54,16 +55,16 @@ test('current plan review exposes per-image prompts before confirmation', () => 
   assert.match(promptWorkspace, /复制原始数据/);
   assert.match(promptWorkspace, /原始计划结构/);
   assert.match(promptWorkspace, /查看原始数据/);
-  assert.doesNotMatch(promptWorkspace, /结构化 JSON|原始 JSON/);
+  assert.doesNotMatch(readSource('web/src/prompt-workspace.jsx'), /结构化 JSON|原始 JSON/);
   assert.match(promptWorkspace, /OPENAI_GPT_IMAGE_PROMPT_LIMIT = 32000/);
   assert.match(styles, /\.prompt-review-metrics/);
   assert.match(styles, /\.prompt-item-card/);
   assert.match(promptWorkspace, /function ReferenceMaterialsSection/);
   assert.match(promptWorkspace, /rawSummaryGroups/);
-  assert.doesNotMatch(promptWorkspace, /function PromptStructureSection/);
-  assert.doesNotMatch(promptWorkspace, /提示词独占展示/);
-  assert.doesNotMatch(promptWorkspace, /<PromptStructureSection plan=\{plan\}/);
-  assert.doesNotMatch(promptWorkspace, /\['提示词', \[\['prompt'/);
+  assert.doesNotMatch(readSource('web/src/prompt-workspace.jsx'), /function PromptStructureSection/);
+  assert.doesNotMatch(readSource('web/src/prompt-workspace.jsx'), /提示词独占展示/);
+  assert.doesNotMatch(readSource('web/src/prompt-workspace.jsx'), /<PromptStructureSection plan=\{plan\}/);
+  assert.doesNotMatch(readSource('web/src/prompt-workspace.jsx'), /\['提示词', \[\['prompt'/);
   assert.match(styles, /\.prompt-raw-layout/);
   assert.doesNotMatch(styles, /\.prompt-raw-prompt-section/);
   assert.match(styles, /\.prompt-raw-material-table/);
@@ -74,10 +75,10 @@ test('current plan review exposes per-image prompts before confirmation', () => 
 });
 
 test('Workbench exposes Studio-first creation controls without a second chat flow', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
+  const main = readFrontendSource();
+  const styles = readStyles();
   const projectTemplates = fs.readFileSync(path.join(skillRoot, 'src/vnext/domain/project-templates.ts'), 'utf8');
-  assert.doesNotMatch(main, /PROJECT_CREATION_TEMPLATES/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /PROJECT_CREATION_TEMPLATES/);
   assert.match(main, /PROJECT_TEMPLATE_UNAVAILABLE/);
   assert.match(main, /GENERIC_TASK_GOAL_FALLBACKS/);
   assert.match(main, /ROUND_PURPOSE_OPTIONS/);
@@ -88,8 +89,8 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /id: 'fill',[\s\S]*defaultCount: '2',[\s\S]*defaultAspectRatio: '16:9'/);
   assert.match(main, /setIfEmptyOrDefault\(setTargetCount, previous\.defaultCount, option\.defaultCount\)/);
   assert.match(main, /setTargetCount\(selectedGoal\.defaultCount \|\| ''\)/);
-  assert.doesNotMatch(main, /TASK_CREATION_GOALS/);
-  assert.doesNotMatch(main, /ROUND_CREATION_PURPOSES/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /TASK_CREATION_GOALS/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /ROUND_CREATION_PURPOSES/);
   assert.match(main, /两条入口、一条流程/);
   assert.match(main, /新建项目/);
   assert.match(main, /新建任务/);
@@ -103,7 +104,7 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /projectTemplateDefaultName/);
   assert.match(main, /CreationSuggestionChips/);
   assert.match(main, /项目说明示例/);
-  assert.doesNotMatch(main, /创建后建议|创建完成提示|nextSteps/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /创建后建议|创建完成提示|nextSteps/);
   for (const handlerName of ['createProjectFromStudio', 'createTaskFromStudio', 'createRoundFromStudio']) {
     const start = main.indexOf('  const ' + handlerName + ' =');
     const end = main.indexOf('\n  const ', start + 1);
@@ -115,10 +116,10 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /defaultVariationAxes/);
   assert.match(main, /defaultRefinementGoals/);
   assert.match(main, /扩展或补充方向/);
-  assert.doesNotMatch(main, /CreationNextGuide/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /CreationNextGuide/);
   assert.match(main, /继续操作/);
-  assert.doesNotMatch(main, /回到 Agent 可直接说/);
-  assert.doesNotMatch(main, /外部 Provider 调用仍必须由 Agent/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /回到 Agent 可直接说/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /外部 Provider 调用仍必须由 Agent/);
   assert.match(main, /taskGoalsForProjectTemplate/);
   assert.match(main, /creation-template-bridge/);
   assert.match(main, /项目模板联动/);
@@ -133,10 +134,10 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(projectTemplates, /商品主体图/);
   assert.match(projectTemplates, /defaultCount: '8'/);
   assert.match(projectTemplates, /defaultAspectRatio: '1:1'/);
-  assert.doesNotMatch(main, /商品主图探索/);
-  assert.doesNotMatch(main, /商品主体图/);
-  assert.doesNotMatch(main, /defaultCount: '8'/);
-  assert.doesNotMatch(main, /defaultAspectRatio: '1:1'/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /商品主图探索/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /商品主体图/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /defaultCount: '8'/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /defaultAspectRatio: '1:1'/);
   assert.match(main, /DERIVED_VARIATION_AXES/);
   assert.match(main, /DERIVED_REFINEMENT_GOALS/);
   assert.match(main, /希望保持不变/);
@@ -156,8 +157,8 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(styles, /\.creation-template-bridge/);
 });
 test('Workbench exposes a creator-facing reference material selector for draft rounds', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
+  const main = readFrontendSource();
+  const styles = readStyles();
   assert.match(main, /REFERENCE_USAGE_OPTIONS/);
   assert.match(main, /ReferenceAssetDialog/);
   assert.match(main, /选择本轮参考素材/);
@@ -179,15 +180,15 @@ test('Workbench exposes a creator-facing reference material selector for draft r
 });
 
 test('delivery page exposes a visible all-images selection action', () => {
-  const delivery = fs.readFileSync(path.join(skillRoot, 'web/src/creator-delivery.jsx'), 'utf8');
+  const delivery = readFrontendSource();
   assert.match(delivery, /全选全部.*assets\.length.*张/);
   assert.match(delivery, /取消全选/);
   assert.match(delivery, /打包下载.*selected\.length.*张/);
 });
 
 test('image preview can select deliverables and the selection strip keeps removal compact', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
+  const main = readFrontendSource();
+  const styles = readStyles();
   assert.match(main, /inspector-select-control/);
   assert.match(main, /onChange=\{\(\) => void onToggleDeliverable\(asset\)\}/);
   assert.match(main, /className="selection-item"/);
@@ -197,11 +198,11 @@ test('image preview can select deliverables and the selection strip keeps remova
 });
 
 test('Workbench exposes one shared image action launcher and structured reject-to-round flow', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const lineage = fs.readFileSync(path.join(skillRoot, 'web/src/creative-lineage-canvas.jsx'), 'utf8');
-  const launcher = fs.readFileSync(path.join(skillRoot, 'web/src/creative-action-launcher.jsx'), 'utf8');
-  const actions = fs.readFileSync(path.join(skillRoot, 'web/src/creative-actions.mjs'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
+  const main = readFrontendSource();
+  const lineage = readFrontendSource();
+  const launcher = readFrontendSource();
+  const actions = readSource('web/src/creative-actions.mjs');
+  const styles = readStyles();
   assert.match(actions, /CREATIVE_ACTION_ENTRIES/);
   assert.match(actions, /more-similar/);
   assert.match(actions, /feedback-to-next-round/);
@@ -216,7 +217,7 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   // 旧文案「不会确认、预检、创建 Generation Run 或访问 Provider」是工程话，已随第一批术语治理收敛。
   assert.match(launcher, /import \{ DRAFT_BOUNDARY_COPY \} from '\.\/boundary-copy\.mjs'/);
   assert.match(launcher, /\{DRAFT_BOUNDARY_COPY\}/);
-  assert.doesNotMatch(launcher, /创建 Generation Run|访问 Provider/);
+  assert.doesNotMatch(readSource('web/src/creative-action-launcher.jsx'), /创建 Generation Run|访问 Provider/);
   assert.match(main, /writeImageBlobToClipboard/);
   assert.match(main, /convertImageBlobToPng/);
   assert.match(main, /ClipboardItem\.supports/);
@@ -240,7 +241,7 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(main, /为什么不采用/);
   assert.match(main, /同时加入当前这一轮作为反例参考/);
   assert.match(lineage, /LineageAssetGetActions/);
-  assert.doesNotMatch(lineage, /function LineageContinueMenu|function LineageReferenceActions|function LineageCreativeActions/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /function LineageContinueMenu|function LineageReferenceActions|function LineageCreativeActions/);
   assert.match(styles, /\.creative-action-launcher/);
   assert.match(styles, /\.creative-action-panel/);
   assert.match(styles, /\.creative-action-card/);
@@ -263,22 +264,22 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(main, /parentAssetIds/);
   assert.match(styles, /\.mask-lite-panel/);
   assert.match(styles, /\.mask-lite-actions/);
-  assert.doesNotMatch(main, /推荐下一步|ContextActionRecommendations|推荐动作只创建\/选择上下文/);
-  assert.doesNotMatch(lineage, /lineage-next-actions|标记保留|标记待复核|标记可衍生/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /推荐下一步|ContextActionRecommendations|推荐动作只创建\/选择上下文/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /lineage-next-actions|标记保留|标记待复核|标记可衍生/);
   assert.doesNotMatch(styles, /context-action-recommendations|context-action-row|lineage-next-actions|project-next-step/);
   assert.match(main, /className="asset-action-menu"/);
   assert.match(styles, /\.asset-action-menu/);
-  assert.doesNotMatch(main, /WorkspaceActionMenu|工作台统一动作入口|行动入口只创建上下文/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /WorkspaceActionMenu|工作台统一动作入口|行动入口只创建上下文/);
   assert.doesNotMatch(styles, /\.workspace-action-menu|\.workspace-action-panel/);
   assert.match(main, /asset-action-section/);
   assert.match(styles, /\.asset-action-section/);
-  assert.doesNotMatch(main, /className="asset-action-group"/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /className="asset-action-group"/);
 });
 
 test('Workbench confirmations use the shared accessible modal instead of native dialogs', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const provider = fs.readFileSync(path.join(skillRoot, 'web/src/provider-settings.jsx'), 'utf8');
-  const confirmation = fs.readFileSync(path.join(skillRoot, 'web/src/confirmation-dialog.jsx'), 'utf8');
+  const main = readFrontendSource();
+  const provider = readFrontendSource();
+  const confirmation = readFrontendSource();
   assert.doesNotMatch(main + provider, /window\.(?:alert|confirm|prompt)|\b(?:alert|confirm|prompt)\s*\(/);
   assert.match(main, /<ConfirmationDialog/);
   assert.match(main, /归档后将关闭该项目下的任务与轮次/);
@@ -287,7 +288,7 @@ test('Workbench confirmations use the shared accessible modal instead of native 
   assert.match(main, /error=\{confirmationError\}/);
   assert.match(main, /onCancel=\{dismissConfirmation\}/);
   assert.match(main, /onConfirm=\{confirmPendingAction\}/);
-  assert.doesNotMatch(main, /archiveProjectAction|trash\(confirmation\.assetId/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /archiveProjectAction|trash\(confirmation\.assetId/);
   assert.match(provider, /<ConfirmationDialog/);
   assert.match(confirmation, /<AccessibleDialog/);
   assert.match(confirmation, /confirmation-dialog-actions/);
@@ -337,23 +338,23 @@ test('Workbench guards injected diagnostics timer callbacks without hiding app e
 });
 
 test('lineage canvas preserves group soft links as layout endpoints', () => {
-  const lineage = fs.readFileSync(path.join(skillRoot, 'web/src/creative-lineage-canvas.jsx'), 'utf8');
+  const lineage = readFrontendSource();
   assert.match(lineage, /endpointByKey/);
   assert.match(lineage, /nodeKey\('group', rendered\.id\)/);
   assert.match(lineage, /payloadEndpointKeys/);
-  assert.doesNotMatch(lineage, /payloadNodeKeys\.has\(nodeKey\(link\.sourceType, link\.sourceId\)\) && payloadNodeKeys\.has/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /payloadNodeKeys\.has\(nodeKey\(link\.sourceType, link\.sourceId\)\) && payloadNodeKeys\.has/);
 });
 
 test('lineage canvas exposes complete data loading and keyboard-accessible overlays', () => {
-  const lineage = fs.readFileSync(path.join(skillRoot, 'web/src/creative-lineage-canvas.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  const lineage = readFrontendSource();
+  const styles = readStyles();
+  const main = readFrontendSource();
   assert.match(main, /runItems=\{lineageVisibleRunItems\}/);
   assert.match(main, /runItemCoverage=\{lineageRunItemCoverage\}/);
   assert.match(main, /loadCompleteLineageAssets\(route/);
   assert.match(lineage, /assetCountLabel/);
   assert.match(lineage, /runItemCountLabel/);
-  assert.doesNotMatch(lineage, /居中选择/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /居中选择/);
   assert.match(lineage, /role="combobox"/);
   assert.match(lineage, /aria-activedescendant=\{activeSearchOptionId\}/);
   assert.match(lineage, /role="listbox"/);
@@ -368,10 +369,10 @@ test('lineage canvas exposes complete data loading and keyboard-accessible overl
 });
 
 test('lineage canvas is the creator-first project workspace', () => {
-  const lineage = fs.readFileSync(path.join(skillRoot, 'web/src/creative-lineage-canvas.jsx'), 'utf8');
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
-  const route = fs.readFileSync(path.join(skillRoot, 'web/src/workbench-route.mjs'), 'utf8');
+  const lineage = readFrontendSource();
+  const main = readFrontendSource();
+  const styles = readStyles();
+  const route = readSource('web/src/workbench-route.mjs');
   assert.match(route, /view: 'lineage', projectId/);
   assert.match(route, /selectTask[\s\S]*view: 'lineage'/);
   assert.match(main, /const projectRounds = roundLists\.flat\(\)/);
@@ -386,11 +387,11 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /画布视角/);
   // 画布 mode 是同一张图的五种看法，名字不得再和左侧一级入口撞车
   // （旧名里「项目地图/资产分支/交付路线」与入口近义、「轮次对比」与页签同名）。
-  assert.doesNotMatch(lineage, /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'轮次对比'/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'轮次对比'/);
   assert.match(lineage, /LineageWorkspaceSummary/);
   assert.match(lineage, /lineage-focus-strip/);
   assert.match(lineage, /toolbarMode/);
-  assert.doesNotMatch(lineage, /创作地图|创作者工作台/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /创作地图|创作者工作台/);
   assert.match(styles, /\.lineage-focus-strip/);
   assert.match(styles, /\.lineage-focus-strip \{ display:grid; grid-template-columns:minmax\(260px,\.9fr\) minmax\(360px,1\.25fr\) minmax\(320px,\.85fr\)/);
   assert.match(lineage, /title=\{description\} onClick=\{\(\) => onMode\(value\)\}><strong>\{label\}<\/strong><\/button>/);
@@ -406,7 +407,7 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /lineage-context-actions/);
   assert.match(lineage, /任务列表/);
   assert.match(lineage, /lineage-mode-grid" role="radiogroup"/);
-  assert.doesNotMatch(lineage, /<details className="lineage-mode-panel"/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /<details className="lineage-mode-panel"/);
   assert.match(lineage, /lineage-edit-more/);
   assert.match(styles, /\.lineage-shell\.has-resources \{ grid-template-columns:minmax\(0,1fr\) 360px/);
   assert.match(styles, /\.lineage-shell\.has-resources \.lineage-resource-panel \{ position:absolute/);
@@ -421,12 +422,12 @@ test('lineage canvas is the creator-first project workspace', () => {
   // 意图不变：画布只展示状态，不直接执行重试。文案随术语治理收成人话（去掉「运行项」）。
   assert.match(lineage, /只展示状态，不直接重试/);
   assert.match(lineage, /暂停、恢复或取消运行请回到当前 Agent 会话处理/);
-  assert.doesNotMatch(lineage, /onControlRun\('(?:pause|resume|cancel)'/);
-  assert.doesNotMatch(lineage, /onRetryRunItem\(item\.id\)/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /onControlRun\('(?:pause|resume|cancel)'/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /onRetryRunItem\(item\.id\)/);
 });
 
 test('Workbench renders route context errors as live alerts', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  const main = readFrontendSource();
   assert.match(main, /contextError && <div className="error-strip" role="alert" aria-live="assertive"/);
   assert.match(main, /关闭错误提示/);
 });

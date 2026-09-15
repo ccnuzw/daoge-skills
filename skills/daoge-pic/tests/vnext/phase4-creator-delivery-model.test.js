@@ -1,9 +1,7 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readSource } = require('./source-text');
 
-const skillRoot = path.resolve(__dirname, '../..');
 
 test('CreatorDelivery phase presentation exposes one action and freezes after operation creation', async () => {
   const { deliveryCompletionPresentation } = await import('../../web/src/creator-delivery-model.mjs');
@@ -50,18 +48,18 @@ test('batch snapshots exclude delivery ids that are not eligible in the active p
 });
 
 test('CreatorDelivery source wires completion, frozen, batchBusy and disables real controls', () => {
-  const source = fs.readFileSync(path.join(skillRoot, 'web/src/creator-delivery.jsx'), 'utf8');
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  const source = readFrontendSource();
+  const main = readFrontendSource();
   assert.match(main, /completion=\{deliveryCompletion\}/);
   assert.match(main, /batchBusy=\{batchBusy\}/);
   assert.match(main, /frozen=\{Boolean\(deliveryCompletion \|\| deliveryCreating\)\}/);
   assert.match(source, /const locked = frozen \|\| deliveryCreating/);
   assert.match(source, /disabled=\{locked\}/);
-  assert.doesNotMatch(main, /__legacy_deliveries__|DeliveryComposer/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /__legacy_deliveries__|DeliveryComposer/);
 });
 
 test('changing the active project clears batch controls before a new submission', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
+  const main = readFrontendSource();
   assert.match(main, /useEffect\(\(\) => \{\s*batchOperationRef\.current = null;\s*setBatchName\(''\);\s*setSelectedDeliveryIds\(new Set\(\)\);\s*\}, \[activeProjectId\]\)/);
   assert.match(main, /eligibleDeliveryIds, name: batchName/);
 });

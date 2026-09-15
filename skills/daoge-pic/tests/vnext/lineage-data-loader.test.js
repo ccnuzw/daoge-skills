@@ -1,7 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readFrontendSource } = require('./source-text');
 
 
 test('lineage data loader reads every run item and asset page', async () => {
@@ -94,7 +93,7 @@ test('lineage asset page failure never emits a completed loading event', async (
 });
 
 test('Workbench wires lineage asset coverage through every loading phase', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../web/src/main.jsx'), 'utf8');
+  const source = readFrontendSource();
   assert.match(source, /const EMPTY_LINEAGE_ASSET_COVERAGE = Object\.freeze\(\{ loaded: 0, total: 0, loading: true \}\)/);
   assert.match(source, /setLineageAssetCoverage\(EMPTY_LINEAGE_ASSET_COVERAGE\)/);
   assert.match(source, /setLineageAssetCoverage\(\{ loaded: streamedAssets\.length, total: nextTotal, loading: true \}\)/);

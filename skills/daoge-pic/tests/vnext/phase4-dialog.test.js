@@ -1,7 +1,6 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readStyles } = require('./source-text');
 
 function fakeElement(name) {
   return { name, hidden: false, focused: false, focus() { this.focused = true; active.current = this; } };
@@ -62,7 +61,7 @@ test('dialog focus session traps Tab, dismisses Escape, and returns focus', asyn
 });
 
 test('AccessibleDialog rerender updates dismiss callback without resetting the mount-only focus session', () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '../../web/src/accessible-dialog.jsx'), 'utf8');
+  const source = readFrontendSource();
   assert.match(source, /dismissRef\.current = onDismiss/);
   assert.match(source, /dismiss: \(\) => dismissRef\.current\(\)/);
   assert.match(source, /useEffect\(\(\) => \{[\s\S]*?\}, \[\]\)/);
@@ -84,8 +83,8 @@ test('dialog background session hides and inerts the app root, then restores its
 });
 
 test('AccessibleDialog uses a portal and a full-viewport dismissible backdrop', () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '../../web/src/accessible-dialog.jsx'), 'utf8');
-  const styles = fs.readFileSync(path.resolve(__dirname, '../../web/src/styles.css'), 'utf8');
+  const source = readFrontendSource();
+  const styles = readStyles();
   assert.match(source, /createPortal/);
   assert.match(source, /accessible-dialog-backdrop/);
   assert.match(source, /onClick=\{\(\) => dismissRef\.current\(\)\}/);

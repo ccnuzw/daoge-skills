@@ -1,9 +1,7 @@
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFrontendSource, readSource } = require('./source-text');
 
-const skillRoot = path.resolve(__dirname, '../..');
 
 function deferred() {
   let resolve;
@@ -67,25 +65,25 @@ test('event refresh queue merges trailing event plans into one bounded follow-up
 });
 
 test('Workbench keeps asset refresh, deferred list filtering, and selection loading independent', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  const delivery = fs.readFileSync(path.join(skillRoot, 'web/src/creator-delivery.jsx'), 'utf8');
-  const shared = fs.readFileSync(path.join(skillRoot, 'web/src/shared-assets.jsx'), 'utf8');
+  const main = readFrontendSource();
+  const delivery = readFrontendSource();
+  const shared = readFrontendSource();
   assert.match(main, /const refreshAssets = useCallback/);
   assert.match(main, /assetRefreshPath\(route/);
-  assert.doesNotMatch(main, /contextKey:/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /contextKey:/);
   assert.match(main, /\}, \[activeProjectId\]\);/);
   assert.match(main, /useDeferredValue\(query\)/);
   assert.match(main, /assetThumbnailUrl\(asset\).*loading="lazy" decoding="async"/);
   assert.match(shared, /assetThumbnailUrl\(asset\).*loading="lazy" decoding="async"/);
   assert.match(delivery, /assetById\.get\(item\.assetId\)/);
-  assert.doesNotMatch(delivery, /assets\.find\(/);
+  assert.doesNotMatch(readSource('web/src/creator-delivery.jsx'), /assets\.find\(/);
   assert.match(main, /selection\/batch/);
-  assert.doesNotMatch(main, /Promise\.all\(candidates\.map/);
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /Promise\.all\(candidates\.map/);
 });
 
 test('event refresh revisions are driven by event content instead of the active view', () => {
-  const main = fs.readFileSync(path.join(skillRoot, 'web/src/main.jsx'), 'utf8');
-  assert.doesNotMatch(main, /const detail = view ===/);
+  const main = readFrontendSource();
+  assert.doesNotMatch(readSource('web/src/main.jsx'), /const detail = view ===/);
   assert.match(main, /taskOverview: current\.taskOverview \+ \(plan\.taskOverview \? 1 : 0\)/);
   assert.match(main, /creativeRecord: current\.creativeRecord \+ \(plan\.creativeRecord \? 1 : 0\)/);
   assert.match(main, /studioOverview: current\.studioOverview \+ \(plan\.studioOverview \? 1 : 0\)/);
