@@ -289,7 +289,7 @@ export function updateStudioSessionContext(db: StudioDatabase, input: { studioId
   if (!session || session.studio_id !== input.studioId) throw new StudioNotFoundError('Studio session not found: ' + input.sessionId);
   let projectId = input.projectId || null;
   let taskId = input.taskId || null;
-  let roundId = input.roundId || null;
+  const roundId = input.roundId || null;
   if (taskId) {
     const task = resolveTaskInStudio(db, input.studioId, taskId);
     if (projectId && projectId !== task.project_id) throw new InvalidCommandError('Session task context is not part of the selected project.');

@@ -1,4 +1,4 @@
-import { capabilityShapeForProvider, isProviderId as descriptorIsProviderId, providerDescriptor, providerEndpointPolicyIssues, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, PROVIDER_IDS, ProviderEndpointTrustMode, ProviderId, ProviderProfileLimits } from '../providers/descriptors';
+import { capabilityShapeForProvider, isProviderId as descriptorIsProviderId, providerDescriptor, providerEndpointPolicyIssues, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, ProviderEndpointTrustMode, ProviderId, ProviderProfileLimits } from '../providers/descriptors';
 
 export { PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, PROVIDER_IDS, ProviderEndpointTrustMode, ProviderId, ProviderProfileLimits } from '../providers/descriptors';
 

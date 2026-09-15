@@ -1,7 +1,7 @@
 import { createId, nowIso } from '../shared/ids';
 import { assertRunItemTransition, assertRunTransition, OPEN_RUN_STATUSES, RunItemStatus, RunStatus } from '../domain/states';
 import { CommandReceipt, executeIdempotent, InvalidCommandError, StudioNotFoundError, VersionConflictError } from '../domain/studio-commands';
-import { ImageOperation, MAX_IMAGE_REQUEST_MEDIA_BYTES } from '../providers/contracts';
+import { MAX_IMAGE_REQUEST_MEDIA_BYTES } from '../providers/contracts';
 import { providerDescriptor } from '../providers/descriptors';
 import { ITEM_PROMPT_PREFIX, PreflightPlan, PreflightResult, preflightGenerationPlan } from './preflight';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
@@ -393,12 +393,6 @@ function validateManagedAssets(db: StudioDatabase, studioId: string, projectId: 
 function countInFlightItems(db: StudioDatabase, runId: string): number {
   const row = db.prepare("SELECT COUNT(*) AS total FROM run_items WHERE run_id = ? AND status IN ('leased', 'requesting', 'receiving', 'persisting', 'cancel_requested')").get(runId) as { total: number };
   return row.total;
-}
-
-function storeRunStatus(db: StudioDatabase, run: StoredRun, status: RunStatus, workerId: string | null = null): GenerationRun {
-  assertRunTransition(run.status, status);
-  db.prepare('UPDATE generation_runs SET status = ?, worker_id = COALESCE(?, worker_id), version = version + 1, updated_at = ? WHERE id = ?').run(status, workerId, nowIso(), run.id);
-  return { ...runFromRow(run), status, version: run.version + 1 };
 }
 
 function applyProviderProfileLimits(result: PreflightResult, providerConfig: ResolvedProviderConfig): PreflightResult {

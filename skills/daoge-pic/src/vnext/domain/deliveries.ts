@@ -89,13 +89,6 @@ function latestProjectReview(db: StudioDatabase, projectId: string, assetId: str
   return row || null;
 }
 
-function deliveryItemSnapshot(db: StudioDatabase, project: ProjectRow, asset: StudioAsset, sequence: number): DeliveryAssetSnapshot {
-  if (!projectOwnsAsset(db, project.id, asset.id)) throw new InvalidCommandError('Delivery asset does not belong to the selected project: ' + asset.id);
-  const review = latestProjectReview(db, project.id, asset.id);
-  if (!review || review.decision !== 'keep') throw new InvalidCommandError('Delivery asset requires a current keep review: ' + asset.id);
-  return { assetId: asset.id, sequence, source: redacted(asset.source) as Record<string, unknown>, review: reviewSnapshot(review, project.id), asset: { id: asset.id, kind: asset.kind, mediaType: asset.mediaType, deletedAt: asset.deletedAt } };
-}
-
 function replaceDeliveryAssets(db: StudioDatabase, project: ProjectRow, deliveryId: string, assetIds: string[], timestamp: string): DeliveryAssetSnapshot[] {
   const assets = activeAssets(db, project.studio_id, assetIds);
   const ids = assets.map((asset) => asset.id);

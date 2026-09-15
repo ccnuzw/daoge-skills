@@ -5,9 +5,9 @@ import http, { IncomingMessage, OutgoingHttpHeaders, Server, ServerResponse } fr
 import { URL } from 'node:url';
 import { Readable } from 'node:stream';
 import { closeStudioDatabase, openStudioDatabase, StudioDatabase, STUDIO_SCHEMA_VERSION, studioSchemaVersion, subscribeStudioEvents, withTransaction } from '../studio/database';
-import { hardenStudioAccess, ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
+import { hardenStudioAccess, initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { isProviderId, providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
-import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileConfig, updateProviderProfile } from '../studio/provider-store';
+import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileConfig, updateProviderProfile } from '../studio/provider-store';
 import { providerSecretBackendPolicy, ProviderSecretBackendPolicyError } from '../studio/provider-secrets';
 import { isProviderEndpointTrustMode, providerDescriptor, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, referenceEnabledForProvider } from '../providers/descriptors';
 import { createImageProvider, modelListProbeFor, requestEndpointFor } from '../providers/http-adapters';

@@ -19,10 +19,6 @@ function normalizedRelative(paths: StudioPaths, value: string): string {
   return path.relative(paths.workspaceRoot, value).split(path.sep).join('/');
 }
 
-function missingAlreadyRecorded(db: StudioDatabase, studioId: string, assetId: string): boolean {
-  return Boolean(db.prepare("SELECT id FROM events WHERE studio_id = ? AND entity_type = 'asset' AND entity_id = ? AND event_type = 'asset.media_missing' LIMIT 1").get(studioId, assetId));
-}
-
 function generatedRecoveryRejected(db: StudioDatabase, studioId: string, assetId: string, reason: string): void {
   if (db.prepare("SELECT id FROM events WHERE studio_id = ? AND entity_type = 'media_commit' AND entity_id = ? AND event_type = 'media.commit_recovery_rejected' LIMIT 1").get(studioId, assetId)) return;
   withTransaction(db, () => appendStudioEvent(db, { studioId, entityType: 'media_commit', entityId: assetId, eventType: 'media.commit_recovery_rejected', payload: { reason } }));

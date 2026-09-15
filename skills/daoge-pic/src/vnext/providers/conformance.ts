@@ -151,7 +151,7 @@ export function createOfflineProviderTransport(providerId: ProviderId, fixture: 
   const dependencies: HttpAdapterDependencies = {
     fetch,
     resolveHost: async () => ['93.184.216.34'],
-    downloadRequest: async (url, addresses, init): Promise<PinnedHttpResponse> => ({
+    downloadRequest: async (url, addresses, _init): Promise<PinnedHttpResponse> => ({
       response: new Response(downloadBody, { status: 200, headers: { 'content-type': 'image/png' } }),
       remoteAddress: addresses[0] || '93.184.216.34'
     })

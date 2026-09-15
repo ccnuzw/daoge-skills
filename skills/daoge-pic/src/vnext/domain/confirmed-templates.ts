@@ -26,6 +26,7 @@ export const CONFIRMED_TEMPLATE_LIMITS = Object.freeze({
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const SENSITIVE_KEY = /(?:api[_-]?key|authorization|secret|token|password|credential|cookie|capability|bearer|prompt|provider|request|response|raw|headers?|body|url|uri|endpoint|path|storage|file)/i;
+// eslint-disable-next-line no-useless-escape -- 脱敏用的安全正则，逐个字符校对过；不为了 lint 去改它
 const SENSITIVE_VALUE = /(?:\b[a-z][a-z0-9+.-]{1,31}:\/\/|\bwww\.[^\s<>"]+|\b(?:bearer|authorization|api[_ -]?key|secret|token|password|capability)\s*[:=]\s*[^\s,;<>"']+|\b(?:sk|pk|rk|dgpct1)[-_a-z0-9.]{8,}\b|(?:^|[\s(\"'=])(?:~\/|\.{1,2}\/|[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|tmp|var|private|Volumes|opt|srv|mnt|media|workspace)(?:[\\/]|$))|\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[^\s]+|[\u0000-\u001f\u007f])/i;
 
 export interface ConfirmedTemplateSource {

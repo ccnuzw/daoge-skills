@@ -218,7 +218,7 @@ export function recordUsageEvent(db: StudioDatabase, input: UsageEventInput): Us
   return withTransaction(db, () => {
     const idempotencyKey = required(input.idempotencyKey, 'usage idempotencyKey');
     const attribution = assertAttribution(db, input);
-    let estimate = normalizeUsageEstimate(input.estimate);
+    const estimate = normalizeUsageEstimate(input.estimate);
     const billingState = input.billingState || (estimate.estimatedCostMinor === null ? 'unknown' : 'estimated');
     if (billingState === 'unknown' && estimate.estimatedCostMinor !== null) throw new InvalidCommandError('Unknown billing state cannot carry a settled cost estimate.');
     const existing = db.prepare('SELECT id, studio_id, profile_id, project_id, task_id, round_id, run_id, run_item_id, unit, quantity, estimated_cost_minor, cost_unit, billing_state, estimate_source, idempotency_key, created_at FROM usage_ledger WHERE studio_id = ? AND idempotency_key = ?').get(attribution.studioId, idempotencyKey) as UsageRow | undefined;

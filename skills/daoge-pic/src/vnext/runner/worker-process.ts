@@ -25,6 +25,9 @@ function isProviderConfig(value: unknown): value is ResolvedProviderConfig {
 
 function receiveProviderConfig(): Promise<ResolvedProviderConfig> {
   const { promise, resolve, reject } = Promise.withResolvers<ResolvedProviderConfig>();
+  // 这里的 let 不是疏漏：onMessage 闭包先引用 timeout，赋值发生在下方，
+  // 声明与初始化无法合并，改成 const 会直接编译不过。
+  // eslint-disable-next-line prefer-const
   let timeout: NodeJS.Timeout;
   const onMessage = (message: unknown): void => {
     if (!message || typeof message !== 'object' || (message as Record<string, unknown>).type !== 'configure-provider') return;

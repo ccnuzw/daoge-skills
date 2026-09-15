@@ -340,7 +340,7 @@ export function recoverPendingBackupRestore(targetRoot: string): { recovered: nu
   if (!root) throw new RestoreApplyFailure('recovery_failed', 'Restore recovery target workspace is not safe.');
   let recovered = 0;
   let names: string[];
-  try { names = fs.readdirSync(root).filter((name) => /^\.daoge-restore-[A-Za-z0-9_-]+\.journal\.json$/.test(name)); } catch (error) { throw new RestoreApplyFailure('recovery_failed', 'Unable to inspect pending restore journals.'); }
+  try { names = fs.readdirSync(root).filter((name) => /^\.daoge-restore-[A-Za-z0-9_-]+\.journal\.json$/.test(name)); } catch { throw new RestoreApplyFailure('recovery_failed', 'Unable to inspect pending restore journals.'); }
   for (const name of names) {
     const journalPath = path.join(root, name); const journal = readJournal(journalPath);
     if (!journal || safeRoot(journal.targetRoot) !== root || fs.realpathSync.native(path.dirname(journal.journalPath)) !== root || path.basename(journal.journalPath) !== name) throw new RestoreApplyFailure('recovery_failed', 'Pending restore journal is invalid.');
@@ -397,7 +397,7 @@ export function applyBackupRestore(input: RestoreApplyInput): RestoreApplyResult
   try {
     fs.mkdirSync(stagingRoot, { recursive: false }); fsyncDirectory(targetRoot);
     const databaseOperation = writes.find((operation) => operation.category === 'database' && operation.path === 'daoge-studio/studio.db');
-    if (databaseOperation) { try { checkpointDatabase(absoluteFor(targetRoot, databaseOperation.path)); } catch (error) { throw new RestoreApplyFailure('staging_failed', 'Unable to checkpoint target SQLite database before restore.'); } }
+    if (databaseOperation) { try { checkpointDatabase(absoluteFor(targetRoot, databaseOperation.path)); } catch { throw new RestoreApplyFailure('staging_failed', 'Unable to checkpoint target SQLite database before restore.'); } }
     for (let index = 0; index < writes.length; index += 1) {
       const operation = writes[index]; const sourcePath = absoluteFor(sourceRoot, operation.path); const stagedPath = path.join(stagingRoot, 'file-' + index);
       try { assertSafeExistingPath(sourceRoot, operation.path); } catch { throw new RestoreApplyFailure('staging_failed', 'Restore source path is unsafe.', operation.path); }

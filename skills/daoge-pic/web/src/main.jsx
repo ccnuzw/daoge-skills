@@ -3051,7 +3051,7 @@ function App() {
   };
   const selectRetryablePageItems = (selected) => {
     const pageIds = retryableRunItems(visibleRunItems).map((item) => item.id);
-    setSelectedRunItemIds((current) => { const next = new Set(current); for (const itemId of pageIds) selected ? next.add(itemId) : next.delete(itemId); return next; });
+    setSelectedRunItemIds((current) => { const next = new Set(current); for (const itemId of pageIds) { if (selected) next.add(itemId); else next.delete(itemId); } return next; });
   };
   const retryRunItemsByIds = async (itemIds) => {
     if (!activeRun) return;

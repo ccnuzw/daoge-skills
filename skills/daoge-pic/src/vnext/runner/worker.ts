@@ -209,11 +209,7 @@ export class GenerationWorker {
       return 'blocked';
     }
 
-    try {
-      transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'requesting', emitEvent: false });
-    } catch (error) {
-      throw error;
-    }
+    transitionRunItem(this.db, { itemId: item.id, leaseToken: String(item.leaseToken), now: this.clock(), status: 'requesting', emitEvent: false });
     const controller = new AbortController();
     let request: ImageRequest;
     let managedAssets: ResolvedManagedAssets | undefined;
