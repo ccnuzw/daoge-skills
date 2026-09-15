@@ -20,12 +20,12 @@ import { bootstrapLocalStudioSession } from './local-auth.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { ConfirmationDialog } from './confirmation-dialog.jsx';
 import { StudioSearch } from './studio-search.jsx';
+import { useStudioSearch } from './use-studio-search.mjs';
 import { createLatestRequestGate, useRouteRefresh } from './use-route-refresh.mjs';
 import { studioEventRefreshPlan, useStudioEvents } from './use-studio-events.mjs';
 import { assetOriginalUrl, assetThumbnailUrl } from './asset-media-url.mjs';
 import { ASSET_IMPORT_CONCURRENCY, mapWithConcurrency } from './bounded-concurrency.mjs';
 import { createEventRefreshQueue } from './refresh-coordinator.mjs';
-import { createStudioSearchCoordinator } from './studio-search-model.mjs';
 import { batchOperationSignature, createBatchOperationSnapshot, createDeliveryInteractionGuard, isDeliveryOperationCurrent } from './creator-delivery-model.mjs';
 import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, clampAssetPage, normalizeAssetPageSize } from './asset-pagination.mjs';
 import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, EMPTY_RUN_ITEM_PAGE, RUN_ITEM_FILTER_OPTIONS, RUN_ITEM_PAGE_SIZES, normalizeRunItemFilter, normalizeRunItemPage, normalizeRunItemPageNumber, normalizeRunItemPageSize, normalizeRunItemSequence, retryableRunItems, runItemFilterCount, runItemPageBounds, runItemProgress, selectableRunItemIds, serializeRunItemRequestQuery } from './run-item-pagination.mjs';
@@ -1580,10 +1580,6 @@ function App() {
   const [deliveryBatches, setDeliveryBatches] = useState(EMPTY);
   const [taskOverview, setTaskOverview] = useState(null);
   const [studioOverview, setStudioOverview] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState(EMPTY);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState('');
   const [batchName, setBatchName] = useState('');
   const [selectedDeliveryIds, setSelectedDeliveryIds] = useState(new Set());
   const [creativeRecord, setCreativeRecord] = useState(null);
@@ -1659,7 +1655,6 @@ function App() {
   const [batchBusy, setBatchBusy] = useState(false);
   const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0, canvasLayout: 0 });
   const inputRef = useRef(null);
-  const searchCoordinatorRef = useRef(null);
   const batchBusyRef = useRef(false);
   const batchOperationRef = useRef(null);
   const deliveryInteractionRef = useRef(null);
@@ -1703,11 +1698,6 @@ function App() {
   sharedAssetRequests.current ||= createLatestRequestGate();
   qualityMetricsRequests.current ||= createLatestRequestGate();
   deliveryInteractionRef.current ||= createDeliveryInteractionGuard();
-  searchCoordinatorRef.current ||= createStudioSearchCoordinator({
-    request: async (query, signal) => (await api('/api/search?q=' + encodeURIComponent(query) + '&limit=12', { signal })).results || [],
-    schedule: (callback, delay) => window.setTimeout(callback, delay),
-    cancelSchedule: (timer) => window.clearTimeout(timer)
-  });
   useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); assetProvenanceRequests.current?.cancel(); sessionRefreshRequests.current?.cancel(); qualityMetricsRequests.current?.cancel(); }, []);
   const { view, projectId: activeProjectId, taskId: activeTaskId, roundId: activeRoundId, compareRoundIds = EMPTY, runId: activeRunId, assetScope, runItemFilter: activeRunItemFilter = DEFAULT_RUN_ITEM_FILTER, runItemPage: activeRunItemPage = 1, runItemPageSize: activeRunItemPageSize = DEFAULT_RUN_ITEM_PAGE_SIZE, runItemSequence: activeRunItemSequence = null } = route;
   const routeView = rendererForWorkbenchView(view);
@@ -1733,6 +1723,7 @@ function App() {
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+  const { searchQuery, setSearchQuery, searchResults, searchLoading, searchError, openSearchResult } = useStudioSearch({ api, navigateRoute });
 
   const openWorkbenchSession = useCallback(async () => {
     if (session) return session;
@@ -2689,19 +2680,6 @@ function App() {
   const toggleComparedRound = (roundId) => {
     const next = compareRoundIds.includes(roundId) ? compareRoundIds.filter((id) => id !== roundId) : [...compareRoundIds, roundId].slice(0, 12);
     navigateRoute({ view: 'studio-overview', roundId: next[0] || null, compareRoundIds: next, runId: null, assetScope: 'task' });
-  };
-  useEffect(() => {
-    searchCoordinatorRef.current.search(searchQuery, (state) => {
-      setSearchResults(state.results);
-      setSearchError(state.error);
-      setSearchLoading(state.loading);
-    });
-    return () => searchCoordinatorRef.current.cancel();
-  }, [searchQuery]);
-  useEffect(() => () => searchCoordinatorRef.current.dispose(), []);
-  const openSearchResult = (result) => {
-    const changes = result.entityType === 'project' ? { view: 'lineage', projectId: result.projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' } : { view: 'lineage', projectId: result.projectId, taskId: result.taskId, roundId: result.entityType === 'round' ? result.entityId : null, compareRoundIds: result.entityType === 'round' ? [result.entityId] : [], runId: null, assetScope: result.entityType === 'round' ? 'round' : 'task' };
-    setSearchResults(EMPTY); setSearchQuery(''); navigateRoute(changes);
   };
   const openCreationDialog = (kind) => {
     setCreationError('');
