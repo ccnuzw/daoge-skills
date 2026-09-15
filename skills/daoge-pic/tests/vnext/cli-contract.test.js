@@ -516,3 +516,40 @@ for (const identityCase of [
     assert.deepEqual(shutdownRequests, []);
   });
 }
+
+test('CLI 用法文本由命令表生成，不再有第二份手写副本', () => {
+  const { commandSchemas, commandHelp, usage } = require('../../dist/vnext/cli/daoge');
+  const names = Object.keys(commandSchemas);
+  assert.ok(names.length > 40, '命令表条目太少，看起来没加载完整：' + names.length);
+
+  // 每条命令都必须有说明：用法是生成的，没有 summary 就只剩一行空壳。
+  for (const name of names) {
+    assert.ok(commandSchemas[name].summary, '命令缺少 summary：' + name);
+    assert.ok(commandSchemas[name].summary.trim().length > 0, 'summary 是空白：' + name);
+  }
+
+  // 反向：usage() 必须覆盖表里每一条命令。此前手写的那一份漏了六个 provider-* 命令。
+  const rendered = usage();
+  const missing = names.filter((name) => !rendered.includes('daoge ' + name + ' '));
+  assert.deepEqual(missing, [], 'usage() 没有列出这些命令：' + missing.join(', '));
+
+  // 单命令 --help 必须列出该命令全部必填参数，否则帮不上忙。
+  for (const name of names) {
+    const help = commandHelp(name);
+    assert.match(help, new RegExp('^daoge ' + name + '$', 'm'), name + ' 的帮助标题不对');
+    assert.ok(help.includes(commandSchemas[name].summary), name + ' 的帮助里没有说明');
+    for (const [flag, schema] of Object.entries(commandSchemas[name].flags)) {
+      if (schema.required) assert.ok(help.includes(flag + ' '), name + ' 的帮助里缺少必填参数 ' + flag);
+    }
+  }
+});
+
+test('未知参数报错会直接给出该命令的完整用法', () => {
+  const { parseCommand } = require('../../dist/vnext/cli/daoge');
+  // 以前只说「未知或不适用于 X 的参数：Y」，用户还得去猜这个命令到底收什么参数。
+  assert.throws(() => parseCommand(['provider-test', '--workspace', '/tmp/x', '--nope', '1']), (error) => {
+    assert.match(error.message, /未知或不适用于 provider-test 的参数：--nope/);
+    assert.match(error.message, /--profile/);
+    return true;
+  });
+});
