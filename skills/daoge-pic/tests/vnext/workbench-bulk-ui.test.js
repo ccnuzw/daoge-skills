@@ -49,9 +49,12 @@ test('current plan review exposes per-image prompts before confirmation', () => 
   assert.match(promptWorkspace, /逐图提示词/);
   assert.match(promptWorkspace, /Specific scene direction for this image:/);
   assert.match(promptWorkspace, /复制全部最终提示词/);
-  assert.match(promptWorkspace, /复制结构化 JSON/);
+  // 复制原始计划数据 / 查看原始数据：能力不变，只是把 JSON 这个词从创作者面收回
+  // （见 docs/daoge_pic_terminology_zh.md，术语守卫会拦住回潮）。
+  assert.match(promptWorkspace, /复制原始数据/);
   assert.match(promptWorkspace, /原始计划结构/);
-  assert.match(promptWorkspace, /查看原始 JSON/);
+  assert.match(promptWorkspace, /查看原始数据/);
+  assert.doesNotMatch(promptWorkspace, /结构化 JSON|原始 JSON/);
   assert.match(promptWorkspace, /OPENAI_GPT_IMAGE_PROMPT_LIMIT = 32000/);
   assert.match(styles, /\.prompt-review-metrics/);
   assert.match(styles, /\.prompt-item-card/);

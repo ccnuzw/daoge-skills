@@ -93,7 +93,10 @@ test('marks complete loaded coverage without claiming a virtualized window is th
   });
 
   assert.equal(outline.coverage.complete, true);
-  assert.match(outline.coverage.message, /已加载 graph 数据/);
+  // 意图：覆盖率文案必须说明「这份列表来自已加载数据，且分页已全覆盖」，不许冒充完整谱系。
+  // 「关系端点」已按术语单收回到「连线」（docs/daoge_pic_terminology_zh.md）。
+  assert.match(outline.coverage.message, /已加载的谱系数据[\s\S]*均已覆盖/);
+  assert.doesNotMatch(outline.coverage.message, /端点/);
   assert.match(outline.coverage.canvasNote, /虚拟化/);
   assert.equal(outline.nodes[0].openable, true);
 });

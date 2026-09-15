@@ -126,7 +126,7 @@ function unloadedEndpoint(key) {
     shortId: shortId(endpoint?.id),
     title: '未加载' + nodeTypeLabel(type),
     status: { label: '未加载', tone: 'quiet' },
-    summary: '该关系端点不在当前已加载数据中；不能据此判断完整谱系。',
+    summary: '这条连线不在已加载的数据里；不能据此判断完整谱系。',
     openable: false,
     unresolved: true,
     flags: { selected: false, shared: false, delivered: false, unavailable: false }
@@ -191,8 +191,8 @@ export function createAccessibleLineage({ nodes = [], connections = [], endpoint
       complete,
       unresolvedRelations,
       message: complete
-        ? '当前列表来自已加载 graph 数据；资产与运行项分页均已覆盖，关系端点已解析。'
-        : '当前仅展示已加载数据；loaded / total 未覆盖的分页节点不代表不存在，未加载关系端点也不会被冒充为完整谱系。',
+        ? '当前列表来自已加载的谱系数据；资产与运行项分页均已覆盖，连线已解析。'
+        : '当前仅展示已加载数据；loaded / total 未覆盖的分页节点不代表不存在，未加载的连线也不会被冒充为完整谱系。',
       canvasNote: '画布活动窗口的虚拟化只限制画布 DOM；此列表不把虚拟化窗口冒充为完整数据。'
     }
   };

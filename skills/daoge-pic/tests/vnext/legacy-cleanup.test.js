@@ -20,5 +20,6 @@ test('vNext source tree excludes the retired workflow and static workbench', () 
   assert.deepEqual(entries(path.join(skillRoot, 'src')), ['vnext']);
   assert.deepEqual(entries(path.join(skillRoot, 'tests')), ['vnext']);
   assert.deepEqual(entries(path.join(skillRoot, 'references')), ['provider.env.example']);
-  assert.deepEqual(entries(path.join(skillRoot, 'docs')), ['daoge_pic_vnext_upgrade_spec_zh.md', 'vnext_verification_evidence_zh.md']);
+  // docs/ 只放人读文档。新增术语单（人读版，与 web/src/terminology.mjs 由测试锁一致）。
+  assert.deepEqual(entries(path.join(skillRoot, 'docs')), ['daoge_pic_terminology_zh.md', 'daoge_pic_vnext_upgrade_spec_zh.md', 'vnext_verification_evidence_zh.md']);
 });

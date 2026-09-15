@@ -133,7 +133,7 @@ function rawSummaryGroups(plan) {
 }
 function rawSummaryIntro(groups) {
   const semantic = groups.map(([label]) => label).filter((label) => !['基础', '输出规格', '参考素材'].includes(label));
-  if (!semantic.length) return '字段较少时保持紧凑网格；完整计划仍保留在原始 JSON。';
+  if (!semantic.length) return '字段较少时保持紧凑网格；完整计划仍保留在原始数据里。';
   return '已识别 ' + semantic.slice(0, 4).join('、') + (semantic.length > 4 ? ' 等' : '') + ' 任务字段；长数组和对象先摘要，可展开查看完整结构。';
 }
 function RawFieldValue({ value }) {
@@ -187,7 +187,7 @@ function ReferenceMaterialsSection({ plan }) {
 
 function StructuredPlanDetails({ plan }) {
   const groups = rawSummaryGroups(plan);
-  return <details className="prompt-raw-structure"><summary><ChevronDown size={15} /><span>原始计划结构</span><small>{groups.length} 组字段 + 原始 JSON</small></summary><div className="prompt-raw-layout"><section className="prompt-raw-summary"><header><div><p className="eyebrow">关键字段</p><h4>按任务类型归组</h4></div><span>{rawSummaryIntro(groups)}</span></header><div className="prompt-raw-groups">{groups.map(([label, fields]) => <section key={label} className={fields.some(([, value]) => isLongRawValue(value)) ? 'is-rich' : 'is-compact'}><h4>{label}</h4><dl>{fields.map(([key, value]) => <div key={key} className={isLongRawValue(value) ? 'is-long' : ''}><dt>{key}</dt><dd><RawFieldValue value={value} /></dd></div>)}</dl></section>)}</div></section><ReferenceMaterialsSection plan={plan} /></div><details className="prompt-raw-json"><summary>查看原始 JSON</summary><pre>{JSON.stringify(asRecord(plan), null, 2)}</pre></details></details>;
+  return <details className="prompt-raw-structure"><summary><ChevronDown size={15} /><span>原始计划结构</span><small>{groups.length} 组字段 + 原始数据</small></summary><div className="prompt-raw-layout"><section className="prompt-raw-summary"><header><div><p className="eyebrow">关键字段</p><h4>按任务类型归组</h4></div><span>{rawSummaryIntro(groups)}</span></header><div className="prompt-raw-groups">{groups.map(([label, fields]) => <section key={label} className={fields.some(([, value]) => isLongRawValue(value)) ? 'is-rich' : 'is-compact'}><h4>{label}</h4><dl>{fields.map(([key, value]) => <div key={key} className={isLongRawValue(value) ? 'is-long' : ''}><dt>{key}</dt><dd><RawFieldValue value={value} /></dd></div>)}</dl></section>)}</div></section><ReferenceMaterialsSection plan={plan} /></div><details className="prompt-raw-json"><summary>查看原始数据</summary><pre>{JSON.stringify(asRecord(plan), null, 2)}</pre></details></details>;
 }
 
 export function PromptWorkspace({ round, planVersions, loading, onRefresh }) {
@@ -204,7 +204,7 @@ export function PromptWorkspace({ round, planVersions, loading, onRefresh }) {
     if (!current?.plan || !navigator.clipboard?.writeText) return;
     if (mode === 'json') {
       await navigator.clipboard.writeText(JSON.stringify(asRecord(current.plan), null, 2));
-      setCopyNotice('已复制结构化计划 JSON。');
+      setCopyNotice('已复制原始计划数据。');
       return;
     }
     if (mode === 'final') {
@@ -218,7 +218,7 @@ export function PromptWorkspace({ round, planVersions, loading, onRefresh }) {
 
   if (!round) return <section className="prompt-stage empty-stage"><Layers3 size={30} strokeWidth={1.15} /><p>先从左侧选择一个轮次，再查看可追溯的计划与提示词。</p></section>;
   return <section className="prompt-stage">
-    <header className="prompt-stage-head"><div><p className="eyebrow">{ROUND_PURPOSE_LABELS[round.purpose] || round.purpose}轮次</p><h2>当前计划</h2><span>确认前先看通用提示词、逐图差异、参考素材和原始计划结构；历史版本和对比放在下面。</span></div><div className="prompt-stage-actions"><button type="button" className="outline-button" onClick={onRefresh} disabled={loading}><RefreshCw size={16} className={loading ? 'spin' : ''} />刷新</button><button type="button" className="outline-button" onClick={() => void copyCurrent('shared')} disabled={!current?.plan?.prompt}><ClipboardCopy size={16} />复制通用提示词</button><button type="button" className="outline-button" onClick={() => void copyCurrent('final')} disabled={!current?.plan?.prompt}><ClipboardCopy size={16} />复制全部最终提示词</button><button type="button" className="outline-button" onClick={() => void copyCurrent('json')} disabled={!current?.plan}><ClipboardCopy size={16} />复制结构化 JSON</button>{copyNotice && <span className="prompt-copy-notice" role="status">{copyNotice}</span>}</div></header>
+    <header className="prompt-stage-head"><div><p className="eyebrow">{ROUND_PURPOSE_LABELS[round.purpose] || round.purpose}轮次</p><h2>当前计划</h2><span>确认前先看通用提示词、逐图差异、参考素材和原始计划结构；历史版本和对比放在下面。</span></div><div className="prompt-stage-actions"><button type="button" className="outline-button" onClick={onRefresh} disabled={loading}><RefreshCw size={16} className={loading ? 'spin' : ''} />刷新</button><button type="button" className="outline-button" onClick={() => void copyCurrent('shared')} disabled={!current?.plan?.prompt}><ClipboardCopy size={16} />复制通用提示词</button><button type="button" className="outline-button" onClick={() => void copyCurrent('final')} disabled={!current?.plan?.prompt}><ClipboardCopy size={16} />复制全部最终提示词</button><button type="button" className="outline-button" onClick={() => void copyCurrent('json')} disabled={!current?.plan}><ClipboardCopy size={16} />复制原始数据</button>{copyNotice && <span className="prompt-copy-notice" role="status">{copyNotice}</span>}</div></header>
     {loading ? <div className="empty-stage"><RefreshCw size={26} className="spin" /><p>正在读取计划版本。</p></div> : !planVersions.length ? <div className="empty-stage"><Layers3 size={30} strokeWidth={1.15} /><p>当前轮次还没有可展示的计划版本。</p></div> : <>
       <section className="prompt-current-plan"><PlanVersionCard version={current} current review /></section>
       <details className="prompt-history"><summary><ChevronDown size={16} /><span>历史版本与对比</span><small>{history.length ? history.length + ' 个旧版本' : '没有旧版本'}</small></summary><div className="prompt-version-rail">{planVersions.map((version) => <label key={version.id || version.planVersion} className={'prompt-version-chip ' + (comparison.includes(version.planVersion) ? 'is-selected' : '')}><input type="checkbox" checked={comparison.includes(version.planVersion)} onChange={() => toggleComparison(version.planVersion)} /><span>v{version.planVersion}</span><small>{planStateLabel(version.state)}</small></label>)}</div>{history.length ? <div className="prompt-version-grid">{history.map((version) => <PlanVersionCard key={version.id || version.planVersion} version={version} />)}</div> : <p className="empty-copy">当前只有一个计划版本。</p>}{selected.length === 2 && <section className="prompt-diff"><header><div><FileDiff size={18} /><div><p className="eyebrow">版本对比</p><h3>v{selected[0].planVersion} 与 v{selected[1].planVersion}</h3></div></div><small>{differences.length ? differences.length + ' 项变化' : '两版没有结构化差异'}</small></header>{differences.length ? <dl>{differences.map((item) => <div key={item.label}><dt>{item.label}</dt><dd><span>{item.before}</span><b>→</b><span>{item.after}</span></dd></div>)}</dl> : <p>计划的提示词、操作、数量、输出规格与参考素材一致。</p>}</section>}</details>

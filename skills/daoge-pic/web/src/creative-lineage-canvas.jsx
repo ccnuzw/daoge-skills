@@ -1287,7 +1287,7 @@ function LineageTextView({ id = 'lineage-accessible-view', nodes = EMPTY_ARRAY, 
   const nodeHeadingId = id + '-nodes';
   const relationHeadingId = id + '-relations';
   return <section id={id} className="lineage-text-view" data-lineage-no-zoom aria-labelledby={titleId}>
-    <header className="lineage-text-head"><div><p className="eyebrow">非视觉入口</p><h2 id={titleId}>列表 / 文本谱系</h2><span>按当前已加载 graph 数据阅读项目、任务、轮次、计划、运行、运行项、资产和交付；不会把画布虚拟化窗口冒充为完整谱系。</span></div><div className="lineage-text-count"><strong>{outline.nodes.length} 个已加载节点 · {outline.connections.length} 条关系</strong><span>{outline.scope.label} · {outline.scope.shortId}</span></div></header>
+    <header className="lineage-text-head"><div><p className="eyebrow">非视觉入口</p><h2 id={titleId}>列表 / 文本谱系</h2><span>按当前已加载的谱系数据阅读项目、任务、轮次、计划、运行、运行项、资产和交付；不会把画布虚拟化窗口冒充为完整谱系。</span></div><div className="lineage-text-count"><strong>{outline.nodes.length} 个已加载节点 · {outline.connections.length} 条关系</strong><span>{outline.scope.label} · {outline.scope.shortId}</span></div></header>
     <section className="lineage-text-coverage" aria-labelledby={coverageId}>
       <div className="lineage-text-coverage-head"><h3 id={coverageId}>加载覆盖范围</h3><strong>{outline.coverage.complete ? '当前加载范围已覆盖' : '当前为局部加载'}</strong></div>
       <dl>{outline.coverage.rows.map((row) => <div key={row.id}><dt>{row.label}</dt><dd><strong>{row.loaded} / {row.total}</strong><span>{row.complete ? '已加载' : '仍有未加载'}</span></dd></div>)}</dl>
@@ -1295,7 +1295,7 @@ function LineageTextView({ id = 'lineage-accessible-view', nodes = EMPTY_ARRAY, 
     </section>
     <div className="lineage-text-columns">
       <section aria-labelledby={nodeHeadingId}><h3 id={nodeHeadingId}>节点（当前已加载）</h3>{outline.nodes.length ? <ol className="lineage-text-node-list">{outline.nodes.map((summary) => { const node = nodeByKey.get(summary.key); const selected = selectedKeys.has(summary.key); const state = [summary.status.label, summary.shortId, summary.flags.unavailable ? '媒体不可用' : ''].filter(Boolean).join(' · '); return <li key={summary.key}><button type="button" className={selected ? 'is-active' : ''} aria-pressed={selected} aria-label={`${summary.typeLabel}：${summary.title}，${state}`} onClick={() => node && onFocus?.(node)}><span>{summary.typeLabel} · {summary.title}</span><small>{state}</small><em>{summary.summary}</em></button>{summary.openable && node ? <button type="button" className="lineage-text-open" aria-label={`打开${summary.typeLabel}：${summary.title}`} onClick={() => onOpen?.(node)}>打开</button> : <span className="lineage-text-unavailable">仅摘要</span>}</li>; })}</ol> : <p className="lineage-note">当前加载数据没有节点。</p>}</section>
-      <section aria-labelledby={relationHeadingId}><h3 id={relationHeadingId}>关系（已加载端点）</h3>{outline.connections.length ? <ol className="lineage-text-link-list">{outline.connections.map((connection) => <li key={connection.key}><span title={connection.source.title}>{connection.source.title}</span><b aria-hidden="true">→</b><span title={connection.target.title}>{connection.target.title}</span><small>{connection.label}{connection.unresolved ? ' · 端点未加载' : ''}</small></li>)}</ol> : <p className="lineage-note">当前加载数据没有关系。</p>}</section>
+      <section aria-labelledby={relationHeadingId}><h3 id={relationHeadingId}>关系（已加载的连线）</h3>{outline.connections.length ? <ol className="lineage-text-link-list">{outline.connections.map((connection) => <li key={connection.key}><span title={connection.source.title}>{connection.source.title}</span><b aria-hidden="true">→</b><span title={connection.target.title}>{connection.target.title}</span><small>{connection.label}{connection.unresolved ? ' · 连线未加载' : ''}</small></li>)}</ol> : <p className="lineage-note">当前加载数据没有关系。</p>}</section>
     </div>
   </section>;
 }
@@ -1495,7 +1495,7 @@ function RunItemActions({ item }) {
 }
 function RunActions({ run, onNavigate }) {
   const execution = runExecutionPresentation(run, []);
-  return <div className="lineage-inspector-actions"><p>{execution.detail || '运行由 daemon Worker 队列执行，画布只展示状态。'}</p><button type="button" className="outline-button" onClick={() => onNavigate({ view: 'runs', roundId: run.roundId, compareRoundIds: [run.roundId], runId: run.id, assetScope: 'round' })}><Eye size={15} />查看生成历史</button>{!['completed', 'cancelled'].includes(run.status) && <p className="lineage-note">暂停、恢复或取消运行请回到当前 Agent 会话处理；创作谱系只展示状态。</p>}</div>;
+  return <div className="lineage-inspector-actions"><p>{execution.detail || '出图由后台队列执行，这里只展示状态。'}</p><button type="button" className="outline-button" onClick={() => onNavigate({ view: 'runs', roundId: run.roundId, compareRoundIds: [run.roundId], runId: run.id, assetScope: 'round' })}><Eye size={15} />查看生成历史</button>{!['completed', 'cancelled'].includes(run.status) && <p className="lineage-note">暂停、恢复或取消运行请回到当前 Agent 会话处理；创作谱系只展示状态。</p>}</div>;
 }
 function NavigationActions({ node, onNavigate, onCreateRound, onOpenReference }) {
   const route = contextRouteForNode(node);

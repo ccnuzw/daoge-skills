@@ -398,7 +398,7 @@ function MaterialNeedChecklist({ materialNeeds, completedCounts = {}, title = '�
     return next;
   });
   return <section className="material-need-checklist" aria-label={title}>
-    <header><div><p className="eyebrow">{title}</p><h3>先把素材准备清楚</h3><span>勾选只是个人准备提醒；只有导入素材或保存参考素材才会写入 Studio 事实源。</span></div></header>
+    <header><div><p className="eyebrow">{title}</p><h3>先把素材准备清楚</h3><span>勾选只是个人准备提醒；只有导入素材或保存参考素材，才会真的写进 Studio。</span></div></header>
     <ul>{values.map((need) => {
       const preset = materialNeedUsagePreset(need);
       const count = Number(completedCounts[need] || 0);
@@ -2074,7 +2074,7 @@ function App() {
         }
       } catch { /* daemon is inside the expected restart gap */ }
     }
-    if (restartMonitorEpoch.current === epoch) setError(createWorkbenchError({ category: 'connection', message: 'Studio 重启超时。请复制脱敏诊断并检查本地 daemon 日志。' }, { category: 'connection', phase: 'reconnecting', safeToRetry: false }));
+    if (restartMonitorEpoch.current === epoch) setError(createWorkbenchError({ category: 'connection', message: 'Studio 重启超时。请复制脱敏诊断，并查看后台服务日志。' }, { category: 'connection', phase: 'reconnecting', safeToRetry: false }));
   }, [finishStudioRecovery]);
   const beginStudioRestart = useCallback(() => {
     if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);

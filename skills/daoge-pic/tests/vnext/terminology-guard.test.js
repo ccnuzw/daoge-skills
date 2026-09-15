@@ -1,23 +1,34 @@
+// 术语治理的守卫。断言刻意写得很死：一句话就只能是一句话，多一处手写副本就 fail。
+// 为什么必须固化：A/B 两轮已经证明文案会在后续重构里被顺手改回去，只写文档守不住。
+//
+// 两个批次：
+//   第一批 —— 边界免责句收成一句（9 处 → 1 处 + 确认出图那一句）。
+//   第二批 —— 「收回」级术语从创作者面清出，术语单落成可 import 的模块。
+//
+// 注意：`require` 一个 .mjs 需要 Node ≥ 22.12（本仓库测试已在该版本以上运行）。
+// 这样术语单只有一个来源 —— 测试与产品读的是同一份数据，不会各自漂移。
+
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// 术语治理的守卫。第一批只管「边界免责句」这一件事，所以断言刻意写得很死：
-// 收成一句就只能是一句，多一处手写副本就 fail。
-// 为什么必须固化：A/B 两轮已经证明文案会在后续重构里被顺手改回去，只写文档守不住。
+const terminology = require('../../web/src/terminology.mjs');
+const { CONFIG_FACE_FILES, DOC_FACE_FILES, TERM_LEVELS, TERM_SCOPES, TERMS, forbiddenInVisibleCopy, visibleCopyStrings } = terminology;
 
 const SRC = path.join(__dirname, '../../web/src');
+const DOC = path.join(__dirname, '../../docs/daoge_pic_terminology_zh.md');
 
 const read = (name) => fs.readFileSync(path.join(SRC, name), 'utf8');
 const listSources = () => fs.readdirSync(SRC).filter((name) => /\.(jsx|mjs)$/.test(name));
 
-// 「面向面」——一刀切会改坏东西，所以先按面分文件。
-// config：配系统的地方（允许术语，但须配人话副标题 + 视觉隔离）
-// doc：学系统的地方（允许术语，首次出现要给解释）
-const CONFIG_FACE = ['provider-settings.jsx', 'provider-settings-model.mjs'];
-const DOC_FACE = ['learning-center.jsx', 'learning-center-content.mjs', 'offline-strategy-model.mjs'];
-const CREATOR_FACE = listSources().filter((name) => !CONFIG_FACE.includes(name) && !DOC_FACE.includes(name));
+// 「面向面」——一刀切会改坏东西，所以按面分文件。清单的唯一来源是术语单模块。
+const CONFIG_FACE = [...CONFIG_FACE_FILES];
+const DOC_FACE = [...DOC_FACE_FILES];
+// 术语表自身就是这些词的持有者，不参与扫描。
+const TERM_OWNERS = ['terminology.mjs'];
+const CREATOR_FACE = listSources().filter((name) => !CONFIG_FACE.includes(name) && !DOC_FACE.includes(name) && !TERM_OWNERS.includes(name));
+
 
 test('草稿边界句只有一个来源', () => {
   // 这句话此前在 9 个地方各写了一遍，用户要读 9 次才知道自己在哪一步。
@@ -80,3 +91,75 @@ test('确认弹窗把工程细节放在人话之下', () => {
   const styles = fs.readFileSync(path.join(SRC, 'styles.css'), 'utf8');
   assert.match(styles, /\.confirmation-dialog-copy \.confirmation-dialog-note \{/);
 });
+
+// ---------- 第二批：术语单 ----------
+
+test('术语单自身结构自检', () => {
+  // 三级 + 三面都不能少：少了「收回」就等于没有可执行的禁用规则。
+  assert.deepEqual([...TERM_LEVELS], ['保留', '译好', '收回']);
+  assert.deepEqual([...TERM_SCOPES], ['creator', 'config', 'doc']);
+
+  const internals = TERMS.map((term) => term.internal);
+  assert.deepEqual(internals, [...new Set(internals)], '术语单里有重复条目');
+
+  for (const term of TERMS) {
+    assert.ok(term.internal && term.level && term.scope, '缺字段：' + JSON.stringify(term));
+    assert.ok(TERM_LEVELS.includes(term.level), term.internal + ' 的级别不在三级内：' + term.level);
+    assert.ok(TERM_SCOPES.includes(term.scope), term.internal + ' 的面向面不在三面内：' + term.scope);
+    // 「收回」必须给出人能看懂的说法 —— 否则只是把词藏起来，创作者仍然不知道那是什么。
+    if (term.forbidInCreator) {
+      assert.equal(term.level, '收回', term.internal + '：只有「收回」级才允许在创作者面禁用');
+      assert.equal(term.scope, 'creator', term.internal + '：创作者面禁用词必须归在 creator 面');
+      assert.ok(term.creator, term.internal + '：已禁用就必须给出替代说法');
+    }
+  }
+
+  // 禁用清单必须与「收回」级一致，不允许两套口径。
+  assert.deepEqual(forbiddenInVisibleCopy().sort(), TERMS.filter((term) => term.forbidInCreator).map((term) => term.internal).sort());
+});
+
+test('创作者面的可见文案里没有「收回」级术语', () => {
+  const forbidden = forbiddenInVisibleCopy();
+  const violations = [];
+  for (const name of CREATOR_FACE) {
+    for (const copy of visibleCopyStrings(read(name))) {
+      const hits = forbidden.filter((word) => copy.includes(word));
+      if (hits.length) violations.push(name + ' | ' + hits.join(',') + ' | ' + JSON.stringify(copy));
+    }
+  }
+  assert.deepEqual(violations, [], '这些创作者面文案里还留着实现词，换成人话或下沉到技术详情层：\n' + violations.join('\n'));
+});
+
+test('扫描器只看可见文案，不看标识符与注释', () => {
+  // 这条守的是「口径」本身：上一轮把 providerId / assetScope 这类标识符算进密度表，
+  // 得出的数字是虚高的、也没法改。口径必须在测试里钉死。
+  const sample = [
+    '// 注释里的 Provider 不算',
+    '/* 块注释里的 端点 也不算 */',
+    "const providerId = 'x';",
+    "const label = '生成服务配置';",
+    'const node = <span>出图由后台队列执行</span>;'
+  ].join('\n');
+  const copy = visibleCopyStrings(sample);
+  assert.deepEqual(copy, ['生成服务配置', '出图由后台队列执行']);
+});
+
+test('面清单里的文件都必须真实存在，避免清单腐烂', () => {
+  for (const name of [...CONFIG_FACE, ...DOC_FACE]) {
+    assert.ok(listSources().includes(name), '面清单里的文件已不存在：' + name);
+  }
+});
+
+test('人读版术语单与模块一一对应（反向守卫，防单边漂移）', () => {
+  const markdown = fs.readFileSync(DOC, 'utf8');
+  // 表格首列写成 `内部词`，据此提取。
+  const documented = [...markdown.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1]);
+  const internals = TERMS.map((term) => term.internal);
+  const missing = internals.filter((term) => !documented.includes(term));
+  const extra = documented.filter((term) => !internals.includes(term));
+  assert.deepEqual(missing, [], 'docs/daoge_pic_terminology_zh.md 缺少这些条目：' + missing.join(','));
+  assert.deepEqual(extra, [], 'docs/daoge_pic_terminology_zh.md 多出这些条目：' + extra.join(','));
+  assert.equal(documented.length, internals.length, '人读版条目数与模块不一致');
+  assert.equal(new Set(documented).size, documented.length, '人读版里有重复条目');
+});
+

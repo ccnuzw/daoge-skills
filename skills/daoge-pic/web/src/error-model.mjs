@@ -19,7 +19,7 @@ const CATEGORY_COPY = Object.freeze({
   connection: { code: 'connection_failed', message: '无法连接到本地 Studio。请确认页面仍连接当前本地服务后再重试。' },
   auth: { code: 'unauthorized', message: '本地 Studio 授权未通过。请重新连接工作台。' },
   skill_only: { code: 'skill_only_action', message: '该操作涉及 Provider 凭据，只能在本地 Skill/CLI 中执行。请在会话里让智能体执行，或运行对应的 daoge 命令。' },
-  secret_backend: { code: 'provider_secret_backend_policy', message: '本地 daemon 的 Provider 凭据后端与工作区里已有的 Profile 不一致，因此拒绝了这次读写。这不是连接故障：请用 DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext 重启 daemon 后重试。' },
+  secret_backend: { code: 'provider_secret_backend_policy', message: '本地后台服务的 Provider 凭据后端与工作区里已有的 Profile 不一致，因此拒绝了这次读写。这不是连接故障：请用 DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext 重启后台服务后重试。' },
   conflict: { code: 'conflict', message: '当前内容已被更新；请刷新或继续查看最新状态后再操作。' },
   validation: { code: 'invalid_command', message: '请求未通过 Studio 校验。请调整输入或回到会话确认后再继续。' },
   provider: { code: 'provider_error', message: '生成服务暂时无法完成请求。Provider 细节已脱敏；请查看运行项或回到会话处理。' },

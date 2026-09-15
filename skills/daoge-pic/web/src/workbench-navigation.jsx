@@ -32,7 +32,7 @@ function ProviderStatusCard({ provider, onOpen }) {
   const reconfigurationPending = provider?.reconfigurationPending === true;
   const tone = !configured ? 'danger' : reconfigurationPending ? 'warning' : 'ready';
   const title = !configured ? '生成配置未就绪' : reconfigurationPending ? '配置正在热加载' : '生成配置已就绪';
-  const detail = configured ? reconfigurationPending ? 'daemon 正在切换匹配 Worker' : [provider.profileName, provider.model].filter(Boolean).join(' · ') || '活动 Profile 可用' : provider?.missing?.includes('active_profile') ? '请先创建并激活 Profile' : '补全模型、端点或密钥';
+  const detail = configured ? reconfigurationPending ? '后台服务正在切换对应的处理进程' : [provider.profileName, provider.model].filter(Boolean).join(' · ') || '活动 Profile 可用' : provider?.missing?.includes('active_profile') ? '请先创建并激活 Profile' : '补全模型、服务地址或密钥';
   const Icon = configured ? Server : CloudOff;
   return <button type="button" className={'rail-status-card is-' + tone} onClick={onOpen} title={title + '：' + detail} aria-label={title + '，打开生成服务设置'}>
     <span className="rail-status-icon"><Icon size={16} aria-hidden="true" /></span>
