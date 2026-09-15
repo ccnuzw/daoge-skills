@@ -21,6 +21,9 @@ test('Workbench confirms a plan without preflighting or queueing a generation ru
   assert.match(confirmation, /\/confirm'/);
   assert.doesNotMatch(confirmation, /\/preflight|\/api\/runs|user-preflight|user-run/);
   assert.match(source, /confirmLabel="确认计划"/);
-  assert.match(source, /确认不会调用 Provider/);
+  // 工程细节搬进技术详情层（note），人话在上：确认之后会怎样，见 confirmationPlanSummary。
+  assert.match(source, /确认本身不会调用生成服务/);
+  assert.match(source, /confirmationPlanSummary\(generationConfirmation\.round\)/);
+  assert.doesNotMatch(source, /确认不会调用 Provider/);
   assert.doesNotMatch(source, /确认并开始生成/);
 });

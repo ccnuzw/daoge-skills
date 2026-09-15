@@ -121,7 +121,10 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /项目模板联动/);
   assert.match(main, /模板推荐/);
   assert.match(main, /materialNeeds/);
-  assert.match(main, /项目模板只来自 Studio API/);
+  // 意图：新建项目弹窗必须写明模板来自 Studio（配合上面的 doesNotMatch，禁止前端硬编码模板）。
+  // 原句「项目模板只来自 Studio API；这里建立结构化上下文，不会调用 Provider」里，
+  // 后半句与紧随其后的边界提示重复说同一件事，已随第一批术语治理收敛，断言只锁前半句的意图。
+  assert.match(main, /项目模板来自 Studio/);
   assert.match(main, /setProjectTemplates\(projectTemplateData\.templates \|\| \[\]\)/);
   assert.match(projectTemplates, /商品主图探索/);
   assert.match(projectTemplates, /商品主体图/);
@@ -206,7 +209,11 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(launcher, /export function CreativeActionLauncher/);
   assert.match(launcher, /先选用途，再选草稿轮次/);
   assert.match(launcher, /未锁定轮次：点击用途后先选择或创建草稿轮次/);
-  assert.match(launcher, /不会确认、预检、创建 Generation Run 或访问 Provider/);
+  // 动作面板必须继续声明「这些动作不出图」，但改用全站唯一那句人话（见 boundary-copy.mjs）。
+  // 旧文案「不会确认、预检、创建 Generation Run 或访问 Provider」是工程话，已随第一批术语治理收敛。
+  assert.match(launcher, /import \{ DRAFT_BOUNDARY_COPY \} from '\.\/boundary-copy\.mjs'/);
+  assert.match(launcher, /\{DRAFT_BOUNDARY_COPY\}/);
+  assert.doesNotMatch(launcher, /创建 Generation Run|访问 Provider/);
   assert.match(main, /writeImageBlobToClipboard/);
   assert.match(main, /convertImageBlobToPng/);
   assert.match(main, /ClipboardItem\.supports/);
