@@ -2087,7 +2087,8 @@ export class LocalStudioService {
         error: {
           code: error.code,
           message: '当前 daemon 的 Provider 凭据后端与工作区内已有的 Provider Profile 不一致，因此拒绝读写。'
-            + '本工作区的 Profile 使用 sqlite-plaintext 存储，daemon 必须以 DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext 启动后重启。',
+            + '本工作区的 Profile 使用 sqlite-plaintext 存储，daemon 必须以 DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext 启动后重启。'
+            + '一次性修复：daoge provider-secret-backend --workspace <项目根> --backend plaintext，然后 daoge restart（官方入口之后会自动带上）。',
           details: {
             activeBackend,
             requiredEnv: 'DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext',

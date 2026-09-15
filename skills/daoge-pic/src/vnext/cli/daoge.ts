@@ -6,6 +6,7 @@ import { openWorkbenchUrl } from './open-workbench';
 import { MAX_GLOBAL_CONCURRENCY, MIN_EXECUTION_CONCURRENCY } from '../studio/runtime-settings';
 import { healthStudioId, shutdownVerifiedDaemon } from './daemon-shutdown';
 import { readStudioManifest, sameWorkspaceRoot, studioPaths } from '../studio/workspace';
+import { daemonEnvWithSecretBackend, readWorkspaceSecretBackend, writeWorkspaceSecretBackend, SECRET_BACKEND_CHOICES, type SecretBackendChoice } from '../studio/secret-backend-config';
 import { isSupportedProtocolVersion, isSupportedRuntimeVersion, RUNTIME_VERSION, SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
 import { registerSkill, SkillRegistrationScope } from './register-skill';
 import { assertWorkspaceSupported, doctorWorkspace, formatDoctorReport, redactDoctorReport } from './doctor';
@@ -18,8 +19,8 @@ const STDIN_SECRET_MARKER = Object.freeze({ __daogeSecretStdin: true });
 const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
-type LocalAction = 'status' | 'studio' | 'open' | 'restart' | 'register-skill' | 'doctor' | 'backup-restore';
-type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'non-negative-integer' | 'usage-limit' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope';
+type LocalAction = 'status' | 'studio' | 'open' | 'restart' | 'register-skill' | 'doctor' | 'backup-restore' | 'provider-secret-backend';
+type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'non-negative-integer' | 'usage-limit' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope' | 'secret-backend';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
   // summary 必填：用法文本由表生成，少了它这条命令在 --help 里就是一行没有说明的空壳。
@@ -43,7 +44,8 @@ const FLAG_HINTS: Record<FlagKind, string> = {
   'list': '<逗号分隔>',
   'boolean': '<true|false>',
   'purpose': '<exploration|refinement|variation|edit|fill>',
-  'scope': '<project|user>'
+  'scope': '<project|user>',
+  'secret-backend': '<plaintext|system>'
 };
 interface ParsedCommand {
   name: string;
@@ -56,6 +58,7 @@ interface ParsedCommand {
   jsonOutput?: boolean;
   redactedOutput?: boolean;
   restoreInput?: JsonObject;
+  secretBackend?: SecretBackendChoice;
 }
 
 function workspaceRoot(value: string | undefined): string {
@@ -292,7 +295,7 @@ async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
   }
   const daemonEntry = path.resolve(__dirname, 'daemon.js');
   if (!fs.existsSync(daemonEntry)) throw new Error('未找到 vNext Studio daemon。当前安装包不完整，请重新安装完整发布包。');
-  const child = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { detached: true, stdio: 'ignore', windowsHide: true });
+  const child = spawn(process.execPath, [daemonEntry, '--workspace', workspaceRoot], { detached: true, stdio: 'ignore', windowsHide: true, env: daemonEnvWithSecretBackend(studioPaths(workspaceRoot)) });
   let spawnError: Error | null = null;
   child.once('error', (error) => { spawnError = error; });
   for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
@@ -386,6 +389,7 @@ const commandSchemas: Record<string, CommandSchema> = {
   'provider-delete': { summary: '删除这一组配置；正在使用时要加 --force', method: 'POST', flags: { '--profile': { kind: 'text', required: true }, '--force': { kind: 'boolean' } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/delete', body: (v) => ({ force: v['--force'] === true }) },
   'provider-validate': { summary: '只检查填得全不全，不联网', method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/validate', body: () => ({}) },
   'provider-test': { summary: '真的访问生成服务测连通，但不出图', method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/test', body: () => ({}) },
+  'provider-secret-backend': { summary: '把 Provider 凭据后端写入工作区配置，之后官方入口启动的 daemon 会自动带上；需要 restart 生效', action: 'provider-secret-backend', flags: { '--backend': { kind: 'secret-backend', required: true } } },
   'provider-models': { summary: '读取服务可用的模型列表', method: 'POST', flags: { '--profile': { kind: 'text', required: true } }, pathname: (v) => '/api/providers/' + encoded(v, '--profile') + '/models', body: () => ({}) },
   session: { summary: '按 conversation 建立或恢复会话', method: 'POST', flags: { '--conversation': { kind: 'text', required: true } }, pathname: () => '/api/sessions/open', body: (v) => ({ conversationId: textValue(v, '--conversation') }) },
   'session-context': { summary: '绑定会话的项目、任务与轮次', method: 'POST', flags: { '--session': { kind: 'text', required: true }, '--project': { kind: 'text' }, '--task': { kind: 'text' }, '--round': { kind: 'text' } }, pathname: (v) => '/api/sessions/' + encoded(v, '--session') + '/context', body: (v) => ({ projectId: v['--project'], taskId: v['--task'], roundId: v['--round'] }) },
@@ -436,6 +440,7 @@ function validateFlag(name: string, raw: string, kind: FlagKind): unknown {
   if (kind === 'purpose') { if (!['exploration', 'refinement', 'variation', 'edit', 'fill'].includes(value)) throw new Error(name + ' 不是支持的创作目的。'); return value; }
   if (kind === 'execution-concurrency') return strictExecutionConcurrency(value);
   if (kind === 'scope') { if (value !== 'project' && value !== 'user') throw new Error(name + ' 只能是 project 或 user。'); return value; }
+  if (kind === 'secret-backend') { if (!SECRET_BACKEND_CHOICES.includes(value as SecretBackendChoice)) throw new Error(name + ' 只能是 plaintext 或 system。'); return value as SecretBackendChoice; }
   const integer = Number(value);
   if (!Number.isSafeInteger(integer) || (kind === 'non-negative-integer' ? integer < 0 : integer < 1) || (kind === 'usage-limit' && integer > 10000)) throw new Error(name + ' 必须是' + (kind === 'non-negative-integer' ? '非负安全整数' : kind === 'usage-limit' ? '1 到 10000 的安全整数' : '正整数') + '。');
   return integer;
@@ -525,7 +530,7 @@ function parseCommand(args: string[]): ParsedCommand {
   const root = userRegistration && rawValues['--workspace'] === undefined ? undefined : workspaceRoot(rawValues['--workspace']);
   const markerCount = Object.values(values).filter((value) => value === STDIN_JSON_MARKER).length;
   if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
-  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}) };
+  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}), ...(schema.action === 'provider-secret-backend' ? { secretBackend: values['--backend'] as SecretBackendChoice } : {}) };
   const method = schema.method as HttpMethod;
   const operationName = method === 'GET' || rawValues['--idempotency-key'] ? undefined : rawValues['--operation-name'] ? explicitOperationName(rawValues['--operation-name']) : undefined;
   const idempotencyKey = method === 'GET' || operationName ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
@@ -619,6 +624,17 @@ export async function main(): Promise<void> {
   if (!manifest) {
     assertWorkspaceSupported(root);
     assertImplicitStudioCreationAllowed(root, parsed.action === 'open' && parsed.allowNestedStudio === true);
+  }
+  if (parsed.action === 'provider-secret-backend') {
+    const paths = studioPaths(root);
+    writeWorkspaceSecretBackend(paths, parsed.secretBackend as SecretBackendChoice);
+    process.stdout.write(JSON.stringify({
+      workspaceRoot: root,
+      backend: readWorkspaceSecretBackend(paths),
+      env: 'DAOGE_PIC_PROVIDER_SECRET_BACKEND=' + (parsed.secretBackend as SecretBackendChoice),
+      note: '已写入工作区配置，之后 daoge open / daoge studio 启动的 daemon 会自动带上它。已在运行的 daemon 需要 daoge restart 才生效。'
+    }, null, 2) + '\n');
+    return;
   }
   if (parsed.action === 'restart') {
     const restarted = await restartDaemon(root);
