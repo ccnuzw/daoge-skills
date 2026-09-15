@@ -88,15 +88,15 @@ test('run item controls round-trip only on generation history routes', async () 
 
 test('every context-bar tab drops the run context on the views that do not render runs', async () => {
   const { parseWorkbenchRoute, serializeWorkbenchRoute, updateWorkbenchRoute } = await import('../../web/src/workbench-route.mjs');
-  // The context bar is reachable from 「生成记录」 while a run is open, and `updateWorkbenchRoute` merges rather
-  // than replaces. 「计划」/「结果」/「轮次对比」 therefore used to inherit `run=run_d`, and the context loader
+  // The context bar is reachable from 「生成历史」 while a run is open, and `updateWorkbenchRoute` merges rather
+  // than replaces. 「计划」/「资产管理」/「轮次对比」 therefore used to inherit `run=run_d`, and the context loader
   // answered with 「请先打开生成运行视图，再继续查看运行。」 on all three — a page the operator had just chosen.
   const onRuns = parseWorkbenchRoute('?view=runs&project=project_a&task=task_b&round=round_c&run=run_d&scope=round');
   const tabs = [
     ['计划', 'prompts', { assetScope: 'round' }],
     ['生成历史', 'runs', { assetScope: 'round' }],
-    ['结果', 'assets', { assetScope: 'round' }],
-    ['谱系', 'lineage', { assetScope: 'round' }],
+    ['资产管理', 'assets', { assetScope: 'round' }],
+    ['创作平台', 'lineage', { assetScope: 'round' }],
     ['轮次对比', 'studio-overview', { assetScope: 'task' }]
   ];
   for (const [label, targetView, changes] of tabs) {

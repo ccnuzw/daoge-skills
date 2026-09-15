@@ -18,8 +18,11 @@ test('project assets expose page selection, configurable pagination, and multi-f
   assert.match(main, /routeView === 'assets' && selectedProject && <button type="button" className="command-button asset-import-button"/);
   assert.match(main, /function WorkspaceContextBar\(\{ project, tasks = EMPTY, task/);
   assert.match(main, /className="workspace-context-select workspace-context-task"/);
-  assert.match(main, /onSelectTask=\{\(taskId\) => taskId \? navigateRoute\(selectTask/);
+  assert.match(main, /onSelectTask=\{\(taskId\) => navigateRoute\(updateWorkbenchRoute/);
   assert.match(main, /aria-label="任务工作入口"/);
+  assert.match(main, />资产管理<\/button>/);
+  assert.match(main, />创作平台<\/button>/);
+  assert.match(main, />生成历史<\/button>/);
   assert.match(main, />轮次对比<\/button>/);
   assert.doesNotMatch(main, /className="task-more-tabs"/);
   assert.match(main, /if \(!session\) void openWorkbenchSession\(\)\.catch/);

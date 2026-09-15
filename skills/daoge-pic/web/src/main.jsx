@@ -4,7 +4,7 @@ import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAl
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
 import { runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
 import { planPresentation, planStateLabel } from './plan-presentation.mjs';
-import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectRound, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
+import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
 import { PromptWorkspace } from './prompt-workspace.jsx';
 import { LearningCenter } from './learning-center.jsx';
 import { CreativeLibrary } from './creative-library.jsx';
@@ -568,19 +568,19 @@ function IconButton({ label, children, onClick, disabled = false, tone = 'defaul
 function surfaceTitle(view, project = null) {
   if (view === 'project-overview') return project?.name || '项目总览';
   return ({
-    projects: '工作台',
+    projects: '项目管理',
     tasks: '任务',
-    lineage: '创作流',
-    'studio-overview': '创作流',
-    prompts: '创作流',
-    assets: '素材库',
-    trash: '素材库',
-    'shared-assets': '素材库',
-    runs: '生成记录',
-    deliveries: '交付',
+    lineage: '创作平台',
+    'studio-overview': '轮次对比',
+    prompts: '计划',
+    assets: '资产管理',
+    trash: '回收站',
+    'shared-assets': '共享素材',
+    runs: '生成历史',
+    deliveries: '资产交付',
     library: '规则资料',
     guide: '创作手册'
-  })[view] || '工作台';
+  })[view] || '项目管理';
 }
 
 function surfaceEyebrow(view, hasProject) {
@@ -594,7 +594,7 @@ function surfaceSubtitle(view, project) {
   if (view === 'shared-assets') return '跨项目复用图片。';
   if (view === 'guide') return '工作流帮助。';
   if (project) return project.name;
-  return '从工作台选择项目，再进入创作流、素材库、生成记录或交付。';
+  return '先选择或创建一个项目，再进入创作。';
 }
 
 
@@ -734,7 +734,7 @@ function ProjectTaskList({ project, tasks, onOpenTask, onCreateTask }) {
 
 
 function WorkspaceContextBar({ project, tasks = EMPTY, task, rounds, selectedRound, view, assetScope, sessionPlanStatus, onProject, onTasks, onSelectTask, onSelectRound, onCreateRound, onNavigate, onRestoreContext }) {
-  if (!project || ['project-overview', 'tasks'].includes(view)) return null;
+  if (!project) return null;
   const scopedAssetTarget = selectedRound ? 'round' : task ? 'task' : 'project';
   const roundOptions = selectedRound && !rounds.some((round) => round.id === selectedRound.id) ? [selectedRound, ...rounds] : rounds;
   const roundTaskLabel = (round) => !task && round?.taskId ? tasks.find((item) => item.id === round.taskId)?.name : '';
@@ -747,8 +747,8 @@ function WorkspaceContextBar({ project, tasks = EMPTY, task, rounds, selectedRou
     <div className="task-local-tabs" aria-label="任务工作入口">
       <button type="button" className={view === 'prompts' ? 'is-active' : ''} disabled={!selectedRound} onClick={() => onNavigate('prompts', { assetScope: 'round' })}>计划</button>
       <button type="button" className={view === 'runs' ? 'is-active' : ''} disabled={!selectedRound} onClick={() => onNavigate('runs', { assetScope: 'round' })}>生成历史</button>
-      <button type="button" className={view === 'assets' ? 'is-active' : ''} onClick={() => onNavigate('assets', { assetScope: scopedAssetTarget })}>结果</button>
-      <button type="button" className={view === 'lineage' ? 'is-active' : ''} onClick={() => onNavigate('lineage', { assetScope: scopedAssetTarget })}>谱系</button>
+      <button type="button" className={view === 'assets' ? 'is-active' : ''} onClick={() => onNavigate('assets', { assetScope: scopedAssetTarget })}>资产管理</button>
+      <button type="button" className={view === 'lineage' ? 'is-active' : ''} onClick={() => onNavigate('lineage', { assetScope: scopedAssetTarget })}>创作平台</button>
       <button type="button" className={view === 'studio-overview' ? 'is-active' : ''} disabled={!task} onClick={() => onNavigate('studio-overview', { assetScope: 'task' })}>轮次对比</button>
     </div>
     <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={onRestoreContext} />
@@ -3284,7 +3284,7 @@ function App() {
           </div>
         </header>
         {!studioView ? <>
-          <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} assetScope={assetScope} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectTask={(taskId) => taskId ? navigateRoute(selectTask(route, taskId)) : navigateRoute({ view: 'lineage', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); roundId ? navigateRoute({ view: 'lineage', taskId: nextRound?.taskId || selectedTask?.id || null, roundId, compareRoundIds: [roundId], runId: null, assetScope: 'round' }) : navigateRoute({ view: 'lineage', taskId: selectedTask?.id || null, roundId: null, compareRoundIds: [], runId: null, assetScope: selectedTask ? 'task' : 'project' }); }} onCreateRound={() => openCreationDialog('round')} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onRestoreContext={restoreSessionContext} />
+          <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} assetScope={assetScope} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} onCreateRound={() => openCreationDialog('round')} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onRestoreContext={restoreSessionContext} />
         </> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={restoreSessionContext} />}
       </div>
       <RuntimeHealthAlertStrip studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />

@@ -20,25 +20,28 @@ test('every WORKBENCH_VIEW has exactly one renderer key and legacy dispatch is a
   assert.doesNotMatch(main, /__legacy_deliveries__|DeliveryComposer/);
 });
 
-test('mobile navigation exposes five human workbench entries with 44px targets', async () => {
+test('mobile navigation exposes four human workbench entries with 44px targets', async () => {
   const { workbenchNavigationViews } = await import('../../web/src/workbench-navigation-model.mjs');
-  assert.deepEqual(workbenchNavigationViews(true), ['projects', 'lineage', 'assets', 'runs', 'deliveries']);
+  assert.deepEqual(workbenchNavigationViews(true), ['projects', 'lineage', 'assets', 'deliveries']);
   assert.deepEqual(workbenchNavigationViews(false), ['projects']);
   const navigation = fs.readFileSync(path.join(skillRoot, 'web/src/workbench-navigation.jsx'), 'utf8');
-  assert.match(navigation, /label: '工作台'/);
-  assert.match(navigation, /label: '创作流'/);
-  assert.match(navigation, /label: '素材库'/);
-  assert.match(navigation, /label: '生成记录'/);
-  assert.match(navigation, /label: '交付'/);
+  assert.match(navigation, /label: '项目管理'/);
+  assert.match(navigation, /label: '创作平台'/);
+  assert.match(navigation, /label: '资产管理'/);
+  assert.match(navigation, /label: '资产交付'/);
   assert.match(navigation, /const mainItems = \[/);
   assert.match(navigation, /WORKBENCH_ACTIVE_VIEWS/);
-  assert.match(navigation, /workbench: \{ view: 'projects', label: '工作台'[^\n]+projectId: null/);
+  assert.match(navigation, /workbench: \{ view: 'projects', label: '项目管理'[^\n]+projectId: null/);
   assert.match(navigation, /const workbenchItem = NAVIGATION_ITEMS\.workbench/);
   assert.match(navigation, /const WORKBENCH_ACTIVE_VIEWS = new Set\(\['projects'\]\)/);
   assert.doesNotMatch(navigation, /workbenchItem = project \?/);
   assert.doesNotMatch(navigation, /workbenchItem[^\n]+project-overview/);
   assert.match(navigation, /ASSET_ACTIVE_VIEWS/);
-  assert.doesNotMatch(navigation, /label: '项目管理'|label: '项目资产'|label: '回收站'|label: '任务'/);
+  // 「生成历史」按轮次组织，只在任务内联页签里出现；一旦把它请回一级入口，这条会先响。
+  assert.doesNotMatch(navigation, /NAVIGATION_ITEMS\.runs|item: runItem/);
+  // v5.12.0 把轨道里「当前项目」那一组二级入口整体撤掉了，这条守卫锁住它不回潮。
+  // 「项目管理」不在禁令内：它是 Studio 级 projects 入口的名字（v5.12.0 之前就叫这个），与那组二级入口无关。
+  assert.doesNotMatch(navigation, /label: '项目资产'|label: '回收站'|label: '任务'/);
   assert.doesNotMatch(navigation, /NAVIGATION_ITEMS\.library|project-navigation-name/);
   const css = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
   assert.match(css, /\.studio-rail \{ min-width:0; max-width:100%; overflow:hidden;[^}]*\}/);

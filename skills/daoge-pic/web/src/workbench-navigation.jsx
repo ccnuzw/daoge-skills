@@ -1,16 +1,18 @@
-import { Activity, BookOpen, Clock3, CloudOff, Copy, FolderKanban, GitFork, Image, PackageCheck, RefreshCw, Server } from 'lucide-react';
+import { Activity, BookOpen, CloudOff, Copy, FolderKanban, GitFork, Image, PackageCheck, RefreshCw, Server } from 'lucide-react';
 import { runtimeHealthPresentation } from './runtime-health.mjs';
 
 const PROJECT_CONTEXT_RESET = { taskId: null, roundId: null, compareRoundIds: [], runId: null };
+// 四个一级入口：选项目 → 干活 → 看产出 → 交出去。
+// 「生成历史」(runs) 不是一级入口：它按轮次组织，只在任务内联页签里出现。
 const NAVIGATION_ITEMS = {
-  workbench: { view: 'projects', label: '工作台', Icon: FolderKanban, changes: { projectId: null, ...PROJECT_CONTEXT_RESET, assetScope: 'studio' } },
-  lineage: { view: 'lineage', label: '创作流', Icon: GitFork, changes: { ...PROJECT_CONTEXT_RESET, assetScope: 'project' }, disabledLabel: '先选择一个项目' },
-  assets: { view: 'assets', label: '素材库', Icon: Image, changes: { ...PROJECT_CONTEXT_RESET, assetScope: 'project' }, disabledLabel: '先选择一个项目' },
-  runs: { view: 'runs', label: '生成记录', Icon: Clock3, changes: { assetScope: 'round' } },
-  deliveries: { view: 'deliveries', label: '交付', Icon: PackageCheck, changes: PROJECT_CONTEXT_RESET, disabledLabel: '先选择一个项目' }
+  workbench: { view: 'projects', label: '项目管理', Icon: FolderKanban, changes: { projectId: null, ...PROJECT_CONTEXT_RESET, assetScope: 'studio' } },
+  lineage: { view: 'lineage', label: '创作平台', Icon: GitFork, changes: { ...PROJECT_CONTEXT_RESET, assetScope: 'project' }, disabledLabel: '先选择一个项目' },
+  assets: { view: 'assets', label: '资产管理', Icon: Image, changes: { ...PROJECT_CONTEXT_RESET, assetScope: 'project' }, disabledLabel: '先选择一个项目' },
+  deliveries: { view: 'deliveries', label: '资产交付', Icon: PackageCheck, changes: PROJECT_CONTEXT_RESET, disabledLabel: '先选择一个项目' }
 };
 const WORKBENCH_ACTIVE_VIEWS = new Set(['projects']);
-const LINEAGE_ACTIVE_VIEWS = new Set(['lineage', 'studio-overview', 'prompts']);
+// 生成历史属于创作过程，从任务页签进入时让「创作平台」保持高亮，避免左侧一整列无高亮。
+const LINEAGE_ACTIVE_VIEWS = new Set(['lineage', 'studio-overview', 'prompts', 'runs']);
 const ASSET_ACTIVE_VIEWS = new Set(['assets', 'trash', 'shared-assets']);
 
 function NavigationButton({ item, active, disabled = false, onNavigate }) {
@@ -61,19 +63,17 @@ export function WorkbenchNavigation({ view, project, task, round, provider, stud
   const projectRequired = !project;
   const workbenchItem = NAVIGATION_ITEMS.workbench;
   const lineageItem = project ? { ...NAVIGATION_ITEMS.lineage, changes: round ? { taskId: task?.id || round.taskId, roundId: round.id, compareRoundIds: [round.id], runId: null, assetScope: 'round' } : task ? { taskId: task.id, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' } : NAVIGATION_ITEMS.lineage.changes } : NAVIGATION_ITEMS.lineage;
-  const assetItem = { ...NAVIGATION_ITEMS.assets, disabledLabel: projectRequired ? '先选择一个项目' : '打开当前项目素材库' };
-  const runItem = { ...NAVIGATION_ITEMS.runs, changes: round ? { roundId: round.id, compareRoundIds: [round.id], runId: null, assetScope: 'round' } : { assetScope: 'round' }, disabledLabel: task ? '先在任务里选择一个轮次' : '先选择任务和轮次' };
-  const deliveryItem = { ...NAVIGATION_ITEMS.deliveries, disabledLabel: projectRequired ? '先选择一个项目' : '打开当前项目交付' };
+  const assetItem = { ...NAVIGATION_ITEMS.assets, disabledLabel: projectRequired ? '先选择一个项目' : '打开当前项目的资产' };
+  const deliveryItem = { ...NAVIGATION_ITEMS.deliveries, disabledLabel: projectRequired ? '先选择一个项目' : '打开当前项目的交付' };
   const mainItems = [
     { item: workbenchItem, active: WORKBENCH_ACTIVE_VIEWS.has(view), disabled: false },
     { item: lineageItem, active: LINEAGE_ACTIVE_VIEWS.has(view), disabled: projectRequired },
     { item: assetItem, active: ASSET_ACTIVE_VIEWS.has(view), disabled: projectRequired },
-    { item: runItem, active: view === 'runs', disabled: !round },
     { item: deliveryItem, active: view === 'deliveries', disabled: projectRequired }
   ];
   return <>
     <nav className="workspace-navigation" aria-label="Studio 导航">
-      <section className="primary-navigation" aria-label="创作工作台主入口"><p>创作工作台</p>{mainItems.map(({ item, active, disabled }) => <NavigationButton key={item.label} item={item} active={active} disabled={disabled} onNavigate={onNavigate} />)}</section>
+      <section className="primary-navigation" aria-label="工作区主入口"><p>工作区</p>{mainItems.map(({ item, active, disabled }) => <NavigationButton key={item.label} item={item} active={active} disabled={disabled} onNavigate={onNavigate} />)}</section>
     </nav>
     <div className="rail-utility-stack">
       <section className="rail-system-panel" aria-label="Studio 状态"><p className="rail-section-label">系统</p><ProviderStatusCard provider={provider} onOpen={onOpenProvider} /><RuntimeStatusCard studio={studio} recoveryPhase={recoveryPhase} repairing={repairing} onCopy={onCopyRuntimeDiagnostic} onRefresh={onRefresh} onRepair={onRepair} /></section>
