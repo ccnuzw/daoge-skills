@@ -3,8 +3,16 @@ import { IncomingMessage } from 'node:http';
 
 export type LocalAuthentication = 'bearer' | 'cookie';
 
+/**
+ * `skill_only_action` marks a refusal based on the caller's *credential class*: the caller is authenticated,
+ * but the endpoint is reserved for the Skill/CLI bearer token. It is deliberately distinct from `forbidden`
+ * (a Host/Origin reject) so the Workbench can explain the real reason instead of telling the operator their
+ * session expired and to reconnect. It is currently unused: the Provider credential endpoints used it while
+ * they were bearer-only (v5.14.0–v5.14.x), and they now accept same-origin Workbench callers again. Keep the
+ * code so a future credential-class gate stays distinguishable from an expired session.
+ */
 export class LocalAccessError extends Error {
-  constructor(readonly status: 401 | 403 | 415, readonly code: 'unauthorized' | 'forbidden' | 'unsupported_media_type', message: string) {
+  constructor(readonly status: 401 | 403 | 415, readonly code: 'unauthorized' | 'forbidden' | 'skill_only_action' | 'unsupported_media_type', message: string) {
     super(message);
   }
 }

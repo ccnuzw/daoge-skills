@@ -5,7 +5,7 @@ import { ImageOperation, ImageProvider, ImageProviderCapabilities, ImageRequest,
 import { ProviderId, ResolvedProviderConfig } from '../studio/provider-config';
 import { providerDescriptor, providerEndpointPolicyIssues } from './descriptors';
 import { OutputTransport, resolveOutputSpec } from './output-spec';
-import { HostResolver, HttpFetch, PinnedHttpTransport, PrivateAddressPolicy, downloadHttpResourceToFile, readJsonImageResponseToFile, readBoundedResponse, requestPinnedHttpEndpoint } from './http-safety';
+import { HostResolver, HttpFetch, PinnedHttpTransport, PrivateAddressPolicy, describeTransportFailure, downloadHttpResourceToFile, readJsonImageResponseToFile, readBoundedResponse, requestPinnedHttpEndpoint } from './http-safety';
 import { detectedMediaType } from '../media/archive';
 
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
@@ -93,6 +93,21 @@ export function requestEndpointFor(config: ResolvedProviderConfig, operation: Im
   }
 }
 
+/**
+ * The model-list endpoint plus the credential headers for it.
+ *
+ * `连接测试` used to probe the *generation* endpoint, which almost every gateway only accepts POST on — so a
+ * perfectly healthy Provider answered 404 and the Workbench reported a scary non-2xx status for a working
+ * setup. A GET on the model-list endpoint is what actually proves DNS, TLS and credential acceptance.
+ */
+export function modelListProbeFor(config: ResolvedProviderConfig): { url: string; headers: Record<string, string> } | null {
+  try {
+    return { url: modelsEndpoint(config.baseUrl, config.providerId), headers: credentialHeaders(config) };
+  } catch {
+    return null;
+  }
+}
+
 export function requestPathFor(config: ResolvedProviderConfig, operation: ImageOperation = 'generate'): string | null {
   try {
     const target = requestEndpointFor(config, operation);
@@ -124,7 +139,7 @@ async function credentialedFetch(transport: HttpTransport, target: string, init:
     }
   } catch (error) {
     if (init.signal?.aborted) throw error;
-    throw new Error('Provider request failed before a response was received.');
+    throw new Error('Provider request failed before a response was received: ' + describeTransportFailure(error), { cause: error });
   }
   await rejectRedirect(response);
   return response;

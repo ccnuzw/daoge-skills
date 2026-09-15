@@ -5,7 +5,7 @@ import { createId, nowIso } from '../shared/ids';
 import { InvalidCommandError, StudioNotFoundError, VersionConflictError } from '../domain/studio-commands';
 import { capabilitiesForProvider, configFromProviderEnv, endpointPolicyWarnings, isProviderId, parseProviderEnv, providerSnapshot, ProviderCapabilities, ProviderEndpointTrustMode, ProviderId, ProviderProfileLimits, ResolvedProviderConfig, SafeProviderStatus } from './provider-config';
 import { providerDescriptor, providerEndpointPolicyIssues, referenceEnabledForProvider, safeProviderDescriptors, isProviderEndpointTrustMode, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, SafeProviderDescriptor } from '../providers/descriptors';
-import { createProviderSecretStore, providerSecretBackendPolicy, ProviderSecretBackend, ProviderSecretStore, storeProviderSecret } from './provider-secrets';
+import { createProviderSecretStore, providerSecretBackendPolicy, ProviderSecretBackend, ProviderSecretBackendPolicyError, ProviderSecretStore, storeProviderSecret } from './provider-secrets';
 import { StudioPaths } from './workspace';
 
 const PROVIDER_SCHEMA_VERSION = 3;
@@ -180,7 +180,7 @@ function readSecret(row: StoredProfile, kind: 'base_url' | 'api_key', paths?: St
     // compatibility, but the active system policy must not expose newly
     // written plaintext rows.
     if (providerSecretBackendPolicy() === 'system' && row.secret_backend_origin !== 'legacy') {
-      throw new Error('Plaintext Provider credentials are disabled by the active secret backend policy.');
+      throw new ProviderSecretBackendPolicyError('Plaintext Provider credentials are disabled by the active secret backend policy.');
     }
     return kind === 'base_url' ? row.base_url : row.api_key;
   }
@@ -599,7 +599,7 @@ export function updateProviderProfile(db: ProviderDatabase, id: string, input: {
     const profile = mutation(db, input.idempotencyKey, 'provider.update', { id, name: input.name, providerId: input.providerId, model: input.model, baseUrl: input.baseUrl, apiKey: input.apiKey, options: input.options, expectedConfigVersion: input.expectedConfigVersion, endpointTrustMode: input.endpointTrustMode, limits: input.limits }, () => {
       const current = row(db, id);
       if (backend(current) === 'sqlite-plaintext' && providerSecretBackendPolicy() === 'system') {
-        throw new Error('Plaintext Provider credentials are read-only legacy data under the active secret backend policy.');
+        throw new ProviderSecretBackendPolicyError('Plaintext Provider credentials are read-only legacy data under the active secret backend policy.');
       }
       const currentBaseUrl = readSecret(current, 'base_url', input.paths);
       const currentApiKey = readSecret(current, 'api_key', input.paths);

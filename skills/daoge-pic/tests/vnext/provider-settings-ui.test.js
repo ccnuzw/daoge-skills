@@ -35,6 +35,26 @@ test('Provider settings UI keeps secrets write-only and exposes accessible expli
   assert.doesNotMatch(source, /保存并重启/);
   assert.match(source, /aria-live="polite"/);
   assert.doesNotMatch(source, /localStorage|sessionStorage/);
+  // The three-command hint box is gone on purpose. It was a dead-end: it told the operator to leave the page and
+  // run `daoge provider-validate | provider-test | provider-models` by hand, and because the three commands were
+  // rendered as adjacent inline <code> elements they also copied out as one un-runnable string. The buttons
+  // themselves now perform the action in the browser, so there is nothing left to copy and no fallback to show.
+  assert.doesNotMatch(source, /provider-cli-commands/);
+  assert.doesNotMatch(source, /copyCliCommand/);
+  // NB: do not assert the absence of `provider-restart-note` — that class still carries the legitimate
+  // endpoint-policy warning and hot-reload notices. Only the CLI hint block was removed.
+  assert.doesNotMatch(source, /daemon 只接受本地 Skill\/CLI 调用/);
+  assert.doesNotMatch(source, /Workbench 不代持密钥/);
+  assert.doesNotMatch(source, /navigator\.clipboard/);
+  assert.doesNotMatch(source, /<\/code><code>/);
+  // A disabled button with no onClick swallows the click silently: the operator concludes the
+  // control is broken. These three controls must stay enabled and actually perform their action
+  // from the Workbench (the daemon accepts same-origin cookie callers for them).
+  assert.match(source, /onClick=\{\(\) => void performAction\('validate'\)\}/);
+  assert.match(source, /onClick=\{\(\) => void performAction\('test'\)\}/);
+  assert.match(source, /onClick=\{\(\) => void loadModels\(\)\}/);
+  assert.doesNotMatch(source, /disabled title="涉及 Provider 凭据/, 'credential-only buttons must not sit silently disabled');
+  assert.doesNotMatch(source, /PROVIDER_SKILL_ONLY_ACTIONS/, 'the Workbench no longer treats these actions as CLI-only');
 });
 
 test('Provider edit model preserves projected Provider metadata and limits', async () => {

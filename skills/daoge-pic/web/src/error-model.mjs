@@ -18,6 +18,8 @@ const CATEGORY_COPY = Object.freeze({
   abort: { code: 'aborted', message: '操作已取消，页面状态已保留。' },
   connection: { code: 'connection_failed', message: '无法连接到本地 Studio。请确认页面仍连接当前本地服务后再重试。' },
   auth: { code: 'unauthorized', message: '本地 Studio 授权未通过。请重新连接工作台。' },
+  skill_only: { code: 'skill_only_action', message: '该操作涉及 Provider 凭据，只能在本地 Skill/CLI 中执行。请在会话里让智能体执行，或运行对应的 daoge 命令。' },
+  secret_backend: { code: 'provider_secret_backend_policy', message: '本地 daemon 的 Provider 凭据后端与工作区里已有的 Profile 不一致，因此拒绝了这次读写。这不是连接故障：请用 DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext 重启 daemon 后重试。' },
   conflict: { code: 'conflict', message: '当前内容已被更新；请刷新或继续查看最新状态后再操作。' },
   validation: { code: 'invalid_command', message: '请求未通过 Studio 校验。请调整输入或回到会话确认后再继续。' },
   provider: { code: 'provider_error', message: '生成服务暂时无法完成请求。Provider 细节已脱敏；请查看运行项或回到会话处理。' },
@@ -31,6 +33,8 @@ const PRESENTATION_COPY = Object.freeze({
   abort: { tone: 'neutral', title: '操作已取消', failure: false },
   connection: { tone: 'warning', title: '本地 Studio 连接中断', failure: true },
   auth: { tone: 'warning', title: '需要重新授权', failure: true },
+  skill_only: { tone: 'warning', title: '需要 Skill/CLI 执行', failure: true },
+  secret_backend: { tone: 'warning', title: 'Provider 凭据后端不匹配', failure: true },
   conflict: { tone: 'warning', title: '状态已变化', failure: true },
   validation: { tone: 'warning', title: '需要调整后继续', failure: true },
   provider: { tone: 'danger', title: 'Provider 未完成请求', failure: true },
@@ -151,10 +155,24 @@ function classify({ input, apiError, details, status, code, kind, category, mess
   const haystack = [code, kind, category, status, message].filter(Boolean).join(' ').toLowerCase();
   if (hasPartialBatch(input, apiError, details) || /partial[_ -]?batch|batch[_ -]?partial/.test(haystack)) return 'partial_batch';
   if (/outcome[_ -]?unknown|unknown[_ -]?outcome|result[_ -]?unknown|uncertain[_ -]?outcome|lease_expired/.test(haystack)) return 'unknown_outcome';
+  // Checked before the 409/conflict bucket and before the provider bucket: the daemon answers this case with 409
+  // and the code contains "provider", and both routes used to end in a message that blamed the network or a stale
+  // page instead of the real cause (a mismatched DAOGE_PIC_PROVIDER_SECRET_BACKEND).
+  if (/secret[_ -]?backend/.test(haystack)) return 'secret_backend';
   if (status === 409 || /conflict|version_conflict|invalid_state_transition|state_transition/.test(haystack)) return 'conflict';
+  // Must be decided before the 401/403 bucket: this is a deliberate credential-class rule, not a lost session,
+  // and presenting it as "reconnect the workbench" sent operators chasing an authorization problem that did not
+  // exist. No endpoint emits it right now — the Provider credential actions accept same-origin Workbench callers
+  // again — but keep the branch so a future credential-class gate stays distinguishable from an expired session.
+  if (/skill[_ -]?only/.test(haystack)) return 'skill_only';
   if (status === 401 || status === 403 || /unauthori[sz]ed|forbidden|auth|permission|csrf/.test(haystack)) return 'auth';
   if (/connection|network|offline|econn|refused|failed to fetch|load failed|socket|dns|timeout|timed out|invalid[_ -]?response|malformed[_ -]?response|bad[_ -]?response|无法连接|暂时不可用/.test(haystack) || input?.category === 'connection') return 'connection';
   if (/media|asset|image|mask|mime|content[_ -]?type|unsupported[_ -]?media|too[_ -]?large|decode|thumbnail/.test(haystack)) return 'media';
+  // A 400/422 is always a request-shape problem, never a Provider problem — even when the message mentions
+  // "Provider" (e.g. "使用 Provider Profile 覆盖端点、Provider 类型或信任策略时必须同时提供新的 API Key").
+  // Without this, that business-rule rejection rendered as 「生成服务暂时无法完成请求。Provider 细节已脱敏」,
+  // sending the operator to inspect run items for a problem they could have fixed in the form immediately.
+  if (status === 400 || status === 422) return 'validation';
   if (/provider|rate[_ -]?limited|quota|external|http_429|http_5\d\d|transient/.test(haystack) || status === 429) return 'provider';
   if (status === 400 || status === 422 || /invalid|validation|required|missing|malformed|bad_request/.test(haystack)) return 'validation';
   if (status && TRANSIENT_STATUSES.has(status)) return 'connection';
@@ -210,7 +228,7 @@ export function normalizeWorkbenchError(input, options = {}) {
   const explicitCommitted = explicitBoolean(options.mayHaveCommitted, options.possibleCommitted, apiError?.mayHaveCommitted, input?.mayHaveCommitted, details?.mayHaveCommitted, details?.possibleCommitted);
   const mayHaveCommitted = explicitCommitted ?? (category === 'unknown_outcome' || category === 'partial_batch' || POST_SUBMISSION_PHASES.has(phase));
   const explicitSafe = explicitBoolean(options.safeToRetry, apiError?.safeToRetry, input?.safeToRetry, details?.safeToRetry);
-  const unsafeByCategory = category === 'abort' || category === 'auth' || category === 'conflict' || category === 'unknown_outcome' || category === 'partial_batch';
+  const unsafeByCategory = category === 'abort' || category === 'auth' || category === 'skill_only' || category === 'secret_backend' || category === 'conflict' || category === 'unknown_outcome' || category === 'partial_batch';
   const safeToRetry = Boolean((explicitSafe ?? retryable) && !unsafeByCategory && !mayHaveCommitted);
   const context = sanitizeContext({ ...(options.context || {}), ...(isObject(input?.context) ? input.context : {}), ...(isObject(apiError?.context) ? apiError.context : {}), ...(isObject(details?.context) ? details.context : {}) });
   const normalized = {

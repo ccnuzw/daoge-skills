@@ -248,6 +248,11 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
   let total = 0;
   let inString = false;
   let escaped = false;
+  // Collects the four hex digits of a \uXXXX escape. JSON encoders emit this form
+  // for characters such as '&', and providers hand back long pre-signed URLs where
+  // every '&' arrives as \u0026. Without decoding it the URL keeps a literal
+  // "u0026" and the signature query parameters are destroyed.
+  let unicodeEscape: string | null = null;
   let pendingString: string | null = null;
   let expectingValue = false;
   let nextCapture: JsonImageCapture | null = null;
@@ -290,9 +295,24 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
         continue;
       }
       if (inString) {
+        if (unicodeEscape !== null) {
+          unicodeEscape += character;
+          if (unicodeEscape.length === 4) {
+            const codePoint = Number.parseInt(unicodeEscape, 16);
+            unicodeEscape = null;
+            if (!Number.isFinite(codePoint)) throw new Error('Provider response JSON contained an invalid unicode escape.');
+            if (activeCapture === 'base64') throw new Error('Provider response included invalid base64 image data.');
+            if (current.length < 16384) current += String.fromCharCode(codePoint);
+          }
+          continue;
+        }
         if (escaped) {
           escaped = false;
           if (activeCapture === 'base64') throw new Error('Provider response included invalid base64 image data.');
+          if (character === 'u') {
+            unicodeEscape = '';
+            continue;
+          }
           current += decodeJsonEscape(character);
           continue;
         }
@@ -365,7 +385,7 @@ export async function readJsonImageResponseToFile(response: Response, destinatio
       await consume(decoder.decode(result.value, { stream: true }));
     }
     await consume(decoder.decode());
-    if (inString || escaped || activeJsonCapture) throw new Error('Provider response JSON was incomplete.');
+    if (inString || escaped || unicodeEscape !== null || activeJsonCapture) throw new Error('Provider response JSON was incomplete.');
     await flushBase64();
     const completedWriter = base64Writer as Base64FileWriter | null;
     if (completedWriter) await completedWriter.finish();
@@ -850,6 +870,27 @@ function redirectLocation(response: Response): string | null {
   return response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
 }
 
+/**
+ * Surfaces the underlying transport failure instead of hiding it behind a generic
+ * message. Without this a closed proxy port, a DNS failure and a TLS rejection all
+ * look identical in the Studio error records, which makes them very hard to tell apart.
+ * Credential-shaped fragments are stripped because the text is persisted.
+ */
+export function describeTransportFailure(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    const message = current instanceof Error ? current.message : String(current);
+    if (message) parts.push(message);
+    current = current instanceof Error ? (current as Error & { cause?: unknown }).cause : undefined;
+  }
+  return parts
+    .join(' <- ')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer ***')
+    .replace(/sk-[A-Za-z0-9._-]{8,}/g, 'sk-***')
+    .slice(0, 300);
+}
+
 export async function downloadHttpResource(value: string, options: SafeDownloadOptions): Promise<DownloadedResource> {
   const request = options.request || pinnedHttpTransport;
   const resolver = options.resolveHost || defaultHostResolver;
@@ -874,7 +915,7 @@ export async function downloadHttpResource(value: string, options: SafeDownloadO
       });
     } catch (error) {
       if (options.signal.aborted) throw error;
-      throw new Error('Provider image download request failed.');
+      throw new Error('Provider image download request failed: ' + describeTransportFailure(error), { cause: error });
     }
     const { response, remoteAddress } = result;
     try {
@@ -924,7 +965,7 @@ export async function downloadHttpResourceToFile(value: string, destination: str
       result = await request(target.url, target.addresses, { headers: { accept: 'image/png, image/jpeg, image/webp' }, signal: options.signal, ...(target.proxy ? { proxy: target.proxy, targetAddresses: target.targetAddresses } : {}) });
     } catch (error) {
       if (options.signal.aborted) throw error;
-      throw new Error('Provider image download request failed.');
+      throw new Error('Provider image download request failed: ' + describeTransportFailure(error), { cause: error });
     }
     const { response, remoteAddress } = result;
     try {

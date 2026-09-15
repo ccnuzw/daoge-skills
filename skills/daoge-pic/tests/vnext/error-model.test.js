@@ -30,6 +30,28 @@ test('normalizes Studio API conflict errors into stable local UI state', async (
   assert.equal(presentation.failure, true);
 });
 
+test('surfaces a Provider secret-backend mismatch as actionable configuration copy, not a lost connection', async () => {
+  const { normalizeWorkbenchError, errorPresentation } = await import(modulePath);
+  const normalized = normalizeWorkbenchError({
+    status: 409,
+    error: {
+      code: 'provider_secret_backend_policy',
+      message: '当前 daemon 的 Provider 凭据后端与工作区内已有的 Provider Profile 不一致，因此拒绝读写。',
+      details: { activeBackend: 'system', requiredEnv: 'DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext', reason: 'Plaintext Provider credentials are read-only legacy data under the active secret backend policy.' }
+    }
+  }, { operation: 'save-provider', resource: 'provider:profile_1' });
+
+  assert.equal(normalized.category, 'secret_backend');
+  assert.equal(normalized.code, 'provider_secret_backend_policy');
+  assert.equal(normalized.safeToRetry, false);
+  assert.match(normalized.message, /DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext/);
+  assert.doesNotMatch(normalized.message, /无法连接到本地 Studio/);
+
+  const presentation = errorPresentation(normalized);
+  assert.equal(presentation.title, 'Provider 凭据后端不匹配');
+  assert.equal(presentation.failure, true);
+});
+
 test('redacts sensitive API, Provider, prompt, URL, and path data from the model', async () => {
   const { normalizeWorkbenchError } = await import(modulePath);
   const normalized = normalizeWorkbenchError({

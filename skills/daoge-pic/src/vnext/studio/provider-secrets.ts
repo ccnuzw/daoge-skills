@@ -8,6 +8,28 @@ import { hardenStudioAccess } from './workspace';
 export type ProviderSecretBackend = 'sqlite-plaintext' | 'macos-keychain' | 'windows-dpapi-file' | 'linux-libsecret';
 export type ProviderSecretKind = 'base_url' | 'api_key';
 
+/**
+ * Raised when a Provider read/write is refused because the profile's stored
+ * secret backend does not match the backend currently selected by
+ * `providerSecretBackendPolicy()`.
+ *
+ * This is a *configuration* refusal, not an infrastructure failure. It used to
+ * be a plain `Error`, which the API layer turned into a 500 and the Workbench
+ * then rendered as "无法连接到本地 Studio" — pointing the operator at the
+ * network when the real cause is a mismatched `DAOGE_PIC_PROVIDER_SECRET_BACKEND`.
+ * Keep it a distinct type so callers can map it to an actionable message.
+ */
+export const PROVIDER_SECRET_BACKEND_POLICY_CODE = 'provider_secret_backend_policy';
+
+export class ProviderSecretBackendPolicyError extends Error {
+  readonly code = PROVIDER_SECRET_BACKEND_POLICY_CODE;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProviderSecretBackendPolicyError';
+  }
+}
+
 export interface StoredSecretLocation {
   backend: ProviderSecretBackend;
   ref: string;

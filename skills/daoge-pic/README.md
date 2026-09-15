@@ -1,9 +1,9 @@
 # DAOGE Pic vNext
 
-> **当前稳定正式版本**：[`5.14.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.0)
-> **当前源码与运行时**：`5.14.0`（已生成正式 `.tgz` 与 sidecar；`5.13.0` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
-> **运行时兼容范围**：`>=5.14.0 <6.0.0`。
-> **Skill protocol**：`daoge-pic-skill-protocol 2.0.0`，独立于制品版本；`5.14.0` 不是协议版本。
+> **当前稳定正式版本**：[`5.14.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.1)
+> **当前源码与运行时**：`5.14.1`（已生成正式 `.tgz` 与 sidecar；`5.14.0` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
+> **运行时兼容范围**：`>=5.14.1 <6.0.0`。
+> **Skill protocol**：`daoge-pic-skill-protocol 2.0.0`，独立于制品版本；`5.14.1` 不是协议版本。
 > **安装来源**：GitHub Release `.tgz` 资产；这不表示包已发布到 npm registry。
 
 DAOGE Pic 是 Agent + 创作者工作台协作的本地图像创作管理平台。Agent 负责澄清、规划、确认、受控执行和风险恢复；Studio Workbench 负责符合创作者操作习惯的结构化项目/任务/轮次创建、Provider 设置、创作谱系、Generation History、素材、选片、复核和交付。
@@ -12,7 +12,7 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 
 ## 目录
 
-- [5.14.0 重点升级](#5140-重点升级)
+- [5.14.1 重点升级](#5141-重点升级)
 - [5.11.0 历史升级](#5110-重点升级)
 - [快速安装](#快速安装)
 - [启动与会话顺序](#启动与会话顺序)
@@ -24,15 +24,15 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 - [开发与验证](#开发与验证)
 - [文档与发布证据](#文档与发布证据)
 
-## 5.14.0 重点升级
+## 5.14.1 重点升级
 
 | 领域 | 变化 | 用户收益 |
 | --- | --- | --- |
-| 预算与用量 | 预检声明的成本估算冻结到 Generation Run，运行项按份额记账；重试路径重新经过预算闸门，未知成本保持显式 unknown。 | 已知成本会被真实拦截，未知成本不会被错误当作零。 |
-| 参考素材契约 | 声明参考图或遮罩时必须使用 `edit`；`generate` 请求体保持纯提示词，线协议回归固定两种请求形状。 | 避免用户付费生成一批实际没有使用参考图的图片。 |
-| 备份与恢复 | backup manifest 支持大资产分页和旧交付冻结清单；`backup-restore` 提供校验后原子替换与失败回滚；Schema v34 加入进行中运行的轮次级唯一约束。 | 大型 Studio 可以备份恢复，重复运行竞争有数据库级防线。 |
-| Provider 与安全 | 默认优先系统凭据后端，代理/本地 TUN/企业私有端点策略统一到 Provider 传输层；敏感地址仍 fail-closed。 | 密钥和网络路径更安全，代理环境下也能按明确策略工作。 |
-| Runtime 与发布门禁 | Worker 生命周期、daemon 连续性、构建锁、package allowlist 和机器验证证据收口到 5.14.0。 | 发布包、源码、协议和安装 smoke 指向同一运行时。 |
+| Provider 连接测试 | 连接测试改为探测模型列表端点，不再把只接受 POST 的生成端点当探针而误报“端点可达（HTTP 404）”；连通性回执改为反映真实探测结果。 | 设置页的连接状态如实反映 Provider 状态，不再出现自相矛盾的“可达但 404”。 |
+| Provider 模型列表 | 获取模型直接返回真实模型清单；面板不再显示“Provider 细节已脱敏”这类占位文案。 | 可以看到并选择 Provider 实际提供的模型，而不是被占位信息挡住。 |
+| Provider 密钥与错误 | 新增 `secret_backend` 错误分类，`400/422` 归入校验类，密钥后端冲突 `409` 单独提示。 | 面板报错指向真正原因，而不是笼统的失败。 |
+| 上下文与路由 | 路由不变量收口到唯一的 `normalizeRoute`：非运行视图不再保留 `runId`，缺失的层级上下文自动降级。 | 切换上下文栏标签、打开书签或手改 URL 都不会再出现无法消除的上下文错误提示。 |
+| Runtime 与发布门禁 | 运行时升至 `5.14.1`，兼容范围 `>=5.14.1 <6.0.0`。 | 发布包、源码、协议与安装 smoke 指向同一运行时。 |
 
 ## 5.11.0 重点升级
 
@@ -58,7 +58,7 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 ### 推荐：项目级安装
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.0/daoge-pic-5.14.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.1/daoge-pic-5.14.1.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -66,7 +66,7 @@ npx daoge doctor --workspace /absolute/workspace
 Windows PowerShell：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.0/daoge-pic-5.14.0.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.1/daoge-pic-5.14.1.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
@@ -76,18 +76,18 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ### 全局安装
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.0/daoge-pic-5.14.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.1/daoge-pic-5.14.1.tgz"
 daoge register-skill --scope user
 ```
 
 Windows PowerShell：
 
 ```powershell
-npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.0/daoge-pic-5.14.0.tgz"
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.1/daoge-pic-5.14.1.tgz"
 daoge.cmd register-skill --scope user
 ```
 
-上述 URL 指向 `5.14.0` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
+上述 URL 指向 `5.14.1` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
 
 ### 直接试用 main 分支源码
 
@@ -294,10 +294,11 @@ npm test
 npm run test:package
 ```
 
-5.14.0 已执行验证：
+5.14.1 已执行验证：
 
-- macOS `npm test`：571 项，569 通过、0 失败、2 项仅 Windows 实机用例跳过。
+- macOS `npm test`：576 项，574 通过、0 失败、2 项仅 Windows 实机用例跳过。
 - `npm run test:package`：发布清单 164 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
+- 实机复验（本机 daemon 重启到 `5.14.1` 后）：Provider 面板的本地校验返回 `valid=true`、连接测试返回 `connected=true status=200`、获取模型返回 3 个真实模型；带 cookie 的跨源请求仍返回 403；`/api/studio` 自报 `runtimeVersion=5.14.1`。
 - 最终制品的大小和 SHA-256 记录在 GitHub Release、仓库根发布说明和 `.tgz.sha256` sidecar 中；本 README 随包发布，不嵌入会改变自身内容的归档哈希。
 
 发布前最低验证：
@@ -319,7 +320,8 @@ npm run test:package
 - 受控会话协议：[SKILL.md](SKILL.md)
 - 长期权威产品与架构规格：[docs/daoge_pic_vnext_upgrade_spec_zh.md](docs/daoge_pic_vnext_upgrade_spec_zh.md)
 - 发布验证记录：[docs/vnext_verification_evidence_zh.md](docs/vnext_verification_evidence_zh.md)
-- GitHub Release：[`daoge-pic-v5.14.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.0)
+- GitHub Release：[`daoge-pic-v5.14.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.1)
+- v5.14.0 历史 GitHub Release：[`daoge-pic-v5.14.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.0)
 - v5.13.0 历史 GitHub Release：[`daoge-pic-v5.13.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0)
 - v5.11.0 历史 GitHub Release：[`daoge-pic-v5.11.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.11.0)
 

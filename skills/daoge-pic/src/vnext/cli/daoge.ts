@@ -541,7 +541,6 @@ function usage(): string {
     'daoge provider-import-env --workspace <path>  # 显式导入工作区 daoge-studio/provider.env',
     'daoge provider-create --workspace <path> --name <name> --provider <id> --model <model> --base-url <url> --api-key-stdin @- [--endpoint-trust-mode <mode>] [--limits <json>] [--active true]  # 密钥只从 stdin 读取',
     'daoge provider-update --workspace <path> --profile <id> --version <n> --base-url-action <keep|replace|clear> --api-key-action <keep|replace|clear> [--endpoint-trust-mode <mode>] [--limits <json>] [--api-key-stdin @-]  # replace 时密钥只从 stdin 读取',
-    'daoge provider-copy|provider-activate|provider-delete|provider-validate|provider-test|provider-models --workspace <path> --profile <id>  # provider-models 会显式访问模型列表但不生成图片',
     'daoge restart --workspace <path>  # 优雅重启本工作区 Studio',
     'daoge session --workspace <path> --conversation <id>',
     'daoge project --workspace <path> --name <name> [--description <text>] [--session <id>]',

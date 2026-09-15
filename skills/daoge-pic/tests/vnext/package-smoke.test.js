@@ -30,7 +30,7 @@ const metadata = [{ filename: 'daoge-pic-fixture.tgz', files: [
   { path: 'docs/vnext_verification_evidence_zh.md' }
 ] }];
 
-function writeTarball(file, extraPaths = [], version = '5.14.0') {
+function writeTarball(file, extraPaths = [], version = '5.14.1') {
   const paths = [...new Set([...metadata[0].files.map((entry) => entry.path), 'package.json', ...extraPaths])];
   const chunks = [];
   for (const name of paths) {
@@ -72,9 +72,9 @@ test('release artifact verifier validates package version and rejects retired fi
   const stale = path.join(root, 'stale.tgz');
   try {
     writeTarball(valid);
-    assert.equal(assertReleaseArtifact(valid, '5.14.0').version, '5.14.0');
+    assert.equal(assertReleaseArtifact(valid, '5.14.1').version, '5.14.1');
     writeTarball(stale, ['dist/vnext/cli/legacy-daemon.js']);
-    assert.throws(() => assertReleaseArtifact(stale, '5.14.0'), /legacy-daemon/);
+    assert.throws(() => assertReleaseArtifact(stale, '5.14.1'), /legacy-daemon/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -118,7 +118,7 @@ test('package smoke waits for the dist lock before packing', async () => {
   const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-package-smoke-lock-'));
   const lockPath = path.join(lockRoot, 'dist.lock');
   const markerPath = path.join(lockRoot, 'packed');
-  fs.writeFileSync(path.join(skillRoot, 'package.json'), JSON.stringify({ name: 'daoge-pic', version: '5.14.0' }));
+  fs.writeFileSync(path.join(skillRoot, 'package.json'), JSON.stringify({ name: 'daoge-pic', version: '5.14.1' }));
   const handle = acquireLockSync(lockPath, { label: 'package-smoke-test-owner' });
   try {
     const childProgram = [
@@ -152,7 +152,7 @@ test('package smoke waits for the dist lock before packing', async () => {
 
 test('package smoke packs in a temporary directory and never removes a same-named release artifact', () => {
   const skillRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-package-smoke-skill-root-'));
-  fs.writeFileSync(path.join(skillRoot, 'package.json'), JSON.stringify({ name: 'daoge-pic', version: '5.14.0' }));
+  fs.writeFileSync(path.join(skillRoot, 'package.json'), JSON.stringify({ name: 'daoge-pic', version: '5.14.1' }));
   const filename = `daoge-pic-protected-${process.pid}-${Date.now()}.tgz`;
   const protectedArtifact = path.join(skillRoot, filename);
   const workRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-package-smoke-contract-'));

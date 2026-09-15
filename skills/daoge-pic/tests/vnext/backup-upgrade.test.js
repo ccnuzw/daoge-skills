@@ -20,8 +20,8 @@ test('upgrade compatibility requires a matching path-free rollback point for cha
     assert.equal(Object.hasOwn(point, 'workspaceRoot'), false);
     assert.equal(JSON.stringify(point).includes(root), false);
     assert.equal(evaluateUpgradeCompatibility({ currentRuntimeVersion: '5.13.0', targetRuntimeVersion: '5.13.0', currentSchemaVersion: 27, targetSchemaVersion: 27, supportedSchemaVersion: 27, targetProtocolVersion: '2.0.0', rollbackPoint: null }).allowed, true);
-    assert.equal(evaluateUpgradeCompatibility({ currentRuntimeVersion: '5.13.0', targetRuntimeVersion: '5.14.0', currentSchemaVersion: 27, targetSchemaVersion: 27, supportedSchemaVersion: 27, targetProtocolVersion: '2.0.0', rollbackPoint: point }).allowed, true);
-    assert.equal(evaluateUpgradeCompatibility({ currentRuntimeVersion: '5.13.0', targetRuntimeVersion: '5.14.0', currentSchemaVersion: 27, targetSchemaVersion: 28, supportedSchemaVersion: 28, targetProtocolVersion: '2.0.0', rollbackPoint: null }).issues.some((item) => item.code === 'rollback_missing'), true);
+    assert.equal(evaluateUpgradeCompatibility({ currentRuntimeVersion: '5.13.0', targetRuntimeVersion: '5.14.1', currentSchemaVersion: 27, targetSchemaVersion: 27, supportedSchemaVersion: 27, targetProtocolVersion: '2.0.0', rollbackPoint: point }).allowed, true);
+    assert.equal(evaluateUpgradeCompatibility({ currentRuntimeVersion: '5.13.0', targetRuntimeVersion: '5.14.1', currentSchemaVersion: 27, targetSchemaVersion: 28, supportedSchemaVersion: 28, targetProtocolVersion: '2.0.0', rollbackPoint: null }).issues.some((item) => item.code === 'rollback_missing'), true);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

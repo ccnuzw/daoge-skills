@@ -26,6 +26,20 @@ const LIMIT_ROWS = [
   ['maxRetryAttempts', '自动重试', '默认', '次']
 ];
 
+/**
+ * 连接测试优先探测 Provider 的**模型列表端点**（一个真正的带凭据请求，能同时证明 DNS、TLS 和密钥是否被接受，
+ * 网关通常答 200）；只有该端点不存在（404/405）时才回退到生成端点探测。生成端点多数网关只接受 POST，
+ * 拿它当探针会得到 404，于是健康的 Provider 也被报成「未通过」。按状态码分开表述，避免误导。
+ */
+function connectionTestFeedback(result) {
+  const status = result?.status;
+  if (!result?.connected) return '无法连接端点（HTTP ' + status + '）。请检查 Base URL、网络和访问权限。';
+  if (status === 401 || status === 403) return '端点可达，但鉴权未通过（HTTP ' + status + '）。请检查 API Key。已记录脱敏测试证据。';
+  if (status === 404 || status === 405) return '端点可达，但探测路径返回 HTTP ' + status + '（该网关可能未开放模型列表，且生成端点不接受探测请求）。已记录脱敏测试证据。';
+  if (Number.isFinite(status) && status < 400) return '连接测试通过（HTTP ' + status + '）：模型列表端点应答正常，网络、TLS 与密钥均可用。已记录脱敏测试证据。';
+  return '端点可达，返回 HTTP ' + status + '；请确认是否符合该 Provider 的预期。已记录脱敏测试证据。';
+}
+
 function secretUpdate(action, value) {
   return action === 'replace' ? { action, value } : { action };
 }
@@ -188,7 +202,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
       const suffix = name === 'copy' ? '/copy' : name === 'activate' ? '/activate' : name === 'delete' ? '/delete' : '/' + name;
       const result = await request('/api/providers/' + encodeURIComponent(target.id) + suffix, { method: 'POST', idempotencyKey: crypto.randomUUID(), body });
       if (name === 'validate') setFeedback(result.valid ? '本地校验通过。未发起网络连接。' + (result.warnings?.length ? ' 提示：' + result.warnings.join('；') : '') : '本地校验未通过：' + result.missing.join('、'));
-      else if (name === 'test') setFeedback(result.connected ? '连接测试通过（HTTP ' + result.status + '）。已记录脱敏测试证据。' : '已连接端点，但鉴权或服务状态未通过（HTTP ' + result.status + '）。');
+      else if (name === 'test') setFeedback(connectionTestFeedback(result));
       else { await load(); await onChanged(); setFeedback(name === 'activate' ? '已设为活动 Profile；daemon 会自动热加载，后续预检和新运行使用它。' : name === 'copy' ? '已复制 Profile，副本默认不激活。' : (result.impact?.message || 'Profile 已删除。')); }
     } catch (nextError) { setError(nextError.message || 'Provider 操作失败。'); }
     finally { setBusy(''); }
@@ -200,27 +214,37 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
     try {
       const path = '/api/provider-models';
       const descriptor = descriptorForProvider(descriptors, form.providerId);
-      let body = { providerId: form.providerId, model: form.model || descriptor?.modelExamples?.[0] || '', endpointTrustMode: form.endpointTrustMode, options: { referenceEnabled: form.referenceEnabled } };
-      if (mode === 'edit' && selected) body = { ...body, profileId: selected.id };
+      const model = form.model || descriptor?.modelExamples?.[0] || '';
+      const options = { referenceEnabled: form.referenceEnabled };
+      const replacingBaseUrl = mode === 'edit' && form.baseUrlAction === 'replace' && Boolean(form.baseUrl.trim());
+      const replacingApiKey = mode === 'edit' && form.apiKeyAction === 'replace' && Boolean(form.apiKey.trim());
+      let body;
       if (mode === 'create') {
         if (!form.baseUrl.trim()) throw new Error('请输入 Base URL 后再获取模型列表。');
         if (!form.apiKey.trim()) throw new Error('请输入 API Key 后再获取模型列表。');
-        body = { ...body, baseUrl: form.baseUrl, apiKey: form.apiKey };
+        // 草稿：直接用表单里填的端点与密钥去问 Provider，不落库。
+        body = { providerId: form.providerId, model, baseUrl: form.baseUrl, apiKey: form.apiKey, endpointTrustMode: form.endpointTrustMode, options };
+      } else if (form.baseUrlAction === 'clear' || form.apiKeyAction === 'clear') {
+        throw new Error('清除连接信息后无法读取模型列表。');
+      } else if (replacingBaseUrl && replacingApiKey) {
+        // 表单里同时换了端点和密钥：按草稿测试这组新值。
+        body = { providerId: form.providerId, model, baseUrl: form.baseUrl, apiKey: form.apiKey, endpointTrustMode: form.endpointTrustMode, options };
+      } else if (replacingBaseUrl) {
+        // 只换端点不换密钥是问不出模型列表的：已存密钥只在 Profile 自己配置的端点上使用，
+        // 而任何别的端点都必须带上新密钥。与其发一个注定被拒（或发错端点）的请求，不如直接说清楚。
+        throw new Error('更换 Base URL 后还需要填入新的 API Key，才能用新端点获取模型列表。');
+      } else if (replacingApiKey) {
+        // 只换密钥：端点仍然用 Profile 自己配置的，只是拿新密钥去问。
+        body = { profileId: selected.id, model, apiKey: form.apiKey, options };
       } else {
-        if (form.baseUrlAction === 'clear' || form.apiKeyAction === 'clear') throw new Error('清除连接信息后无法读取模型列表。');
-        if (form.baseUrlAction === 'replace') {
-          if (!form.baseUrl.trim()) throw new Error('请输入新的 Base URL 后再获取模型列表。');
-          body = { ...body, baseUrl: form.baseUrl };
-        }
-        if (form.apiKeyAction === 'replace') {
-          if (!form.apiKey.trim()) throw new Error('请输入新的 API Key 后再获取模型列表。');
-          body = { ...body, apiKey: form.apiKey };
-        }
+        // 其余情况一律只带 profileId，让服务端用 Profile 已保存的端点与密钥。
+        // 之前这里无条件带上 providerId / endpointTrustMode，会被判成「覆盖端点」而要求新密钥 → 永远 400。
+        body = { profileId: selected.id, model, options };
       }
       const result = await request(path, { method: 'POST', idempotencyKey: crypto.randomUUID(), body });
       const models = Array.isArray(result.models) ? result.models : [];
       setModelPicker({ profileId: pickerKey, models });
-      setFeedback(models.length ? '已读取 ' + models.length + ' 个模型；选择后保存配置生效。' : 'Provider 返回空模型列表；可继续手动填写模型名。');
+      setFeedback(models.length ? '已读取 ' + models.length + ' 个模型：' + models.map((entry) => entry.id).join('、') + '。选择后保存配置生效。' : 'Provider 返回空模型列表；可继续手动填写模型名。');
     } catch (nextError) { setError(nextError.message || '无法读取 Provider 模型列表。'); }
     finally { setBusy(''); }
   };
@@ -320,8 +344,8 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
               <header><div><p className="eyebrow">操作</p><strong>配置、校验和模型选择集中在这里。</strong></div><small>连接测试和模型列表会访问 Provider；不会生成图片。</small></header>
               <div className="provider-actions-grid">
                 <button type="button" className="command-button" onClick={beginEdit}>编辑 Profile</button>
-                <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void action('validate')}>本地校验</button>
-                <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void action('test')}>{busy === 'test' ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={15} />}连接测试</button>
+                <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void performAction('validate')} title="本地检查 Profile 配置是否完整；不发起网络连接。">{busy === 'validate' ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}本地校验</button>
+                <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void performAction('test')} title="用已存密钥访问 Provider 的模型列表端点（该端点不存在时回退到生成端点），只探测连通性，不生成图片；结果会记录为脱敏测试证据。">{busy === 'test' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}连接测试</button>
                 <button type="button" className="outline-button" disabled={selected.active || Boolean(busy)} onClick={() => void action('activate')}><Power size={15} />激活</button>
                 <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void action('copy')}><Copy size={15} />复制</button>
                 <button type="button" className="danger-button" aria-label="删除 Profile" disabled={Boolean(busy)} onClick={() => void action('delete')}><Trash2 size={15} />删除</button>
@@ -363,7 +387,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
                 <label><span>Profile 名称</span><input autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
                 <label><span>Provider</span><select value={form.providerId} onChange={(event) => setProviderId(event.target.value)}>{descriptors.map((descriptor) => <option value={descriptor.id} key={descriptor.id}>{descriptor.displayName}</option>)}</select></label>
                 <label><span>模型</span><input value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} autoComplete="off" placeholder={activeDescriptor?.modelExamples?.[0] || ''} /></label>
-                <button type="button" className="outline-button provider-model-fetch" disabled={Boolean(busy)} onClick={() => void loadModels()}>{busy === 'models' ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={15} />}获取模型</button>
+                <button type="button" className="outline-button provider-model-fetch" disabled={Boolean(busy)} onClick={() => void loadModels()} title="用当前表单里的配置访问 Provider 读取模型列表；不会生成图片。模型名也可以直接手动填写。">{busy === 'models' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}获取模型</button>
                 {activeDescriptor?.reference?.enableOptionKey === 'referenceEnabled' && <label className="provider-checkbox"><input type="checkbox" checked={form.referenceEnabled} onChange={(event) => setForm({ ...form, referenceEnabled: event.target.checked })} /><span>允许 Gemini 参考图能力</span></label>}
               </div>
               {modelsLoaded && <div className="provider-model-picker provider-model-picker--form" aria-label="Provider 模型列表">
@@ -398,7 +422,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
             </details>
 
             {mode === 'create' && <label className="provider-checkbox"><input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} /><span>保存后设为活动 Profile</span></label>}
-            <div className="provider-form-note"><CircleAlert size={15} /><span>连接测试会访问 Provider 但不生成图片；本地校验不会联网。</span></div>
+            <div className="provider-form-note"><CircleAlert size={15} /><span>连接测试会访问 Provider 但不生成图片；本地校验不会联网。本地校验、连接测试和模型列表都会用到 Provider 密钥，daemon 只接受来自本机这个页面的调用；已存密钥只会发往 Profile 自己配置的端点。获取模型可以直接点按钮，也可以手动填写模型名。</span></div>
             <div className="provider-form-actions"><button type="button" className="outline-button" onClick={cancelEdit}>取消</button><button type="submit" className="command-button" disabled={Boolean(busy)}>{busy === 'save' ? <LoaderCircle className="spin" size={15} /> : null}保存配置</button></div>
           </form>}
         </section>

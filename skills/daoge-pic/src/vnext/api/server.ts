@@ -8,8 +8,9 @@ import { closeStudioDatabase, openStudioDatabase, StudioDatabase, STUDIO_SCHEMA_
 import { hardenStudioAccess, ensureCacheDirectory, initializeStudio, InitializeStudioResult } from '../studio/workspace';
 import { isProviderId, providerSnapshot, ResolvedProviderConfig } from '../studio/provider-config';
 import { activateProviderProfile, closeProviderDatabase, copyProviderProfile, createProviderProfile, deleteProviderProfile, importLegacyProviderEnvOnce, importProviderEnvProfile, listProviderProfiles, openProviderDatabase, ProviderDatabase, providerDescriptorSummaries, providerStatus, recordProviderTestEvidence, resolveActiveProviderConfig, resolveProviderProfileConfig, updateProviderProfile } from '../studio/provider-store';
+import { providerSecretBackendPolicy, ProviderSecretBackendPolicyError } from '../studio/provider-secrets';
 import { isProviderEndpointTrustMode, providerDescriptor, PROVIDER_ADAPTER_VERSION, PROVIDER_DESCRIPTOR_VERSION, referenceEnabledForProvider } from '../providers/descriptors';
-import { createImageProvider, requestEndpointFor } from '../providers/http-adapters';
+import { createImageProvider, modelListProbeFor, requestEndpointFor } from '../providers/http-adapters';
 import type { ImageProvider } from '../providers/contracts';
 import { probeHttpEndpoint } from '../providers/http-safety';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getRound, getStudioSession, getTask, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateRoundDraftContext, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
@@ -1234,7 +1235,19 @@ export class LocalStudioService {
     const confirmedTemplateMutation = pathname === '/api/confirmed-templates' || /^\/api\/confirmed-templates\/[^/]+\/(?:archive|rollback)$/.test(pathname);
     if (confirmedTemplateMutation && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Confirmed template writes require Skill/CLI authentication.');
     const providerSecretAction = pathname === '/api/provider-models' || /^\/api\/providers\/[^/]+\/(?:validate|test|models)$/.test(pathname);
-    if (providerSecretAction && authentication !== 'bearer') throw new LocalAccessError(403, 'forbidden', 'Provider credential actions require Skill/CLI authentication.');
+    // 这三个端点会读取 Provider 密钥、并以它发起真实出网请求，所以必须确认请求来自本机这个页面。
+    //
+    // v5.14.0 曾把它们限制为 bearer-only，代价是 Workbench 上的「本地校验 / 连接测试 / 获取模型」三个按钮
+    // 在浏览器里永久 403（v5.13.0 之前是可用的）。现在恢复浏览器可用，靠的是两条**与调用方身份无关**的既有
+    // 防线，而不是「只看是不是 CLI」：
+    //   1. 会话 cookie 是 SameSite=Strict，且 `assertLocalWriteOrigin`（对每个 POST/PUT 都已执行）要求
+    //      cookie 调用方的 Origin 精确等于本地 Studio 的 origin —— 第三方页面既带不上会话，也伪造不了 Origin。
+    //   2. `providerModelConfigFromProfile` 规定：Profile 绑定调用若要改 providerId / baseUrl /
+    //      endpointTrustMode，必须**同时提交新的 API Key**。所以**已存的密钥永远不会被送到 Profile 自己
+    //      配置之外的地方**，攻击者无法用你的密钥去打自己的服务器。
+    // 于是同源 Workbench 放行，跨源调用在更早的位置就已 403 `forbidden`。
+    // 这里再显式断言一次写入来源：让这条不变量长在敏感端点旁边，不会被别处的改动悄悄摘掉。
+    if (providerSecretAction) assertLocalWriteOrigin(request, this.origin, authentication);
     const key = idempotencyKey(request, body);
     const putAllowed = /^\/api\/providers\/[^/]+$/.test(pathname) || /^\/api\/deliveries\/[^/]+\/items$/.test(pathname) || /^\/api\/rounds\/[^/]+\/draft-context$/.test(pathname);
     if (request.method === 'PUT' && !putAllowed) return json(response, 404, { ok: false, error: { code: 'not_found', message: '未找到请求的 Studio API。' } });
@@ -1398,15 +1411,27 @@ export class LocalStudioService {
       const controller = new AbortController();
       let timedOut = false;
       const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
-      let probeResult: { reachable: boolean; status: number };
+      let probeResult: { reachable: boolean; status: number } | null = null;
       try {
-        const headers: Record<string, string> = { accept: 'application/json' };
-        if (config.providerId === 'gemini-image') headers['x-goog-api-key'] = config.apiKey;
-        else headers.authorization = 'Bearer ' + config.apiKey;
-        const probeTarget = requestEndpointFor(config);
-        if (!probeTarget) throw new InvalidCommandError('无法构造 Provider 生成端点，请检查 Base URL、Provider 类型和模型。');
         const privateAddressPolicy = config.endpointTrustMode === 'local_proxy' || config.endpointTrustMode === 'enterprise_private' ? config.endpointTrustMode : undefined;
-        probeResult = await this.providerProbe(probeTarget, headers, controller.signal, privateAddressPolicy !== undefined, privateAddressPolicy);
+        // Prefer the model-list endpoint: gateways only accept POST on the generation endpoint, so probing that
+        // one returns 404 for a healthy Provider. `GET /models` is an authenticated request that actually proves
+        // DNS resolution, TLS and credential acceptance, and answers 200 when everything is fine.
+        const modelProbe = modelListProbeFor(config);
+        if (modelProbe) {
+          const attempt = await this.providerProbe(modelProbe.url, modelProbe.headers, controller.signal, privateAddressPolicy !== undefined, privateAddressPolicy);
+          // Some gateways do not expose a model list at all; fall through to the generation endpoint in that case
+          // so connectivity is still reported instead of failing outright.
+          if (attempt.status !== 404 && attempt.status !== 405) probeResult = attempt;
+        }
+        if (!probeResult) {
+          const headers: Record<string, string> = { accept: 'application/json' };
+          if (config.providerId === 'gemini-image') headers['x-goog-api-key'] = config.apiKey;
+          else headers.authorization = 'Bearer ' + config.apiKey;
+          const probeTarget = requestEndpointFor(config);
+          if (!probeTarget) throw new InvalidCommandError('无法构造 Provider 生成端点，请检查 Base URL、Provider 类型和模型。');
+          probeResult = await this.providerProbe(probeTarget, headers, controller.signal, privateAddressPolicy !== undefined, privateAddressPolicy);
+        }
       } catch {
         throw new InvalidCommandError(timedOut ? 'Provider 连接测试超时。请检查 Base URL 与网络后重试。' : '无法连接 Provider 端点。请检查 Base URL、网络和访问权限后重试。');
       } finally { clearTimeout(timeout); }
@@ -2052,6 +2077,25 @@ export class LocalStudioService {
       return;
     }
     if (error instanceof LocalAccessError) return json(response, error.status, { ok: false, error: { code: error.code, message: error.message } });
+    // A mismatched Provider secret backend is a configuration problem, not an
+    // outage. Reporting it as 500 made the Workbench say "无法连接到本地 Studio",
+    // which sends the operator hunting for a network fault that does not exist.
+    if (error instanceof ProviderSecretBackendPolicyError) {
+      const activeBackend = providerSecretBackendPolicy();
+      return json(response, 409, {
+        ok: false,
+        error: {
+          code: error.code,
+          message: '当前 daemon 的 Provider 凭据后端与工作区内已有的 Provider Profile 不一致，因此拒绝读写。'
+            + '本工作区的 Profile 使用 sqlite-plaintext 存储，daemon 必须以 DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext 启动后重启。',
+          details: {
+            activeBackend,
+            requiredEnv: 'DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext',
+            reason: error.message,
+          },
+        },
+      });
+    }
     if (error instanceof StateTransitionError) return json(response, 409, { ok: false, error: { code: 'invalid_state_transition', message: error.message, details: { entity: error.entity, from: error.from, to: error.to } } });
     if (error instanceof VersionConflictError) return json(response, 409, { ok: false, error: { code: 'version_conflict', message: error.message } });
     if (error instanceof StudioNotFoundError) return json(response, 404, { ok: false, error: { code: 'not_found', message: error.message } });

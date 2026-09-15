@@ -347,7 +347,11 @@ test('Provider API exposes descriptors, records explicit test evidence, and guar
     assert.equal(tested.status, 200, JSON.stringify(tested.body));
     assert.equal(tested.body.data.evidence.status, 204);
     assert.equal(probeCalls, 1);
-    assert.equal(probeTarget, 'https://images.example.test/v1/images/generations');
+    // The probe deliberately targets the model-list endpoint, not the generation endpoint. A GET on
+    // /v1/images/generations is not a supported request on real gateways, so it answered 404 and the Workbench
+    // rendered "端点可达（HTTP 404）" for a Provider that was in fact healthy. `GET /models` is an authenticated
+    // request that proves DNS resolution, TLS and credential acceptance, and answers 200 when all is well.
+    assert.equal(probeTarget, 'https://images.example.test/v1/models');
     for (const [suffix, body] of [['/copy', {}], ['/activate', {}], ['/delete', { force: true }], ['/validate', {}], ['/test', {}]]) {
       const wrongMethod = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + suffix, { method: 'PUT', idempotencyKey: 'provider-wrong-method-' + suffix.slice(1), body });
       assert.equal(wrongMethod.status, 404, suffix + ' must reject PUT without executing');
@@ -361,6 +365,34 @@ test('Provider API exposes descriptors, records explicit test evidence, and guar
     assert.equal(forcedDelete.status, 200, JSON.stringify(forcedDelete.body));
     assert.equal(forcedDelete.body.data.impact.restartRequired, false);
     assert.equal(forcedDelete.body.data.activeProfileId, null);
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+test('Provider connection test falls back to the generation endpoint when the Provider has no model list', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  let started;
+  const probed = [];
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'No Model List Provider', endpointTrustMode: 'compatible_public' });
+    // Gateways that do not publish a model list answer 404 on `GET /models`. The probe must not report that as a
+    // failed connection: it retries the generation endpoint so the operator still learns whether the host is up.
+    started = await startLocalStudioService({
+      hardenAccess: false,
+      workspaceRoot,
+      providerProbe: async (target) => {
+        probed.push(target);
+        return target.endsWith('/v1/models') ? { reachable: false, status: 404 } : { reachable: true, status: 204 };
+      }
+    });
+    const profile = (await requestJson(started, '/api/providers')).body.data.profiles[0];
+    const tested = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/test', { method: 'POST', idempotencyKey: 'provider-fallback-test', body: {} });
+    assert.equal(tested.status, 200, JSON.stringify(tested.body));
+    assert.deepEqual(probed, ['https://images.example.test/v1/models', 'https://images.example.test/v1/images/generations']);
+    assert.equal(tested.body.data.connected, true);
+    assert.equal(tested.body.data.status, 204);
   } finally {
     if (started) await started.service.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -395,6 +427,46 @@ test('Provider Profile changes are blocked while resumable runs reference its fr
   }
 });
 
+test('Provider writes report a secret-backend mismatch as a configuration error instead of an outage', async () => {
+  const workspaceRoot = temporaryWorkspace();
+  const previousBackend = process.env.DAOGE_PIC_PROVIDER_SECRET_BACKEND;
+  let started;
+  try {
+    const initialized = initializeStudio({ workspaceRoot });
+    configureProvider(initialized, { name: 'Plaintext Only Provider', baseUrl: 'https://images.example.test/v1', apiKey: 'plaintext-only-secret' });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
+    const listed = await requestJson(started, '/api/providers');
+    const profile = listed.body.data.profiles[0];
+    // Simulate a daemon started without this workspace's plaintext opt-in. The policy then falls back to `system`,
+    // which must refuse the stored sqlite-plaintext row. That refusal used to be a plain Error -> 500, and the
+    // Workbench rendered "无法连接到本地 Studio" for what is purely a launch-configuration mistake.
+    process.env.DAOGE_PIC_PROVIDER_SECRET_BACKEND = 'system';
+    const blocked = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id), {
+      method: 'PUT',
+      idempotencyKey: 'secret-backend-mismatch',
+      body: { expectedConfigVersion: profile.configVersion, name: 'Renamed', providerId: profile.providerId, model: profile.model, baseUrl: { action: 'keep' }, apiKey: { action: 'keep' }, options: {} }
+    });
+    assert.equal(blocked.status, 409, JSON.stringify(blocked.body));
+    assert.equal(blocked.body.error.code, 'provider_secret_backend_policy');
+    assert.equal(blocked.body.error.details.activeBackend, 'system');
+    assert.equal(blocked.body.error.details.requiredEnv, 'DAOGE_PIC_PROVIDER_SECRET_BACKEND=plaintext');
+    assert.doesNotMatch(JSON.stringify(blocked.body), /plaintext-only-secret/);
+    process.env.DAOGE_PIC_PROVIDER_SECRET_BACKEND = 'plaintext';
+    const saved = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id), {
+      method: 'PUT',
+      idempotencyKey: 'secret-backend-restored',
+      body: { expectedConfigVersion: profile.configVersion, name: 'Renamed', providerId: profile.providerId, model: profile.model, baseUrl: { action: 'keep' }, apiKey: { action: 'keep' }, options: {} }
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.data.name, 'Renamed');
+  } finally {
+    if (previousBackend === undefined) delete process.env.DAOGE_PIC_PROVIDER_SECRET_BACKEND;
+    else process.env.DAOGE_PIC_PROVIDER_SECRET_BACKEND = previousBackend;
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('Provider API lists models only through explicit safe action without leaking credentials', async () => {
   const workspaceRoot = temporaryWorkspace();
   const requests = [];
@@ -416,23 +488,48 @@ test('Provider API lists models only through explicit safe action without leakin
     const profile = listed.body.data.profiles[0];
     const cookie = await workbenchCookie(started);
     const attackerBaseUrl = 'http://127.0.0.1:' + address.port + '/attacker/v1';
+    // A foreign page cannot drive these endpoints: the session cookie is SameSite=Strict, and every POST/PUT
+    // must carry an Origin equal to the local Studio origin. The bearer gate that used to sit here (v5.14.0)
+    // is gone because it also locked the legitimate Workbench out of its own buttons; the Origin check plus the
+    // retarget refusal below carry the load instead.
     for (const [pathname, idempotencyKey] of [
       ['/api/provider-models', 'cookie-provider-models'],
       ['/api/providers/' + encodeURIComponent(profile.id) + '/models', 'cookie-provider-profile-models'],
       ['/api/providers/' + encodeURIComponent(profile.id) + '/test', 'cookie-provider-test'],
       ['/api/providers/' + encodeURIComponent(profile.id) + '/validate', 'cookie-provider-validate']
     ]) {
-      const blocked = await requestJsonAsWorkbench(started, pathname, {
+      const crossOrigin = await requestJsonAsWorkbench(started, pathname, {
         cookie,
         method: 'POST',
         idempotencyKey,
+        headers: { origin: 'https://attacker.example' },
+        body: { profileId: profile.id }
+      });
+      assert.equal(crossOrigin.status, 403, pathname + ' must reject a foreign Origin');
+      assert.doesNotMatch(JSON.stringify(crossOrigin.body), /model-list-secret|attacker/);
+    }
+    assert.deepEqual(requests, [], 'a foreign Origin must not reach a Provider endpoint');
+
+    // Nor can any caller retarget the stored credential, same-origin or not: overriding providerId, baseUrl or
+    // endpointTrustMode on a Profile-bound call requires a fresh API key, so the stored key is only ever sent
+    // to the endpoint the Profile itself configures.
+    for (const [pathname, idempotencyKey] of [
+      ['/api/provider-models', 'cookie-provider-models'],
+      ['/api/providers/' + encodeURIComponent(profile.id) + '/models', 'cookie-provider-profile-models'],
+      ['/api/providers/' + encodeURIComponent(profile.id) + '/test', 'cookie-provider-test'],
+      ['/api/providers/' + encodeURIComponent(profile.id) + '/validate', 'cookie-provider-validate']
+    ]) {
+      const retarget = await requestJsonAsWorkbench(started, pathname, {
+        cookie,
+        method: 'POST',
+        idempotencyKey: idempotencyKey + '-retarget',
         body: { profileId: profile.id, providerId: 'gemini-image', baseUrl: attackerBaseUrl, endpointTrustMode: 'local_proxy' }
       });
-      assert.equal(blocked.status, 403, pathname + ' must be bearer-only');
-      assert.equal(blocked.body.error.code, 'forbidden');
-      assert.doesNotMatch(JSON.stringify(blocked.body), /model-list-secret|attacker/);
+      assert.equal(retarget.status, 400, pathname + ' must refuse a Profile-bound endpoint override without a fresh key');
+      assert.equal(retarget.body.error.code, 'invalid_command');
+      assert.doesNotMatch(JSON.stringify(retarget.body), /model-list-secret|attacker/);
     }
-    assert.deepEqual(requests, [], 'cookie attacks must not reach a Provider endpoint');
+    assert.deepEqual(requests, [], 'the stored key must never be sent to a caller-chosen base URL');
     const models = await requestJson(started, '/api/provider-models', { method: 'POST', idempotencyKey: 'provider-models', body: { profileId: profile.id } });
     assert.equal(models.status, 200, JSON.stringify(models.body));
     assert.deepEqual(models.body.data.models, [{ id: 'gpt-image-2', label: 'gpt-image-2', ownedBy: 'openai' }, { id: 'gpt-image-1', label: 'gpt-image-1', ownedBy: null }]);
@@ -446,11 +543,31 @@ test('Provider API lists models only through explicit safe action without leakin
     const directModels = await requestJson(started, '/api/providers/' + encodeURIComponent(profile.id) + '/models', { method: 'POST', idempotencyKey: 'provider-profile-models', body: {} });
     assert.equal(directModels.status, 200, JSON.stringify(directModels.body));
     assert.deepEqual(directModels.body.data.models, models.body.data.models);
+
+    // The Workbench itself must be able to run all three actions — this is what the Provider panel buttons do.
+    // Local validate touches no network at all.
+    const workbenchValidate = await requestJsonAsWorkbench(started, '/api/providers/' + encodeURIComponent(profile.id) + '/validate', { cookie, method: 'POST', idempotencyKey: 'workbench-validate', body: {} });
+    assert.equal(workbenchValidate.status, 200, JSON.stringify(workbenchValidate.body));
+    assert.equal(workbenchValidate.body.data.valid, true);
+    const workbenchModels = await requestJsonAsWorkbench(started, '/api/providers/' + encodeURIComponent(profile.id) + '/models', { cookie, method: 'POST', idempotencyKey: 'workbench-models', body: {} });
+    assert.equal(workbenchModels.status, 200, JSON.stringify(workbenchModels.body));
+    assert.deepEqual(workbenchModels.body.data.models, models.body.data.models);
+    const workbenchTest = await requestJsonAsWorkbench(started, '/api/providers/' + encodeURIComponent(profile.id) + '/test', { cookie, method: 'POST', idempotencyKey: 'workbench-test', body: {} });
+    assert.equal(workbenchTest.status, 200, JSON.stringify(workbenchTest.body));
+    assert.equal(workbenchTest.body.data.connected, true);
+    assert.equal(JSON.stringify(workbenchTest.body).includes('model-list-secret'), false);
+
+    // Three explicit list-models calls plus the Workbench's own, then the connectivity probe — which now also
+    // targets the model-list endpoint. Every one of these requests must carry the Profile's own key, and none
+    // may reach a caller-chosen host.
     assert.deepEqual(requests, [
       { url: '/v1/models', authorization: 'Bearer model-list-secret' },
       { url: '/v1/models', authorization: 'Bearer draft-model-secret' },
+      { url: '/v1/models', authorization: 'Bearer model-list-secret' },
+      { url: '/v1/models', authorization: 'Bearer model-list-secret' },
       { url: '/v1/models', authorization: 'Bearer model-list-secret' }
     ]);
+    assert.equal(requests.some((entry) => entry.url.includes('attacker')), false, 'no request may reach a caller-chosen base URL');
 
     assert.equal(JSON.stringify(models.body).includes('model-list-secret'), false);
     assert.equal(JSON.stringify(draftModels.body).includes('draft-model-secret'), false);
