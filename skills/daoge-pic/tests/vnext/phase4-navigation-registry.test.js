@@ -41,8 +41,21 @@ test('mobile navigation exposes four human workbench entries with 44px targets',
   assert.doesNotMatch(navigation, /NAVIGATION_ITEMS\.runs|item: runItem/);
   // v5.12.0 把轨道里「当前项目」那一组二级入口整体撤掉了，这条守卫锁住它不回潮。
   // 「项目管理」不在禁令内：它是 Studio 级 projects 入口的名字（v5.12.0 之前就叫这个），与那组二级入口无关。
+  // 「NAVIGATION_ITEMS.library」也不在禁令内：925f7e5 禁它是因为当时 library 是个没有渲染的死项，
+  // 现在它有了真入口（辅助区），守卫跟着演进 —— 但「不许回潮」的部分必须留着。
   assert.doesNotMatch(navigation, /label: '项目资产'|label: '回收站'|label: '任务'/);
-  assert.doesNotMatch(navigation, /NAVIGATION_ITEMS\.library|project-navigation-name/);
+  assert.doesNotMatch(navigation, /project-navigation-name/);
+  // 辅助区的两个视图曾经各自只在创作手册里有一个按钮，等于不可达（library 跳转目标数只有 1）。
+  // 它们必须各有真入口，否则会再次变成孤儿。
+  assert.match(navigation, /const AUX_ITEMS = \[/);
+  assert.match(navigation, /view: 'library', label: '规则资料'/);
+  assert.match(navigation, /view: 'shared-assets', label: '共享素材'/);
+  assert.match(navigation, /AUX_ITEMS\.map\(\(item\) => <RailAuxCard/);
+  // 「资产管理」以项目为边界（用户已定）：选片 / 评审 / 交付在数据模型里就是按项目记的
+  // （/api/projects/<id>/selection/…），跨项目混看没有意义，所以它和另外两个项目级入口一样要先选项目。
+  // 连带保持 workbench-route.test.js 里那条刻意立的不变量有效：「assets/lineage 深链永不保留 studio 作用域」。
+  assert.match(navigation, /assets: \{ view: 'assets', label: '资产管理'[^\n]+assetScope: 'project'/);
+  assert.match(navigation, /\{ item: assetItem, active: ASSET_ACTIVE_VIEWS\.has\(view\), disabled: projectRequired \}/);
   const css = fs.readFileSync(path.join(skillRoot, 'web/src/styles.css'), 'utf8');
   assert.match(css, /\.studio-rail \{ min-width:0; max-width:100%; overflow:hidden;[^}]*\}/);
   assert.match(css, /\.workspace-navigation \{ display:flex; width:100%; max-width:100%; min-width:0;[^}]*overflow-x:auto/);

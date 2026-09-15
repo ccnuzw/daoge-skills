@@ -1,15 +1,22 @@
-import { Activity, BookOpen, CloudOff, Copy, FolderKanban, GitFork, Image, PackageCheck, RefreshCw, Server } from 'lucide-react';
+import { Activity, BookOpen, CloudOff, Copy, FolderKanban, GitFork, Image, Images, Library, PackageCheck, RefreshCw, Server } from 'lucide-react';
 import { runtimeHealthPresentation } from './runtime-health.mjs';
 
 const PROJECT_CONTEXT_RESET = { taskId: null, roundId: null, compareRoundIds: [], runId: null };
 // 四个一级入口：选项目 → 干活 → 看产出 → 交出去。
 // 「生成历史」(runs) 不是一级入口：它按轮次组织，只在任务内联页签里出现。
+// 「资产管理」以项目为边界（用户已定）：选片、评审、交付在数据模型里就是按项目记的
+// （/api/projects/<id>/selection/…），跨项目混看没有意义，所以它和「创作平台」「资产交付」一样要先选项目。
 const NAVIGATION_ITEMS = {
   workbench: { view: 'projects', label: '项目管理', Icon: FolderKanban, changes: { projectId: null, ...PROJECT_CONTEXT_RESET, assetScope: 'studio' } },
   lineage: { view: 'lineage', label: '创作平台', Icon: GitFork, changes: { ...PROJECT_CONTEXT_RESET, assetScope: 'project' }, disabledLabel: '先选择一个项目' },
   assets: { view: 'assets', label: '资产管理', Icon: Image, changes: { ...PROJECT_CONTEXT_RESET, assetScope: 'project' }, disabledLabel: '先选择一个项目' },
   deliveries: { view: 'deliveries', label: '资产交付', Icon: PackageCheck, changes: PROJECT_CONTEXT_RESET, disabledLabel: '先选择一个项目' }
 };
+// 辅助区。这两个视图此前各自只在创作手册里有一个按钮，等于不可达；现在给它们真入口。
+const AUX_ITEMS = [
+  { view: 'library', label: '规则资料', hint: '任务类型、风格与品牌规则', Icon: Library, changes: PROJECT_CONTEXT_RESET },
+  { view: 'shared-assets', label: '共享素材', hint: '跨项目复用图片', Icon: Images, changes: PROJECT_CONTEXT_RESET }
+];
 const WORKBENCH_ACTIVE_VIEWS = new Set(['projects']);
 // 生成历史属于创作过程，从任务页签进入时让「创作平台」保持高亮，避免左侧一整列无高亮。
 const LINEAGE_ACTIVE_VIEWS = new Set(['lineage', 'studio-overview', 'prompts', 'runs']);
@@ -52,10 +59,10 @@ function RuntimeStatusCard({ studio, recoveryPhase, repairing, onCopy, onRefresh
   </details>;
 }
 
-function GuideCard({ active, onOpen }) {
-  return <button type="button" className={'rail-guide-card' + (active ? ' is-active' : '')} onClick={onOpen} title="DAOGE Pic 创作手册" aria-label="打开 DAOGE Pic 创作手册" aria-current={active ? 'page' : undefined}>
-    <span className="rail-guide-icon"><BookOpen size={17} aria-hidden="true" /></span>
-    <span className="rail-guide-copy"><strong>创作手册</strong><small>工作流、边界与恢复</small></span>
+function RailAuxCard({ active, onOpen, Icon, label, hint }) {
+  return <button type="button" className={'rail-guide-card' + (active ? ' is-active' : '')} onClick={onOpen} title={'DAOGE Pic ' + label} aria-label={'打开 DAOGE Pic ' + label} aria-current={active ? 'page' : undefined}>
+    <span className="rail-guide-icon"><Icon size={17} aria-hidden="true" /></span>
+    <span className="rail-guide-copy"><strong>{label}</strong><small>{hint}</small></span>
   </button>;
 }
 
@@ -77,7 +84,7 @@ export function WorkbenchNavigation({ view, project, task, round, provider, stud
     </nav>
     <div className="rail-utility-stack">
       <section className="rail-system-panel" aria-label="Studio 状态"><p className="rail-section-label">系统</p><ProviderStatusCard provider={provider} onOpen={onOpenProvider} /><RuntimeStatusCard studio={studio} recoveryPhase={recoveryPhase} repairing={repairing} onCopy={onCopyRuntimeDiagnostic} onRefresh={onRefresh} onRepair={onRepair} /></section>
-      <section className="rail-assist-panel" aria-label="辅助入口"><p className="rail-section-label">辅助</p><GuideCard active={view === 'guide'} onOpen={onOpenGuide} /></section>
+      <section className="rail-assist-panel" aria-label="辅助入口"><p className="rail-section-label">辅助</p>{AUX_ITEMS.map((item) => <RailAuxCard key={item.view} active={view === item.view} onOpen={() => onNavigate(item.view, item.changes)} Icon={item.Icon} label={item.label} hint={item.hint} />)}<RailAuxCard active={view === 'guide'} onOpen={onOpenGuide} Icon={BookOpen} label="创作手册" hint="工作流、边界与恢复" /></section>
     </div>
   </>;
 }

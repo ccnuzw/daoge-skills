@@ -368,11 +368,15 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(main, /const projectRuns = await loadLineageRuns\(projectRounds\)/);
   assert.match(main, /navigateRoute\(\{ view: 'lineage'/);
   assert.match(lineage, /CREATOR_MODES/);
-  assert.match(lineage, /项目地图/);
-  assert.match(lineage, /任务创作流/);
-  assert.match(lineage, /轮次对比/);
-  assert.match(lineage, /资产分支/);
-  assert.match(lineage, /交付路线/);
+  assert.match(lineage, /'全局'/);
+  assert.match(lineage, /'按任务'/);
+  assert.match(lineage, /'按轮次'/);
+  assert.match(lineage, /'按图片'/);
+  assert.match(lineage, /'按交付'/);
+  assert.match(lineage, /画布视角/);
+  // 画布 mode 是同一张图的五种看法，名字不得再和左侧一级入口撞车
+  // （旧名里「项目地图/资产分支/交付路线」与入口近义、「轮次对比」与页签同名）。
+  assert.doesNotMatch(lineage, /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'轮次对比'/);
   assert.match(lineage, /LineageWorkspaceSummary/);
   assert.match(lineage, /lineage-focus-strip/);
   assert.match(lineage, /toolbarMode/);

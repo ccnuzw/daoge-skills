@@ -12,12 +12,14 @@ import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 const PURPOSE_LABELS = { exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' };
 const OPERATION_LABELS = { generation: '生成', generate: '生成', edit: '编辑', variation: '变体', refinement: '优化', fill: '补图' };
 const REVIEW_LABELS = { keep: '成果', review: '未定', reject: '不采用', derive: '可继续' };
+// 这是同一张图上的五种「看法」，不是五个去处 —— 名字必须和左侧一级入口明显区分，
+// 否则「资产分支 / 资产管理」「交付路线 / 资产交付」会被读成同一件事。
 const CREATOR_MODES = [
-  ['map', '项目地图', '看项目、任务、轮次和交付全貌。'],
-  ['flow', '任务创作流', '沿参考、计划、运行、结果继续推进。'],
-  ['rounds', '轮次对比', '比较每一轮方向和保留率。'],
-  ['assets', '资产分支', '围绕关键图片继续变体或精修。'],
-  ['delivery', '交付路线', '只看交付候选、交付包和最终路径。']
+  ['map', '全局', '看项目、任务、轮次和交付全貌。'],
+  ['flow', '按任务', '沿参考、计划、运行、结果继续推进。'],
+  ['rounds', '按轮次', '比较每一轮方向和保留率。'],
+  ['assets', '按图片', '围绕关键图片继续变体或精修。'],
+  ['delivery', '按交付', '只看交付候选、交付包和最终路径。']
 ];
 const FILTERS = [
   ['all', '全部'],
@@ -484,9 +486,9 @@ function LineageWorkspaceSummary({ project, selectedTask, selectedRound, runs = 
         {contextStatus && <small>{contextStatus}</small>}
         <div className="lineage-context-actions"><button type="button" className="outline-button" onClick={onOpenTasks}><GitFork size={14} />任务列表</button><button type="button" className="outline-button" onClick={onCreateTask}><Sparkles size={14} />新建任务</button></div>
       </div>
-      <section className="lineage-mode-panel" aria-label="创作谱系工作模式">
-        <div className="lineage-mode-heading"><span>视图</span><strong>{currentMode[1]}</strong></div>
-        <div className="lineage-mode-grid" role="radiogroup" aria-label="切换谱系视图">
+      <section className="lineage-mode-panel" aria-label="画布视角切换">
+        <div className="lineage-mode-heading"><span>画布视角</span><strong>{currentMode[1]}</strong></div>
+        <div className="lineage-mode-grid" role="radiogroup" aria-label="切换画布视角">
           {CREATOR_MODES.map(([value, label, description]) => <button type="button" key={value} className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} title={description} onClick={() => onMode(value)}><strong>{label}</strong></button>)}
         </div>
       </section>
