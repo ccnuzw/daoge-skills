@@ -2,10 +2,10 @@ import { StudioDatabase, appendStudioEvent, withTransaction } from '../studio/da
 import { StudioAsset, getStudioAsset } from './assets';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
 import { createId, nowIso } from '../shared/ids';
+import { isInStudio } from './studio-scope';
 
 function requireProject(db: StudioDatabase, studioId: string, projectId: string): void {
-  const project = db.prepare('SELECT id FROM projects WHERE id = ? AND studio_id = ?').get(projectId, studioId) as { id: string } | undefined;
-  if (!project) throw new StudioNotFoundError('Project not found: ' + projectId);
+  if (!isInStudio(db, 'project', projectId, studioId)) throw new StudioNotFoundError('Project not found: ' + projectId);
 }
 
 function projectOwnsAsset(db: StudioDatabase, projectId: string, assetId: string): boolean {

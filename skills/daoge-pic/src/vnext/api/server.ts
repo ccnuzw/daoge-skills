@@ -18,6 +18,7 @@ import { cancelGenerationRun, createDryRunPreview, getDryRunPreview, getGenerati
 import { StateTransitionError } from '../domain/states';
 import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listScopedStudioAssetsByIds, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
+import { isInStudio, notInStudioMessage, selectInStudioSql, ScopedEntityType } from '../domain/studio-scope';
 import { getQualityMetrics } from '../domain/quality-metrics';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { getLatestRun, listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
@@ -60,6 +61,8 @@ const MAX_BATCH_IDS = 500;
 const MAX_BACKUP_MANIFEST_ASSETS = 5000;
 /** Page size for asset enumeration; `listStudioAssets` clamps every page to this many rows. */
 const ASSET_PAGE_SIZE = 500;
+/** Import relation targets accepted by `assertImportTarget` -- deliberately narrower than every scoped entity. */
+const IMPORT_TARGET_TYPES = new Set<string>(['project', 'creative_task', 'creative_round', 'run_item', 'style_kit', 'brand_kit', 'delivery']);
 
 type JsonBody = Record<string, unknown>;
 
@@ -1118,7 +1121,7 @@ export class LocalStudioService {
       const sessionPlanMatch = /^\/api\/sessions\/([^/]+)\/plan-status$/.exec(parsed.pathname);
       if (request.method === 'GET' && sessionPlanMatch) {
         const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionPlanMatch[1] });
-        const round = session.activeRoundId ? this.db.prepare('SELECT round.id, round.purpose, round.plan_json, round.plan_version, round.status, task.id AS task_id, task.name AS task_name, project.id AS project_id, project.name AS project_name FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?').get(session.activeRoundId, this.initialized.manifest.studioId) as { id: string; purpose: string; plan_json: string; plan_version: number; status: string; task_id: string; task_name: string; project_id: string; project_name: string } | undefined : undefined;
+        const round = session.activeRoundId ? this.db.prepare(selectInStudioSql('creative_round', 'round.id, round.purpose, round.plan_json, round.plan_version, round.status, task.id AS task_id, task.name AS task_name, project.id AS project_id, project.name AS project_name')).get(session.activeRoundId, this.initialized.manifest.studioId) as { id: string; purpose: string; plan_json: string; plan_version: number; status: string; task_id: string; task_name: string; project_id: string; project_name: string } | undefined : undefined;
          const latestRun = round ? getLatestRun(this.db, this.initialized.manifest.studioId, round.id) : null;
         const consent = round ? this.confirmationGate.consentFor(round.id) : null;
         const pendingConfirmation = round ? this.confirmationGate.getChallenge(round.id) : null;
@@ -1741,27 +1744,25 @@ export class LocalStudioService {
     fs.createReadStream(resolved).on('error', () => response.destroy()).pipe(response);
   }
 
-  private assertProjectInStudio(projectId: string): void {
-    const project = this.db.prepare('SELECT 1 FROM projects WHERE id = ? AND studio_id = ?').get(projectId, this.initialized.manifest.studioId);
-    if (!project) throw new StudioNotFoundError('Project not found in this Studio: ' + projectId);
+  private assertInStudio(type: ScopedEntityType, id: string, message?: string): void {
+    if (isInStudio(this.db, type, id, this.initialized.manifest.studioId)) return;
+    throw new StudioNotFoundError(message || notInStudioMessage(type, id));
   }
 
-  private assertScopedId(id: string, label: string, sql: string): void {
-    if (!this.db.prepare(sql).get(id, this.initialized.manifest.studioId)) throw new StudioNotFoundError(label + ' not found in this Studio: ' + id);
-  }
+  private assertProjectInStudio(projectId: string): void { this.assertInStudio('project', projectId); }
 
-  private assertSessionInStudio(sessionId: string): void { this.assertScopedId(sessionId, 'Studio session', 'SELECT 1 FROM studio_sessions WHERE id = ? AND studio_id = ?'); }
-  private assertTaskInStudio(taskId: string): void { this.assertScopedId(taskId, 'Creative task', 'SELECT 1 FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?'); }
-  private assertDryRunInStudio(previewId: string): void { this.assertScopedId(previewId, 'Dry-run preview', 'SELECT 1 FROM dry_run_previews preview JOIN creative_rounds round ON round.id = preview.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE preview.id = ? AND project.studio_id = ?'); }
-  private assertRoundInStudio(roundId: string): void { this.assertScopedId(roundId, 'Creative round', 'SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?'); }
-  private assertRunInStudio(runId: string): void { this.assertScopedId(runId, 'Generation run', 'SELECT 1 FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?'); }
-  private assertRunItemInStudio(itemId: string): void { this.assertScopedId(itemId, 'Generation run item', 'SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?'); }
+  private assertSessionInStudio(sessionId: string): void { this.assertInStudio('studio_session', sessionId); }
+  private assertTaskInStudio(taskId: string): void { this.assertInStudio('creative_task', taskId); }
+  private assertDryRunInStudio(previewId: string): void { this.assertInStudio('dry_run_preview', previewId); }
+  private assertRoundInStudio(roundId: string): void { this.assertInStudio('creative_round', roundId); }
+  private assertRunInStudio(runId: string): void { this.assertInStudio('generation_run', runId); }
+  private assertRunItemInStudio(itemId: string): void { this.assertInStudio('run_item', itemId); }
   private assertRunItemBelongsToRunInStudio(runId: string, itemId: string): void {
-    const row = this.db.prepare('SELECT item.id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND item.run_id = ? AND project.studio_id = ?').get(itemId, runId, this.initialized.manifest.studioId);
+    const row = this.db.prepare(selectInStudioSql('run_item', 'item.id') + ' AND item.run_id = ?').get(itemId, this.initialized.manifest.studioId, runId);
     if (!row) throw new StudioNotFoundError('Generation run item not found in this run: ' + itemId);
   }
   private resolveRunProviderConfig(runId: string): ResolvedProviderConfig | null {
-    const row = this.db.prepare('SELECT run.provider_profile_id, run.provider_config_version FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?').get(runId, this.initialized.manifest.studioId) as { provider_profile_id: string | null; provider_config_version: number | null } | undefined;
+    const row = this.db.prepare(selectInStudioSql('generation_run', 'run.provider_profile_id, run.provider_config_version')).get(runId, this.initialized.manifest.studioId) as { provider_profile_id: string | null; provider_config_version: number | null } | undefined;
     if (!row || typeof row.provider_profile_id !== 'string' || !row.provider_profile_id.trim() || !Number.isSafeInteger(Number(row.provider_config_version)) || Number(row.provider_config_version) < 1) return null;
     try {
       return resolveProviderProfileConfig(this.providerDb, row.provider_profile_id, this.initialized.paths);
@@ -1770,13 +1771,11 @@ export class LocalStudioService {
     }
   }
 
-  private assertAssetInStudio(assetId: string): void { this.assertScopedId(assetId, 'Asset', 'SELECT 1 FROM assets WHERE id = ? AND studio_id = ?'); }
-  private assertDeliveryBatchInStudio(batchId: string): void { this.assertScopedId(batchId, 'Delivery batch', 'SELECT 1 FROM delivery_batches batch JOIN projects project ON project.id = batch.project_id WHERE batch.id = ? AND project.studio_id = ?'); }
-  private assertDeliveryBatchVersionInStudio(versionId: string): void { this.assertScopedId(versionId, 'Delivery batch version', 'SELECT 1 FROM delivery_batch_versions version JOIN delivery_batches batch ON batch.id = version.batch_id JOIN projects project ON project.id = batch.project_id WHERE version.id = ? AND project.studio_id = ?'); }
+  private assertAssetInStudio(assetId: string): void { this.assertInStudio('asset', assetId); }
+  private assertDeliveryBatchInStudio(batchId: string): void { this.assertInStudio('delivery_batch', batchId); }
+  private assertDeliveryBatchVersionInStudio(versionId: string): void { this.assertInStudio('delivery_batch_version', versionId); }
 
-  private assertDeliveryInStudio(deliveryId: string): void {
-    this.assertScopedId(deliveryId, 'Delivery', 'SELECT 1 FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?');
-  }
+  private assertDeliveryInStudio(deliveryId: string): void { this.assertInStudio('delivery', deliveryId); }
   private assertConfirmedRoundSession(roundId: string, sessionId: string): void {
     const normalizedSessionId = text(sessionId);
     if (!normalizedSessionId) throw new InvalidCommandError('预检需要明确的 Studio Session。');
@@ -1792,7 +1791,7 @@ export class LocalStudioService {
   private assertResumeSession(runId: string, sessionId: string): void {
     const normalizedSessionId = text(sessionId);
     if (!normalizedSessionId) throw new InvalidCommandError('恢复运行需要明确的 Studio Session。');
-    const run = this.db.prepare('SELECT run.round_id FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?').get(runId, this.initialized.manifest.studioId) as { round_id: string } | undefined;
+    const run = this.db.prepare(selectInStudioSql('generation_run', 'run.round_id')).get(runId, this.initialized.manifest.studioId) as { round_id: string } | undefined;
     if (!run) throw new StudioNotFoundError('Generation run not found: ' + runId);
     const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: normalizedSessionId });
     if (session.activeRoundId !== run.round_id) throw new InvalidCommandError('恢复运行必须绑定所属创作轮次的当前 Studio Session。');
@@ -1805,18 +1804,8 @@ export class LocalStudioService {
   private assertImportTarget(targetType?: string, targetId?: string): void {
     if (Boolean(targetType) !== Boolean(targetId)) throw new InvalidCommandError('导入关系必须同时提供目标类型和目标 ID。');
     if (!targetType || !targetId) return;
-    const queries: Record<string, string> = {
-      project: 'SELECT 1 FROM projects WHERE id = ? AND studio_id = ?',
-      creative_task: 'SELECT 1 FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?',
-      creative_round: 'SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?',
-      run_item: 'SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?',
-      style_kit: 'SELECT 1 FROM style_kits WHERE id = ? AND studio_id = ?',
-      brand_kit: 'SELECT 1 FROM brand_kits WHERE id = ? AND studio_id = ?',
-      delivery: 'SELECT delivery.id FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?'
-    };
-    const query = queries[targetType];
-    if (!query) throw new InvalidCommandError('不支持该导入关系目标。');
-    if (!this.db.prepare(query).get(targetId, this.initialized.manifest.studioId)) throw new StudioNotFoundError('未找到当前 Studio 中的导入关系目标。');
+    if (!IMPORT_TARGET_TYPES.has(targetType)) throw new InvalidCommandError('不支持该导入关系目标。');
+    if (!isInStudio(this.db, targetType as ScopedEntityType, targetId, this.initialized.manifest.studioId)) throw new StudioNotFoundError('未找到当前 Studio 中的导入关系目标。');
   }
   private async importAsset(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const key = headerValue(request, 'idempotency-key');
@@ -1886,7 +1875,7 @@ export class LocalStudioService {
   }
   private async deliveryArchive(request: IncomingMessage, response: ServerResponse, deliveryId: string, requestedSequences: string[]): Promise<void> {
     this.assertDeliveryInStudio(deliveryId);
-    const delivery = this.db.prepare('SELECT delivery.id, delivery.name, delivery.status, delivery.manifest_json, project.name AS project_name FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; name: string; status: string; manifest_json: string; project_name: string } | undefined;
+    const delivery = this.db.prepare(selectInStudioSql('delivery', 'delivery.id, delivery.name, delivery.status, delivery.manifest_json, project.name AS project_name')).get(deliveryId, this.initialized.manifest.studioId) as { id: string; name: string; status: string; manifest_json: string; project_name: string } | undefined;
     if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('已完成交付不存在：' + deliveryId);
     let manifest: Record<string, unknown>;
     try { manifest = record(JSON.parse(delivery.manifest_json)); } catch { throw new InvalidCommandError('交付文件记录无效。'); }
@@ -1911,7 +1900,7 @@ export class LocalStudioService {
     await this.writeImageArchive(request, response, archiveFilename(delivery.project_name + '-' + delivery.name + '-交付图片', timestamp), 'daoge-pic-delivery-' + timestamp + '.zip', entries);
   }
   private deliveryFileIdentity(deliveryId: string, sequence: number): { relativeDirectory: string; file: string; mediaType: string; contentHash: string; byteSize: number } {
-    const delivery = this.db.prepare('SELECT delivery.id, delivery.status, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, this.initialized.manifest.studioId) as { id: string; status: string; manifest_json: string } | undefined;
+    const delivery = this.db.prepare(selectInStudioSql('delivery', 'delivery.id, delivery.status, delivery.manifest_json')).get(deliveryId, this.initialized.manifest.studioId) as { id: string; status: string; manifest_json: string } | undefined;
     if (!delivery || delivery.status !== 'exported') throw new StudioNotFoundError('Exported delivery not found: ' + deliveryId);
     let manifest: Record<string, unknown>;
     try { manifest = record(JSON.parse(delivery.manifest_json)); } catch { throw new InvalidCommandError('Delivery export manifest is invalid.'); }

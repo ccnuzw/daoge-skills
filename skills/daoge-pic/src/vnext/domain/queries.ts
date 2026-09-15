@@ -1,5 +1,6 @@
 import { StudioDatabase } from '../studio/database';
 import { CreativeRound, CreativeTask, InvalidCommandError, Project, StudioNotFoundError } from './studio-commands';
+import { existsInStudioSql, ScopedEntityType } from './studio-scope';
 import { GenerationRun } from '../runner/run-commands';
 import { RUN_ITEM_STATUSES, RunItemStatus } from './states';
 import { SafeErrorDetail, safeErrorDetail, safeErrorSummary } from '../shared/safe-error';
@@ -63,14 +64,14 @@ function safeRunItemResult(value: string | null): PublicRunItemResult | null {
 }
 function item(row: StoredRunItem): PublicGenerationRunItem { return { id: row.id, runId: row.run_id, sequence: row.sequence, status: row.status, attempts: row.attempts, retryAt: row.retry_at, error: safeRunItemError(row.error_json), result: safeRunItemResult(row.result_json), updatedAt: row.updated_at }; }
 
-function requireScopedEntity(db: StudioDatabase, sql: string, id: string, studioId: string, label: string): void {
-  if (!db.prepare(sql).get(id, studioId)) throw new StudioNotFoundError(label + ' not found: ' + id);
+function requireScopedEntity(db: StudioDatabase, type: ScopedEntityType, id: string, studioId: string, label: string): void {
+  if (!db.prepare(existsInStudioSql(type)).get(id, studioId)) throw new StudioNotFoundError(label + ' not found: ' + id);
 }
 
-function requireProjectInStudio(db: StudioDatabase, studioId: string, projectId: string): void { requireScopedEntity(db, 'SELECT id FROM projects WHERE id = ? AND studio_id = ?', projectId, studioId, 'Project'); }
-function requireTaskInStudio(db: StudioDatabase, studioId: string, taskId: string): void { requireScopedEntity(db, 'SELECT task.id FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?', taskId, studioId, 'Creative task'); }
-function requireRoundInStudio(db: StudioDatabase, studioId: string, roundId: string): void { requireScopedEntity(db, 'SELECT round.id FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?', roundId, studioId, 'Creative round'); }
-function requireRunInStudio(db: StudioDatabase, studioId: string, runId: string): void { requireScopedEntity(db, 'SELECT run.id FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?', runId, studioId, 'Generation run'); }
+function requireProjectInStudio(db: StudioDatabase, studioId: string, projectId: string): void { requireScopedEntity(db, 'project', projectId, studioId, 'Project'); }
+function requireTaskInStudio(db: StudioDatabase, studioId: string, taskId: string): void { requireScopedEntity(db, 'creative_task', taskId, studioId, 'Creative task'); }
+function requireRoundInStudio(db: StudioDatabase, studioId: string, roundId: string): void { requireScopedEntity(db, 'creative_round', roundId, studioId, 'Creative round'); }
+function requireRunInStudio(db: StudioDatabase, studioId: string, runId: string): void { requireScopedEntity(db, 'generation_run', runId, studioId, 'Generation run'); }
 
 export interface PublicRunItemResult { assetId?: string; mediaType?: string; byteSize?: number; }
 export interface PublicRunItemOutputAsset { id: string; kind: 'import' | 'generated' | 'export'; mediaType: string; deletedAt: string | null; mediaState: string; }

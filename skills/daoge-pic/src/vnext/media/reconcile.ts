@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
+import { selectInStudioSql } from '../domain/studio-scope';
 import { createId } from '../shared/ids';
 import { recoverAssetMediaOperations } from '../domain/assets';
 import { archiveStagedImage, inspectManagedImageFile, inspectManagedImageFileAsync, plannedArchivePath, resolveManagedMediaPath } from './archive';
@@ -25,7 +26,8 @@ function generatedRecoveryRejected(db: StudioDatabase, studioId: string, assetId
 }
 
 function generatedRunBelongsToStudio(db: StudioDatabase, studioId: string, runId: string, runItemId: string): boolean {
-  return Boolean(db.prepare('SELECT item.id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND item.run_id = ? AND project.studio_id = ?').get(runItemId, runId, studioId));
+  // 参数顺序由 studio-scope 约定：实体 id、Studio id，然后才是指调用点追加的条件。
+  return Boolean(db.prepare(selectInStudioSql('run_item', 'item.id') + ' AND item.run_id = ?').get(runItemId, studioId, runId));
 }
 
 export function recoverGeneratedMediaCommits(db: StudioDatabase, paths: StudioPaths, studioId: string): number {

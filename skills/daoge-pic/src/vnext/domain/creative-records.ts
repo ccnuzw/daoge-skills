@@ -1,6 +1,7 @@
 import { StudioDatabase } from '../studio/database';
 import { StudioAsset, getStudioAsset } from './assets';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
+import { selectInStudioSql } from './studio-scope';
 import { publicRunPlanSnapshot, publicRunRequestSummary } from './queries';
 import { safeErrorDetail } from '../shared/safe-error';
 import { normalizeReviewFeedback, parseReviewContext } from './review-contract';
@@ -29,12 +30,12 @@ function reviewFeedbackHash(value: string | null | undefined): string | undefine
   }
 }
 function taskRow(db: StudioDatabase, studioId: string, taskId: string): TaskRow {
-  const value = db.prepare('SELECT task.id, task.project_id, task.name, task.status, task.intent_json, project.name AS project_name FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?').get(taskId, studioId) as TaskRow | undefined;
+  const value = db.prepare(selectInStudioSql('creative_task', 'task.id, task.project_id, task.name, task.status, task.intent_json, project.name AS project_name')).get(taskId, studioId) as TaskRow | undefined;
   if (!value) throw new StudioNotFoundError('Creative task not found: ' + taskId);
   return value;
 }
 function roundRow(db: StudioDatabase, studioId: string, roundId: string): RoundRow {
-  const value = db.prepare('SELECT round.id, round.task_id, round.parent_round_id, round.purpose, round.plan_json, round.plan_version, round.status, round.created_at, round.updated_at FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?').get(roundId, studioId) as RoundRow | undefined;
+  const value = db.prepare(selectInStudioSql('creative_round', 'round.id, round.task_id, round.parent_round_id, round.purpose, round.plan_json, round.plan_version, round.status, round.created_at, round.updated_at')).get(roundId, studioId) as RoundRow | undefined;
   if (!value) throw new StudioNotFoundError('Creative round not found: ' + roundId);
   return value;
 }

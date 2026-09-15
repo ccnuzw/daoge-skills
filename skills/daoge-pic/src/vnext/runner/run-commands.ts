@@ -13,6 +13,7 @@ import { SafeErrorDetail, safeErrorDetail } from '../shared/safe-error';
 import { canonicalJson } from '../shared/canonical-json';
 import { evaluateBudgetGate, getBudgetPolicy, unknownUsageEstimate } from '../usage/budget';
 import { budgetReservesRunStatus, parseStoredUsageEstimate, recordUsageEvent, UsageBillingState, UsageEstimate } from '../usage/ledger';
+import { selectInStudioSql } from '../domain/studio-scope';
 
 const MEDIA_TYPES_BY_ID = (values: readonly string[]): Record<string, true> => Object.fromEntries(values.map((value) => [value, true]));
 const OPEN_RUN_STATUSES_SQL = '(' + OPEN_RUN_STATUSES.map((status) => "'" + status + "'").join(', ') + ')';
@@ -295,19 +296,19 @@ export function recordRunItemUsage(db: StudioDatabase, input: { studioId: string
 
 
 function resolveRoundInStudio(db: StudioDatabase, studioId: string, roundId: string): StoredRoundPlan {
-  const row = db.prepare('SELECT r.id, r.status, r.plan_json, r.plan_version, p.studio_id, p.id AS project_id FROM creative_rounds r JOIN creative_tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(roundId, studioId) as StoredRoundPlan | undefined;
+  const row = db.prepare(selectInStudioSql('creative_round', 'round.id, round.status, round.plan_json, round.plan_version, project.studio_id, project.id AS project_id')).get(roundId, studioId) as StoredRoundPlan | undefined;
   if (!row) throw new StudioNotFoundError('Creative round not found: ' + roundId);
   return row;
 }
 
 function resolveRunInStudio(db: StudioDatabase, studioId: string, runId: string): StoredRun & { studio_id: string } {
-  const row = db.prepare('SELECT r.id, r.round_id, r.status, r.provider_snapshot_json, r.plan_snapshot_json, r.execution_concurrency, r.concurrency_source, r.version, p.studio_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(runId, studioId) as (StoredRun & { studio_id: string }) | undefined;
+  const row = db.prepare(selectInStudioSql('generation_run', 'run.id, run.round_id, run.status, run.provider_snapshot_json, run.plan_snapshot_json, run.execution_concurrency, run.concurrency_source, run.version, project.studio_id')).get(runId, studioId) as (StoredRun & { studio_id: string }) | undefined;
   if (!row) throw new StudioNotFoundError('Generation run not found: ' + runId);
   return row;
 }
 
 function resolveRunItemInStudio(db: StudioDatabase, studioId: string, itemId: string): { id: string; run_id: string; status: RunItemStatus; error_json: string | null } {
-  const row = db.prepare('SELECT item.id, item.run_id, item.status, item.error_json FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?').get(itemId, studioId) as { id: string; run_id: string; status: RunItemStatus; error_json: string | null } | undefined;
+  const row = db.prepare(selectInStudioSql('run_item', 'item.id, item.run_id, item.status, item.error_json')).get(itemId, studioId) as { id: string; run_id: string; status: RunItemStatus; error_json: string | null } | undefined;
   if (!row) throw new StudioNotFoundError('Generation run item not found: ' + itemId);
   return row;
 }
@@ -473,7 +474,7 @@ export function listDryRunPreviews(db: StudioDatabase, studioId: string, roundId
 }
 
 export function getDryRunPreview(db: StudioDatabase, studioId: string, roundId: string, previewId: string): DryRunPreview | null {
-  const row = db.prepare('SELECT preview.id, preview.round_id, preview.plan_version, preview.provider_snapshot_json, preview.plan_snapshot_json, preview.item_count, preview.execution_concurrency, preview.concurrency_source, preview.usage_estimate_json, preview.created_at FROM dry_run_previews preview JOIN creative_rounds round ON round.id = preview.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE preview.id = ? AND preview.round_id = ? AND project.studio_id = ?').get(previewId, roundId, studioId) as { id: string; round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string; item_count: number; execution_concurrency: number; concurrency_source: ConcurrencySource; usage_estimate_json: string; created_at: string } | undefined;
+  const row = db.prepare(selectInStudioSql('dry_run_preview', 'preview.id, preview.round_id, preview.plan_version, preview.provider_snapshot_json, preview.plan_snapshot_json, preview.item_count, preview.execution_concurrency, preview.concurrency_source, preview.usage_estimate_json, preview.created_at') + ' AND preview.round_id = ?').get(previewId, studioId, roundId) as { id: string; round_id: string; plan_version: number; provider_snapshot_json: string; plan_snapshot_json: string; item_count: number; execution_concurrency: number; concurrency_source: ConcurrencySource; usage_estimate_json: string; created_at: string } | undefined;
   return row ? dryRunFromRow(row) : null;
 }
 

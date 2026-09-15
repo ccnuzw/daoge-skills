@@ -1,6 +1,7 @@
 import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
+import { joinInStudioSql } from './studio-scope';
 
 /** Template kinds that may be persisted from a confirmed creative round. */
 export const CONFIRMED_TEMPLATE_TYPES = ['task_type', 'style_kit', 'brand_kit'] as const;
@@ -276,10 +277,7 @@ function resolveConfirmedSource(db: StudioDatabase, studioId: string, roundIdVal
   const row = db.prepare(`SELECT round.id AS round_id, task.id AS task_id, project.id AS project_id, project.studio_id,
     round.status AS round_status, round.plan_version, round.plan_json,
     plan.state AS plan_state, plan.confirmed_at
-    FROM creative_rounds round
-    JOIN creative_tasks task ON task.id = round.task_id
-    JOIN projects project ON project.id = task.project_id
-    JOIN round_plan_versions plan ON plan.round_id = round.id AND plan.plan_version = round.plan_version
+    ${joinInStudioSql('creative_round', 'JOIN round_plan_versions plan ON plan.round_id = round.id AND plan.plan_version = round.plan_version')}
     WHERE round.id = ? AND project.studio_id = ?`).get(roundId, studioId) as ConfirmedSourceRow | undefined;
   if (!row) throw new StudioNotFoundError('Creative round is not available in this Studio.');
   if (row.round_status !== 'active' || row.plan_state !== 'confirmed' || !row.confirmed_at) invalid('A confirmed round and confirmed plan version are required.');

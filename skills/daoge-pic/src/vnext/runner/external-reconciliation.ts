@@ -12,6 +12,7 @@ import type { GeneratedAssetPersister, PersistedImageResult } from './worker';
 import { recordRunItemUsage } from './run-commands';
 import { canonicalJson } from '../shared/canonical-json';
 import type { SafeErrorDetail } from '../shared/safe-error';
+import { joinInStudioSql, selectInStudioSql } from '../domain/studio-scope';
 
 const IMAGE_MEDIA_TYPES: Record<string, true> = {
   'image/png': true,
@@ -115,7 +116,7 @@ function parseObject(value: string | null): Record<string, unknown> | null {
 
 
 function loadCandidate(db: StudioDatabase, studioId: string, runId: string, itemId: string): ReconciliationCandidate | null {
-  const row = db.prepare('SELECT run.id AS run_id, run.status AS run_status, run.provider_snapshot_json, run.provider_profile_id, run.provider_config_version, item.id AS item_id, item.sequence, item.status AS item_status, item.request_id, item.external_request_id, item.lease_token, item.lease_worker_id, item.lease_expires_at, item.error_json, item.result_json FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND item.run_id = ? AND project.studio_id = ?').get(itemId, runId, studioId) as {
+  const row = db.prepare(selectInStudioSql('run_item', 'run.id AS run_id, run.status AS run_status, run.provider_snapshot_json, run.provider_profile_id, run.provider_config_version, item.id AS item_id, item.sequence, item.status AS item_status, item.request_id, item.external_request_id, item.lease_token, item.lease_worker_id, item.lease_expires_at, item.error_json, item.result_json') + ' AND item.run_id = ?').get(itemId, studioId, runId) as {
     run_id: string;
     run_status: RunStatus;
     provider_snapshot_json: string;
@@ -191,7 +192,7 @@ function providerSupportsReconciliation(provider: ImageProvider | null, config: 
 }
 
 function persistedAssetMatchesScope(db: StudioDatabase, input: { studioId: string; runId: string; itemId: string; persisted: PersistedImageResult }): boolean {
-  const row = db.prepare("SELECT asset.id, relation.metadata_json FROM assets asset JOIN asset_relations relation ON relation.asset_id = asset.id WHERE asset.id = ? AND asset.studio_id = ? AND asset.deleted_at IS NULL AND asset.media_type = ? AND asset.byte_size = ? AND asset.content_hash = ? AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item' AND relation.target_id = ? LIMIT 1").get(input.persisted.assetId, input.studioId, input.persisted.mediaType, input.persisted.byteSize, input.persisted.contentHash, input.itemId) as { id: string; metadata_json: string } | undefined;
+  const row = db.prepare("SELECT asset.id, relation.metadata_json " + joinInStudioSql('asset', 'JOIN asset_relations relation ON relation.asset_id = asset.id') + " WHERE asset.id = ? AND asset.studio_id = ? AND asset.deleted_at IS NULL AND asset.media_type = ? AND asset.byte_size = ? AND asset.content_hash = ? AND relation.relation_type = 'output_of' AND relation.target_type = 'run_item' AND relation.target_id = ? LIMIT 1").get(input.persisted.assetId, input.studioId, input.persisted.mediaType, input.persisted.byteSize, input.persisted.contentHash, input.itemId) as { id: string; metadata_json: string } | undefined;
   if (!row) return false;
   const metadata = parseObject(row.metadata_json);
   return metadata?.runId === input.runId;
@@ -307,7 +308,7 @@ function normalizedPersistedResult(value: PersistedImageResult): PersistedImageR
 }
 
 function settleReconciledRunInTransaction(db: StudioDatabase, input: { studioId: string; runId: string; now?: () => Date }): void {
-  const run = db.prepare('SELECT run.id, run.status, run.version FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?').get(input.runId, input.studioId) as { id: string; status: RunStatus; version: number } | undefined;
+  const run = db.prepare(selectInStudioSql('generation_run', 'run.id, run.status, run.version')).get(input.runId, input.studioId) as { id: string; status: RunStatus; version: number } | undefined;
   if (!run || !Object.hasOwn(RECONCILABLE_RUN_STATUSES, run.status)) return;
   const items = db.prepare('SELECT status FROM run_items WHERE run_id = ? ORDER BY sequence').all(input.runId) as Array<{ status: RunItemStatus }>;
   if (!items.length || items.some((item) => item.status !== 'succeeded')) return;

@@ -10,6 +10,7 @@ import { ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 import { createVerifiedSnapshot, createVerifiedSnapshotAsync, openVerifiedManagedFile, openVerifiedManagedFileAsync, VerifiedManagedFile } from '../media/archive';
 import { portablePathSegment } from '../shared/windows';
 import { parseReviewContext } from './review-contract';
+import { selectInStudioSql } from './studio-scope';
 
 export interface DeliveryAssetSnapshot { assetId: string; sequence: number; source: Record<string, unknown>; review: Record<string, unknown>; asset: { id: string; kind: string; mediaType: string; deletedAt: string | null } | null; }
 export interface Delivery { id: string; projectId: string; name: string; status: 'draft' | 'ready' | 'exported'; manifest: Record<string, unknown>; items?: DeliveryAssetSnapshot[]; }
@@ -131,7 +132,7 @@ export function createDelivery(db: StudioDatabase, input: { studioId: string; pr
 }
 
 function storedDelivery(db: StudioDatabase, studioId: string, deliveryId: string): StoredDelivery {
-  const value = db.prepare('SELECT delivery.id, delivery.project_id, delivery.name, delivery.status, delivery.manifest_json FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(deliveryId, studioId) as StoredDelivery | undefined;
+  const value = db.prepare(selectInStudioSql('delivery', 'delivery.id, delivery.project_id, delivery.name, delivery.status, delivery.manifest_json')).get(deliveryId, studioId) as StoredDelivery | undefined;
   if (!value) throw new StudioNotFoundError('Delivery not found: ' + deliveryId);
   return value;
 }

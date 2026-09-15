@@ -2,6 +2,7 @@ import { createId, nowIso, sha256 } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from './asset-access';
 import { isProjectTemplateId } from './project-templates';
+import { joinInStudioSql, selectInStudioSql } from './studio-scope';
 import { canonicalJson } from '../shared/canonical-json';
 export class StudioNotFoundError extends Error {}
 export class VersionConflictError extends Error {}
@@ -179,14 +180,14 @@ function resolveProjectInStudio(db: StudioDatabase, studioId: string, projectId:
 
 function resolveTaskInStudio(db: StudioDatabase, studioId: string, taskId: string): StoredTask & { studio_id: string; project_status: Project['status'] } {
   const id = requireValue(taskId, 'taskId');
-  const row = db.prepare('SELECT t.id, t.project_id, t.task_type_id, t.name, t.intent_json, t.status, t.version, p.studio_id, p.status AS project_status FROM creative_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ? AND p.studio_id = ?').get(id, requireValue(studioId, 'studioId')) as (StoredTask & { studio_id: string; project_status: Project['status'] }) | undefined;
+  const row = db.prepare(selectInStudioSql('creative_task', 'task.id, task.project_id, task.task_type_id, task.name, task.intent_json, task.status, task.version, project.studio_id, project.status AS project_status')).get(id, requireValue(studioId, 'studioId')) as (StoredTask & { studio_id: string; project_status: Project['status'] }) | undefined;
   if (!row) throw new StudioNotFoundError('Creative task not found: ' + id);
   return row;
 }
 
 function resolveRoundInStudio(db: StudioDatabase, studioId: string, roundId: string, label = 'Creative round'): StoredRound & { studio_id: string; project_id: string } {
   const id = requireValue(roundId, 'roundId');
-  const row = db.prepare('SELECT r.id, r.task_id, r.parent_round_id, r.purpose, r.plan_json, r.plan_version, r.status, r.version, p.studio_id, p.id AS project_id FROM creative_rounds r JOIN creative_tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(id, requireValue(studioId, 'studioId')) as (StoredRound & { studio_id: string; project_id: string }) | undefined;
+  const row = db.prepare(selectInStudioSql('creative_round', 'round.id, round.task_id, round.parent_round_id, round.purpose, round.plan_json, round.plan_version, round.status, round.version, project.studio_id, project.id AS project_id')).get(id, requireValue(studioId, 'studioId')) as (StoredRound & { studio_id: string; project_id: string }) | undefined;
   if (!row) throw new StudioNotFoundError(label + ' not found: ' + id);
   return row;
 }
@@ -449,12 +450,12 @@ export function getProject(db: StudioDatabase, studioId: string, projectId: stri
 }
 
 export function getTask(db: StudioDatabase, studioId: string, taskId: string): CreativeTask | null {
-  const row = db.prepare('SELECT t.id, t.project_id, t.task_type_id, t.name, t.intent_json, t.status, t.version FROM creative_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ? AND p.studio_id = ?').get(taskId, studioId) as StoredTask | undefined;
+  const row = db.prepare(selectInStudioSql('creative_task', 'task.id, task.project_id, task.task_type_id, task.name, task.intent_json, task.status, task.version')).get(taskId, studioId) as StoredTask | undefined;
   return row ? taskFromRow(row) : null;
 }
 
 export function getRound(db: StudioDatabase, studioId: string, roundId: string): CreativeRound | null {
-  const row = db.prepare('SELECT r.id, r.task_id, r.parent_round_id, r.purpose, r.plan_json, r.plan_version, r.status, r.version FROM creative_rounds r JOIN creative_tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(roundId, studioId) as StoredRound | undefined;
+  const row = db.prepare(selectInStudioSql('creative_round', 'round.id, round.task_id, round.parent_round_id, round.purpose, round.plan_json, round.plan_version, round.status, round.version')).get(roundId, studioId) as StoredRound | undefined;
   return row ? roundFromRow(row) : null;
 }
 
@@ -462,5 +463,5 @@ export interface RoundPlanVersion { id: string; roundId: string; planVersion: nu
 
 export function listRoundPlanVersions(db: StudioDatabase, studioId: string, roundId: string): RoundPlanVersion[] {
   resolveRoundInStudio(db, studioId, roundId);
-  return (db.prepare('SELECT version.id, version.round_id, version.plan_version, version.plan_json, version.state, version.created_at, version.confirmed_at FROM round_plan_versions version JOIN creative_rounds round ON round.id = version.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE version.round_id = ? AND project.studio_id = ? ORDER BY version.plan_version DESC').all(requireValue(roundId, 'roundId'), requireValue(studioId, 'studioId')) as Array<{ id: string; round_id: string; plan_version: number; plan_json: string; state: RoundPlanVersion['state']; created_at: string; confirmed_at: string | null }>).map((row) => ({ id: row.id, roundId: row.round_id, planVersion: row.plan_version, plan: parseObject(row.plan_json), state: row.state, createdAt: row.created_at, confirmedAt: row.confirmed_at }));
+  return (db.prepare('SELECT version.id, version.round_id, version.plan_version, version.plan_json, version.state, version.created_at, version.confirmed_at ' + joinInStudioSql('creative_round', 'JOIN round_plan_versions version ON version.round_id = round.id') + ' WHERE round.id = ? AND project.studio_id = ? ORDER BY version.plan_version DESC').all(requireValue(roundId, 'roundId'), requireValue(studioId, 'studioId')) as Array<{ id: string; round_id: string; plan_version: number; plan_json: string; state: RoundPlanVersion['state']; created_at: string; confirmed_at: string | null }>).map((row) => ({ id: row.id, roundId: row.round_id, planVersion: row.plan_version, plan: parseObject(row.plan_json), state: row.state, createdAt: row.created_at, confirmedAt: row.confirmed_at }));
 }

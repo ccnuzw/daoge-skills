@@ -5,6 +5,7 @@ __pycache__/
 .bytro
 skills/daoge-pic/node_modules/
 skills/daoge-pic/dist/
+skills/daoge-pic/.daoge-pic-dist.lock/
 skills/daoge-pic/*.tgz
 /daoge-studio/
 /daoge-assets/

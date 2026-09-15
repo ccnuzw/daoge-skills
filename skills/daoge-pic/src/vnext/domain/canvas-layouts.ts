@@ -2,6 +2,7 @@ import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from './asset-access';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
+import { ENTITY_SCOPE_QUERIES, joinInStudioSql, ScopedEntityType } from './studio-scope';
 
 export type CanvasLayoutScopeType = 'project' | 'task' | 'round';
 export type CanvasLayoutEntityType = 'project' | 'task' | 'round' | 'plan' | 'run' | 'run_item' | 'asset' | 'shared_asset' | 'delivery' | 'group' | 'task_type' | 'style_kit' | 'brand_kit';
@@ -89,6 +90,12 @@ function assertProjectInStudio(db: StudioDatabase, studioId: string, projectId: 
   if (!db.prepare('SELECT 1 FROM projects WHERE id = ? AND studio_id = ?').get(projectId, studioId)) throw new StudioNotFoundError('Project not found: ' + projectId);
 }
 
+/** 画布节点的共同约束：既属于当前 Studio，也属于当前项目。 */
+function inProject(db: StudioDatabase, type: ScopedEntityType, id: string, studioId: string, projectId: string): boolean {
+  const scope = ENTITY_SCOPE_QUERIES[type];
+  return Boolean(db.prepare('SELECT 1 ' + scope.from + ' WHERE ' + scope.where + ' AND project.id = ?').get(id, studioId, projectId));
+}
+
 function assertScopeInProject(db: StudioDatabase, studioId: string, projectId: string, scopeType: CanvasLayoutScopeType, scopeId: string): void {
   assertProjectInStudio(db, studioId, projectId);
   if (scopeType === 'project') {
@@ -96,14 +103,14 @@ function assertScopeInProject(db: StudioDatabase, studioId: string, projectId: s
     return;
   }
   if (scopeType === 'task') {
-    if (!db.prepare('SELECT 1 FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND task.project_id = ? AND project.studio_id = ?').get(scopeId, projectId, studioId)) throw new StudioNotFoundError('Creative task not found: ' + scopeId);
+    if (!inProject(db, 'creative_task', scopeId, studioId, projectId)) throw new StudioNotFoundError('Creative task not found: ' + scopeId);
     return;
   }
-  if (!db.prepare('SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.id = ? AND project.studio_id = ?').get(scopeId, projectId, studioId)) throw new StudioNotFoundError('Creative round not found: ' + scopeId);
+  if (!inProject(db, 'creative_round', scopeId, studioId, projectId)) throw new StudioNotFoundError('Creative round not found: ' + scopeId);
 }
 
 function assetIsSharedAcrossStudio(db: StudioDatabase, studioId: string, assetId: string): boolean {
-  return Boolean(db.prepare("SELECT 1 FROM assets asset JOIN asset_relations relation ON relation.asset_id = asset.id WHERE asset.id = ? AND asset.studio_id = ? AND asset.deleted_at IS NULL AND relation.relation_type = 'shared_across_projects' AND relation.target_type = 'studio' AND relation.target_id = ?").get(assetId, studioId, studioId));
+  return Boolean(db.prepare("SELECT 1 " + joinInStudioSql('asset', 'JOIN asset_relations relation ON relation.asset_id = asset.id') + " WHERE asset.id = ? AND asset.studio_id = ? AND asset.deleted_at IS NULL AND relation.relation_type = 'shared_across_projects' AND relation.target_type = 'studio' AND relation.target_id = ?").get(assetId, studioId, studioId));
 }
 
 function normalizeScope(db: StudioDatabase, input: CanvasLayoutInput): { scopeType: CanvasLayoutScopeType; scopeId: string } {
@@ -121,19 +128,19 @@ function assertEntityBelongsToProject(db: StudioDatabase, studioId: string, proj
     return;
   }
   if (entityType === 'task') {
-    if (!db.prepare('SELECT 1 FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND task.project_id = ? AND project.studio_id = ?').get(entityId, projectId, studioId)) throw new StudioNotFoundError('Creative task not found: ' + entityId);
+    if (!inProject(db, 'creative_task', entityId, studioId, projectId)) throw new StudioNotFoundError('Creative task not found: ' + entityId);
     return;
   }
   if (entityType === 'round' || entityType === 'plan') {
-    if (!db.prepare('SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.id = ? AND project.studio_id = ?').get(entityId, projectId, studioId)) throw new StudioNotFoundError('Creative round not found: ' + entityId);
+    if (!inProject(db, 'creative_round', entityId, studioId, projectId)) throw new StudioNotFoundError('Creative round not found: ' + entityId);
     return;
   }
   if (entityType === 'run') {
-    if (!db.prepare('SELECT 1 FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.id = ? AND project.studio_id = ?').get(entityId, projectId, studioId)) throw new StudioNotFoundError('Generation run not found: ' + entityId);
+    if (!inProject(db, 'generation_run', entityId, studioId, projectId)) throw new StudioNotFoundError('Generation run not found: ' + entityId);
     return;
   }
   if (entityType === 'run_item') {
-    if (!db.prepare('SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.id = ? AND project.studio_id = ?').get(entityId, projectId, studioId)) throw new StudioNotFoundError('Generation run item not found: ' + entityId);
+    if (!inProject(db, 'run_item', entityId, studioId, projectId)) throw new StudioNotFoundError('Generation run item not found: ' + entityId);
     return;
   }
   if (entityType === 'asset' || entityType === 'shared_asset') {
@@ -143,7 +150,7 @@ function assertEntityBelongsToProject(db: StudioDatabase, studioId: string, proj
     return;
   }
   if (entityType === 'delivery') {
-    if (!db.prepare('SELECT 1 FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.id = ? AND project.studio_id = ?').get(entityId, projectId, studioId)) throw new StudioNotFoundError('Delivery not found: ' + entityId);
+    if (!inProject(db, 'delivery', entityId, studioId, projectId)) throw new StudioNotFoundError('Delivery not found: ' + entityId);
     return;
   }
   if (entityType === 'task_type') {

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { archiveStagedImage, archiveStagedImageAsync, ArchivedImage, createVerifiedSnapshot, createVerifiedSnapshotAsync, discardStagedImage, inspectManagedImageFile, ManagedMediaRoot, MediaValidationError, plannedArchivePath, resolveManagedMediaPath, stageImage, StagedImage, VerifiedManagedFile } from '../media/archive';
 import { createId, nowIso } from '../shared/ids';
+import { isInStudio, ScopedEntityType, selectInStudioSql } from './studio-scope';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { AssetBucket, ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
@@ -173,16 +174,13 @@ function expectedIdentity(entry: PendingAssetOperation, stored: StoredAsset | nu
   return { mediaType, contentHash, byteSize: Number(byteSize) };
 }
 
+/** 导入/关联关系允许挂接的目标类型。刻意窄于全部实体——加一个类型是一次明确的决定。 */
+const RELATION_TARGET_TYPES: ScopedEntityType[] = ['project', 'creative_task', 'creative_round', 'run_item', 'style_kit', 'brand_kit', 'delivery'];
+
 function relationBelongsToStudio(db: StudioDatabase, studioId: string, targetType: string, targetId: string): boolean {
   if (targetType === 'studio') return targetId === studioId && Boolean(db.prepare('SELECT id FROM studios WHERE id = ?').get(targetId));
-  if (targetType === 'project') return Boolean(db.prepare('SELECT id FROM projects WHERE id = ? AND studio_id = ?').get(targetId, studioId));
-  if (targetType === 'creative_task') return Boolean(db.prepare('SELECT task.id FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?').get(targetId, studioId));
-  if (targetType === 'creative_round') return Boolean(db.prepare('SELECT round.id FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?').get(targetId, studioId));
-  if (targetType === 'run_item') return Boolean(db.prepare('SELECT item.id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?').get(targetId, studioId));
-  if (targetType === 'style_kit') return Boolean(db.prepare('SELECT id FROM style_kits WHERE id = ? AND studio_id = ?').get(targetId, studioId));
-  if (targetType === 'brand_kit') return Boolean(db.prepare('SELECT id FROM brand_kits WHERE id = ? AND studio_id = ?').get(targetId, studioId));
-  if (targetType === 'delivery') return Boolean(db.prepare('SELECT delivery.id FROM deliveries delivery JOIN projects project ON project.id = delivery.project_id WHERE delivery.id = ? AND project.studio_id = ?').get(targetId, studioId));
-  return false;
+  if (!(RELATION_TARGET_TYPES as string[]).includes(targetType)) return false;
+  return isInStudio(db, targetType as ScopedEntityType, targetId, studioId);
 }
 
 function importRecoveryMetadata(db: StudioDatabase, entry: PendingAssetOperation, expected: ExpectedMediaIdentity): { asset: PendingImportAsset; relation: AssetRelationInput | null } {
@@ -465,11 +463,11 @@ function assertScopedAssetHierarchy(db: StudioDatabase, studioId: string, input:
     return;
   }
   if (input.scope === 'task') {
-    const task = db.prepare('SELECT task.id, task.project_id FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = ? AND project.studio_id = ?').get(String(input.taskId || ''), studioId) as { id: string; project_id: string } | undefined;
+    const task = db.prepare(selectInStudioSql('creative_task', 'task.id, task.project_id')).get(String(input.taskId || ''), studioId) as { id: string; project_id: string } | undefined;
     if (!task || (input.projectId && input.projectId !== task.project_id)) throw new InvalidCommandError('Task asset scope is not part of this Studio project.');
     return;
   }
-  const round = db.prepare('SELECT round.id, round.task_id, task.project_id FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE round.id = ? AND project.studio_id = ?').get(String(input.roundId || ''), studioId) as { id: string; task_id: string; project_id: string } | undefined;
+  const round = db.prepare(selectInStudioSql('creative_round', 'round.id, round.task_id, task.project_id')).get(String(input.roundId || ''), studioId) as { id: string; task_id: string; project_id: string } | undefined;
   if (!round || (input.taskId && input.taskId !== round.task_id) || (input.projectId && input.projectId !== round.project_id)) throw new InvalidCommandError('Round asset scope is not part of this Studio task.');
 }
 
@@ -595,14 +593,14 @@ function resolveReviewContext(db: StudioDatabase, input: { studioId: string; ass
   if (input.roundId && suppliedContext.roundId && input.roundId !== suppliedContext.roundId) throw new InvalidCommandError('Review context roundId does not match the selected round.');
   const taskId = input.taskId || suppliedContext.taskId;
   const roundId = input.roundId || suppliedContext.roundId;
-  const task = taskId ? db.prepare('SELECT t.id, t.project_id FROM creative_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ? AND p.studio_id = ?').get(taskId, input.studioId) as { id: string; project_id: string } | undefined : undefined;
+  const task = taskId ? db.prepare(selectInStudioSql('creative_task', 'task.id, task.project_id')).get(taskId, input.studioId) as { id: string; project_id: string } | undefined : undefined;
   if (taskId && !task) throw new InvalidCommandError('Review task does not belong to this Studio.');
-  const round = roundId ? db.prepare('SELECT cr.id, cr.task_id, p.id AS project_id FROM creative_rounds cr JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE cr.id = ? AND p.studio_id = ?').get(roundId, input.studioId) as { id: string; task_id: string; project_id: string } | undefined : undefined;
+  const round = roundId ? db.prepare(selectInStudioSql('creative_round', 'round.id, round.task_id, project.id AS project_id')).get(roundId, input.studioId) as { id: string; task_id: string; project_id: string } | undefined : undefined;
   if (roundId && !round) throw new InvalidCommandError('Review round does not belong to this Studio.');
   if (round && task && round.task_id !== task.id) throw new InvalidCommandError('Review round does not belong to the selected task.');
-  const run = suppliedContext.runId ? db.prepare('SELECT run.id, run.round_id, round.task_id, project.id AS project_id FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?').get(suppliedContext.runId, input.studioId) as { id: string; round_id: string; task_id: string; project_id: string } | undefined : undefined;
+  const run = suppliedContext.runId ? db.prepare(selectInStudioSql('generation_run', 'run.id, run.round_id, round.task_id, project.id AS project_id')).get(suppliedContext.runId, input.studioId) as { id: string; round_id: string; task_id: string; project_id: string } | undefined : undefined;
   if (suppliedContext.runId && !run) throw new InvalidCommandError('Review context runId does not belong to this Studio.');
-  const runItem = suppliedContext.runItemId ? db.prepare('SELECT item.id, item.run_id, round.id AS round_id, round.task_id, project.id AS project_id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE item.id = ? AND project.studio_id = ?').get(suppliedContext.runItemId, input.studioId) as { id: string; run_id: string; round_id: string; task_id: string; project_id: string } | undefined : undefined;
+  const runItem = suppliedContext.runItemId ? db.prepare(selectInStudioSql('run_item', 'item.id, item.run_id, round.id AS round_id, round.task_id, project.id AS project_id')).get(suppliedContext.runItemId, input.studioId) as { id: string; run_id: string; round_id: string; task_id: string; project_id: string } | undefined : undefined;
   if (suppliedContext.runItemId && !runItem) throw new InvalidCommandError('Review context runItemId does not belong to this Studio.');
   if (run && runItem && run.id !== runItem.run_id) throw new InvalidCommandError('Review context runItemId does not belong to the selected run.');
   if ((run && roundId && run.round_id !== roundId) || (runItem && roundId && runItem.round_id !== roundId)) throw new InvalidCommandError('Review context run does not belong to the selected round.');

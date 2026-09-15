@@ -2,6 +2,7 @@ import { StudioDatabase } from '../studio/database';
 import { RUN_ITEM_STATUSES, RUN_STATUSES, RunItemStatus, RunStatus } from './states';
 import { safeErrorDetail } from '../shared/safe-error';
 import { StudioNotFoundError } from './studio-commands';
+import { ENTITY_SCOPE_QUERIES } from './studio-scope';
 
 const TERMINAL_ITEM_STATUSES = new Set<RunItemStatus>(['succeeded', 'failed', 'blocked', 'outcome_unknown', 'cancelled']);
 const FAILURE_ITEM_STATUSES = new Set<RunItemStatus>(['failed', 'blocked', 'outcome_unknown', 'retry_wait']);
@@ -157,11 +158,11 @@ export function getQualityMetrics(db: StudioDatabase, studioId: string, input: Q
   const projectId = input.projectId?.trim() || undefined;
   if (projectId) requireProjectInStudio(db, studioId, projectId);
   const scope = projectScope(projectId);
-  const runRows = db.prepare('SELECT run.status, COUNT(*) AS total FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE project.studio_id = ?' + scope.sql + ' GROUP BY run.status').all(studioId, ...scope.values) as unknown as RunStatusRow[];
+  const runRows = db.prepare('SELECT run.status, COUNT(*) AS total ' + ENTITY_SCOPE_QUERIES.generation_run.from + ' WHERE project.studio_id = ?' + scope.sql + ' GROUP BY run.status').all(studioId, ...scope.values) as unknown as RunStatusRow[];
   const runStatusCounts = emptyRunStatusCounts();
   for (const row of runRows) if (RUN_STATUSES.includes(row.status as RunStatus)) runStatusCounts[row.status as RunStatus] = Number(row.total);
 
-  const itemRows = db.prepare('SELECT item.status, item.error_json, item.updated_at FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE project.studio_id = ?' + scope.sql).all(studioId, ...scope.values) as unknown as RunItemMetricRow[];
+  const itemRows = db.prepare('SELECT item.status, item.error_json, item.updated_at ' + ENTITY_SCOPE_QUERIES.run_item.from + ' WHERE project.studio_id = ?' + scope.sql).all(studioId, ...scope.values) as unknown as RunItemMetricRow[];
   const itemStatusCounts = emptyRunItemStatusCounts();
   const patternCounts = new Map<string, FailurePatternMetric>();
   for (const row of itemRows) {

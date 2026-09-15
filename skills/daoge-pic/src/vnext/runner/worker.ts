@@ -11,6 +11,7 @@ import { ClaimedRunItem, claimRunItems, getGenerationRun, getGenerationRunItem, 
 import { retryDecision, RetryPolicy, DEFAULT_RETRY_POLICY } from './retry-policy';
 import { resolveWorkerLeaseMs } from '../studio/runtime-settings';
 import type { UsageBillingState } from '../usage/ledger';
+import { selectInStudioSql } from '../domain/studio-scope';
 
 function providerFailureBillingState(kind: ProviderError['kind']): UsageBillingState {
   return ['invalid_request', 'invalid_config', 'missing_asset', 'permission', 'unsupported', 'cancelled'].includes(kind) ? 'not_billed' : 'possibly_billed';
@@ -222,7 +223,7 @@ export class GenerationWorker {
       managedAssets?.release();
     };
     try {
-      const context = this.db.prepare('SELECT project.id AS project_id FROM generation_runs run JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE run.id = ? AND project.studio_id = ?').get(item.runId, item.studioId) as { project_id?: string } | undefined;
+      const context = this.db.prepare(selectInStudioSql('generation_run', 'project.id AS project_id')).get(item.runId, item.studioId) as { project_id?: string } | undefined;
       if (!context?.project_id) throw new InvalidCommandError('运行项目上下文不存在。');
       managedAssets = this.assetResolver ? await this.assetResolver.resolve({ studioId: item.studioId, projectId: context.project_id, referenceAssetIds: item.promptPayload.referenceAssetIds, maskAssetId: item.promptPayload.maskAssetId }) : { assets: { referenceAssets: [], maskAsset: undefined }, release: () => undefined };
       request = { requestId: item.requestId, idempotencyKey: 'run-request-' + item.requestId, prompt: promptFromItem(item), output: outputFromItem(item), ...managedAssets.assets };

@@ -1,6 +1,7 @@
 import { createId, nowIso } from '../shared/ids';
 import { InvalidCommandError, StudioNotFoundError } from '../domain/studio-commands';
 import { StudioDatabase, withTransaction } from '../studio/database';
+import { selectInStudioSql } from '../domain/studio-scope';
 
 /** Monetary values are integer minor units named by costUnit (for example USD_minor); no provider price is inferred. */
 export type UsageBillingState = 'estimated' | 'billed' | 'possibly_billed' | 'unknown' | 'not_billed';
@@ -176,20 +177,20 @@ function assertAttribution(db: StudioDatabase, input: UsageAttribution): UsageAt
   let expectedRun = runId;
   if (projectId && !db.prepare('SELECT id FROM projects WHERE id = ? AND studio_id = ?').get(projectId, studioId) && !taskId && !roundId && !runId && !runItemId) throw new InvalidCommandError('Usage project attribution is outside the Studio.');
   if (taskId) {
-    const row = db.prepare('SELECT t.id, t.project_id FROM creative_tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ? AND p.studio_id = ?').get(taskId, studioId) as { id: string; project_id: string } | undefined;
+    const row = db.prepare(selectInStudioSql('creative_task', 'task.id, task.project_id')).get(taskId, studioId) as { id: string; project_id: string } | undefined;
     if (!row) throw new InvalidCommandError('Usage task attribution is outside the Studio.');
     if (expectedProject && expectedProject !== row.project_id) throw new InvalidCommandError('Usage task attribution does not belong to the project.');
     expectedProject = row.project_id; expectedTask = row.id;
   }
   if (roundId) {
-    const row = db.prepare('SELECT r.id, r.task_id, t.project_id FROM creative_rounds r JOIN creative_tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(roundId, studioId) as { id: string; task_id: string; project_id: string } | undefined;
+    const row = db.prepare(selectInStudioSql('creative_round', 'round.id, round.task_id, task.project_id')).get(roundId, studioId) as { id: string; task_id: string; project_id: string } | undefined;
     if (!row) throw new InvalidCommandError('Usage round attribution is outside the Studio.');
     if (expectedTask && expectedTask !== row.task_id) throw new InvalidCommandError('Usage round attribution does not belong to the task.');
     if (expectedProject && expectedProject !== row.project_id) throw new InvalidCommandError('Usage round attribution does not belong to the project.');
     expectedProject = row.project_id; expectedTask = row.task_id; expectedRound = row.id;
   }
   if (runId) {
-    const row = db.prepare('SELECT r.id, r.round_id, cr.task_id, t.project_id, r.provider_profile_id FROM generation_runs r JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE r.id = ? AND p.studio_id = ?').get(runId, studioId) as { id: string; round_id: string; task_id: string; project_id: string; provider_profile_id: string | null } | undefined;
+    const row = db.prepare(selectInStudioSql('generation_run', 'run.id, run.round_id, round.task_id, task.project_id, run.provider_profile_id')).get(runId, studioId) as { id: string; round_id: string; task_id: string; project_id: string; provider_profile_id: string | null } | undefined;
     if (!row) throw new InvalidCommandError('Usage run attribution is outside the Studio.');
     if (expectedRound && expectedRound !== row.round_id) throw new InvalidCommandError('Usage run attribution does not belong to the round.');
     if (expectedTask && expectedTask !== row.task_id) throw new InvalidCommandError('Usage run attribution does not belong to the task.');
@@ -199,7 +200,7 @@ function assertAttribution(db: StudioDatabase, input: UsageAttribution): UsageAt
     expectedProject = row.project_id; expectedTask = row.task_id; expectedRound = row.round_id; expectedRun = row.id;
   }
   if (runItemId) {
-    const row = db.prepare('SELECT i.id, i.run_id, r.round_id, cr.task_id, t.project_id, r.provider_profile_id FROM run_items i JOIN generation_runs r ON r.id = i.run_id JOIN creative_rounds cr ON cr.id = r.round_id JOIN creative_tasks t ON t.id = cr.task_id JOIN projects p ON p.id = t.project_id WHERE i.id = ? AND p.studio_id = ?').get(runItemId, studioId) as { id: string; run_id: string; round_id: string; task_id: string; project_id: string; provider_profile_id: string | null } | undefined;
+    const row = db.prepare(selectInStudioSql('run_item', 'item.id, item.run_id, run.round_id, round.task_id, task.project_id, run.provider_profile_id')).get(runItemId, studioId) as { id: string; run_id: string; round_id: string; task_id: string; project_id: string; provider_profile_id: string | null } | undefined;
     if (!row) throw new InvalidCommandError('Usage run item attribution is outside the Studio.');
     if (expectedRun && expectedRun !== row.run_id) throw new InvalidCommandError('Usage run item attribution does not belong to the run.');
     if (expectedRound && expectedRound !== row.round_id) throw new InvalidCommandError('Usage run item attribution does not belong to the round.');
