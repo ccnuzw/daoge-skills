@@ -40,6 +40,11 @@ import { redactedRuntimeDiagnostic, runtimeHealthPresentation } from './runtime-
 import { canRetryWorkbenchError, errorPresentation, normalizeWorkbenchError } from './error-model.mjs';
 import './styles.css';
 
+/**
+ * 顶层横幅要展示的错误：可以是一句给人看的话，也可以是带分类与重试信息的结构化错误。
+ * @typedef {string | Error} WorkbenchErrorState
+ */
+
 const EMPTY = [];
 
 installBrowserErrorGuard();
@@ -228,6 +233,7 @@ const DELIVERY_COMPLETION_PREFIX = 'daoge-pic:delivery-completion:';
 const ASSET_PAGE_SIZE_KEY = 'daoge-pic:asset-page-size';
 const ASSET_PREVIEW_FIT_KEY = 'daoge-pic:asset-preview-fit';
 const RAIL_COLLAPSE_KEY = 'daoge-pic:rail-collapsed';
+/** @type {import('./lineage-data-loader.mjs').LineageCoverage} */
 const EMPTY_LINEAGE_ASSET_COVERAGE = Object.freeze({ loaded: 0, total: 0, loading: true });
 
 const ASSET_SCOPE_LABELS = { round: '当前轮次', task: '当前任务', project: '当前项目', studio: '全部 Studio' };
@@ -455,6 +461,7 @@ function normalizeReferenceMaterials(plan = {}) {
   return values;
 }
 
+/** @param {object} [plan] @param {any[]} [materials] */
 function planWithReferenceMaterials(plan = {}, materials = []) {
   const normalized = normalizeReferenceMaterials({ referenceMaterials: materials });
   const referenceAssetIds = normalized.filter((item) => item.usage !== 'mask').map((item) => item.assetId);
@@ -556,7 +563,9 @@ function runExecutionPresentationFromCounts(run, statusCounts) {
 
 function statusLabel(value) { return statusPresentation('generic', value).label; }
 
-function StatusPill({ value, scope = 'generic', presentation = null }) {
+// `presentation` 和 `value` 二选一：传了解析好的展示结果就不用再传原始状态值，
+// 没传时由 `scope` + `value` 现场解析。
+function StatusPill({ value = null, scope = 'generic', presentation = null }) {
   const semantics = presentation || statusPresentation(scope, value);
   return <span className={'status-pill ' + semantics.tone}>{semantics.label}</span>;
 }
@@ -1393,7 +1402,7 @@ function RunItemProgressBar({ page }) {
   const progress = runItemProgress(page.statusCounts);
   const total = Math.max(0, Number(page.allTotal || page.total || 0));
   const segments = [{ key: 'succeeded', label: '完成', value: progress.succeeded }, { key: 'active', label: '进行中', value: progress.active }, { key: 'waiting', label: '等待', value: progress.waiting }, { key: 'attention', label: '需处理', value: progress.attention }, { key: 'cancelled', label: '取消', value: progress.cancelled }].filter((segment) => segment.value > 0);
-  return <div className="run-item-progress" role="progressbar" aria-label={'完成进度：' + progress.succeeded + ' / ' + total} aria-valuemin="0" aria-valuemax={total || 1} aria-valuenow={Math.min(progress.succeeded, total || 1)}>
+  return <div className="run-item-progress" role="progressbar" aria-label={'完成进度：' + progress.succeeded + ' / ' + total} aria-valuemin={0} aria-valuemax={total || 1} aria-valuenow={Math.min(progress.succeeded, total || 1)}>
     <div>{segments.length ? segments.map((segment) => <span key={segment.key} className={'is-' + segment.key} style={{ width: Math.max(2, (segment.value / Math.max(1, total)) * 100) + '%' }} />) : <span className="is-empty" />}</div>
     <p>{progress.succeeded} 完成 · {progress.active} 进行中 · {progress.attention} 需处理 · 共 {total} 项</p>
   </div>;
@@ -1434,7 +1443,7 @@ function AdvancedDetailsPanel({ details, onClose }) {
 
 function DryRunEvidenceCard({ dryRun }) {
   const evidence = dryRunEvidence(dryRun);
-  const details = evidence.details || {};
+  const details = /** @type {any} */ (evidence.details || {});
   const planSnapshot = details.planSnapshot && typeof details.planSnapshot === 'object' ? details.planSnapshot : {};
   const provider = details.provider && typeof details.provider === 'object' ? details.provider : {};
   const capabilities = provider.capabilities && typeof provider.capabilities === 'object' ? provider.capabilities : {};
@@ -1639,9 +1648,9 @@ function App() {
   const [route, setRoute] = useState(() => parseWorkbenchRoute(window.location.search));
   const [contextError, setContextError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(/** @type {WorkbenchErrorState} */ (''));
   const [notice, setNotice] = useState('');
-  const [connectionError, setConnectionError] = useState('');
+  const [connectionError, setConnectionError] = useState(/** @type {WorkbenchErrorState} */ (''));
   const [runtimeRepairing, setRuntimeRepairing] = useState(false);
   const [recoveryPhase, setRecoveryPhase] = useState('ready');
   const [pendingDerivedAfterTask, setPendingDerivedAfterTask] = useState(null);
@@ -1809,7 +1818,7 @@ function App() {
       const result = await loadCompleteLineageRunItems(lineageRuns, load, requireCurrent, onPage);
       requireCurrent();
       setLineageRunItems(result.items);
-      setLineageRunItemCoverage({ loaded: result.loaded, total: result.total });
+      setLineageRunItemCoverage({ loaded: result.loaded, total: result.total, loading: false });
       return result;
     };
     const loadLineageRunItemsInBackground = (lineageRuns) => {
@@ -2818,7 +2827,7 @@ function App() {
   const referenceTargetForAssets = (sourceAssets, availableRounds = rounds) => {
     if (selectedRound?.status === 'draft') return { task: selectedTask || taskForId(selectedRound.taskId), draftRounds: [selectedRound], tasks: selectedTask ? [selectedTask] : tasks };
     if (selectedTask) return { task: selectedTask, draftRounds: draftRoundsForTask(selectedTask, availableRounds), tasks: [selectedTask] };
-    const inferredTasks = referenceTaskIdsForAssets(sourceAssets, availableRounds).map(taskForId).filter(Boolean);
+    const inferredTasks = referenceTaskIdsForAssets(sourceAssets, availableRounds).map((taskId) => taskForId(taskId)).filter(Boolean);
     if (inferredTasks.length === 1) return { task: inferredTasks[0], draftRounds: draftRoundsForTask(inferredTasks[0], availableRounds), tasks: inferredTasks };
     const allDraftRounds = availableRounds.filter((round) => round.status === 'draft');
     if (allDraftRounds.length === 1) {
@@ -2899,7 +2908,7 @@ function App() {
     const sourceAssets = (nextAssets || EMPTY).filter((asset) => asset && !asset.deletedAt);
     if (!selectedProject) { setError('请先打开一个项目，再继续创作。'); return; }
     if (!sourceAssets.length) { setError('请先选择至少一张可用图片。'); return; }
-    const inferredTasks = referenceTaskIdsForAssets(sourceAssets).map(taskForId).filter(Boolean);
+    const inferredTasks = referenceTaskIdsForAssets(sourceAssets).map((taskId) => taskForId(taskId)).filter(Boolean);
     const targetTask = selectedTask || (inferredTasks.length === 1 ? inferredTasks[0] : tasks.length === 1 ? tasks[0] : null);
     if (!targetTask) { setError(tasks.length ? '请先选择任务，再继续创作。' : '请先新建任务，再继续创作。'); return; }
     setError('');
@@ -2943,7 +2952,7 @@ function App() {
     if (!sourceAssets.length) { setError('请先选择至少一张可用图片。'); return false; }
     let target = referenceTargetForAssets(sourceAssets);
     if (selectedRound?.status !== 'draft') {
-      const inferredTasks = referenceTaskIdsForAssets(sourceAssets).map(taskForId).filter(Boolean);
+      const inferredTasks = referenceTaskIdsForAssets(sourceAssets).map((taskId) => taskForId(taskId)).filter(Boolean);
       const candidateTasks = selectedTask ? [selectedTask] : inferredTasks.length ? inferredTasks : tasks;
       try {
         const availableRounds = await loadReferenceRounds(candidateTasks);
@@ -2980,6 +2989,7 @@ function App() {
     setRejectDialog(null);
     setRejectError('');
   };
+  /** @param {unknown} feedback @param {boolean|{addAsNegative?: boolean, createNextRound?: boolean}} [options] 兼容旧调用：直接传 true 等于 addAsNegative。 */
   const saveRejectReview = async (feedback, options = {}) => {
     if (rejectBusy || !rejectDialog?.assets?.length) return;
     const addAsNegative = typeof options === 'boolean' ? options : Boolean(options?.addAsNegative);

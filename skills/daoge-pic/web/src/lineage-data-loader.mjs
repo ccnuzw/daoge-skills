@@ -5,9 +5,23 @@ import { DEFAULT_RUN_ITEM_FILTER, normalizeRunItemPage, serializeRunItemRequestQ
 export const LINEAGE_ASSET_PAGE_SIZE = 500;
 export const LINEAGE_RUN_ITEM_PAGE_SIZE = 100;
 export const LINEAGE_REQUEST_CONCURRENCY = 4;
+/**
+ * 谱系大批量数据加载的进度。
+ * @typedef {object} LineageCoverage
+ * @property {number} loaded 已加载条数
+ * @property {number} total 预计总条数
+ * @property {boolean} loading 是否还在翻页
+ */
+/** @type {LineageCoverage} */
 export const EMPTY_LINEAGE_RUN_ITEM_COVERAGE = Object.freeze({ loaded: 0, total: 0, loading: true });
 const EMPTY = Object.freeze([]);
 
+/**
+ * @param {unknown} runs
+ * @param {(path: string) => Promise<any>} requestJson
+ * @param {() => void} [requireCurrent] 每批数据回来后校验这次加载还是不是最新的
+ * @param {(payload: object) => void} [onPage] 每翻一页回调一次，让调用方能增量渲染
+ */
 export async function loadCompleteLineageRunItems(runs, requestJson, requireCurrent = () => undefined, onPage = () => undefined) {
   const items = [];
   let total = 0;
@@ -33,6 +47,7 @@ export async function loadCompleteLineageRunItems(runs, requestJson, requireCurr
   return { items, total, loaded: items.length };
 }
 
+/** @param {unknown} route @param {(path: string) => Promise<any>} requestJson @param {() => void} [requireCurrent] @param {(payload: object) => void} [onPage] */
 export async function loadCompleteLineageAssets(route, requestJson, requireCurrent = () => undefined, onPage = () => undefined) {
   const firstPath = assetRefreshPath(route, { page: 1, pageSize: LINEAGE_ASSET_PAGE_SIZE, filter: 'all' });
   if (!firstPath) return { assets: EMPTY, total: 0 };

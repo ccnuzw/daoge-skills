@@ -1,0 +1,31 @@
+{
+  // 前端（web/src，JS + JSX）的渐进式类型检查配置。
+  // 目标：不改成 TypeScript 项目，也能让「改了前端不知道会不会坏」变成可机器验证的事。
+  //
+  // 当前档位：strict=false。全量 strict 下 web/src 有 2500+ 报错（绝大多数是
+  // noImplicitAny 的「参数缺标注」），一次性清完不现实，也会把真正的问题淹没。
+  // 这里先只保留「不管类型标注也能查出来」的那类错误：属性不存在、赋值类型不匹配、
+  // useState 推断成 never 等 —— 它们几乎都是真 bug 或真歧义。
+  //
+  // 抬档顺序（每档必须先清零再抬）：
+  //   1) strict=false                    （当前，82 → 0）
+  //   2) + strictNullChecks              （约 549 → 0）
+  //   3) + noImplicitAny                 （约 2100 → 0）
+  // 抬档时改这里即可，scripts/check-web-types.mjs 会自动按新档位卡门。
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["web/src/**/*"]
+}

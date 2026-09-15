@@ -124,9 +124,14 @@ function rawFieldEntries(value, key) {
   }
   return [[key, value[key]]];
 }
+/**
+ * 把计划摊平成「[分组名, [[字段名, 值], ...]]」的二维数组，供原始结构面板渲染。
+ * @param {unknown} plan
+ * @returns {Array<[string, Array<[string, unknown]>]>}
+ */
 function rawSummaryGroups(plan) {
   const value = asRecord(plan);
-  const groups = RAW_FIELD_GROUPS.map(({ label, keys }) => [label, keys.flatMap((key) => rawFieldEntries(value, key)).filter(([, item]) => item !== undefined)]).filter(([, fields]) => fields.length);
+  const groups = /** @type {Array<[string, Array<[string, unknown]>]>} */ (RAW_FIELD_GROUPS.map(({ label, keys }) => [label, keys.flatMap((key) => rawFieldEntries(value, key)).filter(([, item]) => item !== undefined)]).filter(([, fields]) => fields.length));
   const other = Object.entries(value).filter(([key]) => !RAW_GROUP_KEYS.has(key));
   if (other.length) groups.push(['其他元数据', other]);
   return groups;

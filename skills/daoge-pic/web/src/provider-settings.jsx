@@ -118,6 +118,14 @@ function ConfigGlossaryPanel() {
   </details>;
 }
 
+/** 限额字段：[表单字段名, 给创作者看的名字, 允许的最大值]。 */
+const LIMIT_FIELDS = /** @type {Array<[string, string, number]>} */ ([
+  ['maxRunItems', '一次最多出几张', 1000],
+  ['maxExecutionConcurrency', '同时最多出几张', 1000],
+  ['requestTimeoutMs', '等多久算超时（毫秒）', 600000],
+  ['maxRetryAttempts', '失败后最多重试几次', 20]
+]);
+
 export function ProviderSettings({ request, onDismiss, onChanged }) {
   const [data, setData] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -171,7 +179,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
     if (mode === 'edit' && form.baseUrlAction === 'replace' && !form.baseUrl.trim()) return '请填写新的完整服务地址（Base URL）。';
     if (mode === 'edit' && form.apiKeyAction === 'replace' && !form.apiKey.trim()) return '请填写新的 API Key（调用密钥）。';
     try { if (mode === 'create' || form.baseUrlAction === 'replace') new URL(form.baseUrl); } catch { return 'Base URL 格式无效。'; }
-    for (const [key, label, max] of [['maxRunItems', '一次最多出几张', 1000], ['maxExecutionConcurrency', '同时最多出几张', 1000], ['requestTimeoutMs', '等多久算超时（毫秒）', 600000], ['maxRetryAttempts', '失败后最多重试几次', 20]]) {
+    for (const [key, label, max] of LIMIT_FIELDS) {
       const raw = form.limits?.[key];
       if (raw !== '' && raw !== undefined && raw !== null) {
         const value = Number(raw);

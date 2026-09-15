@@ -7,6 +7,40 @@ const PROJECT_CONTEXT_STUDIO_VIEWS = ['library', 'guide'];
 // The only views that actually render a run. Anywhere else a `runId` is a leftover from whichever view set it.
 const RUN_RENDERING_VIEWS = ['runs', 'lineage'];
 
+/**
+ * 一次路由可以带上的全部字段。`normalizeRoute` 是每个入口的唯一收敛点，调用方只会传自己关心的
+ * 那几个字段，缺的必须在归一化里补默认值 —— 所以这里的字段全部是可选的。
+ * @typedef {object} WorkbenchRouteDraft
+ * @property {string} [view]
+ * @property {string|null} [projectId]
+ * @property {string|null} [taskId]
+ * @property {string|null} [roundId]
+ * @property {string[]} [compareRoundIds]
+ * @property {string|null} [runId]
+ * @property {string} [assetScope]
+ * @property {string|null} [runItemFilter]
+ * @property {number|string|null} [runItemPage]
+ * @property {number|string|null} [runItemPageSize]
+ * @property {number|string|null} [runItemSequence]
+ */
+
+/**
+ * 归一化之后的结果。与 draft 的区别只有两点：字段一定有值（缺的补 null / 默认值），
+ * 以及「单张出图」相关的四个字段只在 runs 视图下存在。
+ * @typedef {object} NormalizedWorkbenchRoute
+ * @property {string} view
+ * @property {string|null} projectId
+ * @property {string|null} taskId
+ * @property {string|null} roundId
+ * @property {string[]} compareRoundIds
+ * @property {string|null} runId
+ * @property {string} assetScope
+ * @property {string} [runItemFilter]
+ * @property {number} [runItemPage]
+ * @property {number} [runItemPageSize]
+ * @property {number|null} [runItemSequence]
+ */
+
 export const WORKBENCH_VIEW_RENDERERS = Object.freeze(Object.fromEntries(WORKBENCH_VIEWS.map((view) => [view, view])));
 
 export function rendererForWorkbenchView(view) {
@@ -39,6 +73,7 @@ function runItemControls(route) {
 }
 
 
+/** @param {WorkbenchRouteDraft} route @returns {NormalizedWorkbenchRoute} */
 function normalizeRoute(route) {
   const view = known(route.view, WORKBENCH_VIEWS, 'projects');
   const controls = view === 'runs' ? runItemControls(route) : {};

@@ -153,6 +153,14 @@ function coverageScope(scope) {
  * Builds a screen-reader-friendly lineage outline without exposing raw entity
  * payloads. It consumes only the graph already present in the caller.
  */
+/**
+ * @param {object} [input]
+ * @param {any[]} [input.nodes]
+ * @param {any[]} [input.connections]
+ * @param {Map<string, unknown>} [input.endpointByKey]
+ * @param {{type?: unknown, id?: unknown}} [input.scope]
+ * @param {{assets?: unknown, runItems?: unknown}} [input.coverage]
+ */
 export function createAccessibleLineage({ nodes = [], connections = [], endpointByKey = new Map(), scope = null, coverage = {} } = {}) {
   const sourceNodes = Array.isArray(nodes) ? nodes : [];
   const publicNodes = sourceNodes.map(publicNode);

@@ -14,7 +14,9 @@ function selectionCopy(selection) {
   return { title: '先挑选要交付的图片', body: '在项目资产里通过缩略图选择想留下的画面。' };
 }
 
-function DeliveryAssetGrid({ title, hint, assets, onDownload, onCopy, onRemove, emptyAction, onArchive, disabled = false }) {
+// onArchive / onRemove / emptyAction 是可选的：这一格在「草稿可调整」和「已导出只读」两种场合复用，
+// 默认值明确写出来，调用方就不必为不存在的操作传空函数。
+function DeliveryAssetGrid({ title, hint, assets, onDownload, onCopy, onRemove = null, emptyAction = null, onArchive = null, disabled = false }) {
   const assetKeys = assets.map(archiveKey).join('|');
   const [chosen, setChosen] = useState([]);
   useEffect(() => { setChosen(assets.map(archiveKey)); }, [assetKeys]);

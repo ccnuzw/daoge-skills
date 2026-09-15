@@ -65,6 +65,15 @@ function publicLink(link = {}) {
   };
 }
 
+/**
+ * @param {object} [input]
+ * @param {{id?: unknown, name?: unknown, description?: unknown}} [input.project]
+ * @param {{id?: unknown, type?: unknown}} [input.scope]
+ * @param {unknown[]} [input.nodes]
+ * @param {unknown[]} [input.groups]
+ * @param {unknown[]} [input.links]
+ * @param {string} [input.generatedAt]
+ */
 export function createLineageExport({ project, scope, nodes = [], groups = [], links = [], generatedAt = new Date().toISOString() } = {}) {
   return safeValue({
     generatedAt,

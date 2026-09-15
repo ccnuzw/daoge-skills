@@ -76,7 +76,10 @@ const NODE_SIZE = {
   style_kit: [230, 116],
   brand_kit: [230, 116]
 };
-const EMPTY_ARRAY = Object.freeze([]);
+// 这两个空值既当默认值又当返回值。用 Object.freeze 会让类型变成 readonly，
+// 而下面所有用到它的地方都只读取、不修改，所以声明成普通可变类型更贴合实际用法。
+const EMPTY_ARRAY = /** @type {any[]} */ (Object.freeze([]));
+/** @type {Set<string>} */
 const EMPTY_SET = new Set();
 const PLAN_PROMPT_PROTECTED_LABEL = '提示词受保护，请在会话中查看。';
 const RUN_ITEM_ERROR_PROTECTED_LABEL = '这张的出图错误已隐去隐私；请在会话中查看详情。';
@@ -134,6 +137,7 @@ function runItemErrorSummary(item) {
   const summary = safeDisplayText(source, RUN_ITEM_ERROR_PROTECTED_LABEL, 120);
   return summary === RUN_ITEM_ERROR_PROTECTED_LABEL ? summary : '隐去隐私的错误摘要：' + summary;
 }
+/** @param {any} [output] */
 function planOutputSummary(output = {}) {
   if (!output || typeof output !== 'object') return '输出规格待确认';
   const dimensions = output.width && output.height ? output.width + '×' + output.height : '';
@@ -203,6 +207,7 @@ function reviewDecisionCounts(assets) {
     return acc;
   }, { keep: 0, review: 0, reject: 0, derive: 0, unreviewed: 0, trash: 0 });
 }
+/** @param {any} [overrides] 节点上允许覆盖/追加任意字段（title、subtitle、searchText、deliveredAsset…） */
 function createNode(entityType, entity, position, overrides = {}) {
   const [width, height] = NODE_SIZE[entityType] || [220, 120];
   const entityId = overrides.entityId || (typeof entity === 'string' ? entity : entity?.id);

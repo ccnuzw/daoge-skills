@@ -33,6 +33,14 @@ export function lineageViewportBounds(viewport, canvasSize, margin = LINEAGE_VIE
  * nodes up to a deterministic budget. Hidden nodes remain in the graph model
  * and minimap; this function only bounds React DOM work.
  */
+/**
+ * @param {unknown} nodes
+ * @param {object} [options]
+ * @param {{x: number, y: number, width: number, height: number}} [options.viewportBounds]
+ * @param {Set<string>} [options.selectedKeys]
+ * @param {Set<string>} [options.searchMatchKeys]
+ * @param {number} [options.limit]
+ */
 export function virtualizeLineageNodes(nodes, { viewportBounds, selectedKeys = new Set(), searchMatchKeys = new Set(), limit = LINEAGE_NODE_RENDER_LIMIT } = {}) {
   const all = Array.isArray(nodes) ? nodes : [];
   const maxNodes = Math.max(1, Number.isSafeInteger(limit) ? limit : LINEAGE_NODE_RENDER_LIMIT);

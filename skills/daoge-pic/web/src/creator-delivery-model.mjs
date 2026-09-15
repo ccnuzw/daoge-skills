@@ -35,6 +35,15 @@ export function createDeliveryInteractionGuard() {
   };
 }
 
+/**
+ * @param {object} input
+ * @param {string} input.action
+ * @param {string|null} [input.batchId]
+ * @param {string|null} [input.versionId]
+ * @param {Iterable<string>} [input.deliveryIds]
+ * @param {Iterable<string>|null} [input.eligibleDeliveryIds]
+ * @param {string} [input.name]
+ */
 export function createBatchOperationSnapshot({ action, batchId = null, versionId = null, deliveryIds = [], eligibleDeliveryIds = null, name = '' }) {
   const eligible = eligibleDeliveryIds === null ? null : new Set(eligibleDeliveryIds);
   return Object.freeze({

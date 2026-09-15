@@ -23,8 +23,23 @@ const FILTER_STATUSES = Object.freeze({
 const ALL_STATUS_KEYS = Object.freeze(['pending', 'leased', 'requesting', 'receiving', 'persisting', 'succeeded', 'retry_wait', 'blocked', 'cancel_requested', 'cancelled', 'outcome_unknown', 'failed']);
 const RETRYABLE_STATUSES = new Set(['failed', 'blocked', 'retry_wait']);
 
+/**
+ * 一页「单张出图」记录的集合。
+ * @typedef {object} RunItemPage
+ * @property {any[]} items
+ * @property {number} page
+ * @property {number} pageSize
+ * @property {number} total 当前筛选条件下的总数
+ * @property {number} totalPages
+ * @property {number} allTotal 不筛选时的总数
+ * @property {Record<string, number>} statusCounts
+ */
+
+// Object.freeze 会把字面量锁成 `readonly` 且字段类型收窄成字面量类型（page: 1 而不是 number），
+// 直接拿它当 useState 初始值会让后续赋值全部报错。这里显式声明成可变结构再冻结。
+/** @type {RunItemPage} */
 export const EMPTY_RUN_ITEM_PAGE = Object.freeze({
-  items: Object.freeze([]),
+  items: [],
   page: 1,
   pageSize: DEFAULT_RUN_ITEM_PAGE_SIZE,
   total: 0,
@@ -101,6 +116,13 @@ export function runItemPageBounds(page) {
   return { start, end };
 }
 
+/**
+ * @param {object} [request]
+ * @param {unknown} [request.page]
+ * @param {unknown} [request.pageSize]
+ * @param {unknown} [request.filter]
+ * @param {unknown} [request.sequence]
+ */
 export function serializeRunItemRequestQuery({ page, pageSize, filter, sequence } = {}) {
   const params = new URLSearchParams();
   params.set('page', String(normalizeRunItemPageNumber(page)));

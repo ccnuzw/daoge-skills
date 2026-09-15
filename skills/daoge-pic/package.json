@@ -25,7 +25,8 @@
   "scripts": {
     "typecheck:vnext": "tsc -p tsconfig.vnext.json --noEmit",
     "build:vnext": "npm run typecheck:vnext && node scripts/build-vnext.js",
-    "build:workbench": "vite build --config vite.workbench.config.mjs",
+    "typecheck:web": "tsc -p tsconfig.web.json",
+    "build:workbench": "npm run typecheck:web && vite build --config vite.workbench.config.mjs",
     "build": "npm run build:vnext && npm run build:workbench",
     "bench:perf": "npm run build:vnext && node scripts/bench-perf.js",
     "test:vnext": "npm run build && node scripts/run-tests.js",
@@ -47,6 +48,8 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/node": "^22.20.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.1.2",
     "eslint": "^9.39.5",
     "typescript": "^5.9.3",
