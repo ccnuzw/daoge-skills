@@ -180,6 +180,81 @@ test('面清单里的文件都必须真实存在，避免清单腐烂', () => {
   }
 });
 
+// ---------- 第四批：config 面 ----------
+// 这一面刻意保留术语（要照着服务商文档填地址、填密钥、对型号），
+// 但保留必须付代价：顶部一句人话导语 + 每个字段一句人话 + 名词表折叠隔离。
+
+test('config 面：留下的每个术语都在名词表里有一句人话', async () => {
+  const { CONFIG_TERM_GLOSSARY, CONFIG_FIELD_HINTS, CONFIG_FACE_INTRO, CONFIG_GLOSSARY_COPY, configFieldHint } = await import('../../web/src/config-face-copy.mjs');
+  const settings = read('provider-settings.jsx');
+
+  const terms = CONFIG_TERM_GLOSSARY.map(([term]) => term);
+  assert.equal(new Set(terms).size, terms.length, 'config 面名词表里有重复条目');
+  for (const [term, plain] of CONFIG_TERM_GLOSSARY) {
+    assert.ok(term && plain, 'config 面名词表条目不完整：' + term);
+    assert.notEqual(plain, term, 'config 面名词表的人话就是术语本身：' + term);
+    // 不许解释一个源码里已经不存在的词 —— 那只会让名词表慢慢变成一份谎言。
+    assert.ok(settings.includes(term), 'provider-settings.jsx 里已经没有这个词了：' + term);
+  }
+
+  // 字段人话不能是死条目：每个 key 都必须在面板里真的被引用。
+  for (const key of Object.keys(CONFIG_FIELD_HINTS)) {
+    assert.ok(settings.includes("configFieldHint('" + key + "')"), 'CONFIG_FIELD_HINTS 里这条没有被用到：' + key);
+    assert.ok(configFieldHint(key), 'CONFIG_FIELD_HINTS 里这条是空的：' + key);
+  }
+
+  assert.ok(CONFIG_FACE_INTRO.length > 10, 'config 面缺少顶部人话导语');
+  assert.match(settings, /\{CONFIG_FACE_INTRO\}/);
+  assert.ok(CONFIG_GLOSSARY_COPY.summary && CONFIG_GLOSSARY_COPY.note);
+});
+
+test('config 面：技术名词表与主路径视觉隔离（收在折叠区里）', () => {
+  const settings = read('provider-settings.jsx');
+  // 折叠 = 默认不占主路径。写成常显就等于把技术名词摊在创作者脸上。
+  assert.match(settings, /<details className="provider-secondary-panel provider-glossary-panel">/);
+  assert.match(settings, /provider-glossary-list/);
+  // 面板在 idle 与表单两种模式下都挂 —— 填表的时候才是最需要查名词的时候。
+  assert.match(settings, /<section className="provider-profile-panel">\s*\n\s*<ConfigGlossaryPanel \/>/);
+  // 视觉隔离要有样式兜底，否则 details 只是个没有边界感的裸元素。
+  const styles = fs.readFileSync(path.join(SRC, 'styles.css'), 'utf8');
+  assert.match(styles, /\.provider-glossary-panel \{/);
+  assert.match(styles, /\.provider-field-hint \{/);
+  assert.match(styles, /\.provider-settings-plain \{/);
+});
+
+// ---------- 第五批：doc 面 ----------
+// 手册要讲清系统怎么跑，术语必须留；但首次出现必须给解释，顶部再挂名词表兜底。
+
+test('doc 面：名词表覆盖的术语都真的出现在手册正文里', async () => {
+  const { DOC_TERM_GLOSSARY, DOC_GLOSSARY_COPY } = await import('../../web/src/doc-face-copy.mjs');
+  const content = read('learning-center-content.mjs') + read('learning-center.jsx') + read('offline-strategy-model.mjs');
+
+  const terms = DOC_TERM_GLOSSARY.map(([term]) => term);
+  assert.equal(new Set(terms).size, terms.length, 'doc 面名词表里有重复条目');
+  for (const [term, plain] of DOC_TERM_GLOSSARY) {
+    assert.ok(term && plain, 'doc 面名词表条目不完整：' + term);
+    assert.notEqual(plain, term, 'doc 面名词表的人话就是术语本身：' + term);
+    assert.ok(content.includes(term), '手册正文里已经没有这个词了：' + term);
+  }
+  assert.ok(DOC_GLOSSARY_COPY.summary && DOC_GLOSSARY_COPY.note);
+});
+
+test('doc 面：名词表挂在手册顶部，且术语首次出现处有括注', async () => {
+  const { DOC_TERM_GLOSSARY } = await import('../../web/src/doc-face-copy.mjs');
+  const center = read('learning-center.jsx');
+  assert.match(center, /<DocGlossaryPanel \/>/);
+  assert.match(center, /from '\.\/doc-face-copy\.mjs'/);
+
+  // 首次出现给解释 —— 抽查几个最容易让人卡住的词，必须带全角括号括注。
+  // （daemon 的括注挂在 Workbench 那处，写作「daemon 是常驻本机的后台服务」，所以这里查 Workbench。）
+  const content = read('learning-center-content.mjs');
+  for (const term of ['Workbench', 'conversation', 'Canary', 'SQLite', 'Profile', 'API Key', '预检', 'write-only']) {
+    assert.match(content, new RegExp(term.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&') + '（[^）]+）'), '手册里 ' + term + ' 首次出现没有括注解释');
+  }
+  // 括注不能只给名词表，正文也要有（二者互为兜底，不是二选一）。
+  assert.ok(DOC_TERM_GLOSSARY.length >= 10, 'doc 面名词表条目太少，覆盖不住手册里的术语');
+});
+
 test('人读版术语单与模块一一对应（反向守卫，防单边漂移）', () => {
   const markdown = fs.readFileSync(DOC, 'utf8');
   // 表格首列写成 `内部词`，据此提取。

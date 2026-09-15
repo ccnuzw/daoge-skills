@@ -3,6 +3,7 @@ import { Check, CircleAlert, Copy, KeyRound, LoaderCircle, Plus, Power, RefreshC
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { ConfirmationDialog } from './confirmation-dialog.jsx';
 import { createProviderEditForm, descriptorForProvider, normalizeProfileLimits } from './provider-settings-model.mjs';
+import { CONFIG_FACE_INTRO, CONFIG_GLOSSARY_COPY, CONFIG_TERM_GLOSSARY, configFieldHint } from './config-face-copy.mjs';
 
 const FALLBACK_PROVIDERS = [
   { id: 'openai-images', displayName: 'OpenAI Images', endpoint: { defaultTrustMode: 'compatible_public', examples: ['https://api.openai.com/v1'], help: 'OpenAI Images 或兼容 /v1 images endpoint。' }, reference: { supported: true, maxCount: 8 }, mask: { supported: true }, operations: { generate: true, edit: true }, modelExamples: ['gpt-image-2'] },
@@ -53,10 +54,10 @@ function formatLimitValue(value, fallback, suffix) {
 }
 
 function runtimeReasonLabel(reason) {
-  if (reason === 'rate_limited') return 'Provider 限流降速';
-  if (reason === 'memory_pressure') return 'Worker 内存压力降速';
-  if (reason === 'transient' || reason === 'unknown') return '临时故障降速';
-  if (reason === 'healthy') return '健康窗口逐步升速';
+  if (reason === 'rate_limited') return '服务在限流，先放慢出图';
+  if (reason === 'memory_pressure') return '后台内存吃紧，先放慢出图';
+  if (reason === 'transient' || reason === 'unknown') return '刚遇到临时故障，先放慢出图';
+  if (reason === 'healthy') return '一切正常，正在逐步加快';
   return '启动预热中';
 }
 
@@ -71,8 +72,9 @@ function ProviderCapabilityCard({ descriptor, profile }) {
   if (!descriptor) return null;
   const referenceEnabled = profile ? profile.referenceEnabled : descriptor.reference?.defaultEnabled === true;
   const referenceActive = descriptor.reference?.supported && referenceEnabled;
-  return <section className="provider-card provider-capability-card" aria-label="Provider 能力摘要">
+  return <section className="provider-card provider-capability-card" aria-label="生成服务能力摘要">
     <header><ShieldCheck size={16} /><div><strong>{descriptor.displayName} 能力</strong><span>Descriptor v{descriptor.descriptorVersion || 1} · Adapter {descriptor.adapterVersion || 'http-image-v1'}</span></div></header>
+    <p className="provider-card-note">下面这份清单由服务自己申报，标明它支持哪些功能；看不懂也不影响使用。</p>
     <ul>
       <CapabilityPill label="文生图" active={descriptor.operations?.generate} detail={descriptor.operations?.generate ? '支持' : '不支持'} />
       <CapabilityPill label="参考图" active={referenceActive} detail={referenceActive ? '最多 ' + descriptor.reference.maxCount + ' 张' : descriptor.reference?.supported ? '可开启' : '不支持'} />
@@ -85,6 +87,7 @@ function ProviderCapabilityCard({ descriptor, profile }) {
 function ProviderLimitSummary({ limits = {} }) {
   return <section className="provider-card provider-limit-summary" aria-label="Profile 级安全限额">
     <header><span>Profile 级安全限额</span><small>留空项使用全局安全边界</small></header>
+    <p className="provider-card-note">{configFieldHint('limits')}</p>
     <dl>
       {LIMIT_ROWS.map(([key, label, fallback, suffix]) => <div key={key}>
         <dt>{label}</dt>
@@ -104,6 +107,15 @@ function ProviderModelButton({ model, selected = false, onChoose }) {
     {id && id !== label ? <span className="provider-model-id">{id}</span> : null}
     {ownedBy && <small>{ownedBy}</small>}
   </button>;
+}
+
+function ConfigGlossaryPanel() {
+  return <details className="provider-secondary-panel provider-glossary-panel">
+    <summary><span><strong>{CONFIG_GLOSSARY_COPY.summary}</strong><small>{CONFIG_GLOSSARY_COPY.note}</small></span><em>{CONFIG_GLOSSARY_COPY.foldLabel}</em></summary>
+    <dl className="provider-glossary-list">
+      {CONFIG_TERM_GLOSSARY.map(([term, plain]) => <div key={term}><dt>{term}</dt><dd>{plain}</dd></div>)}
+    </dl>
+  </details>;
 }
 
 export function ProviderSettings({ request, onDismiss, onChanged }) {
@@ -129,7 +141,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
     return next;
   };
 
-  useEffect(() => { void load().catch((nextError) => setError(nextError.message || '无法读取 Provider Profiles。')); }, []);
+  useEffect(() => { void load().catch((nextError) => setError(nextError.message || '读不到生成服务的配置。')); }, []);
 
   const beginCreate = () => {
     const descriptor = descriptorForProvider(descriptors, 'openai-images') || descriptors[0];
@@ -152,18 +164,18 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
   };
 
   const localError = () => {
-    if (!form?.name.trim()) return '请输入 Profile 名称。';
+    if (!form?.name.trim()) return '请给这一组起个名字。';
     if (!form?.model.trim()) return '请输入模型名称。';
-    if (mode === 'create' && !form.baseUrl.trim()) return '请输入完整 Base URL。';
-    if (mode === 'create' && !form.apiKey.trim()) return '请输入 API Key。';
-    if (mode === 'edit' && form.baseUrlAction === 'replace' && !form.baseUrl.trim()) return '请输入新的完整 Base URL。';
-    if (mode === 'edit' && form.apiKeyAction === 'replace' && !form.apiKey.trim()) return '请输入新的 API Key。';
+    if (mode === 'create' && !form.baseUrl.trim()) return '请填写完整的服务地址（Base URL）。';
+    if (mode === 'create' && !form.apiKey.trim()) return '请填写 API Key（调用密钥）。';
+    if (mode === 'edit' && form.baseUrlAction === 'replace' && !form.baseUrl.trim()) return '请填写新的完整服务地址（Base URL）。';
+    if (mode === 'edit' && form.apiKeyAction === 'replace' && !form.apiKey.trim()) return '请填写新的 API Key（调用密钥）。';
     try { if (mode === 'create' || form.baseUrlAction === 'replace') new URL(form.baseUrl); } catch { return 'Base URL 格式无效。'; }
-    for (const [key, label, max] of [['maxRunItems', '单次数量上限', 1000], ['maxExecutionConcurrency', '运行并发上限', 1000], ['requestTimeoutMs', '请求超时毫秒', 600000], ['maxRetryAttempts', '自动重试上限', 20]]) {
+    for (const [key, label, max] of [['maxRunItems', '一次最多出几张', 1000], ['maxExecutionConcurrency', '同时最多出几张', 1000], ['requestTimeoutMs', '等多久算超时（毫秒）', 600000], ['maxRetryAttempts', '失败后最多重试几次', 20]]) {
       const raw = form.limits?.[key];
       if (raw !== '' && raw !== undefined && raw !== null) {
         const value = Number(raw);
-        if (!Number.isInteger(value) || value < 1 || value > max) return label + '必须是 1 到 ' + max + ' 的整数。';
+        if (!Number.isInteger(value) || value < 1 || value > max) return label + '要填 1 到 ' + max + ' 之间的整数。';
       }
     }
     return '';
@@ -181,8 +193,8 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
       setForm(null); setMode('idle'); setModelPicker({ profileId: null, models: [] });
       await load();
       await onChanged();
-      setFeedback('Profile 已保存；活动配置会自动热加载，已完成的预检需重新预检后再运行。');
-    } catch (nextError) { setError(nextError.message || '无法保存 Provider Profile。'); }
+      setFeedback('配置已保存；后台会自动换用新配置。之前已经算过的，需要重新算一次再出图。');
+    } catch (nextError) { setError(nextError.message || '保存失败，配置没有改动。'); }
     finally { setBusy(''); }
   };
   const save = async () => {
@@ -203,8 +215,8 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
       const result = await request('/api/providers/' + encodeURIComponent(target.id) + suffix, { method: 'POST', idempotencyKey: crypto.randomUUID(), body });
       if (name === 'validate') setFeedback(result.valid ? '本地校验通过。未发起网络连接。' + (result.warnings?.length ? ' 提示：' + result.warnings.join('；') : '') : '本地校验未通过：' + result.missing.join('、'));
       else if (name === 'test') setFeedback(connectionTestFeedback(result));
-      else { await load(); await onChanged(); setFeedback(name === 'activate' ? '已设为活动 Profile；daemon 会自动热加载，后续预检和新运行使用它。' : name === 'copy' ? '已复制 Profile，副本默认不激活。' : (result.impact?.message || 'Profile 已删除。')); }
-    } catch (nextError) { setError(nextError.message || 'Provider 操作失败。'); }
+      else { await load(); await onChanged(); setFeedback(name === 'activate' ? '已经改用这一组；后台会自动切换，之后的出图都用它。' : name === 'copy' ? '已复制这一组，副本默认不启用。' : (result.impact?.message || '配置已删除。')); }
+    } catch (nextError) { setError(nextError.message || '操作失败，请重试。'); }
     finally { setBusy(''); }
   };
   const loadModels = async () => {
@@ -220,8 +232,8 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
       const replacingApiKey = mode === 'edit' && form.apiKeyAction === 'replace' && Boolean(form.apiKey.trim());
       let body;
       if (mode === 'create') {
-        if (!form.baseUrl.trim()) throw new Error('请输入 Base URL 后再获取模型列表。');
-        if (!form.apiKey.trim()) throw new Error('请输入 API Key 后再获取模型列表。');
+        if (!form.baseUrl.trim()) throw new Error('请先填写服务地址（Base URL），再获取模型列表。');
+        if (!form.apiKey.trim()) throw new Error('请先填写 API Key，再获取模型列表。');
         // 草稿：直接用表单里填的端点与密钥去问 Provider，不落库。
         body = { providerId: form.providerId, model, baseUrl: form.baseUrl, apiKey: form.apiKey, endpointTrustMode: form.endpointTrustMode, options };
       } else if (form.baseUrlAction === 'clear' || form.apiKeyAction === 'clear') {
@@ -232,7 +244,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
       } else if (replacingBaseUrl) {
         // 只换端点不换密钥是问不出模型列表的：已存密钥只在 Profile 自己配置的端点上使用，
         // 而任何别的端点都必须带上新密钥。与其发一个注定被拒（或发错端点）的请求，不如直接说清楚。
-        throw new Error('更换 Base URL 后还需要填入新的 API Key，才能用新端点获取模型列表。');
+        throw new Error('换了服务地址（Base URL）还要填新的 API Key，才能用新地址获取模型列表。');
       } else if (replacingApiKey) {
         // 只换密钥：端点仍然用 Profile 自己配置的，只是拿新密钥去问。
         body = { profileId: selected.id, model, apiKey: form.apiKey, options };
@@ -244,8 +256,8 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
       const result = await request(path, { method: 'POST', idempotencyKey: crypto.randomUUID(), body });
       const models = Array.isArray(result.models) ? result.models : [];
       setModelPicker({ profileId: pickerKey, models });
-      setFeedback(models.length ? '已读取 ' + models.length + ' 个模型：' + models.map((entry) => entry.id).join('、') + '。选择后保存配置生效。' : 'Provider 返回空模型列表；可继续手动填写模型名。');
-    } catch (nextError) { setError(nextError.message || '无法读取 Provider 模型列表。'); }
+      setFeedback(models.length ? '已读取 ' + models.length + ' 个模型：' + models.map((entry) => entry.id).join('、') + '。选择后保存配置生效。' : '服务没有返回可用模型；可以直接手填模型名。');
+    } catch (nextError) { setError(nextError.message || '读不到模型列表，请检查地址和密钥。'); }
     finally { setBusy(''); }
   };
   const chooseModel = (modelId) => {
@@ -275,25 +287,26 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
   const modelsLoaded = Boolean(form && modelPickerKey && modelPicker.profileId === modelPickerKey);
 
   return <>
-    <AccessibleDialog className="provider-settings-dialog" label="Provider Profile 设置" onDismiss={onDismiss}>
+    <AccessibleDialog className="provider-settings-dialog" label="生成服务设置" onDismiss={onDismiss}>
       <header className="provider-settings-head">
         <div className="provider-settings-title">
           <p className="eyebrow">本地敏感配置</p>
           <h2>Provider Profiles</h2>
+          <span className="provider-settings-plain">{CONFIG_FACE_INTRO}</span>
           <span>密钥与完整 Base URL 只在当前写入表单中短暂出现，不会从服务端回显。</span>
         </div>
         <div className="provider-head-actions">
-          <button type="button" className="outline-button" onClick={beginCreate}><Plus size={15} />新建 Profile</button>
-          <button type="button" className="icon-button" aria-label="关闭 Provider 设置" onClick={onDismiss}><X size={18} /></button>
+          <button type="button" className="outline-button" onClick={beginCreate}><Plus size={15} />新建配置</button>
+          <button type="button" className="icon-button" aria-label="关闭生成服务设置" onClick={onDismiss}><X size={18} /></button>
         </div>
       </header>
 
       {error && <div className="provider-form-alert" role="alert"><CircleAlert size={16} /><span>{error}</span></div>}
       {feedback && <div className="provider-form-feedback" role="status" aria-live="polite"><Check size={16} /><span>{feedback}</span></div>}
 
-      {!data ? <div className="provider-loading"><LoaderCircle className="spin" size={20} />正在读取 Profiles</div> : <div className="provider-settings-layout">
-        <aside className="provider-profile-rail" aria-label="Provider Profile 列表">
-          <div className="provider-list-title"><span><strong>{providerCount}</strong> 个 Profile</span><small>本地配置，不自动联网</small></div>
+      {!data ? <div className="provider-loading"><LoaderCircle className="spin" size={20} />正在读取配置</div> : <div className="provider-settings-layout">
+        <aside className="provider-profile-rail" aria-label="配置列表">
+          <div className="provider-list-title"><span><strong>{providerCount}</strong> 组配置</span><small>都存在本机，不会自动联网</small></div>
           <div className="provider-profile-list">
             {data.profiles.length ? data.profiles.map((profile) => <button type="button" key={profile.id} aria-pressed={profile.id === selectedId} className={profile.id === selectedId ? 'is-selected' : ''} onClick={() => { setSelectedId(profile.id); cancelEdit(); }}>
               <span className="provider-profile-icon"><Server size={17} /></span>
@@ -306,14 +319,15 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
               {profile.active && <em><Power size={12} />活动</em>}
             </button>) : <div className="provider-empty">
               <KeyRound size={22} />
-              <p>尚无 Profile</p>
-              <span>新建后可显式激活；不会自动连接 Provider。</span>
-              <button type="button" className="command-button" onClick={beginCreate}><Plus size={15} />新建 Profile</button>
+              <p>还没有任何配置</p>
+              <span>新建后要手动启用；不会自动连服务。</span>
+              <button type="button" className="command-button" onClick={beginCreate}><Plus size={15} />新建配置</button>
             </div>}
           </div>
         </aside>
 
         <section className="provider-profile-panel">
+          <ConfigGlossaryPanel />
           {mode === 'idle' && selected ? <>
             <section className="provider-profile-card provider-profile-card--primary">
               <div className="provider-profile-summary">
@@ -327,28 +341,28 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
               <div className="provider-meta-strip" aria-label="Profile 状态">
                 <span>{selected.apiKeyConfigured ? 'API Key 已设置（write-only）' : 'API Key 未设置'}</span>
                 <span>{trustModeLabel(selected.endpointTrustMode)}</span>
-                <span>配置 v{selected.configVersion}</span>
-                <span>Descriptor v{selected.descriptorVersion}</span>
+                <span>配置第 {selected.configVersion} 版</span>
+                <span>能力清单第 {selected.descriptorVersion} 版</span>
               </div>
               {runtimeConcurrency && <div className="provider-runtime-status provider-runtime-status--compact" role="status" aria-live="polite">
-                <div><strong>Provider 并发</strong><span>{runtimeReasonLabel(runtimeConcurrency.lastReason)}</span></div>
+                <div><strong>同时出几张</strong><span>{runtimeReasonLabel(runtimeConcurrency.lastReason)}</span></div>
                 <b>目标 {data.runtime.providerConcurrency.target} / {data.runtime.providerConcurrency.max}</b>
                 <small>当前活动 {data.runtime.providerConcurrency.active}</small>
               </div>}
             </section>
 
             {selected.endpointPolicyWarnings?.length ? <div className="provider-restart-note"><CircleAlert size={16} /><span>{selected.endpointPolicyWarnings.join('；')}</span></div> : null}
-            {data.runtime?.reconfigurationPending && <div className="provider-restart-note"><CircleAlert size={16} /><span>daemon 正在热加载活动配置；新运行会等待匹配的 Worker 接手，不需要重启。</span></div>}
+            {data.runtime?.reconfigurationPending && <div className="provider-restart-note"><CircleAlert size={16} /><span>后台正在自动换用新配置，不用你重启；新的出图会等合适的后台任务接手。</span></div>}
 
-            <section className="provider-actions-panel" aria-label="Provider Profile 操作">
-              <header><div><p className="eyebrow">操作</p><strong>配置、校验和模型选择集中在这里。</strong></div><small>连接测试和模型列表会访问 Provider；不会生成图片。</small></header>
+            <section className="provider-actions-panel" aria-label="配置操作">
+              <header><div><p className="eyebrow">操作</p><strong>配置、校验和模型选择集中在这里。</strong></div><small>连接测试和读取模型列表会真的访问生成服务，但不会出图。</small></header>
               <div className="provider-actions-grid">
-                <button type="button" className="command-button" onClick={beginEdit}>编辑 Profile</button>
-                <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void performAction('validate')} title="本地检查 Profile 配置是否完整；不发起网络连接。">{busy === 'validate' ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}本地校验</button>
-                <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void performAction('test')} title="用已存密钥访问 Provider 的模型列表端点（该端点不存在时回退到生成端点），只探测连通性，不生成图片；结果会记录为脱敏测试证据。">{busy === 'test' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}连接测试</button>
+                <button type="button" className="command-button" onClick={beginEdit}>编辑配置</button>
+                <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void performAction('validate')} title="只检查这一组填得全不全，不会联网。">{busy === 'validate' ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}本地校验</button>
+                <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void performAction('test')} title="用已存的密钥访问生成服务的模型列表（这份列表不存在时会退回到出图入口），只探测能不能连通，不会真出图；结果会记成一份已隐去隐私的测试记录。">{busy === 'test' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}连接测试</button>
                 <button type="button" className="outline-button" disabled={selected.active || Boolean(busy)} onClick={() => void action('activate')}><Power size={15} />激活</button>
                 <button type="button" className="outline-button" disabled={Boolean(busy)} onClick={() => void action('copy')}><Copy size={15} />复制</button>
-                <button type="button" className="danger-button" aria-label="删除 Profile" disabled={Boolean(busy)} onClick={() => void action('delete')}><Trash2 size={15} />删除</button>
+                <button type="button" className="danger-button" aria-label="删除这组配置" disabled={Boolean(busy)} onClick={() => void action('delete')}><Trash2 size={15} />删除</button>
               </div>
             </section>
 
@@ -359,11 +373,11 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
                   <div><dt>端点摘要</dt><dd>{selected.endpointSummary || '未配置'}</dd></div>
                   <div><dt>信任模式</dt><dd>{trustModeLabel(selected.endpointTrustMode)}</dd></div>
                   <div><dt>API Key</dt><dd>{selected.apiKeyConfigured ? '已设置（write-only）' : '未设置'}</dd></div>
-                  <div><dt>测试证据</dt><dd>{selected.lastTest ? selected.lastTest.testedAt + ' · HTTP ' + selected.lastTest.status : '尚未显式连接测试'}</dd></div>
+                  <div><dt>最后一次连接测试</dt><dd>{selected.lastTest ? selected.lastTest.testedAt + ' · HTTP ' + selected.lastTest.status : '还没测过'}</dd></div>
                 </dl>
               </section>
               <details className="provider-secondary-panel">
-                <summary><span><strong>能力与安全限额</strong><small>辅助信息；展开查看 Provider 能力和 Profile 运行边界</small></span><em>辅助信息</em></summary>
+                <summary><span><strong>能力与安全限额</strong><small>辅助信息；展开看这个服务能做些什么，以及这组配置的上限</small></span><em>辅助信息</em></summary>
                 <div className="provider-secondary-grid">
                   <ProviderCapabilityCard descriptor={selectedDescriptor} profile={selected} />
                   <ProviderLimitSummary limits={selected.limits} />
@@ -373,21 +387,21 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
           </> : mode === 'idle' ? <div className="provider-empty-panel">
             <Server size={26} />
             <h3>配置生成服务</h3>
-            <p>新建一个 Profile，保存后再显式激活。页面打开与保存都不会自动发起网络连接。</p>
-            <button type="button" className="command-button" onClick={beginCreate}><Plus size={16} />新建 Profile</button>
+            <p>新建一个 Profile（一组连接信息：服务 + 地址 + 密钥 + 模型），保存后再手动启用。打开页面和保存都不会自动联网。</p>
+            <button type="button" className="command-button" onClick={beginCreate}><Plus size={16} />新建配置</button>
           </div> : <form className="provider-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
             <header className="provider-form-header">
               <div><p className="eyebrow">{mode === 'create' ? '新 Profile' : '编辑 Profile'}</p><h3>{mode === 'create' ? '填写连接配置' : '更新连接配置'}</h3></div>
-              <span>{mode === 'create' ? '新建不会自动测试连接' : '密钥字段必须明确 keep / replace / clear；活动配置会自动热加载'}</span>
+              <span>{mode === 'create' ? '新建不会自动测试连接' : '密钥那一栏必须明确选「保留现有值 / 替换 / 清除」；保存后后台会自动换用新配置'}</span>
             </header>
 
             <section className="provider-form-section">
               <h4>Profile 身份</h4>
               <div className="provider-form-grid">
-                <label><span>Profile 名称</span><input autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-                <label><span>Provider</span><select value={form.providerId} onChange={(event) => setProviderId(event.target.value)}>{descriptors.map((descriptor) => <option value={descriptor.id} key={descriptor.id}>{descriptor.displayName}</option>)}</select></label>
-                <label><span>模型</span><input value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} autoComplete="off" placeholder={activeDescriptor?.modelExamples?.[0] || ''} /></label>
-                <button type="button" className="outline-button provider-model-fetch" disabled={Boolean(busy)} onClick={() => void loadModels()} title="用当前表单里的配置访问 Provider 读取模型列表；不会生成图片。模型名也可以直接手动填写。">{busy === 'models' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}获取模型</button>
+                <label><span>Profile 名称</span><input autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><small className="provider-field-hint">{configFieldHint('name')}</small></label>
+                <label><span>Provider</span><select value={form.providerId} onChange={(event) => setProviderId(event.target.value)}>{descriptors.map((descriptor) => <option value={descriptor.id} key={descriptor.id}>{descriptor.displayName}</option>)}</select><small className="provider-field-hint">{configFieldHint('provider')}</small></label>
+                <label><span>模型</span><input value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} autoComplete="off" placeholder={activeDescriptor?.modelExamples?.[0] || ''} /><small className="provider-field-hint">{configFieldHint('model')}</small></label>
+                <button type="button" className="outline-button provider-model-fetch" disabled={Boolean(busy)} onClick={() => void loadModels()} title="按表单里填的内容去问生成服务有哪些模型；不会出图。模型名也可以直接手填。">{busy === 'models' ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}获取模型</button>
                 {activeDescriptor?.reference?.enableOptionKey === 'referenceEnabled' && <label className="provider-checkbox"><input type="checkbox" checked={form.referenceEnabled} onChange={(event) => setForm({ ...form, referenceEnabled: event.target.checked })} /><span>允许 Gemini 参考图能力</span></label>}
               </div>
               {modelsLoaded && <div className="provider-model-picker provider-model-picker--form" aria-label="Provider 模型列表">
@@ -400,10 +414,10 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
               <h4>连接信息</h4>
               <div className="provider-form-grid">
                 {mode === 'edit' && <label><span>Base URL 更新</span><select value={form.baseUrlAction} onChange={(event) => setForm({ ...form, baseUrlAction: event.target.value, baseUrl: '' })}><option value="keep">保留现有值</option><option value="replace">替换</option><option value="clear">清除</option></select></label>}
-                {(mode === 'create' || form.baseUrlAction === 'replace') && <label><span>完整 Base URL</span><input type="url" value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} autoComplete="off" spellCheck="false" placeholder={activeDescriptor?.endpoint?.examples?.[0] || ''} /><small>{activeDescriptor?.endpoint?.help || '仅随本次写入发送；不会存入浏览器。'}</small></label>}
-                <label><span>端点信任模式</span><select value={form.endpointTrustMode} onChange={(event) => setForm({ ...form, endpointTrustMode: event.target.value })}>{TRUST_MODES.map(([value, label, description]) => <option value={value} key={value}>{label} - {description}</option>)}</select></label>
+                {(mode === 'create' || form.baseUrlAction === 'replace') && <label><span>完整 Base URL</span><input type="url" value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} autoComplete="off" spellCheck="false" placeholder={activeDescriptor?.endpoint?.examples?.[0] || ''} /><small className="provider-field-hint">{configFieldHint('baseUrl')}</small><small>{activeDescriptor?.endpoint?.help || '仅随本次写入发送；不会存入浏览器。'}</small></label>}
+                <label><span>端点信任模式</span><select value={form.endpointTrustMode} onChange={(event) => setForm({ ...form, endpointTrustMode: event.target.value })}>{TRUST_MODES.map(([value, label, description]) => <option value={value} key={value}>{label} - {description}</option>)}</select><small className="provider-field-hint">{configFieldHint('trustMode')}</small></label>
                 {mode === 'edit' && <label><span>API Key 更新</span><select value={form.apiKeyAction} onChange={(event) => setForm({ ...form, apiKeyAction: event.target.value, apiKey: '' })}><option value="keep">保留现有值</option><option value="replace">替换</option><option value="clear">清除</option></select></label>}
-                {(mode === 'create' || form.apiKeyAction === 'replace') && <label><span>API Key</span><input type="password" value={form.apiKey} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} autoComplete="new-password" spellCheck="false" /><small>write-only；关闭表单后立即从页面状态移除。</small></label>}
+                {(mode === 'create' || form.apiKeyAction === 'replace') && <label><span>API Key</span><input type="password" value={form.apiKey} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} autoComplete="new-password" spellCheck="false" /><small className="provider-field-hint">{configFieldHint('apiKey')}</small><small>write-only；关闭表单后立即从页面状态移除。</small></label>}
               </div>
             </section>
 
@@ -413,6 +427,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
                 <ProviderCapabilityCard descriptor={activeDescriptor} profile={{ referenceEnabled: form.referenceEnabled }} />
                 <fieldset className="provider-limit-grid">
                   <legend>Profile 级安全限额（可留空）</legend>
+                  <p className="provider-field-hint">{configFieldHint('limits')}</p>
                   <label><span>单次数量上限</span><input inputMode="numeric" value={form.limits?.maxRunItems || ''} onChange={(event) => setLimit('maxRunItems', event.target.value)} placeholder="最多 1000" /></label>
                   <label><span>运行并发上限</span><input inputMode="numeric" value={form.limits?.maxExecutionConcurrency || ''} onChange={(event) => setLimit('maxExecutionConcurrency', event.target.value)} placeholder="最多 1000" /></label>
                   <label><span>请求超时 ms</span><input inputMode="numeric" value={form.limits?.requestTimeoutMs || ''} onChange={(event) => setLimit('requestTimeoutMs', event.target.value)} placeholder="120000" /></label>
@@ -421,13 +436,13 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
               </div>
             </details>
 
-            {mode === 'create' && <label className="provider-checkbox"><input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} /><span>保存后设为活动 Profile</span></label>}
-            <div className="provider-form-note"><CircleAlert size={15} /><span>连接测试会访问 Provider 但不生成图片；本地校验不会联网。本地校验、连接测试和模型列表都会用到 Provider 密钥，daemon 只接受来自本机这个页面的调用；已存密钥只会发往 Profile 自己配置的端点。获取模型可以直接点按钮，也可以手动填写模型名。</span></div>
+            {mode === 'create' && <label className="provider-checkbox"><input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} /><span>保存后就用这一组</span></label>}
+            <div className="provider-form-note"><CircleAlert size={15} /><span>连接测试会真的访问生成服务，但不会出图；本地校验只查填得全不全，不联网。这几项都会用到你的密钥：后台只接受来自本机这个页面的调用，已存的密钥只会发往这一组自己填的服务地址。模型名可以点按钮拉取，也可以直接手填。</span></div>
             <div className="provider-form-actions"><button type="button" className="outline-button" onClick={cancelEdit}>取消</button><button type="submit" className="command-button" disabled={Boolean(busy)}>{busy === 'save' ? <LoaderCircle className="spin" size={15} /> : null}保存配置</button></div>
           </form>}
         </section>
       </div>}
     </AccessibleDialog>
-    {confirmation && <ConfirmationDialog label={confirmation.kind === 'delete' ? '确认删除 Provider Profile' : '确认清除连接信息'} title={confirmation.kind === 'delete' ? '删除 Provider Profile？' : '清除连接信息？'} message={confirmation.kind === 'delete' ? (confirmation.active ? 'Profile“' + confirmation.profileName + '”是当前活动 Profile。删除后新运行会等待你激活其他 Profile。是否继续？' : '删除 Profile“' + confirmation.profileName + '”？此操作不会删除历史运行。') : '清除连接信息会让该 Profile 暂时不可用；活动配置保存后会自动热加载。是否继续？'} confirmLabel={confirmation.kind === 'delete' ? '确认删除' : '继续清除'} tone={confirmation.kind === 'delete' ? 'danger' : 'warning'} onCancel={() => setConfirmation(null)} onConfirm={confirmPendingAction} />}
+    {confirmation && <ConfirmationDialog label={confirmation.kind === 'delete' ? '确认删除这组配置' : '确认清除连接信息'} title={confirmation.kind === 'delete' ? '删除这组配置？' : '清除连接信息？'} message={confirmation.kind === 'delete' ? (confirmation.active ? '“' + confirmation.profileName + '”正在使用中。删除后新的出图会等你先启用另一组。要继续吗？' : '删除“' + confirmation.profileName + '”？已经出过的图不受影响。') : '清除连接信息后，这一组暂时用不了；保存后后台会自动换用新配置。要继续吗？'} confirmLabel={confirmation.kind === 'delete' ? '确认删除' : '继续清除'} tone={confirmation.kind === 'delete' ? 'danger' : 'warning'} onCancel={() => setConfirmation(null)} onConfirm={confirmPendingAction} />}
   </>;
 }

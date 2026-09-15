@@ -1375,3 +1375,28 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 @media (max-width:1100px) { .offline-strategy-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:700px) { .offline-strategy-heading { grid-template-columns:1fr; }.offline-strategy-default { min-width:0; width:max-content; }.offline-strategy-grid { grid-template-columns:1fr; }.offline-strategy-focus-summary { flex-direction:column; gap:3px; } }
 @media (max-width:700px) { .lineage-text-count { text-align:left; }.lineage-text-coverage dl { grid-template-columns:1fr; }.lineage-text-coverage dl > div { align-items:flex-start; flex-direction:column; gap:4px; } }
+
+/* config 面（生成服务设置）：技术名词照留，但必须配人话副标题 + 折叠隔离。
+   这三组类分别是「面板导语」「字段下方的一句人话」「名词表」。 */
+.provider-settings-plain { display:block; margin-top:7px; max-width:620px; color:#3f5145; font-size:13px; line-height:1.65; text-wrap:pretty; }
+.provider-field-hint { display:block; margin:5px 0 0; color:#69786c; font-size:11px; line-height:1.5; text-wrap:pretty; }
+.provider-card-note { margin:0 0 11px; color:#667568; font-size:11px; line-height:1.6; text-wrap:pretty; }
+.provider-glossary-panel { border-style:dashed; }
+.provider-glossary-list { display:grid; gap:0; margin:0; }
+.provider-glossary-list > div { display:grid; grid-template-columns:minmax(104px,148px) minmax(0,1fr); align-items:start; gap:12px; border-top:1px solid #dde4da; padding:8px 0; }
+.provider-glossary-list > div:first-child { border-top:0; padding-top:0; }
+.provider-glossary-list dt { min-width:0; color:#2a3f31; font-size:12px; font-weight:800; overflow-wrap:anywhere; }
+.provider-glossary-list dd { margin:0; color:#5b6f60; font-size:12px; line-height:1.65; text-wrap:pretty; }
+@media (max-width:560px) { .provider-glossary-list > div { grid-template-columns:1fr; gap:3px; } }
+
+/* doc 面（创作手册）：术语在正文首次出现处加括注，顶部再挂一份名词表兜底。 */
+.learning-glossary { border:1px dashed #c6d2c5; padding:12px 15px; background:#fbfcf8; }
+.learning-glossary > summary { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; cursor:pointer; }
+.learning-glossary > summary strong { display:block; color:#2a3f31; font-size:13px; }
+.learning-glossary > summary small { display:block; margin-top:3px; color:#667568; font-size:11px; line-height:1.55; text-wrap:pretty; }
+.learning-glossary > summary em { flex:0 0 auto; color:#5b6f60; font-size:10px; font-style:normal; letter-spacing:.08em; }
+.learning-glossary-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(268px,1fr)); gap:0 22px; margin:11px 0 0; }
+.learning-glossary-list > div { display:grid; grid-template-columns:minmax(88px,124px) minmax(0,1fr); align-items:start; gap:10px; border-top:1px solid #e3e9e0; padding:7px 0; }
+.learning-glossary-list dt { min-width:0; color:#2a3f31; font-size:12px; font-weight:800; overflow-wrap:anywhere; }
+.learning-glossary-list dd { margin:0; color:#5b6f60; font-size:12px; line-height:1.6; text-wrap:pretty; }
+@media (max-width:560px) { .learning-glossary-list > div { grid-template-columns:1fr; gap:2px; } }
