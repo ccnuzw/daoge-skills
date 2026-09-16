@@ -32,6 +32,8 @@ import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, clampAssetPa
 import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, EMPTY_RUN_ITEM_PAGE, RUN_ITEM_FILTER_OPTIONS, RUN_ITEM_PAGE_SIZES, normalizeRunItemFilter, normalizeRunItemPage, normalizeRunItemPageNumber, normalizeRunItemPageSize, normalizeRunItemSequence, retryableRunItems, runItemFilterCount, runItemPageBounds, runItemProgress, selectableRunItemIds, serializeRunItemRequestQuery } from './run-item-pagination.mjs';
 import { assetRefreshPath } from './asset-refresh-plan.mjs';
 import { EMPTY_LINEAGE_RUN_ITEM_COVERAGE, LINEAGE_ASSET_PAGE_SIZE, loadCompleteLineageAssets, loadCompleteLineageRunItems } from './lineage-data-loader.mjs';
+import { REFERENCE_USAGE_LABELS, REFERENCE_USAGE_OPTIONS, materialNeedReferenceNote, materialNeedUsagePreset } from './reference-usage-model.mjs';
+import { advanceUploadProgress, imageFilesFrom, maskImportHeaders, maskImportProblem, mergeImportedReferences, resolveUploadMaterial, resolveUploadTarget, shouldLinkImportedToRound, uploadOutcome } from './asset-import-model.mjs';
 import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, createProjectSearchIndex, createTaskSearchIndex, filterProjectIndex, filterTaskIndex, paginateWorkspaceItems } from './workspace-list-model.mjs';
 import { ProviderSettings } from './provider-settings.jsx';
 import { workbenchConversationId } from './workbench-session.mjs';
@@ -252,16 +254,6 @@ const ROUND_PURPOSE_OPTIONS = [
 ];
 const CREATION_COUNT_OPTIONS = ['', '2', '4', '6', '8', '12'];
 const CREATION_ASPECT_OPTIONS = ['', '1:1', '4:5', '3:4', '16:9', '9:16', '3:2'];
-const REFERENCE_USAGE_OPTIONS = [
-  { id: 'subject', label: '主体参考', description: '尽量保持主体身份、轮廓或核心特征。' },
-  { id: 'style', label: '风格参考', description: '提取画风、质感和色调，不复制具体内容。' },
-  { id: 'composition', label: '构图参考', description: '参考画面布局、视角和主体位置。' },
-  { id: 'color', label: '色彩参考', description: '参考配色、明暗关系和整体氛围。' },
-  { id: 'brand', label: '品牌参考', description: '参考 Logo、产品、品牌色或固定视觉规范。' },
-  { id: 'mask', label: '遮罩图', description: '用于局部编辑范围；生成前仍会按生成服务的能力校验。' },
-  { id: 'negative', label: '反例 / 不要这样', description: '说明不希望出现的方向，由 Agent 在计划中转成约束。' }
-];
-const REFERENCE_USAGE_LABELS = Object.fromEntries(REFERENCE_USAGE_OPTIONS.map((option) => [option.id, option.label]));
 const DERIVED_ROUND_ACTIONS = CREATIVE_DERIVED_ACTIONS.map((action) => ({ ...action, label: action.label || action.title }));
 const DERIVED_ACTION_BY_ID = CREATIVE_DERIVED_ACTION_BY_ID;
 const DERIVED_ACTION_BY_PURPOSE = Object.fromEntries(DERIVED_ROUND_ACTIONS.map((option) => [option.purpose, option]));
@@ -284,15 +276,6 @@ const DERIVED_REFERENCE_USAGE_NOTES = {
   mask: '局部编辑遮罩；白色区域通常表示修改范围',
   negative: '反例：下一轮需要避免这种方向'
 };
-const MATERIAL_NEED_USAGE_RULES = [
-  { pattern: /遮罩|蒙版|修改区域|重绘区域/, usage: 'mask', hint: '适合导入黑白或透明遮罩；生成前仍会按生成服务的能力核算一遍。' },
-  { pattern: /Logo|品牌|规范|色板|品牌包/i, usage: 'brand', hint: '适合导入 Logo、品牌色、品牌规范截图或固定视觉规范。' },
-  { pattern: /风格|竞品|历史视觉|系列参考|参考封面|画法|质感/, usage: 'style', hint: '适合导入风格样张；Agent 只提取画风、质感和语气。' },
-  { pattern: /构图|版式|安全区|尺寸|规格|平台|渠道|场景关键词/, usage: 'composition', hint: '适合导入版式、安全区、平台规格或构图参考截图。' },
-  { pattern: /色彩|配色|光线|光影|氛围/, usage: 'color', hint: '适合导入色彩、明暗关系或氛围参考。' },
-  { pattern: /反例|不要|禁改|禁忌|不允许|限制|不可改变|保持|一致性/, usage: 'negative', hint: '适合导入不希望延续的方向；文字约束请同时写进创作意图。' },
-  { pattern: /主体|产品|商品|角色|人物|原图|已选|已确认|待发布|主视觉|封面|输入素材/, usage: 'subject', hint: '适合导入主体、产品、角色或已选结果，用于保持身份和轮廓。' }
-];
 
 const REJECT_REASON_OPTIONS = [
   { id: 'subject-wrong', label: '主体不准' },
@@ -454,18 +437,6 @@ function planWithReferenceMaterials(plan = {}, materials = []) {
   if (mask) next.maskAssetId = mask.assetId;
   else delete next.maskAssetId;
   return next;
-}
-
-function materialNeedUsagePreset(need) {
-  const label = String(need || '').trim();
-  const matched = MATERIAL_NEED_USAGE_RULES.find((rule) => rule.pattern.test(label));
-  const usage = matched?.usage || 'subject';
-  return { need: label, usage, usageLabel: REFERENCE_USAGE_LABELS[usage] || usage, hint: matched?.hint || '可导入图片或截图；如果只是文字信息，请在创作意图或备注里说明。' };
-}
-
-function materialNeedReferenceNote(need, usage) {
-  const preset = materialNeedUsagePreset(need);
-  return '按素材需求导入：' + preset.need + ' · ' + (REFERENCE_USAGE_LABELS[usage || preset.usage] || usage || preset.usage);
 }
 
 function materialNeedsForTemplate(template) {
@@ -2168,7 +2139,7 @@ function App() {
   const runItemDetail = useMemo(() => runItemDetailId ? visibleRunItems.find((item) => item.id === runItemDetailId) || null : null, [runItemDetailId, visibleRunItems]);
   const runLifecycleStatus = activeRun ? statusPresentation('run', activeRun.status) : null;
   const canCancelActiveRun = Boolean(activeRun && !['completed', 'cancelled'].includes(activeRun.status));
-  const uploadTarget = assetScope === 'round' && selectedRound ? { type: 'creative_round', id: selectedRound.id } : assetScope === 'task' && selectedTask ? { type: 'creative_task', id: selectedTask.id } : selectedProject ? { type: 'project', id: selectedProject.id } : null;
+  const uploadTarget = resolveUploadTarget({ assetScope, selectedRound, selectedTask, selectedProject });
   const canImport = ['assets', 'lineage'].includes(view) && Boolean(selectedProject);
   const importLabel = selectedImportNeed ? '导入“' + selectedImportNeed + '”' : selectedRound && assetScope === 'round' ? '添加为本轮参考' : '导入到项目';
   const deliverySelection = useMemo(() => projectDeliverySelection(selectedProject?.id || null, selectedAssets), [selectedProject?.id, selectedAssets]);
@@ -2314,12 +2285,11 @@ function App() {
   }, [session, selectedProject, selectedTask, selectedRound, activeTaskId, activeRoundId]);
 
   const upload = async (files) => {
-    const images = Array.from(files || []).filter((file) => file.type.startsWith('image/'));
+    const images = imageFilesFrom(files);
     if (!images.length) return;
 
     const failed = [];
-    const uploadMaterialNeed = selectedImportNeed && contextMaterialNeeds.includes(selectedImportNeed) ? selectedImportNeed : '';
-    const uploadMaterialPreset = uploadMaterialNeed ? materialNeedUsagePreset(uploadMaterialNeed) : assetScope === 'round' ? { usage: 'subject', usageLabel: REFERENCE_USAGE_LABELS.subject } : null;
+    const { need: uploadMaterialNeed, preset: uploadMaterialPreset } = resolveUploadMaterial({ selectedImportNeed, contextMaterialNeeds, assetScope });
     const importedAssets = [];
     try {
       setUploading(true); setUploadProgress({ completed: 0, total: images.length }); setError(''); setNotice('');
@@ -2340,36 +2310,30 @@ function App() {
         } catch (nextError) {
           failed.push({ name: file.name, message: errorMessageForDisplay(nextError, '无法导入图片。') });
         }
-        setUploadProgress((current) => ({ completed: Math.min(images.length, (current?.completed || 0) + 1), total: images.length }));
+        setUploadProgress((current) => advanceUploadProgress(current, images.length));
       }, ASSET_IMPORT_CONCURRENCY);
       await refresh();
-      const succeeded = images.length - failed.length;
       let referenceSaved = false;
-      if (succeeded && importedAssets.length && selectedRound && assetScope === 'round' && selectedRound.status === 'draft') {
-        const materialMap = new Map(referenceMaterials.map((item) => [item.assetId, item]));
-        const usage = uploadMaterialPreset?.usage || 'subject';
+      const usage = uploadMaterialPreset?.usage || 'subject';
+      if (shouldLinkImportedToRound({ succeeded: images.length - failed.length, importedCount: importedAssets.length, selectedRound, assetScope })) {
         const note = uploadMaterialNeed ? materialNeedReferenceNote(uploadMaterialNeed, usage) : '本轮直接导入 · ' + (REFERENCE_USAGE_LABELS[usage] || usage);
-        for (const asset of importedAssets) materialMap.set(asset.id, { assetId: asset.id, usage, note });
-        referenceSaved = await saveRoundReferenceMaterials([...materialMap.values()], false);
+        referenceSaved = await saveRoundReferenceMaterials(mergeImportedReferences({ existing: referenceMaterials, importedAssets, usage, note }), false);
       }
-      if (succeeded) setNotice('已导入 ' + succeeded + ' 张图片' + (referenceSaved ? '，并已按用途加入当前这一轮的参考素材' : '') + (failed.length ? '，' + failed.length + ' 张失败。' : '。'));
-      if (failed.length) setError('有 ' + failed.length + ' 张图片导入失败：' + failed.slice(0, 3).map((item) => item.name).join('、') + (failed.length > 3 ? ' 等' : '') + '。');
+      const outcome = uploadOutcome({ total: images.length, failed, savedAsReference: referenceSaved });
+      if (outcome.notice) setNotice(outcome.notice);
+      if (outcome.error) setError(outcome.error);
     } finally {
       setUploading(false); setUploadProgress(null); if (inputRef.current) inputRef.current.value = '';
     }
   };
   const importDerivedMaskAsset = async (file) => {
-    if (!selectedProject) throw new Error('请先选择项目，再导入遮罩图。');
-    if (!file?.type?.startsWith('image/')) throw new Error('请选择图片文件作为遮罩。');
+    const problem = maskImportProblem({ selectedProject, file });
+    if (problem) throw new Error(problem);
     const data = await api('/api/assets/import', {
       method: 'POST',
       idempotencyKey: uniqueKey('mask-upload'),
       contentType: file.type || 'application/octet-stream',
-      headers: {
-        'x-daoge-filename': encodeURIComponent(file.name || 'mask.png'),
-        'x-daoge-target-type': 'project',
-        'x-daoge-target-id': selectedProject.id
-      },
+      headers: maskImportHeaders({ projectId: selectedProject.id, file }),
       rawBody: file
     });
     await refresh();
