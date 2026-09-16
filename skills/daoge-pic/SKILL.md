@@ -5,7 +5,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 # DAOGE Pic vNext
 
-当前源码、运行时与最新不可变正式发布版本均为 `5.14.1`。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/2.0.0`，运行时兼容范围为 `>=5.14.1 <6.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
+当前源码、运行时与最新不可变正式发布版本均为 `5.14.2`。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/2.0.0`，运行时兼容范围为 `>=5.14.2 <6.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
 
 本文件是 Agent 执行协议，不是完整产品规格。产品、架构、Schema、Worker、ZIP、安全实现和验证证据分别以 `docs/daoge_pic_vnext_upgrade_spec_zh.md`、`docs/vnext_verification_evidence_zh.md`、源码与测试为准。用户可见沟通使用中文。
 
@@ -154,7 +154,7 @@ node scripts/daoge.js template-archive --workspace <path> --template <template-i
 node scripts/daoge.js template-rollback --workspace <path> --template <template-id> --version <n>
 ```
 
-同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.14.1` 是当前源码/运行时版本，`5.14.0` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
+同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.14.2` 是当前源码/运行时版本，`5.14.1` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
 
 固定查询端点：`GET /api/studio` 是协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History；确认模板读取使用 Bearer-only 的 `/api/confirmed-templates` 列表和详情端点，写入使用其 Bearer-only POST save/archive/rollback 端点。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝；Skill 必须改用正确端点或受控 CLI，不得猜测 `/api/studio/...`、旧命令或工作区文件。
 

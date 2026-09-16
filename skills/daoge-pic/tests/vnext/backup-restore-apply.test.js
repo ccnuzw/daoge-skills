@@ -276,7 +276,7 @@ test('the public backup-restore CLI uses the offline helper and returns nonzero 
     put(source, 'media/a.bin', 'source-a');
     const initialized = initializeStudio({ workspaceRoot: target });
     put(target, 'media/a.bin', 'original-a');
-    const manifest = createBackupManifest({ workspaceRoot: source, studio: { studioId: initialized.manifest.studioId, protocolName: 'daoge-pic-skill-protocol', protocolVersion: '2.0.0', runtimeVersion: '5.14.1' }, entries: [{ path: 'media/a.bin', category: 'media' }] });
+    const manifest = createBackupManifest({ workspaceRoot: source, studio: { studioId: initialized.manifest.studioId, protocolName: 'daoge-pic-skill-protocol', protocolVersion: '2.0.0', runtimeVersion: '5.14.2' }, entries: [{ path: 'media/a.bin', category: 'media' }] });
     const success = runCli(target, source, manifest);
     assert.equal(success.status, 0, success.stderr);
     assert.equal(read(target, 'media/a.bin'), 'source-a');

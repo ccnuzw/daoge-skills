@@ -243,12 +243,12 @@ test('backup CLI schemas are JSON-only and preserve path/body marker conventions
   assert.equal(manifest.request.method, 'GET');
   assert.equal(manifest.request.pathname, '/api/backup/manifest');
   assert.deepEqual(manifest.request.body, {});
-  const upgrade = parseCommand(['backup-upgrade-assess', '--workspace', root, '--target-runtime-version', '5.14.1', '--target-schema-version', '33', '--target-protocol-version', '2.0.0', '--rollback-point', '@-']);
+  const upgrade = parseCommand(['backup-upgrade-assess', '--workspace', root, '--target-runtime-version', '5.14.2', '--target-schema-version', '33', '--target-protocol-version', '2.0.0', '--rollback-point', '@-']);
   assert.deepEqual(upgrade.request.body.rollbackPoint, { __daogeJsonStdin: true });
   assert.equal(upgrade.request.body.currentSchemaVersion, undefined);
   assert.equal(upgrade.request.body.supportedSchemaVersion, undefined);
   assert.equal(upgrade.request.body.supportedProtocolRange, undefined);
-  assert.throws(() => parseCommand(['backup-upgrade-assess', '--workspace', root, '--current-runtime-version', '5.13.0', '--target-runtime-version', '5.14.1', '--target-schema-version', '33', '--target-protocol-version', '2.0.0']), /未知参数|--current-runtime-version/);
+  assert.throws(() => parseCommand(['backup-upgrade-assess', '--workspace', root, '--current-runtime-version', '5.13.0', '--target-runtime-version', '5.14.2', '--target-schema-version', '33', '--target-protocol-version', '2.0.0']), /未知参数|--current-runtime-version/);
   const rollback = parseCommand(['backup-rollback-point', '--workspace', root, '--manifest', '{}', '--runtime-version', '5.13.0', '--schema-version', '1']);
   assert.equal(rollback.request.pathname, '/api/backup/rollback-point');
   assert.equal(rollback.request.body.runtimeVersion, '5.13.0');
