@@ -31,7 +31,7 @@
     "bench:perf": "npm run build:vnext && node scripts/bench-perf.js",
     "test:vnext": "npm run build && node scripts/run-tests.js",
     "test": "npm run test:vnext",
-    "test:package": "npm run build && node scripts/package-smoke.js --require-release-artifact",
+    "test:package": "npm run build && npm pack --ignore-scripts --pack-destination . && node scripts/package-smoke.js --require-release-artifact",
     "verify:evidence": "node scripts/verification-evidence.js",
     "verify:evidence:check": "node scripts/verification-evidence.js --check",
     "prepack": "npm run build",
