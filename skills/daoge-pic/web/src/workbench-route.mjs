@@ -1,7 +1,7 @@
 import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, normalizeRunItemFilter, normalizeRunItemPageNumber, normalizeRunItemPageSize, normalizeRunItemSequence } from './run-item-pagination.mjs';
 
-export const WORKBENCH_VIEWS = ['projects', 'project-overview', 'lineage', 'tasks', 'assets', 'runs', 'studio-overview', 'prompts', 'library', 'shared-assets', 'guide', 'deliveries', 'trash'];
-export const STUDIO_VIEWS = ['projects', 'library', 'shared-assets', 'guide'];
+export const WORKBENCH_VIEWS = ['projects', 'project-overview', 'lineage', 'tasks', 'assets', 'runs', 'studio-overview', 'prompts', 'library', 'shared-assets', 'guide', 'deliveries', 'trash', 'troubleshoot'];
+export const STUDIO_VIEWS = ['projects', 'library', 'shared-assets', 'guide', 'troubleshoot'];
 export const ASSET_SCOPES = ['round', 'task', 'project', 'studio'];
 const PROJECT_CONTEXT_STUDIO_VIEWS = ['library', 'guide'];
 // The only views that actually render a run. Anywhere else a `runId` is a leftover from whichever view set it.

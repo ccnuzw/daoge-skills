@@ -10,14 +10,14 @@ function safeDiagnosticText(value) {
 }
 
 export function runtimeHealthPresentation(runtime, recoveryPhase = 'ready') {
-  if (recoveryPhase === 'stopping') return { tone: 'warning', title: '正在安全关闭后台任务', detail: '后台任务、HTTP 服务与本地数据库正在按顺序释放。', live: true };
-  if (recoveryPhase === 'reconnecting') return { tone: 'warning', title: 'Studio 正在重连', detail: '保留当前页面状态；连接恢复后将刷新权威快照。', live: true };
-  if (recoveryPhase === 'restored') return { tone: 'ready', title: 'Studio 已恢复', detail: '授权和页面状态已复用，实时更新已重新连接。', live: true };
+  if (recoveryPhase === 'stopping') return { tone: 'warning', title: '正在安全关闭后台任务', detail: '后台任务、页面服务与本地数据库正在按顺序释放。', live: true };
+  if (recoveryPhase === 'reconnecting') return { tone: 'warning', title: 'Studio 正在重连', detail: '保留当前页面状态；连接恢复后会重新读取最新数据。', live: true };
+  if (recoveryPhase === 'restored') return { tone: 'ready', title: 'Studio 已恢复', detail: '登录状态和页面内容都已接上，实时更新也重新连上了。', live: true };
   const generation = runtime?.workerPool;
   const media = runtime?.mediaWorkerPool;
-  if (generation?.state === 'failed' || media?.state === 'failed') return { tone: 'danger', title: '后台处理池需要重启', detail: [generation?.lastError, media?.lastError].filter(Boolean).map(safeDiagnosticText).join(' · ') || '子进程连续恢复失败；保存的运行和资产状态未丢失。', live: true };
-  if (generation?.state === 'degraded' || media?.state === 'degraded') return { tone: 'warning', title: '后台处理池正在恢复', detail: '生成：' + (POOL_LABELS[generation?.state] || '未配置') + ' · 媒体：' + (POOL_LABELS[media?.state] || '未配置'), live: true };
-  if (generation?.state === 'starting' || media?.state === 'starting') return { tone: 'working', title: '按需启动后台处理', detail: '仅在队列需要时才启动后台任务，首次可能短暂等待。', live: true };
+  if (generation?.state === 'failed' || media?.state === 'failed') return { tone: 'danger', title: '后台任务需要重启', detail: [generation?.lastError, media?.lastError].filter(Boolean).map(safeDiagnosticText).join(' · ') || '后台任务连续启动失败；已保存的出图和素材不会丢失。', live: true };
+  if (generation?.state === 'degraded' || media?.state === 'degraded') return { tone: 'warning', title: '后台任务正在恢复', detail: '生成：' + (POOL_LABELS[generation?.state] || '未配置') + ' · 媒体：' + (POOL_LABELS[media?.state] || '未配置'), live: true };
+  if (generation?.state === 'starting' || media?.state === 'starting') return { tone: 'working', title: '按需启动后台任务', detail: '只在真的有任务要做时才启动，第一次可能要多等一会儿。', live: true };
   return { tone: 'ready', title: 'Studio 运行正常', detail: '生成：' + (POOL_LABELS[generation?.state] || '未配置') + ' · 媒体：' + (POOL_LABELS[media?.state] || '按需待命'), live: false };
 }
 

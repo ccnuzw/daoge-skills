@@ -21,10 +21,10 @@ const TRUST_MODES = [
 
 const TRUST_MODE_LABELS = Object.fromEntries(TRUST_MODES.map(([value, label]) => [value, label]));
 const LIMIT_ROWS = [
-  ['maxRunItems', '单次数量', '未限制', '张'],
-  ['maxExecutionConcurrency', '运行并发', '未限制', '路'],
-  ['requestTimeoutMs', '请求超时', '默认', 'ms'],
-  ['maxRetryAttempts', '自动重试', '默认', '次']
+  ['maxRunItems', '一次最多出几张', '未限制', ' 张'],
+  ['maxExecutionConcurrency', '同时最多出几张', '未限制', ' 张'],
+  ['requestTimeoutMs', '等多久算超时', '默认', ' 毫秒'],
+  ['maxRetryAttempts', '失败后最多重试几次', '默认', ' 次']
 ];
 
 /**
@@ -85,8 +85,8 @@ function ProviderCapabilityCard({ descriptor, profile }) {
 }
 
 function ProviderLimitSummary({ limits = {} }) {
-  return <section className="provider-card provider-limit-summary" aria-label="Profile 级安全限额">
-    <header><span>Profile 级安全限额</span><small>留空项使用全局安全边界</small></header>
+  return <section className="provider-card provider-limit-summary" aria-label="这组配置的用量上限">
+    <header><span>这组配置的用量上限</span><small>留空就用默认值</small></header>
     <p className="provider-card-note">{configFieldHint('limits')}</p>
     <dl>
       {LIMIT_ROWS.map(([key, label, fallback, suffix]) => <div key={key}>
@@ -118,12 +118,12 @@ function ConfigGlossaryPanel() {
   </details>;
 }
 
-/** 限额字段：[表单字段名, 给创作者看的名字, 允许的最大值]。 */
-const LIMIT_FIELDS = /** @type {Array<[string, string, number]>} */ ([
-  ['maxRunItems', '一次最多出几张', 1000],
-  ['maxExecutionConcurrency', '同时最多出几张', 1000],
-  ['requestTimeoutMs', '等多久算超时（毫秒）', 600000],
-  ['maxRetryAttempts', '失败后最多重试几次', 20]
+/** 限额字段：[表单字段名, 给创作者看的名字, 允许的最大值, 输入框提示]。 */
+const LIMIT_FIELDS = /** @type {Array<[string, string, number, string]>} */ ([
+  ['maxRunItems', '一次最多出几张', 1000, '最多 1000'],
+  ['maxExecutionConcurrency', '同时最多出几张', 1000, '最多 1000'],
+  ['requestTimeoutMs', '等多久算超时（毫秒）', 600000, '120000'],
+  ['maxRetryAttempts', '失败后最多重试几次', 20, '默认 4']
 ]);
 
 export function ProviderSettings({ request, onDismiss, onChanged }) {
@@ -434,12 +434,9 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
               <div className="provider-secondary-grid provider-secondary-grid--form">
                 <ProviderCapabilityCard descriptor={activeDescriptor} profile={{ referenceEnabled: form.referenceEnabled }} />
                 <fieldset className="provider-limit-grid">
-                  <legend>Profile 级安全限额（可留空）</legend>
+                  <legend>这组配置的用量上限（可留空）</legend>
                   <p className="provider-field-hint">{configFieldHint('limits')}</p>
-                  <label><span>单次数量上限</span><input inputMode="numeric" value={form.limits?.maxRunItems || ''} onChange={(event) => setLimit('maxRunItems', event.target.value)} placeholder="最多 1000" /></label>
-                  <label><span>运行并发上限</span><input inputMode="numeric" value={form.limits?.maxExecutionConcurrency || ''} onChange={(event) => setLimit('maxExecutionConcurrency', event.target.value)} placeholder="最多 1000" /></label>
-                  <label><span>请求超时 ms</span><input inputMode="numeric" value={form.limits?.requestTimeoutMs || ''} onChange={(event) => setLimit('requestTimeoutMs', event.target.value)} placeholder="120000" /></label>
-                  <label><span>自动重试上限</span><input inputMode="numeric" value={form.limits?.maxRetryAttempts || ''} onChange={(event) => setLimit('maxRetryAttempts', event.target.value)} placeholder="默认 4" /></label>
+                  {LIMIT_FIELDS.map(([key, label, , placeholder]) => <label key={key}><span>{label}</span><input inputMode="numeric" value={form.limits?.[key] || ''} onChange={(event) => setLimit(key, event.target.value)} placeholder={placeholder} /></label>)}
                 </fieldset>
               </div>
             </details>

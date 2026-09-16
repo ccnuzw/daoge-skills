@@ -8,6 +8,7 @@ import { planPresentation, planStateLabel } from './plan-presentation.mjs';
 import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
 import { PromptWorkspace } from './prompt-workspace.jsx';
 import { LearningCenter } from './learning-center.jsx';
+import { Troubleshoot } from './troubleshoot.jsx';
 import { CreativeLibrary } from './creative-library.jsx';
 import { SharedAssets } from './shared-assets.jsx';
 import { CreativeLineageCanvas } from './creative-lineage-canvas.jsx';
@@ -20,6 +21,7 @@ import { bootstrapLocalStudioSession } from './local-auth.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { ConfirmationDialog } from './confirmation-dialog.jsx';
 import { StudioSearch } from './studio-search.jsx';
+import { useAssetImport } from './use-asset-import.mjs';
 import { useProjectQualityMetrics } from './use-project-quality-metrics.mjs';
 import { useStudioSearch } from './use-studio-search.mjs';
 import { createLatestRequestGate, useRouteRefresh } from './use-route-refresh.mjs';
@@ -32,8 +34,9 @@ import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, clampAssetPa
 import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, EMPTY_RUN_ITEM_PAGE, RUN_ITEM_FILTER_OPTIONS, RUN_ITEM_PAGE_SIZES, normalizeRunItemFilter, normalizeRunItemPage, normalizeRunItemPageNumber, normalizeRunItemPageSize, normalizeRunItemSequence, retryableRunItems, runItemFilterCount, runItemPageBounds, runItemProgress, selectableRunItemIds, serializeRunItemRequestQuery } from './run-item-pagination.mjs';
 import { assetRefreshPath } from './asset-refresh-plan.mjs';
 import { EMPTY_LINEAGE_RUN_ITEM_COVERAGE, LINEAGE_ASSET_PAGE_SIZE, loadCompleteLineageAssets, loadCompleteLineageRunItems } from './lineage-data-loader.mjs';
-import { REFERENCE_USAGE_LABELS, REFERENCE_USAGE_OPTIONS, materialNeedReferenceNote, materialNeedUsagePreset } from './reference-usage-model.mjs';
-import { advanceUploadProgress, imageFilesFrom, maskImportHeaders, maskImportProblem, mergeImportedReferences, resolveUploadMaterial, resolveUploadTarget, shouldLinkImportedToRound, uploadOutcome } from './asset-import-model.mjs';
+import { REFERENCE_USAGE_LABELS, REFERENCE_USAGE_OPTIONS, materialNeedUsagePreset } from './reference-usage-model.mjs';
+import { resolveUploadTarget } from './asset-import-model.mjs';
+import { chunkAssetIds, deliverableIntent, isSelectionWriteCurrent, keepCandidateIds, latestSelection, mergeSelectionAssets, needsKeepReview, nextBusySet, nextSelectedIds, normalizeAssetIds, selectionCandidates, selectionIdSet, shouldClearSelectionBusy } from './selection-model.mjs';
 import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, createProjectSearchIndex, createTaskSearchIndex, filterProjectIndex, filterTaskIndex, paginateWorkspaceItems } from './workspace-list-model.mjs';
 import { ProviderSettings } from './provider-settings.jsx';
 import { workbenchConversationId } from './workbench-session.mjs';
@@ -229,7 +232,7 @@ const PROJECT_TEMPLATE_UNAVAILABLE = Object.freeze({
   version: 0,
   name: '模板未加载',
   label: '模板未加载',
-  description: '项目模板由 Studio API 提供；未加载时可先创建不绑定模板的自定义项目。',
+  description: '项目模板由 Studio 提供；未加载时可先创建不绑定模板的自定义项目。',
   defaultName: '自定义创作项目',
   descriptionPrompt: '说明客户、产品、使用渠道或交付目标。',
   recommendedTasks: [],
@@ -543,12 +546,13 @@ function surfaceTitle(view, project = null) {
     runs: '生成历史',
     deliveries: '资产交付',
     library: '规则资料',
-    guide: '创作手册'
+    guide: '创作手册',
+    troubleshoot: '疑难处理'
   })[view] || '项目管理';
 }
 
 function surfaceEyebrow(view, hasProject) {
-  if (['library', 'shared-assets', 'guide'].includes(view)) return '辅助';
+  if (['library', 'shared-assets', 'guide', 'troubleshoot'].includes(view)) return '辅助';
   return hasProject ? '项目工作区' : 'Studio';
 }
 
@@ -557,6 +561,7 @@ function surfaceSubtitle(view, project) {
   if (view === 'library') return '任务类型、风格与品牌规则。';
   if (view === 'shared-assets') return '跨项目复用图片。';
   if (view === 'guide') return '工作流帮助。';
+  if (view === 'troubleshoot') return '出问题时的状态、诊断与恢复指引。';
   if (project) return project.name;
   return '先选择或创建一个项目，再进入创作。';
 }
@@ -791,7 +796,7 @@ function ProjectCreationDialog({ projectTemplates = EMPTY, busy, error, onDismis
       <header><div><p className="eyebrow">Studio 直接创建</p><h2>新建项目</h2><span>项目模板来自 Studio；这里只是把信息记下来。</span></div><IconButton label="关闭新建项目" onClick={onDismiss}><X size={16} /></IconButton></header>
       <ExecutionBoundaryNote />
       <section className="creation-section"><h3>选择项目类型</h3><div className="creation-choice-grid" role="radiogroup" aria-label="项目类型">{availableTemplates.map((option) => <button type="button" key={option.id || 'no-template'} className={templateId === option.id ? 'is-active' : ''} aria-pressed={templateId === option.id} onClick={() => chooseTemplate(option)}><b>{projectTemplateName(option)}</b><span>{option.description}</span></button>)}</div></section>
-      <section className="creation-section creation-selection-detail"><div><b>{selectedName}</b><span>{selectedTemplate.description}</span></div><div className="creation-detail-grid"><span><strong>模板来源</strong>{templateBound ? 'Studio API · 模板 v' + (selectedTemplate.version || 1) : '未绑定模板'}</span><span><strong>推荐任务</strong>{listItems(selectedTemplate.recommendedTasks).join('、') || '根据项目说明由 Agent 判断'}</span><span><strong>推荐画幅</strong>{listItems(selectedTemplate.aspectRatios).join('、') || '由 Agent 判断'}</span><span><strong>参考提示</strong>{selectedTemplate.referenceHint || '可在创建后从当前项目素材中选择参考。'}</span></div><CreationInfoList label="优先准备的素材" items={materialNeeds} /></section>
+      <section className="creation-section creation-selection-detail"><div><b>{selectedName}</b><span>{selectedTemplate.description}</span></div><div className="creation-detail-grid"><span><strong>模板来源</strong>{templateBound ? 'Studio 内置 · 模板 v' + (selectedTemplate.version || 1) : '未绑定模板'}</span><span><strong>推荐任务</strong>{listItems(selectedTemplate.recommendedTasks).join('、') || '根据项目说明由 Agent 判断'}</span><span><strong>推荐画幅</strong>{listItems(selectedTemplate.aspectRatios).join('、') || '由 Agent 判断'}</span><span><strong>参考提示</strong>{selectedTemplate.referenceHint || '可在创建后从当前项目素材中选择参考。'}</span></div><CreationInfoList label="优先准备的素材" items={materialNeeds} /></section>
       <section className="creation-section"><h3>基础信息</h3><label><span>项目名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：茶饮新品夏季视觉" autoFocus /><small>{templateBound ? '已按 Studio 模板填入默认名称，可直接改成客户、品牌或产品名。' : '模板未加载时创建的项不绑定官方模板，后续仍可由会话补充信息。'}</small></label><label><span>项目说明</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={selectedTemplate.descriptionPrompt || '说明客户、产品、使用渠道或交付目标。'} /></label><CreationSuggestionChips label="项目说明示例" options={descriptionExamples} onChoose={setDescription} /></section>
       <section className="creation-summary"><p className="eyebrow">创建摘要</p><strong>{name.trim() || '未填写项目名称'}</strong><span>{templateBound ? selectedName + ' · 模板 v' + (selectedTemplate.version || 1) : '不绑定项目模板'}</span><span>{description.trim() || selectedTemplate.description}</span></section>
       <p className="creation-hint">创建后会打开该项目，并设为当前 Studio 标签页的对象；后续可在项目工作区继续新建任务、导入素材或整理计划。</p><CreationError error={error} /><footer><button type="button" className="outline-button" onClick={onDismiss} disabled={busy}>取消</button><button type="submit" className="command-button" disabled={busy || !name.trim()}>{busy ? '正在创建' : '创建项目'}</button></footer>
@@ -1591,8 +1596,6 @@ function App() {
   const [runtimeRepairing, setRuntimeRepairing] = useState(false);
   const [recoveryPhase, setRecoveryPhase] = useState('ready');
   const [pendingDerivedAfterTask, setPendingDerivedAfterTask] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0, canvasLayout: 0 });
   const inputRef = useRef(null);
@@ -2284,62 +2287,6 @@ function App() {
     });
   }, [session, selectedProject, selectedTask, selectedRound, activeTaskId, activeRoundId]);
 
-  const upload = async (files) => {
-    const images = imageFilesFrom(files);
-    if (!images.length) return;
-
-    const failed = [];
-    const { need: uploadMaterialNeed, preset: uploadMaterialPreset } = resolveUploadMaterial({ selectedImportNeed, contextMaterialNeeds, assetScope });
-    const importedAssets = [];
-    try {
-      setUploading(true); setUploadProgress({ completed: 0, total: images.length }); setError(''); setNotice('');
-      await mapWithConcurrency(images, async (file) => {
-        try {
-          const data = await api('/api/assets/import', {
-            method: 'POST',
-            idempotencyKey: uniqueKey('upload'),
-            contentType: file.type || 'application/octet-stream',
-            headers: {
-              'x-daoge-filename': encodeURIComponent(file.name),
-              ...(uploadTarget ? { 'x-daoge-target-type': uploadTarget.type, 'x-daoge-target-id': uploadTarget.id } : {}),
-              ...(uploadMaterialNeed ? { 'x-daoge-material-need': encodeURIComponent(uploadMaterialNeed), 'x-daoge-material-usage': uploadMaterialPreset.usage } : {})
-            },
-            rawBody: file
-          });
-          if (data?.id) importedAssets.push(data);
-        } catch (nextError) {
-          failed.push({ name: file.name, message: errorMessageForDisplay(nextError, '无法导入图片。') });
-        }
-        setUploadProgress((current) => advanceUploadProgress(current, images.length));
-      }, ASSET_IMPORT_CONCURRENCY);
-      await refresh();
-      let referenceSaved = false;
-      const usage = uploadMaterialPreset?.usage || 'subject';
-      if (shouldLinkImportedToRound({ succeeded: images.length - failed.length, importedCount: importedAssets.length, selectedRound, assetScope })) {
-        const note = uploadMaterialNeed ? materialNeedReferenceNote(uploadMaterialNeed, usage) : '本轮直接导入 · ' + (REFERENCE_USAGE_LABELS[usage] || usage);
-        referenceSaved = await saveRoundReferenceMaterials(mergeImportedReferences({ existing: referenceMaterials, importedAssets, usage, note }), false);
-      }
-      const outcome = uploadOutcome({ total: images.length, failed, savedAsReference: referenceSaved });
-      if (outcome.notice) setNotice(outcome.notice);
-      if (outcome.error) setError(outcome.error);
-    } finally {
-      setUploading(false); setUploadProgress(null); if (inputRef.current) inputRef.current.value = '';
-    }
-  };
-  const importDerivedMaskAsset = async (file) => {
-    const problem = maskImportProblem({ selectedProject, file });
-    if (problem) throw new Error(problem);
-    const data = await api('/api/assets/import', {
-      method: 'POST',
-      idempotencyKey: uniqueKey('mask-upload'),
-      contentType: file.type || 'application/octet-stream',
-      headers: maskImportHeaders({ projectId: selectedProject.id, file }),
-      rawBody: file
-    });
-    await refresh();
-    return data;
-  };
-
   const review = async (assetId, decision, feedback = {}) => {
     try {
       await api('/api/assets/' + encodeURIComponent(assetId) + '/review', { method: 'POST', idempotencyKey: uniqueKey('review'), body: { decision, taskId: selectedTask?.id, roundId: selectedRound?.id, feedback } });
@@ -2364,13 +2311,13 @@ function App() {
   const restore = async (assetId) => { try { await api('/api/assets/' + encodeURIComponent(assetId) + '/restore', { method: 'POST', idempotencyKey: uniqueKey('restore'), body: {} }); await refresh(); } catch (nextError) { reportRequestError(nextError, '无法恢复资产。', { operation: 'restore-asset', phase: 'committing' }); } };
   const applyProjectSelection = (selection) => {
     const nextAssets = selection?.assets || EMPTY;
-    const ids = new Set(nextAssets.map((asset) => asset.id));
+    const ids = selectionIdSet(selection);
     selectedAssetIdsRef.current = ids;
     setSelectedAssetIds(ids);
     setSelectionAssets(nextAssets);
   };
   const markSelectionBusy = (assetIds, busy) => {
-    for (const assetId of assetIds) { if (busy) selectionBusyIdsRef.current.add(assetId); else selectionBusyIdsRef.current.delete(assetId); }
+    selectionBusyIdsRef.current = nextBusySet(selectionBusyIdsRef.current, assetIds, busy);
     setSelectionBusyIds(new Set(selectionBusyIdsRef.current));
   };
   const enqueueSelectionWrite = (projectId, assetIds, request, fallbackMessage) => {
@@ -2378,32 +2325,32 @@ function App() {
     markSelectionBusy(assetIds, true);
     const operation = selectionWriteQueue.current.catch(() => undefined).then(async () => {
       const data = await request();
-      if (selectionProjectIdRef.current === projectId && epoch === selectionMutationEpoch.current) applyProjectSelection(data.selection);
+      if (isSelectionWriteCurrent({ projectId, currentProjectId: selectionProjectIdRef.current, epoch, currentEpoch: selectionMutationEpoch.current })) applyProjectSelection(data.selection);
     });
     selectionWriteQueue.current = operation.catch(() => undefined);
     void operation.catch(async (nextError) => {
-      if (selectionProjectIdRef.current !== projectId || epoch !== selectionMutationEpoch.current) return;
+      if (!isSelectionWriteCurrent({ projectId, currentProjectId: selectionProjectIdRef.current, epoch, currentEpoch: selectionMutationEpoch.current })) return;
       reportRequestError(nextError, fallbackMessage, { operation: 'save-asset-selection', phase: 'committing' });
       await refresh();
-    }).finally(() => { if (selectionProjectIdRef.current === projectId) markSelectionBusy(assetIds, false); });
+    }).finally(() => { if (shouldClearSelectionBusy({ projectId, currentProjectId: selectionProjectIdRef.current })) markSelectionBusy(assetIds, false); });
   };
   const setAssetSelection = (assetId, selected) => {
     if (!selectedProject || selectionBusyIdsRef.current.has(assetId)) return;
-    const nextIds = new Set(selectedAssetIdsRef.current);
-    if (selected) nextIds.add(assetId); else nextIds.delete(assetId);
+    const nextIds = nextSelectedIds(selectedAssetIdsRef.current, [assetId], selected);
     selectedAssetIdsRef.current = nextIds;
     setSelectedAssetIds(new Set(nextIds));
-    setSelectionAssets((current) => selected ? (current.some((asset) => asset.id === assetId) ? current : [...current, assetById.get(assetId)].filter(Boolean)) : current.filter((asset) => asset.id !== assetId));
+    setSelectionAssets((current) => mergeSelectionAssets(current, [assetById.get(assetId)], selected));
     const projectId = selectedProject.id;
     enqueueSelectionWrite(projectId, [assetId], () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/assets/' + encodeURIComponent(assetId), { method: 'POST', idempotencyKey: uniqueKey('asset-selection'), body: { selected } }), '无法保存当前选片。');
   };
   const toggleSelection = (assetId) => setAssetSelection(assetId, !selectedAssetIdsRef.current.has(assetId));
   const markAsDeliverable = async (asset) => {
-    if (!selectedProject) return;
-    if (selectedAssetIdsRef.current.has(asset.id)) { toggleSelection(asset.id); return; }
+    const intent = deliverableIntent({ hasProject: Boolean(selectedProject), isSelected: selectedAssetIdsRef.current.has(asset.id) });
+    if (intent === 'skip') return;
+    if (intent === 'deselect') { toggleSelection(asset.id); return; }
     const projectId = selectedProject.id;
     enqueueSelectionWrite(projectId, [asset.id], async () => {
-      if (asset.review?.decision !== 'keep') await api('/api/assets/' + encodeURIComponent(asset.id) + '/review', { method: 'POST', idempotencyKey: uniqueKey('delivery-keep'), body: { decision: 'keep' } });
+      if (needsKeepReview(asset)) await api('/api/assets/' + encodeURIComponent(asset.id) + '/review', { method: 'POST', idempotencyKey: uniqueKey('delivery-keep'), body: { decision: 'keep' } });
       return api('/api/projects/' + encodeURIComponent(projectId) + '/selection/assets/' + encodeURIComponent(asset.id), { method: 'POST', idempotencyKey: uniqueKey('delivery-select'), body: { selected: true } });
     }, '无法将图片选为成果。');
   };
@@ -2416,31 +2363,33 @@ function App() {
     const projectId = selectedProject.id;
     enqueueSelectionWrite(projectId, selected.map((asset) => asset.id), async () => {
       let latest = { assets: EMPTY };
-      for (let offset = 0; offset < selected.length; offset += 500) {
-        const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('asset-selection-clear'), body: { assetIds: selected.slice(offset, offset + 500).map((asset) => asset.id), selected: false } });
-        latest = data.selection || latest;
+      for (const batch of chunkAssetIds(selected.map((asset) => asset.id))) {
+        const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('asset-selection-clear'), body: { assetIds: batch, selected: false } });
+        latest = latestSelection(latest, data.selection);
       }
       return { selection: latest };
     }, '无法清空当前选片。');
   };
   const setPageSelection = (selected) => {
     if (!selectedProject || !visibleAssets.length || pageSelectionBusy) return;
-    const candidates = visibleAssets.filter((asset) => selectedAssetIdsRef.current.has(asset.id) !== selected);
+    const candidates = selectionCandidates(visibleAssets, selectedAssetIdsRef.current, selected);
     if (!candidates.length) return;
     const projectId = selectedProject.id;
     const candidateIds = candidates.map((asset) => asset.id);
-    enqueueSelectionWrite(projectId, candidateIds, () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('page-selection'), body: { assetIds: candidateIds, selected, keepAssetIds: selected ? candidates.filter((asset) => asset.review?.decision !== 'keep').map((asset) => asset.id) : [] } }), '无法更新本页选片。');
+    enqueueSelectionWrite(projectId, candidateIds, () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('page-selection'), body: { assetIds: candidateIds, selected, keepAssetIds: keepCandidateIds(candidates, selected) } }), '无法更新本页选片。');
   };
   const setAssetsSelection = (assetIds, selected) => {
     if (!selectedProject || !assetIds.length) return;
-    const uniqueIds = [...new Set(assetIds)].filter(Boolean);
-    const nextIds = new Set(selectedAssetIdsRef.current);
-    for (const assetId of uniqueIds) { if (selected) nextIds.add(assetId); else nextIds.delete(assetId); }
+    const uniqueIds = normalizeAssetIds(assetIds);
+    const nextIds = nextSelectedIds(selectedAssetIdsRef.current, uniqueIds, selected);
     selectedAssetIdsRef.current = nextIds;
     setSelectedAssetIds(new Set(nextIds));
-    setSelectionAssets((current) => selected ? [...current, ...uniqueIds.map((assetId) => assetById.get(assetId)).filter((asset) => asset && !current.some((item) => item.id === asset.id))] : current.filter((asset) => !uniqueIds.includes(asset.id)));
+    setSelectionAssets((current) => mergeSelectionAssets(current, uniqueIds.map((assetId) => assetById.get(assetId)), selected));
     const projectId = selectedProject.id;
-    enqueueSelectionWrite(projectId, uniqueIds, () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('canvas-selection'), body: { assetIds: uniqueIds, selected, keepAssetIds: selected ? uniqueIds.filter((assetId) => assetById.get(assetId)?.review?.decision !== 'keep') : [] } }), '无法更新创作谱系选片。');
+    // keepAssetIds 只回答「补不补 keep 评审」：查不到的资产按「没有 keep」处理（与原实现一致），
+    // 所以这里给它一个只带 id 的占位，避免 id 被丢掉 —— 但并进清单时不能塞占位，那是上一行的事。
+    const keepEntries = uniqueIds.map((assetId) => assetById.get(assetId) || { id: assetId });
+    enqueueSelectionWrite(projectId, uniqueIds, () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('canvas-selection'), body: { assetIds: uniqueIds, selected, keepAssetIds: keepCandidateIds(keepEntries, selected) } }), '无法更新创作谱系选片。');
   };
   const batchReview = async (assetIds, decision) => {
     try {
@@ -2749,6 +2698,12 @@ function App() {
     setReferenceError('');
   };
   const saveRoundReferenceMaterials = async (materials, close = true) => saveReferenceMaterialsForRound(selectedRound, materials, close);
+  // 导入要等 saveRoundReferenceMaterials 就位才能接线：它得把导入结果并进本轮参考素材，
+  // 而那件事又依赖上面的轮次保存逻辑 —— 所以这个 hook 的调用点排在这里，不在原来的位置。
+  const { uploading, uploadProgress, upload, importDerivedMaskAsset } = useAssetImport({
+    api, refresh, uniqueKey, uploadTarget, assetScope, selectedImportNeed, contextMaterialNeeds,
+    selectedProject, selectedRound, referenceMaterials, saveRoundReferenceMaterials, setError, setNotice, inputRef
+  });
   const addAssetsToRoundReferences = async (round, sourceAssets, usage = 'subject', message = '') => {
     const materialMap = new Map(normalizeReferenceMaterials(round?.plan || {}).map((item) => [item.assetId, item]));
     for (const asset of sourceAssets) materialMap.set(asset.id, { assetId: asset.id, usage, note: REFERENCE_USAGE_LABELS[usage] || usage });
@@ -3158,7 +3113,8 @@ function App() {
     library: () => <CreativeLibrary taskTypes={taskTypes} styleKits={styleKits} brandKits={brandKits} sharedAssets={sharedAssets} onOpenProjects={() => navigateRoute({ view: 'projects' })} onOpenSharedAssets={() => navigateRoute({ view: 'shared-assets' })} />,
     'shared-assets': () => <SharedAssets assets={sharedAssets} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onOpenProjects={() => navigateRoute({ view: 'projects' })} />,
     deliveries: () => <CreatorDelivery project={selectedProject} selection={deliverySelection} deliveryName={deliveryName} deliveryCreating={deliveryCreating} completion={deliveryCompletion} frozen={Boolean(deliveryCompletion || deliveryCreating)} onDeliveryNameChange={setDeliveryName} onCreate={() => void completeDelivery()} onOpenAssets={() => navigateRoute({ view: 'assets', assetScope: 'project', taskId: null, roundId: null, compareRoundIds: [], runId: null })} selectedAssets={deliveryFlowAssets} deliveries={deliveries} assets={assets} deliveryBusyId={deliveryBusyId} onDeliveryAction={deliveryAction} onRemoveSelection={(asset) => toggleSelection(asset.id)} onDownload={downloadAsset} onCopy={copyAsset} onArchiveProject={downloadProjectArchive} onArchiveDelivery={downloadDeliveryArchive} batches={deliveryBatches} batchName={batchName} selectedDeliveryIds={selectedDeliveryIds} batchBusy={batchBusy} onBatchNameChange={setBatchName} onToggleDelivery={toggleBatchDelivery} onBatchAction={batchAction} />,
-    trash: () => renderAssetsView()
+    trash: () => renderAssetsView(),
+    troubleshoot: () => <Troubleshoot request={api} studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onRefresh={() => void refresh()} onCopyDiagnostic={() => void copyRuntimeDiagnostic()} onRepair={() => void repairRuntime()} />
   };
   const renderActiveView = viewRenderers[routeView];
 

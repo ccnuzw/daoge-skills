@@ -34,6 +34,7 @@
 | `端点` | 收回 | creator | 服务地址 |
 | `daemon` | 收回 | creator | 后台服务 |
 | `Worker` | 收回 | creator | 后台任务 / 处理进程 |
+| `处理池` | 收回 | creator | 后台任务 |
 | `JSON` | 收回 | creator | 原始数据 |
 | `事实源` | 收回 | creator | Studio 里的正式数据 |
 | `毫秒` | 收回 | creator | 换算成秒 |

@@ -27,6 +27,7 @@ export const TERMS = Object.freeze([
   { internal: '端点', level: '收回', scope: 'creator', creator: '服务地址', forbidInCreator: true },
   { internal: 'daemon', level: '收回', scope: 'creator', creator: '后台服务', forbidInCreator: true },
   { internal: 'Worker', level: '收回', scope: 'creator', creator: '后台任务 / 处理进程', forbidInCreator: true },
+  { internal: '处理池', level: '收回', scope: 'creator', creator: '后台任务', forbidInCreator: true },
   { internal: 'JSON', level: '收回', scope: 'creator', creator: '原始数据', forbidInCreator: true },
   { internal: '事实源', level: '收回', scope: 'creator', creator: 'Studio 里的正式数据', forbidInCreator: true },
   { internal: '毫秒', level: '收回', scope: 'creator', creator: '换算成秒', forbidInCreator: true },
@@ -55,6 +56,19 @@ export const TERMS = Object.freeze([
   { internal: 'Profile', level: '保留', scope: 'config', creator: '生成服务配置', hint: 'Workbench 里的生成服务设置项' },
   { internal: 'API', level: '保留', scope: 'config' }
 ]);
+
+// config 面专属术语。
+//
+// scope 说的是「这个词属于哪个面」，所以它天然蕴含「不许飘到别的面去」—— 但这条含义
+// 此前只有声明、没有执行：scope 字段只在结构自检里被检查「取值合法」，没有任何断言去拦
+// 「Profile 出现在左侧栏」这类跨面泄漏。于是「Profile 只在配置面」是一句注释，不是一条规则。
+// 补上之后，creator 面的可见文案里出现配置面术语会直接 fail。
+//
+// 与 level 的分工：level 管「creator 面怎么处理这个词」，scope 管「它能不能出现在 creator 面」。
+// 一个词标了 scope: 'config'，它的 level 在 creator 语境下就没有定义域 —— 不要拿 level 兜这件事。
+export function configFaceTerms() {
+  return TERMS.filter((term) => term.scope === 'config').map((term) => term.internal);
+}
 
 // 技术详情层白名单。
 // 工程词在「技术详情」里是允许的（视觉隔离 + 按需展开 + 每条值配一句人话且可复制），

@@ -1,4 +1,4 @@
-import { Activity, BookOpen, CloudOff, Copy, FolderKanban, GitFork, Image, Images, Library, PackageCheck, RefreshCw, Server } from 'lucide-react';
+import { Activity, BookOpen, CloudOff, Copy, FolderKanban, GitFork, Image, Images, Library, LifeBuoy, PackageCheck, RefreshCw, Server } from 'lucide-react';
 import { runtimeHealthPresentation } from './runtime-health.mjs';
 
 const PROJECT_CONTEXT_RESET = { taskId: null, roundId: null, compareRoundIds: [], runId: null };
@@ -15,7 +15,8 @@ const NAVIGATION_ITEMS = {
 // 辅助区。这两个视图此前各自只在创作手册里有一个按钮，等于不可达；现在给它们真入口。
 const AUX_ITEMS = [
   { view: 'library', label: '规则资料', hint: '任务类型、风格与品牌规则', Icon: Library, changes: PROJECT_CONTEXT_RESET },
-  { view: 'shared-assets', label: '共享素材', hint: '跨项目复用图片', Icon: Images, changes: PROJECT_CONTEXT_RESET }
+  { view: 'shared-assets', label: '共享素材', hint: '跨项目复用图片', Icon: Images, changes: PROJECT_CONTEXT_RESET },
+  { view: 'troubleshoot', label: '疑难处理', hint: '状态、数据体检与恢复', Icon: LifeBuoy, changes: PROJECT_CONTEXT_RESET }
 ];
 const WORKBENCH_ACTIVE_VIEWS = new Set(['projects']);
 // 生成历史属于创作过程，从任务页签进入时让「创作平台」保持高亮，避免左侧一整列无高亮。
@@ -32,7 +33,7 @@ function ProviderStatusCard({ provider, onOpen }) {
   const reconfigurationPending = provider?.reconfigurationPending === true;
   const tone = !configured ? 'danger' : reconfigurationPending ? 'warning' : 'ready';
   const title = !configured ? '生成配置未就绪' : reconfigurationPending ? '配置正在热加载' : '生成配置已就绪';
-  const detail = configured ? reconfigurationPending ? '后台服务正在切换对应的处理进程' : [provider.profileName, provider.model].filter(Boolean).join(' · ') || '活动 Profile 可用' : provider?.missing?.includes('active_profile') ? '请先创建并激活 Profile' : '补全模型、服务地址或密钥';
+  const detail = configured ? reconfigurationPending ? '后台服务正在切换对应的处理进程' : [provider.profileName, provider.model].filter(Boolean).join(' · ') || '生成服务配置可用' : provider?.missing?.includes('active_profile') ? '请先创建并启用生成服务配置' : '补全模型、服务地址或密钥';
   const Icon = configured ? Server : CloudOff;
   return <button type="button" className={'rail-status-card is-' + tone} onClick={onOpen} title={title + '：' + detail} aria-label={title + '，打开生成服务设置'}>
     <span className="rail-status-icon"><Icon size={16} aria-hidden="true" /></span>

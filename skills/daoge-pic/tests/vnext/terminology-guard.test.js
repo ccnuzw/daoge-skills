@@ -145,6 +145,23 @@ test('创作者面的可见文案里也没有「译好」级术语（技术详�
   assert.deepEqual(violations, [], '这些创作者面文案还在用内部说法，换成术语单里的创作者说法：\n' + violations.join('\n'));
 });
 
+test('配置面专属术语不许出现在创作者面的可见文案里', () => {
+  // 这条补的是一个「写了没人读」的字段：术语单给 Profile 标了 scope: 'config'，
+  // 但守卫只读 forbidInCreator 和 level，scope 从头到尾没有任何断言在执行 ——
+  // 结果是左侧栏挂着「请先创建并激活 Profile」，而测试全绿。
+  const configOnly = terminology.configFaceTerms();
+  assert.ok(configOnly.length > 0, 'scope: config 的术语一条都没有，检查术语单是不是被改坏了');
+
+  const violations = [];
+  for (const name of CREATOR_FACE) {
+    for (const copy of visibleCopyStrings(read(name))) {
+      const hits = configOnly.filter((word) => copy.includes(word));
+      if (hits.length) violations.push(name + ' | ' + hits.join(',') + ' | ' + JSON.stringify(copy));
+    }
+  }
+  assert.deepEqual(violations, [], '这些创作者面文案用了配置面专属术语，换成人话，或把它留在配置面：\n' + violations.join('\n'));
+});
+
 test('技术详情层白名单没有悄悄长成一整块', () => {
   const allowed = [...terminology.ADVANCED_DETAILS_ALLOWED_COPY];
   // 白名单只服务「技术详情」这一层：每条都必须是「预检」相关的短字符串，

@@ -20,7 +20,9 @@ test('Provider settings UI keeps secrets write-only and exposes accessible expli
   // 「热加载」是 daemon 的实现细节；人话说法是「后台自动换用新配置」，措辞变了但语义不变。
   assert.match(source, /后台会自动换用新配置/);
   assert.match(source, /端点信任模式/);
-  assert.match(source, /Profile 级安全限额/);
+  // 限额区的标签按「本系统自己的旋钮用纯人话」处理：这几个参数没有外部文档要照抄，
+  // 保留「并发 / 超时 ms」这类词不减少认知负荷，只是净增负担。
+  assert.match(source, /这组配置的用量上限/);
   assert.match(source, /连接测试会真的访问生成服务，但不会出图/);
   assert.match(source, /Descriptor v/);
   assert.doesNotMatch(readSource('web/src/provider-settings.jsx'), /window\.(?:alert|confirm|prompt)/);
