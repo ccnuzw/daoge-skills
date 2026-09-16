@@ -86,7 +86,10 @@ test('去注释只处理块注释，且不会碰字符串里的内容', () => {
 });
 
 test('readFrontendSource 覆盖前端全部代码文件，且不含类型声明与样式表', () => {
-  const files = frontendFiles().map((file) => path.relative(SKILL_ROOT, file));
+  // ⚠️ path.relative 在 Windows 上返回 `web\src\…`（反斜杠），下面的断言与错误消息都按 `/` 写，
+  // 所以先归一到 POSIX 分隔符 —— 否则第一个文件就会让这条断言在 Windows 上必红。
+  // 归一不影响下面的顺序断言：排序发生在绝对路径上，前缀相同，转换后顺序不变。
+  const files = frontendFiles().map((file) => path.relative(SKILL_ROOT, file).split(path.sep).join('/'));
   assert.ok(files.length >= 50, '前端文件应该有几十个，少了说明扫描规则漏了：' + files.length);
   for (const file of files) assert.match(file, /^web\/src\/.+\.(?:js|jsx|mjs)$/, file);
   assert.ok(!files.some((file) => file.endsWith('.d.ts')), '类型声明不是运行时代码，不该进断言范围');
