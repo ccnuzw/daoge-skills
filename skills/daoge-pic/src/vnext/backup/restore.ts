@@ -4,6 +4,7 @@ import path from 'node:path';
 import { BackupManifestEntry, BackupManifestStudioIdentityInput, BackupManifestValidation, validateBackupManifest } from './manifest';
 import { acquireDaemonLock, DaemonLockBusyError, type DaemonLockHandle } from '../runtime/daemon-lock';
 import { STUDIO_SCHEMA_VERSION } from '../studio/database';
+import { sameWorkspaceRoot } from '../studio/workspace';
 
 /**
  * Restore is plan-only by default. Applying a restore is an offline transaction:
@@ -343,7 +344,14 @@ export function recoverPendingBackupRestore(targetRoot: string): { recovered: nu
   try { names = fs.readdirSync(root).filter((name) => /^\.daoge-restore-[A-Za-z0-9_-]+\.journal\.json$/.test(name)); } catch { throw new RestoreApplyFailure('recovery_failed', 'Unable to inspect pending restore journals.'); }
   for (const name of names) {
     const journalPath = path.join(root, name); const journal = readJournal(journalPath);
-    if (!journal || safeRoot(journal.targetRoot) !== root || fs.realpathSync.native(path.dirname(journal.journalPath)) !== root || path.basename(journal.journalPath) !== name) throw new RestoreApplyFailure('recovery_failed', 'Pending restore journal is invalid.');
+    // ⚠️ 路径比较必须走 sameWorkspaceRoot，不要自己写 `===`。它对 win32 做了大小写归一
+    // （realpathSync 在那边可能保留输入的大小写形态），并统一用 realpathSync.native。
+    // 这里原本是 `fs.realpathSync.native(dir) !== root`：少了归一这一步，于是同一份完好的待恢复记录
+    // 在 Windows 上被判成损坏 —— 而原文其实好端端躺在暂存目录里。macOS/Linux 大小写敏感，本机永远测不出来。
+    // safeRoot 仍要保留：它管的是「必须是真实目录、祖先无符号链接」，与「是不是同一个根」是两件事。
+    const recordedTarget = journal ? safeRoot(journal.targetRoot) : null;
+    const recordedJournalDirectory = journal ? safeRoot(path.dirname(journal.journalPath)) : null;
+    if (!journal || !recordedTarget || !sameWorkspaceRoot(recordedTarget, root) || !recordedJournalDirectory || !sameWorkspaceRoot(recordedJournalDirectory, root) || path.basename(journal.journalPath) !== name) throw new RestoreApplyFailure('recovery_failed', 'Pending restore journal is invalid.');
     if (journal.state === 'applied') { try { cleanupJournalArtifacts(journal); recovered += 1; } catch { throw new RestoreApplyFailure('recovery_failed', 'Unable to clean an applied restore journal.'); } continue; }
     if (!rollbackJournal(journal)) throw new RestoreApplyFailure('recovery_failed', 'Unable to roll back a pending restore; staging and originals were retained.');
     recovered += 1;

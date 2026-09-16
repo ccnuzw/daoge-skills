@@ -73,7 +73,13 @@ test('daemon identity is created once, kept at 0600, and repaired field by field
     for (const value of [first.capability, first.sessionToken, first.gateSecret]) assert.match(value, /^[A-Za-z0-9_-]{43,}$/);
     assert.notEqual(first.capability, first.sessionToken);
     assert.equal(first.version, 1);
-    assert.equal(fs.statSync(path.join(runtimeDir, DAEMON_IDENTITY_FILE)).mode & 0o777, 0o600);
+    // ⚠️ Windows 没有 POSIX 权限位：fs.chmod 在那边只动只读位，mode 恒为 0666。
+    // 实现里那句注释说的就是这个（"platforms without chmod keep the umask-derived mode"）。
+    // 所以这条断言只在 POSIX 上成立 —— 那边才是 0600 真正生效、也真正挡得住同机其他用户的地方；
+    // Windows 上这份身份文件的保护来自用户目录本身的 ACL，不是这一位。
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(path.join(runtimeDir, DAEMON_IDENTITY_FILE)).mode & 0o777, 0o600);
+    }
 
     fs.writeFileSync(path.join(runtimeDir, DAEMON_IDENTITY_FILE), JSON.stringify({ version: 1, capability: 'too-short', sessionToken: first.sessionToken, gateSecret: first.gateSecret }));
     const repaired = loadOrCreateDaemonIdentity(runtimeDir);

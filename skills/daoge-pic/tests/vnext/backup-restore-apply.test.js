@@ -287,3 +287,13 @@ test('the public backup-restore CLI uses the offline helper and returns nonzero 
     fs.rmSync(target, { recursive: true, force: true });
   }
 });
+
+test('待恢复记录的校验走 sameWorkspaceRoot，而不是手写 realpath 比较', () => {
+  // 守的是一个已经踩过的坑：原先写的是 `fs.realpathSync.native(dir) !== root`，少了 win32 的大小写归一，
+  // 于是同一份完好的待恢复记录在 Windows 上被判成损坏 —— 而原文其实好端端躺在暂存目录里。
+  // 这条**行为上测不出来**（macOS 大小写敏感、realpath 形态稳定，本机永远绿），只能靠源码守卫钉住：
+  // v5.14.0 与 v5.14.1 的 Windows CI 四个 job 全栽在这里。
+  const source = fs.readFileSync(path.join(__dirname, '../../src/vnext/backup/restore.ts'), 'utf8');
+  assert.match(source, /sameWorkspaceRoot\(/, '待恢复记录的路径比较必须走 sameWorkspaceRoot');
+  assert.doesNotMatch(source, /realpathSync\.native\(path\.dirname/, '不要在恢复校验里手写 realpath 比较');
+});

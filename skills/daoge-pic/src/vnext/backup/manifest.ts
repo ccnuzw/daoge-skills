@@ -191,8 +191,13 @@ function normalizeStudioIdentity(input: BackupManifestStudioIdentityInput | Back
 }
 
 function normalizeRelativePath(value: unknown): RelativePathResult {
-  if (typeof value !== 'string' || !value || value.includes('\0') || value.includes('\\')) return { path: null, issue: 'invalid' };
+  if (typeof value !== 'string' || !value) return { path: null, issue: 'invalid' };
+  // ⚠️ 绝对路径判定必须排在反斜杠判定**之前**。Windows 的绝对路径（`D:\a\b`）同时含反斜杠，
+  // 先判反斜杠会把它误报成「path is invalid」，而它真正的问题是「必须是相对路径」——
+  // 这两种说法对调用方完全不同（一个是格式坏了，一个是位置不对）。Linux/macOS 的
+  // path.isAbsolute 不认盘符，所以这里补一条显式正则，让三个平台给同一个答案。
   if (path.isAbsolute(value) || /^[A-Za-z]:/.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) return { path: null, issue: 'absolute' };
+  if (value.includes('\0') || value.includes('\\')) return { path: null, issue: 'invalid' };
   const segments = value.split('/');
   if (!segments.length || segments.some((segment) => !segment || segment === '.' || segment === '..')) return { path: null, issue: 'traversal' };
   return { path: segments.join('/') };

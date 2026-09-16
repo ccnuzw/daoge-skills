@@ -67,6 +67,11 @@ test('backup manifest rejects traversal, absolute, symlink, directory, and sensi
     const make = (entry) => createBackupManifest({ workspaceRoot: root, studio, entries: [entry] });
     assert.throws(() => make({ path: '../outside.txt', category: 'reference' }), /relative|traverse/i);
     assert.throws(() => make({ path: path.join(root, 'safe.txt'), category: 'reference' }), /relative|workspace/i);
+    // Windows 形态的绝对路径：在**任何平台**上都必须说「必须是相对路径」，而不是「path is invalid」。
+    // 反斜杠判定若排在绝对路径判定之前，D:\a\b 会被误报成「格式坏了」——两者对调用方的意思完全不同。
+    // v5.14.0/v5.14.1 的 Windows CI 就栽在这一条（macOS 上 path.join 给的是 / 开头，永远走不到这个分支）。
+    assert.throws(() => make({ path: 'D:\\a\\safe.txt', category: 'reference' }), /relative|workspace/i);
+    assert.throws(() => make({ path: 'C:/Users/x/safe.txt', category: 'reference' }), /relative|workspace/i);
     assert.throws(() => make({ path: 'linked.txt', category: 'reference' }), /symbolic|link/i);
     assert.throws(() => make({ path: 'directory', category: 'reference' }), /regular|file/i);
     assert.throws(() => make({ path: 'safe.txt', category: 'secret' }), /category|supported/i);
