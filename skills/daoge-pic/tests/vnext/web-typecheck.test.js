@@ -3,6 +3,9 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// source-text-exempt: 这一组用例找的是 @ts-ignore 之类的逃逸注释，而 readSource() 会先把块注释剥掉
+// —— 用它就等于把要抓的东西洗没了。这里必须读原始字节。
+//
 // 前端（web/src）是 JS + JSX，靠 tsconfig.web.json 的 checkJs 做渐进式类型检查。
 // 这个守卫不跑 tsc（跑一次要十几秒，交给 `npm run typecheck:web` 卡在构建里），
 // 它守的是「不能悄悄把检查关掉」：配置不能被降级，也不能用逃逸注释把错误埋掉。

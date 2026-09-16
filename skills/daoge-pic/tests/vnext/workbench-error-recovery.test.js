@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const sourcePath = path.join(__dirname, '../../web/src/main.jsx');
+const { readSource } = require('./source-text');
 
 function blockBetween(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -14,7 +14,7 @@ function blockBetween(source, start, end) {
 }
 
 test('Workbench session and provenance reads abort superseded requests before committing state', () => {
-  const source = fs.readFileSync(sourcePath, 'utf8');
+  const source = readSource('web/src/main.jsx');
   const session = blockBetween(source, 'const refreshWorkbenchSession = useCallback(async (sessionId) => {', 'const refreshStudio =');
   const provenance = blockBetween(source, 'const inspectAsset = async (assetId) => {', 'const downloadAsset =');
 
@@ -29,8 +29,8 @@ test('Workbench session and provenance reads abort superseded requests before co
 });
 
 test('Workbench async failures use classified safe error state instead of raw thrown values', () => {
-  const source = fs.readFileSync(sourcePath, 'utf8');
-  assert.match(source, /function normalizeRequestError\(value, fallback/);
+  const source = readSource('web/src/main.jsx');
+  assert.match(readSource('web/src/error-model.mjs'), /function normalizeRequestError\(value, fallback/);
   assert.match(source, /if \(normalized\.category === 'connection'\) setConnectionError\(normalized\);/);
   assert.match(source, /operation: 'load-lineage-run-items'/);
   assert.doesNotMatch(blockBetween(source, 'const refreshWorkbenchSession = useCallback(async (sessionId) => {', 'const refreshStudio ='), /setError\(nextError \|\|/);
@@ -38,7 +38,7 @@ test('Workbench async failures use classified safe error state instead of raw th
 });
 
 test('API retry callbacks are limited to reads and idempotent mutations', async () => {
-  const source = fs.readFileSync(sourcePath, 'utf8');
+  const source = readSource('web/src/main.jsx');
   const api = blockBetween(source, 'async function api(path, options = {}) {', 'function projectArchiveUrl');
 
   assert.match(api, /const canReplay = readRequest \|\| Boolean\(options\.idempotencyKey\);/);

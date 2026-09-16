@@ -20,6 +20,7 @@ import { bootstrapLocalStudioSession } from './local-auth.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { ConfirmationDialog } from './confirmation-dialog.jsx';
 import { StudioSearch } from './studio-search.jsx';
+import { useProjectQualityMetrics } from './use-project-quality-metrics.mjs';
 import { useStudioSearch } from './use-studio-search.mjs';
 import { createLatestRequestGate, useRouteRefresh } from './use-route-refresh.mjs';
 import { studioEventRefreshPlan, useStudioEvents } from './use-studio-events.mjs';
@@ -37,7 +38,7 @@ import { workbenchConversationId } from './workbench-session.mjs';
 import { CREATIVE_DERIVED_ACTIONS, CREATIVE_DERIVED_ACTION_BY_ID, creativeDerivedActionForPurpose } from './creative-actions.mjs';
 import { installBrowserErrorGuard } from './browser-error-guard.mjs';
 import { redactedRuntimeDiagnostic, runtimeHealthPresentation } from './runtime-health.mjs';
-import { canRetryWorkbenchError, errorPresentation, normalizeWorkbenchError } from './error-model.mjs';
+import { canRetryWorkbenchError, createWorkbenchError, errorMessageForDisplay, errorPresentation, hasWorkbenchErrorMetadata, isAbortError, normalizeRequestError } from './error-model.mjs';
 import './styles.css';
 
 /**
@@ -49,10 +50,6 @@ const EMPTY = [];
 
 installBrowserErrorGuard();
 
-function isAbortError(error) {
-  return error?.name === 'AbortError' || typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError';
-}
-
 function isReadRequest(method) {
   return ['GET', 'HEAD', 'OPTIONS'].includes(method);
 }
@@ -63,19 +60,6 @@ function apiErrorOptions(options, overrides = {}) {
     if (options?.[key] !== undefined) modelOptions[key] = options[key];
   }
   return { ...modelOptions, ...overrides };
-}
-
-function createWorkbenchError(input, options = {}, retry = null) {
-  const normalized = normalizeWorkbenchError(input, options);
-  const error = new Error(normalized.message);
-  Object.assign(error, normalized);
-  if (typeof retry === 'function' && canRetryWorkbenchError(normalized)) Object.defineProperty(error, 'retry', { configurable: true, value: retry });
-  return error;
-}
-function normalizeRequestError(value, fallback, options = {}) {
-  if (hasWorkbenchErrorMetadata(value)) return value;
-  const input = typeof value === 'string' ? { message: value } : value || { message: fallback };
-  return createWorkbenchError(input, options);
 }
 
 
@@ -762,17 +746,6 @@ function WorkspaceContextBar({ project, tasks = EMPTY, task, rounds, selectedRou
     </div>
     <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={onRestoreContext} />
   </div>;
-}
-
-function hasWorkbenchErrorMetadata(value) {
-  return value !== null && typeof value === 'object' && typeof value.category === 'string' && typeof value.safeToRetry === 'boolean' && Array.isArray(value.actions);
-}
-
-function errorMessageForDisplay(value, fallback = '') {
-  if (!value) return fallback;
-  if (typeof value === 'string') return value;
-  const normalized = hasWorkbenchErrorMetadata(value) ? value : normalizeWorkbenchError(value);
-  return errorPresentation(normalized).detail || fallback;
 }
 
 function WorkbenchErrorAlert({ error, className = 'error-strip', icon: Icon = CircleAlert, dismissLabel = '关闭请求错误', onDismiss, onRetry, onReconnect }) {
@@ -1615,9 +1588,6 @@ function App() {
   const [creationBusy, setCreationBusy] = useState(false);
   const [creationError, setCreationError] = useState('');
   const [referenceDialog, setReferenceDialog] = useState(null);
-  const [qualityMetrics, setQualityMetrics] = useState(null);
-  const [qualityMetricsLoading, setQualityMetricsLoading] = useState(false);
-  const [qualityMetricsError, setQualityMetricsError] = useState(null);
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [referenceError, setReferenceError] = useState('');
   const [referenceAssets, setReferenceAssets] = useState(EMPTY);
@@ -1683,7 +1653,6 @@ function App() {
   const recoveryTimerRef = useRef(null);
   const restartMonitorEpoch = useRef(0);
   const sharedAssetRequests = useRef(null);
-  const qualityMetricsRequests = useRef(null);
   const eventRefreshQueueRef = useRef(null);
   const eventRefreshCallbacks = useRef(null);
   taskOverviewRequests.current ||= createLatestRequestGate();
@@ -1696,9 +1665,8 @@ function App() {
   sessionRefreshRequests.current ||= createLatestRequestGate();
   selectionRequests.current ||= createLatestRequestGate();
   sharedAssetRequests.current ||= createLatestRequestGate();
-  qualityMetricsRequests.current ||= createLatestRequestGate();
   deliveryInteractionRef.current ||= createDeliveryInteractionGuard();
-  useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); assetProvenanceRequests.current?.cancel(); sessionRefreshRequests.current?.cancel(); qualityMetricsRequests.current?.cancel(); }, []);
+  useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); assetProvenanceRequests.current?.cancel(); sessionRefreshRequests.current?.cancel(); }, []);
   const { view, projectId: activeProjectId, taskId: activeTaskId, roundId: activeRoundId, compareRoundIds = EMPTY, runId: activeRunId, assetScope, runItemFilter: activeRunItemFilter = DEFAULT_RUN_ITEM_FILTER, runItemPage: activeRunItemPage = 1, runItemPageSize: activeRunItemPageSize = DEFAULT_RUN_ITEM_PAGE_SIZE, runItemSequence: activeRunItemSequence = null } = route;
   const routeView = rendererForWorkbenchView(view);
   const studioView = isStudioView(view);
@@ -2157,43 +2125,7 @@ function App() {
   }, [session?.id, session?.version, eventRevision.planVersions, eventRevision.creativeRecord, eventRevision.runs, reportRequestError]);
 
   const selectedProject = useMemo(() => activeProjectId ? projects.find((project) => project.id === activeProjectId) || null : null, [projects, activeProjectId]);
-  const refreshQualityMetrics = useCallback(async () => {
-    const projectId = selectedProject?.id;
-    if (!projectId) {
-      qualityMetricsRequests.current.cancel();
-      setQualityMetrics(null);
-      setQualityMetricsError(null);
-      setQualityMetricsLoading(false);
-      return false;
-    }
-    const request = qualityMetricsRequests.current.begin(projectId);
-    setQualityMetricsLoading(true);
-    setQualityMetricsError(null);
-    setQualityMetrics(null);
-    try {
-      const data = await api('/api/projects/' + encodeURIComponent(projectId) + '/quality-metrics', { signal: request.signal });
-      if (!request.isCurrent()) return false;
-      setQualityMetrics(data.metrics || null);
-      return true;
-    } catch (nextError) {
-      if (isAbortError(nextError) || !request.isCurrent()) return false;
-      setQualityMetricsError(normalizeRequestError(nextError, '无法读取项目质量指标。', { operation: 'load-quality-metrics', phase: 'loading' }));
-      return false;
-    } finally {
-      if (request.isCurrent()) setQualityMetricsLoading(false);
-    }
-  }, [selectedProject?.id]);
-  useEffect(() => {
-    if (view !== 'project-overview' || !selectedProject) {
-      qualityMetricsRequests.current.cancel();
-      setQualityMetrics(null);
-      setQualityMetricsError(null);
-      setQualityMetricsLoading(false);
-      return undefined;
-    }
-    void refreshQualityMetrics();
-    return () => qualityMetricsRequests.current.cancel();
-  }, [refreshQualityMetrics, selectedProject?.id, view]);
+  const { qualityMetrics, qualityMetricsLoading, qualityMetricsError, refreshQualityMetrics } = useProjectQualityMetrics({ api, projectId: selectedProject?.id || null, view });
   const selectedTask = useMemo(() => activeTaskId ? tasks.find((task) => task.id === activeTaskId) || null : null, [tasks, activeTaskId]);
   const selectedRound = useMemo(() => activeRoundId ? rounds.find((round) => round.id === activeRoundId) || null : null, [rounds, activeRoundId]);
   const activeRun = useMemo(() => activeRunId ? runs.find((run) => run.id === activeRunId) || null : null, [runs, activeRunId]);

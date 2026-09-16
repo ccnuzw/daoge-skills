@@ -274,3 +274,58 @@ export function errorPresentation(input, options = {}) {
     actions: error.actions.map((id) => ({ id, label: ACTION_LABELS[id], primary: id === 'retry' && error.safeToRetry || id === 'reconnect' && error.category === 'connection' }))
   };
 }
+
+/**
+ * 一个值是否已经是可以展示的工作台错误（而不是刚抓到的原始异常）。
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function hasWorkbenchErrorMetadata(value) {
+  return value !== null && typeof value === 'object' && typeof value.category === 'string' && typeof value.safeToRetry === 'boolean' && Array.isArray(value.actions);
+}
+
+/**
+ * 把抓取到的异常做成可展示的工作台错误；已经是的话原样返回。
+ * @param {unknown} value
+ * @param {string} fallback
+ * @param {object} [options]
+ * @returns {any}
+ */
+export function normalizeRequestError(value, fallback, options = {}) {
+  if (hasWorkbenchErrorMetadata(value)) return value;
+  const input = typeof value === 'string' ? { message: value } : value || { message: fallback };
+  return createWorkbenchError(input, options);
+}
+
+/**
+ * 归一化的错误 + 可选的 retry 闭包，合成一个真正的 Error。
+ * @param {unknown} input
+ * @param {object} [options]
+ * @param {Function|null} [retry]
+ * @returns {any}
+ */
+export function createWorkbenchError(input, options = {}, retry = null) {
+  const normalized = normalizeWorkbenchError(input, options);
+  const error = new Error(normalized.message);
+  Object.assign(error, normalized);
+  if (typeof retry === 'function' && canRetryWorkbenchError(normalized)) Object.defineProperty(error, 'retry', { configurable: true, value: retry });
+  return error;
+}
+
+/**
+ * 取一句能直接给创作者看的错误说明。
+ * @param {any} value
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export function errorMessageForDisplay(value, fallback = '') {
+  if (!value) return fallback;
+  if (typeof value === 'string') return value;
+  const normalized = hasWorkbenchErrorMetadata(value) ? value : normalizeWorkbenchError(value);
+  return errorPresentation(normalized).detail || fallback;
+}
+
+/** 请求被取消：这是正常生命周期，不是错误。 */
+export function isAbortError(error) {
+  return error?.name === 'AbortError' || typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError';
+}

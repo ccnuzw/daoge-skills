@@ -13,13 +13,14 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const { readSource, readStyles } = require('./source-text');
 const terminology = require('../../web/src/terminology.mjs');
 const { CONFIG_FACE_FILES, DOC_FACE_FILES, TERM_LEVELS, TERM_SCOPES, TERMS, forbiddenInVisibleCopy, visibleCopyStrings } = terminology;
 
 const SRC = path.join(__dirname, '../../web/src');
 const DOC = path.join(__dirname, '../../docs/daoge_pic_terminology_zh.md');
 
-const read = (name) => fs.readFileSync(path.join(SRC, name), 'utf8');
+const read = (name) => readSource('web/src/' + name);
 const listSources = () => fs.readdirSync(SRC).filter((name) => /\.(jsx|mjs)$/.test(name));
 
 // 「面向面」——一刀切会改坏东西，所以按面分文件。清单的唯一来源是术语单模块。
@@ -88,7 +89,7 @@ test('确认弹窗把工程细节放在人话之下', () => {
   assert.match(dialog, /note = ''/);
   assert.match(dialog, /className="confirmation-dialog-note"/);
   // note 是可选项：其余确认弹窗（归档 / 回收站 / Provider）不受影响。
-  const styles = fs.readFileSync(path.join(SRC, 'styles.css'), 'utf8');
+  const styles = readStyles();
   assert.match(styles, /\.confirmation-dialog-copy \.confirmation-dialog-note \{/);
 });
 
@@ -216,7 +217,7 @@ test('config 面：技术名词表与主路径视觉隔离（收在折叠区里�
   // 面板在 idle 与表单两种模式下都挂 —— 填表的时候才是最需要查名词的时候。
   assert.match(settings, /<section className="provider-profile-panel">\s*\n\s*<ConfigGlossaryPanel \/>/);
   // 视觉隔离要有样式兜底，否则 details 只是个没有边界感的裸元素。
-  const styles = fs.readFileSync(path.join(SRC, 'styles.css'), 'utf8');
+  const styles = readStyles();
   assert.match(styles, /\.provider-glossary-panel \{/);
   assert.match(styles, /\.provider-field-hint \{/);
   assert.match(styles, /\.provider-settings-plain \{/);

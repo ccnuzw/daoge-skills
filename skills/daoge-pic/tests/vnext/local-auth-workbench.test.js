@@ -1,7 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFrontendSource, readSource } = require('./source-text');
-const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -58,7 +57,7 @@ test('Workbench retains the fragment when authorization cannot be completed', as
 
 test('Workbench mounts App only after authorization and exposes a retryable failure page', () => {
   const main = readFrontendSource();
-  const auth = fs.readFileSync(helperFilePath, 'utf8');
+  const auth = readSource('web/src/local-auth.mjs');
   assert.match(main, /if \(authorized\) return <App \/>;/);
   assert.match(main, /className="local-auth-failure"/);
   assert.match(main, /重试授权/);
