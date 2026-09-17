@@ -18,13 +18,11 @@ import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 const PURPOSE_LABELS = { exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' };
 const OPERATION_LABELS = { generation: '生成', generate: '生成', edit: '编辑', variation: '变体', refinement: '优化', fill: '补图' };
 const REVIEW_LABELS = { keep: '成果', review: '未定', reject: '不采用', derive: '可继续' };
-// 这是同一张图上的五种「看法」，不是五个去处 —— 名字必须和左侧一级入口明显区分，
-// 否则「资产分支 / 资产管理」「交付路线 / 资产交付」会被读成同一件事。
+// 这是同一张图上的三种「看法」，不是三个去处 —— 名字必须和左侧一级入口明显区分。
+// 2026-09-17 从五种收敛为三种（刀哥裁定）：折叠 + 去冗余之后，「按批次」与全局重合、「按任务」与按图片重合。
 const CREATOR_MODES = [
-  ['map', '全局', '看项目、任务、批次和交付全貌。'],
-  ['flow', '按任务', '沿参考、计划、运行、结果继续推进。'],
-  ['rounds', '按批次', '比较每一轮方向和保留率。'],
-  ['assets', '按图片', '围绕关键图片继续变体或精修。'],
+  ['map', '全局', '看项目、任务、批次和交付全貌。图按批次收着，双击展开。'],
+  ['assets', '按图片', '翻库：全部图片平铺，围绕关键图继续变体或精修。'],
   ['delivery', '按交付', '只看交付候选、交付包和最终路径。']
 ];
 const FILTERS = [
@@ -476,14 +474,19 @@ function visibleByFilter(node, filter, selectedKeys) {
   if (filter === 'shared') return node.sharedAsset || node.entityType === 'shared_asset';
   return true;
 }
-function visibleByMode(node, mode, expandedRoundIds = EMPTY_ROUND_SET) {
-  if (mode === 'flow') return true;
+/** 旧布局可能存着已收敛的模式值，归一化到语义最近的新模式（flow≈按图片，rounds≈全局）。 */
+function normalizeCanvasMode(mode) {
+  if (mode === 'flow') return 'assets';
+  if (mode === 'rounds') return 'map';
+  return mode;
+}
+function visibleByMode(node, rawMode, expandedRoundIds = EMPTY_ROUND_SET) {
+  const mode = normalizeCanvasMode(rawMode);
   if (mode === 'map') return ['project', 'task', 'round', 'delivery'].includes(node.entityType)
     // 折叠到批次级（方案 4.3 第一刀）：批次默认收起，它的图只在**展开**时铺到画布上。
     // 「看不过来」的解药是收起 + 筛选，不是把图全铺开。
     || ((isAssetNode(node) || node.entityType === 'placeholder') && node.roundId && expandedRoundIds.has(node.roundId))
     || node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep';
-  if (mode === 'rounds') return ['project', 'task', 'round'].includes(node.entityType) || node.entity?.review?.decision === 'keep' || node.entity?.review?.decision === 'reject' || node.selectedAsset || node.deliveredAsset;
   if (mode === 'assets') return ['project', 'task', 'round', 'asset', 'shared_asset', 'delivery'].includes(node.entityType);
   if (mode === 'delivery') return ['project', 'delivery'].includes(node.entityType) || node.deliveredAsset || node.selectedAsset || node.entity?.review?.decision === 'keep';
   return true;

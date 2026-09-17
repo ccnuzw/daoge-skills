@@ -91,3 +91,16 @@ test('每一张归属图都与批次有连线（B2 删掉中间层之后，这�
   assert.doesNotMatch(canvas, /!source && sourceRoundId\)? connect\(nodeKey\('round'/, '不许只给无来源的图连线');
   assert.match(canvas, /if \(sourceRoundId\) connect\(nodeKey\('round', sourceRoundId\), assetNode\.key, 'generated'/, '归属图必须全部与批次连线');
 });
+
+test('画布视图收敛为三种（2026-09-17 刀哥裁定）：全局 / 按图片 / 按交付', () => {
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  // 折叠 + 去冗余之后，「按批次」与全局重合、「按任务」与按图片重合 —— 刀哥裁定收敛。
+  assert.match(canvas, /'全局'/);
+  assert.match(canvas, /'按图片'/);
+  assert.match(canvas, /'按交付'/);
+  // 砍掉的两种不许回潮。
+  assert.doesNotMatch(canvas, /'按任务'|'按批次'/, '已收敛的模式不许回潮');
+  // 旧布局里存的 mode 值要归一化（flow→assets，rounds→map），不能落到"全显"兜底。
+  assert.match(canvas, /mode === 'flow'\) return 'assets'/, '旧 mode 值必须归一化');
+  assert.match(canvas, /mode === 'rounds'\) return 'map'/, '旧 mode 值必须归一化');
+});

@@ -380,12 +380,12 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(main, /navigateRoute\(\{ view: 'lineage'/);
   assert.match(lineage, /CREATOR_MODES/);
   assert.match(lineage, /'全局'/);
-  assert.match(lineage, /'按任务'/);
-  assert.match(lineage, /'按批次'/);
   assert.match(lineage, /'按图片'/);
   assert.match(lineage, /'按交付'/);
+  // 2026-09-17 收敛为三种（刀哥裁定）：按批次与全局重合、按任务与按图片重合。
+  assert.doesNotMatch(lineage, /'按任务'|'按批次'/);
   assert.match(lineage, /画布视角/);
-  // 画布 mode 是同一张图的五种看法，名字不得再和左侧一级入口撞车
+  // 画布 mode 是同一张图上的三种看法（收敛前五种），名字不得再和左侧一级入口撞车
   // （旧名里「项目地图/资产分支/交付路线」与入口近义、「批次对比」与页签同名）。
   assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'批次对比'/);
   assert.match(lineage, /LineageWorkspaceSummary/);
