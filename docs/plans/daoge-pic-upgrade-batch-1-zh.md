@@ -12,6 +12,7 @@
 | 2026-09-17 | **已开工**：A1 开工前的守卫核查完成（读了 `workbench-route.test.js` 10 个测试），**发现方案 7.7.2 的收益被高估** → A1 降级为小改（见第 8 节日志第 1 条，待确认改方案） | 确认后实施 A1 小改，再进 A2 |
 | 2026-09-17 | **A1 完成**（小改版）：新增派生函数 `contextLevelOf`、注释澄清 `roundId` / `assetScope` 的角色、新增一致性守卫测试；方案 7.7.2 已按纪律回改 | 进 **A2**（视图注册表：先写守卫桩，见 0.3-②） |
 | 2026-09-17 | **A2 完成**：新增「视图 → 宿主」单一来源（`VIEW_HOSTS` / `PRIMARY_VIEWS` / `viewsHostedBy`）+ 守卫锁一致性（3 条）；未改导航组件 | 进 **A3**（共享翻译表：先写桩，见 0.3-①） |
+| 2026-09-17 | **A3 完成**：新建 `purpose-labels.mjs`（枚举→人话唯一来源），`main.jsx` 与 `studio-search.jsx` 都改用它；新增守卫 3 条 | 进 **A4**（改词 113 处 + 「轮次对比」→「批次对比」）——**A 组最后一项，工作量最大** |
 
 > **交接约定**：换会话后，新会话只需读 **本节 + 第 8 节实施日志** + 项目记忆 `<workspace>/.workbuddy/memory/YYYY-MM-DD.md`，
 > 即可无损接续。**没写进这三处的东西等于没发生。**
@@ -256,5 +257,29 @@
 
 **结论**：与 A1 同一个模式——**先把语义固化成单一来源，再用守卫锁住它与既有实现的一致性**，
 而不是立刻替换实现（替换的收益只是"少改一处"，风险却是动到被守卫锁定的组件）。
+
+---
+
+### 2026-09-17 · **A3 完成**（共享翻译表）
+
+**先写桩、确认 3 条全红**，再建模块让它变绿。
+
+**改了什么**：
+
+1. 新建 `web/src/purpose-labels.mjs`——`PURPOSE_LABELS`（5 个枚举 → 人话）+ `purposeLabel()`（**未知值返回空串**，调用方据此不渲染，而不是把英文漏出去）；
+2. `main.jsx` 的 `ROUND_PURPOSE_OPTIONS` 五处 `label` 改为 `purposeLabel('…')`——**文案不再硬编码**（新增枚举只改一处）；
+3. `studio-search.jsx` 的 `result.status || result.purpose || ''` 改为 `result.status || purposeLabel(result.purpose) || ''`。
+
+**一处桩自身的措辞修正（教训）**：第一版守卫写的是 `assert.doesNotMatch(search, /result\.purpose/)`，
+结果在实现正确之后**仍然红**——因为 `purposeLabel(result.purpose)` 里当然含 `result.purpose`。
+→ 改成两条**表达意图**的断言：**必须包裹**（`assert.match(search, /purposeLabel\(result\.purpose\)/)`）
+**+ 不许裸接**（`assert.doesNotMatch(search, /\|\|\s*result\.purpose\s*\|\|/)`）。
+**教训：桩要断言"意图"，不是断言"某个字符串不存在"**——否则它会在正确的实现上误报。
+
+**顺带发现（未修，留给 D 组）**：同一个 `<small>` 里还渲染 `result.status`（轮次状态枚举如 `awaiting_confirmation`），
+**同样是英文裸奔**。它与 D 组的「状态与文案」同类，本项不动它（范围控制），已在 D 组开工时复核。
+
+**验证**：新守卫 **3/3** ✓；既有守卫 `phase4-search` / `terminology-guard` / `source-text-guard` **24/24** ✓；
+`typecheck:web` 通过；`lint` **0 error**。
 
 ### 待续

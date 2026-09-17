@@ -23,6 +23,7 @@ import { ConfirmationDialog } from './confirmation-dialog.jsx';
 import { StudioSearch } from './studio-search.jsx';
 import { useAssetImport } from './use-asset-import.mjs';
 import { useProjectQualityMetrics } from './use-project-quality-metrics.mjs';
+import { purposeLabel } from './purpose-labels.mjs';
 import { useStudioSearch } from './use-studio-search.mjs';
 import { createLatestRequestGate, useRouteRefresh } from './use-route-refresh.mjs';
 import { studioEventRefreshPlan, useStudioEvents } from './use-studio-events.mjs';
@@ -249,11 +250,11 @@ const GENERIC_TASK_GOAL_FALLBACKS = [
   { id: 'custom', label: '自定义任务', description: '目标特殊时选择，并在创作意图里写清输入、限制和交付用途。', defaultName: '自定义创作任务', defaultCount: '', defaultAspectRatio: '', roundPurpose: 'exploration', recommendedInputs: ['输入素材', '限制条件', '交付用途'], quickBriefs: ['已有明确需求，请按当前素材、限制条件和交付目标建立任务。'] }
 ];
 const ROUND_PURPOSE_OPTIONS = [
-  { id: 'exploration', label: '探索新方向', description: '适合还没确定视觉方向时，一次生成多种候选。', defaultCount: '6', defaultAspectRatio: '4:5', recommendedInputs: ['创作主题', '风格方向', '参考素材'], quickBriefs: ['探索几个适合当前目标的视觉方向。', '从不同风格、构图和受众角度各出候选。'] },
-  { id: 'refinement', label: '精修当前结果', description: '适合选中满意图后，提高质感或细节。', defaultCount: '4', defaultAspectRatio: '', defaultRefinementGoals: ['质感', '光影', '细节'], defaultKeepConstraints: ['主体', '构图大方向'], recommendedInputs: ['父轮次 / 父资产', '精修目标', '不允许改变项'], quickBriefs: ['提升质感和边缘清晰度，不改变主体身份。', '保留构图，增强完成度和画面细节。'] },
-  { id: 'variation', label: '生成更多变体', description: '适合保留主体方向，但想多看几种变化。', defaultCount: '4', defaultAspectRatio: '', defaultVariationAxes: ['构图', '背景'], defaultKeepConstraints: ['主体'], recommendedInputs: ['父轮次 / 父资产', '变化维度', '保持不变项'], quickBriefs: ['保留主体方向，尝试几种背景和构图。', '主体不变，分别变化构图、背景和色彩。'] },
-  { id: 'edit', label: '局部修改', description: '适合只替换画面中的某个区域。', defaultCount: '2', defaultAspectRatio: '', defaultKeepConstraints: ['主体'], recommendedInputs: ['父资产', '遮罩或修改区域', '保持区域'], quickBriefs: ['只替换指定局部区域，其他内容不变。', '修改局部文字或瑕疵区域，其他内容不变。'] },
-  { id: 'fill', label: '补图 / 扩图', description: '适合扩展画幅或补充缺失区域。', defaultCount: '2', defaultAspectRatio: '16:9', defaultKeepConstraints: ['主体', '构图大方向'], recommendedInputs: ['原图', '扩展方向', '目标画幅'], quickBriefs: ['扩展为目标画幅，补齐环境和留白。', '保持主体位置，向画面两侧自然延展背景。'] }
+  { id: 'exploration', label: purposeLabel('exploration'), description: '适合还没确定视觉方向时，一次生成多种候选。', defaultCount: '6', defaultAspectRatio: '4:5', recommendedInputs: ['创作主题', '风格方向', '参考素材'], quickBriefs: ['探索几个适合当前目标的视觉方向。', '从不同风格、构图和受众角度各出候选。'] },
+  { id: 'refinement', label: purposeLabel('refinement'), description: '适合选中满意图后，提高质感或细节。', defaultCount: '4', defaultAspectRatio: '', defaultRefinementGoals: ['质感', '光影', '细节'], defaultKeepConstraints: ['主体', '构图大方向'], recommendedInputs: ['父轮次 / 父资产', '精修目标', '不允许改变项'], quickBriefs: ['提升质感和边缘清晰度，不改变主体身份。', '保留构图，增强完成度和画面细节。'] },
+  { id: 'variation', label: purposeLabel('variation'), description: '适合保留主体方向，但想多看几种变化。', defaultCount: '4', defaultAspectRatio: '', defaultVariationAxes: ['构图', '背景'], defaultKeepConstraints: ['主体'], recommendedInputs: ['父轮次 / 父资产', '变化维度', '保持不变项'], quickBriefs: ['保留主体方向，尝试几种背景和构图。', '主体不变，分别变化构图、背景和色彩。'] },
+  { id: 'edit', label: purposeLabel('edit'), description: '适合只替换画面中的某个区域。', defaultCount: '2', defaultAspectRatio: '', defaultKeepConstraints: ['主体'], recommendedInputs: ['父资产', '遮罩或修改区域', '保持区域'], quickBriefs: ['只替换指定局部区域，其他内容不变。', '修改局部文字或瑕疵区域，其他内容不变。'] },
+  { id: 'fill', label: purposeLabel('fill'), description: '适合扩展画幅或补充缺失区域。', defaultCount: '2', defaultAspectRatio: '16:9', defaultKeepConstraints: ['主体', '构图大方向'], recommendedInputs: ['原图', '扩展方向', '目标画幅'], quickBriefs: ['扩展为目标画幅，补齐环境和留白。', '保持主体位置，向画面两侧自然延展背景。'] }
 ];
 const CREATION_COUNT_OPTIONS = ['', '2', '4', '6', '8', '12'];
 const CREATION_ASPECT_OPTIONS = ['', '1:1', '4:5', '3:4', '16:9', '9:16', '3:2'];
