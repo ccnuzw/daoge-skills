@@ -117,3 +117,15 @@ test('批次收起 = 这批的图全部收进，已选定/已交付/可继续也
   );
   assert.match(canvas, /collapsedIntoBatch/, '折叠语义必须显式覆盖全部归属图');
 });
+
+test('退出编辑模式必须回到「选择」工具（编辑模式的工具状态不外溢）', () => {
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  // 刀哥 2026-09-17 实机：进编辑 → 退出 → 所有节点都无法选中。
+  // 机制：编辑时用过「拖动画布」工具（tool='pan'），退出编辑后 tool 残留 ——
+  // pan 模式下点节点是拖画布，永远不触发选中，且工具条高亮变化很不显眼。
+  assert.match(
+    canvas,
+    /if \(!next\) setTool\('select'\)/,
+    '退出编辑模式必须把工具复位为「选择」，否则编辑期间选过的工具会残留'
+  );
+});

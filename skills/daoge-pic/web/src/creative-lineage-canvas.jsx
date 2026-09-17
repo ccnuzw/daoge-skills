@@ -1350,7 +1350,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       <div className="lineage-actions">
         <button type="button" onClick={fitAll}><Search size={15} />适应全部</button>
         {selectedKeys.size > 0 && <button type="button" onClick={fitSelection}><ZoomIn size={15} />适应选择</button>}
-        <button type="button" className={editing ? 'is-active' : ''} onClick={() => setEditing((value) => !value)}><Move size={15} />{editing ? '退出编辑' : '编辑模式'}</button>
+        <button type="button" className={editing ? 'is-active' : ''} onClick={() => setEditing((value) => { const next = !value; if (!next) setTool('select'); return next; })}><Move size={15} />{editing ? '退出编辑' : '编辑模式'}</button>
         {editing && <>
           <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')}><BoxSelect size={15} />选择</button>
           <button type="button" className={tool === 'pan' ? 'is-active' : ''} onClick={() => setTool('pan')}><Move size={15} />拖动画布</button>
