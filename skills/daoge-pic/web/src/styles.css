@@ -402,6 +402,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 .lineage-node.tone-task_type .lineage-node-icon { background:#e7eddc; color:#536f2c; }
 .lineage-node.tone-style_kit .lineage-node-icon { background:#f2e7d9; color:#865d24; }
 .lineage-node.tone-brand_kit .lineage-node-icon { background:#ebe6f4; color:#6a4c8c; }
+/* 出图占位格（方案 4.9）：斜纹 + 轻微呼吸，表示「这一格在等一张图」。 */
+.lineage-thumb.is-placeholder { display:flex; align-items:center; justify-content:center; min-height:120px; border:1px dashed #c3cdbd; background:repeating-linear-gradient(135deg,#f4f7f0,#f4f7f0 6px,#eef2e8 6px,#eef2e8 12px); color:#6f7d70; font-size:11px; }
+@keyframes lineage-pending-breathe { 0%,100% { opacity:1; } 50% { opacity:.55; } }
+.lineage-thumb.is-placeholder span { animation:lineage-pending-breathe 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .lineage-thumb.is-placeholder span { animation:none; } }
+
 .lineage-node-copy .lineage-collapse-hint { margin:6px 0 0; color:#3f6b4a; font-size:10px; letter-spacing:.02em; }
 .lineage-plan-mini { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
 .lineage-plan-mini span { border:1px solid #d2d9cf; padding:2px 5px; background:#f2f4ed; color:#657466; font-size:9px; }

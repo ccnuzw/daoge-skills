@@ -134,6 +134,18 @@ export function serializeRunItemRequestQuery({ page, pageSize, filter, sequence 
   return params.toString();
 }
 
+/**
+ * 「还没出完」的项——画布上用它们立占位格（方案 4.9：让等待有形状，而不是只给一个进度数字）。
+ * 判据**复用上面的状态分组**，不另写一份状态列表：
+ * 进行中（leased/requesting/receiving/persisting）+ 等待（pending/retry_wait/cancel_requested）。
+ * 终态一律不占位——包括 failed / blocked / outcome_unknown：它们已经「有结果」了，哪怕是坏结果。
+ * @param {any[]} [items]
+ */
+export function pendingRunItems(items) {
+  const pending = new Set([...FILTER_STATUSES.active, ...FILTER_STATUSES.waiting]);
+  return (Array.isArray(items) ? items : []).filter((item) => pending.has(item?.status));
+}
+
 export function retryableRunItems(items) {
   return (Array.isArray(items) ? items : []).filter((item) => RETRYABLE_STATUSES.has(item?.status));
 }

@@ -7,6 +7,7 @@ import { createAccessibleLineage, redactLineageText } from './lineage-accessible
 import { creativeLibraryResources, filterCreativeLibraryResources } from './creative-library-model.mjs';
 import { createLineageExport, lineageExportFilename } from './lineage-export-model.mjs';
 import { runExecutionPresentation, statusPresentation } from './status-presentation.mjs';
+import { pendingRunItems } from './run-item-pagination.mjs';
 import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 
 const PURPOSE_LABELS = { exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' };
@@ -71,6 +72,7 @@ const NODE_SIZE = {
   run_item: [210, 102],
   asset: [174, 220],
   shared_asset: [174, 220],
+  placeholder: [174, 220],
   delivery: [230, 118],
   task_type: [230, 116],
   style_kit: [230, 116],
@@ -407,6 +409,19 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     if (!source && sourceRoundId) connect(nodeKey('round', sourceRoundId), assetNode.key, 'generated', '批次结果');
   });
 
+  // C4（方案 4.9）：还没出完的项**先立占位格**——它同时说明「要出几张」和「出了几张」，
+  // 比一个进度数字有用得多。占位与图同尺寸、排在同一条道上，出一张就顶掉一个占位。
+  for (const item of pendingRunItems(safeRunItems)) {
+    const itemRun = runById.get(item.runId) || activeRun;
+    const itemRoundId = item.roundId || itemRun?.roundId || null;
+    const laneKey = itemRoundId || 'project';
+    const localIndex = assetLaneIndex.get(laneKey) || 0;
+    assetLaneIndex.set(laneKey, localIndex + 1);
+    const anchor = itemRoundId ? roundAnchorById.get(itemRoundId) : null;
+    const yBase = anchor ? anchor.y : 40;
+    nodes.push(createNode('placeholder', item, { x: 1490 + (localIndex % 3) * 198, y: yBase + Math.floor(localIndex / 3) * 250 }, { title: '生成中', subtitle: '第 ' + item.sequence + ' 张 · 还没出来', status: item.status, tone: 'pending', roundId: itemRoundId }));
+  }
+
   let externalSharedIndex = 0;
   safeSharedAssets.forEach((asset) => {
     if (!asset?.id || currentAssetIds.has(asset.id)) return;
@@ -456,7 +471,7 @@ function visibleByMode(node, mode, expandedRoundIds = EMPTY_ROUND_SET) {
   if (mode === 'map') return ['project', 'task', 'round', 'delivery'].includes(node.entityType)
     // 折叠到批次级（方案 4.3 第一刀）：批次默认收起，它的图只在**展开**时铺到画布上。
     // 「看不过来」的解药是收起 + 筛选，不是把图全铺开。
-    || (isAssetNode(node) && node.roundId && expandedRoundIds.has(node.roundId))
+    || ((isAssetNode(node) || node.entityType === 'placeholder') && node.roundId && expandedRoundIds.has(node.roundId))
     || node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep';
   if (mode === 'rounds') return ['project', 'task', 'round'].includes(node.entityType) || node.entity?.review?.decision === 'keep' || node.entity?.review?.decision === 'reject' || node.selectedAsset || node.deliveredAsset;
   if (mode === 'assets') return ['project', 'task', 'round', 'asset', 'shared_asset', 'delivery'].includes(node.entityType);
@@ -1407,7 +1422,7 @@ function LineageNode({ node, active, searchHit, searchActive, onPointerDown, onS
   };
   return <article role="button" tabIndex={0} aria-pressed={active} aria-label={nodeTypeLabel(node.entityType) + '：' + node.title} className={'lineage-node type-' + node.entityType + ' tone-' + (node.tone || node.entityType) + (active ? ' is-active' : '') + (searchHit ? ' is-search-hit' : '') + (searchActive ? ' is-search-active' : '') + (node.focused ? ' is-focused' : '') + (node.mediaUnavailable ? ' is-unavailable' : '')} style={{ left: node.x, top: node.y, width: node.width, height: node.height }} onPointerDown={(event) => onPointerDown(event, node)} onKeyDown={handleKeyDown} onDoubleClick={() => (node.collapsible ? onToggleCollapsed(node) : onOpen())} onContextMenu={(event) => onContextMenu(event, node)} onDragOver={(event) => onDragOver(event, node)} onDrop={(event) => onDrop(event, node)}>
     {canReference && <span className="lineage-reference-handle" draggable title="拖到计划、批次、任务或项目节点上，作为参考信息" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, node)}><GitFork size={12} /></span>}
-    {isAsset ? <div className="lineage-thumb"><img src={assetThumbnailUrl(node.entity)} alt="" loading="lazy" decoding="async" />{assetBadges(node).map(([tone, label]) => <span key={tone + label} className={'badge-' + tone}>{label}</span>)}</div> : <NodeIcon node={node} />}
+    {isAsset ? <div className="lineage-thumb"><img src={assetThumbnailUrl(node.entity)} alt="" loading="lazy" decoding="async" />{assetBadges(node).map(([tone, label]) => <span key={tone + label} className={'badge-' + tone}>{label}</span>)}</div> : node.entityType === 'placeholder' ? <div className="lineage-thumb is-placeholder" role="status" aria-label="这张还在生成"><span>生成中</span></div> : <NodeIcon node={node} />}
     <div className="lineage-node-copy"><header><strong title={node.title}>{node.title}</strong><span className={'lineage-status ' + status.tone}>{status.label}</span></header><p title={node.subtitle}>{node.subtitle}</p>{node.collapsible && <p className="lineage-collapse-hint">{node.collapsed ? '双击展开这一批的图' : '双击收起'}</p>}{node.planDetail && <div className="lineage-plan-mini"><span>{node.planDetail.itemCount || 0} 项</span><span>{node.planDetail.referenceCount || 0} 参考</span><span>{node.planDetail.outputSummary}</span></div>}</div>
   </article>;
 }

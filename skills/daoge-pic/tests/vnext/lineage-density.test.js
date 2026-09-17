@@ -60,3 +60,25 @@ test('增量插入：新节点插进空位，重排只在用户点「自动整�
   // ③ 全量重排是**用户主动**的动作（方案：平时布局稳定，只有点「整理」才重排）。
   assert.match(canvas, /autoArrange/, '「自动整理」必须是用户主动触发的入口');
 });
+
+test('出图占位：还没出完的项先立占位格，让等待有形状（方案 4.9）', async () => {
+  const { pendingRunItems } = await import('../../web/src/run-item-pagination.mjs');
+  // 判据复用既有的状态分组（单一来源，不另写一份状态列表）：
+  //   进行中（leased/requesting/receiving/persisting）+ 等待（pending/retry_wait/cancel_requested）= 还没出完；
+  //   终态不占位——包括 failed / blocked / outcome_unknown：它们已经「有结果」了，哪怕是坏结果。
+  const items = [
+    { id: 'a', status: 'pending' },
+    { id: 'b', status: 'requesting' },
+    { id: 'c', status: 'succeeded' },
+    { id: 'd', status: 'failed' },
+    { id: 'e', status: 'retry_wait' },
+    { id: 'f', status: 'cancelled' }
+  ];
+  assert.deepEqual(pendingRunItems(items).map((item) => item.id), ['a', 'b', 'e']);
+  assert.deepEqual(pendingRunItems(null), []);
+  assert.deepEqual(pendingRunItems([]), []);
+
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  assert.match(canvas, /pendingRunItems/, '画布必须用这个判据铺占位');
+  assert.match(canvas, /'placeholder'/, '必须真的创建占位节点（否则只是空谈）');
+});
