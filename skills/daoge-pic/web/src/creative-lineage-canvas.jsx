@@ -221,6 +221,28 @@ function defaultCollapsedFor(node) { return node?.collapsible === true; }
 /** 没有展开批次时的常量集合，避免每次渲染新建。 */
 const EMPTY_ROUND_SET = new Set();
 
+/** 两个矩形是否重叠（增量插入时用来避让已占位的区域）。 */
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/**
+ * 增量插入：新节点**不重排已有布局**，但也不能落在别人身上。
+ * 节点自带的坐标来自固定公式（按索引排布），而用户可能挪过节点——两者一撞就叠在一起。
+ * 所以从自带位置起沿 y 向下找第一个不重叠的空位；探测有上限，找不到就退回原位（宁可重叠，不要跑到天边）。
+ */
+function findFreeSlot(node, occupied) {
+  if (!occupied.length) return { x: node.x, y: node.y };
+  const step = Math.max(60, Math.round((node.height || 120) * 0.75));
+  let y = node.y;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const candidate = { x: node.x, y, width: node.width, height: node.height };
+    if (!occupied.some((rect) => rectsOverlap(rect, candidate))) return { x: node.x, y };
+    y += step;
+  }
+  return { x: node.x, y: node.y };
+}
+
 /** @param {any} [overrides] 节点上允许覆盖/追加任意字段（title、subtitle、searchText、deliveredAsset…） */
 function createNode(entityType, entity, position, overrides = {}) {
   const [width, height] = NODE_SIZE[entityType] || [220, 120];
@@ -776,9 +798,15 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     setPositions((current) => {
       let changed = false;
       const next = { ...current };
+      // 已占位的矩形（含用户挪过的位置）。**首次铺布局时它是空的**——那时所有节点都用自带坐标，
+      // 精心排好的列布局不会被避让逻辑打乱；只有「增量插入」才避让。
+      const occupied = Object.values(next).filter((rect) => rect && Number.isFinite(rect.x) && Number.isFinite(rect.y) && Number.isFinite(rect.width) && Number.isFinite(rect.height));
+      const incremental = occupied.length > 0;
       for (const node of graph.nodes) {
         if (next[node.key]) continue;
-        next[node.key] = { x: node.x, y: node.y, width: node.width, height: node.height, collapsed: defaultCollapsedFor(node), groupId: null };
+        const slot = incremental ? findFreeSlot(node, occupied) : { x: node.x, y: node.y };
+        next[node.key] = { x: slot.x, y: slot.y, width: node.width, height: node.height, collapsed: defaultCollapsedFor(node), groupId: null };
+        occupied.push(next[node.key]);
         changed = true;
       }
       if (changed) positionsRef.current = next;

@@ -50,3 +50,13 @@ test('折叠到批次级：批次节点可展开收起，且折叠是默认态',
   // 展开某批次时要能看见它的图：折叠过滤必须挂在图上（图的归属批次）
   assert.match(canvas, /node\.roundId/, '图节点必须带归属批次，否则折叠时不知道该藏谁');
 });
+
+test('增量插入：新节点插进空位，重排只在用户点「自动整理」时发生', () => {
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  // ① 增量而不是全排：已有位置的节点一律跳过（方案 4.3 技术要点）。
+  assert.match(canvas, /if \(next\[node\.key\]\) continue;/, '已有节点必须跳过——布局是增量插入，不是每次全排');
+  // ② 新节点不能落在别人身上：来自固定公式的坐标可能与用户挪过的节点重叠。
+  assert.match(canvas, /findFreeSlot/, '新节点必须沿轴避让已占用区域，而不是直接用公式坐标');
+  // ③ 全量重排是**用户主动**的动作（方案：平时布局稳定，只有点「整理」才重排）。
+  assert.match(canvas, /autoArrange/, '「自动整理」必须是用户主动触发的入口');
+});
