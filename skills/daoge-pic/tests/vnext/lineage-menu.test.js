@@ -37,7 +37,7 @@ test('菜单随对象状态变：候选 / 已选定 / 已交付 三套完全不�
   // 评审记了 keep 但没进选片的图，仍显示「选为成果」——否则「移出成果」后菜单永远停在已选定态
   // （2026-09-17 刀哥实机：评审 keep 是「选为成果」顺带做的，移出只解除选片，两个维度不能混判）。
   const keptButNotSelected = nodeMenuItems(asset({ entity: { review: { decision: 'keep' } } }), { canDeliver: true });
-  assert.deepEqual(ids(keptButNotSelected), ['keep', 'reject', 'deliver', 'detail']);
+  assert.deepEqual(ids(keptButNotSelected), ['keep', 'reject', 'detail']);
 });
 
 test('每张菜单 3–4 项，且全是动词', async () => {
