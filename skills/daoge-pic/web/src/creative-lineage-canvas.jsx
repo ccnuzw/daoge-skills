@@ -482,11 +482,14 @@ function normalizeCanvasMode(mode) {
 }
 function visibleByMode(node, rawMode, expandedRoundIds = EMPTY_ROUND_SET) {
   const mode = normalizeCanvasMode(rawMode);
+  // 折叠语义（方案 4.3 第一刀）：批次收起 = 这批的图**全部**收进去——
+  // 已选定 / 已交付 / 可继续也不例外（数量在批次摘要里、内容在展开后，一样不少）。
+  // 否则只要批里有几张已选的图，批次就**永远关不上**（2026-09-17 刀哥实机抓到）。
+  const collapsedIntoBatch = isAssetNode(node) && node.roundId && !expandedRoundIds.has(node.roundId);
   if (mode === 'map') return ['project', 'task', 'round', 'delivery'].includes(node.entityType)
-    // 折叠到批次级（方案 4.3 第一刀）：批次默认收起，它的图只在**展开**时铺到画布上。
-    // 「看不过来」的解药是收起 + 筛选，不是把图全铺开。
+    // 折叠到批次级：批次默认收起，它的图只在**展开**时铺到画布上。
     || ((isAssetNode(node) || node.entityType === 'placeholder') && node.roundId && expandedRoundIds.has(node.roundId))
-    || node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep';
+    || (!collapsedIntoBatch && (node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep'));
   if (mode === 'assets') return ['project', 'task', 'round', 'asset', 'shared_asset', 'delivery'].includes(node.entityType);
   if (mode === 'delivery') return ['project', 'delivery'].includes(node.entityType) || node.deliveredAsset || node.selectedAsset || node.entity?.review?.decision === 'keep';
   return true;

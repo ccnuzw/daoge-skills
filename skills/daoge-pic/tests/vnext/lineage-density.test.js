@@ -104,3 +104,16 @@ test('画布视图收敛为三种（2026-09-17 刀哥裁定）：全局 / 按图
   assert.match(canvas, /mode === 'flow'\) return 'assets'/, '旧 mode 值必须归一化');
   assert.match(canvas, /mode === 'rounds'\) return 'map'/, '旧 mode 值必须归一化');
 });
+
+test('批次收起 = 这批的图全部收进，已选定/已交付/可继续也不例外', () => {
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  // 刀哥 2026-09-17 实机抓到：优化批次的图大多是已选定/可继续，而全局视图对这几类图
+  // 有「无条件显示」的例外 —— 它们不服从折叠，批次**怎么都关不上**。
+  // 折叠的本意就是「这批整体收成一个节点」；数量在摘要里、内容在展开后，一样不少。
+  assert.doesNotMatch(
+    canvas,
+    /\|\| node\.selectedAsset \|\| node\.deliveredAsset \|\| node\.derivedAsset \|\| node\.entity\?\.review\?\.decision === 'keep'/,
+    '折叠批次的图不许凭「已选定/已交付/可继续」逃过收起'
+  );
+  assert.match(canvas, /collapsedIntoBatch/, '折叠语义必须显式覆盖全部归属图');
+});
