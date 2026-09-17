@@ -216,6 +216,11 @@ function reviewDecisionCounts(assets) {
     return acc;
   }, { keep: 0, review: 0, reject: 0, derive: 0, unreviewed: 0, trash: 0 });
 }
+/** 折叠的默认值：可折叠的节点（批次）**默认收起**——「默认一个批次 = 一个节点，双击展开」（方案 4.3 第一刀）。 */
+function defaultCollapsedFor(node) { return node?.collapsible === true; }
+/** 没有展开批次时的常量集合，避免每次渲染新建。 */
+const EMPTY_ROUND_SET = new Set();
+
 /** @param {any} [overrides] 节点上允许覆盖/追加任意字段（title、subtitle、searchText、deliveredAsset…） */
 function createNode(entityType, entity, position, overrides = {}) {
   const [width, height] = NODE_SIZE[entityType] || [220, 120];
@@ -345,7 +350,7 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     // 去冗余（方案 4.3 第二刀）：计划是批次的属性、运行与出图槽位是中间过程——
     // 三者都不再各占一个画布节点，信息收进批次节点（计划详情）与输出摘要（几张图 / 几张没成）。
     const outputSummary = roundOutputSummary(round.id, safeAssets, safeRunItems, runById);
-    const roundNode = createNode('round', round, { x: 310, y }, { title: (PURPOSE_LABELS[round.purpose] || round.purpose) + '批次', subtitle: ['计划 v' + round.planVersion, detail.operationLabel, detail.itemCount ? detail.itemCount + ' 项' : '', parentAssets.length ? parentAssets.length + ' 张父资产' : '', references.length ? references.length + ' 张参考' : '', outputSummary].filter(Boolean).join(' · '), status: round.status, tone: 'round', planDetail: detail, focused: selectedRound?.id === round.id });
+    const roundNode = createNode('round', round, { x: 310, y }, { title: (PURPOSE_LABELS[round.purpose] || round.purpose) + '批次', subtitle: ['计划 v' + round.planVersion, detail.operationLabel, detail.itemCount ? detail.itemCount + ' 项' : '', parentAssets.length ? parentAssets.length + ' 张父资产' : '', references.length ? references.length + ' 张参考' : '', outputSummary].filter(Boolean).join(' · '), status: round.status, tone: 'round', planDetail: detail, collapsible: true, focused: selectedRound?.id === round.id });
     nodes.push(roundNode);
     connect(nodeKey('task', round.taskId), roundNode.key, 'contains', '包含批次');
     if (round.parentRoundId) connect(nodeKey('round', round.parentRoundId), roundNode.key, 'lineage', '衍生自');
@@ -375,7 +380,7 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     const yBase = sourceAnchor ? sourceAnchor.y : Number.isInteger(taskIndex) ? 170 + taskIndex * 260 : 40;
     const sourceText = source ? '来自第 ' + source.itemSequence + ' 项' + (source.retry ? ' · 重试产物' : '') : sourceRoundId ? '来自批次结果' : '';
     const subtitle = [assetState(asset, selected, shared, delivered, unavailable, derived), sourceText].filter(Boolean).join(' · ');
-    const assetNode = createNode('asset', asset, { x: 1490 + (localIndex % 3) * 198, y: yBase + Math.floor(localIndex / 3) * 250 }, { title: assetLabel(asset), subtitle, status: unavailable ? 'unavailable' : asset.review?.decision || (selected ? 'selected' : derived ? 'derived' : 'active'), tone: shared ? 'shared' : 'asset', selectedAsset: selected, sharedAsset: shared, deliveredAsset: delivered, derivedAsset: derived, mediaUnavailable: unavailable, outputSource: source || null, focused: Boolean(activeRun?.id && source?.runId === activeRun.id) });
+    const assetNode = createNode('asset', asset, { x: 1490 + (localIndex % 3) * 198, y: yBase + Math.floor(localIndex / 3) * 250 }, { title: assetLabel(asset), subtitle, status: unavailable ? 'unavailable' : asset.review?.decision || (selected ? 'selected' : derived ? 'derived' : 'active'), tone: shared ? 'shared' : 'asset', selectedAsset: selected, sharedAsset: shared, deliveredAsset: delivered, derivedAsset: derived, mediaUnavailable: unavailable, outputSource: source || null, roundId: sourceRoundId, focused: Boolean(activeRun?.id && source?.runId === activeRun.id) });
     nodes.push(assetNode);
     if (!source && sourceRoundId) connect(nodeKey('round', sourceRoundId), assetNode.key, 'generated', '批次结果');
   });
@@ -424,9 +429,13 @@ function visibleByFilter(node, filter, selectedKeys) {
   if (filter === 'shared') return node.sharedAsset || node.entityType === 'shared_asset';
   return true;
 }
-function visibleByMode(node, mode) {
+function visibleByMode(node, mode, expandedRoundIds = EMPTY_ROUND_SET) {
   if (mode === 'flow') return true;
-  if (mode === 'map') return ['project', 'task', 'round', 'delivery'].includes(node.entityType) || node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep';
+  if (mode === 'map') return ['project', 'task', 'round', 'delivery'].includes(node.entityType)
+    // 折叠到批次级（方案 4.3 第一刀）：批次默认收起，它的图只在**展开**时铺到画布上。
+    // 「看不过来」的解药是收起 + 筛选，不是把图全铺开。
+    || (isAssetNode(node) && node.roundId && expandedRoundIds.has(node.roundId))
+    || node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep';
   if (mode === 'rounds') return ['project', 'task', 'round'].includes(node.entityType) || node.entity?.review?.decision === 'keep' || node.entity?.review?.decision === 'reject' || node.selectedAsset || node.deliveredAsset;
   if (mode === 'assets') return ['project', 'task', 'round', 'asset', 'shared_asset', 'delivery'].includes(node.entityType);
   if (mode === 'delivery') return ['project', 'delivery'].includes(node.entityType) || node.deliveredAsset || node.selectedAsset || node.entity?.review?.decision === 'keep';
@@ -576,7 +585,9 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     const rendered = groupMemberBounds(group, nodes);
     return { ...rendered, key: nodeKey('group', rendered.id), entityType: 'group', entityId: rendered.id };
   }), [groups, nodes]);
-  const filteredNodes = useMemo(() => nodes.filter((node) => !collapsedGroupIds.has(node.groupId) && visibleByMode(node, settings.mode || 'map') && visibleByFilter(node, settings.filter, selectedKeys)), [nodes, collapsedGroupIds, selectedKeys, settings.filter, settings.mode]);
+  // 展开的批次：折叠状态存在 positions 里（复用既有的 collapsed 字段），key 形如 `round:<id>`。
+  const expandedRoundIds = useMemo(() => new Set(Object.entries(positions).filter(([key, value]) => key.startsWith('round:') && value.collapsed === false).map(([key]) => key.slice('round:'.length))), [positions]);
+  const filteredNodes = useMemo(() => nodes.filter((node) => !collapsedGroupIds.has(node.groupId) && visibleByMode(node, settings.mode || 'map', expandedRoundIds) && visibleByFilter(node, settings.filter, selectedKeys)), [nodes, collapsedGroupIds, selectedKeys, settings.filter, settings.mode, positions, expandedRoundIds]);
   const selectedNodes = useMemo(() => nodes.filter((node) => selectedKeys.has(node.key)), [nodes, selectedKeys]);
   const selectedAssetNodes = selectedNodes.filter((node) => isAssetNode(node) && !node.externalSharedAsset);
   const primaryNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
@@ -767,7 +778,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       const next = { ...current };
       for (const node of graph.nodes) {
         if (next[node.key]) continue;
-        next[node.key] = { x: node.x, y: node.y, width: node.width, height: node.height, collapsed: false, groupId: null };
+        next[node.key] = { x: node.x, y: node.y, width: node.width, height: node.height, collapsed: defaultCollapsedFor(node), groupId: null };
         changed = true;
       }
       if (changed) positionsRef.current = next;
@@ -801,6 +812,13 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const updateGroups = useCallback((updater, dirty = true, record = true) => replaceLayoutState({ groups: typeof updater === 'function' ? updater(groupsRef.current) : updater }, dirty, record), [replaceLayoutState]);
   const updateManualLinks = useCallback((updater, dirty = true, record = true) => replaceLayoutState({ manualLinks: typeof updater === 'function' ? updater(linksRef.current) : updater }, dirty, record), [replaceLayoutState]);
   const applyLayoutSnapshot = useCallback((snapshot) => replaceLayoutState(snapshot, true, false), [replaceLayoutState]);
+  /** 切换一个批次的折叠（双击批次节点）。状态写在 positions 的 `collapsed` 上、与布局一起持久化——
+   *  所以刷新或换标签页之后收起状态还在，不是前端影子状态（红线：唯一事实依据）。 */
+  const toggleNodeCollapsed = useCallback((node) => {
+    if (!node?.collapsible) return;
+    const current = positionsRef.current[node.key] || { x: node.x, y: node.y, width: node.width, height: node.height };
+    replaceLayoutState({ positions: { ...positionsRef.current, [node.key]: { ...current, collapsed: current.collapsed !== true } } });
+  }, [replaceLayoutState]);
   const undoLayout = useCallback(() => {
     const previous = historyRef.current.undo.pop();
     if (!previous) return;
@@ -1013,7 +1031,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const autoArrange = useCallback(() => {
     const current = positionsRef.current;
     const next = {};
-    graph.nodes.forEach((node) => { next[node.key] = { x: node.x, y: node.y, width: node.width, height: node.height, collapsed: false, groupId: current[node.key]?.groupId || null }; });
+    graph.nodes.forEach((node) => { next[node.key] = { x: node.x, y: node.y, width: node.width, height: node.height, collapsed: current[node.key]?.collapsed ?? defaultCollapsedFor(node), groupId: current[node.key]?.groupId || null }; });
     const nextViewport = viewportForItems(positionedItems(graph.nodes, next));
     replaceLayoutState({ positions: next, ...(nextViewport ? { viewport: nextViewport } : {}) });
   }, [graph.nodes, replaceLayoutState, viewportForItems]);
@@ -1262,7 +1280,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         </svg>
         <div className="lineage-world" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}>
           {renderedCanvasGroups.map((group) => <LineageGroup key={group.id} group={group} memberCount={nodes.filter((node) => node.groupId === group.id).length} onToggle={toggleGroupCollapsed} onUngroup={ungroup} />)}
-          {renderedNodes.map((node) => <LineageNode key={node.key} node={node} active={selectedKeys.has(node.key)} searchHit={nodeSearchMatchKeys.has(node.key)} searchActive={activeNodeSearch?.key === node.key} onPointerDown={handleNodePointerDown} onSelect={selectNode} onOpen={() => openNode(node, { onNavigate, onInspectAsset })} onContextMenu={openContextMenu} onDragStart={handleNodeDragStart} onDragOver={handleNodeDragOver} onDrop={handleNodeDrop} />)}
+          {renderedNodes.map((node) => <LineageNode key={node.key} node={{ ...node, collapsed: positions[node.key]?.collapsed === true }} active={selectedKeys.has(node.key)} searchHit={nodeSearchMatchKeys.has(node.key)} searchActive={activeNodeSearch?.key === node.key} onPointerDown={handleNodePointerDown} onSelect={selectNode} onOpen={() => openNode(node, { onNavigate, onInspectAsset })} onToggleCollapsed={toggleNodeCollapsed} onContextMenu={openContextMenu} onDragStart={handleNodeDragStart} onDragOver={handleNodeDragOver} onDrop={handleNodeDrop} />)}
           {selectionBox && <div className="lineage-selection-box" style={{ left: Math.min(selectionBox.startX, selectionBox.currentX), top: Math.min(selectionBox.startY, selectionBox.currentY), width: Math.abs(selectionBox.currentX - selectionBox.startX), height: Math.abs(selectionBox.currentY - selectionBox.startY) }} />}
         </div>
         {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode && !isResourceType(contextNode.entityType))} canGroup={editing && selectedNodes.length > 1} canRemoveResource={editing && contextNode && isResourceType(contextNode.entityType)} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onRemoveResource={() => contextNode && removeResourceNode(contextNode)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
@@ -1350,7 +1368,7 @@ function LineageGroup({ group, memberCount, onToggle, onUngroup }) {
     <header data-lineage-no-zoom><strong>{group.title}</strong><span>{memberCount} 个节点</span><button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => onToggle(group.id)}>{collapsed ? '展开' : '折叠'}</button><button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => onUngroup(group.id)}>取消分组</button></header>
   </section>;
 }
-function LineageNode({ node, active, searchHit, searchActive, onPointerDown, onSelect, onOpen, onContextMenu, onDragStart, onDragOver, onDrop }) {
+function LineageNode({ node, active, searchHit, searchActive, onPointerDown, onSelect, onOpen, onToggleCollapsed, onContextMenu, onDragStart, onDragOver, onDrop }) {
   const status = statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status);
   const isAsset = isAssetNode(node);
   const canReference = isAsset || node.resourceNode;
@@ -1359,10 +1377,10 @@ function LineageNode({ node, active, searchHit, searchActive, onPointerDown, onS
     if (event.key === ' ') { event.preventDefault(); onSelect(event, node); return; }
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); onContextMenu(event, node); }
   };
-  return <article role="button" tabIndex={0} aria-pressed={active} aria-label={nodeTypeLabel(node.entityType) + '：' + node.title} className={'lineage-node type-' + node.entityType + ' tone-' + (node.tone || node.entityType) + (active ? ' is-active' : '') + (searchHit ? ' is-search-hit' : '') + (searchActive ? ' is-search-active' : '') + (node.focused ? ' is-focused' : '') + (node.mediaUnavailable ? ' is-unavailable' : '')} style={{ left: node.x, top: node.y, width: node.width, height: node.height }} onPointerDown={(event) => onPointerDown(event, node)} onKeyDown={handleKeyDown} onDoubleClick={onOpen} onContextMenu={(event) => onContextMenu(event, node)} onDragOver={(event) => onDragOver(event, node)} onDrop={(event) => onDrop(event, node)}>
+  return <article role="button" tabIndex={0} aria-pressed={active} aria-label={nodeTypeLabel(node.entityType) + '：' + node.title} className={'lineage-node type-' + node.entityType + ' tone-' + (node.tone || node.entityType) + (active ? ' is-active' : '') + (searchHit ? ' is-search-hit' : '') + (searchActive ? ' is-search-active' : '') + (node.focused ? ' is-focused' : '') + (node.mediaUnavailable ? ' is-unavailable' : '')} style={{ left: node.x, top: node.y, width: node.width, height: node.height }} onPointerDown={(event) => onPointerDown(event, node)} onKeyDown={handleKeyDown} onDoubleClick={() => (node.collapsible ? onToggleCollapsed(node) : onOpen())} onContextMenu={(event) => onContextMenu(event, node)} onDragOver={(event) => onDragOver(event, node)} onDrop={(event) => onDrop(event, node)}>
     {canReference && <span className="lineage-reference-handle" draggable title="拖到计划、批次、任务或项目节点上，作为参考信息" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, node)}><GitFork size={12} /></span>}
     {isAsset ? <div className="lineage-thumb"><img src={assetThumbnailUrl(node.entity)} alt="" loading="lazy" decoding="async" />{assetBadges(node).map(([tone, label]) => <span key={tone + label} className={'badge-' + tone}>{label}</span>)}</div> : <NodeIcon node={node} />}
-    <div className="lineage-node-copy"><header><strong title={node.title}>{node.title}</strong><span className={'lineage-status ' + status.tone}>{status.label}</span></header><p title={node.subtitle}>{node.subtitle}</p>{node.planDetail && <div className="lineage-plan-mini"><span>{node.planDetail.itemCount || 0} 项</span><span>{node.planDetail.referenceCount || 0} 参考</span><span>{node.planDetail.outputSummary}</span></div>}</div>
+    <div className="lineage-node-copy"><header><strong title={node.title}>{node.title}</strong><span className={'lineage-status ' + status.tone}>{status.label}</span></header><p title={node.subtitle}>{node.subtitle}</p>{node.collapsible && <p className="lineage-collapse-hint">{node.collapsed ? '双击展开这一批的图' : '双击收起'}</p>}{node.planDetail && <div className="lineage-plan-mini"><span>{node.planDetail.itemCount || 0} 项</span><span>{node.planDetail.referenceCount || 0} 参考</span><span>{node.planDetail.outputSummary}</span></div>}</div>
   </article>;
 }
 function NodeIcon({ node }) {

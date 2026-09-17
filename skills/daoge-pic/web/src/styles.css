@@ -402,6 +402,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 .lineage-node.tone-task_type .lineage-node-icon { background:#e7eddc; color:#536f2c; }
 .lineage-node.tone-style_kit .lineage-node-icon { background:#f2e7d9; color:#865d24; }
 .lineage-node.tone-brand_kit .lineage-node-icon { background:#ebe6f4; color:#6a4c8c; }
+.lineage-node-copy .lineage-collapse-hint { margin:6px 0 0; color:#3f6b4a; font-size:10px; letter-spacing:.02em; }
 .lineage-plan-mini { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
 .lineage-plan-mini span { border:1px solid #d2d9cf; padding:2px 5px; background:#f2f4ed; color:#657466; font-size:9px; }
 .lineage-selection-box { position:absolute; z-index:5; border:1px dashed #2c6f49; background:rgba(70,128,84,.14); pointer-events:none; }

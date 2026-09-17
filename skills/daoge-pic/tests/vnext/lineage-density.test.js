@@ -39,3 +39,14 @@ test('画布仍保留「任务 / 批次 / 图」三层与项目、交付', () =>
     assert.match(canvas, new RegExp("createNode\\('" + type + "'"), type + ' 节点必须保留');
   }
 });
+
+test('折叠到批次级：批次节点可展开收起，且折叠是默认态', () => {
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  // 这组断言防的是 2026-09-17 核查发现的那个坑：`collapsed` 字段**存了却没有 UI 去改它**
+  // （只随布局持久化，没有任何交互）。所以这里断言的不只是「有字段」，而是「有交互」。
+  assert.match(canvas, /collapsible/, '批次节点必须被标记为可折叠');
+  assert.match(canvas, /toggleNodeCollapsed/, '必须有切换折叠的实现（而不是只有初值）');
+  assert.match(canvas, /defaultCollapsedFor/, '必须有「默认折叠」的判定——折叠是默认态，展开才是用户动作');
+  // 展开某批次时要能看见它的图：折叠过滤必须挂在图上（图的归属批次）
+  assert.match(canvas, /node\.roundId/, '图节点必须带归属批次，否则折叠时不知道该藏谁');
+});
