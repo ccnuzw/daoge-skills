@@ -1,6 +1,7 @@
 import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, Image as ImageIcon, ImagePlus, Inbox, Library, LoaderCircle, LockKeyhole, MessageSquareText, PanelTop, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, Image as ImageIcon, ImagePlus, Inbox, Library, LoaderCircle, LockKeyhole, Maximize2, MessageSquareText, PanelTop, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { REVIEW_ZOOM_MAX, REVIEW_ZOOM_MIN, clampReviewZoom, reviewKeyAction, reviewZoomStep } from './image-review-keys-model.mjs';
 import { DRAFT_BOUNDARY_COPY } from './boundary-copy.mjs';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
 import { runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
@@ -1272,9 +1273,35 @@ function RejectReviewDialog({ assets, canAddNegative, canCreateNextRound, initia
 function ImageInspectorDialog({ assets, zoom, selectedAssetIds, selectionBusyIds, selectedProject, selectedTask, fallbackTask, selectedRound, onClose, onZoom, onToggleDeliverable, onReview, onOpenDerive, onAddReference, onReject, onOpenReference }) {
   const single = assets.length === 1 ? assets[0] : null;
   const singleSelected = single ? selectedAssetIds.has(single.id) : false;
-  return <AccessibleDialog className="image-inspector" label={assets.length === 2 ? '双图对比' : '素材放大查看'} onDismiss={onClose}>
-    <div className="inspector-toolbar"><span>{assets.length === 2 ? '双图对比' : '素材查看'}</span><div><IconButton label="缩小" disabled={zoom <= 0.75} onClick={() => onZoom(Math.max(0.75, zoom - 0.25))}><ZoomOut size={16} /></IconButton><IconButton label="放大" disabled={zoom >= 2} onClick={() => onZoom(Math.min(2, zoom + 0.25))}><ZoomIn size={16} /></IconButton><IconButton label="关闭查看" onClick={onClose}><X size={16} /></IconButton></div></div>
-    <div className={'inspector-images ' + (assets.length === 2 ? 'is-compare' : '')}>{assets.map((asset, index) => { const selected = selectedAssetIds.has(asset.id); const busy = selectionBusyIds.has(asset.id); return <figure className={selected ? 'is-selected' : ''} key={asset.id}>{selectedProject && !asset.deletedAt && <label className="inspector-select-control"><input type="checkbox" checked={selected} disabled={busy} onChange={() => void onToggleDeliverable(asset)} /><span>{selected ? <Check size={15} /> : <Bookmark size={15} />}{busy ? '正在保存' : selected ? '已选成果' : '选为成果'}</span></label>}<div className="inspector-image-frame" style={{ '--inspector-zoom': zoom }}><img src={assetOriginalUrl(asset)} alt="" /></div><figcaption>{asset.display?.label || (assets.length === 2 ? '对比图 ' + (index + 1) : '素材')}</figcaption></figure>; })}</div>
+  // 方案 4.8：两张只够「选 A 还是选 B」，实际挑图常是「这几张里挑一张」——对比放宽到 2–4 张。
+  const comparing = assets.length >= 2 && assets.length <= 4;
+  const comparingLabel = assets.length + ' 张对比';
+  // 当前看第几张：切图靠 ←→，手不必回鼠标。
+  const [focusIndex, setFocusIndex] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const canReview = typeof onToggleDeliverable === 'function';
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      // 焦点在输入框里时一律不抢键（8.9 #19：正在打字时的空格不该触发「就它了」）。
+      const target = event.target;
+      if (target && typeof target.closest === 'function' && target.closest('input, textarea, [contenteditable="true"]')) return;
+      const next = reviewKeyAction({ key: event.key, index: focusIndex, count: assets.length, canReview });
+      if (next.action === 'none') return;
+      event.preventDefault();
+      if (next.action === 'close') return onClose();
+      if (next.action === 'toggle-zoom') return onZoom(clampReviewZoom(zoom) > REVIEW_ZOOM_MIN ? 1 : 2);
+      if (next.action === 'prev' || next.action === 'next') return setFocusIndex(next.index);
+      const asset = assets[focusIndex];
+      if (!asset) return;
+      if (next.action === 'keep') return void onToggleDeliverable(asset);
+      if (next.action === 'reject') return onReject([asset], { createNextRound: false });
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [assets, focusIndex, zoom, canReview, onClose, onZoom, onToggleDeliverable, onReject]);
+  return <AccessibleDialog className={'image-inspector' + (fullscreen ? ' is-fullscreen' : '')} label={comparing ? comparingLabel : '素材放大查看'} onDismiss={onClose}>
+    <div className="inspector-toolbar"><span>{comparing ? comparingLabel + ' · ← → 切图 · 空格保留 · X 不采用 · Enter 缩放' : '素材查看 · ← → 切图 · Enter 缩放'}</span><div><IconButton label="缩小" disabled={clampReviewZoom(zoom) <= REVIEW_ZOOM_MIN} onClick={() => onZoom(reviewZoomStep(zoom, -1))}><ZoomOut size={16} /></IconButton><IconButton label="放大" disabled={clampReviewZoom(zoom) >= REVIEW_ZOOM_MAX} onClick={() => onZoom(reviewZoomStep(zoom, 1))}><ZoomIn size={16} /></IconButton><IconButton label={fullscreen ? '退出铺满' : '铺满查看'} onClick={() => setFullscreen((value) => !value)}><Maximize2 size={16} /></IconButton><IconButton label="关闭查看" onClick={onClose}><X size={16} /></IconButton></div></div>
+    <div className={'inspector-images ' + (comparing ? 'is-compare' : '')}>{assets.map((asset, index) => { const selected = selectedAssetIds.has(asset.id); const busy = selectionBusyIds.has(asset.id); return <figure className={(selected ? 'is-selected' : '') + (index === focusIndex ? ' is-keyboard-focus' : '')} key={asset.id}>{selectedProject && !asset.deletedAt && <label className="inspector-select-control"><input type="checkbox" checked={selected} disabled={busy} onChange={() => void onToggleDeliverable(asset)} /><span>{selected ? <Check size={15} /> : <Bookmark size={15} />}{busy ? '正在保存' : selected ? '已选成果' : '选为成果'}</span></label>}<div className="inspector-image-frame" style={{ '--inspector-zoom': zoom }}><img src={assetOriginalUrl(asset)} alt="" /></div><figcaption>{asset.display?.label || (comparing ? (index + 1) + ' / ' + assets.length : '素材')}</figcaption></figure>; })}</div>
     <div className="inspector-action-bar" aria-label="图片继续操作">
       {single ? <button type="button" className="outline-button" onClick={() => void onToggleDeliverable(single)}><Bookmark size={15} />{singleSelected ? '移出成果' : '选为成果'}</button> : <button type="button" className="outline-button" onClick={() => assets.forEach((asset) => void onToggleDeliverable(asset))}>都选为成果</button>}
       <CreativeActionLauncher assets={assets} selectedTask={selectedTask} fallbackTask={fallbackTask} selectedRound={selectedRound} label={single ? '用这张继续' : '用这组继续'} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} />
@@ -3074,7 +3101,7 @@ function App() {
         {routeView === 'assets' && selectedProject && <AssetStateLegend title="状态说明" compact collapsed />}
         {routeView === 'assets' && selectedProject && <button type="button" className="outline-button asset-trash-link" onClick={() => navigateRoute({ view: 'trash', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })}><Trash2 size={15} />回收站</button>}
         {routeView === 'trash' && selectedProject && <button type="button" className="outline-button" onClick={() => navigateRoute({ view: 'assets', assetScope: 'project' })}><ImagePlus size={15} />返回素材</button>}
-        {selectedAssets.length === 2 && <IconButton label="对比两张已选素材" onClick={() => { setPreviewZoom(1); setPreviewAssets(selectedAssets); }}><Eye size={16} /></IconButton>}
+        {selectedAssets.length >= 2 && selectedAssets.length <= 4 && <IconButton label={'对比选中的 ' + selectedAssets.length + ' 张素材'} onClick={() => { setPreviewZoom(1); setPreviewAssets(selectedAssets); }}><Eye size={16} /></IconButton>}
         <div className="asset-hint">{routeView === 'trash' ? '当前项目回收站' : selectedAssetIds.size ? selectedAssetIds.size + ' 张已选择' : ASSET_SCOPE_LABELS[assetScope] + '资产'}</div>
       </div>
     </div>

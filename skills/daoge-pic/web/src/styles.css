@@ -403,6 +403,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 .lineage-node.tone-style_kit .lineage-node-icon { background:#f2e7d9; color:#865d24; }
 .lineage-node.tone-brand_kit .lineage-node-icon { background:#ebe6f4; color:#6a4c8c; }
 /* 出图占位格（方案 4.9）：斜纹 + 轻微呼吸，表示「这一格在等一张图」。 */
+/* 挑图（方案 4.8）：铺满查看 + 键盘焦点所在的那一张。 */
+.image-inspector.is-fullscreen { inset: 0; width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; }
+.inspector-images figure.is-keyboard-focus { outline: 2px solid #4a6b52; outline-offset: 2px; }
+
 .lineage-thumb.is-placeholder { display:flex; align-items:center; justify-content:center; min-height:120px; border:1px dashed #c3cdbd; background:repeating-linear-gradient(135deg,#f4f7f0,#f4f7f0 6px,#eef2e8 6px,#eef2e8 12px); color:#6f7d70; font-size:11px; }
 @keyframes lineage-pending-breathe { 0%,100% { opacity:1; } 50% { opacity:.55; } }
 .lineage-thumb.is-placeholder span { animation:lineage-pending-breathe 1.8s ease-in-out infinite; }
