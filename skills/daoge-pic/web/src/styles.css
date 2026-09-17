@@ -403,6 +403,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 .lineage-node.tone-style_kit .lineage-node-icon { background:#f2e7d9; color:#865d24; }
 .lineage-node.tone-brand_kit .lineage-node-icon { background:#ebe6f4; color:#6a4c8c; }
 /* 出图占位格（方案 4.9）：斜纹 + 轻微呼吸，表示「这一格在等一张图」。 */
+/* 失败归因（方案 4.10）：暖色 = 请求要改，绿 = 等一等，灰 = 没写明。 */
+.lineage-attribution { margin:4px 0 0; font-size:11px; }
+.lineage-attribution.is-me { color:#8c5a2f; }
+.lineage-attribution.is-system { color:#3f6b4a; }
+.lineage-attribution.is-unknown { color:#6f7d70; }
+
 /* 改计划弹窗 + 改完的提示条（方案 4.5）。 */
 .plan-edit-dialog { display:grid; gap:12px; }
 .plan-edit-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }

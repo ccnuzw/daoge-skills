@@ -10,6 +10,7 @@ import { runExecutionPresentation, statusPresentation } from './status-presentat
 import { pendingRunItems } from './run-item-pagination.mjs';
 import { nodeMenuItems } from './lineage-menu-model.mjs';
 import { applyPlanEdit, planEditForm, planEditIssues } from './plan-edit-model.mjs';
+import { batchFailureSummary, failureAttribution } from './failure-copy-model.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 
@@ -162,12 +163,18 @@ function roundPlanDetails(round = {}) {
 function roundOutputSummary(roundId, assets, runItems, runById) {
   if (!roundId) return '';
   const images = assets.filter((asset) => asset?.id && assetSourceRoundId(asset) === roundId).length;
-  const failed = runItems.filter((item) => {
+  // 「没成」（failed / outcome_unknown）与「被挡」（blocked）**分开说**——两者的下一步不同（方案 4.10）。
+  let failed = 0;
+  let blocked = 0;
+  runItems.forEach((item) => {
     const itemRound = item.roundId || runById?.get(item.runId)?.roundId;
-    return itemRound === roundId && ['failed', 'blocked', 'outcome_unknown'].includes(item.status);
-  }).length;
-  if (!images && !failed) return '';
-  return images + ' 张图' + (failed ? ' · ' + failed + ' 张没成' : '');
+    if (itemRound !== roundId) return;
+    if (item.status === 'blocked') blocked += 1;
+    else if (['failed', 'outcome_unknown'].includes(item.status)) failed += 1;
+  });
+  const failureText = batchFailureSummary({ failed, blocked });
+  if (!images && !failureText) return '';
+  return images + ' 张图' + (failureText ? ' · ' + failureText : '');
 }
 
 function connectionPath(from, to) {
@@ -1630,7 +1637,10 @@ function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selectedRound, 
 function RunItemActions({ item }) {
   const retryable = ['failed', 'blocked', 'retry_wait'].includes(item.status);
   const errorSummary = runItemErrorSummary(item) || '这张暂无错误。';
-  return <div className="lineage-inspector-actions"><p>{errorSummary}</p>{retryable ? <p className="lineage-note">可重试的单张出图请回到会话处理；创作平台只展示状态，不直接重试。</p> : item.status === 'outcome_unknown' ? <p className="lineage-note">未知结果需要用户核实，不能自动重放；请回到当前 Agent 会话处理。</p> : null}</div>;
+  // 归因（方案 4.10）：分清「我的问题」与「系统的问题」——下一步完全不同。没写明就说没写明，不猜。
+  const attribution = failureAttribution(item);
+  const failureStatuses = ['failed', 'blocked', 'retry_wait', 'outcome_unknown'];
+  return <div className="lineage-inspector-actions"><p>{errorSummary}</p>{failureStatuses.includes(item.status) && <p className={'lineage-attribution is-' + attribution.owner}>{attribution.label}。{attribution.advice}</p>}{retryable ? <p className="lineage-note">可重试的单张出图请回到会话处理；创作平台只展示状态，不直接重试。</p> : item.status === 'outcome_unknown' ? <p className="lineage-note">未知结果需要用户核实，不能自动重放；请回到当前 Agent 会话处理。</p> : null}</div>;
 }
 function RunActions({ run, onNavigate }) {
   const execution = runExecutionPresentation(run, []);
