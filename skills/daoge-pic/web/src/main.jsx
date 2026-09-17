@@ -1277,8 +1277,8 @@ function RejectReviewDialog({ assets, canAddNegative, canCreateNextRound, initia
 function ImageInspectorDialog({ assets, zoom, selectedAssetIds, selectionBusyIds, selectedProject, selectedTask, fallbackTask, selectedRound, onClose, onZoom, onToggleDeliverable, onReview, onOpenDerive, onAddReference, onReject, onOpenReference }) {
   const single = assets.length === 1 ? assets[0] : null;
   const singleSelected = single ? selectedAssetIds.has(single.id) : false;
-  // 方案 4.8：两张只够「选 A 还是选 B」，实际挑图常是「这几张里挑一张」——对比放宽到 2–4 张。
-  const comparing = assets.length >= 2 && assets.length <= 4;
+  // 对比不设上限：布局是自适应网格（repeat(auto-fit)），2/4/6/8 张都并排，5 张以上也不再纵向堆叠。
+  const comparing = assets.length >= 2;
   const comparingLabel = assets.length + ' 张对比';
   // 当前看第几张：切图靠 ←→，手不必回鼠标。
   const [focusIndex, setFocusIndex] = useState(0);
@@ -3105,7 +3105,7 @@ function App() {
         {routeView === 'assets' && selectedProject && <AssetStateLegend title="状态说明" compact collapsed />}
         {routeView === 'assets' && selectedProject && <button type="button" className="outline-button asset-trash-link" onClick={() => navigateRoute({ view: 'trash', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })}><Trash2 size={15} />回收站</button>}
         {routeView === 'trash' && selectedProject && <button type="button" className="outline-button" onClick={() => navigateRoute({ view: 'assets', assetScope: 'project' })}><ImagePlus size={15} />返回素材</button>}
-        {selectedAssets.length >= 2 && selectedAssets.length <= 4 && <IconButton label={'对比选中的 ' + selectedAssets.length + ' 张素材'} onClick={() => { setPreviewZoom(1); setPreviewAssets(selectedAssets); }}><Eye size={16} /></IconButton>}
+        {selectedAssets.length >= 2 && <IconButton label={'对比选中的 ' + selectedAssets.length + ' 张素材'} onClick={() => { setPreviewZoom(1); setPreviewAssets(selectedAssets); }}><Eye size={16} /></IconButton>}
         <div className="asset-hint">{routeView === 'trash' ? '当前项目回收站' : selectedAssetIds.size ? selectedAssetIds.size + ' 张已选择' : ASSET_SCOPE_LABELS[assetScope] + '资产'}</div>
       </div>
     </div>

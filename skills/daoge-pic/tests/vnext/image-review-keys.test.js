@@ -60,8 +60,8 @@ test('挑图链路完整：三个入口与弹层的每个决策回调都接通',
   const main = readSource('web/src/main.jsx');
   // 入口 1：选区工具条的「预览」按钮（选中图之后出现）。
   assert.match(main, /onPreview=\{\(nextAssets\) => \{ setPreviewZoom\(1\); setPreviewAssets\(nextAssets\); \}\}/, '选区工具条的预览必须接到弹层');
-  // 入口 2：选中 2–4 张时的「对比」按钮。
-  assert.match(main, /selectedAssets\.length >= 2 && selectedAssets\.length <= 4 && <IconButton/, '对比按钮必须支持 2–4 张');
+  // 入口 2：选中 2 张及以上即可对比（布局自适应网格，上限交给布局而不是按钮）。
+  assert.match(main, /selectedAssets\.length >= 2 && <IconButton/, '对比按钮必须支持 2 张及以上');
   // 弹层的每个回调必须真的传进去——canReview 靠 onToggleDeliverable，缺了它空格/X 会静默失效。
   const dialog = main.match(/<ImageInspectorDialog[\s\S]*?onReject=[^ ]*/)?.[0] || '';
   for (const prop of ['onToggleDeliverable=', 'onReject=', 'onZoom=', 'onClose=']) {
