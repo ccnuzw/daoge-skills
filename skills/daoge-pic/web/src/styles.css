@@ -409,15 +409,28 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 .lineage-attribution.is-system { color:#3f6b4a; }
 .lineage-attribution.is-unknown { color:#6f7d70; }
 
-/* 改计划弹窗 + 改完的提示条（方案 4.5）。 */
-.accessible-dialog.plan-edit-dialog { display:grid; gap:12px; width:min(560px, 100%); max-height:calc(100dvh - 48px); overflow-y:auto; padding:20px 22px; border:1px solid #55645a; border-radius:10px; background:linear-gradient(135deg,#eef0e8 0%,#f8f9f4 56%,#e5ebe1 100%); color:#243129; box-shadow:0 28px 90px rgba(9,18,12,.42); }
-.plan-edit-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-.plan-edit-field { display:grid; gap:5px; font-size:12px; color:#4a5a4c; }
-.plan-edit-field textarea, .plan-edit-field input { width:100%; border:1px solid #d2d9cf; padding:7px 9px; font:inherit; }
-.plan-edit-field small { color:#7d8a7d; }
-.plan-edit-error { color:#8c3b32; font-size:12px; }
-.plan-edit-hint { color:#7d6a3a; font-size:12px; }
-.plan-edit-actions { display:flex; justify-content:flex-end; gap:8px; }
+/* 改计划弹窗（方案 4.5）：宽敞的三段式表单面板（头 / 身 / 脚）。 */
+.accessible-dialog.plan-edit-dialog { display:flex; flex-direction:column; width:min(680px, 100%); max-height:calc(100dvh - 64px); overflow:hidden; padding:0; border:1px solid #55645a; border-radius:12px; background:linear-gradient(165deg,#f7f9f3 0%,#fbfcf8 55%,#eef2ea 100%); color:#243129; box-shadow:0 32px 96px rgba(9,18,12,.45); animation:plan-edit-enter .18s ease; }
+@keyframes plan-edit-enter { from { opacity:0; transform:translateY(12px) scale(.985); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: reduce) { .accessible-dialog.plan-edit-dialog { animation:none; } }
+.plan-edit-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:18px 22px 14px; border-bottom:1px solid #dde3d7; background:rgba(255,255,255,.55); }
+.plan-edit-head h2 { margin:2px 0 0; font-size:18px; color:#22301f; }
+.plan-edit-sub { display:block; margin-top:4px; color:#657166; font-size:11px; }
+.plan-edit-body { display:grid; gap:14px; padding:18px 22px; overflow-y:auto; }
+.plan-edit-body .lineage-note { margin:0; color:#536158; }
+.plan-edit-field { display:grid; gap:7px; }
+.plan-edit-field > span { font-size:12px; font-weight:500; letter-spacing:.02em; color:#33412f; }
+.plan-edit-field textarea { min-height:150px; resize:vertical; border:1px solid #c3cdbd; border-radius:6px; padding:10px 12px; background:#fffef8; font:inherit; font-size:13px; line-height:1.6; color:#2b382f; }
+.plan-edit-count-row { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; }
+.plan-edit-count { max-width:150px; }
+.plan-edit-count input { border:1px solid #c3cdbd; border-radius:6px; padding:9px 12px; background:#fffef8; font:inherit; font-size:14px; color:#2b382f; }
+.plan-edit-field textarea:focus, .plan-edit-count input:focus { outline:2px solid #6d9c7d; outline-offset:1px; }
+.plan-edit-current { margin:0 0 8px; color:#657166; font-size:11px; }
+.plan-edit-error { margin:0; padding:9px 12px; border:1px solid #d8b3ab; background:#f9efec; border-radius:6px; color:#8c3b32; font-size:12px; }
+.plan-edit-hint { margin:0; color:#7d6a3a; font-size:12px; }
+.plan-edit-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 22px 16px; border-top:1px solid #dde3d7; background:rgba(255,255,255,.45); }
+.plan-edit-foot-note { color:#7d8a7d; font-size:11px; }
+.plan-edit-foot-actions { display:flex; gap:8px; }
 .lineage-notice { position:absolute; left:50%; top:12px; transform:translateX(-50%); margin:0; padding:6px 12px; background:#eef4ea; border:1px solid #c3d4bd; color:#2f4a33; font-size:12px; border-radius:6px; z-index:25; }
 
 /* 窄窗口：检查器退化为右滑抽屉（8.9 #20）——选中东西时滑出，空态时收起，别一直占着屏幕。 */

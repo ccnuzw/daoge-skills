@@ -1615,13 +1615,18 @@ function PlanEditDialog({ node, form, busy, error, onChange, onSave, onDismiss }
   const issues = planEditIssues(form);
   const detail = node?.planDetail || roundPlanDetails(node?.entity);
   return <AccessibleDialog className="plan-edit-dialog" label="编辑这一批的计划" onDismiss={onDismiss}>
-    <header className="plan-edit-head"><div><p className="eyebrow">{node?.title || '这一批'}</p><h2>改计划</h2></div><button type="button" className="icon-button" aria-label="关闭" onClick={onDismiss}><X size={16} /></button></header>
-    <p className="lineage-note">这里只改「提示词」和「数量」；引用素材、遮罩、输出规格照旧带过去。<b>改完需要重新确认</b>——旧的那次确认会自动失效。</p>
-    <label className="plan-edit-field"><span>提示词</span><textarea value={form.prompt} rows={5} disabled={busy} onChange={(event) => onChange({ ...form, prompt: event.target.value })} /></label>
-    <label className="plan-edit-field"><span>出几张</span><input type="number" min="1" max="1000" value={form.itemCount} disabled={busy} onChange={(event) => onChange({ ...form, itemCount: Number(event.target.value) })} /><small>当前计划：{detail.itemCount || 0} 项 · {detail.outputSummary}</small></label>
-    {error && <p className="plan-edit-error" role="alert">{error}</p>}
-    {!error && issues.length > 0 && <p className="plan-edit-hint">{issues.join(' ')}</p>}
-    <footer className="plan-edit-actions"><button type="button" className="outline-button" disabled={busy} onClick={onDismiss}>取消</button><button type="button" className="command-button" disabled={busy || issues.length > 0} onClick={onSave}>{busy ? '正在保存' : '保存计划'}</button></footer>
+    <header className="plan-edit-head"><div><p className="eyebrow">{node?.title || '这一批'}</p><h2>改计划</h2><span className="plan-edit-sub">计划 v{node?.entity?.planVersion || '—'} · 只改提示词与数量，引用素材、遮罩、输出规格照旧带过去</span></div><button type="button" className="icon-button" aria-label="关闭" onClick={onDismiss}><X size={16} /></button></header>
+    <div className="plan-edit-body">
+      <p className="lineage-note">改完需要<b>重新确认</b>——旧的那次确认会自动失效，保存后请在批次上重新确认。</p>
+      <label className="plan-edit-field"><span>提示词</span><textarea value={form.prompt} rows={8} disabled={busy} onChange={(event) => onChange({ ...form, prompt: event.target.value })} /></label>
+      <div className="plan-edit-count-row">
+        <label className="plan-edit-field plan-edit-count"><span>出几张</span><input type="number" min="1" max="1000" value={form.itemCount} disabled={busy} onChange={(event) => onChange({ ...form, itemCount: Number(event.target.value) })} /></label>
+        <p className="plan-edit-current">当前计划：{detail.itemCount || 0} 项 · {detail.outputSummary}</p>
+      </div>
+      {error && <p className="plan-edit-error" role="alert">{error}</p>}
+      {!error && issues.length > 0 && <p className="plan-edit-hint">{issues.join(' ')}</p>}
+    </div>
+    <footer className="plan-edit-foot"><span className="plan-edit-foot-note">保存后请在批次上重新确认</span><div className="plan-edit-foot-actions"><button type="button" className="outline-button" disabled={busy} onClick={onDismiss}>取消</button><button type="button" className="command-button" disabled={busy || issues.length > 0} onClick={onSave}>{busy ? '正在保存' : '保存计划'}</button></div></footer>
   </AccessibleDialog>;
 }
 function LineageAssetGetActions({ asset, onPreviewAsset, onDownloadAsset, onCopyAsset }) {
