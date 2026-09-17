@@ -56,7 +56,7 @@ const TEMPLATE_OPTIONS = [
   ['resource', '资料规划']
 ];
 const RESOURCE_NODE_TYPES = ['task_type', 'style_kit', 'brand_kit'];
-const REFERENCE_TARGET_TYPES = ['project', 'task', 'round', 'plan'];
+const REFERENCE_TARGET_TYPES = ['project', 'task', 'round'];
 const DEFAULT_VIEWPORT = { x: 80, y: 80, k: 0.88 };
 const DEFAULT_SETTINGS = { filter: 'all', mode: 'map', background: 'lines', minimap: true, snapGrid: true, edgeLabels: true };
 const HISTORY_LIMIT = 50;
@@ -152,10 +152,19 @@ function roundPlanDetails(round = {}) {
   const output = plan.output || plan.outputSpec || {};
   return { operation, operationLabel: OPERATION_LABELS[operation] || operation, promptNotice: PLAN_PROMPT_PROTECTED_LABEL, itemCount, referenceCount, maskCount, outputSummary: planOutputSummary(output) };
 }
-function planSummary(round) {
-  const detail = roundPlanDetails(round);
-  return [detail.operationLabel, detail.itemCount ? detail.itemCount + ' 项' : '', detail.outputSummary, detail.referenceCount ? detail.referenceCount + ' 个参考' : '', detail.maskCount ? '含遮罩' : ''].filter(Boolean).join(' · ');
+/** 批次节点的输出摘要：把原先散在「运行 / 出图槽位」节点上的结果收回批次（方案 4.3 第二刀）。
+ *  失败口径与 4.10 一致：failed 与 blocked 都要说，outcome_unknown 也要计入「没成」。 */
+function roundOutputSummary(roundId, assets, runItems, runById) {
+  if (!roundId) return '';
+  const images = assets.filter((asset) => asset?.id && assetSourceRoundId(asset) === roundId).length;
+  const failed = runItems.filter((item) => {
+    const itemRound = item.roundId || runById?.get(item.runId)?.roundId;
+    return itemRound === roundId && ['failed', 'blocked', 'outcome_unknown'].includes(item.status);
+  }).length;
+  if (!images && !failed) return '';
+  return images + ' 张图' + (failed ? ' · ' + failed + ' 张没成' : '');
 }
+
 function connectionPath(from, to) {
   const sx = from.x + from.width;
   const sy = from.y + from.height / 2;
@@ -333,37 +342,17 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     const references = roundReferenceMaterials(round);
     const masks = roundMaskAssetIds(round);
     for (const assetId of parentAssets) derivedAssetIds.add(assetId);
-    const roundNode = createNode('round', round, { x: 310, y }, { title: (PURPOSE_LABELS[round.purpose] || round.purpose) + '批次', subtitle: ['计划 v' + round.planVersion, detail.operationLabel, parentAssets.length ? parentAssets.length + ' 张父资产' : '', references.length ? references.length + ' 张参考' : ''].filter(Boolean).join(' · '), tone: 'round', focused: selectedRound?.id === round.id });
-    const planNode = createNode('plan', round, { x: 590, y }, { title: '计划 v' + round.planVersion, subtitle: planSummary(round), status: round.status, tone: 'plan', planDetail: detail, focused: selectedRound?.id === round.id });
-    nodes.push(roundNode, planNode);
+    // 去冗余（方案 4.3 第二刀）：计划是批次的属性、运行与出图槽位是中间过程——
+    // 三者都不再各占一个画布节点，信息收进批次节点（计划详情）与输出摘要（几张图 / 几张没成）。
+    const outputSummary = roundOutputSummary(round.id, safeAssets, safeRunItems, runById);
+    const roundNode = createNode('round', round, { x: 310, y }, { title: (PURPOSE_LABELS[round.purpose] || round.purpose) + '批次', subtitle: ['计划 v' + round.planVersion, detail.operationLabel, detail.itemCount ? detail.itemCount + ' 项' : '', parentAssets.length ? parentAssets.length + ' 张父资产' : '', references.length ? references.length + ' 张参考' : '', outputSummary].filter(Boolean).join(' · '), status: round.status, tone: 'round', planDetail: detail, focused: selectedRound?.id === round.id });
+    nodes.push(roundNode);
     connect(nodeKey('task', round.taskId), roundNode.key, 'contains', '包含批次');
     if (round.parentRoundId) connect(nodeKey('round', round.parentRoundId), roundNode.key, 'lineage', '衍生自');
-    connect(roundNode.key, planNode.key, 'plan', '计划');
     for (const assetId of parentAssets) connect(nodeKey('asset', assetId), roundNode.key, 'lineage', '衍生起点');
-    for (const material of references) connect(nodeKey(material.externalShared ? 'shared_asset' : 'asset', material.assetId), planNode.key, material.usage === 'negative' ? 'manual' : 'reference', usageLabel(material.usage));
-    for (const assetId of masks) connect(nodeKey('asset', assetId), planNode.key, 'reference', '遮罩');
-  });
-
-  const runLocalIndex = new Map();
-  safeRuns.forEach((run, index) => {
-    const anchor = roundAnchorById.get(run.roundId);
-    const localIndex = runLocalIndex.get(run.roundId) || 0;
-    runLocalIndex.set(run.roundId, localIndex + 1);
-    const y = anchor ? anchor.y + localIndex * 136 : 70 + index * 160;
-    const runNode = createNode('run', run, { x: 900, y }, { title: '出图 ' + shortId(run.id), subtitle: '计划 v' + run.planVersion + ' · ' + (run.executionConcurrency || 0) + ' 路并行', status: run.status, tone: 'run', focused: activeRun?.id === run.id });
-    nodes.push(runNode);
-    connect(nodeKey('plan', run.roundId), runNode.key, 'run', '提交运行');
-  });
-
-  safeRunItems.forEach((item, index) => {
-    const run = runById.get(item.runId) || activeRun;
-    const runId = item.runId || run?.id;
-    const roundId = item.roundId || run?.roundId;
-    const itemNode = createNode('run_item', item, { x: 1200, y: 58 + index * 118 }, { title: '第 ' + item.sequence + ' 项', subtitle: runItemErrorSummary(item) || ('尝试 ' + (item.attempts || 0) + ' 次' + (Number(item.attempts || 0) > 1 ? ' · 重试产物' : '')), status: item.status, tone: 'run-item', runId, roundId, focused: activeRun?.id && runId === activeRun.id });
-    nodes.push(itemNode);
-    if (runId) connect(nodeKey('run', runId), itemNode.key, 'run-item', '单张出图');
-    if (item.result?.assetId) connect(itemNode.key, nodeKey('asset', item.result.assetId), 'generated', '生成资产');
-    for (const output of listValue(item.outputAssets)) if (output?.id) connect(itemNode.key, nodeKey('asset', output.id), 'generated', '生成资产');
+    // 参考素材与遮罩原本挂在计划节点上；计划节点取消后，它们直接挂在批次上。
+    for (const material of references) connect(nodeKey(material.externalShared ? 'shared_asset' : 'asset', material.assetId), roundNode.key, material.usage === 'negative' ? 'manual' : 'reference', usageLabel(material.usage));
+    for (const assetId of masks) connect(nodeKey('asset', assetId), roundNode.key, 'reference', '遮罩');
   });
 
   const assetLaneIndex = new Map();
@@ -438,7 +427,7 @@ function visibleByFilter(node, filter, selectedKeys) {
 function visibleByMode(node, mode) {
   if (mode === 'flow') return true;
   if (mode === 'map') return ['project', 'task', 'round', 'delivery'].includes(node.entityType) || node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep';
-  if (mode === 'rounds') return ['project', 'task', 'round', 'plan', 'run'].includes(node.entityType) || node.entity?.review?.decision === 'keep' || node.entity?.review?.decision === 'reject' || node.selectedAsset || node.deliveredAsset;
+  if (mode === 'rounds') return ['project', 'task', 'round'].includes(node.entityType) || node.entity?.review?.decision === 'keep' || node.entity?.review?.decision === 'reject' || node.selectedAsset || node.deliveredAsset;
   if (mode === 'assets') return ['project', 'task', 'round', 'asset', 'shared_asset', 'delivery'].includes(node.entityType);
   if (mode === 'delivery') return ['project', 'delivery'].includes(node.entityType) || node.deliveredAsset || node.selectedAsset || node.entity?.review?.decision === 'keep';
   return true;
@@ -1090,7 +1079,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     const nextPlacements = resourcePlacementsRef.current.some((item) => item.entityType === entityType && item.entityId === entityId) ? resourcePlacementsRef.current : [...resourcePlacementsRef.current, placement];
     const nextPositions = { ...positionsRef.current, [key]: { ...(positionsRef.current[key] || {}), x: world.x, y: world.y, width, height, groupId: positionsRef.current[key]?.groupId || null } };
     let nextLinks = linksRef.current;
-    const targetNode = primaryNode || (selectedRound ? { entityType: 'plan', entityId: selectedRound.id } : selectedTask ? { entityType: 'task', entityId: selectedTask.id } : project ? { entityType: 'project', entityId: project.id } : null);
+    const targetNode = primaryNode || (selectedRound ? { entityType: 'round', entityId: selectedRound.id } : selectedTask ? { entityType: 'task', entityId: selectedTask.id } : project ? { entityType: 'project', entityId: project.id } : null);
     if (targetNode) {
       const targetType = targetNode.entityType;
       const targetId = targetNode.entityId;
@@ -1373,7 +1362,7 @@ function LineageNode({ node, active, searchHit, searchActive, onPointerDown, onS
   return <article role="button" tabIndex={0} aria-pressed={active} aria-label={nodeTypeLabel(node.entityType) + '：' + node.title} className={'lineage-node type-' + node.entityType + ' tone-' + (node.tone || node.entityType) + (active ? ' is-active' : '') + (searchHit ? ' is-search-hit' : '') + (searchActive ? ' is-search-active' : '') + (node.focused ? ' is-focused' : '') + (node.mediaUnavailable ? ' is-unavailable' : '')} style={{ left: node.x, top: node.y, width: node.width, height: node.height }} onPointerDown={(event) => onPointerDown(event, node)} onKeyDown={handleKeyDown} onDoubleClick={onOpen} onContextMenu={(event) => onContextMenu(event, node)} onDragOver={(event) => onDragOver(event, node)} onDrop={(event) => onDrop(event, node)}>
     {canReference && <span className="lineage-reference-handle" draggable title="拖到计划、批次、任务或项目节点上，作为参考信息" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, node)}><GitFork size={12} /></span>}
     {isAsset ? <div className="lineage-thumb"><img src={assetThumbnailUrl(node.entity)} alt="" loading="lazy" decoding="async" />{assetBadges(node).map(([tone, label]) => <span key={tone + label} className={'badge-' + tone}>{label}</span>)}</div> : <NodeIcon node={node} />}
-    <div className="lineage-node-copy"><header><strong title={node.title}>{node.title}</strong><span className={'lineage-status ' + status.tone}>{status.label}</span></header><p title={node.subtitle}>{node.subtitle}</p>{node.entityType === 'plan' && node.planDetail && <div className="lineage-plan-mini"><span>{node.planDetail.itemCount || 0} 项</span><span>{node.planDetail.referenceCount || 0} 参考</span><span>{node.planDetail.outputSummary}</span></div>}</div>
+    <div className="lineage-node-copy"><header><strong title={node.title}>{node.title}</strong><span className={'lineage-status ' + status.tone}>{status.label}</span></header><p title={node.subtitle}>{node.subtitle}</p>{node.planDetail && <div className="lineage-plan-mini"><span>{node.planDetail.itemCount || 0} 项</span><span>{node.planDetail.referenceCount || 0} 参考</span><span>{node.planDetail.outputSummary}</span></div>}</div>
   </article>;
 }
 function NodeIcon({ node }) {
