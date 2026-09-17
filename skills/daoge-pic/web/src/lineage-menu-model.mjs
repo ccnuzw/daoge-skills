@@ -25,12 +25,11 @@ export function nodeMenuItems(node, { canReview = false, canDeliver = false, can
   const pushDerive = () => { if (canDerive) body.push({ id: 'derive', label: '照它再来几张' }); };
 
   if (type === 'asset' && !node.externalSharedAsset) {
-    const decision = node.entity?.review?.decision;
     if (node.deliveredAsset) {
       // 已交付：这批图已经出去了，能做的只剩「找到它」和「拿走」。
       body.push({ id: 'open-delivery', label: '查看所在交付' });
       body.push({ id: 'download', label: '下载' });
-    } else if (node.selectedAsset || decision === 'keep') {
+    } else if (node.selectedAsset) {
       // 已选定：下一步是「用它」或「不要了」。
       body.push({ id: 'unkeep', label: '移出成果' });
       if (canDeliver) body.push({ id: 'deliver', label: '送去交付' });
