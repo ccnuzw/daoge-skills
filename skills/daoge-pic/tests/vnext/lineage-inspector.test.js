@@ -35,6 +35,9 @@ test('检查器把三件事分清楚：它是什么 / 过程资产 / 确认', ()
   // 窄窗口退化为抽屉（8.9 #20）。
   assert.match(styles, /\.lineage-inspector/);
   assert.match(styles, /@media \(max-width:800px\)[\s\S]*lineage-inspector/, '窄窗口下检查器必须退化为抽屉');
+  // 改计划弹窗必须是不透明的（AccessibleDialog 容器本身没有背景，每个弹窗自带）——
+  // 缺背景 = 透明弹窗，能看到后面的画布（2026-09-17 刀哥实机抓到）。
+  assert.match(styles, /\.accessible-dialog\.plan-edit-dialog \{[^}]*background:linear-gradient/, '改计划弹窗必须有不透明背景');
 });
 
 test('过程资产给得出「看生成历史」的入口', () => {
