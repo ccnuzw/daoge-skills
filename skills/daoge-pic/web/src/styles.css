@@ -412,6 +412,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visib
 .lineage-thumb.is-placeholder span { animation:lineage-pending-breathe 1.8s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .lineage-thumb.is-placeholder span { animation:none; } }
 
+/* 选中节点时浮出的工具条（方案 4.4：右键有先天缺陷，新用户不知道有右键）。 */
+.lineage-node-toolbar { position:absolute; left:0; top:-30px; display:flex; gap:4px; padding:3px 4px; background:#fff; border:1px solid #d2d9cf; border-radius:6px; white-space:nowrap; }
+.lineage-node-toolbar button { border:none; background:none; padding:3px 7px; font-size:11px; color:#3d4b3f; cursor:pointer; border-radius:4px; }
+.lineage-node-toolbar button:hover { background:#eef2e8; }
+.lineage-node-toolbar button.is-primary { background:#e6efe7; color:#2b4a33; font-weight:500; }
+
 .lineage-node-copy .lineage-collapse-hint { margin:6px 0 0; color:#3f6b4a; font-size:10px; letter-spacing:.02em; }
 .lineage-plan-mini { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
 .lineage-plan-mini span { border:1px solid #d2d9cf; padding:2px 5px; background:#f2f4ed; color:#657466; font-size:9px; }

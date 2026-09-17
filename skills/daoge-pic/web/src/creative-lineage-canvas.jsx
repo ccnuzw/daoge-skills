@@ -8,6 +8,7 @@ import { creativeLibraryResources, filterCreativeLibraryResources } from './crea
 import { createLineageExport, lineageExportFilename } from './lineage-export-model.mjs';
 import { runExecutionPresentation, statusPresentation } from './status-presentation.mjs';
 import { pendingRunItems } from './run-item-pagination.mjs';
+import { nodeMenuItems } from './lineage-menu-model.mjs';
 import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 
 const PURPOSE_LABELS = { exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' };
@@ -862,6 +863,31 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     const current = positionsRef.current[node.key] || { x: node.x, y: node.y, width: node.width, height: node.height };
     replaceLayoutState({ positions: { ...positionsRef.current, [node.key]: { ...current, collapsed: current.collapsed !== true } } });
   }, [replaceLayoutState]);
+  /** 菜单的上下文：哪些动作此刻可用。判据都是「此刻真的做得了吗」，不做推测。 */
+  const nodeMenuContext = useCallback((node) => ({
+    // 「去确认计划」只对等着确认的批次有意义。
+    canReview: node?.entityType === 'round' && node?.entity?.status === 'awaiting_confirmation',
+    // 「拿出去」要有项目才能落到某次交付里。
+    canDeliver: Boolean(project?.id),
+    // 「照它再来」要经队列派给 agent——本批还没有队列，所以恒为 false（模型留了开关）。
+    canDerive: false,
+    collapsed: positionsRef.current[node?.key]?.collapsed === true
+  }), [project?.id]);
+  /** 菜单项 → 动作。全走画布已有的回调，不新增能力、不绕过既有流程。 */
+  const runNodeMenuItem = useCallback((itemId, node) => {
+    if (!node || !itemId) return;
+    const entity = node.entity;
+    if (itemId === 'toggle') return toggleNodeCollapsed(node);
+    if (itemId === 'open' || itemId === 'detail') return openNode(node, { onNavigate, onInspectAsset });
+    if (itemId === 'deliver' || itemId === 'open-delivery') return onNavigate({ view: 'deliveries', projectId: project?.id || null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
+    if (itemId === 'confirm') return onNavigate({ view: 'prompts', taskId: entity?.taskId || null, roundId: entity?.id || null, compareRoundIds: entity?.id ? [entity.id] : [], runId: null, assetScope: 'round' });
+    if (itemId === 'keep' || itemId === 'unkeep') return void onToggleAsset(entity);
+    if (itemId === 'reject') return onReject([entity], { createNextRound: false });
+    if (itemId === 'download') return onDownloadAsset(entity);
+    if (itemId === 'new-round') return onCreateRound();
+    if (itemId === 'new-task') return onCreateTask();
+  }, [toggleNodeCollapsed, onNavigate, project?.id, onInspectAsset, onToggleAsset, onReject, onDownloadAsset, onCreateRound, onCreateTask]);
+
   const undoLayout = useCallback(() => {
     const previous = historyRef.current.undo.pop();
     if (!previous) return;
@@ -1323,10 +1349,10 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         </svg>
         <div className="lineage-world" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}>
           {renderedCanvasGroups.map((group) => <LineageGroup key={group.id} group={group} memberCount={nodes.filter((node) => node.groupId === group.id).length} onToggle={toggleGroupCollapsed} onUngroup={ungroup} />)}
-          {renderedNodes.map((node) => <LineageNode key={node.key} node={{ ...node, collapsed: positions[node.key]?.collapsed === true }} active={selectedKeys.has(node.key)} searchHit={nodeSearchMatchKeys.has(node.key)} searchActive={activeNodeSearch?.key === node.key} onPointerDown={handleNodePointerDown} onSelect={selectNode} onOpen={() => openNode(node, { onNavigate, onInspectAsset })} onToggleCollapsed={toggleNodeCollapsed} onContextMenu={openContextMenu} onDragStart={handleNodeDragStart} onDragOver={handleNodeDragOver} onDrop={handleNodeDrop} />)}
+          {renderedNodes.map((node) => <LineageNode key={node.key} node={{ ...node, collapsed: positions[node.key]?.collapsed === true }} active={selectedKeys.has(node.key)} searchHit={nodeSearchMatchKeys.has(node.key)} searchActive={activeNodeSearch?.key === node.key} actions={selectedKeys.size === 1 && selectedKeys.has(node.key) ? nodeMenuItems(node, nodeMenuContext(node)).filter((item) => item.id !== 'detail') : EMPTY_ARRAY} onAction={(itemId) => runNodeMenuItem(itemId, node)} onPointerDown={handleNodePointerDown} onSelect={selectNode} onOpen={() => openNode(node, { onNavigate, onInspectAsset })} onToggleCollapsed={toggleNodeCollapsed} onContextMenu={openContextMenu} onDragStart={handleNodeDragStart} onDragOver={handleNodeDragOver} onDrop={handleNodeDrop} />)}
           {selectionBox && <div className="lineage-selection-box" style={{ left: Math.min(selectionBox.startX, selectionBox.currentX), top: Math.min(selectionBox.startY, selectionBox.currentY), width: Math.abs(selectionBox.currentX - selectionBox.startX), height: Math.abs(selectionBox.currentY - selectionBox.startY) }} />}
         </div>
-        {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode && !isResourceType(contextNode.entityType))} canGroup={editing && selectedNodes.length > 1} canRemoveResource={editing && contextNode && isResourceType(contextNode.entityType)} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onRemoveResource={() => contextNode && removeResourceNode(contextNode)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
+        {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} nodeItems={contextNode ? nodeMenuItems(contextNode, nodeMenuContext(contextNode)) : EMPTY_ARRAY} onNodeItem={(itemId) => runNodeMenuItem(itemId, contextNode)} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode && !isResourceType(contextNode.entityType))} canGroup={editing && selectedNodes.length > 1} canRemoveResource={editing && contextNode && isResourceType(contextNode.entityType)} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onRemoveResource={() => contextNode && removeResourceNode(contextNode)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
         {editing && settings.minimap && <LineageMinimap nodes={renderableNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} selectedKeys={selectedKeys} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
       </div>
       <LineageInspector tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} onCreateTask={onCreateTask} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onCreateDelivery={onCreateDelivery} onOpenConfirmation={onOpenConfirmation} />
@@ -1355,7 +1381,7 @@ function LineageTextView({ id = 'lineage-accessible-view', nodes = EMPTY_ARRAY, 
   </section>;
 }
 
-function LineageContextMenu({ editing, menu, node, selectedCount, canOpen, canGroup, canRemoveResource, onClose, onOpen, onFit, onGroup, onCopy, onRemoveResource, onExport, onShortcuts }) {
+function LineageContextMenu({ editing, menu, node, selectedCount, canOpen, canGroup, canRemoveResource, nodeItems = EMPTY_ARRAY, onNodeItem, onClose, onOpen, onFit, onGroup, onCopy, onRemoveResource, onExport, onShortcuts }) {
   const menuRef = useRef(null);
   useEffect(() => {
     const restoreTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1379,6 +1405,8 @@ function LineageContextMenu({ editing, menu, node, selectedCount, canOpen, canGr
   };
   return <div ref={menuRef} className="lineage-context-menu" style={{ left: menu.x, top: menu.y }} data-lineage-no-zoom role="menu" aria-label="谱系节点操作" onClick={(event) => event.stopPropagation()} onKeyDown={handleKeyDown}>
     <strong>{node ? node.title : selectedCount ? selectedCount + ' 个节点' : '画布'}</strong>
+    {/* 「对它做什么」优先于「怎么看」（方案 4.4）：先给这个对象能做的动作，再给画布的通用工具。 */}
+    {nodeItems.filter((item) => item.id !== 'detail').map((item) => <button type="button" role="menuitem" key={item.id} className={item.primary ? 'is-primary' : undefined} onClick={() => { onNodeItem(item.id); onClose(); }}>{item.label}</button>)}
     {canOpen && <button type="button" role="menuitem" onClick={() => { onOpen(); onClose(); }}><Eye size={14} />打开详情</button>}
     {selectedCount > 0 && <button type="button" role="menuitem" onClick={() => { onFit(); onClose(); }}><ZoomIn size={14} />适应选择</button>}
     {selectedCount > 0 && <button type="button" role="menuitem" onClick={() => { onCopy(); onClose(); }}><Copy size={14} />复制参考信息</button>}
@@ -1411,7 +1439,7 @@ function LineageGroup({ group, memberCount, onToggle, onUngroup }) {
     <header data-lineage-no-zoom><strong>{group.title}</strong><span>{memberCount} 个节点</span><button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => onToggle(group.id)}>{collapsed ? '展开' : '折叠'}</button><button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => onUngroup(group.id)}>取消分组</button></header>
   </section>;
 }
-function LineageNode({ node, active, searchHit, searchActive, onPointerDown, onSelect, onOpen, onToggleCollapsed, onContextMenu, onDragStart, onDragOver, onDrop }) {
+function LineageNode({ node, active, searchHit, searchActive, actions = EMPTY_ARRAY, onAction, onPointerDown, onSelect, onOpen, onToggleCollapsed, onContextMenu, onDragStart, onDragOver, onDrop }) {
   const status = statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status);
   const isAsset = isAssetNode(node);
   const canReference = isAsset || node.resourceNode;
@@ -1421,6 +1449,7 @@ function LineageNode({ node, active, searchHit, searchActive, onPointerDown, onS
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); onContextMenu(event, node); }
   };
   return <article role="button" tabIndex={0} aria-pressed={active} aria-label={nodeTypeLabel(node.entityType) + '：' + node.title} className={'lineage-node type-' + node.entityType + ' tone-' + (node.tone || node.entityType) + (active ? ' is-active' : '') + (searchHit ? ' is-search-hit' : '') + (searchActive ? ' is-search-active' : '') + (node.focused ? ' is-focused' : '') + (node.mediaUnavailable ? ' is-unavailable' : '')} style={{ left: node.x, top: node.y, width: node.width, height: node.height }} onPointerDown={(event) => onPointerDown(event, node)} onKeyDown={handleKeyDown} onDoubleClick={() => (node.collapsible ? onToggleCollapsed(node) : onOpen())} onContextMenu={(event) => onContextMenu(event, node)} onDragOver={(event) => onDragOver(event, node)} onDrop={(event) => onDrop(event, node)}>
+    {active && actions.length > 0 && <div className="lineage-node-toolbar" data-lineage-no-zoom aria-label="对这个节点的操作">{actions.map((item) => <button type="button" key={item.id} className={item.primary ? 'is-primary' : undefined} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onAction(item.id); }}>{item.label}</button>)}</div>}
     {canReference && <span className="lineage-reference-handle" draggable title="拖到计划、批次、任务或项目节点上，作为参考信息" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, node)}><GitFork size={12} /></span>}
     {isAsset ? <div className="lineage-thumb"><img src={assetThumbnailUrl(node.entity)} alt="" loading="lazy" decoding="async" />{assetBadges(node).map(([tone, label]) => <span key={tone + label} className={'badge-' + tone}>{label}</span>)}</div> : node.entityType === 'placeholder' ? <div className="lineage-thumb is-placeholder" role="status" aria-label="这张还在生成"><span>生成中</span></div> : <NodeIcon node={node} />}
     <div className="lineage-node-copy"><header><strong title={node.title}>{node.title}</strong><span className={'lineage-status ' + status.tone}>{status.label}</span></header><p title={node.subtitle}>{node.subtitle}</p>{node.collapsible && <p className="lineage-collapse-hint">{node.collapsed ? '双击展开这一批的图' : '双击收起'}</p>}{node.planDetail && <div className="lineage-plan-mini"><span>{node.planDetail.itemCount || 0} 项</span><span>{node.planDetail.referenceCount || 0} 参考</span><span>{node.planDetail.outputSummary}</span></div>}</div>
