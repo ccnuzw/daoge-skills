@@ -1478,7 +1478,7 @@ function contextRouteForNode(node) {
 }
 function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCopyContext, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
   if (!selectedNodes.length) {
-    return <aside className="lineage-inspector" data-lineage-no-zoom>
+    return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
       <p className="eyebrow">检查器</p>
       <h2>选择一个节点</h2>
       <p>{editing ? '编辑模式可多选、分组、添加标注或拖入资料。' : '单击节点查看详情；节点相关动作会在这里出现。'}</p>
@@ -1488,7 +1488,7 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
   if (!node) {
     const selectedAssetIds = selectedAssetNodes.map((item) => item.entity.id).filter(Boolean);
     const selectedAssets = selectedAssetNodes.map((item) => item.entity).filter(Boolean);
-    return <aside className="lineage-inspector" data-lineage-no-zoom>
+    return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
       <div className="lineage-inspector-head">
         <div><p className="eyebrow">批量操作</p><h2>{selectedNodes.length} 个节点</h2></div>
         <button type="button" className="icon-button" aria-label="清除选择" onClick={onClear}><X size={15} /></button>
@@ -1513,7 +1513,7 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
   const entity = node.entity;
   const isAsset = isAssetNode(node);
   const isResource = node.resourceNode || isResourceType(node.entityType);
-  return <aside className="lineage-inspector" data-lineage-no-zoom>
+  return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
     <div className="lineage-inspector-head">
       <div><p className="eyebrow">检查器</p><h2>{node.title}</h2></div>
       <button type="button" className="icon-button" aria-label="清除选择" onClick={onClear}><X size={15} /></button>
@@ -1523,7 +1523,10 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
       <div><dt>状态</dt><dd>{isAsset ? assetState(entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable, node.derivedAsset) : statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status).label}</dd></div>
       <div><dt>短 ID</dt><dd>{shortId(node.entityId)}</dd></div>
     </dl>
-    {node.entityType === 'plan' ? <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} /> : isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : node.entityType === 'run_item' ? <RunItemActions item={entity} /> : node.entityType === 'run' ? <RunActions run={entity} onNavigate={onNavigate} /> : isResource ? <ResourceActions node={node} onCopyContext={onCopyContext} /> : ['task', 'round', 'delivery'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} onOpenReference={onOpenReference} /> : null}
+    {/* 计划是批次的属性（B2 之后计划不再单独成节点）——**确认闸门也随之挂在批次上**：
+        人点一下批次，右侧就能确认，不用离开画布（方案 4.5）。 */}
+    {node.entityType === 'round' && <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} />}
+    {node.entityType === 'plan' ? null : isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : node.entityType === 'run_item' ? <RunItemActions item={entity} /> : node.entityType === 'run' ? <RunActions run={entity} onNavigate={onNavigate} /> : isResource ? <ResourceActions node={node} onCopyContext={onCopyContext} /> : ['task', 'round', 'delivery'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} onOpenReference={onOpenReference} /> : null}
     {editing && nodeLinks.length ? <SoftLinkList links={nodeLinks} node={node} onRemove={onRemoveLink} onUpdate={onUpdateLink} onReverse={onReverseLink} /> : null}
   </aside>;
 }
@@ -1539,10 +1542,11 @@ function PlanActions({ node, onNavigate, onCopyContext, onOpenConfirmation }) {
   const detail = node.planDetail || roundPlanDetails(node.entity);
   const needsConfirmation = node.entity?.status === 'awaiting_confirmation';
   return <div className="lineage-plan-details">
-    <p className="lineage-note">计划节点展示已保存的、隐去隐私的计划摘要。待确认时可以在这里确认；核算和出图仍由会话执行。</p>
+    <h3 className="lineage-inspector-section">过程资产</h3>
+    <p className="lineage-note">这里展示已保存的、隐去隐私的计划摘要。待确认时可以在这里确认；核算和出图仍由会话执行。</p>
     <dl><div><dt>操作</dt><dd>{detail.operationLabel}</dd></div><div><dt>数量</dt><dd>{detail.itemCount || 0} 项</dd></div><div><dt>输出</dt><dd>{detail.outputSummary}</dd></div><div><dt>参考/遮罩</dt><dd>{detail.referenceCount || 0} / {detail.maskCount || 0}</dd></div><div><dt>提示词</dt><dd>{detail.promptNotice || PLAN_PROMPT_PROTECTED_LABEL}</dd></div></dl>
     {needsConfirmation && <section className="lineage-confirmation-callout"><p>当前计划正在等待人工确认。</p><button type="button" className="command-button" onClick={() => onOpenConfirmation?.(node.entity)}><Check size={15} />审阅并确认计划</button></section>}
-    <div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => openNode(node, { onNavigate, onInspectAsset: () => undefined })}><Eye size={15} />打开计划版本对比</button><button type="button" className="outline-button" onClick={() => onCopyContext('refinement', [node])}><RefreshCw size={15} />复制优化计划指令</button><button type="button" className="outline-button" onClick={() => onCopyContext('variation', [node])}><Sparkles size={15} />复制变体计划指令</button></div>
+    <div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onNavigate({ view: 'runs', taskId: node.entity?.taskId || null, roundId: node.entity?.id || null, compareRoundIds: node.entity?.id ? [node.entity.id] : [], runId: null, assetScope: 'round' })}><Play size={15} />看生成历史</button><button type="button" className="outline-button" onClick={() => openNode(node, { onNavigate, onInspectAsset: () => undefined })}><Eye size={15} />打开计划版本对比</button><button type="button" className="outline-button" onClick={() => onCopyContext('refinement', [node])}><RefreshCw size={15} />复制优化计划指令</button><button type="button" className="outline-button" onClick={() => onCopyContext('variation', [node])}><Sparkles size={15} />复制变体计划指令</button></div>
   </div>;
 }
 function LineageAssetGetActions({ asset, onPreviewAsset, onDownloadAsset, onCopyAsset }) {
