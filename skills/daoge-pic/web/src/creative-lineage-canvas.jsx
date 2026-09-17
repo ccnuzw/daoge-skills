@@ -11,6 +11,7 @@ import { pendingRunItems } from './run-item-pagination.mjs';
 import { nodeMenuItems } from './lineage-menu-model.mjs';
 import { applyPlanEdit, planEditForm, planEditIssues } from './plan-edit-model.mjs';
 import { batchFailureSummary, failureAttribution } from './failure-copy-model.mjs';
+import { batchQualityCopy, reviewDistribution } from './batch-quality-model.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 
@@ -221,12 +222,9 @@ function taskForAsset(asset, tasks) { const taskId = assetSourceTaskId(asset); r
 function taskForAssets(assets, tasks) { const taskIds = [...new Set(listValue(assets).map(assetSourceTaskId).filter(Boolean))]; return taskIds.length === 1 ? taskForAsset({ display: { taskId: taskIds[0] } }, tasks) : null; }
 function taskRounds(task, rounds) { return listValue(rounds).filter((round) => round.taskId === task?.id); }
 function runStatusCounts(runs) { return runs.reduce((acc, run) => ({ ...acc, [run.status || 'unknown']: (acc[run.status || 'unknown'] || 0) + 1 }), {}); }
+/** 统计口径收进 batch-quality-model（唯一来源）；这里保留原名字，调用方不动。 */
 function reviewDecisionCounts(assets) {
-  return listValue(assets).reduce((acc, asset) => {
-    const key = asset?.deletedAt ? 'trash' : asset?.review?.decision || 'unreviewed';
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, { keep: 0, review: 0, reject: 0, derive: 0, unreviewed: 0, trash: 0 });
+  return reviewDistribution(listValue(assets));
 }
 /** 折叠的默认值：可折叠的节点（批次）**默认收起**——「默认一个批次 = 一个节点，双击展开」（方案 4.3 第一刀）。 */
 function defaultCollapsedFor(node) { return node?.collapsible === true; }
@@ -638,6 +636,14 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const selectedNodes = useMemo(() => nodes.filter((node) => selectedKeys.has(node.key)), [nodes, selectedKeys]);
   const selectedAssetNodes = selectedNodes.filter((node) => isAssetNode(node) && !node.externalSharedAsset);
   const primaryNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
+  // 「质量跟着看的东西走」（方案 7.10.2）：选中批次时，检查器直接给这一批的评审分布。
+  // 项目级指标留在 project-overview（能力只加强不删）——这里是加，不是搬走。
+  const inspectorBatchQuality = useMemo(() => {
+    const round = primaryNode?.entityType === 'round' ? primaryNode.entity : null;
+    if (!round?.id) return '';
+    const roundAssets = (Array.isArray(assets) ? assets : []).filter((asset) => asset?.id && assetSourceRoundId(asset) === round.id);
+    return batchQualityCopy(reviewDistribution(roundAssets), roundAssets.length);
+  }, [primaryNode, assets]);
   const endpointByKey = useMemo(() => new Map([...nodes.map((node) => [node.key, node]), ...renderedGroups.map((group) => [group.key, group])]), [nodes, renderedGroups]);
   const validManualLinks = useMemo(() => {
     const seen = new Set();
@@ -1400,7 +1406,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} nodeItems={contextNode ? nodeMenuItems(contextNode, nodeMenuContext(contextNode)) : EMPTY_ARRAY} onNodeItem={(itemId) => runNodeMenuItem(itemId, contextNode)} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode && !isResourceType(contextNode.entityType))} canGroup={editing && selectedNodes.length > 1} canRemoveResource={editing && contextNode && isResourceType(contextNode.entityType)} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onRemoveResource={() => contextNode && removeResourceNode(contextNode)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
         {editing && settings.minimap && <LineageMinimap nodes={renderableNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} selectedKeys={selectedKeys} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
       </div>
-      <LineageInspector onEditPlan={openPlanEdit} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} onCreateTask={onCreateTask} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onCreateDelivery={onCreateDelivery} onOpenConfirmation={onOpenConfirmation} />
+      <LineageInspector onEditPlan={openPlanEdit} batchQuality={inspectorBatchQuality} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} onCreateTask={onCreateTask} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onCreateDelivery={onCreateDelivery} onOpenConfirmation={onOpenConfirmation} />
     </div>
   </section>;
 }
@@ -1521,7 +1527,7 @@ function contextRouteForNode(node) {
   if (node.entityType === 'round' || node.entityType === 'plan') return { view: 'lineage', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' };
   return null;
 }
-function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCopyContext, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation, onEditPlan }) {
+function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCopyContext, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation, onEditPlan, batchQuality = '' }) {
   if (!selectedNodes.length) {
     return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
       <p className="eyebrow">检查器</p>
@@ -1570,7 +1576,10 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
     </dl>
     {/* 计划是批次的属性（B2 之后计划不再单独成节点）——**确认闸门也随之挂在批次上**：
         人点一下批次，右侧就能确认，不用离开画布（方案 4.5）。 */}
-    {node.entityType === 'round' && <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} onEditPlan={onEditPlan} />}
+    {node.entityType === 'round' && <>
+      {batchQuality && <p className="lineage-quality-line" aria-label="这一批的质量">{batchQuality}</p>}
+      <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} onEditPlan={onEditPlan} />
+    </>}
     {node.entityType === 'plan' ? null : isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : node.entityType === 'run_item' ? <RunItemActions item={entity} /> : node.entityType === 'run' ? <RunActions run={entity} onNavigate={onNavigate} /> : isResource ? <ResourceActions node={node} onCopyContext={onCopyContext} /> : ['task', 'round', 'delivery'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} onOpenReference={onOpenReference} /> : null}
     {editing && nodeLinks.length ? <SoftLinkList links={nodeLinks} node={node} onRemove={onRemoveLink} onUpdate={onUpdateLink} onReverse={onReverseLink} /> : null}
   </aside>;
