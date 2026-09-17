@@ -82,3 +82,12 @@ test('出图占位：还没出完的项先立占位格，让等待有形状（�
   assert.match(canvas, /pendingRunItems/, '画布必须用这个判据铺占位');
   assert.match(canvas, /'placeholder'/, '必须真的创建占位节点（否则只是空谈）');
 });
+
+test('每一张归属图都与批次有连线（B2 删掉中间层之后，这是它唯一的入边）', () => {
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  // B2 删掉 run_item 节点时，item→asset 的边随之消失；round→asset 的线当时只补给了
+  // 「无 output 来源」的图 —— 而有来源的（大部分图）丢了唯一的入边，展开批次后图与批次之间没有线。
+  // 刀哥 2026-09-17 实机试用抓到了这个回归。
+  assert.doesNotMatch(canvas, /!source && sourceRoundId\)? connect\(nodeKey\('round'/, '不许只给无来源的图连线');
+  assert.match(canvas, /if \(sourceRoundId\) connect\(nodeKey\('round', sourceRoundId\), assetNode\.key, 'generated'/, '归属图必须全部与批次连线');
+});

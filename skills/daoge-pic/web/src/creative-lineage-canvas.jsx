@@ -414,7 +414,9 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     const subtitle = [assetState(asset, selected, shared, delivered, unavailable, derived), sourceText].filter(Boolean).join(' · ');
     const assetNode = createNode('asset', asset, { x: 1490 + (localIndex % 3) * 198, y: yBase + Math.floor(localIndex / 3) * 250 }, { title: assetLabel(asset), subtitle, status: unavailable ? 'unavailable' : asset.review?.decision || (selected ? 'selected' : derived ? 'derived' : 'active'), tone: shared ? 'shared' : 'asset', selectedAsset: selected, sharedAsset: shared, deliveredAsset: delivered, derivedAsset: derived, mediaUnavailable: unavailable, outputSource: source || null, roundId: sourceRoundId, focused: Boolean(activeRun?.id && source?.runId === activeRun.id) });
     nodes.push(assetNode);
-    if (!source && sourceRoundId) connect(nodeKey('round', sourceRoundId), assetNode.key, 'generated', '批次结果');
+    // B2 删掉出图槽位中间层后，图**直接挂批次** —— 这是归属图唯一的入边，
+    // 不能只补给「无 output 来源」的那部分（否则大部分图展开批次后没有线，2026-09-17 实机抓到的回归）。
+    if (sourceRoundId) connect(nodeKey('round', sourceRoundId), assetNode.key, 'generated', '批次结果');
   });
 
   // C4（方案 4.9）：还没出完的项**先立占位格**——它同时说明「要出几张」和「出了几张」，
