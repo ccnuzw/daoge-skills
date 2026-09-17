@@ -2402,6 +2402,8 @@ function App() {
     enqueueSelectionWrite(projectId, [assetId], () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/assets/' + encodeURIComponent(assetId), { method: 'POST', idempotencyKey: uniqueKey('asset-selection'), body: { selected } }), '无法保存当前选片。');
   };
   const toggleSelection = (assetId) => setAssetSelection(assetId, !selectedAssetIdsRef.current.has(assetId));
+  // 显式移出：菜单已经知道当前是选中状态，方向不该靠 ref 反推（ref 在异步写入时会滞后）。
+  const deselectAsset = (assetId) => setAssetSelection(assetId, false);
   const markAsDeliverable = async (asset) => {
     const intent = deliverableIntent({ hasProject: Boolean(selectedProject), isSelected: selectedAssetIdsRef.current.has(asset.id) });
     if (intent === 'skip') return;
@@ -3143,6 +3145,7 @@ function App() {
       onPreviewAsset={(asset) => { setPreviewZoom(1); setPreviewAssets([asset]); }}
       onInspectAsset={inspectAsset}
       onToggleAsset={markAsDeliverable}
+      onDeselectAsset={deselectAsset}
       onBatchSelectAssets={setAssetsSelection}
       onReviewAsset={review}
       onBatchReviewAssets={batchReview}

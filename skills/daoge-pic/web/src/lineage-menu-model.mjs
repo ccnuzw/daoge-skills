@@ -28,25 +28,25 @@ export function nodeMenuItems(node, { canReview = false, canDeliver = false, can
     const decision = node.entity?.review?.decision;
     if (node.deliveredAsset) {
       // 已交付：这批图已经出去了，能做的只剩「找到它」和「拿走」。
-      body.push({ id: 'open-delivery', label: '看它在哪次交付里' });
+      body.push({ id: 'open-delivery', label: '查看所在交付' });
       body.push({ id: 'download', label: '下载' });
     } else if (node.selectedAsset || decision === 'keep') {
       // 已选定：下一步是「用它」或「不要了」。
-      body.push({ id: 'unkeep', label: '取消选定' });
-      if (canDeliver) body.push({ id: 'deliver', label: '拿去交付' });
+      body.push({ id: 'unkeep', label: '移出成果' });
+      if (canDeliver) body.push({ id: 'deliver', label: '送去交付' });
       pushDerive();
     } else {
       // 候选：最常走的一套——就它了 / 不行 / 拿出去了。
-      body.push({ id: 'keep', label: '就它了', primary: true });
-      body.push({ id: 'reject', label: '不行' });
-      if (canDeliver) body.push({ id: 'deliver', label: '拿出去' });
+      body.push({ id: 'keep', label: '选为成果', primary: true });
+      body.push({ id: 'reject', label: '不采用' });
+      if (canDeliver) body.push({ id: 'deliver', label: '送去交付' });
       pushDerive();
     }
   } else if (type === 'round') {
     // 批次：折叠态给「展开」，展开态给「收起」——同一格随状态换说法。
     body.push({ id: 'toggle', label: collapsed ? '展开这一批的图' : '收起这一批的图' });
-    if (canReview) body.push({ id: 'confirm', label: '去确认计划' });
-    if (canDeliver) body.push({ id: 'deliver', label: '拿出去' });
+    if (canReview) body.push({ id: 'confirm', label: '审阅并确认计划' });
+    if (canDeliver) body.push({ id: 'deliver', label: '送去交付' });
   } else if (type === 'task') {
     body.push({ id: 'open', label: '打开这个任务' });
     body.push({ id: 'new-round', label: '新建批次' });

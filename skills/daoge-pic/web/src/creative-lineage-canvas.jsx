@@ -554,7 +554,7 @@ function LineageWorkspaceSummary({ project, selectedTask, selectedRound, runs = 
     </section>
   </div>;
 }
-export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation }) {
+export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation, onDeselectAsset }) {
   tasks = listValue(tasks);
   rounds = listValue(rounds);
   runs = listValue(runs);
@@ -938,7 +938,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     if (itemId === 'open' || itemId === 'detail') return openNode(node, { onNavigate, onInspectAsset });
     if (itemId === 'deliver' || itemId === 'open-delivery') return onNavigate({ view: 'deliveries', projectId: project?.id || null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
     if (itemId === 'confirm') return onNavigate({ view: 'prompts', taskId: entity?.taskId || null, roundId: entity?.id || null, compareRoundIds: entity?.id ? [entity.id] : [], runId: null, assetScope: 'round' });
-    if (itemId === 'keep' || itemId === 'unkeep') return void onToggleAsset(entity);
+    // 「选为成果」带 keep 评审（markAsDeliverable）；「移出成果」**显式传方向**——
+    // markAsDeliverable 靠 selectedAssetIdsRef 反推意图，选区写入异步时 ref 会滞后，
+    // 菜单明明知道状态，就不该让方向靠推断（2026-09-17 刀哥实机：移出永远无效）。
+    if (itemId === 'keep') return void onToggleAsset(entity);
+    if (itemId === 'unkeep') return void onDeselectAsset(entity.id);
     if (itemId === 'reject') return onReject([entity], { createNextRound: false });
     if (itemId === 'download') return onDownloadAsset(entity);
     if (itemId === 'new-round') return onCreateRound();
