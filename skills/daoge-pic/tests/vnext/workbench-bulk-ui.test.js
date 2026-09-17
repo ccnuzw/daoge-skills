@@ -416,7 +416,9 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /aria-label="画布缩略图，拖动以定位"/);
   assert.match(styles, /\.lineage-minimap svg \{ display:block; width:210px; height:134px/);
   assert.match(main, /onOpenConfirmation=\{\(round\) => void openGenerationConfirmation\(round\)\}/);
-  assert.match(lineage, /PlanActions\(\{ node, onNavigate, onCopyContext, onOpenConfirmation \}\)/);
+  // 断言的是「PlanActions 必须接得上确认回调」这件事本身，而不是把整个签名拷一遍 ——
+  // 后者会在每次给它加一个 prop 时无意义地变红（C1 加 onEditPlan 时就红了一次）。
+  assert.match(lineage, /function PlanActions\(\{[^}]*onOpenConfirmation[^}]*\}\)/);
   assert.match(lineage, /node\.entity\?\.status === 'awaiting_confirmation'/);
   assert.match(lineage, /审阅并确认计划/);
   // 意图不变：画布只展示状态，不直接执行重试。文案随术语治理收成人话（去掉「运行项」）。
