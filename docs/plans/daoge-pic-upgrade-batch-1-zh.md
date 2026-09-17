@@ -9,7 +9,7 @@
 
 | 日期 | 进度 | 下一步 |
 |---|---|---|
-| 2026-09-17 | 施工单已出；**尚未开工**（环境已就绪：仓库干净、文档已入版本控制） | 写 4 个守卫桩（见 0.3），然后进 A 组 |
+| 2026-09-17 | **已开工**：A1 开工前的守卫核查完成（读了 `workbench-route.test.js` 10 个测试），**发现方案 7.7.2 的收益被高估** → A1 降级为小改（见第 8 节日志第 1 条，待确认改方案） | 确认后实施 A1 小改，再进 A2 |
 
 > **交接约定**：换会话后，新会话只需读 **本节 + 第 8 节实施日志** + 项目记忆 `<workspace>/.workbuddy/memory/YYYY-MM-DD.md`，
 > 即可无损接续。**没写进这三处的东西等于没发生。**
@@ -31,7 +31,7 @@
 | 守卫 | 为什么会红 | 处理 |
 |---|---|---|
 | `terminology-guard.test.js` | 「轮次→批次」进术语单后，扫描会命中现有文案 | **顺序做了防控制**：先把文案改完（D 组之后），**最后一步**才加词 |
-| `workbench-route.test.js` | 路由拆「上下文层级 / 筛选范围」（A1） | 与 A1 同步改，保留原有不变量断言（如「assets/lineage 深链永不保留 studio 作用域」） |
+| `workbench-route.test.js` | **A1 已降级为小改**（见第 8 节日志）：只加派生函数、**不动**守卫逻辑 → **预期本测试不需要改**；若它变红，说明改过头了，退回 |
 | `phase4-navigation-registry.test.js` | 视图注册表（A2） | 扩展而非放宽：新增「宿主视图 / 是否一级入口 / 所需上下文」断言 |
 | `source-text-guard.test.js` | 前端源码文本级断言 | 逐条核对，属于「文本变了所以断言跟着变」，**不许删断言** |
 
@@ -73,7 +73,7 @@
 
 | # | 任务 | 涉及文件 | 依据 |
 |---|---|---|---|
-| **A1** | **路由拆「上下文层级 / 筛选范围」**：上下文层级由 project/task/round 三个 id 的存在性算出，不再靠 `assetScope` 兼任；`roundId` 与 `compareRoundIds[0]` 的冗余消除 | `web/src/workbench-route.mjs`（`normalizeRoute` 那 41 行守卫是重点）、`use-route-refresh.mjs`、各调用方 | 方案 7.7.2 |
+| **A1** | **路由小改**（幅度已按施工核查下调，见第 8 节日志）：① 加**显式派生函数** `contextLevelOf(route)`；② 消除 `roundId` ≡ `compareRoundIds[0]` 冗余；③ 注释澄清 `assetScope` = 筛选范围。**不动**降级守卫与 `normalizeRoute` 的判定逻辑 | `web/src/workbench-route.mjs`（必要时才碰调用方） | 方案 7.7.2（已修正） |
 | **A2** | **视图注册表**：把 `WORKBENCH_VIEWS`、`main.jsx` 的 `viewRenderers`、`ACTIVE_VIEWS`（高亮归属）三到四处收成**一处声明** | `web/src/workbench-route.mjs`、`workbench-navigation.jsx`、`main.jsx` | 方案 7.8.2 |
 | **A3** | **枚举→人话共享翻译表**（前端侧）：新建共享模块（如 `purpose-labels.mjs`），`main.jsx` 的 `ROUND_PURPOSE_OPTIONS` 与 `studio-search.jsx` 共用；搜索结果不再直接渲染 `result.purpose` 英文 | 新建 `web/src/purpose-labels.mjs`、`main.jsx`、`studio-search.jsx` | 方案 7.9.1（后端侧移二批） |
 | **A4** | **「轮次→批次」改词**（本批最大的一块文案工作，约 18 文件 113 处） | 全部前端 | 方案 7.9.2 |
@@ -170,7 +170,34 @@
 
 ---
 
-## 8. 实施日志（实施时填）
+## 8. 实施日志
 
-_(空。每完成一组或遇到偏差时补记：实际做法与计划的差异、踩的坑、
-以及"需要回头改方案文档"的发现——后者按规格书的从属纪律单独提出。)_
+### 2026-09-17 · A1 开工前的核查：**方案 7.7.2 的收益被高估**（需回头改方案）
+
+读 `tests/vnext/workbench-route.test.js`（134 行 / 10 个测试）后，发现方案 7.7.2 的判断不成立。
+
+**方案原文**：`normalizeRoute` 那 41 行里「一半在**防御一个本不该存在的歧义**」，且「拆成两个字段后，**那一半守卫直接消失**」。
+
+**实测**：那些守卫**不是在防御字段歧义**，而是在**锁住修过的真实 bug**——测试注释写得很明白：
+
+| 守卫 | 注释里的原因（原文） |
+|---|---|
+| `route never keeps a context level that has nothing behind it` | 孤儿 round 曾让 context loader 报「请先选择一个任务，再继续查看轮次或运行。」 |
+| scope 沿层级降级 | 「a round-scoped asset request with no round made `assetRefreshPath` return null, **so the list silently kept its old contents**」——**静默保留旧内容**，比报错更糟 |
+| `assets/lineage` 深链永不保留 studio 作用域 | 跨层级混看没有意义 |
+| `runId` 只在渲染 run 的视图存活 | 切 tab 带过去的 `run` 曾让页面答「请先打开生成运行视图」 |
+
+**结论**：
+1. 这些不变量**拆字段不会让它们消失**——scope 必须有支撑（scope=round 而没 roundId 就是不自洽），降级逻辑必须保留；
+2. **唯一真实的收益**是 `roundId` ≡ `compareRoundIds[0]` 的冗余可以消除；
+3. 所以 **A1 降级为小改**：
+   - **做**：把「上下文层级」提取为**显式派生函数** `contextLevelOf(route)`（为 B 组铺路）+ 在注释里澄清 `assetScope` 本就是「筛选范围」；
+   - **不做**：删降级守卫、重写 `normalizeRoute` 的 41 行——那会**破坏修过 bug 的防线**。
+
+**按规格书从属纪律**：此发现需**回头修正方案 7.7.2**（把「一半守卫消失」改成准确描述）。**待刀哥确认后修改**。
+
+**✅ 已回改（2026-09-17，刀哥确认）**：方案 7.7.2 已改写（标题改为「有一个是冗余的」+ 新增「原版本的错误论断」小节 + 修正后的设计）；
+**连带同步 4 处**：第 1 节引用、5.4 分期表、7.7.4 一览表、10.2 同步改清单；**规格书 3.2 表**同步。
+**A1 按修正后的「小改」实施。**
+
+### 待续

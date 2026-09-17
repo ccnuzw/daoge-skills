@@ -87,7 +87,7 @@
 |---|---|---|---|---|---|
 | `route-authorization.test.js` | 18 条鉴权规则 + 漂移检测 | | **改**（暂停/取消 → cookie） | | |
 | `terminology-guard.test.js` | 术语单 + 三面隔离 + 技术详情白名单 | **改**（轮次→批次进单） | | | |
-| `workbench-route.test.js` | 路由归一化不变量（如「assets/lineage 深链永不保留 studio 作用域」） | **改**（路由拆字段，方案 7.7.2） | | | |
+| `workbench-route.test.js` | 路由归一化不变量（如「assets/lineage 深链永不保留 studio 作用域」） | **预期不改**（A1 已降级为小改，见方案 7.7.2 的施工修正） | | | |
 | `phase4-navigation-registry.test.js` | 视图↔渲染器一一对应、辅助区不许变孤儿 | **改**（视图注册表，方案 7.8.2） | | | |
 | `studio-schema-contract.test.js` | schema 契约 | | **改**（新库） | | |
 | `protocol-contract.test.js` | Skill 协议契约 | | **改**（协议 → 3.0.0） | | |

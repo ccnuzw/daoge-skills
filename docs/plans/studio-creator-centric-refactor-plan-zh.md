@@ -17,7 +17,7 @@
 | 现象 | 实测 |
 |---|---|
 | 一次出图要跨入口 | 动作线被切成三段（创作平台 / 资产管理 / 资产交付） |
-| 路由状态要记 6 个维度 | `projectId` / `taskId` / `roundId` / `runId` / `assetScope` / `compareRoundIds`；`normalizeRoute` 为「哪些 id 该保留」单独写了一套规则和测试。（⚠️ 二轮重审发现这 6 个里有两个是冗余，见 **7.7.2**） |
+| 路由状态要记 6 个维度 | `projectId` / `taskId` / `roundId` / `runId` / `assetScope` / `compareRoundIds`；`normalizeRoute` 为「哪些 id 该保留」单独写了一套规则和测试。（⚠️ 二轮重审发现 `roundId`≡`compareRoundIds[0]` 这一处冗余；施工期核查又推翻了 7.7.2 的另一处判断，见 **7.7.2**） |
 | 用户被迫做系统决定 | **在「要人提供的内容」里，只有三个必填字段**：`projects.name`、`creative_tasks.name`、`creative_rounds.purpose`。前两个对创作者有意义，**`purpose` 是系统分类**（⚠️ 2026-09-17 核查修正：原写「全库只有三个 NOT NULL 且无默认值」，实测全库有 **245** 个——其余 242 个都由系统自动填，原意是「要人填的只有三个」） |
 | 确认页在讲架构 | 「人工确认闸门 · 可写操作」「会话只能发起确认请求；确认后由会话核算一遍」——没有一个字回答「要出什么、几张」 |
 | 画布上看不过来 | 单张画布最多 **349 个节点**；`round:plan = 159:157`（同一件事两个节点） |
@@ -874,7 +874,7 @@ agent 以对话回应——请求 `done` 时带回复内容，显示在发起处
 | 「枚举→人话」共享翻译表 + 搜索 label 修正 | 7.9 | 一批 |
 | 「轮次→批次」进术语单 | 7.9.2 | 一批（文案 + 守卫） |
 | 质量指标迁检查器 | 7.10.2 | 一批（纯前端） |
-| 路由拆「上下文层级 / 筛选范围」 | 7.7.2 | 一批（纯前端路由） |
+| 路由消除 `roundId` 冗余 + 「上下文层级」改显式派生函数（**不做原计划的大改**，见 7.7.2 施工修正） | 7.7.2 | 一批（纯前端路由） |
 | `studio_requests` 队列 | 7.1 | 二批（已在） |
 | asset `project_id` 外键 + `active_*` 处置 | 7.7 | 二批（动 schema，一次做完） |
 | asset 进搜索索引 | 7.8.1 | 二批（动索引触发器） |
@@ -1107,22 +1107,41 @@ asset  ──output_of──▶  run_item  ──▶  run  ──▶  round  ─
 
 **红线校验**：这不是「前端造影子状态」——恰恰相反，是把「归属」从**约定**升格为**约束**，更符合「唯一事实依据」。
 
-#### 7.7.2 路由的 6 个维度里，有两个其实是同一件事的两个说法
+#### 7.7.2 路由的 6 个维度里，有一个是冗余的（2026-09-17 施工期修正）
 
 文档第 1 节把「路由要记 6 个维度」当作「工程结构被可见化」的**证据**（`projectId` / `taskId` / `roundId` / `runId` / `assetScope` / `compareRoundIds`）。
 
-**但重读 `workbench-route.mjs` 后发现，这 6 个里有两个是「同一个概念的两张皮」**：
+**重读 `workbench-route.mjs` 后**，这 6 个里确实**有一个是冗余**：
 
-- `roundId` 与 `compareRoundIds[0]` **是同一个值**（`parseWorkbenchRoute` 里 `roundId = compareRoundIds[0]`）；
-- `assetScope` **同时干两件事**：它既是「上下文层级」（round/task/project），又是「资产筛选范围」——
-  这正是 `normalizeRoute` 里那一大坨「scope 该不该降级」守卫（第 100-101 行）存在的**唯一原因**。
+- `roundId` 与 `compareRoundIds[0]` **是同一个值**（`parseWorkbenchRoute` 里 `roundId = compareRoundIds[0]`）——**真冗余，可只留一个**。
 
-**迁就体现在**：`normalizeRoute` 写了整整 41 行，其中一半在**防御一个本不该存在的歧义**——
-「scope=round 但没有 roundId 该退到 task 还是 project」。这个歧义不是业务需要，是**「筛选范围」和「上下文层级」被塞进同一个字段**造成的。
+##### ⚠️ 原版本的错误论断（2026-09-17 施工期推翻）
 
-**新设计**：拆成两个字段——**上下文层级**（由 project/task/round 三个 id 的存在性唯一决定，不需要人存）和**筛选范围**（单独一个，只表达「看哪一层」）。归一化逻辑从「守卫一坨歧义」变成「读三个 id 算一个层级」，那一半守卫直接消失。
+本节最初写的是：`assetScope` 兼任「上下文层级」与「筛选范围」，而 `normalizeRoute` 那 41 行里
+「一半在**防御一个本不该存在的歧义**」，且「拆成两个字段后，**那一半守卫直接消失**」。**这个判断被施工核查推翻了。**
 
-**为什么之前没发现**：第 1 节把「6 个维度」当成「问题太复杂」的证据在引用，**却没往下追问这 6 个是不是都必要**。这一追，追出两个是冗余的。
+**实测**（读 `tests/vnext/workbench-route.test.js`，134 行 / 10 个测试）：那些守卫**不是在防御字段歧义**，
+而是在**锁住修过的真实 bug**——测试注释写得很明白：
+
+| 守卫 | 测试注释里的原因 |
+|---|---|
+| 「路由不留没有支撑的上下文层级」 | 孤儿 round 曾让上下文 loader 报「请先选择一个任务，再继续查看轮次或运行。」 |
+| scope 沿层级降级 | 「轮次 scope 的资产请求没有轮次时 `assetRefreshPath` 返回 null，**于是列表静默保留了旧内容**」——静默比报错更糟 |
+| `assets/lineage` 深链不留 studio 作用域 | 跨层级混看没有意义 |
+| `runId` 只在渲染 run 的视图存活 | 切 tab 带过去的 `run` 曾让页面答「请先打开生成运行视图」 |
+
+**它们拆字段也不会消失**——`scope=round` 而没 `roundId` 本来就是不自洽的，**降级逻辑必须保留**。
+
+**修正后的设计（比原方案保守，但安全）**：
+
+- **做**：把「上下文层级」提取为**显式派生函数** `contextLevelOf(route)`
+  （`roundId ? 'round' : taskId ? 'task' : projectId ? 'project' : 'studio'`），供后续（画布按层级铺、筛选范围）复用；
+  在注释里澄清 `assetScope` 的角色是「筛选范围」；消除 `roundId` ≡ `compareRoundIds[0]` 的冗余；
+- **不做**：删降级守卫、重写 `normalizeRoute`——那会破坏修过 bug 的防线。
+
+**方法论（值得记住）**：**「某段代码在防御一个不该存在的歧义」是一个需要证据的断言**，
+证据就是守卫测试的注释——**先读守卫，再决定删不删**。
+本案中我凭 `normalizeRoute` 的代码长度推断「一半是防御」，读注释才发现每一行都对应一次真实故障。
 
 #### 7.7.3 `studio_sessions.active_*` 的真相：两侧都在写，一个字段被两种意图共用
 
@@ -1152,7 +1171,7 @@ agent 写的是「我正在**操作**哪儿」，**两个不同的事实挤在�
 | 原设计（迁就） | 改为 | 实测依据 |
 |---|---|---|
 | 资产归属靠 `asset_relations` 拼五跳 | `assets.project_id` 直接外键，产出图落库即写死 | 1154 张产出图里 1095 张无项目级归属记录 |
-| 路由 6 维度都必要 | 拆「上下文层级」与「筛选范围」，`roundId`≡`compareRoundIds[0]` | `normalizeRoute` 一半行数在防御一个字段歧义 |
+| 路由 6 维度都必要 | 只消除 `roundId`≡`compareRoundIds[0]` 冗余；「上下文层级」改显式派生函数 | ⚠️ 原断「一半守卫在防御歧义」被施工核查**推翻**（那些守卫锁的是真实 bug），见 7.7.2 |
 | 「Studio 只读不写 `active_*`」 | **两侧都在写**（前端 + agent CLI）→ 界面侧交给路由，`active_*` 归还 agent | `main.jsx:2280` + `SKILL.md` 第 35 行 |
 
 **三条全是「关系/状态的组织」，没有一条碰四条红线**——反而都是让「唯一事实」更硬。
@@ -1646,7 +1665,7 @@ const ASSET_ACTIVE_VIEWS    = new Set(['assets', 'trash', 'shared-assets']);
 |---|---|---|
 | `route-authorization.test.js` | 18 条鉴权规则 + 漂移检测 | ✅ 会（暂停/取消改 cookie） |
 | `terminology-guard.test.js` | 术语单 + 三面隔离 + 技术详情白名单 | ✅ 会（轮次→批次进单） |
-| `workbench-route.test.js` | 路由归一化不变量（如「assets/lineage 深链永不保留 studio 作用域」） | ✅ 会（路由拆字段，7.7.2） |
+| `workbench-route.test.js` | 路由归一化不变量（如「assets/lineage 深链永不保留 studio 作用域」） | **预期不改**（A1 已降级为小改，见 7.7.2 施工修正） |
 | `phase4-navigation-registry.test.js` | 视图↔渲染器一一对应、辅助区不许变孤儿、生成历史不许回一级入口 | ✅ 会（视图注册表，7.8.2） |
 | `studio-schema-contract.test.js` | schema 契约 | ✅ 会（新库） |
 | `protocol-contract.test.js` | Skill 协议契约 | ✅ 会（协议升 3.0.0） |
