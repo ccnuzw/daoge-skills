@@ -131,3 +131,28 @@ test('route never keeps a context level that has nothing behind it', async () =>
   assert.equal(parseWorkbenchRoute('?view=lineage&project=project_a&task=task_b&round=round_c&scope=round').roundId, 'round_c');
   assert.equal(parseWorkbenchRoute('?view=lineage&project=project_a&task=task_b&round=round_c&scope=round').assetScope, 'round');
 });
+
+test('roundId stays a derived shortcut of compareRoundIds[0], and the context level is derived from ids', async () => {
+  const { parseWorkbenchRoute, contextLevelOf } = await import('../../web/src/workbench-route.mjs');
+  // `roundId`（主轮次）与 `compareRoundIds[0]` 是同一个事实的两种写法。与其删掉一个字段（10 个断言 + 2 处调用方
+  // 都要动），不如让两者**不可能漂移** —— 这条守卫就是「消除冗余」的可执行形式。
+  for (const search of [
+    '?view=lineage&project=project_a&task=task_b&round=round_c&scope=round',
+    '?view=studio-overview&project=project_a&task=task_b&round=r1&round=r2&scope=task',
+    '?view=lineage&project=project_a',
+    '?view=lineage&project=project_a&task=task_b'
+  ]) {
+    const route = parseWorkbenchRoute(search);
+    assert.equal(route.roundId, route.compareRoundIds[0] ?? null, search + ' roundId is derived from compareRoundIds[0]');
+  }
+  // 上下文层级由 id 的存在性唯一决定，不需要也不应该另存一个字段。
+  assert.equal(contextLevelOf({ projectId: 'p', taskId: 't', roundId: 'r' }), 'round');
+  assert.equal(contextLevelOf({ projectId: 'p', taskId: 't', roundId: null }), 'task');
+  assert.equal(contextLevelOf({ projectId: 'p', taskId: null, roundId: null }), 'project');
+  assert.equal(contextLevelOf({ projectId: null, taskId: null, roundId: null }), 'studio');
+  assert.equal(contextLevelOf({}), 'studio');
+  // 层级 ≠ 筛选范围：在「任务」层级上完全可以看「项目级」的资产 —— 这正是两个概念该分开表达的地方。
+  const taskLevelWithProjectScope = parseWorkbenchRoute('?view=lineage&project=project_a&task=task_b&scope=project');
+  assert.equal(contextLevelOf(taskLevelWithProjectScope), 'task');
+  assert.equal(taskLevelWithProjectScope.assetScope, 'project');
+});

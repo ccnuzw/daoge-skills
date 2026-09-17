@@ -60,6 +60,23 @@ export function isStudioView(view) {
   return STUDIO_VIEWS.includes(view);
 }
 
+/**
+ * 上下文层级：由 project / task / round 三个 id 的存在性**唯一决定**，不需要另外存一个字段。
+ *
+ * ⚠️ 它**不是** `assetScope`：`assetScope` 是「看哪一层的资产」这个**筛选范围**，
+ * 两者只在「未指定 scope 时跟随上下文」这一处默认值上有关系。
+ * 把这两个概念混为一谈，会让「筛选范围」看起来像层级、也让层级看起来像可选状态。
+ *
+ * @param {{projectId?: string|null, taskId?: string|null, roundId?: string|null}} route
+ * @returns {'studio'|'project'|'task'|'round'}
+ */
+export function contextLevelOf(route) {
+  if (route?.roundId) return 'round';
+  if (route?.taskId) return 'task';
+  if (route?.projectId) return 'project';
+  return 'studio';
+}
+
 function studioViewKeepsProject(view) {
   return PROJECT_CONTEXT_STUDIO_VIEWS.includes(view);
 }
@@ -89,10 +106,14 @@ function normalizeRoute(route) {
   // that arrives without its parent is not a usable context: it used to survive on the asset/overview views and
   // made the Workbench answer with 「请先选择一个任务，再继续查看轮次或运行。」.
   if (!taskId) compareRoundIds = [];
+  // `roundId` 是 `compareRoundIds[0]`（主轮次）的**派生快捷方式**——两者的一致性由守卫测试锁住，
+  // 所以这里只从 compareRoundIds 派发，不单独接受一个 roundId 输入。
   const roundId = compareRoundIds[0] || null;
-  const contextScope = roundId ? 'round' : taskId ? 'task' : 'project';
-  const suppliedScope = known(route.assetScope, ASSET_SCOPES, contextScope);
-  let requestedScope = ['assets', 'lineage'].includes(view) && suppliedScope === 'studio' ? contextScope : suppliedScope;
+  // 未指定 scope 时跟随上下文层级 —— 这是「筛选范围」（assetScope）与「上下文层级」唯一的关联点。
+  // 层级由 id 推导（contextLevelOf），不单独存储；assetScope 只表达「看哪一层的资产」。
+  const contextLevel = contextLevelOf({ projectId, taskId, roundId });
+  const suppliedScope = known(route.assetScope, ASSET_SCOPES, contextLevel);
+  let requestedScope = ['assets', 'lineage'].includes(view) && suppliedScope === 'studio' ? contextLevel : suppliedScope;
   // A scope level must be backed by the context that level needs. These two guards used to run for `lineage` only,
   // so `?view=assets&task=t&scope=round` kept a round scope with no round behind it and `assetRefreshPath` answered
   // with null — the asset list then silently stayed on whatever it showed before. Degrading the scope keeps the
