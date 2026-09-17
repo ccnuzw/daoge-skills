@@ -13,11 +13,11 @@ export const MENU_ITEM_LIMIT = 4;
 
 /**
  * @param {any} node 画布节点
- * @param {{ canReview?: boolean, canDeliver?: boolean, canDerive?: boolean, collapsed?: boolean }} [options]
+ * @param {{ canReview?: boolean, canDeliver?: boolean, canDerive?: boolean, canEditPlan?: boolean, canHistory?: boolean, collapsed?: boolean }} [options]
  *   `canDerive` 指「照它再来几张」——它要经队列派给 agent，本批还没有队列，所以传 false 时不出现。
  * @returns {Array<{ id: string, label: string, primary?: boolean }>}
  */
-export function nodeMenuItems(node, { canReview = false, canDeliver = false, canDerive = false, collapsed = false } = {}) {
+export function nodeMenuItems(node, { canReview = false, canDeliver = false, canDerive = false, canEditPlan = false, canHistory = false, collapsed = false } = {}) {
   if (!node) return [];
   const type = node.entityType;
   const body = [];
@@ -29,14 +29,17 @@ export function nodeMenuItems(node, { canReview = false, canDeliver = false, can
       // 已交付：这批图已经出去了，能做的只剩「找到它」和「拿走」。
       body.push({ id: 'open-delivery', label: '查看所在交付' });
       body.push({ id: 'download', label: '下载' });
+      body.push({ id: 'preview', label: '放大查看' });
     } else if (node.selectedAsset) {
       // 已选定：下一步是「用它」或「不要了」。
       body.push({ id: 'unkeep', label: '移出成果' });
       if (canDeliver) body.push({ id: 'deliver', label: '去交付' });
+      body.push({ id: 'preview', label: '放大查看' });
       pushDerive();
     } else {
-      // 候选：最常走的一套——选为成果 / 不采用。交付候选 = 选定的图（动态投影），
+      // 候选：最常走的一套——放大细看 / 选为成果 / 不采用。交付候选 = 选定的图（动态投影），
       // 非成果进不了候选，所以「去交付」只在已选定态出现。
+      body.push({ id: 'preview', label: '放大查看' });
       body.push({ id: 'keep', label: '选为成果', primary: true });
       body.push({ id: 'reject', label: '不采用' });
       pushDerive();
@@ -44,14 +47,20 @@ export function nodeMenuItems(node, { canReview = false, canDeliver = false, can
   } else if (type === 'round') {
     // 批次：折叠态给「展开」，展开态给「收起」——同一格随状态换说法。
     body.push({ id: 'toggle', label: collapsed ? '展开这一批的图' : '收起这一批的图' });
+    // 草稿也能改计划（改后照样走确认）；待确认给确认闸门。两者互斥，不会同现。
+    if (canEditPlan) body.push({ id: 'edit-plan', label: '编辑计划' });
     if (canReview) body.push({ id: 'confirm', label: '审阅并确认计划' });
     if (canDeliver) body.push({ id: 'deliver', label: '去交付' });
+    if (canHistory) body.push({ id: 'history', label: '看生成历史' });
   } else if (type === 'task') {
     body.push({ id: 'open', label: '打开这个任务' });
     body.push({ id: 'new-round', label: '新建批次' });
   } else if (type === 'project') {
     body.push({ id: 'open', label: '打开项目全貌' });
     body.push({ id: 'new-task', label: '在项目里新建任务' });
+  } else if (node.resourceNode || ['task_type', 'style_kit', 'brand_kit'].includes(type)) {
+    // 资料节点记下来就是为了复制去用——这是它唯一的动作，不给等于白放。
+    body.push({ id: 'copy-plan', label: '复制计划指令' });
   } else if (type === 'placeholder') {
     // 占位是「还在生成的那一张」，此刻没有可做的决定。
     return [{ id: 'detail', label: '详情' }];

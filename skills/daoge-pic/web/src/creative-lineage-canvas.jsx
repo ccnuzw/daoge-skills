@@ -926,6 +926,9 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     canReview: node?.entityType === 'round' && node?.entity?.status === 'awaiting_confirmation',
     // 「拿出去」要有项目才能落到某次交付里。
     canDeliver: Boolean(project?.id),
+    // 草稿也能改计划（改后照样走确认）；有了出图记录才谈得上生成历史。
+    canEditPlan: node?.entityType === 'round' && ['draft', 'awaiting_confirmation'].includes(node?.entity?.status),
+    canHistory: node?.entityType === 'round' && !['draft', 'awaiting_confirmation'].includes(node?.entity?.status),
     // 「照它再来」要经队列派给 agent——本批还没有队列，所以恒为 false（模型留了开关）。
     canDerive: false,
     collapsed: positionsRef.current[node?.key]?.collapsed === true
@@ -951,8 +954,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     if (itemId === 'reject') return onReject([entity], { createNextRound: false });
     if (itemId === 'download') return onDownloadAsset(entity);
     if (itemId === 'new-round') return onCreateRound();
-    if (itemId === 'new-task') return onCreateTask();
-  }, [toggleNodeCollapsed, onNavigate, project?.id, onInspectAsset, onToggleAsset, onReject, onDownloadAsset, onCreateRound, onCreateTask]);
+    if (itemId === 'preview') return onPreviewAsset(entity);
+    if (itemId === 'edit-plan') return openPlanEdit(node);
+    if (itemId === 'history') return onNavigate({ view: 'runs', taskId: entity?.taskId || null, roundId: entity?.id || null, compareRoundIds: entity?.id ? [entity.id] : [], runId: null, assetScope: 'round' });
+    if (itemId === 'copy-plan') return void navigator.clipboard?.writeText('请基于 Workbench 创作谱系中的节点生成计划草稿；先不要真的出图，给我审阅确认。').catch(() => setLayoutError('无法复制计划信息，请在会话里手动引用这个节点。'));
+  }, [toggleNodeCollapsed, onNavigate, project?.id, onInspectAsset, onToggleAsset, onReject, onDownloadAsset, onCreateRound, onCreateTask, openPlanEdit, onPreviewAsset]);
 
   const undoLayout = useCallback(() => {
     const previous = historyRef.current.undo.pop();

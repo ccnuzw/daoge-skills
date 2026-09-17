@@ -19,9 +19,9 @@ test('菜单随对象状态变：候选 / 已选定 / 已交付 三套完全不�
   const chosen = nodeMenuItems(asset({ selectedAsset: true }), { canDeliver: true });
   const delivered = nodeMenuItems(asset({ deliveredAsset: true }), { canDeliver: true });
 
-  assert.deepEqual(ids(candidate), ['keep', 'reject', 'detail']);
-  assert.deepEqual(ids(chosen), ['unkeep', 'deliver', 'detail']);
-  assert.deepEqual(ids(delivered), ['open-delivery', 'download', 'detail']);
+  assert.deepEqual(ids(candidate), ['preview', 'keep', 'reject', 'detail']);
+  assert.deepEqual(ids(chosen), ['unkeep', 'deliver', 'preview', 'detail']);
+  assert.deepEqual(ids(delivered), ['open-delivery', 'download', 'preview', 'detail']);
 
   // ⚠️ 交付候选 = 当前选为成果的图（动态投影，2026-09-17 刀哥确认）：
   //   非成果的图进不了候选，「去交付」给了也是白跳 —— 所以它只出现在已选定态；
@@ -37,7 +37,7 @@ test('菜单随对象状态变：候选 / 已选定 / 已交付 三套完全不�
   // 评审记了 keep 但没进选片的图，仍显示「选为成果」——否则「移出成果」后菜单永远停在已选定态
   // （2026-09-17 刀哥实机：评审 keep 是「选为成果」顺带做的，移出只解除选片，两个维度不能混判）。
   const keptButNotSelected = nodeMenuItems(asset({ entity: { review: { decision: 'keep' } } }), { canDeliver: true });
-  assert.deepEqual(ids(keptButNotSelected), ['keep', 'reject', 'detail']);
+  assert.deepEqual(ids(keptButNotSelected), ['preview', 'keep', 'reject', 'detail']);
 });
 
 test('每张菜单 3–4 项，且全是动词', async () => {
@@ -75,7 +75,30 @@ test('批次菜单随折叠状态换说法；依赖队列的动作默认不出�
   // 「照它再来几张」要经队列派给 agent——本批没有队列，默认不该出现。
   assert.equal(nodeMenuItems(asset()).some((item) => item.id === 'derive'), false);
   // 但模型留了开关，队列做完（三批）传 canDerive 就能开。
-  assert.equal(nodeMenuItems(asset(), { canDerive: true }).some((item) => item.id === 'derive'), true);
+  assert.equal(nodeMenuItems(asset({ selectedAsset: true }), { canDerive: true }).some((item) => item.id === 'derive'), true);
+});
+
+test('全节点菜单矩阵（2026-09-17 审计固化）：每类节点该有的都有', async () => {
+  const { nodeMenuItems } = await import('../../web/src/lineage-menu-model.mjs');
+  // 批次：草稿可改计划；有出图记录才有生成历史；待确认给确认闸门。三者按状态出现，不同时全在。
+  const draft = nodeMenuItems({ entityType: 'round', entity: { id: 'r1', status: 'draft' } }, { canEditPlan: true, collapsed: true });
+  assert.deepEqual(ids(draft), ['toggle', 'edit-plan', 'detail'], '草稿批次必须能改计划');
+  const awaiting = nodeMenuItems({ entityType: 'round', entity: { id: 'r1', status: 'awaiting_confirmation' } }, { canReview: true });
+  assert.deepEqual(ids(awaiting), ['toggle', 'confirm', 'detail'], '待确认批次必须有确认闸门');
+  const active = nodeMenuItems({ entityType: 'round', entity: { id: 'r1', status: 'active' } }, { canHistory: true, canDeliver: true });
+  assert.deepEqual(ids(active), ['toggle', 'deliver', 'history', 'detail'], '出过图的批次必须有看生成历史（canDeliver 时含去交付）');
+  // 资料节点记下来就是为了复制去用。
+  const resource = nodeMenuItems({ entityType: 'style_kit', entity: { id: 'sk1' }, resourceNode: true });
+  assert.deepEqual(ids(resource), ['copy-plan', 'detail'], '资料节点必须有复制计划指令');
+  // 图的各类状态都带放大查看（高频动作）。
+  for (const node of [
+    asset(),
+    asset({ selectedAsset: true }),
+    asset({ deliveredAsset: true }),
+    asset({ entity: { review: { decision: 'reject' } } })
+  ]) {
+    assert.equal(nodeMenuItems(node).some((item) => item.id === 'preview'), true, '图节点必须有放大查看');
+  }
 });
 
 test('「去交付」是导航不是自动送入——文案必须诚实，且不能丢任务上下文', async () => {
