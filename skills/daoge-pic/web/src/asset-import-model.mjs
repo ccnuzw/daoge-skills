@@ -15,7 +15,7 @@ export function imageFilesFrom(files) {
 }
 
 /**
- * 这次导入把图片挂到哪个范围（轮次 > 任务 > 项目）。
+ * 这次导入把图片挂到哪个范围（批次 > 任务 > 项目）。
  *
  * ⚠️ 这是**归属**判断：挂错了范围，素材就会出现在另一个工作对象下，而创作者
  * 只会觉得「我传的图不见了」。所以它被单独拎出来单测，不跟着 hook 一起搬。
@@ -69,7 +69,7 @@ export function mergeImportedReferences({ existing = [], importedAssets = [], us
   return [...materialMap.values()];
 }
 
-/** 只有「本轮范围 + 轮次还是草稿」才自动挂进参考素材：已确认的轮次不该被静默改。 */
+/** 只有「本轮范围 + 批次还是草稿」才自动挂进参考素材：已确认的批次不该被静默改。 */
 export function shouldLinkImportedToRound({ succeeded, importedCount, selectedRound, assetScope }) {
   return Boolean(succeeded && importedCount && selectedRound && assetScope === 'round' && selectedRound.status === 'draft');
 }
@@ -105,7 +105,7 @@ export function maskImportProblem({ selectedProject, file }) {
   return '';
 }
 
-/** 遮罩导入的请求头。遮罩恒挂在项目下，不参与轮次范围。 */
+/** 遮罩导入的请求头。遮罩恒挂在项目下，不参与批次范围。 */
 export function maskImportHeaders({ projectId, file }) {
   return {
     'x-daoge-filename': encodeURIComponent(file?.name || 'mask.png'),

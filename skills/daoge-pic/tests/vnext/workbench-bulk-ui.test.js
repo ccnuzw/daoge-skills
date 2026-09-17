@@ -24,7 +24,7 @@ test('project assets expose page selection, configurable pagination, and multi-f
   assert.match(main, />资产管理<\/button>/);
   assert.match(main, />创作平台<\/button>/);
   assert.match(main, />生成历史<\/button>/);
-  assert.match(main, />轮次对比<\/button>/);
+  assert.match(main, />批次对比<\/button>/);
   assert.doesNotMatch(readSource('web/src/main.jsx'), /className="task-more-tabs"/);
   assert.match(main, /if \(!session\) void openWorkbenchSession\(\)\.catch/);
   assert.match(main, /\[session\?\.id, session\?\.version, eventRevision\.planVersions/);
@@ -94,8 +94,8 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /两条入口、一条流程/);
   assert.match(main, /新建项目/);
   assert.match(main, /新建任务/);
-  assert.match(main, /新建轮次/);
-  assert.match(main, /同时创建首个轮次，并设为当前轮次/);
+  assert.match(main, /新建批次/);
+  assert.match(main, /同时创建首个批次，并设为当前批次/);
   assert.match(main, /api\('\/api\/project-templates'/);
   assert.match(main, /templateVersion/);
   assert.match(main, /creation-selection-detail/);
@@ -211,8 +211,8 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(lineage, /import \{ CreativeActionLauncher \} from '\.\/creative-action-launcher\.jsx'/);
   assert.match(lineage, /<CreativeActionLauncher/);
   assert.match(launcher, /export function CreativeActionLauncher/);
-  assert.match(launcher, /先选用途，再选还没开工的轮次/);
-  assert.match(launcher, /未锁定轮次：点击用途后先选一个还没开工的轮次/);
+  assert.match(launcher, /先选用途，再选还没开工的批次/);
+  assert.match(launcher, /未锁定批次：点击用途后先选一个还没开工的批次/);
   // 动作面板必须继续声明「这些动作不出图」，但改用全站唯一那句人话（见 boundary-copy.mjs）。
   // 旧文案「不会确认、预检、创建 Generation Run 或访问 Provider」是工程话，已随第一批术语治理收敛。
   assert.match(launcher, /import \{ DRAFT_BOUNDARY_COPY \} from '\.\/boundary-copy\.mjs'/);
@@ -282,7 +282,7 @@ test('Workbench confirmations use the shared accessible modal instead of native 
   const confirmation = readFrontendSource();
   assert.doesNotMatch(main + provider, /window\.(?:alert|confirm|prompt)|\b(?:alert|confirm|prompt)\s*\(/);
   assert.match(main, /<ConfirmationDialog/);
-  assert.match(main, /归档后将关闭该项目下的任务与轮次/);
+  assert.match(main, /归档后将关闭该项目下的任务与批次/);
   assert.match(main, /这张图片仍被选择、规则资料或交付引用/);
   assert.match(main, /busy=\{confirmationBusy\}/);
   assert.match(main, /error=\{confirmationError\}/);
@@ -381,13 +381,13 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /CREATOR_MODES/);
   assert.match(lineage, /'全局'/);
   assert.match(lineage, /'按任务'/);
-  assert.match(lineage, /'按轮次'/);
+  assert.match(lineage, /'按批次'/);
   assert.match(lineage, /'按图片'/);
   assert.match(lineage, /'按交付'/);
   assert.match(lineage, /画布视角/);
   // 画布 mode 是同一张图的五种看法，名字不得再和左侧一级入口撞车
-  // （旧名里「项目地图/资产分支/交付路线」与入口近义、「轮次对比」与页签同名）。
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'轮次对比'/);
+  // （旧名里「项目地图/资产分支/交付路线」与入口近义、「批次对比」与页签同名）。
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'批次对比'/);
   assert.match(lineage, /LineageWorkspaceSummary/);
   assert.match(lineage, /lineage-focus-strip/);
   assert.match(lineage, /toolbarMode/);
@@ -402,7 +402,7 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /<CreativeActionLauncher/);
   assert.match(lineage, /反例参考/);
   assert.match(lineage, /label: '不采用'/);
-  assert.match(lineage, /设为当前轮次/);
+  assert.match(lineage, /设为当前批次/);
   assert.match(lineage, /不会真的出图/);
   assert.match(lineage, /lineage-context-actions/);
   assert.match(lineage, /任务列表/);

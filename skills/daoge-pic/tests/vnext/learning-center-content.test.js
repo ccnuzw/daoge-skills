@@ -30,9 +30,9 @@ test('learning center matches the stable session, Provider, preflight, history, 
   assert.match(sessions, /新打开与安全复用/);
 
   const projects = topicText('projects');
-  assert.match(projects, /普通新建项目、任务或轮次后直接进入当前上下文/);
+  assert.match(projects, /普通新建项目、任务或批次后直接进入当前上下文/);
   assert.match(projects, /生成计划、变更执行目标和 Provider 调用必须回到会话确认/);
-  assert.doesNotMatch(projects, /创建项目、任务和轮次，以及变更创作目标/);
+  assert.doesNotMatch(projects, /创建项目、任务和批次，以及变更创作目标/);
 
   const provider = topicText('provider');
   assert.match(provider, /Provider\.db/);
@@ -68,7 +68,7 @@ test('learning center matches the stable session, Provider, preflight, history, 
   assert.match(assets, /未定资产不能进入交付/);
   assert.match(assets, /成果 \/ keep/);
   assert.match(assets, /不采用可转成反例/);
-  assert.match(assets, /可继续创作必须创建新轮次/);
+  assert.match(assets, /可继续创作必须创建新批次/);
 
   const delivery = topicText('delivery');
   assert.match(delivery, /全选或取消全选交付图片/);
@@ -82,7 +82,7 @@ test('learning center matches the stable session, Provider, preflight, history, 
   const library = topicText('library');
   assert.match(library, /项目内打开规则资料会保留当前项目壳/);
   assert.match(library, /项目内打开规则资料不关闭当前项目/);
-  assert.match(library, /不绑定任务、轮次、计划或运行/);
+  assert.match(library, /不绑定任务、批次、计划或运行/);
 });
 const path = require('node:path');
 

@@ -6,7 +6,7 @@ export const ASSET_STATE_LEGEND_ITEMS = Object.freeze([
   { id: 'unreviewed', label: '未定', description: '尚未明确保留或不采用；可以继续评审，但不能进入交付。' },
   { id: 'keep', label: '成果 / keep', description: '已选为成果并写入 keep 评审；只有这类图片可创建交付草稿。' },
   { id: 'reject', label: '不采用', description: '记录淘汰原因；可转成反例或下一轮修正目标。' },
-  { id: 'derive', label: '可继续', description: '适合作为父资产或参考；新方向必须创建新轮次。' },
+  { id: 'derive', label: '可继续', description: '适合作为父资产或参考；新方向必须创建新批次。' },
   { id: 'delivery', label: '交付冻结', description: '交付从 keep 选片进入 draft → ready → exported；导出后不受源资产回收影响。' }
 ]);
 

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { readSource } = require('./source-text');
 
 /**
- * 「轮次目的」枚举 → 人话 label 的守卫。
+ * 「批次目的」枚举 → 人话 label 的守卫。
  *
  * 背景：`main.jsx` 的 `ROUND_PURPOSE_OPTIONS` 早就有一份人话 label，但**只被选片那条路径用**；
  * 搜索结果（`studio-search.jsx`）直接渲染 `result.purpose`，于是同一个枚举在两处两种待遇——

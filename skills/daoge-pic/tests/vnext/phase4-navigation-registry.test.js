@@ -35,7 +35,7 @@ test('mobile navigation exposes four human workbench entries with 44px targets',
   assert.doesNotMatch(readSource('web/src/workbench-navigation.jsx'), /workbenchItem = project \?/);
   assert.doesNotMatch(readSource('web/src/workbench-navigation.jsx'), /workbenchItem[^\n]+project-overview/);
   assert.match(navigation, /ASSET_ACTIVE_VIEWS/);
-  // 「生成历史」按轮次组织，只在任务内联页签里出现；一旦把它请回一级入口，这条会先响。
+  // 「生成历史」按批次组织，只在任务内联页签里出现；一旦把它请回一级入口，这条会先响。
   assert.doesNotMatch(readSource('web/src/workbench-navigation.jsx'), /NAVIGATION_ITEMS\.runs|item: runItem/);
   // v5.12.0 把轨道里「当前项目」那一组二级入口整体撤掉了，这条守卫锁住它不回潮。
   // 「项目管理」不在禁令内：它是 Studio 级 projects 入口的名字（v5.12.0 之前就叫这个），与那组二级入口无关。

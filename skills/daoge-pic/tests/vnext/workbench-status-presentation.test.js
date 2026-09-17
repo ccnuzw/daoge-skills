@@ -6,7 +6,7 @@ test('status labels distinguish an open project, confirmed round, and active Pro
 
   assert.deepEqual(statusPresentation('project', 'active'), { label: '开放', tone: 'ready' });
   assert.deepEqual(statusPresentation('round', 'active'), { label: '已确认 · 可继续', tone: 'ready' });
-  assert.deepEqual(taskPresentation({ status: 'draft' }, [{ status: 'active' }, { status: 'active' }]), { label: '已确认 · 2 轮次', tone: 'ready' });
+  assert.deepEqual(taskPresentation({ status: 'draft' }, [{ status: 'active' }, { status: 'active' }]), { label: '已确认 · 2 批次', tone: 'ready' });
   assert.deepEqual(runExecutionPresentation({ status: 'running' }, [{ status: 'requesting' }]), { label: '正在生成', tone: 'live' });
 });
 

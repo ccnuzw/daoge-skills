@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// 「素材用途」是上传、参考素材对话框、派生轮次预设共用的判断，所以它从 main.jsx 里
+// 「素材用途」是上传、参考素材对话框、派生批次预设共用的判断，所以它从 main.jsx 里
 // 搬进了纯模块 —— 这两个用例守的是搬完之后它还得是原来那个判断，而不是「文件还在」。
 const MODEL = '../../web/src/reference-usage-model.mjs';
 

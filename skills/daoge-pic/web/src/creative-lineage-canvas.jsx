@@ -15,9 +15,9 @@ const REVIEW_LABELS = { keep: '成果', review: '未定', reject: '不采用', d
 // 这是同一张图上的五种「看法」，不是五个去处 —— 名字必须和左侧一级入口明显区分，
 // 否则「资产分支 / 资产管理」「交付路线 / 资产交付」会被读成同一件事。
 const CREATOR_MODES = [
-  ['map', '全局', '看项目、任务、轮次和交付全貌。'],
+  ['map', '全局', '看项目、任务、批次和交付全貌。'],
   ['flow', '按任务', '沿参考、计划、运行、结果继续推进。'],
-  ['rounds', '按轮次', '比较每一轮方向和保留率。'],
+  ['rounds', '按批次', '比较每一轮方向和保留率。'],
   ['assets', '按图片', '围绕关键图片继续变体或精修。'],
   ['delivery', '按交付', '只看交付候选、交付包和最终路径。']
 ];
@@ -115,7 +115,7 @@ function resourceNodeKey(resource) { return nodeKey(resource.entityType, resourc
 function endpointFromNode(node) { return { type: node.entityType, id: node.entityId }; }
 function relationLabel(type) { return RELATION_OPTIONS.find(([value]) => value === type)?.[1] || '标注关系'; }
 function safeResourceSummary(resource) { return safeDisplayText(resource?.summary || resource?.source || '可以作为计划信息。', '资料摘要已隐去隐私。', 96); }
-function nodeTypeLabel(type) { return ({ project: '项目', task: '任务', round: '轮次', plan: '计划', run: '本次出图', run_item: '单张出图', asset: '项目资产', shared_asset: '共享素材', delivery: '交付', task_type: '任务类型', style_kit: '风格包', brand_kit: '品牌包', group: '分组' })[type] || type; }
+function nodeTypeLabel(type) { return ({ project: '项目', task: '任务', round: '批次', plan: '计划', run: '本次出图', run_item: '单张出图', asset: '项目资产', shared_asset: '共享素材', delivery: '交付', task_type: '任务类型', style_kit: '风格包', brand_kit: '品牌包', group: '分组' })[type] || type; }
 function isAssetNode(node) { return node?.entityType === 'asset' || node?.entityType === 'shared_asset'; }
 function mediaUnavailable(asset) { return asset?.deletedAt || asset?.mediaAvailable === false || asset?.mediaStatus === 'missing' || asset?.mediaStatus === 'unavailable'; }
 function hasProtectedLineageText(value) {
@@ -316,7 +316,7 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
   taskList.forEach((task, index) => {
     const roundsForTask = taskRounds(task, visibleRounds);
     const y = selectedTask ? 170 : 170 + index * Math.max(260, 152 + roundsForTask.length * 150);
-    const taskNode = createNode('task', task, { x: 0, y }, { title: task.name, subtitle: [task.status === 'completed' ? '已完成任务' : '任务', task.taskTypeId || '通用创作', roundsForTask.length ? roundsForTask.length + ' 个轮次' : '暂无轮次'].filter(Boolean).join(' · '), tone: 'task', focused: selectedTask?.id === task.id });
+    const taskNode = createNode('task', task, { x: 0, y }, { title: task.name, subtitle: [task.status === 'completed' ? '已完成任务' : '任务', task.taskTypeId || '通用创作', roundsForTask.length ? roundsForTask.length + ' 个批次' : '暂无批次'].filter(Boolean).join(' · '), tone: 'task', focused: selectedTask?.id === task.id });
     nodes.push(taskNode);
     connect(projectNode.key, taskNode.key, 'contains', '包含任务');
   });
@@ -333,10 +333,10 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     const references = roundReferenceMaterials(round);
     const masks = roundMaskAssetIds(round);
     for (const assetId of parentAssets) derivedAssetIds.add(assetId);
-    const roundNode = createNode('round', round, { x: 310, y }, { title: (PURPOSE_LABELS[round.purpose] || round.purpose) + '轮次', subtitle: ['计划 v' + round.planVersion, detail.operationLabel, parentAssets.length ? parentAssets.length + ' 张父资产' : '', references.length ? references.length + ' 张参考' : ''].filter(Boolean).join(' · '), tone: 'round', focused: selectedRound?.id === round.id });
+    const roundNode = createNode('round', round, { x: 310, y }, { title: (PURPOSE_LABELS[round.purpose] || round.purpose) + '批次', subtitle: ['计划 v' + round.planVersion, detail.operationLabel, parentAssets.length ? parentAssets.length + ' 张父资产' : '', references.length ? references.length + ' 张参考' : ''].filter(Boolean).join(' · '), tone: 'round', focused: selectedRound?.id === round.id });
     const planNode = createNode('plan', round, { x: 590, y }, { title: '计划 v' + round.planVersion, subtitle: planSummary(round), status: round.status, tone: 'plan', planDetail: detail, focused: selectedRound?.id === round.id });
     nodes.push(roundNode, planNode);
-    connect(nodeKey('task', round.taskId), roundNode.key, 'contains', '包含轮次');
+    connect(nodeKey('task', round.taskId), roundNode.key, 'contains', '包含批次');
     if (round.parentRoundId) connect(nodeKey('round', round.parentRoundId), roundNode.key, 'lineage', '衍生自');
     connect(roundNode.key, planNode.key, 'plan', '计划');
     for (const assetId of parentAssets) connect(nodeKey('asset', assetId), roundNode.key, 'lineage', '衍生起点');
@@ -384,11 +384,11 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     const sourceAnchor = sourceRoundId ? roundAnchorById.get(sourceRoundId) : null;
     const taskIndex = sourceTaskId ? taskIndexById.get(sourceTaskId) : null;
     const yBase = sourceAnchor ? sourceAnchor.y : Number.isInteger(taskIndex) ? 170 + taskIndex * 260 : 40;
-    const sourceText = source ? '来自第 ' + source.itemSequence + ' 项' + (source.retry ? ' · 重试产物' : '') : sourceRoundId ? '来自轮次结果' : '';
+    const sourceText = source ? '来自第 ' + source.itemSequence + ' 项' + (source.retry ? ' · 重试产物' : '') : sourceRoundId ? '来自批次结果' : '';
     const subtitle = [assetState(asset, selected, shared, delivered, unavailable, derived), sourceText].filter(Boolean).join(' · ');
     const assetNode = createNode('asset', asset, { x: 1490 + (localIndex % 3) * 198, y: yBase + Math.floor(localIndex / 3) * 250 }, { title: assetLabel(asset), subtitle, status: unavailable ? 'unavailable' : asset.review?.decision || (selected ? 'selected' : derived ? 'derived' : 'active'), tone: shared ? 'shared' : 'asset', selectedAsset: selected, sharedAsset: shared, deliveredAsset: delivered, derivedAsset: derived, mediaUnavailable: unavailable, outputSource: source || null, focused: Boolean(activeRun?.id && source?.runId === activeRun.id) });
     nodes.push(assetNode);
-    if (!source && sourceRoundId) connect(nodeKey('round', sourceRoundId), assetNode.key, 'generated', '轮次结果');
+    if (!source && sourceRoundId) connect(nodeKey('round', sourceRoundId), assetNode.key, 'generated', '批次结果');
   });
 
   let externalSharedIndex = 0;
@@ -453,11 +453,11 @@ function sessionContextLine(sessionPlanStatus, selectedTask, selectedRound) {
   const context = sessionPlanStatus?.context;
   if (context?.project?.name) {
     const round = context.round;
-    return [safeDisplayText(context.task?.name, '任务', 80), round ? (PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion : '未绑定轮次'].filter(Boolean).join(' / ');
+    return [safeDisplayText(context.task?.name, '任务', 80), round ? (PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion : '未绑定批次'].filter(Boolean).join(' / ');
   }
   if (selectedRound) return (PURPOSE_LABELS[selectedRound.purpose] || selectedRound.purpose) + ' · 计划 v' + selectedRound.planVersion;
   if (selectedTask) return safeDisplayText(selectedTask.name, '任务', 80);
-  return '未绑定活动轮次';
+  return '未绑定活动批次';
 }
 
 function planStatusLine(sessionPlanStatus, selectedRound) {
@@ -1137,8 +1137,8 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     void navigator.clipboard.writeText(message).then(() => setSaveState({ status: 'saved', message: '已复制' })).catch(() => setLayoutError('无法复制计划信息，请在会话里手动引用这个节点。'));
   }, []);
   const copyContextForNodes = useCallback((mode = 'plan', sourceNodes = selectedNodes) => {
-    const intro = mode === 'variation' ? '请基于这些谱系节点起草一个“变体”轮次计划；先不要真的出图，给我审阅确认。' : mode === 'refinement' ? '请基于这些谱系节点起草一个“优化”轮次计划；先不要真的出图，给我审阅确认。' : mode === 'reference' ? '请把这些素材/资料作为下一轮的参考起草计划；先不要真的出图，给我审阅确认。' : '请基于 Workbench 创作谱系中的节点生成计划草稿；先不要真的出图，给我审阅确认。';
-    const message = [intro, '项目：' + (project?.name || '未选择'), selectedTask ? '任务：' + selectedTask.name : '', selectedRound ? '轮次：' + (PURPOSE_LABELS[selectedRound.purpose] || selectedRound.purpose) + ' · v' + selectedRound.planVersion : '', ...sourceNodes.map(selectedNodeContextLine)].filter(Boolean).join('\n');
+    const intro = mode === 'variation' ? '请基于这些谱系节点起草一个“变体”批次计划；先不要真的出图，给我审阅确认。' : mode === 'refinement' ? '请基于这些谱系节点起草一个“优化”批次计划；先不要真的出图，给我审阅确认。' : mode === 'reference' ? '请把这些素材/资料作为下一轮的参考起草计划；先不要真的出图，给我审阅确认。' : '请基于 Workbench 创作谱系中的节点生成计划草稿；先不要真的出图，给我审阅确认。';
+    const message = [intro, '项目：' + (project?.name || '未选择'), selectedTask ? '任务：' + selectedTask.name : '', selectedRound ? '批次：' + (PURPOSE_LABELS[selectedRound.purpose] || selectedRound.purpose) + ' · v' + selectedRound.planVersion : '', ...sourceNodes.map(selectedNodeContextLine)].filter(Boolean).join('\n');
     writeClipboard(message);
   }, [project?.name, selectedNodes, selectedRound, selectedTask, writeClipboard]);
   const exportLineageSummary = useCallback(() => {
@@ -1292,7 +1292,7 @@ function LineageTextView({ id = 'lineage-accessible-view', nodes = EMPTY_ARRAY, 
   const nodeHeadingId = id + '-nodes';
   const relationHeadingId = id + '-relations';
   return <section id={id} className="lineage-text-view" data-lineage-no-zoom aria-labelledby={titleId}>
-    <header className="lineage-text-head"><div><p className="eyebrow">非视觉入口</p><h2 id={titleId}>列表 / 文本谱系</h2><span>按当前已加载的谱系数据阅读项目、任务、轮次、计划、出图、单张出图、资产和交付；不会把画布虚拟化窗口冒充为完整谱系。</span></div><div className="lineage-text-count"><strong>{outline.nodes.length} 个已加载节点 · {outline.connections.length} 条关系</strong><span>{outline.scope.label} · {outline.scope.shortId}</span></div></header>
+    <header className="lineage-text-head"><div><p className="eyebrow">非视觉入口</p><h2 id={titleId}>列表 / 文本谱系</h2><span>按当前已加载的谱系数据阅读项目、任务、批次、计划、出图、单张出图、资产和交付；不会把画布虚拟化窗口冒充为完整谱系。</span></div><div className="lineage-text-count"><strong>{outline.nodes.length} 个已加载节点 · {outline.connections.length} 条关系</strong><span>{outline.scope.label} · {outline.scope.shortId}</span></div></header>
     <section className="lineage-text-coverage" aria-labelledby={coverageId}>
       <div className="lineage-text-coverage-head"><h3 id={coverageId}>加载覆盖范围</h3><strong>{outline.coverage.complete ? '当前加载范围已覆盖' : '当前为局部加载'}</strong></div>
       <dl>{outline.coverage.rows.map((row) => <div key={row.id}><dt>{row.label}</dt><dd><strong>{row.loaded} / {row.total}</strong><span>{row.complete ? '已加载' : '仍有未加载'}</span></dd></div>)}</dl>
@@ -1371,7 +1371,7 @@ function LineageNode({ node, active, searchHit, searchActive, onPointerDown, onS
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); onContextMenu(event, node); }
   };
   return <article role="button" tabIndex={0} aria-pressed={active} aria-label={nodeTypeLabel(node.entityType) + '：' + node.title} className={'lineage-node type-' + node.entityType + ' tone-' + (node.tone || node.entityType) + (active ? ' is-active' : '') + (searchHit ? ' is-search-hit' : '') + (searchActive ? ' is-search-active' : '') + (node.focused ? ' is-focused' : '') + (node.mediaUnavailable ? ' is-unavailable' : '')} style={{ left: node.x, top: node.y, width: node.width, height: node.height }} onPointerDown={(event) => onPointerDown(event, node)} onKeyDown={handleKeyDown} onDoubleClick={onOpen} onContextMenu={(event) => onContextMenu(event, node)} onDragOver={(event) => onDragOver(event, node)} onDrop={(event) => onDrop(event, node)}>
-    {canReference && <span className="lineage-reference-handle" draggable title="拖到计划、轮次、任务或项目节点上，作为参考信息" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, node)}><GitFork size={12} /></span>}
+    {canReference && <span className="lineage-reference-handle" draggable title="拖到计划、批次、任务或项目节点上，作为参考信息" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, node)}><GitFork size={12} /></span>}
     {isAsset ? <div className="lineage-thumb"><img src={assetThumbnailUrl(node.entity)} alt="" loading="lazy" decoding="async" />{assetBadges(node).map(([tone, label]) => <span key={tone + label} className={'badge-' + tone}>{label}</span>)}</div> : <NodeIcon node={node} />}
     <div className="lineage-node-copy"><header><strong title={node.title}>{node.title}</strong><span className={'lineage-status ' + status.tone}>{status.label}</span></header><p title={node.subtitle}>{node.subtitle}</p>{node.entityType === 'plan' && node.planDetail && <div className="lineage-plan-mini"><span>{node.planDetail.itemCount || 0} 项</span><span>{node.planDetail.referenceCount || 0} 参考</span><span>{node.planDetail.outputSummary}</span></div>}</div>
   </article>;
@@ -1403,7 +1403,7 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
       <p className="eyebrow">检查器</p>
       <h2>选择一个节点</h2>
       <p>{editing ? '编辑模式可多选、分组、添加标注或拖入资料。' : '单击节点查看详情；节点相关动作会在这里出现。'}</p>
-      <p className="lineage-note">先点画布里的图片或轮次；右侧只显示和当前选择直接相关的操作。</p>
+      <p className="lineage-note">先点画布里的图片或批次；右侧只显示和当前选择直接相关的操作。</p>
     </aside>;
   }
   if (!node) {
@@ -1507,9 +1507,9 @@ function NavigationActions({ node, onNavigate, onCreateRound, onOpenReference })
   const isTask = node.entityType === 'task';
   const isRound = node.entityType === 'round' || node.entityType === 'plan';
   return <div className="lineage-inspector-actions">
-    {route && <button type="button" className="command-button" onClick={() => onNavigate(route)}><Search size={15} />设为当前轮次</button>}
+    {route && <button type="button" className="command-button" onClick={() => onNavigate(route)}><Search size={15} />设为当前批次</button>}
     <button type="button" className="outline-button" onClick={() => openNode(node, { onNavigate, onInspectAsset: () => undefined })}><Eye size={15} />打开详情</button>
-    {isTask && <button type="button" className="outline-button" onClick={() => { onNavigate(route); onCreateRound(); }}><GitFork size={15} />为此任务新建轮次</button>}
+    {isTask && <button type="button" className="outline-button" onClick={() => { onNavigate(route); onCreateRound(); }}><GitFork size={15} />为此任务新建批次</button>}
     {isRound && node.entity?.status === 'draft' && <button type="button" className="outline-button" onClick={() => onNavigate(route)}><Image size={15} />设为当前后添加参考</button>}
   </div>;
 }

@@ -21,7 +21,7 @@ export const DOC_TERM_GLOSSARY = Object.freeze([
   ['API Key', '调用这家服务的密钥'],
   ['daemon', '常驻在你电脑后台的服务程序；关掉界面它也在'],
   ['Workbench', '你现在看到的这个可视化界面'],
-  ['Studio Session', '一条会话的工作记录，绑定了当前的项目、任务和轮次'],
+  ['Studio Session', '一条会话的工作记录，绑定了当前的项目、任务和批次'],
   ['conversation', '你和智能体之间的一次真实对话'],
   ['Canary', '先用最小样本试一次联网，确认没问题再放开'],
   ['预检', '开工前先算一遍要出几张、能不能跑通；这一步不出图'],

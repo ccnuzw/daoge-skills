@@ -106,7 +106,7 @@ function normalizeRoute(route) {
   // that arrives without its parent is not a usable context: it used to survive on the asset/overview views and
   // made the Workbench answer with 「请先选择一个任务，再继续查看轮次或运行。」.
   if (!taskId) compareRoundIds = [];
-  // `roundId` 是 `compareRoundIds[0]`（主轮次）的**派生快捷方式**——两者的一致性由守卫测试锁住，
+  // `roundId` 是 `compareRoundIds[0]`（主批次）的**派生快捷方式**——两者的一致性由守卫测试锁住，
   // 所以这里只从 compareRoundIds 派发，不单独接受一个 roundId 输入。
   const roundId = compareRoundIds[0] || null;
   // 未指定 scope 时跟随上下文层级 —— 这是「筛选范围」（assetScope）与「上下文层级」唯一的关联点。

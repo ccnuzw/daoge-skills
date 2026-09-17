@@ -10,7 +10,7 @@ const task = { id: 't1' };
 const draftRound = { id: 'r1', status: 'draft' };
 const confirmedRound = { id: 'r1', status: 'confirmed' };
 
-test('导入范围按 轮次 > 任务 > 项目 逐级回落，都没有时返回 null', async () => {
+test('导入范围按 批次 > 任务 > 项目 逐级回落，都没有时返回 null', async () => {
   const { resolveUploadTarget } = await import(MODEL);
   assert.deepEqual(resolveUploadTarget({ assetScope: 'round', selectedRound: draftRound, selectedTask: task, selectedProject: project }), { type: 'creative_round', id: 'r1' });
   assert.deepEqual(resolveUploadTarget({ assetScope: 'task', selectedRound: null, selectedTask: task, selectedProject: project }), { type: 'creative_task', id: 't1' });
@@ -20,10 +20,10 @@ test('导入范围按 轮次 > 任务 > 项目 逐级回落，都没有时返回
   assert.equal(resolveUploadTarget({ assetScope: 'project', selectedProject: null }), null);
 });
 
-test('范围是轮次但没有选中轮次时，不会越级挂到项目上', async () => {
+test('范围是批次但没有选中批次时，不会越级挂到项目上', async () => {
   // 这条单独拎出来：它是最容易写成 `?? project` 而悄悄改归属的地方。
   const { resolveUploadTarget } = await import(MODEL);
-  assert.deepEqual(resolveUploadTarget({ assetScope: 'round', selectedRound: null, selectedTask: null, selectedProject: project }), { type: 'project', id: 'p1' }, '轮次缺失时回落到项目是有意为之，改之前先看这条');
+  assert.deepEqual(resolveUploadTarget({ assetScope: 'round', selectedRound: null, selectedTask: null, selectedProject: project }), { type: 'project', id: 'p1' }, '批次缺失时回落到项目是有意为之，改之前先看这条');
 });
 
 test('素材需求只在确实缺它时才生效，否则按范围给默认用途', async () => {
@@ -34,7 +34,7 @@ test('素材需求只在确实缺它时才生效，否则按范围给默认用�
 
   const missed = resolveUploadMaterial({ selectedImportNeed: '别的需求', contextMaterialNeeds: ['品牌 Logo'], assetScope: 'round' });
   assert.equal(missed.need, '', '不在上下文需求里就不该打标');
-  assert.equal(missed.preset.usage, 'subject', '轮次范围给个默认用途');
+  assert.equal(missed.preset.usage, 'subject', '批次范围给个默认用途');
 
   const plain = resolveUploadMaterial({ selectedImportNeed: null, contextMaterialNeeds: [], assetScope: 'project' });
   assert.equal(plain.preset, null, '项目范围没有默认用途，别硬塞');
@@ -61,10 +61,10 @@ test('并入参考素材时同一张图以新导入的为准，且不产生重�
   ], '重复导入同一张图要覆盖而不是叠一条；没有 id 的响应要丢掉');
 });
 
-test('只有草稿轮次才会被自动挂上参考素材', async () => {
+test('只有草稿批次才会被自动挂上参考素材', async () => {
   const { shouldLinkImportedToRound } = await import(MODEL);
   assert.equal(shouldLinkImportedToRound({ succeeded: 2, importedCount: 2, selectedRound: draftRound, assetScope: 'round' }), true);
-  assert.equal(shouldLinkImportedToRound({ succeeded: 2, importedCount: 2, selectedRound: confirmedRound, assetScope: 'round' }), false, '已确认的轮次不能被静默改');
+  assert.equal(shouldLinkImportedToRound({ succeeded: 2, importedCount: 2, selectedRound: confirmedRound, assetScope: 'round' }), false, '已确认的批次不能被静默改');
   assert.equal(shouldLinkImportedToRound({ succeeded: 0, importedCount: 0, selectedRound: draftRound, assetScope: 'round' }), false);
   assert.equal(shouldLinkImportedToRound({ succeeded: 2, importedCount: 2, selectedRound: null, assetScope: 'project' }), false);
 });

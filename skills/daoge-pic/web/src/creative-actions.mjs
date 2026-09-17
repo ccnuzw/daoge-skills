@@ -53,7 +53,7 @@ export const CREATIVE_ACTION_ENTRIES = Object.freeze([
     label: '作为参考加入当前草稿',
     shortLabel: '加入参考',
     usage: 'subject',
-    description: '把选中图片标注为主体、风格、构图或反例参考，不创建新轮次。'
+    description: '把选中图片标注为主体、风格、构图或反例参考，不创建新批次。'
   },
   {
     id: 'feedback-to-next-round',

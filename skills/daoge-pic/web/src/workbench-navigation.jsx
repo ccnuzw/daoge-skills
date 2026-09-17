@@ -3,7 +3,7 @@ import { runtimeHealthPresentation } from './runtime-health.mjs';
 
 const PROJECT_CONTEXT_RESET = { taskId: null, roundId: null, compareRoundIds: [], runId: null };
 // 四个一级入口：选项目 → 干活 → 看产出 → 交出去。
-// 「生成历史」(runs) 不是一级入口：它按轮次组织，只在任务内联页签里出现。
+// 「生成历史」(runs) 不是一级入口：它按批次组织，只在任务内联页签里出现。
 // 「资产管理」以项目为边界（用户已定）：选片、评审、交付在数据模型里就是按项目记的
 // （/api/projects/<id>/selection/…），跨项目混看没有意义，所以它和「创作平台」「资产交付」一样要先选项目。
 const NAVIGATION_ITEMS = {

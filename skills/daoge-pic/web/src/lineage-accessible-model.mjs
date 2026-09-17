@@ -3,7 +3,7 @@ import { runItemRecovery, statusPresentation } from './status-presentation.mjs';
 const NODE_TYPE_LABELS = Object.freeze({
   project: '项目',
   task: '任务',
-  round: '轮次',
+  round: '批次',
   plan: '计划',
   run: '本次出图',
   run_item: '单张出图',
@@ -16,7 +16,7 @@ const NODE_TYPE_LABELS = Object.freeze({
   group: '分组'
 });
 
-const SCOPE_LABELS = Object.freeze({ project: '项目范围', task: '任务范围', round: '轮次范围' });
+const SCOPE_LABELS = Object.freeze({ project: '项目范围', task: '任务范围', round: '批次范围' });
 const OPENABLE_TYPES = new Set(['project', 'task', 'round', 'plan', 'run', 'run_item', 'asset', 'shared_asset', 'delivery']);
 const SAFE_TONES = new Set(['quiet', 'ready', 'live', 'danger']);
 const URL_TEXT = /https?:\/\/[^\s<>"']+/gi;
@@ -72,7 +72,7 @@ function statusForNode(node) {
 function safeSummary(node) {
   const type = node?.entityType;
   if (type === 'project') return '项目工作区；列表只展示结构化关系和隐去隐私的状态。';
-  if (type === 'task') return '任务节点；计划、轮次和结果通过谱系关系查看。';
+  if (type === 'task') return '任务节点；计划、批次和结果通过谱系关系查看。';
   if (type === 'plan') return '计划摘要已隐去隐私；提示词等受保护字段不在此视图展示。';
   if (type === 'task_type' || type === 'style_kit' || type === 'brand_kit') return '结构化资料节点；具体内容不在此视图展示。';
   if (type === 'run_item') {

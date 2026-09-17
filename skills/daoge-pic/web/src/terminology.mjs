@@ -36,7 +36,8 @@ export const TERMS = Object.freeze([
   // —— 译好：创作者需要理解，给自然说法 ——
   { internal: 'Provider', level: '译好', scope: 'creator', creator: '生成服务', hint: '出图用的那家服务' },
   { internal: '预检', level: '译好', scope: 'creator', creator: '开工前核算', hint: '先算一遍要出几张、能不能跑通，这一步不出图' },
-  { internal: '草稿轮次', level: '译好', scope: 'creator', creator: '还没开工的那一轮', hint: '只记下了想法，还没出图' },
+  { internal: '轮次', level: '译好', scope: 'creator', creator: '批次', hint: '一次出图的一批图；界面上只说「批次」' },
+  { internal: '草稿轮次', level: '译好', scope: 'creator', creator: '还没开工的批次', hint: '只记下了想法，还没出图' },
   { internal: '上下文', level: '译好', scope: 'creator', creator: '已记下的条件', hint: '这次创作参考的信息' },
   { internal: '生成运行', level: '译好', scope: 'creator', creator: '本次出图', hint: '一次真正的出图执行' },
   { internal: '运行项', level: '译好', scope: 'creator', creator: '单张出图记录', hint: '本次出图里的其中一张' },

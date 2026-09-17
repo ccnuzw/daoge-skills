@@ -42,7 +42,8 @@
 | `schema` | 收回 | creator | 数据格式 |
 | `Provider` | 译好 | creator | 生成服务 |
 | `预检` | 译好 | creator | 开工前核算 |
-| `草稿轮次` | 译好 | creator | 还没开工的那一轮 |
+| `轮次` | 译好 | creator | 批次 |
+| `草稿轮次` | 译好 | creator | 还没开工的批次 |
 | `上下文` | 译好 | creator | 已记下的条件 |
 | `生成运行` | 译好 | creator | 本次出图 |
 | `运行项` | 译好 | creator | 单张出图记录 |

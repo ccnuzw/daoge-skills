@@ -70,7 +70,7 @@ export function taskPresentation(task, rounds = []) {
   if (!task) return { label: '未选择任务', tone: QUIET };
   if (task.status === 'archived' || task.status === 'completed') return statusPresentation('task', task.status);
   const confirmedRounds = rounds.filter((round) => round?.status === 'active').length;
-  if (confirmedRounds) return { label: '已确认 · ' + confirmedRounds + ' 轮次', tone: READY };
+  if (confirmedRounds) return { label: '已确认 · ' + confirmedRounds + ' 批次', tone: READY };
   const awaitingRounds = rounds.filter((round) => round?.status === 'awaiting_confirmation').length;
   if (awaitingRounds) return { label: awaitingRounds + ' 轮待确认', tone: QUIET };
   return statusPresentation('task', task.status);

@@ -37,7 +37,7 @@ test('every workbench view declares exactly one host, and the primary set matche
 
 test('left-rail highlight groupings agree with the registry', async () => {
   const { VIEW_HOSTS } = await import('../../web/src/workbench-navigation-model.mjs');
-  // 这几个视图共用「创作平台」的高亮（生成历史按轮次组织，从任务页签进入时让创作平台保持高亮）。
+  // 这几个视图共用「创作平台」的高亮（生成历史按批次组织，从任务页签进入时让创作平台保持高亮）。
   for (const view of ['lineage', 'studio-overview', 'prompts', 'runs']) {
     assert.equal(VIEW_HOSTS[view], 'lineage', view + ' 应归「创作平台」');
   }
