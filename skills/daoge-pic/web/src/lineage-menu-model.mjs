@@ -35,10 +35,10 @@ export function nodeMenuItems(node, { canReview = false, canDeliver = false, can
       if (canDeliver) body.push({ id: 'deliver', label: '去交付' });
       pushDerive();
     } else {
-      // 候选：最常走的一套——就它了 / 不行 / 拿出去了。
+      // 候选：最常走的一套——选为成果 / 不采用。交付候选 = 选定的图（动态投影），
+      // 非成果进不了候选，所以「去交付」只在已选定态出现。
       body.push({ id: 'keep', label: '选为成果', primary: true });
       body.push({ id: 'reject', label: '不采用' });
-      if (canDeliver) body.push({ id: 'deliver', label: '去交付' });
       pushDerive();
     }
   } else if (type === 'round') {

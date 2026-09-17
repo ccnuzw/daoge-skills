@@ -19,9 +19,14 @@ test('菜单随对象状态变：候选 / 已选定 / 已交付 三套完全不�
   const chosen = nodeMenuItems(asset({ selectedAsset: true }), { canDeliver: true });
   const delivered = nodeMenuItems(asset({ deliveredAsset: true }), { canDeliver: true });
 
-  assert.deepEqual(ids(candidate), ['keep', 'reject', 'deliver', 'detail']);
+  assert.deepEqual(ids(candidate), ['keep', 'reject', 'detail']);
   assert.deepEqual(ids(chosen), ['unkeep', 'deliver', 'detail']);
   assert.deepEqual(ids(delivered), ['open-delivery', 'download', 'detail']);
+
+  // ⚠️ 交付候选 = 当前选为成果的图（动态投影，2026-09-17 刀哥确认）：
+  //   非成果的图进不了候选，「去交付」给了也是白跳 —— 所以它只出现在已选定态；
+  //   移出成果会同时退出候选（既有语义，正确）。
+  assert.equal(nodeMenuItems(asset(), { canDeliver: true }).some((item) => item.id === 'deliver'), false, '非成果不显示去交付');
 
   // 「三套不同」是这一项的核心，所以直接断言三者的 id 集合互不相同。
   assert.notDeepEqual(ids(candidate), ids(chosen));
@@ -85,7 +90,7 @@ test('「去交付」是导航不是自动送入——文案必须诚实，且�
     nodeMenuItems({ entityType: 'round', entity: {} }, { canDeliver: true })
   ]) {
     const deliver = items.find((item) => item.id === 'deliver');
-    assert.ok(deliver, 'canDeliver 时必须有去交付项');
+    if (!deliver) continue; // 候选态没有去交付（非成果进不了候选）
     assert.equal(deliver.label, '去交付', '文案与选片工具条统一');
   }
   // 导航要带上图/批次的任务上下文（交付页的创建依赖它），不许丢成 null。
