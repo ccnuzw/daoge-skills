@@ -1459,7 +1459,7 @@ function LineageContextMenu({ editing, menu, node, selectedCount, canOpen, canGr
     if (event.key === 'Home') { event.preventDefault(); items[0].focus(); return; }
     if (event.key === 'End') { event.preventDefault(); items[items.length - 1].focus(); }
   };
-  return <div ref={menuRef} className="lineage-context-menu" style={{ left: menu.x, top: menu.y }} data-lineage-no-zoom role="menu" aria-label="谱系节点操作" onClick={(event) => event.stopPropagation()} onKeyDown={handleKeyDown}>
+  return <div ref={menuRef} className="lineage-context-menu" style={{ left: menu.x, top: menu.y }} data-lineage-no-zoom role="menu" aria-label="谱系节点操作" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onKeyDown={handleKeyDown}>
     <strong>{node ? node.title : selectedCount ? selectedCount + ' 个节点' : '画布'}</strong>
     {/* 「对它做什么」优先于「怎么看」（方案 4.4）：先给这个对象能做的动作，再给画布的通用工具。 */}
     {nodeItems.filter((item) => item.id !== 'detail').map((item) => <button type="button" role="menuitem" key={item.id} className={item.primary ? 'is-primary' : undefined} onClick={() => { onNodeItem(item.id); onClose(); }}>{item.label}</button>)}

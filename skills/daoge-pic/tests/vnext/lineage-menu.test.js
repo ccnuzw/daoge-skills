@@ -74,3 +74,16 @@ test('接线：画布的右键菜单与浮出工具条都用这个模型', () =>
   // 可发现性（方案 4.4）：右键有先天缺陷，选中时要有同内容的浮出工具条。
   assert.match(canvas, /lineage-node-toolbar|nodeActionBar|浮出/, '选中节点时必须有浮出工具条');
 });
+
+test('菜单必须在点击选项时存活到 click（按下瞬间不得被画布卸载）', () => {
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  // 画布的 handleCanvasPointerDown 对左键一律 setContextMenu(null)：若菜单容器不阻止
+  // pointerdown 冒泡，用户**按下**菜单项的瞬间菜单就被卸载，随后的 click 落在已消失的
+  // 按钮上 —— 所有选项「点击无效」（2026-09-17 刀哥实机抓到）。
+  // 注意正则：容器属性里没有 `>`，直到 onPointerDown 为止，所以这一条组合断言是安全的。
+  assert.match(
+    canvas,
+    /className="lineage-context-menu"[^>]*onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/,
+    '菜单容器必须阻止 pointerdown 冒泡到画布，否则按下菜单项的瞬间菜单就被卸载'
+  );
+});
