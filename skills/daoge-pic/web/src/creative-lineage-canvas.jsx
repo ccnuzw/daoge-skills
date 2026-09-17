@@ -936,7 +936,12 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     const entity = node.entity;
     if (itemId === 'toggle') return toggleNodeCollapsed(node);
     if (itemId === 'open' || itemId === 'detail') return openNode(node, { onNavigate, onInspectAsset });
-    if (itemId === 'deliver' || itemId === 'open-delivery') return onNavigate({ view: 'deliveries', projectId: project?.id || null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
+    // 「去交付」＝跳到交付页处理（交付的创建在交付页内完成，产品没有「自动送入」流程）。
+    // 文案与选片工具条统一；导航带上图/批次的任务上下文，交付页创建时才有落点。
+    if (itemId === 'deliver' || itemId === 'open-delivery') {
+      const deliverTaskId = entity?.taskId || assetSourceTaskId(entity) || null;
+      return onNavigate({ view: 'deliveries', projectId: project?.id || null, taskId: deliverTaskId, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
+    }
     if (itemId === 'confirm') return onNavigate({ view: 'prompts', taskId: entity?.taskId || null, roundId: entity?.id || null, compareRoundIds: entity?.id ? [entity.id] : [], runId: null, assetScope: 'round' });
     // 「选为成果」带 keep 评审（markAsDeliverable）；「移出成果」**显式传方向**——
     // markAsDeliverable 靠 selectedAssetIdsRef 反推意图，选区写入异步时 ref 会滞后，

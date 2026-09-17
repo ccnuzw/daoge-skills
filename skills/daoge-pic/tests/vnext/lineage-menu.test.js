@@ -73,6 +73,25 @@ test('批次菜单随折叠状态换说法；依赖队列的动作默认不出�
   assert.equal(nodeMenuItems(asset(), { canDerive: true }).some((item) => item.id === 'derive'), true);
 });
 
+test('「去交付」是导航不是自动送入——文案必须诚实，且不能丢任务上下文', async () => {
+  const { nodeMenuItems } = await import('../../web/src/lineage-menu-model.mjs');
+  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  // 交付的创建在交付页内完成，产品没有「从画布自动送入」的流程——
+  // 文案若说「送去交付」会让人以为图已被送入，实际只是跳转。与选片工具条的「去交付」统一。
+  assert.doesNotMatch(canvas, /'送去交付'/, '不许承诺「送入」——实际是导航');
+  for (const items of [
+    nodeMenuItems(asset(), { canDeliver: true }),
+    nodeMenuItems(asset({ selectedAsset: true }), { canDeliver: true }),
+    nodeMenuItems({ entityType: 'round', entity: {} }, { canDeliver: true })
+  ]) {
+    const deliver = items.find((item) => item.id === 'deliver');
+    assert.ok(deliver, 'canDeliver 时必须有去交付项');
+    assert.equal(deliver.label, '去交付', '文案与选片工具条统一');
+  }
+  // 导航要带上图/批次的任务上下文（交付页的创建依赖它），不许丢成 null。
+  assert.match(canvas, /taskId: (assetSourceTaskId\(entity\)|entity\?\.taskId)/, '去交付的导航必须带任务上下文');
+});
+
 test('接线：画布的右键菜单与浮出工具条都用这个模型', () => {
   const canvas = readSource('web/src/creative-lineage-canvas.jsx');
   assert.match(canvas, /lineage-menu-model\.mjs/, '画布必须用这个模型');
