@@ -25,6 +25,7 @@ import { StudioSearch } from './studio-search.jsx';
 import { useAssetImport } from './use-asset-import.mjs';
 import { useProjectQualityMetrics } from './use-project-quality-metrics.mjs';
 import { purposeLabel } from './purpose-labels.mjs';
+import { projectEmptyState } from './project-empty-state-model.mjs';
 
 /** 窗口标题的基准值。取一次存下来——否则带着计数的标题会被下一次拼装再套一层「(2) (1) …」。 */
 const BASE_DOCUMENT_TITLE = document.title || 'DAOGE Pic Studio';
@@ -630,11 +631,14 @@ function ProjectIndex({ projects, projectTemplates = EMPTY, onOpenProject, onOpe
   const projectIndex = useMemo(() => createProjectSearchIndex(projects), [projects]);
   const filtered = useMemo(() => filterProjectIndex(projectIndex, deferredQuery, status), [projectIndex, deferredQuery, status]);
   const pagination = useMemo(() => paginateWorkspaceItems(filtered, page, PROJECT_PAGE_SIZE), [filtered, page]);
+  // 首屏三形态（方案 4.7）：全新用户 / 搜索无果 / 筛选无果，三句话各不相同。
+  // 判定优先级：先看「有没有项目」这个大前提，才轮到搜索与筛选。
+  const emptyState = projectEmptyState({ hasAnyProject: projects.length > 0, hasQuery: deferredQuery.trim() !== '', hasStatusFilter: status !== 'all' });
   useEffect(() => { if (pagination.page !== page) setPage(pagination.page); }, [page, pagination.page]);
   return <section className="project-index-stage">
     <header className="workspace-section-head"><div><p className="eyebrow">Studio 项目</p><h2>继续创作</h2><span>两条入口、一条流程：在 Studio 直接创建只记下条件；真正出图仍走会话——计划、你确认、核算、出图。</span></div><button type="button" className="command-button" onClick={onCreateProject}><FolderKanban size={16} />新建项目</button></header>
     <div className="workspace-list-toolbar"><label className="workspace-list-search"><Search size={15} /><input type="search" value={query} placeholder="搜索项目名称或说明" onChange={(event) => { setQuery(event.target.value); setPage(1); }} />{query && <IconButton label="清空项目搜索" onClick={() => { setQuery(''); setPage(1); }}><X size={14} /></IconButton>}</label><div className="workspace-list-filters" aria-label="项目状态">{[['active', '进行中'], ['archived', '已归档'], ['all', '全部']].map(([value, label]) => <button type="button" key={value} className={status === value ? 'is-active' : ''} onClick={() => { setStatus(value); setPage(1); }}>{label}</button>)}</div></div>
-    {pagination.items.length ? <><div className="project-index-list">{pagination.items.map((project) => { const template = projectTemplates.find((item) => item.id === project.templateId); return <div className="project-index-row" key={project.id}><button type="button" className="project-index-main" onClick={() => onOpenProject(project.id)}><FolderKanban size={16} /><span><b>{project.name}</b><small>{project.description || '暂无说明'}</small></span><span className="project-index-open">{template?.name || (project.templateId ? '模板未加载' : '未绑定模板')}</span></button><button type="button" className="project-index-overview" title={'只看“' + project.name + '”的总览'} aria-label={'查看“' + project.name + '”的项目总览'} onClick={() => onOpenProjectOverview(project.id)}><PanelTop size={14} />总览</button></div>; })}</div><ListPager page={pagination.page} totalPages={pagination.totalPages} total={pagination.total} onPageChange={setPage} /></> : <div className="empty-stage"><FolderKanban size={28} strokeWidth={1.15} /><p>还没有匹配项目。</p></div>}
+    {pagination.items.length ? <><div className="project-index-list">{pagination.items.map((project) => { const template = projectTemplates.find((item) => item.id === project.templateId); return <div className="project-index-row" key={project.id}><button type="button" className="project-index-main" onClick={() => onOpenProject(project.id)}><FolderKanban size={16} /><span><b>{project.name}</b><small>{project.description || '暂无说明'}</small></span><span className="project-index-open">{template?.name || (project.templateId ? '模板未加载' : '未绑定模板')}</span></button><button type="button" className="project-index-overview" title={'只看“' + project.name + '”的总览'} aria-label={'查看“' + project.name + '”的项目总览'} onClick={() => onOpenProjectOverview(project.id)}><PanelTop size={14} />总览</button></div>; })}</div><ListPager page={pagination.page} totalPages={pagination.totalPages} total={pagination.total} onPageChange={setPage} /></> : <div className={'empty-stage is-' + emptyState.kind}><FolderKanban size={28} strokeWidth={1.15} /><p>{emptyState.title}。</p><p>{emptyState.body}</p>{emptyState.cta && <button type="button" className="command-button" onClick={onCreateProject}><FolderKanban size={16} />{emptyState.cta}</button>}</div>}
   </section>;
 }
 
