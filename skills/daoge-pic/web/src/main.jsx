@@ -24,9 +24,13 @@ import { StudioSearch } from './studio-search.jsx';
 import { useAssetImport } from './use-asset-import.mjs';
 import { useProjectQualityMetrics } from './use-project-quality-metrics.mjs';
 import { purposeLabel } from './purpose-labels.mjs';
+
+/** 窗口标题的基准值。取一次存下来——否则带着计数的标题会被下一次拼装再套一层「(2) (1) …」。 */
+const BASE_DOCUMENT_TITLE = document.title || 'DAOGE Pic Studio';
 import { useStudioSearch } from './use-studio-search.mjs';
 import { createLatestRequestGate, useRouteRefresh } from './use-route-refresh.mjs';
 import { studioEventRefreshPlan, useStudioEvents } from './use-studio-events.mjs';
+import { completionNotificationCopy, hasCompletionSignal, noticeTitle, shouldMarkUnread, shouldSendNotification } from './completion-notice-model.mjs';
 import { assetOriginalUrl, assetThumbnailUrl } from './asset-media-url.mjs';
 import { ASSET_IMPORT_CONCURRENCY, mapWithConcurrency } from './bounded-concurrency.mjs';
 import { createEventRefreshQueue } from './refresh-coordinator.mjs';
@@ -1986,7 +1990,29 @@ function App() {
     applyPlan: (plan) => eventRefreshCallbacks.current.applyPlan(plan)
   });
   useEffect(() => () => eventRefreshQueueRef.current?.dispose(), []);
-  const refreshForEvents = useCallback((events) => eventRefreshQueueRef.current.request(studioEventRefreshPlan(events)), []);
+  // 「出完了叫我」（方案 9.5）：用户不在看页面时，出图有进展就记一次未读。
+  // 判定与文案都在 completion-notice-model 里（纯逻辑、有单测），这里只是接线。
+  const [unreadCompletions, setUnreadCompletions] = useState(0);
+  const refreshForEvents = useCallback((events) => {
+    if (shouldMarkUnread({ hidden: document.hidden, hasSignal: hasCompletionSignal(events) })) {
+      setUnreadCompletions((count) => count + 1);
+    }
+    eventRefreshQueueRef.current.request(studioEventRefreshPlan(events));
+  }, []);
+  // 标题栏挂未读数：切走之后、回来之前，瞟一眼就知道「有新东西」。
+  useEffect(() => { document.title = noticeTitle(BASE_DOCUMENT_TITLE, unreadCompletions); }, [unreadCompletions]);
+  // 回到页面即清零——否则计数只增不减，数字就失去意义了。
+  useEffect(() => {
+    const clearWhenVisible = () => { if (!document.hidden) setUnreadCompletions(0); };
+    document.addEventListener('visibilitychange', clearWhenVisible);
+    return () => document.removeEventListener('visibilitychange', clearWhenVisible);
+  }, []);
+  // 系统通知**只在已授权时**才发；没授权就静默降级成「只有标题栏提示」，绝不主动索要权限。
+  useEffect(() => {
+    if (!unreadCompletions) return;
+    if (!shouldSendNotification(typeof Notification === 'undefined' ? undefined : Notification.permission)) return;
+    try { new Notification(BASE_DOCUMENT_TITLE, { body: completionNotificationCopy(unreadCompletions) }); } catch { /* 通知失败不影响使用 */ }
+  }, [unreadCompletions]);
   const refreshSnapshot = useCallback(async () => {
     const refreshed = await refresh();
     const selectionRefreshed = refreshed ? await refreshSelection() : false;
