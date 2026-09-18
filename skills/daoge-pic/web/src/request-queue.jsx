@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Send, X, CircleAlert, MessageSquare, Check, CornerDownLeft } from 'lucide-react';
 import { requestCardPresentation, queueAttention } from './request-queue-model.mjs';
 import { agentPresencePresentation } from './agent-presence-model.mjs';
+import { detectedCliSummary, queueAttentionThresholdMs, MIN_ATTENTION_MINUTES, MAX_ATTENTION_MINUTES } from './agent-connection-model.mjs';
 
 /**
  * 催什么，取决于**下一步该做什么**——三句话对应三个不同的动作。
@@ -25,7 +26,7 @@ function attentionMessage(attention) {
  *
  * Studio 仍然不执行任何出图——这里只是排队叫号机，执行方永远是装着 skill 的 agent。
  */
-export function RequestQueueDock({ requests, pendingCount, busy, presence, context, progress, onSend, onWithdraw, onAnswer, onOpenRound }) {
+export function RequestQueueDock({ requests, pendingCount, busy, presence, context, progress, onSend, onWithdraw, onAnswer, onOpenRound, detection, detectionLoading, onDetect, connection, onConnectionChange }) {
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState(false);
   // ⚠️ 在场**只有一个来源**（presence 对象）。
@@ -33,7 +34,8 @@ export function RequestQueueDock({ requests, pendingCount, busy, presence, conte
   // 界面就一边说「agent 在场」、一边说「agent 不在场时」，自相矛盾。
   // 判据收成一处之后，这种矛盾在结构上不可能再出现。
   const present = presence?.present === true;
-  const attention = queueAttention({ requests, present, now: Date.now() });
+  // C4：催促超时是「少而必要」的可配项（默认 2 分钟），所以把它交给 queueAttention。
+  const attention = queueAttention({ requests, present, now: Date.now(), thresholdMs: queueAttentionThresholdMs(connection?.attentionMinutes) });
   // 「在场 ≠ 胜任」：没申报 daoge-pic 时，就在输入框旁说清楚（4.6）。
   const agent = agentPresencePresentation(presence, { now: Date.now() });
   const active = requests.filter((request) => ['pending', 'accepted'].includes(request.status));
@@ -64,6 +66,21 @@ export function RequestQueueDock({ requests, pendingCount, busy, presence, conte
     </div>
     <p className={'request-agent is-' + agent.tone} role="status"><span className="request-agent-dot" aria-hidden="true" />{agent.label}{agent.detail ? ' · ' + agent.detail : ''}</p>
     {attention.attention && <p className="request-attention" role="status"><CircleAlert size={14} aria-hidden="true" />{attentionMessage(attention)}</p>}
+    <details className="request-connection" onToggle={(event) => { if (event.currentTarget.open) void onDetect?.(); }}>
+      <summary>连接与唤起</summary>
+      <div className="request-connection-body">
+        <section className="request-connection-detect" aria-live="polite">
+          <p className="eyebrow">这台机器上装了什么</p>
+          {detectionLoading && !detection ? <p className="request-connection-line">正在侦查…</p> : detection ? <><p className="request-connection-line">{detectedCliSummary(detection).headline} · {detectedCliSummary(detection).skillLine}</p><ul className="request-connection-clis">{detectedCliSummary(detection).rows.map((row) => <li key={row.name}><b>{row.name}</b><span>{row.detail}</span></li>)}</ul></> : <p className="request-connection-line">展开时自动侦查，不打扰。</p>}
+        </section>
+        <section className="request-connection-config">
+          <p className="eyebrow">怎么唤起 agent</p>
+          <label>唤起命令<input value={connection?.invokeCommand || ''} onChange={(event) => onConnectionChange?.({ invokeCommand: event.target.value })} placeholder="例如：workbuddy / codex / claude" aria-label="唤起 agent 的命令" /></label>
+          <label>催促超时（分钟）<input type="number" min={MIN_ATTENTION_MINUTES} max={MAX_ATTENTION_MINUTES} value={connection?.attentionMinutes ?? MIN_ATTENTION_MINUTES} onChange={(event) => onConnectionChange?.({ attentionMinutes: event.target.value })} aria-label="agent 离线催促超时分钟数" /></label>
+          <p className="request-connection-note">超时只影响「多久开始催你」；agent 的 skills 归宿主管理，Studio 只侦查不代管。</p>
+        </section>
+      </div>
+    </details>
     {visible.length > 0 && <ul className="request-cards">{visible.map((request) => <RequestCard key={request.id} request={request} busy={busy} progress={progress ? progress(request) : null} onWithdraw={onWithdraw} onAnswer={onAnswer} onOpenRound={onOpenRound} />)}</ul>}
   </section>;
 }

@@ -51,6 +51,9 @@ import { ProviderSettings } from './provider-settings.jsx';
 import { RequestQueueDock } from './request-queue.jsx';
 import { useRequestQueue } from './use-request-queue.mjs';
 import { useAgentPresence } from './use-agent-presence.mjs';
+import { useAgentDetection } from './use-agent-detection.mjs';
+import { readAgentConnectionConfig, writeAgentConnectionConfig } from './agent-connection-model.mjs';
+import { beginCancelUndo, cancelUndoAvailable, cancelUndoLabel } from './cancel-undo-model.mjs';
 import { queueRounds, requestProgress } from './request-progress-model.mjs';
 import { workbenchConversationId } from './workbench-session.mjs';
 import { CREATIVE_DERIVED_ACTIONS, CREATIVE_DERIVED_ACTION_BY_ID, creativeDerivedActionForPurpose } from './creative-actions.mjs';
@@ -1608,6 +1611,9 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(/** @type {WorkbenchErrorState} */ (''));
   const [notice, setNotice] = useState('');
+  const [cancelUndo, setCancelUndo] = useState(/** @type {{ runId: string, startedAt: number, expiresAt: number } | null} */ (null));
+  const [cancelUndoNow, setCancelUndoNow] = useState(() => Date.now());
+  const [agentConnection, setAgentConnection] = useState(() => readAgentConnectionConfig(typeof window === 'undefined' ? null : window.localStorage));
   const [connectionError, setConnectionError] = useState(/** @type {WorkbenchErrorState} */ (''));
   const [runtimeRepairing, setRuntimeRepairing] = useState(false);
   const [recoveryPhase, setRecoveryPhase] = useState('ready');
@@ -1682,6 +1688,8 @@ function App() {
   const answerRequest = useCallback((request, answer) => sendRequest(answer, { projectId: request.projectId, taskId: request.taskId, previousRequestId: request.id }), [sendRequest]);
   // agent 在场（方案 4.6 的「显示是最要紧的」）：状态卡 + 输入框旁的「在场 ≠ 胜任」提示。
   const { presence: agentPresenceStatus } = useAgentPresence({ api, eventRevision: eventRevision.requests, reportError: reportRequestError });
+  // C1 侦查按需触发（连接面板展开时），不在页面加载时扫宿主目录。
+  const { detection: agentDetection, loading: agentDetectionLoading, detect: detectAgents } = useAgentDetection({ api, reportError: reportRequestError });
   // 队列是**全局底栏**，而它关联的批次可能不在当前视图已加载的数据里
   // （比如停在项目列表页、还没进项目）。缺的按 id 补取。
   //
@@ -2176,6 +2184,17 @@ function App() {
       setDeliveryCompletion(null);
     }
   }, [selectedProject?.id]);
+  // 取消运行后的 5 秒撤销窗口（#21）：只做倒计时与到点关闭，取消本身已经生效。
+  useEffect(() => {
+    if (!cancelUndo) return undefined;
+    setCancelUndoNow(Date.now());
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      if (!cancelUndoAvailable(cancelUndo, now)) { setCancelUndo(null); return; }
+      setCancelUndoNow(now);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [cancelUndo]);
   const visibleAssets = view === 'trash' ? assets.filter((asset) => asset.deletedAt) : assets.filter((asset) => !asset.deletedAt);
   const selectedAssets = selectionAssets.filter((asset) => !asset.deletedAt);
   const totalAssetPages = assetPageCount(assetTotal, assetPageSize);
@@ -2940,6 +2959,8 @@ function App() {
       try {
         await api('/api/runs/' + encodeURIComponent(targetRunId) + paths[action], { method: 'POST', idempotencyKey: uniqueKey('run-' + action), body: {} });
         setNotice(labels[action] + '已生效。');
+        // 取消是止损：立即生效，但给 5 秒回头路（撤销走队列，由 agent 判断能否继续）。
+        if (action === 'cancel') setCancelUndo(beginCancelUndo({ runId: targetRunId }));
         await refresh();
       } catch (nextError) {
         reportRequestError(nextError, '无法' + labels[action] + '。', { operation: 'run-' + action, phase: 'committing' });
@@ -2948,6 +2969,17 @@ function App() {
     }
     await requestRunAction(action, { runId: targetRunId, label: action === 'resume' ? '继续这一批的运行' : '重试这一批没成的项' });
   };
+  /**
+   * 撤销取消（#21）：**不是直调恢复**——把「继续这一批」写进请求队列，
+   * 由 agent 判断这一批还在不在、能不能继续（花动作归 agent，4.9）。
+   */
+  const undoCancelRun = async () => {
+    const target = cancelUndo;
+    setCancelUndo(null);
+    if (target?.runId) await requestRunAction('resume', { runId: target.runId, label: '撤销取消并继续这一批' });
+  };
+  /** C4：连接面板的配置（浏览器侧，与页面大小同类；不塞 studio.db）。 */
+  const updateAgentConnection = (patch) => setAgentConnection(writeAgentConnectionConfig(window.localStorage, patch));
   const copyRunPrompt = async (run) => {
     try {
       if (!navigator.clipboard?.writeText) throw new Error('当前浏览器未提供剪贴板权限。');
@@ -3205,11 +3237,12 @@ function App() {
           <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} onCreateRound={() => openCreationDialog('round')} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onRestoreContext={restoreSessionContext} />
         </> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={restoreSessionContext} />}
       </div>
-      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: [...selectedAssetIds] }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} />
+      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: [...selectedAssetIds] }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} detection={agentDetection} detectionLoading={agentDetectionLoading} onDetect={detectAgents} connection={agentConnection} onConnectionChange={updateAgentConnection} />
       <RuntimeHealthAlertStrip studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
       {connectionError && <WorkbenchErrorAlert error={connectionError} className="connection-error-strip" icon={CloudOff} dismissLabel="关闭连接错误" onDismiss={() => setConnectionError('')} onRetry={() => void retryWorkbenchError(connectionError, setConnectionError)} onReconnect={() => void reconnectWorkbenchError(connectionError, setConnectionError)} />}
       {error && <WorkbenchErrorAlert error={error} className="error-strip" onDismiss={() => setError('')} onRetry={() => void retryWorkbenchError(error, setError)} onReconnect={() => void reconnectWorkbenchError(error, setError)} />}
       {contextError && <div className="error-strip" role="alert" aria-live="assertive"><CircleAlert size={15} aria-hidden="true" /><span>{errorMessageForDisplay(contextError, '无法恢复当前工作对象。')}</span><button type="button" className="outline-button" onClick={() => setContextError('')}>关闭错误提示</button></div>}
+      {cancelUndo && cancelUndoAvailable(cancelUndo, cancelUndoNow) && <div className="cancel-undo-strip" role="status" aria-live="polite"><span>{cancelUndoLabel(cancelUndo, cancelUndoNow)}</span><button type="button" className="outline-button" onClick={() => void undoCancelRun()}>撤销取消</button></div>}
       {notice && <div className="notice-strip" role="status" aria-live="polite"><Check size={16} /><span>{notice}</span><IconButton label="关闭通知" onClick={() => setNotice('')}><X size={15} /></IconButton></div>}
       {renderActiveView()}
     </section>

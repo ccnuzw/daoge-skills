@@ -33,6 +33,7 @@ import { getPersistedStudioProvenance, getStudioProvenanceVersion, listStudioPro
 import { listProjectSelectionAssets, setProjectAssetSelected, setProjectAssetsSelected } from '../domain/project-selections';
 import { getCanvasLayout, saveCanvasLayout } from '../domain/canvas-layouts';
 import { agentPresence, registerStudioAgent, touchStudioAgent } from '../domain/agent-presence';
+import { detectAgentClis } from '../domain/agent-detect';
 import { claimStudioRequest, completeStudioRequest, createStudioRequest, expireStudioRequestLeases, getStudioRequest, linkRequestToRound, listStudioRequests, rejectStudioRequest, renewStudioRequestLease, requestContextOf, withdrawStudioRequest, REQUEST_STATUSES, type StudioRequestStatus } from '../domain/request-queue';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { studioEventWindow } from './events';
@@ -1026,6 +1027,11 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/agents') {
         // 「显示是最要紧的」（方案 4.6）：当前有没有 agent 在场、最后活动时间、是否装了 daoge-pic。
         return success(response, publicValue(agentPresence(this.db, { studioId: this.initialized.manifest.studioId })));
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/agents/detect') {
+        // C1 侦查：只读扫一遍已知 agent 家目录 / 共享 skills / PATH，列出「装了哪些 CLI」。
+        // 不登记、不改宿主目录；前端只在连接面板展开时才来取，所以是「自动但不打扰」。
+        return success(response, publicValue(detectAgentClis({})));
       }
       if (request.method === 'GET' && parsed.pathname === '/api/requests') {
         // 队列是「排队叫号机」，没人接的单不能永远停在 accepted。读队列时顺手做一次
