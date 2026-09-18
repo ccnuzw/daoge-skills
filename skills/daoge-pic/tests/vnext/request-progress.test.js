@@ -95,6 +95,49 @@ test('撤回与「agent 说做不了」都是 rejected，但说法不同', async
   assert.equal(requestProgress({ id: 'req_1', status: 'rejected', resultJson: JSON.stringify({ reason: '只能出图片' }) }).label, '无法处理');
 });
 
+test('⚠️ 视图数据优先于补取快照，且补取要随事件重取（否则进度会卡在旧值）', async () => {
+  const { requestProgress } = await model();
+  const req = { id: 'req_1', status: 'accepted', resultRoundId: 'rnd_1' };
+  const viewRounds = [linkedRound({ id: 'rnd_1', status: 'active' })];
+  const viewRuns = [run({ status: 'running' })];
+  const viewItems = [item('succeeded'), item('succeeded', 1), item('requesting', 2)];
+  // 补取到的是一份**旧**快照（出图还没开始时抓的）。
+  const staleLinked = new Map([['rnd_1', { round: linkedRound({ id: 'rnd_1', status: 'active' }), latestRun: null, tally: null }]]);
+  const p = requestProgress(req, { rounds: viewRounds, runs: viewRuns, runItems: viewItems, linked: staleLinked });
+  assert.equal(p.stage, 'generating');
+  assert.match(p.label, /2 \/ 3/, '必须用视图里的新数据，不能被补取的旧快照盖住（实测卡在「出图中 0 / 3」）');
+  // 视图里没有这一批时，才用补取的数据。
+  const p2 = requestProgress(req, { rounds: [], runs: [], runItems: [], linked: new Map([['rnd_1', { round: linkedRound({ id: 'rnd_1', status: 'active' }), latestRun: run({ status: 'running' }), tally: { succeeded: 1, requesting: 2 } }]]) });
+  assert.equal(p2.stage, 'generating');
+  assert.match(p2.label, /1 \/ 3/, '视图之外才用补取数据');
+});
+
+test('⚠️ 视图里的 runs 未必覆盖这一批——不能据此断定「没有运行」', async () => {
+  const { requestProgress } = await model();
+  // 场景：停在「生成历史」视图上，`runs` 只装了当前那一批；卡片上这条请求指向**另一批**。
+  const req = { id: 'req_1', status: 'accepted', resultRoundId: 'rnd_done' };
+  const otherRound = { id: 'rnd_other', taskId: 't', status: 'active', plan: {}, planVersion: 1 };
+  const doneRound = { id: 'rnd_done', taskId: 't', status: 'completed', plan: { requestId: 'req_1' }, planVersion: 2 };
+  const linked = new Map([['rnd_done', {
+    round: doneRound,
+    latestRun: { id: 'run_x', roundId: 'rnd_done', status: 'completed', createdAt: '2026-09-18T00:00:00.000Z' },
+    tally: { succeeded: 3 }
+  }]]);
+  const p = requestProgress(req, { rounds: [otherRound, doneRound], runs: [], runItems: [], linked });
+  assert.equal(p.stage, 'done', '视图里没有这一批的运行，必须退回补取，而不是说「正在准备出图」');
+  assert.match(p.label, /3 张/, '张数要来自服务端的精确计数');
+  // 反向：视图里**有**运行时，视图优先（事件驱动，最新）。
+  const active = requestProgress(
+    { id: 'req_2', status: 'accepted', resultRoundId: 'rnd_live' },
+    { rounds: [{ id: 'rnd_live', taskId: 't', status: 'active', plan: { requestId: 'req_2' }, planVersion: 1 }],
+      runs: [{ id: 'run_live', roundId: 'rnd_live', status: 'running', createdAt: '2026-09-18T01:00:00.000Z' }],
+      runItems: [{ id: 'i1', runId: 'run_live', status: 'succeeded' }],
+      linked: new Map([['rnd_live', { round: { id: 'rnd_live', taskId: 't', status: 'active', plan: {}, planVersion: 1 }, latestRun: null, tally: null }]]) }
+  );
+  assert.equal(active.stage, 'generating', '视图里有运行就用视图的');
+  assert.match(active.label, /1 \//, '进度按视图里的运行项算');
+});
+
 test('关联靠 plan.requestId 外键——一个请求出多批时取最后一批', async () => {
   const { roundForRequest } = await model();
   const rounds = [
@@ -130,9 +173,9 @@ test('接线：卡片显示进度，且「去确认」真的定位到那一批�
   assert.match(main, /openRoundFromQueue/, '必须有「从队列定位批次」的实现');
   // 进度必须由已有事实算（禁止前端累加影子进度）；
   // 批次/运行/槽位取自「当前视图 + 按 id 补取」——补取是为了全局底栏也能算对。
-  assert.match(main, /requestProgress\(request, \{[^}]*rounds: roundsForQueue[^}]*\}\)/, '进度来源必须是已有事实');
+  assert.match(main, /requestProgress\(request, \{[^}]*rounds, runs, runItems: lineageRunItems, linked: linkedProgress[^}]*\}\)/, '进度必须拿视图自己的 rounds + 补取，才能判断该信哪一份');
   assert.match(main, /roundsForQueue/, '缺的关联批次要按 id 补取（全局底栏拿不到当前视图之外的数据）');
-  assert.match(main, /linked: linkedProgress/, '补取到的 latestRun/tally 必须交给模型（否则出图中会显示成「准备出图」）');
+  assert.doesNotMatch(main, /requestProgress\(request, \{[^}]*rounds: roundsForQueue/, '不能把合并后的列表当视图数据传（会让补取快照永不生效）');
 });
 
 test('确认后卡片立刻更新：当前视图的事实必须覆盖补取的旧快照', async () => {

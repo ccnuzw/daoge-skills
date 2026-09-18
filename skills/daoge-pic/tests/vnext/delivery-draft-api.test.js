@@ -110,3 +110,34 @@ test('P1 delivery HTTP API carries project selection through keep-only draft, re
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+test('P1 delivery complete API exports creative-record.json only when the creator asks for it', async () => {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-delivery-record-'));
+  let started;
+  try {
+    initializeStudio({ workspaceRoot });
+    started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
+    const project = await json(started, '/api/projects', { method: 'POST', key: 'record-project', body: { name: '创作记录项目' } });
+    const projectId = project.body.data.value.id;
+    const upload = await fetchStudio(started, '/api/assets/import', { method: 'POST', headers: { 'content-type': 'image/png', 'idempotency-key': 'record-upload', 'x-daoge-target-type': 'project', 'x-daoge-target-id': projectId }, body: png });
+    const asset = (await upload.json()).data;
+    await json(started, '/api/assets/' + asset.id + '/review', { method: 'POST', key: 'record-keep', body: { decision: 'keep' } });
+    const complete = (operationId, phase, includeCreativeRecord) => json(started, '/api/deliveries/complete', { method: 'POST', key: operationId, body: { projectId, name: '记录' + operationId, assetIds: [asset.id], phase, includeCreativeRecord } });
+    const exportedWith = await complete('record-with', 'export', true);
+    assert.equal(exportedWith.status, 200);
+    const withId = exportedWith.body.data.delivery.id;
+    const withManifest = JSON.parse(started.service.db.prepare('SELECT manifest_json FROM deliveries WHERE id = ?').get(withId).manifest_json);
+    assert.equal(withManifest.includeCreativeRecord, true);
+    assert.equal(fs.existsSync(path.join(workspaceRoot, withManifest.exportDirectory, 'creative-record.json')), true);
+    const exportedWithout = await complete('record-without', 'export', false);
+    assert.equal(exportedWithout.status, 200);
+    const withoutId = exportedWithout.body.data.delivery.id;
+    const withoutManifest = JSON.parse(started.service.db.prepare('SELECT manifest_json FROM deliveries WHERE id = ?').get(withoutId).manifest_json);
+    assert.equal(withoutManifest.includeCreativeRecord, false);
+    assert.equal(fs.existsSync(path.join(workspaceRoot, withoutManifest.exportDirectory, 'creative-record.json')), false);
+    assert.equal(fs.readdirSync(path.join(workspaceRoot, withoutManifest.exportDirectory)).sort().join(','), '001.png,contact-sheet.html,manifest.json');
+  } finally {
+    if (started) await started.service.close();
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});

@@ -10,6 +10,22 @@ const { readSource } = require('./source-text');
  * 所以守卫盯的是三件事：键位对得上、缩放真的能放大到看得清细节、对比不止两张。
  */
 
+test('⚠️ Enter 的放大必须真的放大（判据是基准 1×，不是缩放下限 0.75×）', async () => {
+  const m = await import('../../web/src/image-review-keys-model.mjs');
+  // 这一条来自实测：原实现拿 REVIEW_ZOOM_MIN(0.75) 当判据，1× 时条件也成立 →
+  // 永远设回 1×，「Enter 放大」那一半是死的（连按 8 次缩放纹丝不动）。
+  assert.equal(m.reviewZoomToggleTarget(1), 2, '1× 时 Enter 应当放大到 2×');
+  assert.equal(m.reviewZoomToggleTarget(2), 1, '2× 时 Enter 应当复位到 1×');
+  assert.equal(m.reviewZoomToggleTarget(4), 1, '放大之后 Enter 复位');
+  assert.equal(m.reviewZoomToggleTarget(0.75), 2, '比 1× 小时也该放大');
+  assert.notEqual(m.REVIEW_ZOOM_TOGGLE_BASE, m.REVIEW_ZOOM_MIN, '切换基准不能等于缩放下限（那正是这个 bug 的成因）');
+  // 接线：组件必须用模型给的目标，不在组件里另写一遍判据。
+  const { readSource } = require('./source-text');
+  const main = readSource('web/src/main.jsx');
+  assert.match(main, /onZoom\(reviewZoomToggleTarget\(zoom\)\)/, 'Enter 必须走模型给的目标倍率');
+  assert.doesNotMatch(main, /clampReviewZoom\(zoom\) > REVIEW_ZOOM_MIN \? 1 : 2/, '不许再拿缩放下限当切换判据');
+});
+
 test('挑图键位：方向键切图、Esc 收起、Enter 缩放、空格保留、X 不采用', async () => {
   const { reviewKeyAction } = await import('../../web/src/image-review-keys-model.mjs');
   const at = (key, index, count, canReview = true) => reviewKeyAction({ key, index, count, canReview });

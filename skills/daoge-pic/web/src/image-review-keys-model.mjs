@@ -7,6 +7,8 @@
 // 从参考素材、拒绝原因等对话框打开预览时也看得见图，但那里没有「给这一批定去留」的语义——
 // 让空格在那里也能改评审，才是真的会把用户搞糊涂。
 
+/** 「按 Enter 放大」的基准倍率：以此为界在 1× 与 2× 之间切换。 */
+export const REVIEW_ZOOM_TOGGLE_BASE = 1;
 export const REVIEW_ZOOM_MIN = 0.75;
 export const REVIEW_ZOOM_MAX = 4;
 export const REVIEW_ZOOM_STEP = 0.5;
@@ -16,6 +18,17 @@ export function clampReviewZoom(value) {
   const zoom = Number(value);
   if (!Number.isFinite(zoom)) return 1;
   return Math.min(REVIEW_ZOOM_MAX, Math.max(REVIEW_ZOOM_MIN, Math.round(zoom * 100) / 100));
+}
+
+/**
+ * Enter 的「放大 / 复位」目标倍率：在 1× 与 2× 之间切换。
+ *
+ * ⚠️ 判据是**基准倍率（1×）**，不是 `REVIEW_ZOOM_MIN`（0.75×）。
+ * 拿 MIN 当判据会让 1× 时条件也成立、永远设回 1×——放大那一半失效（实测踩到）。
+ * @param {number} current 当前倍率
+ */
+export function reviewZoomToggleTarget(current) {
+  return clampReviewZoom(current) > REVIEW_ZOOM_TOGGLE_BASE ? REVIEW_ZOOM_TOGGLE_BASE : 2;
 }
 
 /** 缩放一步。direction > 0 放大，< 0 缩小。 */

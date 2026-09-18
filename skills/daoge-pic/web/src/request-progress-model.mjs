@@ -118,9 +118,12 @@ function tallyFromCounts(counts) {
 export function requestProgress(request, { rounds = [], runs = [], runItems = [], linked = null } = {}) {
   const status = String(request?.status || '');
   const attempts = attemptNote(request);
-  // 优先用**按 id 补取的**批次事实（全局底栏拿不到当前视图之外的数据）。
-  const fallback = linkedProgressFor(request, linked);
-  const round = roundForRequest(request, rounds) || fallback?.round || null;
+  // ⚠️ 优先用**当前视图**的数据，补取的只在「视图里没有这一批」时兜底。
+  // 反过来（补取优先）会读到过期快照：实测出图已经出了 2 张，卡片还说「出图中 0 / 3」——
+  // 因为那一份是首次补取时抓的，之后事件不断更新视图数据，它却一直没变。
+  // 三个事实各自比新鲜度（见下方注释），所以补取的条目**始终可用**，不做一刀切的闸门。
+  const linkedEntry = linkedProgressFor(request, linked);
+  const round = roundForRequest(request, rounds) || linkedEntry?.round || null;
 
   if (status === 'pending') {
     // ⚠️ 「等待接单」有两种完全不同的处境，界面必须分得开：
@@ -148,9 +151,17 @@ export function requestProgress(request, { rounds = [], runs = [], runItems = []
   }
 
   const roundId = round.id;
-  // 补取来的批次自带 latestRun/tally；否则从当前视图的运行数据里算。
-  const run = fallback?.round?.id === roundId ? fallback.latestRun || null : latestRunForRound(roundId, runs);
-  const tally = fallback?.round?.id === roundId ? (fallback.tally ? tallyFromCounts(fallback.tally) : null) : (run ? runItemTally(run.id, runItems) : null);
+  // 新鲜度要**按事实**判断，不能按批次一刀切：
+  //   - 批次状态：视图里有就用视图的（事件驱动，最新）；视图里没有才用补取。
+  //   - 运行与槽位：视图**未必覆盖**这一批——比如停在「生成历史」视图时，
+  //     `runs` 只装了当前那一批的运行。只在视图找不到运行时才退回补取，
+  //     否则会把「另一批已出好的图」误报成「正在准备出图」（实测踩到）。
+  //   - 槽位计数：补取的来自服务端的精确计数，优先用它（视图里的运行项可能是分页的）。
+  const viewRun = latestRunForRound(roundId, runs);
+  const run = viewRun || linkedEntry?.latestRun || null;
+  const tally = linkedEntry?.tally
+    ? tallyFromCounts(linkedEntry.tally)
+    : (viewRun ? runItemTally(viewRun.id, runItems) : null);
   const base = { roundId, canConfirm: false, canWatch: true };
 
   if (round.status === 'awaiting_confirmation') {

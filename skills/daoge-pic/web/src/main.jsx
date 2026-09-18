@@ -1,7 +1,7 @@
 import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, LoaderCircle, LockKeyhole, Maximize2, MessageSquareText, PanelTop, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { REVIEW_ZOOM_MAX, REVIEW_ZOOM_MIN, clampReviewZoom, reviewKeyAction, reviewZoomStep } from './image-review-keys-model.mjs';
+import { REVIEW_ZOOM_MAX, REVIEW_ZOOM_MIN, clampReviewZoom, reviewKeyAction, reviewZoomStep, reviewZoomToggleTarget } from './image-review-keys-model.mjs';
 import { DRAFT_BOUNDARY_COPY } from './boundary-copy.mjs';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
 import { runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
@@ -1239,7 +1239,9 @@ function ImageInspectorDialog({ assets, zoom, selectedAssetIds, selectionBusyIds
       if (next.action === 'none') return;
       event.preventDefault();
       if (next.action === 'close') return onClose();
-      if (next.action === 'toggle-zoom') return onZoom(clampReviewZoom(zoom) > REVIEW_ZOOM_MIN ? 1 : 2);
+      // ⚠️ 切换目标由模型给（单一来源）。原实现拿 `REVIEW_ZOOM_MIN`(0.75) 当判据，
+      // 1× 时条件也成立 → 永远设回 1×，「Enter 放大」那一半是死的（实测按 8 次纹丝不动）。
+      if (next.action === 'toggle-zoom') return onZoom(reviewZoomToggleTarget(zoom));
       if (next.action === 'prev' || next.action === 'next') return setFocusIndex(next.index);
       const asset = assets[focusIndex];
       if (!asset) return;
@@ -1556,6 +1558,7 @@ function App() {
   const [selectionAssets, setSelectionAssets] = useState(EMPTY);
   const [selectionBusyIds, setSelectionBusyIds] = useState(new Set());
   const [deliveryName, setDeliveryName] = useState('');
+  const [deliveryIncludeCreativeRecord, setDeliveryIncludeCreativeRecord] = useState(true);
   const [assetFilter, setAssetFilter] = useState('all');
   const [assetPage, setAssetPage] = useState(1);
   const [assetPageSize, setAssetPageSize] = useState(() => normalizeAssetPageSize(window.localStorage.getItem(ASSET_PAGE_SIZE_KEY) || DEFAULT_ASSET_PAGE_SIZE));
@@ -1703,7 +1706,11 @@ function App() {
   const roundsForQueue = useMemo(() => queueRounds(rounds, linkedProgress), [rounds, linkedProgress]);
   // 「agent 到哪一步了」全部由已有事实算出来（请求状态 + 关联批次 + 运行 + 槽位），
   // 前端不新增、也不累加任何进度状态（红线：前端不造影子状态）。
-  const progressForRequest = useCallback((request) => requestProgress(request, { rounds: roundsForQueue, runs, runItems: lineageRunItems, linked: linkedProgress }), [roundsForQueue, runs, lineageRunItems, linkedProgress]);
+  // ⚠️ 进度必须拿**视图自己的** rounds（不是已合并补取批次的 roundsForQueue）。
+  // 模型靠「这一批在不在视图里」判断该用哪份数据：在视图里 → 用视图的运行与槽位（最新）；
+  // 不在 → 才退回补取快照。传合并后的列表会让「在视图里」永远成立，
+  // 于是补取的 latestRun/tally 永不生效（全局底栏就又算不出出图进度）。
+  const progressForRequest = useCallback((request) => requestProgress(request, { rounds, runs, runItems: lineageRunItems, linked: linkedProgress }), [rounds, runs, lineageRunItems, linkedProgress]);
 
   const openWorkbenchSession = useCallback(async () => {
     if (session) return session;
@@ -2472,6 +2479,7 @@ function App() {
       window.localStorage.removeItem(DELIVERY_COMPLETION_PREFIX + intent.projectId);
       setDeliveryCompletion(null);
       setDeliveryName('');
+      setDeliveryIncludeCreativeRecord(true);
       setNotice('交付已完成，图片已生成实体文件，可直接下载或复制。');
       deliveryInteractionRef.current.end();
       return;
@@ -2487,6 +2495,7 @@ function App() {
         projectId: selectedProject.id,
         name: deliveryName.trim() || '交付-' + new Date().toISOString().slice(0, 10),
         assetIds: selectedDeliveryAssets.map((asset) => asset.id),
+        includeCreativeRecord: deliveryIncludeCreativeRecord,
         phase: 'draft',
         stage: 'starting'
       };
@@ -2497,7 +2506,7 @@ function App() {
     const operationEpoch = ++deliveryOperationEpoch.current;
     setDeliveryCreating(true);
     try {
-      const result = await api('/api/deliveries/complete', { method: 'POST', idempotencyKey: intent.operationId, body: { projectId, name: intent.name, assetIds: intent.assetIds, phase: intent.phase } });
+      const result = await api('/api/deliveries/complete', { method: 'POST', idempotencyKey: intent.operationId, body: { projectId, name: intent.name, assetIds: intent.assetIds, phase: intent.phase, includeCreativeRecord: intent.includeCreativeRecord === true } });
       const nextIntent = result.nextAction ? { ...intent, deliveryId: result.delivery.id, phase: result.nextAction, stage: result.stage } : { ...intent, deliveryId: result.delivery.id, phase: 'complete', stage: 'exported' };
       window.localStorage.setItem(DELIVERY_COMPLETION_PREFIX + projectId, JSON.stringify(nextIntent));
       if (isDeliveryOperationCurrent({ activeProjectId: activeProjectIdRef.current, projectId, currentEpoch: deliveryOperationEpoch.current, operationEpoch })) {
@@ -3169,7 +3178,7 @@ function App() {
     guide: () => <LearningCenter onDismiss={dismissGuide} onNavigate={(nextView) => navigateRoute({ view: nextView })} />,
     library: () => <CreativeLibrary taskTypes={taskTypes} styleKits={styleKits} brandKits={brandKits} sharedAssets={sharedAssets} onOpenProjects={() => navigateRoute({ view: 'projects' })} onOpenSharedAssets={() => navigateRoute({ view: 'shared-assets' })} />,
     'shared-assets': () => <SharedAssets assets={sharedAssets} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onOpenProjects={() => navigateRoute({ view: 'projects' })} />,
-    deliveries: () => <CreatorDelivery project={selectedProject} selection={deliverySelection} deliveryName={deliveryName} deliveryCreating={deliveryCreating} completion={deliveryCompletion} frozen={Boolean(deliveryCompletion || deliveryCreating)} onDeliveryNameChange={setDeliveryName} onCreate={() => void completeDelivery()} onOpenAssets={() => navigateRoute({ view: 'assets', assetScope: 'project', taskId: null, roundId: null, compareRoundIds: [], runId: null })} selectedAssets={deliveryFlowAssets} deliveries={deliveries} assets={assets} deliveryBusyId={deliveryBusyId} onDeliveryAction={deliveryAction} onRemoveSelection={(asset) => toggleSelection(asset.id)} onDownload={downloadAsset} onCopy={copyAsset} onArchiveProject={downloadProjectArchive} onArchiveDelivery={downloadDeliveryArchive} batches={deliveryBatches} batchName={batchName} selectedDeliveryIds={selectedDeliveryIds} batchBusy={batchBusy} onBatchNameChange={setBatchName} onToggleDelivery={toggleBatchDelivery} onBatchAction={batchAction} />,
+    deliveries: () => <CreatorDelivery project={selectedProject} selection={deliverySelection} deliveryName={deliveryName} deliveryCreating={deliveryCreating} completion={deliveryCompletion} frozen={Boolean(deliveryCompletion || deliveryCreating)} onDeliveryNameChange={setDeliveryName} includeCreativeRecord={deliveryIncludeCreativeRecord} onIncludeCreativeRecordChange={setDeliveryIncludeCreativeRecord} onCreate={() => void completeDelivery()} onOpenAssets={() => navigateRoute({ view: 'assets', assetScope: 'project', taskId: null, roundId: null, compareRoundIds: [], runId: null })} selectedAssets={deliveryFlowAssets} deliveries={deliveries} assets={assets} deliveryBusyId={deliveryBusyId} onDeliveryAction={deliveryAction} onRemoveSelection={(asset) => toggleSelection(asset.id)} onDownload={downloadAsset} onCopy={copyAsset} onArchiveProject={downloadProjectArchive} onArchiveDelivery={downloadDeliveryArchive} batches={deliveryBatches} batchName={batchName} selectedDeliveryIds={selectedDeliveryIds} batchBusy={batchBusy} onBatchNameChange={setBatchName} onToggleDelivery={toggleBatchDelivery} onBatchAction={batchAction} />,
     trash: () => renderAssetsView(),
     troubleshoot: () => <Troubleshoot request={api} studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onRefresh={() => void refresh()} onCopyDiagnostic={() => void copyRuntimeDiagnostic()} onRepair={() => void repairRuntime()} />
   };
