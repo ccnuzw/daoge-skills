@@ -11,52 +11,51 @@ const { downloadHttpResource, pinnedHttpTransport, probeHttpEndpoint, requestPin
 const target = (value) => new URL(value);
 
 const tlsKey = `-----BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDBYo+BIztN9gSV
-CIBppQS3kepAr3QsvL16z4CY64Cfzr3xErvzUjt8Ib0En+bmJghdq8L16S3CLcB4
-tXbf6ElXMcLkCfsB1wQT9kDTehjof27Va6Fkjbf5rvo3GOHh6vK2IueUBJnjhiRH
-c3Mrj3oAx93FJw5T2kw3G7BW7bwK3nfz5dMXDYjLUNC6CjHMjlxG6C+xeCw6r4p5
-bJbnwVBTuR6temiJoQ4hnVOTetwfaG3OUCsoTrLqOX1JcEf9/4p9OZW2lxo+oInI
-XS6VX4Ze96RdQKC45ROKI21zN+n2ofdfqHhTvVcuKCn9gXSc4S0DwmiwsnINAUyR
-B/RFG5hJAgMBAAECggEAAyelpLCGSVLP/KhwroiJJ6ot5/6UxsgQz/NDq1BS6bMt
-6RlqTza9DrI0NbeaxOVuRyzurM6wNutCfmr4ygAC9kpds2pa7yBACkf/AxQ1BNH+
-D7rw8prXRgUDQv6DwjOa4GV4YV35LruOVaC+Cmy4S6ahvmjRNIVVWfl4f9U4DKCm
-O/+1Pl/0bBSu7y3DNP2feRyNDEOBVnm+zxiuVLQslnX0E40ar1Zhz5jTKN5v3/lS
-QumVOlu/LHGtIrnOMGdzQ1Dq27lv4d+XvcpeW+VQ+jF5JsCx5DwhT74BgxNofXK9
-RLefpwdHbU89B6SrhmAAhqnfpojokCJoT1qRALX1gQKBgQDlKMMty1+iWRxRmo7l
-jqTh2N+HNN4nhe4QbMHToIxGW7b5lTw0PsbHA7cBFjUmnzeGQIccqq25nlGzuAxh
-bAo6ALNxBU6slRJdpWggCvpBepAQaECkSvW/p2ukoRw4PbLE0Qz6GaBfj9vQG7iW
-+g5YbpZTvu0U0jMDxzRS0riLYQKBgQDYCR+23+JiyUF2ap5IgoMWP5Oxq3BpWtOb
-IULdIA7HVSPlmjcLXMEuVwNkew3mugxfqABVVrneJ4G6OjVuFQ68Fx5OCqSBx9mw
-GGVHJP2+AYxUQIowAWJTt3aOawJMRk7XYZQudRx/wg4ECBY+em6He9DSANdrG13X
-Wf+aHhLd6QKBgCDgGjAlrxChbBig7cMtFaZ48Ih7IyvUYPTmRWBQ9g7Z9YQUztBH
-+Uhv1f9H6lQiH1sZQsjwC4BHoD0COHR5hXYQx619L24+7KWWpzuBl6lxJd3UtwFa
-56qZIC48FspSv6TQwOXYa1OKVeSjNXYjZY92PgbBq02DYmI2X+FJ7cPBAoGBAKqU
-6bnYpkUibNI39auDgkZ7BP/xQt2tnhCL/uPjgEfc7m9JidUq9E7G3iLlF2Dr3wFZ
-Aopf5HuJ7mFBvRajAfN6va8ZsDPZvgXR/YZjqwfw6QFNxM+LCDzaTH6/+ByKF47x
-ubPFPS+T5sVALXA/9C5+kbCAgZhND5gPtEfZH0ShAoGBAMO52FKIhaVazYzgZWHK
-an5KhWpGO53wLGzrUbCidMnmgGJNmDFo+exj+b1YD+cE6PMA9gzaN2/ndQ8ORmVk
-JBMZPB5XyOi4XB5s/BBaRFXP8LRluv75CiAXMsLCxtZui8btVXQ1y/NuTF5WrRAA
-6JIe8ek+eHlbCS/8rjTpwPTn
+MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC+G7OorCNS5wIb
+iMjpNEanh7hnC0lAkZ6T8aib1Pj3zfsi6e5Hwz9oBSBdp7jx0iEmtCWX9G9GhG8f
+2iSv1FzeTr5UDmnl0W1eABWRi1dARNtYv9MMbwdtP41hCxnL9f60YnhQRF11REXC
+kSDIbZrgQJUygdjrK2BEsNsir1psRKfZr86cjb1MJuhPuRl5gvlaXty1xcxT6uRk
+uCfKtLozE1YQzxM5vwH52u2AwCpaLCFxYRH7uHgr2Kx8Xo1bGAMwApFpZe4TksCN
+/KGyTGj2uJt8+CfR/Tf/OdY229RDJxenL8IfUc8bXfQmzITKemgx1WoY9lMgZ22u
++VYCz5QZAgMBAAECggEASGbld/5DH74yG8lu9v39UK2MSdZPCiPLeL3HAL5OKZZN
+qIDeSn9uRQ/6wSBw+8wS6xod3S7vODSU29UpNrvSuKnVq86nfyrRE8VFcZ5XVvdC
+cJzx5GDeu7lB/20KYJbp78o21x8KVvBu/whlq1+u5exCxi8UrY/iBJc0hhOxhNzC
+NpFF/2SzfgfIrrxu9UHnfk+ZTqNiCS3n1Su/cYxyGbxFDk6jkiyEbuGZ0xSBJzPb
+Z9YOyoMee0ySlA8H+JNcxt07vXZb2voX2RwgM+UHz+EwWwr3skD5SGkbZvRrKePo
+Jer6/xj5QOgII6lvQVl2xsT7WXCobTcIBUUYx9VI5wKBgQDxXuRa4zhK0QcjT7od
+vHAhUnvLUg+861yRJAh/xmebFeTnbSswbU/7O2SuYGFfaYS7Tok5DjAVVl3ehHBz
+yCEn2BABfG8LPw9Nh3KP4jHksxb3LcvGJr+ltBA5CYdVyGWj9gQ7txsAAqe7Va13
+vgB3qPFFGame4ybshKckLkEIvwKBgQDJoWvZdna3N+ov0TrUJrU5WodaIIIELpIe
+uk7rfKX9C3bjFkAwEEZx5/mm+QsE+Zj6IHgYblTFDAYZ1ddR1J0L2EH2dYJ8T9L8
+bRxjIyy1s7XoD+WhAaFXoc/DR56eDnSRZFN9paq7E6xB1ekOTWDA0D0ao43a/sTj
+r/FsR0GBJwKBgQDixmr6UZ1j/bwdGx0cLx2S0TJqNvF+aAuSei5aDojtFsb4AIOh
+fjK1MnpHs1oJENSaPxGCP6hBg+Gx3PDid1dfXgq7urOB939jMi0arkR+QR0Eo0xf
+IazR/Ll5PVCf8iY8xDn5+PEvM09wHPFcHXHG+z2j1JafJ4A8m+2FesezdQKBgQDB
+YdiWkU/7Gd26TuolX5qgj3sRrewFJsVuQzI+GSb6M2yrEEQv1Ow7g0mmI2W2N83I
+2CtXAzq6YnXXgYkqKskU+y0IvFuR7t1kzSFU0/+lpd7p25VZfr7H1aH2oVI4NZUH
+fTm2YJYHJy8nVYpY9U2+n/p6+jKrv34HAlCCkTT6MQKBgQCaJReNCbVlzooyL2iK
+fxzCVPYf4Tj++2HWzeVahdYUfttK0PBSSGsw69YB7OTSeHiGs8UKNtax/iusIhbJ
+BvvmjG6C1ykCwmuSJIhHq2tlk7LeGnTLQs1bcM8WY5TYLOhbW4COtgl3nKZ7JGdK
+Yas4TGVVCnKy6xOBXayTp1rRfg==
 -----END PRIVATE KEY-----`;
 const tlsCert = `-----BEGIN CERTIFICATE-----
-MIIDRDCCAiygAwIBAgIUKYhIf8OUzvV519PBT3MDNSQNeDIwDQYJKoZIhvcNAQEL
-BQAwFjEUMBIGA1UEAwwLdGFyZ2V0LnRlc3QwHhcNMjYwOTE0MTQ0MTM1WhcNMjYw
-OTE2MTQ0MTM1WjAWMRQwEgYDVQQDDAt0YXJnZXQudGVzdDCCASIwDQYJKoZIhvcN
-AQEBBQADggEPADCCAQoCggEBAMFij4EjO032BJUIgGmlBLeR6kCvdCy8vXrPgJjr
-gJ/OvfESu/NSO3whvQSf5uYmCF2rwvXpLcItwHi1dt/oSVcxwuQJ+wHXBBP2QNN6
-GOh/btVroWSNt/mu+jcY4eHq8rYi55QEmeOGJEdzcyuPegDH3cUnDlPaTDcbsFbt
-vAred/Pl0xcNiMtQ0LoKMcyOXEboL7F4LDqvinlslufBUFO5Hq16aImhDiGdU5N6
-3B9obc5QKyhOsuo5fUlwR/3/in05lbaXGj6gichdLpVfhl73pF1AoLjlE4ojbXM3
-6fah91+oeFO9Vy4oKf2BdJzhLQPCaLCycg0BTJEH9EUbmEkCAwEAAaOBiTCBhjAd
-BgNVHQ4EFgQU9DrPEhXJCtPspHo45RQb2gYwQQkwHwYDVR0jBBgwFoAU9DrPEhXJ
-CtPspHo45RQb2gYwQQkwDwYDVR0TAQH/BAUwAwEB/zAzBgNVHREELDAqggt0YXJn
-ZXQudGVzdIIKcHJveHkudGVzdIIJbG9jYWxob3N0hwR/AAABMA0GCSqGSIb3DQEB
-CwUAA4IBAQCIBvuLXqKbd38tnmJCd17rkQvMm/sqhNAAimOTXmcdR8I7moppIEEn
-kxa/75hdyIqjhUEwrrK21v/mgiHcqFZzkCBZzX2mDQl+OxT5x4nPci1oc8jBtg32
-WW/A13EBkQgLSXEQtb/kWJIDUL36kVtE+W6pGK84SIwzLsFGjWXWf49ai25vGWMu
-kQ6L4xpNjxI7RDYumOmhXVgKao0IJt+qtLJ/VmQreV1WzVegl7t2UGOSn+kEn0hj
-om1Zq4K2Y15RQkGODr2l+3LOrYGP5Je/g9oavygqVdMMk0yPTclcQ5Vh+P9jX8Dj
-CaO8ngI/jU91pOgXlLL4AfoBXE+TPu/0
+MIIDJTCCAg2gAwIBAgIUC5HY1ak7z5xv5m2ToVKRKqqNbA0wDQYJKoZIhvcNAQEL
+BQAwFjEUMBIGA1UEAwwLdGFyZ2V0LnRlc3QwHhcNMjYwOTE3MTkxMzEwWhcNMzYw
+OTE0MTkxMzEwWjAWMRQwEgYDVQQDDAt0YXJnZXQudGVzdDCCASIwDQYJKoZIhvcN
+AQEBBQADggEPADCCAQoCggEBAL4bs6isI1LnAhuIyOk0RqeHuGcLSUCRnpPxqJvU
++PfN+yLp7kfDP2gFIF2nuPHSISa0JZf0b0aEbx/aJK/UXN5OvlQOaeXRbV4AFZGL
+V0BE21i/0wxvB20/jWELGcv1/rRieFBEXXVERcKRIMhtmuBAlTKB2OsrYESw2yKv
+WmxEp9mvzpyNvUwm6E+5GXmC+Vpe3LXFzFPq5GS4J8q0ujMTVhDPEzm/Afna7YDA
+KlosIXFhEfu4eCvYrHxejVsYAzACkWll7hOSwI38obJMaPa4m3z4J9H9N/851jbb
+1EMnF6cvwh9Rzxtd9CbMhMp6aDHVahj2UyBnba75VgLPlBkCAwEAAaNrMGkwHQYD
+VR0OBBYEFB90Ybs2sD2ht2rpA30sZgI4RFnPMB8GA1UdIwQYMBaAFB90Ybs2sD2h
+t2rpA30sZgI4RFnPMA8GA1UdEwEB/wQFMAMBAf8wFgYDVR0RBA8wDYILdGFyZ2V0
+LnRlc3QwDQYJKoZIhvcNAQELBQADggEBAE0MGx+D3zKeh+tvkbDm62qZw4zdZRSA
+FcCGZJ9Nw9V20v3mjZpjh8JS2i31fl41nFfmG0g3jHhojpDOrcNFrPLPq/a5bC/B
+b84CrHyR9VG1FCRHC4gfXELdgBdeC36nf1SRi8qXK3F5RImgFuAsutxOU7RGnaYs
+4WYo9OXr6fxQlEx6KIEL+bpSFq6TvjnrsCsTLZocGUZNg147zxD4WErpvBEF8j0+
+gmKTfk+2X2KvoEDM9rlnqUhuGKcqq8JvKuaRw06fDWVZZD6g6vedEbfr2H/4a2Iv
+cp2GLbVA6JXWEUfB8wKIOz6EVRqLxals0iWlvK2coaemYsC6ADWC4WU=
 -----END CERTIFICATE-----`;
 
 test('no proxy is used when none is configured', () => {
@@ -155,7 +154,7 @@ async function withProxy(operation, options = {}) {
 }
 
 test('an HTTP request goes through the proxy as an absolute URI and never dials the target directly', async () => {
-  await withProxy(async ({ seen, originPort, proxyPort, origin }) => {
+  await withProxy(async ({ seen, proxyPort, origin }) => {
     const result = await requestPinnedHttpEndpoint(origin + '/v1/images/generations', {
       signal: new AbortController().signal,
       headers: { accept: 'application/json' },
@@ -171,7 +170,7 @@ test('an HTTP request goes through the proxy as an absolute URI and never dials 
 });
 
 test('proxy credentials are sent to the proxy and not to the origin', async () => {
-  await withProxy(async ({ seen, originPort, proxyPort, origin }) => {
+  await withProxy(async ({ seen, proxyPort, origin }) => {
     await requestPinnedHttpEndpoint(origin + '/v1/images/generations', {
       signal: new AbortController().signal,
       headers: { accept: 'application/json' },

@@ -58,7 +58,9 @@ test('Workbench retains the fragment when authorization cannot be completed', as
 test('Workbench mounts App only after authorization and exposes a retryable failure page', () => {
   const main = readFrontendSource();
   const auth = readSource('web/src/local-auth.mjs');
-  assert.match(main, /if \(authorized\) return <App \/>;/);
+  // 授权通过后先过版本闸门（9.4），兼容时才真正渲染 App —— 断言的是这个顺序，不是某个组件的字面名。
+  assert.match(main, /if \(authorized\) return <StudioVersionGate \/>;/);
+  assert.match(main, /if \(negotiation\.compatible\) return <App \/>;/);
   assert.match(main, /className="local-auth-failure"/);
   assert.match(main, /重试授权/);
   assert.match(main, /<LocalStudioAuthorizationGate \/>/);

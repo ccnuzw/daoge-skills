@@ -37,11 +37,11 @@ function writeTarball(file, extraPaths = [], version = '5.14.2') {
     const content = name === 'package.json'
       ? JSON.stringify({ name: 'daoge-pic', version })
       : name === 'protocol-version.json'
-        ? JSON.stringify({ protocol: 'daoge-pic-skill-protocol', version: '2.0.0', runtimeCompatibility: `>=${version} <6.0.0` })
+        ? JSON.stringify({ protocol: 'daoge-pic-skill-protocol', version: '3.0.0', runtimeCompatibility: `>=${version} <7.0.0` })
         : name === 'dist/vnext/shared/protocol.js'
-          ? `exports.RUNTIME_VERSION = '${version}';\nexports.RUNTIME_COMPATIBILITY_RANGE = '>=${version} <6.0.0';`
+          ? `exports.RUNTIME_VERSION = '${version}';\nexports.RUNTIME_COMPATIBILITY_RANGE = '>=${version} <7.0.0';`
           : name === 'dist/vnext/shared/protocol.d.ts'
-            ? `export declare const RUNTIME_VERSION = "${version}";\nexport declare const RUNTIME_COMPATIBILITY_RANGE = ">=${version} <6.0.0";`
+            ? `export declare const RUNTIME_VERSION = "${version}";\nexport declare const RUNTIME_COMPATIBILITY_RANGE = ">=${version} <7.0.0";`
             : 'fixture';
     const body = Buffer.from(content);
     const header = Buffer.alloc(512);

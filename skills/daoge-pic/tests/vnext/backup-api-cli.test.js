@@ -47,7 +47,7 @@ test('backup manifest API requires current Studio auth and exposes only safe rel
     const asset = importStudioAsset(started.service.db, started.service.initialized.paths, { studioId: started.service.initialized.manifest.studioId, bytes: png, mediaType: 'image/png', originalFilename: 'deleted-fixture.png' });
     const deleted = softDeleteAsset(started.service.db, started.service.initialized.paths, { studioId: started.service.initialized.manifest.studioId, assetId: asset.id });
     assert.match(deleted.storagePath, /^daoge-assets\/trash\//);
-    const unauthenticated = await fetch(started.url + '/api/backup/manifest', { headers: { accept: 'application/json', 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0' } });
+    const unauthenticated = await fetch(started.url + '/api/backup/manifest', { headers: { accept: 'application/json', 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/3.0.0' } });
     assert.equal(unauthenticated.status, 401);
 
     const manifest = await requestJsonAsWorkbench(started, '/api/backup/manifest', { cookie: await workbenchCookie(started) });
@@ -68,7 +68,7 @@ test('backup manifest includes frozen exported delivery files and rejects a miss
   const root = workspace('daoge-pic-backup-api-delivery-');
   let started;
   try {
-    const initialized = initializeStudio({ workspaceRoot: root });
+    initializeStudio({ workspaceRoot: root });
     started = await startLocalStudioService({ hardenAccess: false, workspaceRoot: root, ssePollMs: 20 });
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'backup-delivery-project', body: { name: 'Backup delivery project' } });
     assert.equal(project.status, 200, JSON.stringify(project.body));
@@ -212,7 +212,7 @@ test('backup POST APIs are Bearer-only, enforce allowlists, and keep source path
     assert.equal(upgrade.body.data.runtimeFacts.currentSchemaVersion, STUDIO_SCHEMA_VERSION);
     assert.equal(upgrade.body.data.runtimeFacts.supportedSchemaVersion, STUDIO_SCHEMA_VERSION);
     assert.equal(upgrade.body.data.runtimeFacts.currentRuntimeVersion, RUNTIME_VERSION);
-    assert.equal(upgrade.body.data.runtimeFacts.supportedProtocolRange, '>=2.0.0 <3.0.0');
+    assert.equal(upgrade.body.data.runtimeFacts.supportedProtocolRange, '>=3.0.0 <4.0.0');
 
     const selfCertified = await requestJson(started, '/api/backup/upgrade-assess', { method: 'POST', idempotencyKey: 'backup-upgrade-self', body: { targetRuntimeVersion: RUNTIME_VERSION, targetSchemaVersion: 9999, targetProtocolVersion: SKILL_PROTOCOL_VERSION, supportedSchemaVersion: 9999 } });
     assert.equal(selfCertified.status, 400);

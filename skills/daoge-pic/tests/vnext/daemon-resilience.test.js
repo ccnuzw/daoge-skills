@@ -256,7 +256,7 @@ async function shutdownDaemonRuntime(workspaceRoot, expectedPid) {
       authorization: 'Bearer ' + runtime.capability,
       'content-type': 'application/json',
       'x-daoge-operation-name': 'daemon-shutdown-test',
-      'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0'
+      'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/3.0.0'
     },
     body: '{}',
     signal: AbortSignal.timeout(process.platform === 'win32' ? 30000 : 5000)
@@ -460,7 +460,7 @@ test('controlled restart preserves its port and Workbench authorization across d
       assert.equal(fs.statSync(runtimePath).mode & 0o777, 0o600);
     }
     assert.equal((await fetch(first.url + '/api/studio')).status, 401);
-    assert.equal((await fetch(first.url + '/api/studio', { headers: { authorization: 'Bearer ' + first.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0' } })).status, 200);
+    assert.equal((await fetch(first.url + '/api/studio', { headers: { authorization: 'Bearer ' + first.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/3.0.0' } })).status, 200);
     const studioOutput = spawnSync(process.execPath, [cliEntry, 'studio', '--workspace', workspaceRoot], { encoding: 'utf8' });
     assert.equal(studioOutput.status, 0, studioOutput.stderr);
     assert.equal(studioOutput.stdout.includes(first.capability), false);
@@ -488,9 +488,9 @@ test('controlled restart preserves its port and Workbench authorization across d
     assert.equal(restartedOwner.pid, first.pid);
     assert.notEqual(restartedOwner.ownerId, firstOwner.ownerId, 'controlled restart must release and reacquire the SQLite mutex');
     assert.equal((await fetchEventually(restarted.url + '/api/studio', { headers: { cookie } })).status, 200);
-    const normalClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
+    const normalClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/3.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
     assert.deepEqual((await normalClaim.json()).data, { claimed: false, reused: true, reason: 'recent-workbench' }, 'controlled restart must retain recent Workbench presence in daemon memory');
-    const forcedClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
+    const forcedClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/3.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'f'.repeat(43), force: true }) });
     assert.deepEqual((await forcedClaim.json()).data, { claimed: true, reused: false, reason: 'forced-opener-claim' });
     assert.equal((await fetchEventually(restarted.url + '/api/projects', { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:9', 'content-type': 'application/json', 'idempotency-key': 'hostile-local-page' }, body: JSON.stringify({ name: 'blocked' }) })).status, 403);
     assert.equal((await fetchEventually(restarted.url + '/api/shutdown', { method: 'POST', headers: { cookie, origin: restarted.url, 'content-type': 'application/json', 'idempotency-key': 'cookie-shutdown-blocked' }, body: '{}' })).status, 403);

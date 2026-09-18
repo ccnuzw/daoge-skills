@@ -107,7 +107,6 @@ test('ordinary lineage canvas keeps raw plan prompts, errors, paths, and keys ou
 
   assert.match(lineage, /import \{ createAccessibleLineage, redactLineageText \}/);
   assert.match(lineage, /PLAN_PROMPT_PROTECTED_LABEL/);
-  assert.match(lineage, /RUN_ITEM_ERROR_PROTECTED_LABEL/);
   assert.match(lineage, /assetCoverage = null/);
   assert.match(lineage, /loading: lineageAssetLoading \|\| !layoutReady/);
   assert.match(lineage, /loading: runItemCoverage\?\.loading === true \|\| !layoutReady/);

@@ -35,7 +35,12 @@ export function useStudioSearch({ api, navigateRoute }) {
   }, [searchQuery]);
   useEffect(() => () => searchCoordinatorRef.current.dispose(), []);
   const openSearchResult = (result) => {
-    const changes = result.entityType === 'project' ? { view: 'lineage', projectId: result.projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' } : { view: 'lineage', projectId: result.projectId, taskId: result.taskId, roundId: result.entityType === 'round' ? result.entityId : null, compareRoundIds: result.entityType === 'round' ? [result.entityId] : [], runId: null, assetScope: result.entityType === 'round' ? 'round' : 'task' };
+    // 图与批次都落在它所属的批次上下文里（图的「批次」来自后端解析的 roundId）：
+    // 搜到一张图 = 跳到产出它的那一批，人就地能看见它。
+    const focusedRoundId = result.entityType === 'round' ? result.entityId : result.entityType === 'asset' ? result.roundId || null : null;
+    const changes = result.entityType === 'project'
+      ? { view: 'lineage', projectId: result.projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' }
+      : { view: 'lineage', projectId: result.projectId, taskId: result.taskId, roundId: focusedRoundId, compareRoundIds: focusedRoundId ? [focusedRoundId] : [], runId: null, assetScope: focusedRoundId ? 'round' : 'task' };
     setSearchResults(EMPTY);
     setSearchQuery('');
     navigateRoute(changes);

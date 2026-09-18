@@ -23,11 +23,9 @@ const BEARER_ONLY = [
   ['POST', '/api/rounds/rnd_1/preflight', '预检'],
   ['POST', '/api/runs', '生成运行'],
   ['POST', '/api/runs/run_1/items/itm_1/reconcile', '对账'],
-  ['POST', '/api/runs/run_1/pause', '运行控制'],
   ['POST', '/api/runs/run_1/outcomes/resolve', '运行控制'],
   ['POST', '/api/runs/run_1/retry', '运行控制'],
-  ['POST', '/api/runs/run_1/resume', '运行恢复'],
-  ['POST', '/api/runs/run_1/cancel', '运行控制']
+  ['POST', '/api/runs/run_1/resume', '运行恢复']
 ];
 
 /** Workbench 必须能自己写的端点。这些绝不能被误伤成 bearer-only，否则界面按钮会永久 403。 */
@@ -96,6 +94,15 @@ test('花钱、起停服务、改凭据的端点只认 Skill/CLI', () => {
     assert.equal(error.message, rule.message);
 
     assert.equal(rejection(method, pathname, 'bearer'), null, method + ' ' + pathname + ' 用 bearer 调用应当放行');
+  }
+});
+
+test('止损动作（暂停 / 取消）不再被 bearer 独占：人也能直接止损', () => {
+  // 这是修过的真实缺陷：界面按钮走 cookie，而这两条曾登记为 bearer → 点了必然 403，失败还被静默吞掉。
+  for (const pathname of ['/api/runs/run_1/pause', '/api/runs/run_1/cancel']) {
+    assert.equal(findRouteAuthorizationRule(pathname, 'POST'), null, pathname + ' 应当两者皆可（规格书 §2.2 判据）');
+    assert.equal(rejection('POST', pathname, 'cookie'), null, pathname + ' 必须允许真人（cookie）直接止损');
+    assert.equal(rejection('POST', pathname, 'bearer'), null, pathname + ' 也不该删掉 agent 的止损能力');
   }
 });
 

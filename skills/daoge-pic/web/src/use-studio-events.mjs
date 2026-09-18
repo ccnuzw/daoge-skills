@@ -17,6 +17,9 @@ export function studioEventRefreshPlan(events = []) {
   const assetEvent = (event) => ['asset', 'review'].includes(event?.entityType) || /^(asset|review)\./.test(event?.eventType || '') || ['run.items_updated', 'project.selection_updated'].includes(event?.eventType);
   const contextEvent = (event) => ['task', 'creative_round', 'round', 'generation_run', 'run', 'run_item', 'delivery', 'delivery_batch'].includes(event?.entityType) || /^(task|round|run|run_item|delivery|delivery_batch)\./.test(event?.eventType || '');
   const canvasLayoutEvent = (event) => event?.entityType === 'canvas_layout' || /^canvas_layout\./.test(event?.eventType || '');
+  // 请求队列的事件（created/accepted/done/rejected/lease_expired）驱动队列重取；
+  // 「accepted 立刻推回 Studio」靠的就是这条（方案 4.2：静默是最大的坑）。
+  const requestEvent = (event) => event?.entityType === 'request' || /^request\./.test(event?.eventType || '');
   const refreshSelection = values.some((event) => event?.eventType === 'project.selection_updated' || /^asset\.(reviewed|trashed|restored|restored_reused)$/.test(event?.eventType || ''));
   const refreshSharedAssets = values.some((event) => /^asset\.(shared|unshared)_across_projects$/.test(event?.eventType || ''));
   const refreshContext = global || values.some(contextEvent);
@@ -34,7 +37,8 @@ export function studioEventRefreshPlan(events = []) {
     studioOverview: values.some(detailEvent),
     planVersions: values.some(planEvent),
     canvasLayout: refreshCanvasLayout,
-    maximumRefreshes: (refreshContext ? 1 : 0) + (refreshAssets ? 1 : 0) + (refreshSelection ? 1 : 0) + (refreshSharedAssets ? 1 : 0) + (refreshCanvasLayout ? 1 : 0) + (values.some(detailEvent) ? 1 : 0)
+    requests: values.some(requestEvent),
+    maximumRefreshes: (refreshContext ? 1 : 0) + (refreshAssets ? 1 : 0) + (refreshSelection ? 1 : 0) + (refreshSharedAssets ? 1 : 0) + (refreshCanvasLayout ? 1 : 0) + (values.some(detailEvent) ? 1 : 0) + (values.some(requestEvent) ? 1 : 0)
   };
 }
 

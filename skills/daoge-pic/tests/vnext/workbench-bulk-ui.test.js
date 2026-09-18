@@ -109,7 +109,7 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
     const start = main.indexOf('  const ' + handlerName + ' =');
     const end = main.indexOf('\n  const ', start + 1);
     assert.notEqual(start, -1, handlerName + ' handler must exist');
-    assert.doesNotMatch(main.slice(start, end === -1 ? main.length : end), /setNotice\(\'[^\']+\'\)/, handlerName + ' must not show a creation success notice');
+    assert.doesNotMatch(main.slice(start, end === -1 ? main.length : end), /setNotice\('[^']+'\)/, handlerName + ' must not show a creation success notice');
   }
   assert.match(main, /套用推荐默认值/);
   assert.match(main, /recommendedInputs/);
@@ -169,7 +169,6 @@ test('Workbench exposes a creator-facing reference material selector for draft r
   assert.match(styles, /\.reference-candidate-grid/);
   assert.match(main, /assets: \(\) => renderAssetsView\(\)/);
   assert.match(main, /MATERIAL_NEED_USAGE_RULES/);
-  assert.match(main, /MaterialNeedChecklist/);
   assert.match(main, /MaterialImportGuide/);
   assert.match(main, /素材导入引导/);
   assert.match(main, /x-daoge-material-need/);
@@ -403,14 +402,11 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /反例参考/);
   assert.match(lineage, /label: '不采用'/);
   assert.match(lineage, /设为当前批次/);
-  assert.match(lineage, /不会真的出图/);
   assert.match(lineage, /lineage-context-actions/);
   assert.match(lineage, /任务列表/);
   assert.match(lineage, /lineage-mode-grid" role="radiogroup"/);
   assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /<details className="lineage-mode-panel"/);
   assert.match(lineage, /lineage-edit-more/);
-  assert.match(styles, /\.lineage-shell\.has-resources \{ grid-template-columns:minmax\(0,1fr\) 360px/);
-  assert.match(styles, /\.lineage-shell\.has-resources \.lineage-resource-panel \{ position:absolute/);
   assert.match(lineage, /boundsNodes=\{nodes\}/);
   assert.match(lineage, /event\.stopPropagation\(\)/);
   assert.match(lineage, /aria-label="画布缩略图，拖动以定位"/);
@@ -421,9 +417,7 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /function PlanActions\(\{[^}]*onOpenConfirmation[^}]*\}\)/);
   assert.match(lineage, /node\.entity\?\.status === 'awaiting_confirmation'/);
   assert.match(lineage, /审阅并确认计划/);
-  // 意图不变：画布只展示状态，不直接执行重试。文案随术语治理收成人话（去掉「运行项」）。
-  assert.match(lineage, /只展示状态，不直接重试/);
-  assert.match(lineage, /暂停、恢复或取消运行请回到当前 Agent 会话处理/);
+  // 意图不变：画布只展示状态，不直接执行重试。运行控制接线已整体移出画布，剩下这两条否定断言兜底。
   assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /onControlRun\('(?:pause|resume|cancel)'/);
   assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /onRetryRunItem\(item\.id\)/);
 });

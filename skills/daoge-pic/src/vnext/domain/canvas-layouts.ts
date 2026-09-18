@@ -2,33 +2,51 @@ import { createId, nowIso } from '../shared/ids';
 import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/database';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from './asset-access';
 import { InvalidCommandError, StudioNotFoundError } from './studio-commands';
-import { ENTITY_SCOPE_QUERIES, joinInStudioSql, ScopedEntityType } from './studio-scope';
+import { ENTITY_SCOPE_QUERIES, ScopedEntityType, selectInStudioSql } from './studio-scope';
 
-export type CanvasLayoutScopeType = 'project' | 'task' | 'round';
-export type CanvasLayoutEntityType = 'project' | 'task' | 'round' | 'plan' | 'run' | 'run_item' | 'asset' | 'shared_asset' | 'delivery' | 'group' | 'task_type' | 'style_kit' | 'brand_kit';
-export type CanvasGroupType = 'task' | 'round' | 'run' | 'delivery' | 'custom';
+/**
+ * The project canvas (plan 4.3 / 7.3 / 7.4 / 7.5).
+ *
+ * A project owns exactly one layout. The only persisted node kinds are the
+ * three a creator names (task / round / asset) plus the system-generated
+ * `group`; the database CHECK enforces that, so "plan never goes on the
+ * canvas" is a constraint rather than a convention.
+ *
+ * There is no scope. The old model kept a separate layout per scope, which is
+ * why changing scope moved every node; "where I am looking" is a viewport
+ * concern (the interface's route), not a second layout.
+ *
+ * A row means "a person put this here" (plan 7.3). The auto layout for
+ * everything else is computed by the interface, so an empty table is a valid
+ * state — it means "all automatic" — and the interface only sends the nodes a
+ * user actually moved (or explicitly re-arranged). This module therefore never
+ * has to distinguish "user modified" with a flag: the row's existence is the
+ * flag.
+ */
+
+export type CanvasLayoutEntityType = 'task' | 'round' | 'asset' | 'group';
+export type CanvasGroupType = 'task' | 'round' | 'asset' | 'custom';
 export type CanvasLinkType = 'reference' | 'style' | 'alternative' | 'rejected' | 'todo' | 'context' | 'custom';
 
 export interface CanvasViewport { x: number; y: number; k: number; }
 export interface CanvasNodeLayoutInput { entityType: CanvasLayoutEntityType; entityId: string; x: number; y: number; width: number; height: number; collapsed?: boolean; groupId?: string | null; }
 export interface CanvasGroupLayoutInput { id?: string; title: string; groupType?: CanvasGroupType; x: number; y: number; width: number; height: number; metadata?: Record<string, unknown>; }
 export interface CanvasLinkLayoutInput { id?: string; sourceType: CanvasLayoutEntityType; sourceId: string; targetType: CanvasLayoutEntityType; targetId: string; linkType?: CanvasLinkType; label?: string; metadata?: Record<string, unknown>; }
-export interface CanvasLayoutInput { studioId: string; projectId: string; scopeType?: CanvasLayoutScopeType; scopeId?: string; viewport?: CanvasViewport; settings?: Record<string, unknown>; nodes?: CanvasNodeLayoutInput[]; groups?: CanvasGroupLayoutInput[]; links?: CanvasLinkLayoutInput[]; }
+export interface CanvasLayoutInput { studioId: string; projectId: string; viewport?: CanvasViewport; settings?: Record<string, unknown>; nodes?: CanvasNodeLayoutInput[]; groups?: CanvasGroupLayoutInput[]; links?: CanvasLinkLayoutInput[]; }
 export interface CanvasNodeLayout extends CanvasNodeLayoutInput { id: string; collapsed: boolean; groupId: string | null; }
 export interface CanvasGroupLayout extends Required<Omit<CanvasGroupLayoutInput, 'id' | 'groupType' | 'metadata'>> { id: string; groupType: CanvasGroupType; metadata: Record<string, unknown>; }
 export interface CanvasLinkLayout extends Required<Omit<CanvasLinkLayoutInput, 'id' | 'linkType' | 'label' | 'metadata'>> { id: string; linkType: CanvasLinkType; label: string; metadata: Record<string, unknown>; }
-export interface CanvasLayout { id: string | null; studioId: string; projectId: string; scopeType: CanvasLayoutScopeType; scopeId: string; viewport: CanvasViewport; settings: Record<string, unknown>; version: number; nodes: CanvasNodeLayout[]; groups: CanvasGroupLayout[]; links: CanvasLinkLayout[]; }
+export interface CanvasLayout { id: string | null; studioId: string; projectId: string; viewport: CanvasViewport; settings: Record<string, unknown>; version: number; nodes: CanvasNodeLayout[]; groups: CanvasGroupLayout[]; links: CanvasLinkLayout[]; }
 
-type LayoutRow = { id: string; studio_id: string; project_id: string; scope_type: CanvasLayoutScopeType; scope_id: string; viewport_json: string; settings_json: string; version: number; };
+type LayoutRow = { id: string; studio_id: string; project_id: string; viewport_json: string; settings_json: string; version: number; };
 type NodeRow = { id: string; entity_type: CanvasLayoutEntityType; entity_id: string; x: number; y: number; width: number; height: number; collapsed: number; group_id: string | null; };
 type GroupRow = { id: string; title: string; group_type: CanvasGroupType; x: number; y: number; width: number; height: number; metadata_json: string; };
 type LinkRow = { id: string; source_type: CanvasLayoutEntityType; source_id: string; target_type: CanvasLayoutEntityType; target_id: string; link_type: CanvasLinkType; label: string; metadata_json: string; };
 
-const ENTITY_TYPES: Record<CanvasLayoutEntityType, true> = { project: true, task: true, round: true, plan: true, run: true, run_item: true, asset: true, shared_asset: true, delivery: true, group: true, task_type: true, style_kit: true, brand_kit: true };
-const GROUP_TYPES: Record<CanvasGroupType, true> = { task: true, round: true, run: true, delivery: true, custom: true };
+const ENTITY_TYPES: Record<CanvasLayoutEntityType, true> = { task: true, round: true, asset: true, group: true };
+const GROUP_TYPES: Record<CanvasGroupType, true> = { task: true, round: true, asset: true, custom: true };
 const LINK_TYPES: Record<CanvasLinkType, true> = { reference: true, style: true, alternative: true, rejected: true, todo: true, context: true, custom: true };
 const LINK_LABELS: Record<CanvasLinkType, string> = { reference: '参考自', style: '风格继承', alternative: '备选方案', rejected: '客户否决', todo: '待重做', context: '计划上下文', custom: '标注关系' };
-const SCOPE_TYPES: Record<CanvasLayoutScopeType, true> = { project: true, task: true, round: true };
 const MAX_NODE_LAYOUTS = 1000;
 const MAX_GROUP_LAYOUTS = 200;
 const MAX_LINK_LAYOUTS = 500;
@@ -96,74 +114,18 @@ function inProject(db: StudioDatabase, type: ScopedEntityType, id: string, studi
   return Boolean(db.prepare('SELECT 1 ' + scope.from + ' WHERE ' + scope.where + ' AND project.id = ?').get(id, studioId, projectId));
 }
 
-function assertScopeInProject(db: StudioDatabase, studioId: string, projectId: string, scopeType: CanvasLayoutScopeType, scopeId: string): void {
-  assertProjectInStudio(db, studioId, projectId);
-  if (scopeType === 'project') {
-    if (scopeId !== projectId) throw new InvalidCommandError('项目画布布局必须绑定当前项目。');
-    return;
-  }
-  if (scopeType === 'task') {
-    if (!inProject(db, 'creative_task', scopeId, studioId, projectId)) throw new StudioNotFoundError('Creative task not found: ' + scopeId);
-    return;
-  }
-  if (!inProject(db, 'creative_round', scopeId, studioId, projectId)) throw new StudioNotFoundError('Creative round not found: ' + scopeId);
-}
-
-function assetIsSharedAcrossStudio(db: StudioDatabase, studioId: string, assetId: string): boolean {
-  return Boolean(db.prepare("SELECT 1 " + joinInStudioSql('asset', 'JOIN asset_relations relation ON relation.asset_id = asset.id') + " WHERE asset.id = ? AND asset.studio_id = ? AND asset.deleted_at IS NULL AND relation.relation_type = 'shared_across_projects' AND relation.target_type = 'studio' AND relation.target_id = ?").get(assetId, studioId, studioId));
-}
-
-function normalizeScope(db: StudioDatabase, input: CanvasLayoutInput): { scopeType: CanvasLayoutScopeType; scopeId: string } {
-  const scopeType = String(input.scopeType || 'project') as CanvasLayoutScopeType;
-  if (!SCOPE_TYPES[scopeType]) throw new InvalidCommandError('Unsupported canvas layout scope.');
-  const scopeId = requiredText(input.scopeId || input.projectId, 'Canvas layout scope id');
-  assertScopeInProject(db, input.studioId, input.projectId, scopeType, scopeId);
-  return { scopeType, scopeId };
-}
-
 function assertEntityBelongsToProject(db: StudioDatabase, studioId: string, projectId: string, entityType: CanvasLayoutEntityType, entityId: string): void {
   if (entityType === 'group') return;
-  if (entityType === 'project') {
-    if (entityId !== projectId) throw new InvalidCommandError('Project layout node must reference the current project.');
-    return;
-  }
   if (entityType === 'task') {
     if (!inProject(db, 'creative_task', entityId, studioId, projectId)) throw new StudioNotFoundError('Creative task not found: ' + entityId);
     return;
   }
-  if (entityType === 'round' || entityType === 'plan') {
+  if (entityType === 'round') {
     if (!inProject(db, 'creative_round', entityId, studioId, projectId)) throw new StudioNotFoundError('Creative round not found: ' + entityId);
     return;
   }
-  if (entityType === 'run') {
-    if (!inProject(db, 'generation_run', entityId, studioId, projectId)) throw new StudioNotFoundError('Generation run not found: ' + entityId);
-    return;
-  }
-  if (entityType === 'run_item') {
-    if (!inProject(db, 'run_item', entityId, studioId, projectId)) throw new StudioNotFoundError('Generation run item not found: ' + entityId);
-    return;
-  }
-  if (entityType === 'asset' || entityType === 'shared_asset') {
-    const access = inspectProjectAssetAccess(db, { studioId, projectId, assetIds: [entityId] }).get(entityId);
-    if (!projectAssetReferenceAllowed(access)) throw new StudioNotFoundError('Canvas asset is not available to this project: ' + entityId);
-    if (entityType === 'shared_asset' && !assetIsSharedAcrossStudio(db, studioId, entityId)) throw new InvalidCommandError('Canvas shared asset must reference an explicitly shared asset.');
-    return;
-  }
-  if (entityType === 'delivery') {
-    if (!inProject(db, 'delivery', entityId, studioId, projectId)) throw new StudioNotFoundError('Delivery not found: ' + entityId);
-    return;
-  }
-  if (entityType === 'task_type') {
-    if (!db.prepare("SELECT 1 FROM task_types WHERE id = ? AND (source = 'official' OR studio_id = ?)").get(entityId, studioId)) throw new StudioNotFoundError('Task type not found: ' + entityId);
-    return;
-  }
-  if (entityType === 'style_kit') {
-    if (!db.prepare('SELECT 1 FROM style_kits WHERE id = ? AND studio_id = ?').get(entityId, studioId)) throw new StudioNotFoundError('Style kit not found: ' + entityId);
-    return;
-  }
-  if (entityType === 'brand_kit') {
-    if (!db.prepare('SELECT 1 FROM brand_kits WHERE id = ? AND studio_id = ?').get(entityId, studioId)) throw new StudioNotFoundError('Brand kit not found: ' + entityId);
-  }
+  const access = inspectProjectAssetAccess(db, { studioId, projectId, assetIds: [entityId] }).get(entityId);
+  if (!projectAssetReferenceAllowed(access)) throw new StudioNotFoundError('Canvas asset is not available to this project: ' + entityId);
 }
 
 function normalizeNode(db: StudioDatabase, studioId: string, projectId: string, value: unknown): CanvasNodeLayoutInput {
@@ -235,13 +197,41 @@ function normalizeLink(db: StudioDatabase, studioId: string, projectId: string, 
   };
 }
 
+/**
+ * System-generated lineage links (plan 4.3 第三刀, A8 投影式收口).
+ *
+ * The relationship's single source is `creative_rounds.parent_round_id`; the
+ * canvas draws it at render time from the graph. Persisting it here is a
+ * **projection** of that fact into the canvas (the same kind of thing the
+ * search index is to project/task/round), which is why it is:
+ *   - derived on save, never edited by the user;
+ *   - labelled `system` so the interface does not draw it twice;
+ *   - only created when both endpoint rounds are on this canvas.
+ *
+ * Auto-grouping is deliberately not done: after folding, a round node *is* the
+ * group, so a group frame around it would express the same thing twice
+ * (batch-1 B3, approved).
+ */
+const SYSTEM_LINK_METADATA = '{"system":"round_parent"}';
+
+function deriveSystemLinks(db: StudioDatabase, studioId: string, nodes: CanvasNodeLayoutInput[]): Array<{ id: string; sourceId: string; targetId: string }> {
+  const roundIds = nodes.filter((node) => node.entityType === 'round').map((node) => node.entityId);
+  if (roundIds.length < 2) return [];
+  const onCanvas = new Set(roundIds);
+  const parentOf = new Map<string, string>();
+  for (const roundId of roundIds) {
+    // 归属查询走 studio-scope（Studio 谓词由表推导）；项目归属已由节点校验保证。
+    const row = db.prepare(selectInStudioSql('creative_round', 'round.parent_round_id AS parent_round_id')).get(roundId, studioId) as { parent_round_id: string | null } | undefined;
+    if (row?.parent_round_id) parentOf.set(roundId, row.parent_round_id);
+  }
+  return [...parentOf].filter(([, parentId]) => onCanvas.has(parentId)).map(([childId, parentId]) => ({ id: 'syslink-round-parent-' + childId, sourceId: parentId, targetId: childId }));
+}
+
 function layoutFromRow(row: LayoutRow, nodes: NodeRow[], groups: GroupRow[], links: LinkRow[]): CanvasLayout {
   return {
     id: row.id,
     studioId: row.studio_id,
     projectId: row.project_id,
-    scopeType: row.scope_type,
-    scopeId: row.scope_id,
     viewport: normalizeViewport(parseRecord(row.viewport_json)),
     settings: parseRecord(row.settings_json),
     version: row.version,
@@ -251,11 +241,15 @@ function layoutFromRow(row: LayoutRow, nodes: NodeRow[], groups: GroupRow[], lin
   };
 }
 
-export function getCanvasLayout(db: StudioDatabase, input: CanvasLayoutInput): CanvasLayout {
+/** 空布局是合法状态：还没人动过它，前端就按自动布局铺。 */
+export function emptyCanvasLayout(studioId: string, projectId: string): CanvasLayout {
+  return { id: null, studioId, projectId, viewport: DEFAULT_VIEWPORT, settings: {}, version: 0, nodes: [], groups: [], links: [] };
+}
+
+export function getCanvasLayout(db: StudioDatabase, input: { studioId: string; projectId: string }): CanvasLayout {
   const projectId = requiredText(input.projectId, 'Project id');
-  const scope = normalizeScope(db, { ...input, projectId });
-  const row = db.prepare('SELECT id, studio_id, project_id, scope_type, scope_id, viewport_json, settings_json, version FROM canvas_layouts WHERE studio_id = ? AND project_id = ? AND scope_type = ? AND scope_id = ?').get(input.studioId, projectId, scope.scopeType, scope.scopeId) as LayoutRow | undefined;
-  if (!row) return { id: null, studioId: input.studioId, projectId, scopeType: scope.scopeType, scopeId: scope.scopeId, viewport: DEFAULT_VIEWPORT, settings: {}, version: 0, nodes: [], groups: [], links: [] };
+  const row = db.prepare('SELECT id, studio_id, project_id, viewport_json, settings_json, version FROM canvas_layouts WHERE studio_id = ? AND project_id = ?').get(input.studioId, projectId) as LayoutRow | undefined;
+  if (!row) return emptyCanvasLayout(input.studioId, projectId);
   const nodes = db.prepare('SELECT id, entity_type, entity_id, x, y, width, height, collapsed, group_id FROM canvas_node_layouts WHERE layout_id = ? ORDER BY id').all(row.id) as unknown as NodeRow[];
   const groups = db.prepare('SELECT id, title, group_type, x, y, width, height, metadata_json FROM canvas_groups WHERE layout_id = ? ORDER BY created_at, id').all(row.id) as unknown as GroupRow[];
   const links = db.prepare('SELECT id, source_type, source_id, target_type, target_id, link_type, label, metadata_json FROM canvas_links WHERE layout_id = ? ORDER BY created_at, id').all(row.id) as unknown as LinkRow[];
@@ -264,7 +258,7 @@ export function getCanvasLayout(db: StudioDatabase, input: CanvasLayoutInput): C
 
 export function saveCanvasLayout(db: StudioDatabase, input: CanvasLayoutInput): CanvasLayout {
   const projectId = requiredText(input.projectId, 'Project id');
-  const scope = normalizeScope(db, { ...input, projectId });
+  assertProjectInStudio(db, input.studioId, projectId);
   const nodes = (Array.isArray(input.nodes) ? input.nodes : []).slice(0, MAX_NODE_LAYOUTS + 1);
   const groups = (Array.isArray(input.groups) ? input.groups : []).slice(0, MAX_GROUP_LAYOUTS + 1);
   const links = (Array.isArray(input.links) ? input.links : []).slice(0, MAX_LINK_LAYOUTS + 1);
@@ -278,11 +272,11 @@ export function saveCanvasLayout(db: StudioDatabase, input: CanvasLayoutInput): 
   const viewport = normalizeViewport(input.viewport);
   const settings = safeRecord(input.settings || {});
   const timestamp = nowIso();
-  const layoutId = withTransaction(db, () => {
-    const existing = db.prepare('SELECT id FROM canvas_layouts WHERE studio_id = ? AND project_id = ? AND scope_type = ? AND scope_id = ?').get(input.studioId, projectId, scope.scopeType, scope.scopeId) as { id: string } | undefined;
+  withTransaction(db, () => {
+    const existing = db.prepare('SELECT id FROM canvas_layouts WHERE studio_id = ? AND project_id = ?').get(input.studioId, projectId) as { id: string } | undefined;
     const id = existing?.id || createId('canvaslayout');
     if (existing) db.prepare('UPDATE canvas_layouts SET viewport_json = ?, settings_json = ?, version = version + 1, updated_at = ? WHERE id = ?').run(JSON.stringify(viewport), JSON.stringify(settings), timestamp, id);
-    else db.prepare('INSERT INTO canvas_layouts (id, studio_id, project_id, scope_type, scope_id, viewport_json, settings_json, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)').run(id, input.studioId, projectId, scope.scopeType, scope.scopeId, JSON.stringify(viewport), JSON.stringify(settings), timestamp, timestamp);
+    else db.prepare('INSERT INTO canvas_layouts (id, studio_id, project_id, viewport_json, settings_json, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)').run(id, input.studioId, projectId, JSON.stringify(viewport), JSON.stringify(settings), timestamp, timestamp);
     db.prepare('DELETE FROM canvas_links WHERE layout_id = ?').run(id);
     db.prepare('DELETE FROM canvas_node_layouts WHERE layout_id = ?').run(id);
     db.prepare('DELETE FROM canvas_groups WHERE layout_id = ?').run(id);
@@ -292,9 +286,10 @@ export function saveCanvasLayout(db: StudioDatabase, input: CanvasLayoutInput): 
     for (const group of normalizedGroups) insertGroup.run(group.id, id, group.title, group.groupType || 'custom', group.x, group.y, group.width, group.height, JSON.stringify(group.metadata || {}), timestamp, timestamp);
     const insertLink = db.prepare('INSERT INTO canvas_links (id, layout_id, source_type, source_id, target_type, target_id, link_type, label, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const link of normalizedLinks) insertLink.run(link.id || createId('canvaslink'), id, link.sourceType, link.sourceId, link.targetType, link.targetId, link.linkType || 'custom', link.label || LINK_LABELS[link.linkType || 'custom'], JSON.stringify(link.metadata || {}), timestamp, timestamp);
-    appendStudioEvent(db, { studioId: input.studioId, entityType: 'canvas_layout', entityId: id, eventType: 'canvas.layout_updated', payload: { projectId, scopeType: scope.scopeType, scopeId: scope.scopeId, nodeCount: normalizedNodes.length, groupCount: normalizedGroups.length, linkCount: normalizedLinks.length } });
+    // 系统引用线（投影）：按 parent_round_id 派生，用户不画也不改。
+    for (const link of deriveSystemLinks(db, input.studioId, normalizedNodes)) insertLink.run(link.id, id, 'round', link.sourceId, 'round', link.targetId, 'reference', '衍生自', SYSTEM_LINK_METADATA, timestamp, timestamp);
+    appendStudioEvent(db, { studioId: input.studioId, entityType: 'canvas_layout', entityId: id, eventType: 'canvas.layout_updated', payload: { projectId, nodeCount: normalizedNodes.length, groupCount: normalizedGroups.length, linkCount: normalizedLinks.length } });
     return id;
   });
-  const saved = getCanvasLayout(db, { studioId: input.studioId, projectId, scopeType: scope.scopeType, scopeId: scope.scopeId });
-  return saved.id === layoutId ? saved : getCanvasLayout(db, { studioId: input.studioId, projectId, scopeType: scope.scopeType, scopeId: scope.scopeId });
+  return getCanvasLayout(db, { studioId: input.studioId, projectId });
 }

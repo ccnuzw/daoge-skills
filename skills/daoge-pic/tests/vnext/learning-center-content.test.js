@@ -84,10 +84,8 @@ test('learning center matches the stable session, Provider, preflight, history, 
   assert.match(library, /项目内打开规则资料不关闭当前项目/);
   assert.match(library, /不绑定任务、批次、计划或运行/);
 });
-const path = require('node:path');
 
 test('learning center only deep-links to Studio-global views', () => {
-  const skillRoot = path.resolve(__dirname, '../..');
   const source = readFrontendSource();
   const content = readSource('web/src/learning-center-content.mjs');
   assert.match(source, /<LearningCenter onDismiss=\{dismissGuide\} onNavigate=\{\([^)]*\) => navigateRoute\(\{ view: [^}]+ \}\)\} \/>/);

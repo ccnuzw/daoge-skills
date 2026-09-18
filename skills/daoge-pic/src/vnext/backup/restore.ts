@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { BackupManifestEntry, BackupManifestStudioIdentityInput, BackupManifestValidation, validateBackupManifest } from './manifest';
@@ -221,7 +222,7 @@ function absoluteFor(root: string, relativePath: string): string { return path.j
 function restoreRuntimeDir(targetRoot: string): string { return path.join(targetRoot, 'daoge-studio', 'runtime'); }
 function daemonLockPaths(targetRoot: string): { databasePath: string; ownerRecordPath: string } { const dir = restoreRuntimeDir(targetRoot); return { databasePath: path.join(dir, 'daemon-lock.sqlite'), ownerRecordPath: path.join(dir, 'daemon.lock') }; }
 function fsyncDirectory(directory: string): void { try { const fd = fs.openSync(directory, fs.constants.O_RDONLY); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch { /* filesystem may not expose directory fsync */ } }
-function fsyncPath(filePath: string): void { const fd = fs.openSync(filePath, fs.constants.O_RDONLY); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } }
+
 function writeDurableJson(filePath: string, value: unknown): void {
   const temporary = filePath + '.tmp-' + process.pid + '-' + Math.random().toString(16).slice(2);
   let fd: number | null = null;
@@ -270,11 +271,13 @@ function copyAndHash(source: string, destination: string): FileSnapshot | null {
   } finally { fs.closeSync(input); if (output !== null) fs.closeSync(output); }
 }
 
+type DatabaseSyncConstructor = new (path: string) => DatabaseSyncType;
+
 function checkpointDatabase(databasePath: string): void {
   if (!fs.existsSync(databasePath)) return;
-  let db: any = null;
+  let db: DatabaseSyncType | null = null;
   try {
-    const DatabaseSync = require('node:sqlite').DatabaseSync as new (path: string) => any;
+    const DatabaseSync = require('node:sqlite').DatabaseSync as DatabaseSyncConstructor;
     db = new DatabaseSync(databasePath); db.exec('PRAGMA busy_timeout = 100; PRAGMA synchronous = FULL;');
     const result = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as { busy?: unknown; log?: unknown } | undefined;
     if (!result || Number(result.busy) !== 0 || Number(result.log) !== 0) throw new Error('SQLite checkpoint is busy.');
@@ -283,9 +286,9 @@ function checkpointDatabase(databasePath: string): void {
 }
 
 function verifyDatabaseFile(databasePath: string): void {
-  let db: any = null;
+  let db: DatabaseSyncType | null = null;
   try {
-    const DatabaseSync = require('node:sqlite').DatabaseSync as new (path: string) => any;
+    const DatabaseSync = require('node:sqlite').DatabaseSync as DatabaseSyncConstructor;
     db = new DatabaseSync(databasePath); db.exec('PRAGMA foreign_keys = ON;');
     const integrity = db.prepare('PRAGMA integrity_check').all() as Array<Record<string, unknown>>;
     if (!integrity.length || integrity.some((row) => Object.values(row)[0] !== 'ok')) throw new Error('SQLite integrity_check failed.');
@@ -419,7 +422,7 @@ export function applyBackupRestore(input: RestoreApplyInput): RestoreApplyResult
 
     const createdDirectories: string[] = []; const journalEntries: JournalEntry[] = [];
     for (const { operation, stagedPath } of staged) {
-      const target = absoluteFor(targetRoot, operation.path); const originalPath = path.join(stagingRoot, 'original-' + journalEntries.length);
+      const originalPath = path.join(stagingRoot, 'original-' + journalEntries.length);
       const existing = assertSafeExistingPath(targetRoot, operation.path); const hadOriginal = Boolean(existing);
       journalEntries.push({ relativePath: operation.path, stagedPath, originalPath, backupIntent: false, originalRenamed: false, newInstalled: false, hadOriginal });
     }
@@ -427,7 +430,7 @@ export function applyBackupRestore(input: RestoreApplyInput): RestoreApplyResult
     // manifest intentionally records only the checkpointed studio.db member.
     const sidecarPaths = ['daoge-studio/studio.db-wal', 'daoge-studio/studio.db-shm', 'daoge-studio/studio.db-journal'];
     for (const sidecar of sidecarPaths) {
-      if (!writes.some((operation) => operation.path === sidecar)) { const target = absoluteFor(targetRoot, sidecar); const existing = assertSafeExistingPath(targetRoot, sidecar); if (existing) journalEntries.push({ relativePath: sidecar, stagedPath: '', originalPath: path.join(stagingRoot, 'original-sidecar-' + journalEntries.length), backupIntent: false, originalRenamed: false, newInstalled: false, hadOriginal: true }); }
+      if (!writes.some((operation) => operation.path === sidecar)) { const existing = assertSafeExistingPath(targetRoot, sidecar); if (existing) journalEntries.push({ relativePath: sidecar, stagedPath: '', originalPath: path.join(stagingRoot, 'original-sidecar-' + journalEntries.length), backupIntent: false, originalRenamed: false, newInstalled: false, hadOriginal: true }); }
     }
     journal = makeJournal(targetRoot, stagingRoot, journalEntries, createdDirectories); persistJournal(journal);
 

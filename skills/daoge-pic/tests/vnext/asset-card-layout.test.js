@@ -8,7 +8,7 @@ test('asset cards tuck status help away, keep action labels readable, and show f
   const styles = readStyles();
   const legend = readFrontendSource();
   const assetCard = source.slice(source.indexOf('function AssetCard('), source.indexOf('class WorkbenchErrorBoundary'));
-  const previewEnd = assetCard.search(/\r?\n    <\/div>\r?\n    \{menuOpen && <div className="asset-action-menu"/);
+  const previewEnd = assetCard.search(/\r?\n {4}<\/div>\r?\n {4}\{menuOpen && <div className="asset-action-menu"/);
   assert.ok(previewEnd > 0);
   assert.match(assetCard.slice(0, previewEnd), /className="asset-select-control"/);
   assert.match(assetCard.slice(0, previewEnd), /className="asset-card-tools"/);
@@ -42,7 +42,10 @@ test('asset cards tuck status help away, keep action labels readable, and show f
   assert.match(styles, /\.run-item-detail-assets img \{ display:block; width:100%; height:220px; object-fit:contain;/);
   assert.match(styles, /\.asset-view-mode button\.is-active \{ border-color:#274d34; background:#315f3f; color:#fffef9; \}/);
   assert.match(styles, /\.asset-view-mode button\.is-active span \{ color:#e9f4e3; \}/);
-  assert.match(source, /disabled=\{zoom >= 2\} onClick=\{\(\) => onZoom\(Math\.min\(2, zoom \+ 0\.25\)\)\}/);
+  // 第 1 批 C3 把缩放上限从 2× 提到 4× 并收进共享模型（image-review-keys-model）。
+  // 这里断言「意图」：放大按钮尊重上限、且步进走共享模型，而不是锁死旧的 2× 常量。
+  assert.match(source, /disabled=\{clampReviewZoom\(zoom\) >= REVIEW_ZOOM_MAX\}/, '放大按钮必须尊重缩放上限');
+  assert.match(source, /onClick=\{\(\) => onZoom\(reviewZoomStep\(zoom, 1\)\)\}/, '放大必须走共享步进模型');
   assert.match(source, /<div className="inspector-image-frame" style=\{\{ '--inspector-zoom': zoom \}\}><img src=\{assetOriginalUrl\(asset\)\} alt="" \/><\/div>/);
   assert.match(styles, /\.inspector-image-frame \{ position:relative; display:grid; place-items:center; width:100%; height:100%; min-height:0; overflow:hidden;/);
   assert.match(styles, /\.inspector-images img \{ position:absolute; inset:14px; display:block; width:calc\(100% - 28px\); height:calc\(100% - 28px\); max-width:none; max-height:none; object-fit:contain;/);

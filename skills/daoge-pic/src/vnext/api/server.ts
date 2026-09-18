@@ -31,7 +31,9 @@ import { createDeliveryBatch, getDeliveryBatch, listDeliveryBatches, prepareDeli
 import { getAssetProvenance, getRoundCreativeRecord, getTaskCreativeOverview, getTaskStudioOverview, listAssetsWithReviewSummaries } from '../domain/creative-records';
 import { getPersistedStudioProvenance, getStudioProvenanceVersion, listStudioProvenanceVersions } from '../provenance/studio';
 import { listProjectSelectionAssets, setProjectAssetSelected, setProjectAssetsSelected } from '../domain/project-selections';
-import { getCanvasLayout, saveCanvasLayout, CanvasLayoutScopeType } from '../domain/canvas-layouts';
+import { getCanvasLayout, saveCanvasLayout } from '../domain/canvas-layouts';
+import { agentPresence, registerStudioAgent, touchStudioAgent } from '../domain/agent-presence';
+import { claimStudioRequest, completeStudioRequest, createStudioRequest, expireStudioRequestLeases, getStudioRequest, linkRequestToRound, listStudioRequests, rejectStudioRequest, renewStudioRequestLease, requestContextOf, withdrawStudioRequest, REQUEST_STATUSES, type StudioRequestStatus } from '../domain/request-queue';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { studioEventWindow } from './events';
 import { discardStagedImage, MediaArchiveError, MediaValidationError, openVerifiedManagedFileAsync, stageImageStream, VerifiedManagedFile } from '../media/archive';
@@ -1010,6 +1012,29 @@ export class LocalStudioService {
       }
       if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { descriptors: providerDescriptorSummaries(), profiles: listProviderProfiles(this.providerDb, this.initialized.paths), status: providerStatus(this.providerDb, this.initialized.paths), runtime: this.runtimeStatus() });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
+      const requestDetailMatch = /^\/api\/requests\/([^/]+)$/.exec(parsed.pathname);
+      if (request.method === 'GET' && requestDetailMatch) {
+        const studioId = this.initialized.manifest.studioId;
+        const request = getStudioRequest(this.db, { studioId, requestId: requestDetailMatch[1] });
+        // 追问/续说的闭环：上一条请求的原话随这一条一起读得到（agent 据此「续上」而不靠记忆）。
+        const previousRequestId = requestContextOf(request).previousRequestId;
+        const previousRequest = typeof previousRequestId === 'string' && previousRequestId
+          ? listStudioRequests(this.db, { studioId }).find((item) => item.id === previousRequestId) || null
+          : null;
+        return success(response, { request: publicValue(request), previousRequest: previousRequest ? publicValue(previousRequest) : null });
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/agents') {
+        // 「显示是最要紧的」（方案 4.6）：当前有没有 agent 在场、最后活动时间、是否装了 daoge-pic。
+        return success(response, publicValue(agentPresence(this.db, { studioId: this.initialized.manifest.studioId })));
+      }
+      if (request.method === 'GET' && parsed.pathname === '/api/requests') {
+        // 队列是「排队叫号机」，没人接的单不能永远停在 accepted。读队列时顺手做一次
+        // 租约清理：过期即回队（或按次数失败），界面据此显示「等待接单」。
+        expireStudioRequestLeases(this.db);
+        const status = optionalQueryText(parsed, 'status');
+        if (status && !(REQUEST_STATUSES as readonly string[]).includes(status)) throw new InvalidCommandError('不支持的请求状态。');
+        return success(response, { requests: listStudioRequests(this.db, { studioId: this.initialized.manifest.studioId, status: (status as StudioRequestStatus) || null, limit: parsed.searchParams.has('limit') ? numberValue(parsed.searchParams.get('limit')) : 100 }).map(publicValue) });
+      }
       if (request.method === 'GET' && parsed.pathname === '/api/backup/manifest') {
         const studioId = this.initialized.manifest.studioId;
         const workspaceRoot = this.initialized.paths.workspaceRoot;
@@ -1118,10 +1143,41 @@ export class LocalStudioService {
       if (request.method === 'GET' && parsed.pathname === '/api/shared-assets') return success(response, { assets: listSharedStudioAssets(this.db, this.initialized.manifest.studioId).map(publicAsset) });
       const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && sessionMatch) return success(response, { session: getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionMatch[1] }) });
+      const roundDetailMatch = /^\/api\/rounds\/([^/]+)$/.exec(parsed.pathname);
+      if (request.method === 'GET' && roundDetailMatch) {
+        // 队列是全局的（底栏），而进度依赖批次的真实状态。界面需要能**按 id 直接取一批**，
+        // 不必先进入它所属的项目/任务——否则在项目列表页上，卡片只能退化成「正在理解」。
+        // 一并给出「最近的运行」与「槽位计数」：这两个也是事实，但算计数不该让界面
+        // 去拉整页运行项（那是分页接口）。**事实在服务端，说法在前端。**
+        const studioId = this.initialized.manifest.studioId;
+        const roundId = roundDetailMatch[1];
+        const round = getRound(this.db, studioId, roundId);
+        if (!round) throw new StudioNotFoundError('Creative round not found: ' + roundId);
+        const latestRun = getLatestRun(this.db, studioId, roundId);
+        const tally = latestRun
+          ? Object.fromEntries((this.db.prepare('SELECT status, COUNT(*) AS total FROM run_items WHERE run_id = ? GROUP BY status').all(latestRun.id) as Array<{ status: string; total: number }>).map((row) => [row.status, Number(row.total)]))
+          : null;
+        return success(response, { round: publicValue(round), latestRun: publicValue(latestRun), tally });
+      }
+      const roundChallengeMatch = /^\/api\/rounds\/([^/]+)\/confirmation-challenge$/.exec(parsed.pathname);
+      if (request.method === 'GET' && roundChallengeMatch) {
+        this.assertRoundInStudio(roundChallengeMatch[1]);
+        // 按**批次**读待确认的挑战（挑战本来就是批次的属性，ConfirmationGate 按 roundId 存）。
+        //
+        // 界面原先读的是 `GET /api/sessions/<自己>/plan-status` —— 那只在「界面自己往
+        // `agent_*` 写工作指针」的年代成立；指针收归 agent 独占之后，这条读法必然拿到
+        // null，确认按钮就会一直说「请先由当前智能会话发起挑战」，尽管挑战明明已经在了。
+        const pending = this.confirmationGate.getChallenge(roundChallengeMatch[1]);
+        return success(response, {
+          pendingConfirmation: pending
+            ? { challenge: pending.challenge, sessionId: pending.sessionId, expectedVersion: pending.expectedVersion, expiresAt: pending.expiresAt }
+            : null
+        });
+      }
       const sessionPlanMatch = /^\/api\/sessions\/([^/]+)\/plan-status$/.exec(parsed.pathname);
       if (request.method === 'GET' && sessionPlanMatch) {
         const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: sessionPlanMatch[1] });
-        const round = session.activeRoundId ? this.db.prepare(selectInStudioSql('creative_round', 'round.id, round.purpose, round.plan_json, round.plan_version, round.status, task.id AS task_id, task.name AS task_name, project.id AS project_id, project.name AS project_name')).get(session.activeRoundId, this.initialized.manifest.studioId) as { id: string; purpose: string; plan_json: string; plan_version: number; status: string; task_id: string; task_name: string; project_id: string; project_name: string } | undefined : undefined;
+        const round = session.agentRoundId ? this.db.prepare(selectInStudioSql('creative_round', 'round.id, round.purpose, round.plan_json, round.plan_version, round.status, task.id AS task_id, task.name AS task_name, project.id AS project_id, project.name AS project_name')).get(session.agentRoundId, this.initialized.manifest.studioId) as { id: string; purpose: string; plan_json: string; plan_version: number; status: string; task_id: string; task_name: string; project_id: string; project_name: string } | undefined : undefined;
          const latestRun = round ? getLatestRun(this.db, this.initialized.manifest.studioId, round.id) : null;
         const consent = round ? this.confirmationGate.consentFor(round.id) : null;
         const pendingConfirmation = round ? this.confirmationGate.getChallenge(round.id) : null;
@@ -1155,9 +1211,7 @@ export class LocalStudioService {
       const canvasLayoutMatch = /^\/api\/projects\/([^/]+)\/canvas-layout$/.exec(parsed.pathname);
       if (request.method === 'GET' && canvasLayoutMatch) {
         this.assertProjectInStudio(canvasLayoutMatch[1]);
-        const scopeType = (parsed.searchParams.get('scopeType') || 'project') as CanvasLayoutScopeType;
-        const scopeId = parsed.searchParams.get('scopeId') || canvasLayoutMatch[1];
-        return success(response, { layout: getCanvasLayout(this.db, { studioId: this.initialized.manifest.studioId, projectId: canvasLayoutMatch[1], scopeType, scopeId }) });
+        return success(response, { layout: getCanvasLayout(this.db, { studioId: this.initialized.manifest.studioId, projectId: canvasLayoutMatch[1] }) });
       }
       const assetImpactMatch = /^\/api\/assets\/([^/]+)\/impact$/.exec(parsed.pathname);
       if (request.method === 'GET' && assetImpactMatch) return success(response, { impact: getAssetImpact(this.db, this.initialized.manifest.studioId, assetImpactMatch[1]) });
@@ -1472,13 +1526,59 @@ export class LocalStudioService {
       }), { projectId, assetIds, selected, keepAssetIds });
       return success(response, { ...updated.value, selection: projectSelectionPayload(this.db, this.initialized.manifest.studioId, projectId) });
     }
+    const requestActionMatch = /^\/api\/requests\/([^/]+)\/(accept|renew|done|reject|withdraw)$/.exec(pathname);
+    if (requestActionMatch && request.method === 'POST') {
+      const [, requestId, action] = requestActionMatch;
+      const studioId = this.initialized.manifest.studioId;
+      getStudioRequest(this.db, { studioId, requestId });
+      if (action === 'renew') {
+        // 心跳：跨人工确认的长活要能一直持有租约，否则必然被判「被领过但没完成」。
+        const renewed = renewStudioRequestLease(this.db, { studioId, requestId, agentId: text(body.agentId) || 'agent' });
+        // 租约是「我真的在做这一单」的证据——顺手续报在场，别让状态卡说它走了。
+        touchStudioAgent(this.db, { studioId, cliName: text(body.agentId) });
+        return success(response, publicValue(renewed));
+      }
+      if (action === 'accept') {
+        const agentId = text(body.agentId) || 'agent';
+        const claimed = claimStudioRequest(this.db, { studioId, requestId, agentId });
+        if (claimed.claimed) touchStudioAgent(this.db, { studioId, cliName: agentId });
+        return success(response, { claimed: claimed.claimed, request: publicValue(claimed.request) });
+      }
+      if (action === 'done') {
+        if (text(body.resultRoundId)) this.assertRoundInStudio(text(body.resultRoundId));
+        const result = record(body.result);
+        return success(response, publicValue(completeStudioRequest(this.db, { studioId, requestId, resultRoundId: text(body.resultRoundId) || null, result: Object.keys(result).length ? result : null, ...(body.reply === undefined ? {} : { reply: text(body.reply) }), ...(body.needsInput === undefined ? {} : { needsInput: text(body.needsInput) }) })));
+      }
+      if (action === 'reject') return success(response, publicValue(rejectStudioRequest(this.db, { studioId, requestId, reason: text(body.reason) || undefined })));
+      return success(response, publicValue(withdrawStudioRequest(this.db, { studioId, requestId })));
+    }
+    if (pathname === '/api/agents/register' && request.method === 'POST') {
+      // agent 入场自报家门（含技能清单）；Studio 只展示申报，不管理 skills（方案 4.6 边界）。
+      const skills = Array.isArray(body.skills) ? body.skills.map((skill) => record(skill)) as never[] : [];
+      const agent = registerStudioAgent(this.db, { studioId: this.initialized.manifest.studioId, cliName: text(body.cliName) || 'agent', cliVersion: text(body.cliVersion) || null, skills: skills.map((skill) => ({ name: text((skill as Record<string, unknown>).name), version: text((skill as Record<string, unknown>).version) || undefined })) });
+      return success(response, { agent: publicValue(agent), presence: publicValue(agentPresence(this.db, { studioId: this.initialized.manifest.studioId })) });
+    }
+    if (pathname === '/api/requests' && request.method === 'POST') {
+      const projectId = text(body.projectId);
+      if (projectId) this.assertProjectInStudio(projectId);
+      if (text(body.taskId)) this.assertTaskInStudio(text(body.taskId));
+      if (text(body.roundId)) this.assertRoundInStudio(text(body.roundId));
+      const assetIds = boundedIds(body.assetIds, 'assetIds', { optional: true }) || [];
+      for (const assetId of assetIds) this.assertAssetInStudio(assetId);
+      // 「花动作」按钮走队列时带的意图：重试 / 恢复要精确到运行与运行项。
+      const intent = text(body.intent) || null;
+      const runId = text(body.runId) || null;
+      const itemIds = boundedIds(body.itemIds, 'itemIds', { optional: true }) || [];
+      if (runId) this.assertRunInStudio(runId);
+      for (const itemId of itemIds) this.assertRunItemInStudio(itemId);
+      const created = createStudioRequest(this.db, { studioId: this.initialized.manifest.studioId, text: text(body.text), projectId: projectId || null, taskId: text(body.taskId) || null, context: { projectId: projectId || null, taskId: text(body.taskId) || null, roundId: text(body.roundId) || null, previousRequestId: text(body.previousRequestId) || null, assetIds, flow: text(body.flow) || 'daoge-pic-plan', intent, runId, itemIds } });
+      return success(response, publicValue(created));
+    }
     const canvasLayoutMatch = /^\/api\/projects\/([^/]+)\/canvas-layout$/.exec(pathname);
     if (canvasLayoutMatch && request.method === 'POST') {
       const projectId = canvasLayoutMatch[1];
       this.assertProjectInStudio(projectId);
-      const scopeType = (text(body.scopeType) || 'project') as CanvasLayoutScopeType;
-      const scopeId = text(body.scopeId) || projectId;
-      const saved = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'canvas.layout', () => saveCanvasLayout(this.db, { studioId: this.initialized.manifest.studioId, projectId, scopeType, scopeId, viewport: record(body.viewport) as never, settings: record(body.settings), nodes: Array.isArray(body.nodes) ? body.nodes as never : [], groups: Array.isArray(body.groups) ? body.groups as never : [], links: Array.isArray(body.links) ? body.links as never : [] }), { projectId, scopeType, scopeId, viewport: record(body.viewport), settings: record(body.settings), nodes: Array.isArray(body.nodes) ? body.nodes : [], groups: Array.isArray(body.groups) ? body.groups : [], links: Array.isArray(body.links) ? body.links : [] });
+      const saved = executeIdempotent(this.db, this.initialized.manifest.studioId, key, 'canvas.layout', () => saveCanvasLayout(this.db, { studioId: this.initialized.manifest.studioId, projectId, viewport: record(body.viewport) as never, settings: record(body.settings), nodes: Array.isArray(body.nodes) ? body.nodes as never : [], groups: Array.isArray(body.groups) ? body.groups as never : [], links: Array.isArray(body.links) ? body.links as never : [] }), { projectId, viewport: record(body.viewport), settings: record(body.settings), nodes: Array.isArray(body.nodes) ? body.nodes : [], groups: Array.isArray(body.groups) ? body.groups : [], links: Array.isArray(body.links) ? body.links : [] });
       return success(response, { layout: saved.value });
     }
     if (pathname === '/api/projects') {
@@ -1553,20 +1653,24 @@ export class LocalStudioService {
     const draftContextMatch = /^\/api\/rounds\/([^/]+)\/draft-context$/.exec(pathname);
     if (draftContextMatch && request.method === 'PUT') {
       this.assertRoundInStudio(draftContextMatch[1]);
+      this.assertPlanRequestInStudio(record(body.plan));
       const updated = updateRoundDraftContext(this.db, { studioId: this.initialized.manifest.studioId, roundId: draftContextMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
+      this.linkPlanRequestRound(record(body.plan), draftContextMatch[1]);
       return success(response, updated);
     }
     const planMatch = /^\/api\/rounds\/([^/]+)\/plan$/.exec(pathname);
     if (planMatch && request.method === 'POST') {
       this.assertRoundInStudio(planMatch[1]);
+      this.assertPlanRequestInStudio(record(body.plan));
       const prepared = prepareRoundForConfirmation(this.db, { studioId: this.initialized.manifest.studioId, roundId: planMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
+      this.linkPlanRequestRound(record(body.plan), planMatch[1]);
       return success(response, prepared);
     }
     const challengeMatch = /^\/api\/rounds\/([^/]+)\/confirmation-challenge$/.exec(pathname);
     if (challengeMatch) {
       this.assertRoundInStudio(challengeMatch[1]);
       const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: text(body.sessionId) });
-      if (session.activeRoundId !== challengeMatch[1]) throw new InvalidCommandError('确认挑战必须绑定当前会话的活动轮次。');
+      if (session.agentRoundId !== challengeMatch[1]) throw new InvalidCommandError('确认挑战必须绑定当前会话的操作批次。');
       const round = getRound(this.db, this.initialized.manifest.studioId, challengeMatch[1]);
       const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, challengeMatch[1]);
       const planStateAllowed = Boolean(round && currentPlan && currentPlan.planVersion === round.planVersion && ((round.status === 'awaiting_confirmation' && currentPlan.state === 'awaiting_confirmation') || (round.status === 'active' && currentPlan.state === 'confirmed')));
@@ -1749,13 +1853,27 @@ export class LocalStudioService {
     throw new StudioNotFoundError(message || notInStudioMessage(type, id));
   }
 
+  /**
+   * 计划里的 `requestId` 是「这一轮回应的是哪条请求」的外键（方案 7.1 / B5）。
+   * 原话住在请求表里，计划只留外键——所以这里只需确认它真的存在。
+   */
+  private assertPlanRequestInStudio(plan: Record<string, unknown>): void {
+    const requestId = text(plan.requestId);
+    if (requestId) this.assertInStudio('studio_request', requestId);
+  }
+
+  /** 计划带 requestId 时，把这层关联落成请求表上的列（界面按请求显示进度要用）。 */
+  private linkPlanRequestRound(plan: Record<string, unknown>, roundId: string): void {
+    const requestId = text(plan.requestId);
+    if (requestId) linkRequestToRound(this.db, { studioId: this.initialized.manifest.studioId, requestId, roundId });
+  }
+
   private assertProjectInStudio(projectId: string): void { this.assertInStudio('project', projectId); }
 
   private assertSessionInStudio(sessionId: string): void { this.assertInStudio('studio_session', sessionId); }
   private assertTaskInStudio(taskId: string): void { this.assertInStudio('creative_task', taskId); }
   private assertDryRunInStudio(previewId: string): void { this.assertInStudio('dry_run_preview', previewId); }
-  private assertRoundInStudio(roundId: string): void { this.assertInStudio('creative_round', roundId); }
-  private assertRunInStudio(runId: string): void { this.assertInStudio('generation_run', runId); }
+  private assertRoundInStudio(roundId: string): void { this.assertInStudio('creative_round', roundId); }  private assertRunInStudio(runId: string): void { this.assertInStudio('generation_run', runId); }
   private assertRunItemInStudio(itemId: string): void { this.assertInStudio('run_item', itemId); }
   private assertRunItemBelongsToRunInStudio(runId: string, itemId: string): void {
     const row = this.db.prepare(selectInStudioSql('run_item', 'item.id') + ' AND item.run_id = ?').get(itemId, this.initialized.manifest.studioId, runId);
@@ -1780,7 +1898,7 @@ export class LocalStudioService {
     const normalizedSessionId = text(sessionId);
     if (!normalizedSessionId) throw new InvalidCommandError('预检需要明确的 Studio Session。');
     const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: normalizedSessionId });
-    if (session.activeRoundId !== roundId) throw new InvalidCommandError('预检必须绑定当前会话的活动轮次。');
+    if (session.agentRoundId !== roundId) throw new InvalidCommandError('预检必须绑定当前会话的操作批次。');
     const round = getRound(this.db, this.initialized.manifest.studioId, roundId);
     const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, roundId);
     if (!round || round.status !== 'active' || !currentPlan || currentPlan.planVersion !== round.planVersion || currentPlan.state !== 'confirmed') throw new InvalidCommandError('预检前必须先确认当前创作计划。');
@@ -1794,7 +1912,7 @@ export class LocalStudioService {
     const run = this.db.prepare(selectInStudioSql('generation_run', 'run.round_id')).get(runId, this.initialized.manifest.studioId) as { round_id: string } | undefined;
     if (!run) throw new StudioNotFoundError('Generation run not found: ' + runId);
     const session = getStudioSession(this.db, { studioId: this.initialized.manifest.studioId, sessionId: normalizedSessionId });
-    if (session.activeRoundId !== run.round_id) throw new InvalidCommandError('恢复运行必须绑定所属创作轮次的当前 Studio Session。');
+    if (session.agentRoundId !== run.round_id) throw new InvalidCommandError('恢复运行必须绑定所属创作轮次的当前 Studio Session。');
     const round = getRound(this.db, this.initialized.manifest.studioId, run.round_id);
     const [currentPlan] = listRoundPlanVersions(this.db, this.initialized.manifest.studioId, run.round_id);
     const consent = this.confirmationGate.consentFor(run.round_id, normalizedSessionId);

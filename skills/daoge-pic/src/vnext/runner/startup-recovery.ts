@@ -5,6 +5,7 @@ import { pruneStudioEphemeralRecords, StudioDatabase } from '../studio/database'
 import { StudioPaths } from '../studio/workspace';
 import type { MediaProcessPool } from '../runtime/media-worker-pool';
 import { markRunsResumePending, promoteDueRetryWaitItems, reconcileTerminalRuns, recoverExpiredLeases } from './run-commands';
+import { expireStudioRequestLeases } from '../domain/request-queue';
 
 export interface StartupRecoveryResult {
   generatedMediaCommits: number;
@@ -14,6 +15,8 @@ export interface StartupRecoveryResult {
   dueRetries: number;
   terminalRuns: number;
   resumePendingRuns: number;
+  /** 请求队列里超期未处理的单：回队或失败（8.9#3 租约过期即自愈）。 */
+  expiredRequests: number;
 }
 
 export function recoverStudioStartup(db: StudioDatabase, paths: StudioPaths, studioId: string, now = new Date()): StartupRecoveryResult {
@@ -25,7 +28,8 @@ export function recoverStudioStartup(db: StudioDatabase, paths: StudioPaths, stu
   const expiredLeases = recoverExpiredLeases(db, now);
   const dueRetries = promoteDueRetryWaitItems(db, now);
   const resumePendingRuns = markRunsResumePending(db);
-  return { generatedMediaCommits, assetMediaOperations, managedMedia, expiredLeases, dueRetries, terminalRuns, resumePendingRuns };
+  const expiredRequests = expireStudioRequestLeases(db, now.toISOString());
+  return { generatedMediaCommits, assetMediaOperations, managedMedia, expiredLeases, dueRetries, terminalRuns, resumePendingRuns, expiredRequests: expiredRequests.requeued + expiredRequests.failed };
 }
 
 export async function recoverStudioStartupAsync(db: StudioDatabase, paths: StudioPaths, studioId: string, now = new Date(), options: { mediaWorkerPool?: MediaProcessPool } = {}): Promise<StartupRecoveryResult> {
@@ -40,5 +44,6 @@ export async function recoverStudioStartupAsync(db: StudioDatabase, paths: Studi
   const expiredLeases = recoverExpiredLeases(db, now);
   const dueRetries = promoteDueRetryWaitItems(db, now);
   const resumePendingRuns = markRunsResumePending(db);
-  return { generatedMediaCommits, assetMediaOperations, managedMedia, expiredLeases, dueRetries, terminalRuns, resumePendingRuns };
+  const expiredRequests = expireStudioRequestLeases(db, now.toISOString());
+  return { generatedMediaCommits, assetMediaOperations, managedMedia, expiredLeases, dueRetries, terminalRuns, resumePendingRuns, expiredRequests: expiredRequests.requeued + expiredRequests.failed };
 }

@@ -7,6 +7,7 @@ import { StudioDatabase, withTransaction } from '../studio/database';
 import { StudioPaths } from '../studio/workspace';
 import { createId } from '../shared/ids';
 import { restoreAsset } from '../domain/assets';
+import { attributeOutputAsset } from '../domain/output-attribution';
 import { archiveStagedImageAsync, discardStagedImage, plannedArchivePath, stageImageBytesAsync, stageImageFileAsync } from './archive';
 
 export interface StudioGeneratedAssetPersisterOptions {
@@ -125,5 +126,7 @@ export class StudioGeneratedAssetPersister implements GeneratedAssetPersister {
       JSON.stringify({ runId }),
       timestamp
     );
+    // 归属升格为列（方案 7.7.1）：产出图落库那一刻就写死项目与槽位，不再靠关系表事后拼。
+    attributeOutputAsset(this.db, { studioId: this.studioId, assetId, runId, runItemId: itemId });
   }
 }

@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Archive, BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, PackageCheck, Palette, Pencil, Play, Redo2, RefreshCw, Save, Search, Share2, Sparkles, Tag, Trash2, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, Pencil, Play, Redo2, RefreshCw, Save, Search, Share2, Sparkles, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { assetThumbnailUrl } from './asset-media-url.mjs';
 import { MINIMAP_HEIGHT, MINIMAP_WIDTH, clampWorldPoint, createMinimapGeometry, createMinimapItems, minimapToWorld, viewportRectForMinimap, worldToMinimap } from './lineage-minimap-model.mjs';
 import { LINEAGE_NODE_RENDER_LIMIT, lineageViewportBounds, virtualizeLineageNodes } from './lineage-viewport-model.mjs';
 import { createAccessibleLineage, redactLineageText } from './lineage-accessible-model.mjs';
-import { creativeLibraryResources, filterCreativeLibraryResources } from './creative-library-model.mjs';
 import { createLineageExport, lineageExportFilename } from './lineage-export-model.mjs';
-import { runExecutionPresentation, statusPresentation } from './status-presentation.mjs';
+import { statusPresentation } from './status-presentation.mjs';
 import { pendingRunItems } from './run-item-pagination.mjs';
 import { nodeMenuItems } from './lineage-menu-model.mjs';
 import { applyPlanEdit, planEditForm, planEditIssues } from './plan-edit-model.mjs';
-import { batchFailureSummary, failureAttribution } from './failure-copy-model.mjs';
+import { batchFailureSummary } from './failure-copy-model.mjs';
 import { batchQualityCopy, reviewDistribution } from './batch-quality-model.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { CreativeActionLauncher } from './creative-action-launcher.jsx';
@@ -47,39 +46,24 @@ const RELATION_OPTIONS = [
   ['todo', '待重做'],
   ['context', '计划信息']
 ];
-const RESOURCE_FILTERS = [
-  ['all', '全部'],
-  ['task', '任务类型'],
-  ['style', '风格包'],
-  ['brand', '品牌包']
-];
 const TEMPLATE_OPTIONS = [
   ['project', '项目总览'],
   ['selection', '选片复盘'],
-  ['feedback', '反馈追踪'],
-  ['resource', '资料规划']
+  ['feedback', '反馈追踪']
 ];
-const RESOURCE_NODE_TYPES = ['task_type', 'style_kit', 'brand_kit'];
-const REFERENCE_TARGET_TYPES = ['project', 'task', 'round'];
+// 只有这三类节点会持久化位置（外加系统生成的 group）；其余只在渲染期存在。
+const PERSISTED_NODE_TYPES = new Set(['task', 'round', 'asset']);
+const REFERENCE_TARGET_TYPES = ['task', 'round'];
 const DEFAULT_VIEWPORT = { x: 80, y: 80, k: 0.88 };
 const DEFAULT_SETTINGS = { filter: 'all', mode: 'map', background: 'lines', minimap: true, snapGrid: true, edgeLabels: true };
 const HISTORY_LIMIT = 50;
 const SNAP_SIZE = 24;
 const SAVE_STATUS_LABELS = { idle: '布局已保存', loading: '读取布局', queued: '等待保存', saving: '保存中', saved: '已保存', error: '保存失败' };
 const NODE_SIZE = {
-  project: [250, 112],
   task: [250, 108],
   round: [238, 108],
-  plan: [268, 142],
-  run: [260, 128],
-  run_item: [210, 102],
   asset: [174, 220],
-  shared_asset: [174, 220],
-  placeholder: [174, 220],
-  delivery: [230, 118],
-  task_type: [230, 116],
-  style_kit: [230, 116],
-  brand_kit: [230, 116]
+  placeholder: [174, 220]
 };
 // 这两个空值既当默认值又当返回值。用 Object.freeze 会让类型变成 readonly，
 // 而下面所有用到它的地方都只读取、不修改，所以声明成普通可变类型更贴合实际用法。
@@ -87,7 +71,6 @@ const EMPTY_ARRAY = /** @type {any[]} */ (Object.freeze([]));
 /** @type {Set<string>} */
 const EMPTY_SET = new Set();
 const PLAN_PROMPT_PROTECTED_LABEL = '提示词受保护，请在会话中查看。';
-const RUN_ITEM_ERROR_PROTECTED_LABEL = '这张的出图错误已隐去隐私；请在会话中查看详情。';
 const SAFE_NODE_SUMMARY_LABEL = '摘要已隐去隐私。';
 const LINEAGE_SENSITIVE_PATTERNS = [
   /https?:\/\/[^\s<>"']+/i,
@@ -111,17 +94,13 @@ function clampScale(value) { return Math.min(5, Math.max(0.05, value)); }
 function normalizeViewport(value) { return { x: Number.isFinite(value?.x) ? value.x : DEFAULT_VIEWPORT.x, y: Number.isFinite(value?.y) ? value.y : DEFAULT_VIEWPORT.y, k: clampScale(Number.isFinite(value?.k) ? value.k : DEFAULT_VIEWPORT.k) }; }
 function clonePlain(value) { return JSON.parse(JSON.stringify(value)); }
 function snapshotKey(snapshot) { return JSON.stringify(snapshot); }
-function currentLayoutSnapshot({ positions, viewport, settings, groups, manualLinks, resourcePlacements }) {
-  return { positions: clonePlain(positions || {}), viewport: normalizeViewport(viewport), settings: clonePlain(settings || DEFAULT_SETTINGS), groups: clonePlain(groups || []), manualLinks: clonePlain(manualLinks || []), resourcePlacements: clonePlain(resourcePlacements || []) };
+function currentLayoutSnapshot({ positions, viewport, settings, groups, manualLinks, explicitKeys }) {
+  return { positions: clonePlain(positions || {}), viewport: normalizeViewport(viewport), settings: clonePlain(settings || DEFAULT_SETTINGS), groups: clonePlain(groups || []), manualLinks: clonePlain(manualLinks || []), explicitKeys: [...(explicitKeys || EMPTY_SET)] };
 }
-function resourceEntityType(kind) { return kind === 'task' ? 'task_type' : kind === 'style' ? 'style_kit' : 'brand_kit'; }
-function isResourceType(type) { return RESOURCE_NODE_TYPES.includes(type); }
-function resourceNodeKey(resource) { return nodeKey(resource.entityType, resource.resourceId); }
 function endpointFromNode(node) { return { type: node.entityType, id: node.entityId }; }
 function relationLabel(type) { return RELATION_OPTIONS.find(([value]) => value === type)?.[1] || '标注关系'; }
-function safeResourceSummary(resource) { return safeDisplayText(resource?.summary || resource?.source || '可以作为计划信息。', '资料摘要已隐去隐私。', 96); }
-function nodeTypeLabel(type) { return ({ project: '项目', task: '任务', round: '批次', plan: '计划', run: '本次出图', run_item: '单张出图', asset: '项目资产', shared_asset: '共享素材', delivery: '交付', task_type: '任务类型', style_kit: '风格包', brand_kit: '品牌包', group: '分组' })[type] || type; }
-function isAssetNode(node) { return node?.entityType === 'asset' || node?.entityType === 'shared_asset'; }
+function nodeTypeLabel(type) { return ({ task: '任务', round: '批次', asset: '图片', placeholder: '正在生成', group: '分组' })[type] || type; }
+function isAssetNode(node) { return node?.entityType === 'asset'; }
 function mediaUnavailable(asset) { return asset?.deletedAt || asset?.mediaAvailable === false || asset?.mediaStatus === 'missing' || asset?.mediaStatus === 'unavailable'; }
 function hasProtectedLineageText(value) {
   const source = text(value);
@@ -136,12 +115,6 @@ function safeDisplayText(value, fallback = SAFE_NODE_SUMMARY_LABEL, maxLength = 
 function safeNodeTitle(entityType, value) { return safeDisplayText(value, nodeTypeLabel(entityType), 120); }
 function safeNodeSubtitle(value, fallback = '') { return value ? safeDisplayText(value, fallback || SAFE_NODE_SUMMARY_LABEL, 160) : fallback; }
 function safeSearchToken(value) { return hasProtectedLineageText(value) ? '' : redactLineageText(value, 120); }
-function runItemErrorSummary(item) {
-  const source = item?.error?.summary || item?.error?.message || '';
-  if (!source) return '';
-  const summary = safeDisplayText(source, RUN_ITEM_ERROR_PROTECTED_LABEL, 120);
-  return summary === RUN_ITEM_ERROR_PROTECTED_LABEL ? summary : '隐去隐私的错误摘要：' + summary;
-}
 /** @param {any} [output] */
 function planOutputSummary(output = {}) {
   if (!output || typeof output !== 'object') return '输出规格待确认';
@@ -186,7 +159,7 @@ function connectionPath(from, to) {
 }
 function connectionLabelPoint(from, to) { return { x: (from.x + from.width + to.x) / 2, y: (from.y + from.height / 2 + to.y + to.height / 2) / 2 - 8 }; }
 function selectedNodeContextLine(node) {
-  const status = isAssetNode(node) ? assetState(node.entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable) : statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status).label;
+  const status = isAssetNode(node) ? assetState(node.entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable) : statusPresentation(node.entityType === 'round' ? 'round' : node.entityType === 'task' ? 'task' : 'generic', node.status).label;
   return [nodeTypeLabel(node.entityType) + '：' + safeNodeTitle(node.entityType, node.title), status, safeNodeSubtitle(node.subtitle, ''), 'ID ' + shortId(node.entityId)].filter(Boolean).join(' · ');
 }
 function assetLabel(asset) { return asset?.display?.label || asset?.source?.label || shortId(asset?.id); }
@@ -259,12 +232,6 @@ function createNode(entityType, entity, position, overrides = {}) {
   const safeNode = { ...node, title: safeNodeTitle(entityType, node.title), subtitle: safeNodeSubtitle(node.subtitle, '') };
   return { ...safeNode, searchText: overrides.searchText || nodeSearchHaystack(safeNode) };
 }
-function createResourceNode(resource, position) {
-  const entityType = resource.entityType || resourceEntityType(resource.kind);
-  const entity = { ...resource, id: resource.resourceId };
-  return createNode(entityType, entity, position, { title: resource.title, subtitle: resource.source + ' · 结构化资料节点', status: 'active', tone: entityType, resourceNode: true });
-}
-function createResourceCatalog(taskTypes, styleKits, brandKits) { return creativeLibraryResources({ taskTypes, styleKits, brandKits, assets: [] }).map((resource) => ({ ...resource, entityType: resourceEntityType(resource.kind) })); }
 function groupMemberBounds(group, nodes) {
   const members = nodes.filter((node) => node.groupId === group.id);
   if (!members.length || group.metadata?.collapsed) return group;
@@ -313,18 +280,15 @@ function nodeSearchHaystack(node) {
   return [safeSearchToken(node.title), safeSearchToken(node.subtitle), node.entityType, node.entityId, node.status, safeSearchToken(node.planDetail?.outputSummary), safeSearchToken(node.planDetail?.operationLabel), node.entity?.review?.decision, node.outputSource?.itemSequence, node.linkType].filter(Boolean).join(' ').toLowerCase();
 }
 
-function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, assets, sharedAssets, selectedAssetIds, sharedAssetIds, deliveries, resourcePlacements, resourceCatalog }) {
-  if (!project) return { nodes: [], connections: [], metrics: { issues: 0, selected: 0, assets: 0, deliveries: 0, resources: 0, reviews: reviewDecisionCounts([]) } };
+function buildGraph({ tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, assets, selectedAssetIds, sharedAssetIds, deliveries }) {
+  if (!tasks) return { nodes: [], connections: [], metrics: { issues: 0, selected: 0, assets: 0, deliveries: 0, reviews: reviewDecisionCounts([]) } };
   const safeTasks = listValue(tasks);
   const safeRounds = listValue(rounds);
   const safeRuns = listValue(runs);
   const runById = new Map(safeRuns.map((run) => [run.id, run]));
   const safeRunItems = listValue(runItems);
   const safeAssets = listValue(assets);
-  const safeSharedAssets = listValue(sharedAssets);
   const safeDeliveries = listValue(deliveries);
-  const safeResourcePlacements = listValue(resourcePlacements);
-  const safeResourceCatalog = listValue(resourceCatalog);
   const selectedAssetSet = selectedAssetIds instanceof Set ? selectedAssetIds : EMPTY_SET;
   const sharedAssetSet = sharedAssetIds instanceof Set ? sharedAssetIds : EMPTY_SET;
   const nodes = [];
@@ -354,22 +318,19 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
   const roundAnchorById = new Map();
   const derivedAssetIds = new Set();
 
-  const projectNode = createNode('project', project, { x: 0, y: 0 }, { title: project.name, subtitle: safeDisplayText(project.description || '项目工作区', '项目说明已隐去隐私。', 80), tone: 'project', focused: true });
-  nodes.push(projectNode);
-
+  // 项目不是画布节点，是画布的标题与边界（方案 6.2）：它由画布的 heading 与顶栏承载。
   taskList.forEach((task, index) => {
     const roundsForTask = taskRounds(task, visibleRounds);
-    const y = selectedTask ? 170 : 170 + index * Math.max(260, 152 + roundsForTask.length * 150);
+    const y = selectedTask ? 0 : index * Math.max(260, 152 + roundsForTask.length * 150);
     const taskNode = createNode('task', task, { x: 0, y }, { title: task.name, subtitle: [task.status === 'completed' ? '已完成任务' : '任务', task.taskTypeId || '通用创作', roundsForTask.length ? roundsForTask.length + ' 个批次' : '暂无批次'].filter(Boolean).join(' · '), tone: 'task', focused: selectedTask?.id === task.id });
     nodes.push(taskNode);
-    connect(projectNode.key, taskNode.key, 'contains', '包含任务');
   });
 
   visibleRounds.forEach((round) => {
     const taskIndex = taskIndexById.get(round.taskId) || 0;
     const localIndex = roundLocalIndex.get(round.taskId) || 0;
     roundLocalIndex.set(round.taskId, localIndex + 1);
-    const taskBaseY = selectedTask ? 170 : 170 + taskIndex * Math.max(260, 152 + taskRounds({ id: round.taskId }, visibleRounds).length * 150);
+    const taskBaseY = selectedTask ? 0 : taskIndex * Math.max(260, 152 + taskRounds({ id: round.taskId }, visibleRounds).length * 150);
     const y = taskBaseY + localIndex * 150;
     roundAnchorById.set(round.id, { x: 310, y });
     const detail = roundPlanDetails(round);
@@ -386,13 +347,12 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     if (round.parentRoundId) connect(nodeKey('round', round.parentRoundId), roundNode.key, 'lineage', '衍生自');
     for (const assetId of parentAssets) connect(nodeKey('asset', assetId), roundNode.key, 'lineage', '衍生起点');
     // 参考素材与遮罩原本挂在计划节点上；计划节点取消后，它们直接挂在批次上。
-    for (const material of references) connect(nodeKey(material.externalShared ? 'shared_asset' : 'asset', material.assetId), roundNode.key, material.usage === 'negative' ? 'manual' : 'reference', usageLabel(material.usage));
+    for (const material of references) connect(nodeKey('asset', material.assetId), roundNode.key, material.usage === 'negative' ? 'manual' : 'reference', usageLabel(material.usage));
     for (const assetId of masks) connect(nodeKey('asset', assetId), roundNode.key, 'reference', '遮罩');
   });
 
   const assetLaneIndex = new Map();
-  const currentAssetIds = new Set(safeAssets.map((asset) => asset?.id).filter(Boolean));
-  safeAssets.forEach((asset, index) => {
+  safeAssets.forEach((asset) => {
     if (!asset?.id) return;
     const selected = selectedAssetSet.has(asset.id);
     const shared = sharedAssetSet.has(asset.id);
@@ -430,32 +390,13 @@ function buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs,
     nodes.push(createNode('placeholder', item, { x: 1490 + (localIndex % 3) * 198, y: yBase + Math.floor(localIndex / 3) * 250 }, { title: '生成中', subtitle: '第 ' + item.sequence + ' 张 · 还没出来', status: item.status, tone: 'pending', roundId: itemRoundId }));
   }
 
-  let externalSharedIndex = 0;
-  safeSharedAssets.forEach((asset) => {
-    if (!asset?.id || currentAssetIds.has(asset.id)) return;
-    const index = externalSharedIndex;
-    externalSharedIndex += 1;
-    const delivered = deliveredAssetIds.has(asset.id);
-    nodes.push(createNode('shared_asset', asset, { x: 1490 + (index % 3) * 198, y: 40 + Math.floor(index / 3) * 250 }, { title: assetLabel(asset), subtitle: delivered ? '跨项目共享素材 · 已交付' : '跨项目共享素材', status: 'shared', tone: 'shared', selectedAsset: false, sharedAsset: true, deliveredAsset: delivered, externalSharedAsset: true, mediaUnavailable: mediaUnavailable(asset) }));
-  });
-
-  safeDeliveries.forEach((delivery, index) => {
-    const deliveryNode = createNode('delivery', delivery, { x: 2120, y: 70 + index * 150 }, { title: delivery.name, subtitle: (deliveryAssetIds(delivery).length || 0) + ' 张图片 · ' + delivery.status, status: delivery.status, tone: 'delivery' });
-    nodes.push(deliveryNode);
-    for (const assetId of deliveryAssetIds(delivery)) connect(nodeKey('asset', assetId), deliveryNode.key, 'delivery', '加入交付');
-  });
-
-  const resourceByKey = new Map(safeResourceCatalog.map((resource) => [resourceNodeKey(resource), resource]));
-  safeResourcePlacements.forEach((placement, index) => {
-    const key = nodeKey(placement.entityType, placement.entityId);
-    const resource = resourceByKey.get(key);
-    if (!resource) return;
-    nodes.push(createResourceNode(resource, { x: 250 + (index % 2) * 250, y: 450 + Math.floor(index / 2) * 138 }));
-  });
+  // 共享素材走「导入」、交付在交付页、规则资料在规则资料页（方案 4.3 / 6.2 / 7.11）：
+  // 它们的能力都有新家，不再各占一个画布节点（工程的「收」= 换位置，不是删能力）。
+  // 「这张图已交付 / 已共享」的标记仍留在图节点上——那是图自己的状态。
 
   const selectedCount = safeAssets.filter((asset) => selectedAssetSet.has(asset?.id)).length;
   const issues = [...safeRuns, ...safeRunItems].filter((item) => /failed|blocked|unknown|resume_pending|partial/.test(item?.status || '')).length;
-  return { nodes, connections, metrics: { issues, selected: selectedCount, assets: safeAssets.length, deliveries: safeDeliveries.length, resources: safeResourcePlacements.length, reviews: reviewDecisionCounts(safeAssets) } };
+  return { nodes, connections, metrics: { issues, selected: selectedCount, assets: safeAssets.length, deliveries: safeDeliveries.length, reviews: reviewDecisionCounts(safeAssets) } };
 }
 
 function applySavedLayout(nodes, positions) {
@@ -468,10 +409,10 @@ function visibleByFilter(node, filter, selectedKeys) {
   if (filter === 'all') return true;
   if (filter === 'issues') return /failed|blocked|unknown|resume_pending|partial|error|unavailable/.test(node.status || '');
   if (filter === 'selected') return node.selectedAsset || selectedKeys.has(node.key) || (isAssetNode(node) && node.entity?.review?.decision === 'keep');
-  if (filter === 'undecided') return isAssetNode(node) && !node.externalSharedAsset && (!node.entity?.review?.decision || node.entity?.review?.decision === 'review');
+  if (filter === 'undecided') return isAssetNode(node) && (!node.entity?.review?.decision || node.entity?.review?.decision === 'review');
   if (filter === 'rejected') return isAssetNode(node) && node.entity?.review?.decision === 'reject';
-  if (filter === 'delivery') return node.entityType === 'delivery' || node.deliveredAsset || (node.selectedAsset && node.entity?.review?.decision === 'keep');
-  if (filter === 'shared') return node.sharedAsset || node.entityType === 'shared_asset';
+  if (filter === 'delivery') return node.deliveredAsset || (node.selectedAsset && node.entity?.review?.decision === 'keep');
+  if (filter === 'shared') return node.sharedAsset;
   return true;
 }
 /** 旧布局可能存着已收敛的模式值，归一化到语义最近的新模式（flow≈按图片，rounds≈全局）。 */
@@ -486,12 +427,12 @@ function visibleByMode(node, rawMode, expandedRoundIds = EMPTY_ROUND_SET) {
   // 已选定 / 已交付 / 可继续也不例外（数量在批次摘要里、内容在展开后，一样不少）。
   // 否则只要批里有几张已选的图，批次就**永远关不上**（2026-09-17 刀哥实机抓到）。
   const collapsedIntoBatch = isAssetNode(node) && node.roundId && !expandedRoundIds.has(node.roundId);
-  if (mode === 'map') return ['project', 'task', 'round', 'delivery'].includes(node.entityType)
+  if (mode === 'map') return ['task', 'round'].includes(node.entityType)
     // 折叠到批次级：批次默认收起，它的图只在**展开**时铺到画布上。
     || ((isAssetNode(node) || node.entityType === 'placeholder') && node.roundId && expandedRoundIds.has(node.roundId))
     || (!collapsedIntoBatch && (node.selectedAsset || node.deliveredAsset || node.derivedAsset || node.entity?.review?.decision === 'keep'));
-  if (mode === 'assets') return ['project', 'task', 'round', 'asset', 'shared_asset', 'delivery'].includes(node.entityType);
-  if (mode === 'delivery') return ['project', 'delivery'].includes(node.entityType) || node.deliveredAsset || node.selectedAsset || node.entity?.review?.decision === 'keep';
+  if (mode === 'assets') return ['task', 'round', 'asset'].includes(node.entityType);
+  if (mode === 'delivery') return node.deliveredAsset || node.selectedAsset || node.entity?.review?.decision === 'keep';
   return true;
 }
 
@@ -523,7 +464,7 @@ function planStatusLine(sessionPlanStatus, selectedRound) {
   return '';
 }
 
-function LineageWorkspaceSummary({ project, selectedTask, selectedRound, runs = EMPTY_ARRAY, sessionPlanStatus, graph, mode, onMode, onOpenTasks, onCreateTask }) {
+function LineageWorkspaceSummary({ selectedTask, selectedRound, runs = EMPTY_ARRAY, sessionPlanStatus, graph, mode, onMode, onOpenTasks, onCreateTask }) {
   const reviews = graph.metrics.reviews || {};
   const currentMode = CREATOR_MODES.find(([value]) => value === mode) || CREATOR_MODES[0];
   const undecided = (reviews.unreviewed || 0) + (reviews.review || 0);
@@ -554,7 +495,7 @@ function LineageWorkspaceSummary({ project, selectedTask, selectedRound, runs = 
     </section>
   </div>;
 }
-export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, taskTypes = [], styleKits = [], brandKits = [], sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation, onDeselectAsset }) {
+export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onDeselectAsset }) {
   tasks = listValue(tasks);
   rounds = listValue(rounds);
   runs = listValue(runs);
@@ -562,9 +503,6 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   assets = listValue(assets);
   sharedAssets = listValue(sharedAssets);
   deliveries = listValue(deliveries);
-  taskTypes = listValue(taskTypes);
-  styleKits = listValue(styleKits);
-  brandKits = listValue(brandKits);
   selectedAssetIds = idSetValue(selectedAssetIds);
   selectionBusyIds = idSetValue(selectionBusyIds);
   const parsedAssetTotal = assetCoverage == null ? (assetTotal == null ? assets.length : Number(assetTotal)) : Number(assetCoverage.total);
@@ -585,17 +523,19 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const panRef = useRef(null);
   const selectionRef = useRef(null);
   const positionsRef = useRef({});
+  // A7c（方案 7.3）：表里只存**用户动过**的节点。没记录 = 自动布局算的。
+  // 这个集合就是「哪些算用户动过」的唯一判据：拖拽 / 键盘微调 / 折叠 / 分组 / 显式套用整理模板。
+  const explicitKeysRef = useRef(new Set());
   const viewportRef = useRef(DEFAULT_VIEWPORT);
   const settingsRef = useRef(DEFAULT_SETTINGS);
   const graphNodesRef = useRef([]);
   const groupsRef = useRef([]);
   const linksRef = useRef([]);
-  const resourcePlacementsRef = useRef([]);
   const savedLayoutNodesRef = useRef([]);
   const layoutReadyRef = useRef(false);
   const assetCoverageRef = useRef({ loaded: 0, total: 0 });
   const mountedRef = useRef(false);
-  const saveTargetRef = useRef({ projectId: null, scopeType: null, scopeId: null });
+  const saveTargetRef = useRef({ projectId: null });
   const [tool, setTool] = useState('select');
   const [viewport, setViewport] = useState(DEFAULT_VIEWPORT);
   const [canvasSize, setCanvasSize] = useState({ width: 900, height: 560 });
@@ -603,17 +543,12 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [layoutReady, setLayoutReady] = useState(false);
-  const [layoutError, setLayoutError] = useState('');
   const [saveState, setSaveState] = useState({ status: 'idle', message: SAVE_STATUS_LABELS.idle });
   const [historyCounts, setHistoryCounts] = useState({ undo: 0, redo: 0 });
   const [selectionBox, setSelectionBox] = useState(null);
   const [groups, setGroups] = useState([]);
   const [manualLinks, setManualLinks] = useState([]);
-  const [resourcePlacements, setResourcePlacements] = useState([]);
   const [editing, setEditing] = useState(false);
-  const [resourcePanelOpen, setResourcePanelOpen] = useState(false);
-  const [resourceQuery, setResourceQuery] = useState('');
-  const [resourceFilter, setResourceFilter] = useState('all');
   const [groupTitle, setGroupTitle] = useState('');
   const [contextMenu, setContextMenu] = useState(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -622,15 +557,10 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const [outlineOpen, setOutlineOpen] = useState(false);
 
 
+  // 画布一项目一份（方案 7.4）：保存不再带 scope。`scope` 仍供导出与文本视图描述来源。
   const scope = selectedRound ? { type: 'round', id: selectedRound.id } : selectedTask ? { type: 'task', id: selectedTask.id } : { type: 'project', id: project?.id || '' };
-  saveTargetRef.current = { projectId: project?.id || null, scopeType: scope.type, scopeId: scope.id };
-  const resourceCatalog = useMemo(() => createResourceCatalog(taskTypes, styleKits, brandKits), [taskTypes, styleKits, brandKits]);
-  const resourceById = useMemo(() => new Map(resourceCatalog.map((resource) => [resource.id, resource])), [resourceCatalog]);
-  const visibleResources = useMemo(() => {
-    const placedKeys = new Set(resourcePlacements.map((placement) => nodeKey(placement.entityType, placement.entityId)));
-    return filterCreativeLibraryResources(resourceCatalog, { query: resourceQuery, kind: resourceFilter }).filter((resource) => !placedKeys.has(resourceNodeKey(resource)));
-  }, [resourceCatalog, resourceFilter, resourcePlacements, resourceQuery]);
-  const graph = useMemo(() => buildGraph({ project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, assets, sharedAssets, selectedAssetIds, sharedAssetIds: new Set(sharedAssets.map((asset) => asset.id)), deliveries, resourcePlacements, resourceCatalog }), [project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, assets, sharedAssets, selectedAssetIds, deliveries, resourcePlacements, resourceCatalog]);
+  saveTargetRef.current = { projectId: project?.id || null };
+  const graph = useMemo(() => buildGraph({ tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, assets, selectedAssetIds, sharedAssetIds: new Set(sharedAssets.map((asset) => asset.id)), deliveries }), [project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, assets, sharedAssets, selectedAssetIds, deliveries]);
   const nodes = useMemo(() => applySavedLayout(graph.nodes, positions), [graph.nodes, positions]);
   const nodeByKey = useMemo(() => new Map(nodes.map((node) => [node.key, node])), [nodes]);
   const collapsedGroupIds = useMemo(() => new Set(groups.filter((group) => group.metadata?.collapsed).map((group) => group.id)), [groups]);
@@ -642,7 +572,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const expandedRoundIds = useMemo(() => new Set(Object.entries(positions).filter(([key, value]) => key.startsWith('round:') && value.collapsed === false).map(([key]) => key.slice('round:'.length))), [positions]);
   const filteredNodes = useMemo(() => nodes.filter((node) => !collapsedGroupIds.has(node.groupId) && visibleByMode(node, settings.mode || 'map', expandedRoundIds) && visibleByFilter(node, settings.filter, selectedKeys)), [nodes, collapsedGroupIds, selectedKeys, settings.filter, settings.mode, positions, expandedRoundIds]);
   const selectedNodes = useMemo(() => nodes.filter((node) => selectedKeys.has(node.key)), [nodes, selectedKeys]);
-  const selectedAssetNodes = selectedNodes.filter((node) => isAssetNode(node) && !node.externalSharedAsset);
+  const selectedAssetNodes = selectedNodes.filter((node) => isAssetNode(node));
   const primaryNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
   // 「质量跟着看的东西走」（方案 7.10.2）：选中批次时，检查器直接给这一批的评审分布。
   // 项目级指标留在 project-overview（能力只加强不删）——这里是加，不是搬走。
@@ -703,7 +633,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
 
   const culledCount = Math.max(0, renderableNodes.length - renderedNodes.length);
 
-  const captureSnapshot = useCallback(() => currentLayoutSnapshot({ positions: positionsRef.current, viewport: viewportRef.current, settings: settingsRef.current, groups: groupsRef.current, manualLinks: linksRef.current, resourcePlacements: resourcePlacementsRef.current }), []);
+  const captureSnapshot = useCallback(() => currentLayoutSnapshot({ positions: positionsRef.current, viewport: viewportRef.current, settings: settingsRef.current, groups: groupsRef.current, manualLinks: linksRef.current, explicitKeys: explicitKeysRef.current }), []);
   const syncHistoryCounts = useCallback(() => setHistoryCounts({ undo: historyRef.current.undo.length, redo: historyRef.current.redo.length }), []);
   const resetHistory = useCallback(() => { historyRef.current = { undo: [], redo: [] }; syncHistoryCounts(); }, [syncHistoryCounts]);
   const recordHistory = useCallback(() => {
@@ -721,36 +651,35 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   useEffect(() => { graphNodesRef.current = nodes; }, [nodes]);
   useEffect(() => { groupsRef.current = groups; }, [groups]);
   useEffect(() => { linksRef.current = manualLinks; }, [manualLinks]);
-  useEffect(() => { resourcePlacementsRef.current = resourcePlacements; }, [resourcePlacements]);
   useEffect(() => { layoutReadyRef.current = layoutReady; }, [layoutReady]);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   useEffect(() => { assetCoverageRef.current = { loaded: lineageAssetsLoaded, total: Math.max(lineageAssetsLoaded, lineageAssetTotal) }; }, [lineageAssetsLoaded, lineageAssetTotal]);
 
-  const submitLayoutSave = useCallback((targetProjectId = project?.id, targetScope = scope, permitSave = layoutReadyRef.current, updateState = true) => {
+  const submitLayoutSave = useCallback((targetProjectId = project?.id, permitSave = layoutReadyRef.current, updateState = true) => {
     if (!permitSave || !targetProjectId) return;
     const requestId = saveRequestRef.current + 1;
     saveRequestRef.current = requestId;
-    const canApplyState = () => {
-      const target = saveTargetRef.current;
-      return updateState && mountedRef.current && saveRequestRef.current === requestId && target.projectId === targetProjectId && target.scopeType === targetScope.type && target.scopeId === targetScope.id;
-    };
+    const canApplyState = () => updateState && mountedRef.current && saveRequestRef.current === requestId && saveTargetRef.current.projectId === targetProjectId;
     if (canApplyState()) setSaveState({ status: 'saving', message: SAVE_STATUS_LABELS.saving });
     const currentPositions = positionsRef.current;
-    const currentNodes = graphNodesRef.current;
-    const graphNodeKeys = new Set(currentNodes.map((node) => node.key));
-    const currentPayloadNodes = currentNodes.map((node) => ({ entityType: node.entityType, entityId: node.entityId, x: currentPositions[node.key]?.x ?? node.x, y: currentPositions[node.key]?.y ?? node.y, width: currentPositions[node.key]?.width ?? node.width, height: currentPositions[node.key]?.height ?? node.height, collapsed: currentPositions[node.key]?.collapsed === true, groupId: currentPositions[node.key]?.groupId || null }));
+    // 只有会出现在创作叙述里的三类节点（任务 / 批次 / 图）才落库；数据库的
+    // CHECK 也会拒绝其它类型（方案 7.5：让 schema 自己挡住违规）。
+    // A7c（方案 7.3）：表里只存用户动过的节点。没记录 = 自动布局算的；「自动整理」的结果也算显式（见 autoArrange）。
+    const persistableNodes = graphNodesRef.current.filter((node) => PERSISTED_NODE_TYPES.has(node.entityType) && explicitKeysRef.current.has(node.key));
+    const graphNodeKeys = new Set(graphNodesRef.current.map((node) => node.key));
+    const currentPayloadNodes = persistableNodes.map((node) => ({ entityType: node.entityType, entityId: node.entityId, x: currentPositions[node.key]?.x ?? node.x, y: currentPositions[node.key]?.y ?? node.y, width: currentPositions[node.key]?.width ?? node.width, height: currentPositions[node.key]?.height ?? node.height, collapsed: currentPositions[node.key]?.collapsed === true, groupId: currentPositions[node.key]?.groupId || null }));
     const assetCoverage = assetCoverageRef.current;
-    const preservedAssetNodes = assetCoverage.total > assetCoverage.loaded ? savedLayoutNodesRef.current.filter((node) => (node.entityType === 'asset' || node.entityType === 'shared_asset') && !graphNodeKeys.has(nodeKey(node.entityType, node.entityId))).map((node) => ({ entityType: node.entityType, entityId: node.entityId, x: node.x, y: node.y, width: node.width, height: node.height, collapsed: node.collapsed === true, groupId: node.groupId || null })) : [];
+    const preservedAssetNodes = assetCoverage.total > assetCoverage.loaded ? savedLayoutNodesRef.current.filter((node) => node.entityType === 'asset' && !graphNodeKeys.has(nodeKey(node.entityType, node.entityId))).map((node) => ({ entityType: node.entityType, entityId: node.entityId, x: node.x, y: node.y, width: node.width, height: node.height, collapsed: node.collapsed === true, groupId: node.groupId || null })) : [];
     const payloadNodes = [...currentPayloadNodes, ...preservedAssetNodes];
     const payloadNodeKeys = new Set(payloadNodes.map((node) => nodeKey(node.entityType, node.entityId)));
     const payloadGroupNodes = payloadNodes.map((node) => ({ key: nodeKey(node.entityType, node.entityId), ...node }));
     const payloadGroups = groupsRef.current.map((group) => serializeGroup(group, payloadGroupNodes));
     const payloadEndpointKeys = new Set([...payloadNodeKeys, ...payloadGroups.map((group) => nodeKey('group', group.id))]);
     const payloadLinks = linksRef.current.filter((link) => payloadEndpointKeys.has(nodeKey(link.sourceType, link.sourceId)) && payloadEndpointKeys.has(nodeKey(link.targetType, link.targetId)));
-    void request('/api/projects/' + encodeURIComponent(targetProjectId) + '/canvas-layout', { method: 'POST', idempotencyKey: 'lineage-layout-' + targetScope.type + '-' + targetScope.id + '-' + Date.now(), body: { scopeType: targetScope.type, scopeId: targetScope.id, viewport: viewportRef.current, settings: settingsRef.current, nodes: payloadNodes, groups: payloadGroups, links: payloadLinks } })
-      .then(() => { if (canApplyState()) { setLayoutError(''); setSaveState({ status: 'saved', message: SAVE_STATUS_LABELS.saved }); } })
-      .catch((error) => { if (canApplyState()) { const message = error.message || '无法保存创作谱系布局。'; setLayoutError(message); setSaveState({ status: 'error', message }); } });
-  }, [project?.id, request, scope.type, scope.id]);
+    void request('/api/projects/' + encodeURIComponent(targetProjectId) + '/canvas-layout', { method: 'POST', idempotencyKey: 'lineage-layout-' + targetProjectId + '-' + Date.now(), body: { viewport: viewportRef.current, settings: settingsRef.current, nodes: payloadNodes, groups: payloadGroups, links: payloadLinks } })
+      .then(() => { if (canApplyState()) { setSaveState({ status: 'saved', message: SAVE_STATUS_LABELS.saved }); } })
+      .catch((error) => { if (canApplyState()) { const message = error.message || '无法保存创作谱系布局。'; setSaveState({ status: 'error', message }); } });
+  }, [project?.id, request]);
 
   useEffect(() => {
     const element = canvasRef.current;
@@ -770,19 +699,26 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     if (!project?.id) return undefined;
     let cancelled = false;
     setLayoutReady(false);
-    setLayoutError('');
     setSaveState({ status: 'loading', message: SAVE_STATUS_LABELS.loading });
-    const params = new URLSearchParams({ scopeType: scope.type, scopeId: scope.id });
-    request('/api/projects/' + encodeURIComponent(project.id) + '/canvas-layout?' + params.toString())
+    request('/api/projects/' + encodeURIComponent(project.id) + '/canvas-layout')
       .then((data) => {
         if (cancelled) return;
         const layout = data.layout || {};
         const layoutNodes = Array.isArray(layout.nodes) ? layout.nodes : [];
         savedLayoutNodesRef.current = layoutNodes;
-        const nextPositions = Object.fromEntries(layoutNodes.map((item) => [nodeKey(item.entityType, item.entityId), { x: item.x, y: item.y, width: item.width, height: item.height, collapsed: item.collapsed, groupId: item.groupId || null }]));
-        const nextResources = layoutNodes.filter((item) => isResourceType(item.entityType)).map((item) => ({ entityType: item.entityType, entityId: item.entityId }));
+        // ① 自动布局：在画布上的每个节点先按公式各就各位。
+        const nextPositions = Object.fromEntries(graphNodesRef.current.map((node) => [node.key, { x: node.x, y: node.y, width: node.width, height: node.height, collapsed: defaultCollapsedFor(node), groupId: null }]));
+        // ② 覆盖：库里记着的就是用户动过的（A7c），没记录的一律保持自动布局。
+        for (const item of layoutNodes) {
+          const key = nodeKey(item.entityType, item.entityId);
+          nextPositions[key] = { x: item.x, y: item.y, width: item.width, height: item.height, collapsed: item.collapsed === true, groupId: item.groupId || null };
+        }
+        // ③ 库里有的就是「人动过」的——保存时据此筛选。
+        explicitKeysRef.current = new Set(layoutNodes.map((item) => nodeKey(item.entityType, item.entityId)));
         const nextGroups = Array.isArray(layout.groups) ? layout.groups.map((group) => ({ ...group, metadata: group.metadata || {} })) : [];
-        const nextLinks = Array.isArray(layout.links) ? layout.links.map((link) => ({ ...link, label: link.label || relationLabel(link.linkType), metadata: link.metadata || {} })) : [];
+        // 系统引用线是后端按 parent_round_id 派生并落库的投影，画布的谱系边已经画了它；
+        // 这里只取用户手动连线，避免同一条关系被画两次（A8 投影式收口）。
+        const nextLinks = Array.isArray(layout.links) ? layout.links.filter((link) => !(link.metadata && link.metadata.system)).map((link) => ({ ...link, label: link.label || relationLabel(link.linkType), metadata: link.metadata || {} })) : [];
         const nextViewport = normalizeViewport(layout.viewport);
         const nextSettings = { ...DEFAULT_SETTINGS, ...(layout.settings || {}) };
         positionsRef.current = nextPositions;
@@ -790,13 +726,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         settingsRef.current = nextSettings;
         groupsRef.current = nextGroups;
         linksRef.current = nextLinks;
-        resourcePlacementsRef.current = nextResources;
         setPositions(nextPositions);
         setViewport(nextViewport);
         setSettings(nextSettings);
         setGroups(nextGroups);
         setManualLinks(nextLinks);
-        setResourcePlacements(nextResources);
         resetHistory();
         setSaveState({ status: 'saved', message: SAVE_STATUS_LABELS.saved });
         setLayoutReady(true);
@@ -809,16 +743,14 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         settingsRef.current = DEFAULT_SETTINGS;
         groupsRef.current = [];
         linksRef.current = [];
-        resourcePlacementsRef.current = [];
         savedLayoutNodesRef.current = [];
+        explicitKeysRef.current = new Set();
         setPositions({});
         setViewport(DEFAULT_VIEWPORT);
         setSettings(DEFAULT_SETTINGS);
         setGroups([]);
         setManualLinks([]);
-        setResourcePlacements([]);
         resetHistory();
-        setLayoutError(message);
         setSaveState({ status: 'error', message });
         setLayoutReady(true);
       });
@@ -827,11 +759,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
-        submitLayoutSave(project.id, scope, layoutReadyRef.current, false);
+        submitLayoutSave(project.id, layoutReadyRef.current, false);
       }
       if (wheelHistoryTimerRef.current) window.clearTimeout(wheelHistoryTimerRef.current);
     };
-  }, [project?.id, scope.type, scope.id, layoutRevision, request, resetHistory, submitLayoutSave]);
+  }, [project?.id, layoutRevision, request, resetHistory, submitLayoutSave]);
 
   useEffect(() => {
     setPositions((current) => {
@@ -859,9 +791,9 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
-      submitLayoutSave(project.id, scope, true);
+      submitLayoutSave(project.id, true);
     }, 650);
-  }, [layoutReady, project?.id, scope.type, scope.id, submitLayoutSave]);
+  }, [layoutReady, project?.id, submitLayoutSave]);
 
   const replaceLayoutState = useCallback((patch, dirty = true, record = true) => {
     if (dirty && record) recordHistory();
@@ -869,10 +801,16 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     if (hasOwn(patch, 'viewport')) { const normalized = normalizeViewport(patch.viewport); viewportRef.current = normalized; setViewport(normalized); }
     if (hasOwn(patch, 'settings')) { settingsRef.current = patch.settings; setSettings(patch.settings); }
     if (hasOwn(patch, 'groups')) { groupsRef.current = patch.groups; setGroups(patch.groups); }
+    if (hasOwn(patch, 'explicitKeys')) explicitKeysRef.current = new Set(patch.explicitKeys || []);
     if (hasOwn(patch, 'manualLinks')) { linksRef.current = patch.manualLinks; setManualLinks(patch.manualLinks); }
-    if (hasOwn(patch, 'resourcePlacements')) { resourcePlacementsRef.current = patch.resourcePlacements; setResourcePlacements(patch.resourcePlacements); }
     if (dirty) persistLayout();
   }, [persistLayout, recordHistory]);
+  /** 记下「这些节点的位置/状态是人定的」——保存时只落这些（A7c / 方案 7.3）。 */
+  const markExplicit = useCallback((keys) => {
+    let changed = false;
+    for (const key of keys || []) if (key && !explicitKeysRef.current.has(key)) { explicitKeysRef.current.add(key); changed = true; }
+    return changed;
+  }, []);
   const updatePositions = useCallback((updater, dirty = true, record = true) => replaceLayoutState({ positions: typeof updater === 'function' ? updater(positionsRef.current) : updater }, dirty, record), [replaceLayoutState]);
   const updateViewport = useCallback((next, dirty = true, record = true) => replaceLayoutState({ viewport: next }, dirty, record), [replaceLayoutState]);
   const updateSettings = useCallback((patch, record = true) => replaceLayoutState({ settings: { ...settingsRef.current, ...patch } }, true, record), [replaceLayoutState]);
@@ -917,9 +855,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
 
   const toggleNodeCollapsed = useCallback((node) => {
     if (!node?.collapsible) return;
+    // 折叠也是人做的决定，必须随布局落库（否则「存了却没人改」的老问题会以另一种形式回来）。
+    markExplicit([node.key]);
     const current = positionsRef.current[node.key] || { x: node.x, y: node.y, width: node.width, height: node.height };
     replaceLayoutState({ positions: { ...positionsRef.current, [node.key]: { ...current, collapsed: current.collapsed !== true } } });
-  }, [replaceLayoutState]);
+  }, [markExplicit, replaceLayoutState]);
   /** 菜单的上下文：哪些动作此刻可用。判据都是「此刻真的做得了吗」，不做推测。 */
   const nodeMenuContext = useCallback((node) => ({
     // 「去确认计划」只对等着确认的批次有意义。
@@ -957,7 +897,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     if (itemId === 'preview') return onPreviewAsset(entity);
     if (itemId === 'edit-plan') return openPlanEdit(node);
     if (itemId === 'history') return onNavigate({ view: 'runs', taskId: entity?.taskId || null, roundId: entity?.id || null, compareRoundIds: entity?.id ? [entity.id] : [], runId: null, assetScope: 'round' });
-    if (itemId === 'copy-plan') return void navigator.clipboard?.writeText('请基于 Workbench 创作谱系中的节点生成计划草稿；先不要真的出图，给我审阅确认。').catch(() => setLayoutError('无法复制计划信息，请在会话里手动引用这个节点。'));
+    if (itemId === 'copy-plan') return void navigator.clipboard?.writeText('请基于 Workbench 创作谱系中的节点生成计划草稿；先不要真的出图，给我审阅确认。').catch(() => setSaveState({ status: 'error', message: '无法复制计划信息，请在会话里手动引用这个节点。' }));
   }, [toggleNodeCollapsed, onNavigate, project?.id, onInspectAsset, onToggleAsset, onReject, onDownloadAsset, onCreateRound, onCreateTask, openPlanEdit, onPreviewAsset]);
 
   const undoLayout = useCallback(() => {
@@ -966,17 +906,19 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     historyRef.current.redo = [...historyRef.current.redo.slice(-(HISTORY_LIMIT - 1)), captureSnapshot()];
     syncHistoryCounts();
     applyLayoutSnapshot(previous);
-  }, [applyLayoutSnapshot, captureSnapshot, syncHistoryCounts]);
+    // 撤销/重做也可能改变「哪些算人动过」，所以要落库（A7c 之后这件事才需要显式做）。
+    persistLayout();
+  }, [applyLayoutSnapshot, captureSnapshot, persistLayout, syncHistoryCounts]);
   const redoLayout = useCallback(() => {
     const next = historyRef.current.redo.pop();
     if (!next) return;
     historyRef.current.undo = [...historyRef.current.undo.slice(-(HISTORY_LIMIT - 1)), captureSnapshot()];
     syncHistoryCounts();
     applyLayoutSnapshot(next);
-  }, [applyLayoutSnapshot, captureSnapshot, syncHistoryCounts]);
+    persistLayout();
+  }, [applyLayoutSnapshot, captureSnapshot, persistLayout, syncHistoryCounts]);
 
   const snapCoordinate = useCallback((value) => settingsRef.current.snapGrid === false ? value : Math.round(value / SNAP_SIZE) * SNAP_SIZE, []);
-  const snapPoint = useCallback((point) => ({ x: snapCoordinate(point.x), y: snapCoordinate(point.y) }), [snapCoordinate]);
   const screenToWorld = useCallback((clientX, clientY) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
@@ -1009,11 +951,6 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     if (!node?.key) return;
     setSelectedKeys(new Set([node.key]));
   }, []);
-  const focusCurrentContext = useCallback(() => {
-    const context = sessionPlanStatus?.context;
-    const key = selectedRound ? nodeKey('round', selectedRound.id) : context?.round?.id ? nodeKey('round', context.round.id) : selectedTask ? nodeKey('task', selectedTask.id) : context?.task?.id ? nodeKey('task', context.task.id) : project ? nodeKey('project', project.id) : null;
-    focusNode(key ? nodeByKey.get(key) : null);
-  }, [focusNode, nodeByKey, project, selectedRound, selectedTask, sessionPlanStatus?.context]);
 
 
   const selectNode = useCallback((event, node) => {
@@ -1088,7 +1025,10 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       if (dragRef.current) {
         const dx = (event.clientX - dragRef.current.startX) / viewportRef.current.k;
         const dy = (event.clientY - dragRef.current.startY) / viewportRef.current.k;
-        dragRef.current.moved = dragRef.current.moved || Math.abs(dx) + Math.abs(dy) > 2;
+        if (Math.abs(dx) + Math.abs(dy) > 2) {
+          dragRef.current.moved = true;
+          for (const item of dragRef.current.nodes) explicitKeysRef.current.add(item.key);
+        }
         updatePositions((current) => {
           const next = { ...current };
           for (const item of dragRef.current.nodes) next[item.key] = { ...(next[item.key] || {}), x: snapCoordinate(item.x + dx), y: snapCoordinate(item.y + dy) };
@@ -1174,10 +1114,13 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     const next = {};
     graph.nodes.forEach((node) => { next[node.key] = { x: node.x, y: node.y, width: node.width, height: node.height, collapsed: current[node.key]?.collapsed ?? defaultCollapsedFor(node), groupId: current[node.key]?.groupId || null }; });
     const nextViewport = viewportForItems(positionedItems(graph.nodes, next));
+    // 「自动整理」是用户主动要的，所以它的结果**整体算显式布局**并落库（A7c 的裁定）；
+    // 它不是「清空记录回到公式」——那会让用户点完整理、刷新后布局又变回去。
+    markExplicit(graph.nodes.map((node) => node.key));
     replaceLayoutState({ positions: next, ...(nextViewport ? { viewport: nextViewport } : {}) });
-  }, [graph.nodes, replaceLayoutState, viewportForItems]);
+  }, [graph.nodes, markExplicit, replaceLayoutState, viewportForItems]);
   const applyLayoutTemplate = useCallback((template) => {
-    const laneX = template === 'resource' ? { task_type: 0, style_kit: 0, brand_kit: 0, project: 310, task: 310, round: 590, plan: 860, run: 1160, run_item: 1450, asset: 1730, shared_asset: 1730, delivery: 2030 } : template === 'selection' ? { project: 0, task: 0, round: 280, plan: 560, run: 840, run_item: 1120, asset: 1400, shared_asset: 1400, delivery: 1700, task_type: 280, style_kit: 280, brand_kit: 280 } : template === 'feedback' ? { delivery: 0, asset: 300, shared_asset: 300, run_item: 610, run: 880, plan: 1160, round: 1430, task: 1700, project: 1700, task_type: 1160, style_kit: 1160, brand_kit: 1160 } : { project: 0, task: 0, round: 310, plan: 590, run: 900, run_item: 1200, asset: 1490, shared_asset: 1490, delivery: 2120, task_type: 250, style_kit: 500, brand_kit: 750 };
+    const laneX = template === 'selection' ? { task: 0, round: 280, asset: 1400 } : template === 'feedback' ? { asset: 300, round: 1430, task: 1700 } : { task: 0, round: 310, asset: 1490 };
     const counters = {};
     const next = {};
     const current = positionsRef.current;
@@ -1190,13 +1133,14 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       next[node.key] = { x: column + (index % 2) * (isAssetNode(node) ? 198 : 34), y: rowBase + Math.floor(index / (isAssetNode(node) ? 2 : 1)) * (isAssetNode(node) ? 250 : 148), width: node.width, height: node.height, collapsed: current[node.key]?.collapsed === true, groupId: current[node.key]?.groupId || null };
     }
     const nextViewport = viewportForItems(positionedItems(graph.nodes, next));
+    markExplicit(graph.nodes.map((node) => node.key));
     replaceLayoutState({ positions: next, ...(nextViewport ? { viewport: nextViewport } : {}) });
-  }, [graph.nodes, replaceLayoutState, viewportForItems]);
-  const nudgeSelected = useCallback((dx, dy) => updatePositions((current) => {
+  }, [graph.nodes, markExplicit, replaceLayoutState, viewportForItems]);
+  const nudgeSelected = useCallback((dx, dy) => { markExplicit(selectedKeys); updatePositions((current) => {
     const next = { ...current };
     selectedKeys.forEach((key) => { const node = nodeByKey.get(key); if (node) next[key] = { ...(next[key] || {}), x: snapCoordinate(node.x + dx), y: snapCoordinate(node.y + dy) }; });
     return next;
-  }), [nodeByKey, selectedKeys, snapCoordinate, updatePositions]);
+  }); }, [markExplicit, nodeByKey, selectedKeys, snapCoordinate, updatePositions]);
 
   const createGroup = useCallback(() => {
     if (selectedNodes.length < 2) return;
@@ -1207,59 +1151,19 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     const group = { id, title, groupType: 'custom', x: bounds.x - 24, y: bounds.y - 54, width: bounds.width + 48, height: bounds.height + 78, metadata: { collapsed: false } };
     const nextPositions = { ...positionsRef.current };
     for (const node of selectedNodes) nextPositions[node.key] = { ...(nextPositions[node.key] || {}), x: node.x, y: node.y, width: node.width, height: node.height, groupId: id };
+    markExplicit(selectedNodes.map((node) => node.key));
     setGroupTitle('');
     replaceLayoutState({ groups: [...groupsRef.current, group], positions: nextPositions });
-  }, [groupTitle, replaceLayoutState, selectedNodes]);
+  }, [groupTitle, markExplicit, replaceLayoutState, selectedNodes]);
   const toggleGroupCollapsed = useCallback((groupId) => updateGroups((current) => current.map((group) => group.id === groupId ? { ...group, metadata: { ...(group.metadata || {}), collapsed: !group.metadata?.collapsed } } : group)), [updateGroups]);
   const ungroup = useCallback((groupId) => {
+    const affected = Object.entries(positionsRef.current).filter(([, value]) => value?.groupId === groupId).map(([key]) => key);
     const nextPositions = Object.fromEntries(Object.entries(positionsRef.current).map(([key, value]) => [key, value?.groupId === groupId ? { ...value, groupId: null } : value]));
+    markExplicit(affected);
     replaceLayoutState({ groups: groupsRef.current.filter((group) => group.id !== groupId), positions: nextPositions });
-  }, [replaceLayoutState]);
-  const removeResourceNode = useCallback((node) => {
-    if (!node || !isResourceType(node.entityType)) return;
-    const nextPlacements = resourcePlacementsRef.current.filter((item) => !(item.entityType === node.entityType && item.entityId === node.entityId));
-    const nextPositions = { ...positionsRef.current };
-    delete nextPositions[node.key];
-    const nextLinks = linksRef.current.filter((link) => !(link.sourceType === node.entityType && link.sourceId === node.entityId) && !(link.targetType === node.entityType && link.targetId === node.entityId));
-    replaceLayoutState({ resourcePlacements: nextPlacements, positions: nextPositions, manualLinks: nextLinks });
-    setSelectedKeys((current) => { const next = new Set(current); next.delete(node.key); return next; });
-  }, [replaceLayoutState]);
-
-  const addResourceNode = useCallback((resource, position = null) => {
-    if (!resource) return;
-    const entityType = resource.entityType;
-    const entityId = resource.resourceId;
-    const key = nodeKey(entityType, entityId);
-    const rect = canvasRef.current?.getBoundingClientRect();
-    const fallback = rect ? screenToWorld(rect.left + Math.min(rect.width - 180, 360), rect.top + 160 + resourcePlacementsRef.current.length * 24) : { x: 280, y: 460 };
-    const world = snapPoint(position || fallback);
-    const [width, height] = NODE_SIZE[entityType] || [230, 116];
-    const placement = { entityType, entityId };
-    const nextPlacements = resourcePlacementsRef.current.some((item) => item.entityType === entityType && item.entityId === entityId) ? resourcePlacementsRef.current : [...resourcePlacementsRef.current, placement];
-    const nextPositions = { ...positionsRef.current, [key]: { ...(positionsRef.current[key] || {}), x: world.x, y: world.y, width, height, groupId: positionsRef.current[key]?.groupId || null } };
-    let nextLinks = linksRef.current;
-    const targetNode = primaryNode || (selectedRound ? { entityType: 'round', entityId: selectedRound.id } : selectedTask ? { entityType: 'task', entityId: selectedTask.id } : project ? { entityType: 'project', entityId: project.id } : null);
-    if (targetNode) {
-      const targetType = targetNode.entityType;
-      const targetId = targetNode.entityId;
-      if (!(targetType === entityType && targetId === entityId) && !nextLinks.some((link) => link.sourceType === entityType && link.sourceId === entityId && link.targetType === targetType && link.targetId === targetId && link.linkType === 'context')) {
-        nextLinks = [...nextLinks, { id: clientId('link'), sourceType: entityType, sourceId: entityId, targetType, targetId, linkType: 'context', label: '计划信息', metadata: { manual: true } }];
-      }
-    }
-    replaceLayoutState({ resourcePlacements: nextPlacements, positions: nextPositions, manualLinks: nextLinks });
-    setSelectedKeys(new Set([key]));
-  }, [primaryNode, project, replaceLayoutState, screenToWorld, selectedRound, selectedTask, snapPoint]);
-  const handleResourceDrop = (event) => {
-    const resourceId = event.dataTransfer?.getData('application/x-daoge-resource');
-    if (!resourceId) return;
-    const resource = resourceById.get(resourceId);
-    if (!resource) return;
-    event.preventDefault();
-    event.stopPropagation();
-    addResourceNode(resource, screenToWorld(event.clientX, event.clientY));
-  };
+  }, [markExplicit, replaceLayoutState]);
   const handleNodeDragStart = useCallback((event, node) => {
-    if (!isAssetNode(node) && !node.resourceNode) return;
+    if (!isAssetNode(node)) return;
     event.dataTransfer.setData('application/x-daoge-lineage-node', JSON.stringify({ key: node.key }));
     event.dataTransfer.effectAllowed = 'link';
   }, []);
@@ -1281,8 +1185,8 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   }, []);
 
   const writeClipboard = useCallback((message) => {
-    if (!canWriteTextClipboard()) { setLayoutError('当前浏览器未提供剪贴板权限，请在会话中手动引用该节点。'); return; }
-    void navigator.clipboard.writeText(message).then(() => setSaveState({ status: 'saved', message: '已复制' })).catch(() => setLayoutError('无法复制计划信息，请在会话里手动引用这个节点。'));
+    if (!canWriteTextClipboard()) { setSaveState({ status: 'error', message: '当前浏览器未提供剪贴板权限，请在会话中手动引用该节点。' }); return; }
+    void navigator.clipboard.writeText(message).then(() => setSaveState({ status: 'saved', message: '已复制' })).catch(() => setSaveState({ status: 'error', message: '无法复制计划信息，请在会话里手动引用这个节点。' }));
   }, []);
   const copyContextForNodes = useCallback((mode = 'plan', sourceNodes = selectedNodes) => {
     const intro = mode === 'variation' ? '请基于这些谱系节点起草一个“变体”批次计划；先不要真的出图，给我审阅确认。' : mode === 'refinement' ? '请基于这些谱系节点起草一个“优化”批次计划；先不要真的出图，给我审阅确认。' : mode === 'reference' ? '请把这些素材/资料作为下一轮的参考起草计划；先不要真的出图，给我审阅确认。' : '请基于 Workbench 创作谱系中的节点生成计划草稿；先不要真的出图，给我审阅确认。';
@@ -1306,7 +1210,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       URL.revokeObjectURL(url);
       setSaveState({ status: 'saved', message: '已导出隐去隐私的谱系摘要' });
     } catch (error) {
-      setLayoutError(error?.message || '无法导出隐去隐私的谱系摘要。');
+      setSaveState({ status: 'error', message: error?.message || '无法导出隐去隐私的谱系摘要。' });
     }
   }, [graph.connections, nodes, project, renderedGroups, scope, validManualLinks]);
 
@@ -1370,7 +1274,6 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
           <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')}><BoxSelect size={15} />选择</button>
           <button type="button" className={tool === 'pan' ? 'is-active' : ''} onClick={() => setTool('pan')}><Move size={15} />拖动画布</button>
           <button type="button" onClick={autoArrange}><Columns3 size={15} />自动整理</button>
-          <button type="button" onClick={() => setResourcePanelOpen((value) => !value)}><BookOpen size={15} />{resourcePanelOpen ? '隐藏资料' : '显示资料'}</button>
           <details className="lineage-edit-more">
             <summary><Grid2X2 size={15} />编辑设置</summary>
             <div className="lineage-edit-menu">
@@ -1388,7 +1291,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         <button type="button" className={outlineOpen ? 'is-active' : ''} aria-pressed={outlineOpen} aria-controls="lineage-accessible-view" aria-label={outlineOpen ? '收起列表文字谱系视图' : '打开列表文字谱系视图'} onClick={() => setOutlineOpen((value) => !value)}><BookOpen size={15} />{outlineOpen ? '收起文字谱系' : '文字谱系'}</button>
       </div>
     </header>
-    <LineageWorkspaceSummary project={project} selectedTask={selectedTask} selectedRound={selectedRound} runs={runs} sessionPlanStatus={sessionPlanStatus} graph={graph} mode={settings.mode || 'map'} onMode={(mode) => updateSettings({ mode }, false)} onOpenTasks={() => onNavigate({ view: 'tasks', projectId: project?.id || null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })} onCreateTask={onCreateTask} />
+    <LineageWorkspaceSummary selectedTask={selectedTask} selectedRound={selectedRound} runs={runs} sessionPlanStatus={sessionPlanStatus} graph={graph} mode={settings.mode || 'map'} onMode={(mode) => updateSettings({ mode }, false)} onOpenTasks={() => onNavigate({ view: 'tasks', projectId: project?.id || null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })} onCreateTask={onCreateTask} />
 
     <div className="lineage-filterbar" data-lineage-no-zoom>
       <div>{FILTERS.map(([value, label]) => <button type="button" key={value} className={settings.filter === value ? 'is-active' : ''} onClick={() => updateSettings({ filter: value })}>{label}</button>)}</div>
@@ -1406,8 +1309,8 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       {nodeSearchQuery && nodeSearchResults.length ? <div className="lineage-search-results" id={searchListId} role="listbox" aria-label="谱系节点搜索结果">{nodeSearchResults.map((node, index) => <button type="button" role="option" aria-selected={index === nodeSearchIndex} id={'lineage-search-option-' + index} key={node.key} className={index === nodeSearchIndex ? 'is-active' : ''} onClick={() => { setNodeSearchIndex(index); focusNode(node); }}><strong>{node.title}</strong><small>{nodeTypeLabel(node.entityType)} · {shortId(node.entityId)}</small></button>)}</div> : null}
     </div>
     {outlineOpen && <LineageTextView id="lineage-accessible-view" nodes={nodes} connections={allConnections} endpointByKey={endpointByKey} selectedKeys={selectedKeys} scope={scope} coverage={{ assets: { loaded: lineageAssetsLoaded, total: lineageAssetTotal, loading: lineageAssetLoading || !layoutReady }, runItems: { loaded: lineageRunItemsLoaded, total: lineageRunItemTotal, loading: runItemCoverage?.loading === true || !layoutReady } }} onFocus={selectAccessibleNode} onOpen={(node) => openNode(node, { onNavigate, onInspectAsset })} />}
-    <div className={'lineage-shell' + (editing && resourcePanelOpen ? ' has-resources' : '')}>
-      <div ref={canvasRef} tabIndex={0} className={'lineage-canvas bg-' + settings.background} onPointerDown={handleCanvasPointerDown} onKeyDown={handleKeyDown} onContextMenu={(event) => openContextMenu(event)} onDragOver={(event) => { if (dataTransferHasType(event.dataTransfer, 'application/x-daoge-resource')) event.preventDefault(); }} onDrop={handleResourceDrop} aria-label="创作谱系画布，可拖入资料节点，可用方向键微调选中节点">
+    <div className="lineage-shell">
+      <div ref={canvasRef} tabIndex={0} className={'lineage-canvas bg-' + settings.background} onPointerDown={handleCanvasPointerDown} onKeyDown={handleKeyDown} onContextMenu={(event) => openContextMenu(event)} onDragOver={(event) => { if (dataTransferHasType(event.dataTransfer, 'application/x-daoge-lineage-node')) event.preventDefault(); }} aria-label="创作谱系画布；拖拽图片到批次上可建立引用，可用方向键微调选中节点">
         {!layoutReady && <div className="lineage-loading"><LoaderCircle size={18} className="spin" />读取谱系布局</div>}
         <svg className="lineage-edges" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}>
           <defs><marker id="lineage-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" /></marker></defs>
@@ -1426,10 +1329,11 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         </div>
         {planEditNotice && <p className="lineage-notice" role="status">{planEditNotice}</p>}
         {planEdit && <PlanEditDialog node={planEdit.node} form={planEdit.form} busy={planEditBusy} error={planEditError} onChange={(form) => setPlanEdit({ ...planEdit, form })} onSave={() => void savePlanEdit()} onDismiss={() => setPlanEdit(null)} />}
-        {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} nodeItems={contextNode ? nodeMenuItems(contextNode, nodeMenuContext(contextNode)) : EMPTY_ARRAY} onNodeItem={(itemId) => runNodeMenuItem(itemId, contextNode)} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode && !isResourceType(contextNode.entityType))} canGroup={editing && selectedNodes.length > 1} canRemoveResource={editing && contextNode && isResourceType(contextNode.entityType)} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onRemoveResource={() => contextNode && removeResourceNode(contextNode)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
+        {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} nodeItems={contextNode ? nodeMenuItems(contextNode, nodeMenuContext(contextNode)) : EMPTY_ARRAY} onNodeItem={(itemId) => runNodeMenuItem(itemId, contextNode)} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode)} canGroup={editing && selectedNodes.length > 1} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
         {editing && settings.minimap && <LineageMinimap nodes={renderableNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} selectedKeys={selectedKeys} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
+        {editing && shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
       </div>
-      <LineageInspector onEditPlan={openPlanEdit} batchQuality={inspectorBatchQuality} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onBatchSelectAssets={onBatchSelectAssets} onBatchReviewAssets={onBatchReviewAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onOpenProvider={onOpenProvider} onCopyContext={copyContextForNodes} onCreateTask={onCreateTask} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onCreateDelivery={onCreateDelivery} onOpenConfirmation={onOpenConfirmation} />
+      <LineageInspector onEditPlan={openPlanEdit} batchQuality={inspectorBatchQuality} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onBatchSelectAssets={onBatchSelectAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={copyContextForNodes} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenConfirmation={onOpenConfirmation} />
     </div>
   </section>;
 }
@@ -1455,7 +1359,7 @@ function LineageTextView({ id = 'lineage-accessible-view', nodes = EMPTY_ARRAY, 
   </section>;
 }
 
-function LineageContextMenu({ editing, menu, node, selectedCount, canOpen, canGroup, canRemoveResource, nodeItems = EMPTY_ARRAY, onNodeItem, onClose, onOpen, onFit, onGroup, onCopy, onRemoveResource, onExport, onShortcuts }) {
+function LineageContextMenu({ editing, menu, node, selectedCount, canOpen, canGroup, nodeItems = EMPTY_ARRAY, onNodeItem, onClose, onOpen, onFit, onGroup, onCopy, onExport, onShortcuts }) {
   const menuRef = useRef(null);
   useEffect(() => {
     const restoreTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1485,28 +1389,11 @@ function LineageContextMenu({ editing, menu, node, selectedCount, canOpen, canGr
     {selectedCount > 0 && <button type="button" role="menuitem" onClick={() => { onFit(); onClose(); }}><ZoomIn size={14} />适应选择</button>}
     {selectedCount > 0 && <button type="button" role="menuitem" onClick={() => { onCopy(); onClose(); }}><Copy size={14} />复制参考信息</button>}
     {editing && canGroup && <button type="button" role="menuitem" onClick={() => { onGroup(); onClose(); }}><BoxSelect size={14} />组成分组</button>}
-    {editing && canRemoveResource && <button type="button" role="menuitem" onClick={() => { onRemoveResource(); onClose(); }}><Trash2 size={14} />移除资料节点</button>}
     <button type="button" role="menuitem" onClick={() => { onExport(); onClose(); }}><Download size={14} />导出隐去隐私的摘要</button>
     <button type="button" role="menuitem" onClick={() => { onShortcuts(); onClose(); }}><BookOpen size={14} />查看快捷键</button>
   </div>;
 }
 
-function ResourcePanel({ resources, query, filter, onQuery, onFilter, onAdd }) {
-  return <aside className="lineage-resource-panel" data-lineage-no-zoom aria-label="创作资料节点">
-    <div className="lineage-resource-head"><p className="eyebrow">资料节点</p><h2>拖入画布，形成计划信息</h2><span>只创建画布标注，不会真的出图。</span></div>
-    <label className="lineage-resource-search"><Search size={14} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索任务、风格或品牌" /></label>
-    <div className="lineage-resource-filters">{RESOURCE_FILTERS.map(([value, label]) => <button type="button" key={value} className={filter === value ? 'is-active' : ''} onClick={() => onFilter(value)}>{label}</button>)}</div>
-    <div className="lineage-resource-list">{resources.length ? resources.map((resource) => <ResourceCard key={resource.id} resource={resource} onAdd={onAdd} />) : <p>暂无可拖入的资料。</p>}</div>
-  </aside>;
-}
-function ResourceCard({ resource, onAdd }) {
-  return <article className={'lineage-resource-card kind-' + resource.kind} draggable onDragStart={(event) => { event.dataTransfer.setData('application/x-daoge-resource', resource.id); event.dataTransfer.effectAllowed = 'copy'; }}>
-    <div>{resource.kind === 'task' ? <BookOpen size={15} /> : resource.kind === 'style' ? <Palette size={15} /> : <Tag size={15} />}<span>{resource.source}</span></div>
-    <strong>{resource.title}</strong>
-    <p>{safeResourceSummary(resource)}</p>
-    <button type="button" className="outline-button" onClick={() => onAdd(resource)}>加入画布</button>
-  </article>;
-}
 function LineageGroup({ group, memberCount, onToggle, onUngroup }) {
   const collapsed = group.metadata?.collapsed === true;
   return <section className={'lineage-group' + (collapsed ? ' is-collapsed' : '')} style={{ left: group.x, top: group.y, width: group.width, height: group.height }}>
@@ -1514,9 +1401,9 @@ function LineageGroup({ group, memberCount, onToggle, onUngroup }) {
   </section>;
 }
 function LineageNode({ node, active, searchHit, searchActive, actions = EMPTY_ARRAY, onAction, onPointerDown, onSelect, onOpen, onToggleCollapsed, onContextMenu, onDragStart, onDragOver, onDrop }) {
-  const status = statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status);
+  const status = statusPresentation(node.entityType === 'round' ? 'round' : node.entityType === 'task' ? 'task' : 'generic', node.status);
   const isAsset = isAssetNode(node);
-  const canReference = isAsset || node.resourceNode;
+  const canReference = isAsset;
   const handleKeyDown = (event) => {
     if (event.key === 'Enter') { event.preventDefault(); onOpen(); return; }
     if (event.key === ' ') { event.preventDefault(); onSelect(event, node); return; }
@@ -1524,38 +1411,33 @@ function LineageNode({ node, active, searchHit, searchActive, actions = EMPTY_AR
   };
   return <article role="button" tabIndex={0} aria-pressed={active} aria-label={nodeTypeLabel(node.entityType) + '：' + node.title} className={'lineage-node type-' + node.entityType + ' tone-' + (node.tone || node.entityType) + (active ? ' is-active' : '') + (searchHit ? ' is-search-hit' : '') + (searchActive ? ' is-search-active' : '') + (node.focused ? ' is-focused' : '') + (node.mediaUnavailable ? ' is-unavailable' : '')} style={{ left: node.x, top: node.y, width: node.width, height: node.height }} onPointerDown={(event) => onPointerDown(event, node)} onKeyDown={handleKeyDown} onDoubleClick={() => (node.collapsible ? onToggleCollapsed(node) : onOpen())} onContextMenu={(event) => onContextMenu(event, node)} onDragOver={(event) => onDragOver(event, node)} onDrop={(event) => onDrop(event, node)}>
     {active && actions.length > 0 && <div className="lineage-node-toolbar" data-lineage-no-zoom aria-label="对这个节点的操作">{actions.map((item) => <button type="button" key={item.id} className={item.primary ? 'is-primary' : undefined} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onAction(item.id); }}>{item.label}</button>)}</div>}
-    {canReference && <span className="lineage-reference-handle" draggable title="拖到计划、批次、任务或项目节点上，作为参考信息" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, node)}><GitFork size={12} /></span>}
+    {canReference && <span className="lineage-reference-handle" draggable title="拖到批次或任务节点上，作为参考信息" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, node)}><GitFork size={12} /></span>}
     {isAsset ? <div className="lineage-thumb"><img src={assetThumbnailUrl(node.entity)} alt="" loading="lazy" decoding="async" />{assetBadges(node).map(([tone, label]) => <span key={tone + label} className={'badge-' + tone}>{label}</span>)}</div> : node.entityType === 'placeholder' ? <div className="lineage-thumb is-placeholder" role="status" aria-label="这张还在生成"><span>生成中</span></div> : <NodeIcon node={node} />}
     <div className="lineage-node-copy"><header><strong title={node.title}>{node.title}</strong><span className={'lineage-status ' + status.tone}>{status.label}</span></header><p title={node.subtitle}>{node.subtitle}</p>{node.collapsible && <p className="lineage-collapse-hint">{node.collapsed ? '双击展开这一批的图' : '双击收起'}</p>}{node.planDetail && <div className="lineage-plan-mini"><span>{node.planDetail.itemCount || 0} 项</span><span>{node.planDetail.referenceCount || 0} 参考</span><span>{node.planDetail.outputSummary}</span></div>}</div>
   </article>;
 }
 function NodeIcon({ node }) {
   const props = { size: 22, strokeWidth: 1.7 };
-  const Icon = node.entityType === 'project' ? Archive : node.entityType === 'task' ? Sparkles : node.entityType === 'round' ? GitFork : node.entityType === 'plan' ? Copy : node.entityType === 'run' ? Play : node.entityType === 'run_item' ? Grid2X2 : node.entityType === 'delivery' ? PackageCheck : node.entityType === 'task_type' ? BookOpen : node.entityType === 'style_kit' ? Palette : node.entityType === 'brand_kit' ? Tag : Image;
+  const Icon = node.entityType === 'task' ? Sparkles : node.entityType === 'round' ? GitFork : Image;
   return <div className="lineage-node-icon"><Icon {...props} /></div>;
 }
 function openNode(node, { onNavigate, onInspectAsset }) {
-  if (node.entityType === 'project') onNavigate({ view: 'project-overview', projectId: node.entity.id, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
-  else if (node.entityType === 'task') onNavigate({ view: 'lineage', taskId: node.entity.id, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
-  else if (node.entityType === 'round' || node.entityType === 'plan') onNavigate({ view: 'prompts', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' });
-  else if (node.entityType === 'run') onNavigate({ view: 'runs', roundId: node.entity.roundId, compareRoundIds: [node.entity.roundId], runId: node.entity.id, assetScope: 'round' });
-  else if (node.entityType === 'run_item' && (node.roundId || node.entity?.roundId)) { const roundId = node.roundId || node.entity.roundId; onNavigate({ view: 'runs', roundId, compareRoundIds: [roundId], runId: node.runId || node.entity?.runId || null, assetScope: 'round' }); }
+  if (node.entityType === 'task') onNavigate({ view: 'lineage', taskId: node.entity.id, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
+  else if (node.entityType === 'round') onNavigate({ view: 'prompts', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' });
   else if (isAssetNode(node)) onInspectAsset(node.entity.id);
-  else if (node.entityType === 'delivery') onNavigate({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
 }
 function contextRouteForNode(node) {
   if (!node) return null;
-  if (node.entityType === 'project') return { view: 'lineage', projectId: node.entity.id, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' };
   if (node.entityType === 'task') return { view: 'lineage', projectId: node.entity.projectId, taskId: node.entity.id, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' };
-  if (node.entityType === 'round' || node.entityType === 'plan') return { view: 'lineage', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' };
+  if (node.entityType === 'round') return { view: 'lineage', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' };
   return null;
 }
-function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onReviewAsset, onBatchReviewAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onOpenProvider, onCopyContext, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onCreateDelivery, onOpenConfirmation, onEditPlan, batchQuality = '' }) {
+function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onEditPlan, batchQuality = '' }) {
   if (!selectedNodes.length) {
     return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
       <p className="eyebrow">检查器</p>
       <h2>选择一个节点</h2>
-      <p>{editing ? '编辑模式可多选、分组、添加标注或拖入资料。' : '单击节点查看详情；节点相关动作会在这里出现。'}</p>
+      <p>{editing ? '编辑模式可多选、分组或添加标注。' : '单击节点查看详情；节点相关动作会在这里出现。'}</p>
       <p className="lineage-note">先点画布里的图片或批次；右侧只显示和当前选择直接相关的操作。</p>
     </aside>;
   }
@@ -1586,7 +1468,6 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
   }
   const entity = node.entity;
   const isAsset = isAssetNode(node);
-  const isResource = node.resourceNode || isResourceType(node.entityType);
   return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
     <div className="lineage-inspector-head">
       <div><p className="eyebrow">检查器</p><h2>{node.title}</h2></div>
@@ -1594,7 +1475,7 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
     </div>
     <dl>
       <div><dt>类型</dt><dd>{nodeTypeLabel(node.entityType)}</dd></div>
-      <div><dt>状态</dt><dd>{isAsset ? assetState(entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable, node.derivedAsset) : statusPresentation(node.entityType === 'run_item' ? 'run_item' : node.entityType === 'run' ? 'run' : node.entityType === 'delivery' ? 'delivery' : 'generic', node.status).label}</dd></div>
+      <div><dt>状态</dt><dd>{isAsset ? assetState(entity, node.selectedAsset, node.sharedAsset, node.deliveredAsset, node.mediaUnavailable, node.derivedAsset) : statusPresentation(node.entityType === 'round' ? 'round' : node.entityType === 'task' ? 'task' : 'generic', node.status).label}</dd></div>
       <div><dt>短 ID</dt><dd>{shortId(node.entityId)}</dd></div>
     </dl>
     {/* 计划是批次的属性（B2 之后计划不再单独成节点）——**确认闸门也随之挂在批次上**：
@@ -1603,7 +1484,7 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
       {batchQuality && <p className="lineage-quality-line" aria-label="这一批的质量">{batchQuality}</p>}
       <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} onEditPlan={onEditPlan} />
     </>}
-    {node.entityType === 'plan' ? null : isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onReviewAsset={onReviewAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : node.entityType === 'run_item' ? <RunItemActions item={entity} /> : node.entityType === 'run' ? <RunActions run={entity} onNavigate={onNavigate} /> : isResource ? <ResourceActions node={node} onCopyContext={onCopyContext} /> : ['task', 'round', 'delivery'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} onOpenReference={onOpenReference} /> : null}
+    {isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : ['task', 'round'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} /> : null}
     {editing && nodeLinks.length ? <SoftLinkList links={nodeLinks} node={node} onRemove={onRemoveLink} onUpdate={onUpdateLink} onReverse={onReverseLink} /> : null}
   </aside>;
 }
@@ -1614,7 +1495,6 @@ function RelationActions({ nodes, onCreate }) {
 function SoftLinkList({ links, node, onRemove, onUpdate, onReverse }) {
   return <div className="lineage-soft-links"><h3>人工标注</h3>{links.map((link) => <div key={link.id}><select value={link.linkType} onChange={(event) => onUpdate(link.id, { linkType: event.target.value, label: relationLabel(event.target.value) })}>{RELATION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input value={link.label} maxLength={80} onChange={(event) => onUpdate(link.id, { label: event.target.value })} aria-label="软连线标签" /><small>{link.sourceType === node.entityType && link.sourceId === node.entityId ? '指向 ' + nodeTypeLabel(link.targetType) + ' ' + shortId(link.targetId) : '来自 ' + nodeTypeLabel(link.sourceType) + ' ' + shortId(link.sourceId)}</small><button type="button" className="icon-button" aria-label="反转软连线方向" onClick={() => onReverse(link.id)}><GitFork size={13} /></button><button type="button" className="icon-button" aria-label="删除软连线" onClick={() => onRemove(link.id)}><X size={13} /></button></div>)}</div>;
 }
-function ResourceActions({ node, onCopyContext }) { return <div className="lineage-inspector-actions"><p className="lineage-note">资料节点只是记下的信息。复制后回到会话整理成计划，不会直接出图。</p><button type="button" className="command-button" onClick={() => onCopyContext('plan', [node])}><Copy size={15} />复制计划指令</button><button type="button" className="outline-button" onClick={() => onCopyContext('variation', [node])}><Sparkles size={15} />复制变体要求</button></div>; }
 function PlanActions({ node, onNavigate, onCopyContext, onOpenConfirmation, onEditPlan }) {
   const detail = node.planDetail || roundPlanDetails(node.entity);
   const needsConfirmation = node.entity?.status === 'awaiting_confirmation';
@@ -1654,7 +1534,7 @@ function LineageAssetGetActions({ asset, onPreviewAsset, onDownloadAsset, onCopy
     </div>
   </section>;
 }
-function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selectedRound, onPreviewAsset, onInspectAsset, onToggleAsset, onReviewAsset, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext, onOpenDerive, onAddReference, onReject, onOpenReference }) {
+function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selectedRound, onPreviewAsset, onInspectAsset, onToggleAsset, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext, onOpenDerive, onAddReference, onReject, onOpenReference }) {
   const asset = node.entity;
   const fallbackTask = taskForAsset(asset, tasks);
   if (node.externalSharedAsset) return <div className="lineage-inspector-stack">
@@ -1671,19 +1551,8 @@ function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selectedRound, 
     <details className="lineage-secondary-actions"><summary>更多信息</summary><div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onSetAssetShared(asset, !node.sharedAsset)}><Share2 size={15} />{node.sharedAsset ? '取消共享' : '共享素材'}</button></div></details>
   </div>;
 }
-function RunItemActions({ item }) {
-  const retryable = ['failed', 'blocked', 'retry_wait'].includes(item.status);
-  const errorSummary = runItemErrorSummary(item) || '这张暂无错误。';
-  // 归因（方案 4.10）：分清「我的问题」与「系统的问题」——下一步完全不同。没写明就说没写明，不猜。
-  const attribution = failureAttribution(item);
-  const failureStatuses = ['failed', 'blocked', 'retry_wait', 'outcome_unknown'];
-  return <div className="lineage-inspector-actions"><p>{errorSummary}</p>{failureStatuses.includes(item.status) && <p className={'lineage-attribution is-' + attribution.owner}>{attribution.label}。{attribution.advice}</p>}{retryable ? <p className="lineage-note">可重试的单张出图请回到会话处理；创作平台只展示状态，不直接重试。</p> : item.status === 'outcome_unknown' ? <p className="lineage-note">未知结果需要用户核实，不能自动重放；请回到当前 Agent 会话处理。</p> : null}</div>;
-}
-function RunActions({ run, onNavigate }) {
-  const execution = runExecutionPresentation(run, []);
-  return <div className="lineage-inspector-actions"><p>{execution.detail || '出图由后台队列执行，这里只展示状态。'}</p><button type="button" className="outline-button" onClick={() => onNavigate({ view: 'runs', roundId: run.roundId, compareRoundIds: [run.roundId], runId: run.id, assetScope: 'round' })}><Eye size={15} />查看生成历史</button>{!['completed', 'cancelled'].includes(run.status) && <p className="lineage-note">暂停、恢复或取消运行请回到当前 Agent 会话处理；创作谱系只展示状态。</p>}</div>;
-}
-function NavigationActions({ node, onNavigate, onCreateRound, onOpenReference }) {
+
+function NavigationActions({ node, onNavigate, onCreateRound }) {
   const route = contextRouteForNode(node);
   const isTask = node.entityType === 'task';
   const isRound = node.entityType === 'round' || node.entityType === 'plan';

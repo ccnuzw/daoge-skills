@@ -206,10 +206,6 @@ function actionIdsFor(error) {
   return ['view-details'];
 }
 
-function isNormalized(value) {
-  return isObject(value) && typeof value.category === 'string' && typeof value.safeToRetry === 'boolean' && Array.isArray(value.actions);
-}
-
 export function normalizeWorkbenchError(input, options = {}) {
   const apiError = nestedError(input) || (isObject(input) ? input : null);
   const details = nestedDetails(input, apiError);

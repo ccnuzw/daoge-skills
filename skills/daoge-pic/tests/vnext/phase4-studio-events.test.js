@@ -144,17 +144,17 @@ test('event refresh classification stays bounded and includes plan invalidation'
     { entityType: 'run_item', eventType: 'run_item.retry_wait' },
     ...Array.from({ length: 200 }, () => ({ entityType: 'asset', eventType: 'asset.reviewed' }))
   ]);
-  assert.deepEqual(plan, { scope: 'all', refreshContext: true, refreshAssets: true, refreshSelection: true, refreshSharedAssets: false, refreshCanvasLayout: false, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, canvasLayout: false, maximumRefreshes: 4 });
-  assert.deepEqual(studioEventRefreshPlan([{ entityType: 'asset', eventType: 'asset.shared_across_projects' }]), { scope: 'context', refreshContext: false, refreshAssets: true, refreshSelection: false, refreshSharedAssets: true, refreshCanvasLayout: false, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: false, canvasLayout: false, maximumRefreshes: 3 });
+  assert.deepEqual(plan, { scope: 'all', refreshContext: true, refreshAssets: true, refreshSelection: true, refreshSharedAssets: false, refreshCanvasLayout: false, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: true, canvasLayout: false, requests: false, maximumRefreshes: 4 });
+  assert.deepEqual(studioEventRefreshPlan([{ entityType: 'asset', eventType: 'asset.shared_across_projects' }]), { scope: 'context', refreshContext: false, refreshAssets: true, refreshSelection: false, refreshSharedAssets: true, refreshCanvasLayout: false, taskOverview: true, creativeRecord: true, studioOverview: true, planVersions: false, canvasLayout: false, requests: false, maximumRefreshes: 3 });
   assert.equal(studioEventRefreshPlan([{ entityType: 'delivery', eventType: 'delivery.exported' }]).refreshContext, true);
-  assert.deepEqual(studioEventRefreshPlan([{ entityType: 'canvas_layout', eventType: 'canvas_layout.updated' }]), { scope: 'context', refreshContext: false, refreshAssets: false, refreshSelection: false, refreshSharedAssets: false, refreshCanvasLayout: true, taskOverview: false, creativeRecord: false, studioOverview: false, planVersions: false, canvasLayout: true, maximumRefreshes: 1 });
+  assert.deepEqual(studioEventRefreshPlan([{ entityType: 'canvas_layout', eventType: 'canvas_layout.updated' }]), { scope: 'context', refreshContext: false, refreshAssets: false, refreshSelection: false, refreshSharedAssets: false, refreshCanvasLayout: true, taskOverview: false, creativeRecord: false, studioOverview: false, planVersions: false, canvasLayout: true, requests: false, maximumRefreshes: 1 });
   assert.equal(studioEventRefreshPlan([{ entityType: 'project', eventType: 'project.updated' }]).scope, 'all');
 });
 test('daemon Provider config events trigger a global runtime refresh without exposing payload', async () => {
   const { studioEventRefreshPlan } = await import('../../web/src/use-studio-events.mjs');
   for (const eventType of ['daemon.provider_config_pending', 'daemon.provider_config_applied']) {
     const plan = studioEventRefreshPlan([{ entityType: 'daemon', eventType, payload: { previousProvider: { endpoint: 'https://private.example.test' }, activeProvider: { endpoint: 'https://private.example.test' } } }]);
-    assert.deepEqual(plan, { scope: 'all', refreshContext: true, refreshAssets: true, refreshSelection: false, refreshSharedAssets: false, refreshCanvasLayout: false, taskOverview: false, creativeRecord: false, studioOverview: false, planVersions: false, canvasLayout: false, maximumRefreshes: 2 });
+    assert.deepEqual(plan, { scope: 'all', refreshContext: true, refreshAssets: true, refreshSelection: false, refreshSharedAssets: false, refreshCanvasLayout: false, taskOverview: false, creativeRecord: false, studioOverview: false, planVersions: false, canvasLayout: false, requests: false, maximumRefreshes: 2 });
     assert.equal(JSON.stringify(plan).includes('private.example'), false);
   }
 });

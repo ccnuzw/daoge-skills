@@ -1,9 +1,9 @@
 # DAOGE Pic vNext
 
-> **当前稳定正式版本**：[`5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2)
-> **当前源码与运行时**：`5.14.2`（已生成正式 `.tgz` 与 sidecar；`5.14.1` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
-> **运行时兼容范围**：`>=5.14.2 <6.0.0`。
-> **Skill protocol**：`daoge-pic-skill-protocol 2.0.0`，独立于制品版本；`5.14.2` 不是协议版本。
+> **最近正式发布版本**：[`5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2)
+> **当前源码与运行时**：`6.0.0`（以人为本重构的大版本；`5.14.2` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
+> **运行时兼容范围**：`>=6.0.0 <7.0.0`。
+> **Skill protocol**：`daoge-pic-skill-protocol 3.0.0`，独立于制品版本；`6.0.0` 不是协议版本。
 > **安装来源**：GitHub Release `.tgz` 资产；这不表示包已发布到 npm registry。
 
 DAOGE Pic 是 Agent + 创作者工作台协作的本地图像创作管理平台。Agent 负责澄清、规划、确认、受控执行和风险恢复；Studio Workbench 负责符合创作者操作习惯的结构化项目/任务/轮次创建、Provider 设置、创作谱系、Generation History、素材、选片、复核和交付。

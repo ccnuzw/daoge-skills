@@ -133,9 +133,9 @@ test('four agent conversations retain independent Session context, project owner
     for (const expected of contexts) {
       const restored = await requestJson(started, '/api/sessions/' + expected.sessionId);
       assert.deepEqual({
-        projectId: restored.body.data.session.activeProjectId,
-        taskId: restored.body.data.session.activeTaskId,
-        roundId: restored.body.data.session.activeRoundId
+        projectId: restored.body.data.session.agentProjectId,
+        taskId: restored.body.data.session.agentTaskId,
+        roundId: restored.body.data.session.agentRoundId
       }, { projectId: expected.projectId, taskId: expected.taskId, roundId: expected.roundId });
       const runs = await requestJson(started, '/api/rounds/' + expected.roundId + '/runs');
       assert.deepEqual(runs.body.data.runs.map((run) => run.id), [expected.runId]);

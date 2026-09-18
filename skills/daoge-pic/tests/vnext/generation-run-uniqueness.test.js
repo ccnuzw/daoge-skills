@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
-const { closeStudioDatabase, openStudioDatabase, studioSchemaVersion } = require('../../dist/vnext/studio/database');
+const { closeStudioDatabase, openStudioDatabase, studioSchemaVersion, STUDIO_SCHEMA_VERSION } = require('../../dist/vnext/studio/database');
 const { createProject, createRoundDraft, createTaskDraft } = require('../../dist/vnext/domain/studio-commands');
 const { OPEN_RUN_STATUSES } = require('../../dist/vnext/domain/states');
 
@@ -76,7 +76,7 @@ test('a falsely completed conflicting v34 database becomes pending, then repairs
   // Simulate the broken legacy state: v34 is in the ledger even though its
   // unique index is absent, allowing conflicting open runs to exist.
   db.exec('DROP INDEX IF EXISTS idx_generation_runs_round_open');
-  assert.equal(studioSchemaVersion(db), 34);
+  assert.equal(studioSchemaVersion(db), STUDIO_SCHEMA_VERSION);
   insertRun(db, 'run-legacy-a', round.id, 'queued');
   insertRun(db, 'run-legacy-b', round.id, 'queued');
   closeStudioDatabase(db);
@@ -100,7 +100,7 @@ test('a falsely completed conflicting v34 database becomes pending, then repairs
     db.prepare("UPDATE generation_runs SET status = 'failed' WHERE id = 'run-legacy-b'").run();
     closeStudioDatabase(db);
     db = openStudioDatabase(initialized.paths, initialized.manifest);
-    assert.equal(studioSchemaVersion(db), 34, 'the next opener retries and completes v34 after repair');
+    assert.equal(studioSchemaVersion(db), STUDIO_SCHEMA_VERSION, 'the next opener retries and completes v34 (and later migrations) after repair');
     assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_generation_runs_round_open'").get());
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM generation_runs WHERE round_id = ?').get(round.id).count, 2, 'repair preserves both historical runs');
     assert.equal(db.prepare('SELECT 1 FROM schema_migration_pending WHERE version = 34').get(), undefined);

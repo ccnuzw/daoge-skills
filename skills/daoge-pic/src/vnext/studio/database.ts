@@ -4,7 +4,7 @@ import { nowIso } from '../shared/ids';
 import { StudioManifest, StudioPaths } from './workspace';
 import { afterStudioMigration, dispatchStudioMigration, STUDIO_MIGRATIONS } from './migrations';
 
-export const STUDIO_SCHEMA_VERSION = 34;
+export const STUDIO_SCHEMA_VERSION = 41;
 export const STUDIO_EVENT_RETENTION = 2000;
 
 export type StudioDatabase = DatabaseSyncType;
@@ -55,7 +55,7 @@ function assertSupportedStudioSchema(db: StudioDatabase): void {
 }
 const REQUIRED_SCHEMA_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   studios: ['id', 'workspace_root', 'schema_version'],
-  studio_sessions: ['id', 'studio_id', 'version'],
+  studio_sessions: ['id', 'studio_id', 'version', 'agent_project_id', 'agent_task_id', 'agent_round_id'],
   projects: ['id', 'studio_id', 'template_id', 'template_version'],
   generation_runs: ['id', 'round_id', 'provider_profile_id', 'provider_config_version', 'usage_estimate_json'],
   run_items: ['id', 'run_id', 'status', 'lease_worker_id'],
@@ -69,10 +69,12 @@ const REQUIRED_SCHEMA_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   budget_policies: ['id', 'studio_id', 'limit_cost_minor', 'cost_unit', 'mode'],
   media_commit_journal: ['asset_id', 'studio_id', 'owner_id', 'heartbeat_at'],
   delivery_export_journal: ['studio_id', 'idempotency_key', 'delivery_id'],
-  canvas_layouts: ['id', 'studio_id', 'project_id', 'scope_type', 'scope_id'],
+  canvas_layouts: ['id', 'studio_id', 'project_id', 'viewport_json', 'settings_json', 'version'],
   canvas_node_layouts: ['id', 'layout_id', 'entity_type', 'entity_id'],
   canvas_groups: ['id', 'layout_id', 'title', 'group_type'],
   canvas_links: ['id', 'layout_id', 'source_type', 'source_id', 'target_type', 'target_id', 'link_type'],
+  studio_requests: ['id', 'studio_id', 'text', 'context_json', 'status', 'lease_token', 'lease_expires_at', 'attempts', 'created_at', 'updated_at'],
+  studio_agents: ['id', 'studio_id', 'cli_name', 'capabilities_json', 'registered_at', 'last_seen_at'],
   events: ['id', 'studio_id', 'event_type'],
   schema_migrations: ['version', 'applied_at'],
   schema_migration_pending: ['version', 'state', 'reason', 'details_json', 'updated_at']
@@ -82,6 +84,21 @@ function isOpenRunMigrationPending(db: StudioDatabase): boolean {
   const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migration_pending'").get();
   if (!table) return false;
   return Boolean(db.prepare("SELECT 1 FROM schema_migration_pending WHERE version = 34 AND state = 'degraded' AND reason = 'open_run_conflict'").get());
+}
+
+/**
+ * The degraded migration's version, when one is pending.
+ *
+ * v34 used to be the last migration, so "pending" could be spelled as
+ * `STUDIO_SCHEMA_VERSION - 1`. Later migrations break that arithmetic: v34 can
+ * be pending while the ledger would otherwise run past it. Read the version
+ * from the marker instead of deriving it from the current schema version.
+ */
+function pendingMigrationVersion(db: StudioDatabase): number | null {
+  const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migration_pending'").get();
+  if (!table) return null;
+  const row = db.prepare("SELECT version FROM schema_migration_pending WHERE state = 'degraded' LIMIT 1").get() as { version: number } | undefined;
+  return row ? Number(row.version) : null;
 }
 
 function assertOpenRunMigrationProtection(db: StudioDatabase, pending: boolean): void {
@@ -96,7 +113,7 @@ function assertOpenRunMigrationProtection(db: StudioDatabase, pending: boolean):
 
 function assertStudioSchemaIntegrity(db: StudioDatabase): void {
   const pendingOpenRunMigration = isOpenRunMigrationPending(db);
-  const expectedVersion = pendingOpenRunMigration ? STUDIO_SCHEMA_VERSION - 1 : STUDIO_SCHEMA_VERSION;
+  const expectedVersion = pendingOpenRunMigration ? Number(pendingMigrationVersion(db)) - 1 : STUDIO_SCHEMA_VERSION;
   const migrations = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>;
   if (migrations.length !== expectedVersion || migrations.some((row, index) => Number(row.version) !== index + 1)) throw new Error('Studio database migration ledger is incomplete or non-contiguous.');
   assertOpenRunMigrationProtection(db, pendingOpenRunMigration);
@@ -153,7 +170,8 @@ export function openStudioDatabase(paths: StudioPaths, manifest: StudioManifest,
       const journal = db.prepare('PRAGMA journal_mode').get() as { journal_mode?: unknown } | undefined;
       if (String(journal?.journal_mode || '').toLowerCase() !== 'wal') throw new Error('Studio database requires WAL mode before a worker can attach.');
       const current = db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number | null };
-      if (Number(current.version) !== STUDIO_SCHEMA_VERSION && !(Number(current.version) === STUDIO_SCHEMA_VERSION - 1 && isOpenRunMigrationPending(db))) throw new Error('Studio database requires daemon migration before a worker can attach.');
+      const pendingVersion = pendingMigrationVersion(db);
+      if (Number(current.version) !== STUDIO_SCHEMA_VERSION && !(pendingVersion !== null && Number(current.version) === pendingVersion - 1)) throw new Error('Studio database requires daemon migration before a worker can attach.');
       if (!options.skipIntegrityCheck) assertStudioSchemaIntegrity(db);
       return db;
     }
@@ -203,8 +221,15 @@ export function migrateStudioDatabase(db: StudioDatabase): void {
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migration.version, nowIso());
     });
     // A pending migration is a durable degraded state. Do not apply any
-    // subsequent migrations until this one has succeeded on a later opener.
-    if (migrationPending) break;
+    // subsequent migrations until this one has succeeded on a later opener —
+    // and drop any later ledger rows, so "pending at V" always means the
+    // ledger is exactly 1..V-1. Later migrations are written to be idempotent
+    // (CREATE IF NOT EXISTS / column-existence guards), so re-applying them
+    // after the repair is safe.
+    if (migrationPending) {
+      db.prepare('DELETE FROM schema_migrations WHERE version > ?').run(migration.version);
+      break;
+    }
   }
 }
 

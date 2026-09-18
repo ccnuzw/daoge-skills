@@ -55,12 +55,6 @@ export function nodeMenuItems(node, { canReview = false, canDeliver = false, can
   } else if (type === 'task') {
     body.push({ id: 'open', label: '打开这个任务' });
     body.push({ id: 'new-round', label: '新建批次' });
-  } else if (type === 'project') {
-    body.push({ id: 'open', label: '打开项目全貌' });
-    body.push({ id: 'new-task', label: '在项目里新建任务' });
-  } else if (node.resourceNode || ['task_type', 'style_kit', 'brand_kit'].includes(type)) {
-    // 资料节点记下来就是为了复制去用——这是它唯一的动作，不给等于白放。
-    body.push({ id: 'copy-plan', label: '复制计划指令' });
   } else if (type === 'placeholder') {
     // 占位是「还在生成的那一张」，此刻没有可做的决定。
     return [{ id: 'detail', label: '详情' }];

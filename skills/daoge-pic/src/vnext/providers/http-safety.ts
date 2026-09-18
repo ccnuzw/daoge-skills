@@ -503,7 +503,6 @@ function assertPublicAddress(address: string): void {
 
 export type PrivateAddressPolicy = 'local_proxy' | 'enterprise_private';
 
-function isLoopbackIpv4(bytes: readonly number[]): boolean { return bytes[0] === 127; }
 function isPrivateIpv4(bytes: readonly number[]): boolean {
   return bytes[0] === 10 || (bytes[0] === 172 && bytes[1] >= 16 && bytes[1] <= 31) || (bytes[0] === 192 && bytes[1] === 168);
 }

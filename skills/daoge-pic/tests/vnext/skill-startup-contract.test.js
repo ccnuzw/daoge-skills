@@ -119,9 +119,9 @@ test('README and authoritative specification preserve the same session-first sta
 
 test('Skill API guidance pins the protocol header and plan/history endpoints', () => {
   const commands = markdownSection(skill, '## 受控命令');
-  assert.match(commands, /x-daoge-skill-protocol: daoge-pic-skill-protocol\/2\.0\.0/);
-  assert.match(skill, />=5\.14\.2 <6\.0\.0/);
-  assert.match(commands, /5\.14\.1[\s\S]*绝不能当作协议版本/);
+  assert.match(commands, /x-daoge-skill-protocol: daoge-pic-skill-protocol\/3\.0\.0/);
+  assert.match(skill, />=6\.0\.0 <7\.0\.0/);
+  assert.match(commands, /5\.14\.2[\s\S]*绝不能当作协议版本/);
   assert.match(commands, /GET \/api\/studio/);
   assert.match(commands, /GET \/api\/sessions\/<session-id>\/plan-status/);
   assert.match(commands, /GET \/api\/rounds\/<round-id>\/runs/);
@@ -173,17 +173,17 @@ test('SKILL.md stays a thin agent protocol while retaining execution-critical ru
   assert.doesNotMatch(commands, /delivery-complete\s+--workspace/);
 });
 
-test('5.14.2 is the current source version while 5.14.1 remains the latest immutable release', () => {
+test('6.0.0 is the current source version while 5.14.2 remains the latest immutable release', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const currentDocs = `${skill}\n${readme}\n${spec}`;
 
-  assert.equal(packageJson.version, '5.14.2');
-  assert.equal(packageLock.version, '5.14.2');
-  assert.equal(packageLock.packages[''].version, '5.14.2');
-  assert.match(skill, /5\.14\.2/);
-  assert.match(readme, /5\.14\.2/);
-  assert.match(evidence, /5\.14\.1/);
+  assert.equal(packageJson.version, '6.0.0');
+  assert.equal(packageLock.version, '6.0.0');
+  assert.equal(packageLock.packages[''].version, '6.0.0');
+  assert.match(skill, /6\.0\.0/);
+  assert.match(readme, /6\.0\.0/);
+  assert.match(evidence, /5\.14\.2/);
   assert.doesNotMatch(currentDocs, /5\.11\.0[^。\n]{0,120}(?:待发布|候选)|(?:待发布|候选)[^。\n]{0,120}5\.11\.0/);
   assert.match(readme, /GitHub[^。\n]*资产[^。\n]*不表示[^。\n]*npm registry/);
   assert.match(evidence, /## 1\. daoge-pic 5\.7\.0 已发布历史证据[\s\S]*daoge-pic-5\.7\.0\.tgz[\s\S]*1fb70265f4a0e7e5858be3dec7cf21ad8706c720fede7c1712e74a36678110fe/);

@@ -145,7 +145,7 @@ test('a worker derives its lease from the Provider request timeout so the lease 
   const initialized = initializeStudio({ workspaceRoot });
   try {
     let sequence = 0;
-    const build = (limits, name) => {
+    const build = (limits) => {
       const { config } = base.configureProvider(initialized, { idempotencyKey: 'lease-derivation-' + (++sequence), name: 'Lease Provider ' + sequence, limits });
       const worker = new GenerationWorker({
         db: {},

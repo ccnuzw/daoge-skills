@@ -15,6 +15,9 @@ export const FAILURE_OWNER_LABELS = Object.freeze({
   unknown: '原因没写明'
 });
 
+/** `outcome_unknown` 专用：不是「你要改」，也不是「等等就好」，是要人去核实。 */
+const VERIFY_OWNER_LABEL = '先确认这张出没出';
+
 const SYSTEM_SIGNALS = Object.freeze([
   'rate limit', '429', 'timeout', 'timed out', 'network', 'connection',
   '502', '503', '504', 'server error', 'unavailable', 'overloaded', 'fetch failed'
@@ -26,7 +29,25 @@ const MY_SIGNALS = Object.freeze([
 ]);
 
 /**
+ * 哪些状态算「这一张有结果，但结果是坏消息」。
+ *
+ * 只有这些状态才值得说「怪谁 / 下一步怎么办」——在成功的那张图旁边写「等一等就能过」是噪音。
+ * 这份清单是**唯一来源**：界面按它决定要不要渲染归因，守卫也按它断言，
+ * 免得「哪几种算失败」在两个地方各写一遍、然后慢慢漂移。
+ */
+export const FAILURE_STATUSES = Object.freeze(['failed', 'blocked', 'retry_wait', 'outcome_unknown']);
+
+/** 这张是不是「有结果的坏消息」。 */
+export function isFailureStatus(status) {
+  return FAILURE_STATUSES.includes(String(status || ''));
+}
+
+/**
  * 单张的归因。
+ *
+ * 覆盖四种「有结果的坏消息」。**每种都要显式作答**，不能让它们掉进兜底分支——
+ * `retry_wait` 掉进去就会说成「原因没写明」，而它其实清清楚楚是系统在重试。
+ *
  * @param {any} [item]
  * @returns {{ owner: 'me'|'system'|'unknown', label: string, advice: string }}
  */
@@ -37,6 +58,16 @@ export function failureAttribution(item = {}) {
     // 被挡：有东西挡着，等是等不过去的 —— 归「我的问题」。
     return { owner: 'me', label: FAILURE_OWNER_LABELS.me, advice: '内容被挡住了：多半是描述撞了线，改一改描述再试。' };
   }
+  if (status === 'retry_wait') {
+    // 系统正在自动重试：用户什么都不用做，**别催他去改描述**。
+    return { owner: 'system', label: FAILURE_OWNER_LABELS.system, advice: '系统正在自动重试，不用改描述，等它自己来。' };
+  }
+  if (status === 'outcome_unknown') {
+    // 请求发出去了、结果没收到：既不是「你要改」，也不是「等等就好」，
+    // 而是**要人去核实一次**（方案 4.10 的两段式：先系统对账，对不出来才请人看）。
+    // 所以文案是「先确认出没出」，而不是「结果未知」四个字。
+    return { owner: 'unknown', label: VERIFY_OWNER_LABEL, advice: '这张请求发出去了但没收到结果：去服务商后台看一眼有没有出，回来告诉我们。' };
+  }
   if (SYSTEM_SIGNALS.some((signal) => summary.includes(signal))) {
     return { owner: 'system', label: FAILURE_OWNER_LABELS.system, advice: '像是服务那边的问题，等一等再重试通常就好。' };
   }
@@ -44,6 +75,17 @@ export function failureAttribution(item = {}) {
     return { owner: 'me', label: FAILURE_OWNER_LABELS.me, advice: '像是请求本身要调整：改一改描述或参数再试。' };
   }
   return { owner: 'unknown', label: FAILURE_OWNER_LABELS.unknown, advice: '错误摘要里没写明原因，可以重试一次看看。' };
+}
+
+/**
+ * 界面用的那一个：**不在失败状态就返回 null**，调用方据此决定不渲染。
+ *
+ * 这样界面里不需要再写一遍「哪几种状态算失败」，也不可能出现
+ * 「模型说这是失败、界面却没显示」或反过来的不一致。
+ * @param {any} [item]
+ */
+export function failureAttributionLine(item = {}) {
+  return isFailureStatus(item?.status) ? failureAttribution(item) : null;
 }
 
 /**

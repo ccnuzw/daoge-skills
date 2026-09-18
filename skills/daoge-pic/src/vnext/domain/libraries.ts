@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../shared/ids';
-import { StudioDatabase, appendStudioEvent, withTransaction } from '../studio/database';
+import { StudioDatabase, appendStudioEvent } from '../studio/database';
 import { executeIdempotent, InvalidCommandError, StudioNotFoundError } from './studio-commands';
 
 export interface TaskType { id: string; studioId: string | null; name: string; source: 'official' | 'user'; definition: Record<string, unknown>; }
@@ -26,9 +26,6 @@ export function createUserTaskType(db: StudioDatabase, input: { studioId: string
   }, input);
   return receipt.value;
 }
-
-function listKitAssets(db: StudioDatabase, id: string): string[] { return (db.prepare("SELECT asset_id FROM asset_relations WHERE target_type IN ('style_kit', 'brand_kit') AND target_id = ? ORDER BY created_at").all(id) as Array<{ asset_id: string }>).map((row) => row.asset_id); }
-function kitRow(row: { id: string; studio_id: string; name: string; definition_json: string }, db: StudioDatabase): CreativeKit { return { id: row.id, studioId: row.studio_id, name: row.name, definition: object(row.definition_json), assetIds: listKitAssets(db, row.id) }; }
 
 function assertAssetIds(db: StudioDatabase, studioId: string, assetIds: string[]): void {
   for (const assetId of assetIds) {

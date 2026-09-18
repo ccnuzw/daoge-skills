@@ -31,7 +31,8 @@ export type ScopedEntityType =
   | 'delivery_batch_version'
   | 'style_kit'
   | 'brand_kit'
-  | 'studio_session';
+  | 'studio_session'
+  | 'studio_request';
 
 export interface EntityScopeQuery {
   /** Human-facing entity name, used to build "not found in this Studio" messages. */
@@ -80,6 +81,7 @@ export const ENTITY_SCOPE_QUERIES: Record<ScopedEntityType, EntityScopeQuery> = 
   style_kit: scope('Style kit', 'style_kits style_kit', '', 'style_kit.id', 'style_kit.studio_id'),
   brand_kit: scope('Brand kit', 'brand_kits brand_kit', '', 'brand_kit.id', 'brand_kit.studio_id'),
   studio_session: scope('Studio session', 'studio_sessions studio_session', '', 'studio_session.id', 'studio_session.studio_id'),
+  studio_request: scope('Studio request', 'studio_requests studio_request', '', 'studio_request.id', 'studio_request.studio_id'),
   delivery: scope('Delivery', 'deliveries delivery', 'JOIN projects project ON project.id = delivery.project_id', 'delivery.id', 'project.studio_id'),
   delivery_batch: scope('Delivery batch', 'delivery_batches batch', 'JOIN projects project ON project.id = batch.project_id', 'batch.id', 'project.studio_id'),
   delivery_batch_version: scope('Delivery batch version', 'delivery_batch_versions version', 'JOIN delivery_batches batch ON batch.id = version.batch_id JOIN projects project ON project.id = batch.project_id', 'version.id', 'project.studio_id')

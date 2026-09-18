@@ -94,7 +94,7 @@ function assertReleaseArtifact(tarballPath, expectedVersion) {
   const runtimeRange = protocolContent?.toString('utf8').match(/exports\.RUNTIME_COMPATIBILITY_RANGE = ['"]([^'"]+)['"]/u)?.[1] || null;
   const declaredRuntimeVersion = protocolTypes?.toString('utf8').match(/RUNTIME_VERSION = ["']([^"']+)["']/u)?.[1] || null;
   const declaredRuntimeRange = protocolTypes?.toString('utf8').match(/RUNTIME_COMPATIBILITY_RANGE = ["']([^"']+)["']/u)?.[1] || null;
-  const expectedRange = '>=' + expectedVersion + ' <6.0.0';
+  const expectedRange = '>=' + expectedVersion + ' <7.0.0';
   const mismatch = {
     package: packageJson,
     protocolManifest,
@@ -105,7 +105,7 @@ function assertReleaseArtifact(tarballPath, expectedVersion) {
     expectedVersion,
     expectedRange
   };
-  if (!packageJson || packageJson.name !== 'daoge-pic' || packageJson.version !== expectedVersion || !protocolManifest || protocolManifest.protocol !== 'daoge-pic-skill-protocol' || protocolManifest.version !== '2.0.0' || protocolManifest.runtimeCompatibility !== expectedRange || runtimeVersion !== expectedVersion || runtimeRange !== expectedRange || declaredRuntimeVersion !== expectedVersion || declaredRuntimeRange !== expectedRange) {
+  if (!packageJson || packageJson.name !== 'daoge-pic' || packageJson.version !== expectedVersion || !protocolManifest || protocolManifest.protocol !== 'daoge-pic-skill-protocol' || protocolManifest.version !== '3.0.0' || protocolManifest.runtimeCompatibility !== expectedRange || runtimeVersion !== expectedVersion || runtimeRange !== expectedRange || declaredRuntimeVersion !== expectedVersion || declaredRuntimeRange !== expectedRange) {
     throw new Error(JSON.stringify(mismatch, null, 2));
   }
   return { paths, ...checked, version: packageJson.version, runtimeVersion, runtimeRange };

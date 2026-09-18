@@ -1,8 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-
 const { readSource } = require('./source-text');
 
 function blockBetween(source, start, end) {
@@ -15,16 +12,20 @@ function blockBetween(source, start, end) {
 
 test('Workbench session and provenance reads abort superseded requests before committing state', () => {
   const source = readSource('web/src/main.jsx');
-  const session = blockBetween(source, 'const refreshWorkbenchSession = useCallback(async (sessionId) => {', 'const refreshStudio =');
+  // The Workbench no longer writes/reads the Session working pointer (方案 7.7.3):
+  // the only Session read left is plan-status, and it must still abort a
+  // superseded request before committing state.
+  const session = blockBetween(source, "if (!session) { setSessionPlanStatus(null); return undefined; }", 'const selectedProject = useMemo');
   const provenance = blockBetween(source, 'const inspectAsset = async (assetId) => {', 'const downloadAsset =');
 
-  for (const block of [session, provenance]) {
-    assert.match(block, /\.begin\(String\(/);
-    assert.match(block, /signal: request\.signal/);
-    assert.match(block, /!request\.isCurrent\(\)/);
-    assert.match(block, /isAbortError\(nextError\)/);
-  }
-  assert.match(session, /if \(nextSession\) \{/);
+  assert.match(session, /controller\.abort\(\)/);
+  assert.match(session, /signal: controller\.signal/);
+  assert.match(session, /isAbortError\(nextError\)/);
+  assert.match(session, /setSessionPlanStatus\(data\)/);
+  assert.match(provenance, /\.begin\(String\(/);
+  assert.match(provenance, /signal: request\.signal/);
+  assert.match(provenance, /!request\.isCurrent\(\)/);
+  assert.match(provenance, /isAbortError\(nextError\)/);
   assert.match(provenance, /setAssetProvenance\(data\.provenance \|\| null\)/);
 });
 
@@ -33,7 +34,7 @@ test('Workbench async failures use classified safe error state instead of raw th
   assert.match(readSource('web/src/error-model.mjs'), /function normalizeRequestError\(value, fallback/);
   assert.match(source, /if \(normalized\.category === 'connection'\) setConnectionError\(normalized\);/);
   assert.match(source, /operation: 'load-lineage-run-items'/);
-  assert.doesNotMatch(blockBetween(source, 'const refreshWorkbenchSession = useCallback(async (sessionId) => {', 'const refreshStudio ='), /setError\(nextError \|\|/);
+  assert.doesNotMatch(blockBetween(source, "if (!session) { setSessionPlanStatus(null); return undefined; }", 'const selectedProject = useMemo'), /setError\(nextError \|\|/);
   assert.doesNotMatch(blockBetween(source, 'const inspectAsset = async (assetId) => {', 'const downloadAsset ='), /setError\(nextError \|\|/);
 });
 

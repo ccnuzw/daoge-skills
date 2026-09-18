@@ -51,8 +51,7 @@ test('每张菜单 3–4 项，且全是动词', async () => {
     nodeMenuItems(asset({ selectedAsset: true }), { canDeliver: true }),
     nodeMenuItems(asset({ deliveredAsset: true })),
     nodeMenuItems({ entityType: 'round', entity: {} }, { canReview: true, canDeliver: true }),
-    nodeMenuItems({ entityType: 'task', entity: {} }),
-    nodeMenuItems({ entityType: 'project', entity: {} })
+    nodeMenuItems({ entityType: 'task', entity: {} })
   ];
   for (const items of samples) {
     assert.ok(items.length >= 3 && items.length <= MENU_ITEM_LIMIT, '菜单项数应在 3–4（详情占一格）之间：' + JSON.stringify(ids(items)));
@@ -88,8 +87,6 @@ test('全节点菜单矩阵（2026-09-17 审计固化）：每类节点该有的
   const active = nodeMenuItems({ entityType: 'round', entity: { id: 'r1', status: 'active' } }, { canHistory: true, canDeliver: true });
   assert.deepEqual(ids(active), ['toggle', 'deliver', 'history', 'detail'], '出过图的批次必须有看生成历史（canDeliver 时含去交付）');
   // 资料节点记下来就是为了复制去用。
-  const resource = nodeMenuItems({ entityType: 'style_kit', entity: { id: 'sk1' }, resourceNode: true });
-  assert.deepEqual(ids(resource), ['copy-plan', 'detail'], '资料节点必须有复制计划指令');
   // 图的各类状态都带放大查看（高频动作）。
   for (const node of [
     asset(),

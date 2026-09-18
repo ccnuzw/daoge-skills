@@ -1,4 +1,5 @@
 import type { StudioDatabase } from './database';
+import { assetSearchContentSql, roundSearchContentSql } from './search-content';
 
 /**
  * The Studio schema history, in one place.
@@ -274,6 +275,273 @@ const SCHEMA_V34_GUARDS = [
 ].join(';\n') + ';';
 const SCHEMA_V34_GUARD_NAMES = ['generation_runs_open_guard_insert', 'generation_runs_open_guard_update'] as const;
 
+// v35 opens the 6.0.0 request-queue era. Two tables, both new rather than
+// repurposed: `studio_requests` is the one queue the Workbench request entry
+// and the Agent both consume, and `studio_agents` is where an Agent registers
+// itself so Studio can answer "is anyone listening right now".
+//
+// The queue deliberately stores state in **columns**, not as an event replay:
+// `events` is a rolling 2000-row window that fills up in days, so a request
+// that had not been claimed yet could be evicted before anyone read it. A row
+// per request cannot be evicted by event pruning.
+//
+// The lease columns copy the `run_items` pattern that already exists rather
+// than inventing a second one: claim writes `lease_token` + `lease_expires_at`,
+// and an expired lease can be claimed again. `attempts` counts consecutive
+// expiries so that a request nobody finishes eventually fails instead of
+// looping forever.
+const SCHEMA_V35 = [
+  "CREATE TABLE IF NOT EXISTS studio_requests (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), project_id TEXT REFERENCES projects(id), task_id TEXT REFERENCES creative_tasks(id), text TEXT NOT NULL, context_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'done', 'rejected', 'failed')), lease_token TEXT, lease_worker_id TEXT, lease_expires_at TEXT, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), result_round_id TEXT REFERENCES creative_rounds(id), result_json TEXT, created_at TEXT NOT NULL, accepted_at TEXT, done_at TEXT, updated_at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_studio_requests_queue ON studio_requests(studio_id, status, created_at, id)",
+  "CREATE INDEX IF NOT EXISTS idx_studio_requests_lease ON studio_requests(studio_id, status, lease_expires_at)",
+  "CREATE TABLE IF NOT EXISTS studio_agents (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), cli_name TEXT NOT NULL, cli_version TEXT, skill_name TEXT, skill_version TEXT, capabilities_json TEXT NOT NULL DEFAULT '{}', registered_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, UNIQUE(studio_id, cli_name, skill_name))",
+  "CREATE INDEX IF NOT EXISTS idx_studio_agents_presence ON studio_agents(studio_id, last_seen_at)"
+].join(';\n') + ';';
+
+// v36 makes two relationships into constraints instead of conventions.
+//
+// `assets.project_id`: today "which project does this image belong to" is a
+// five-hop JOIN through `asset_relations -> run_items -> runs -> rounds ->
+// tasks`. Adding the column means a generated image records its project at
+// persist time, so project scope is a column rather than an agreement.
+//
+// `run_items.asset_id`: the produced image id currently lives inside
+// `result_json`, so "which run produced this image" needs JSON parsing. A
+// nullable column makes an empty slot exactly `asset_id IS NULL` — which is
+// also the data foundation of the failure experience (257 empty slots).
+const SCHEMA_V36 = [
+  "ALTER TABLE assets ADD COLUMN project_id TEXT REFERENCES projects(id)",
+  "ALTER TABLE run_items ADD COLUMN asset_id TEXT REFERENCES assets(id)",
+  "CREATE INDEX IF NOT EXISTS idx_assets_project_created ON assets(project_id, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_run_items_asset ON run_items(asset_id)"
+].join(';\n') + ';';
+
+/**
+ * v36 adds nullable columns. Re-runnable on purpose: a later pending migration
+ * (v34 in degraded mode) causes later ledger rows to be rolled back, so this
+ * migration may run again after the repair — ALTER TABLE ADD COLUMN is not
+ * idempotent by itself, so the columns are checked first.
+ */
+function applyAssetAttributionColumns(db: StudioDatabase): boolean {
+  if (!tableExists(db, 'assets') || !tableExists(db, 'run_items')) return true;
+  const statements: string[] = [];
+  if (!columnsOf(db, 'assets').includes('project_id')) statements.push("ALTER TABLE assets ADD COLUMN project_id TEXT REFERENCES projects(id)");
+  if (!columnsOf(db, 'run_items').includes('asset_id')) statements.push("ALTER TABLE run_items ADD COLUMN asset_id TEXT REFERENCES assets(id)");
+  statements.push("CREATE INDEX IF NOT EXISTS idx_assets_project_created ON assets(project_id, created_at)");
+  statements.push("CREATE INDEX IF NOT EXISTS idx_run_items_asset ON run_items(asset_id)");
+  db.exec(statements.join(';\n') + ';');
+  return true;
+}
+
+// v37 returns the session working pointer to its real owner. `active_*` was
+// written by both sides — the Workbench stamped "what I am looking at" into the
+// same columns the Agent used for "what I am operating on" — so the two facts
+// overwrote each other. The interface's "where am I looking" is carried by the
+// route now; these columns are the Agent's alone, so they are renamed to say so.
+function applySessionPointerRename(db: StudioDatabase): boolean {
+  if (!tableExists(db, 'studio_sessions')) return true;
+  const columns = columnsOf(db, 'studio_sessions');
+  // Re-runnable: once renamed the old column is gone. A pending v34 rolls later
+  // ledger rows back, so this can run a second time.
+  if (!columns.includes('active_project_id')) return true;
+  // RENAME COLUMN rather than a table rebuild: `run_resume_confirmations`
+  // holds a foreign key onto studio_sessions(id), and a full rebuild would
+  // have to shut that constraint down to move the data.
+  const renames: string[] = [];
+  if (columns.includes('active_project_id')) renames.push('ALTER TABLE studio_sessions RENAME COLUMN active_project_id TO agent_project_id');
+  if (columns.includes('active_task_id')) renames.push('ALTER TABLE studio_sessions RENAME COLUMN active_task_id TO agent_task_id');
+  if (columns.includes('active_round_id')) renames.push('ALTER TABLE studio_sessions RENAME COLUMN active_round_id TO agent_round_id');
+  db.exec(renames.join(';\n') + ';');
+  return true;
+}
+
+const SCHEMA_V37 = 'SELECT 1;';
+
+// v38 rebuilds the canvas around the form the plan settled on: a project owns
+// exactly one layout, and the only things that get a persisted position are
+// the three node kinds a creator actually talks about (task / round / asset)
+// plus the auto-generated group.
+//
+// The old shape had a layout per scope (round 37 / task 16 / project 8 in the
+// live data), which is why switching scope moved every node — and why so few
+// projects ever had a project-scope layout. Dropping the two scope columns and
+// keeping the project's most complete layout is the whole migration.
+//
+// The enum convergence is deliberate: "plan never goes on the canvas" stops
+// being a sentence in a document and becomes something the database refuses.
+const CANVAS_NODE_TYPES = "('task', 'round', 'asset', 'group')";
+
+function applyCanvasLayoutRebuild(db: StudioDatabase): boolean {
+  // A legacy/synthetic database may carry a version ledger without the canvas
+  // tables (or without `projects` to anchor the foreign key). Skip rather than
+  // abort the whole migration run.
+  if (!tableExists(db, 'projects') || !tableExists(db, 'canvas_layouts') || !tableExists(db, 'canvas_node_layouts') || !tableExists(db, 'canvas_groups') || !tableExists(db, 'canvas_links')) return true;
+  // Re-runnable: the scope columns are gone once the rebuild has happened.
+  if (!columnsOf(db, 'canvas_layouts').includes('scope_type')) return true;
+  // ⚠️ Order matters here, and the obvious order is wrong.
+  //
+  // The new child tables must reference the **temporary** parent name. If they
+  // referenced `canvas_layouts` (the name the parent will eventually have, i.e.
+  // the OLD table), then `DROP TABLE canvas_layouts` would cascade through
+  // `ON DELETE CASCADE` and wipe every row just copied in — the migration would
+  // silently succeed and leave zero node positions behind. That is exactly what
+  // happened once; the regression is covered by
+  // `schema-rebuild-contract.test.js` ("已有数据必须搬过去").
+  //
+  // So: temp parent → children referencing the temp parent → copy → drop the
+  // old children → drop the old parent (nothing references it now) → rename the
+  // parent last, which rewrites the children's foreign keys to the final name.
+  db.exec([
+    'CREATE TABLE canvas_layouts_v38 (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), project_id TEXT NOT NULL REFERENCES projects(id), viewport_json TEXT NOT NULL DEFAULT \'{"x":0,"y":0,"k":1}\', settings_json TEXT NOT NULL DEFAULT \'{}\', version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(studio_id, project_id))',
+    // Keep the project-scope layout when there is one, else the most recently
+    // touched layout for that project. The other scopes' positions are the
+    // alternative views the one-layout design replaces.
+    'INSERT INTO canvas_layouts_v38 (id, studio_id, project_id, viewport_json, settings_json, version, created_at, updated_at) SELECT id, studio_id, project_id, viewport_json, settings_json, version, created_at, updated_at FROM canvas_layouts layout WHERE layout.id = (SELECT candidate.id FROM canvas_layouts candidate WHERE candidate.studio_id = layout.studio_id AND candidate.project_id = layout.project_id ORDER BY (candidate.scope_type = \'project\') DESC, candidate.updated_at DESC, candidate.id LIMIT 1)',
+    'CREATE TABLE canvas_node_layouts_v38 (id TEXT PRIMARY KEY, layout_id TEXT NOT NULL REFERENCES canvas_layouts_v38(id) ON DELETE CASCADE, entity_type TEXT NOT NULL CHECK (entity_type IN ' + CANVAS_NODE_TYPES + '), entity_id TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, width REAL NOT NULL, height REAL NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, group_id TEXT, updated_at TEXT NOT NULL, UNIQUE(layout_id, entity_type, entity_id))',
+    'CREATE TABLE canvas_groups_v38 (id TEXT PRIMARY KEY, layout_id TEXT NOT NULL REFERENCES canvas_layouts_v38(id) ON DELETE CASCADE, title TEXT NOT NULL, group_type TEXT NOT NULL CHECK (group_type IN (\'task\', \'round\', \'asset\', \'custom\')), x REAL NOT NULL, y REAL NOT NULL, width REAL NOT NULL, height REAL NOT NULL, metadata_json TEXT NOT NULL DEFAULT \'{}\', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
+    'CREATE TABLE canvas_links_v38 (id TEXT PRIMARY KEY, layout_id TEXT NOT NULL REFERENCES canvas_layouts_v38(id) ON DELETE CASCADE, source_type TEXT NOT NULL CHECK (source_type IN ' + CANVAS_NODE_TYPES + '), source_id TEXT NOT NULL, target_type TEXT NOT NULL CHECK (target_type IN ' + CANVAS_NODE_TYPES + '), target_id TEXT NOT NULL, link_type TEXT NOT NULL CHECK (link_type IN (\'reference\', \'style\', \'alternative\', \'rejected\', \'todo\', \'context\', \'custom\')), label TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT \'{}\', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
+    'INSERT INTO canvas_node_layouts_v38 (id, layout_id, entity_type, entity_id, x, y, width, height, collapsed, group_id, updated_at) SELECT id, layout_id, entity_type, entity_id, x, y, width, height, collapsed, group_id, updated_at FROM canvas_node_layouts WHERE layout_id IN (SELECT id FROM canvas_layouts_v38) AND entity_type IN ' + CANVAS_NODE_TYPES,
+    'INSERT INTO canvas_groups_v38 (id, layout_id, title, group_type, x, y, width, height, metadata_json, created_at, updated_at) SELECT id, layout_id, title, CASE WHEN group_type IN (\'task\', \'round\', \'asset\') THEN group_type ELSE \'custom\' END, x, y, width, height, metadata_json, created_at, updated_at FROM canvas_groups WHERE layout_id IN (SELECT id FROM canvas_layouts_v38)',
+    'INSERT INTO canvas_links_v38 (id, layout_id, source_type, source_id, target_type, target_id, link_type, label, metadata_json, created_at, updated_at) SELECT id, layout_id, source_type, source_id, target_type, target_id, link_type, label, metadata_json, created_at, updated_at FROM canvas_links WHERE layout_id IN (SELECT id FROM canvas_layouts_v38) AND source_type IN ' + CANVAS_NODE_TYPES + ' AND target_type IN ' + CANVAS_NODE_TYPES,
+    'DROP TABLE canvas_links',
+    'DROP TABLE canvas_groups',
+    'DROP TABLE canvas_node_layouts',
+    // Nothing references the old parent any more (its children are gone, and the
+    // new ones point at the temporary name), so this drop cannot cascade.
+    'DROP TABLE canvas_layouts',
+    'ALTER TABLE canvas_layouts_v38 RENAME TO canvas_layouts',
+    'ALTER TABLE canvas_node_layouts_v38 RENAME TO canvas_node_layouts',
+    'ALTER TABLE canvas_groups_v38 RENAME TO canvas_groups',
+    'ALTER TABLE canvas_links_v38 RENAME TO canvas_links',
+    'CREATE INDEX IF NOT EXISTS idx_canvas_layouts_project ON canvas_layouts(studio_id, project_id)',
+    'CREATE INDEX IF NOT EXISTS idx_canvas_node_layouts_layout ON canvas_node_layouts(layout_id)',
+    'CREATE INDEX IF NOT EXISTS idx_canvas_groups_layout ON canvas_groups(layout_id)',
+    'CREATE INDEX IF NOT EXISTS idx_canvas_links_layout ON canvas_links(layout_id)',
+    'CREATE INDEX IF NOT EXISTS idx_canvas_links_source ON canvas_links(layout_id, source_type, source_id)',
+    'CREATE INDEX IF NOT EXISTS idx_canvas_links_target ON canvas_links(layout_id, target_type, target_id)'
+  ].join(';\n') + ';');
+  return true;
+}
+
+const SCHEMA_V38 = 'SELECT 1;';
+
+// v39 makes search find what a person would search for (plan 7.8.1).
+//
+// Two problems: a round was indexed as its whole `plan_json` (so only
+// `{"operation":"generate"}` matched, not "夜景"), and images were not indexed
+// at all — a user could not search for a picture, which is the main character.
+//
+// The round triggers are replaced with a human projection (prompt + count +
+// output spec). Images get the same treatment, and because an image's
+// describing text comes from rows written around it (its producing run item,
+// later reviews, later deliveries), the index row is refreshed by triggers on
+// those tables rather than only at insert time.
+const SEARCH_ROUND_TRIGGER_NAMES = ['studio_search_rounds_ai', 'studio_search_rounds_au', 'studio_search_rounds_ad'];
+const SEARCH_ASSET_TRIGGER_NAMES = [
+  'studio_search_assets_ai', 'studio_search_assets_ad',
+  'studio_search_assets_relation_ai',
+  'studio_search_assets_review_ai', 'studio_search_assets_review_au', 'studio_search_assets_review_ad',
+  'studio_search_assets_delivery_ai', 'studio_search_assets_delivery_ad'
+];
+
+function assetRefreshStatements(event: string, table: string, targetAssetExpression: string): string[] {
+  const content = assetSearchContentSql('asset');
+  const refresh = "DELETE FROM studio_search WHERE entity_type = 'asset' AND entity_id = " + targetAssetExpression + "; INSERT INTO studio_search (studio_id, entity_type, entity_id, content) SELECT asset.studio_id, 'asset', asset.id, " + content + " FROM assets asset WHERE asset.id = " + targetAssetExpression + " AND " + content + " <> '';";
+  return ["CREATE TRIGGER IF NOT EXISTS " + event + " AFTER " + table + " BEGIN " + refresh + " END"];
+}
+
+const SCHEMA_V39 = [
+  ...SEARCH_ROUND_TRIGGER_NAMES.map((name) => 'DROP TRIGGER IF EXISTS ' + name),
+  ...SEARCH_ASSET_TRIGGER_NAMES.map((name) => 'DROP TRIGGER IF EXISTS ' + name),
+  "DELETE FROM studio_search WHERE entity_type = 'round'",
+  "INSERT INTO studio_search (studio_id, entity_type, entity_id, content) SELECT project.studio_id, 'round', round.id, " + roundSearchContentSql('round.plan_json') + " FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id WHERE " + roundSearchContentSql('round.plan_json') + " <> ''",
+  "CREATE TRIGGER IF NOT EXISTS studio_search_rounds_ai AFTER INSERT ON creative_rounds BEGIN INSERT INTO studio_search (studio_id, entity_type, entity_id, content) SELECT project.studio_id, 'round', NEW.id, " + roundSearchContentSql('NEW.plan_json') + " FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = NEW.task_id AND " + roundSearchContentSql('NEW.plan_json') + " <> ''; END",
+  "CREATE TRIGGER IF NOT EXISTS studio_search_rounds_au AFTER UPDATE OF plan_json ON creative_rounds BEGIN DELETE FROM studio_search WHERE entity_type = 'round' AND entity_id = NEW.id; INSERT INTO studio_search (studio_id, entity_type, entity_id, content) SELECT project.studio_id, 'round', NEW.id, " + roundSearchContentSql('NEW.plan_json') + " FROM creative_tasks task JOIN projects project ON project.id = task.project_id WHERE task.id = NEW.task_id AND " + roundSearchContentSql('NEW.plan_json') + " <> ''; END",
+  "CREATE TRIGGER IF NOT EXISTS studio_search_rounds_ad AFTER DELETE ON creative_rounds BEGIN DELETE FROM studio_search WHERE entity_type = 'round' AND entity_id = OLD.id; END",
+  // An image row is indexed as soon as it exists (filename / revisedPrompt) and
+  // refreshed whenever the facts around it change.
+  ...assetRefreshStatements('studio_search_assets_ai', 'INSERT ON assets', 'NEW.id'),
+  ...assetRefreshStatements('studio_search_assets_ad', 'DELETE ON assets', 'OLD.id'),
+  ...assetRefreshStatements('studio_search_assets_relation_ai', "INSERT ON asset_relations WHEN NEW.relation_type = 'output_of' AND NEW.target_type = 'run_item'", 'NEW.asset_id'),
+  ...assetRefreshStatements('studio_search_assets_review_ai', 'INSERT ON review_decisions', 'NEW.asset_id'),
+  ...assetRefreshStatements('studio_search_assets_review_au', 'UPDATE ON review_decisions', 'NEW.asset_id'),
+  ...assetRefreshStatements('studio_search_assets_review_ad', 'DELETE ON review_decisions', 'OLD.asset_id'),
+  ...assetRefreshStatements('studio_search_assets_delivery_ai', 'INSERT ON delivery_assets', 'NEW.asset_id'),
+  ...assetRefreshStatements('studio_search_assets_delivery_ad', 'DELETE ON delivery_assets', 'OLD.asset_id')
+].join(';\n') + ';';
+
+function applySearchIndexRebuild(db: StudioDatabase): boolean {
+  if (!tableExists(db, 'studio_search')) return true;
+  if (!tableExists(db, 'assets') || !tableExists(db, 'creative_rounds') || !tableExists(db, 'asset_relations') || !tableExists(db, 'review_decisions') || !tableExists(db, 'delivery_assets')) return true;
+  db.exec(SCHEMA_V39);
+  return true;
+}
+
+const SCHEMA_V39_SQL = 'SELECT 1;';
+
+// v40 backfills the two relationships v36/v38 introduced as columns but only
+// wired for *new* rows, plus the asset half of the search index.
+//
+// Migrating a database that already has data means the new columns must be true
+// for the old rows too — otherwise "which project is this image in" and "which
+// image did this slot produce" are NULL for everything, and search still cannot
+// find a single picture. Nullable columns made the schema correct; this makes
+// the existing data correct.
+const SCHEMA_V40 = [
+  // Slot → output image, from the relation that already recorded it.
+  "UPDATE run_items SET asset_id = (SELECT relation.asset_id FROM asset_relations relation WHERE relation.relation_type = 'output_of' AND relation.target_type = 'run_item' AND relation.target_id = run_items.id ORDER BY relation.created_at, relation.asset_id LIMIT 1) WHERE asset_id IS NULL AND EXISTS (SELECT 1 FROM asset_relations relation WHERE relation.relation_type = 'output_of' AND relation.target_type = 'run_item' AND relation.target_id = run_items.id)",
+  // Generated image → project, via the run chain.
+  "UPDATE assets SET project_id = (SELECT task.project_id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.asset_id = assets.id ORDER BY run.created_at, item.sequence LIMIT 1) WHERE project_id IS NULL AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.asset_id = assets.id)",
+  // Imported image → project, from the explicit attachment.
+  "UPDATE assets SET project_id = (SELECT relation.target_id FROM asset_relations relation WHERE relation.asset_id = assets.id AND relation.target_type = 'project' ORDER BY relation.created_at LIMIT 1) WHERE project_id IS NULL AND EXISTS (SELECT 1 FROM asset_relations relation WHERE relation.asset_id = assets.id AND relation.target_type = 'project')"
+].join(';\n') + ';';
+
+function applySearchAssetBackfill(db: StudioDatabase): boolean {
+  // Synthetic/legacy databases may carry a version ledger without these tables
+  // (the v2/v14/v15/v16 migration fixtures do). Skip rather than abort the run.
+  if (!tableExists(db, 'run_items') || !tableExists(db, 'assets') || !tableExists(db, 'asset_relations')) return true;
+  db.exec(SCHEMA_V40);
+  if (!tableExists(db, 'studio_search')) return true;
+  const content = assetSearchContentSql('asset');
+  db.exec("DELETE FROM studio_search WHERE entity_type = 'asset'");
+  db.exec("INSERT INTO studio_search (studio_id, entity_type, entity_id, content) SELECT asset.studio_id, 'asset', asset.id, " + content + " FROM assets asset WHERE " + content + " <> ''");
+  return true;
+}
+
+const SCHEMA_V40_SQL = 'SELECT 1;';
+
+// v41 fixes the identity of a registered agent: **one CLI is one row**.
+//
+// v35 keyed the table on `(studio_id, cli_name, skill_name)` with a nullable
+// `skill_name`. SQLite treats every NULL as distinct in a UNIQUE constraint, so
+// registering the same CLI first without a skill and then with one produced two
+// rows — and the skill-less row could never be matched again (lookup binds
+// `skill_name IS ?`), so it lingered forever as a ghost.
+//
+// The declared skill list already lives in `capabilities_json`; `skill_name` /
+// `skill_version` are just a denormalized convenience for the status card. So
+// the identity collapses to `(studio_id, cli_name)` and duplicates are merged,
+// preferring the row that actually declared a skill.
+const SCHEMA_V41 = [
+  "CREATE TABLE studio_agents_v41 (id TEXT PRIMARY KEY, studio_id TEXT NOT NULL REFERENCES studios(id), cli_name TEXT NOT NULL, cli_version TEXT, skill_name TEXT, skill_version TEXT, capabilities_json TEXT NOT NULL DEFAULT '{}', registered_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, UNIQUE(studio_id, cli_name))",
+  "INSERT INTO studio_agents_v41 (id, studio_id, cli_name, cli_version, skill_name, skill_version, capabilities_json, registered_at, last_seen_at) SELECT id, studio_id, cli_name, cli_version, skill_name, skill_version, capabilities_json, registered_at, last_seen_at FROM studio_agents agent WHERE agent.id = (SELECT candidate.id FROM studio_agents candidate WHERE candidate.studio_id = agent.studio_id AND candidate.cli_name = agent.cli_name ORDER BY (candidate.skill_name IS NOT NULL) DESC, candidate.last_seen_at DESC, candidate.id LIMIT 1)",
+  'DROP TABLE studio_agents',
+  'ALTER TABLE studio_agents_v41 RENAME TO studio_agents',
+  'CREATE INDEX IF NOT EXISTS idx_studio_agents_presence ON studio_agents(studio_id, last_seen_at)'
+].join(';\n') + ';';
+
+function applyAgentIdentityFix(db: StudioDatabase): boolean {
+  if (!tableExists(db, 'studio_agents')) return true;
+  // Re-runnable: once the unique key is `(studio_id, cli_name)` this migration
+  // has already happened (the old shape cannot be reconstructed).
+  const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'studio_agents'").get() as { sql: string } | undefined;
+  if (!schema || !/UNIQUE\s*\(\s*studio_id\s*,\s*cli_name\s*,\s*skill_name\s*\)/i.test(schema.sql)) return true;
+  db.exec(SCHEMA_V41);
+  return true;
+}
+
+const SCHEMA_V41_SQL = 'SELECT 1;';
+
 export interface StudioMigration {
   readonly version: number;
   readonly sql: string;
@@ -356,9 +624,15 @@ export const STUDIO_MIGRATIONS: readonly StudioMigration[] = [
   { version: 31, sql: SCHEMA_V31 },
   { version: 32, sql: SCHEMA_V32 },
   { version: 33, sql: SCHEMA_V33 },
-  { version: 34, sql: SCHEMA_V34, apply: applyOpenRunConstraint }
+  { version: 34, sql: SCHEMA_V34, apply: applyOpenRunConstraint },
+  { version: 35, sql: SCHEMA_V35 },
+  { version: 36, sql: SCHEMA_V36, apply: applyAssetAttributionColumns },
+  { version: 37, sql: SCHEMA_V37, apply: applySessionPointerRename },
+  { version: 38, sql: SCHEMA_V38, apply: applyCanvasLayoutRebuild },
+  { version: 39, sql: SCHEMA_V39_SQL, apply: applySearchIndexRebuild },
+  { version: 40, sql: SCHEMA_V40_SQL, apply: applySearchAssetBackfill },
+  { version: 41, sql: SCHEMA_V41_SQL, apply: applyAgentIdentityFix }
 ];
-
 /**
  * Some migrations cannot run unconditionally: they were written when the
  * target table might not exist yet (a Studio created before that feature), or

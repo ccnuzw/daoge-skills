@@ -79,17 +79,6 @@ function reviewProjectScope(alias: string, projectId: string): ReviewProjectScop
   return { sql: `(${v2} OR ${legacy})`, params };
 }
 
-function projectOwnsAsset(db: StudioDatabase, projectId: string, assetId: string): boolean {
-  const row = db.prepare("SELECT 1 FROM asset_relations relation WHERE relation.asset_id = ? AND ((relation.target_type = 'project' AND relation.target_id = ?) OR (relation.target_type = 'creative_task' AND EXISTS (SELECT 1 FROM creative_tasks task WHERE task.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'creative_round' AND EXISTS (SELECT 1 FROM creative_rounds round JOIN creative_tasks task ON task.id = round.task_id WHERE round.id = relation.target_id AND task.project_id = ?)) OR (relation.target_type = 'run_item' AND relation.relation_type = 'output_of' AND EXISTS (SELECT 1 FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.id = relation.target_id AND task.project_id = ?))) LIMIT 1").get(assetId, projectId, projectId, projectId, projectId) as { 1: number } | undefined;
-  return Boolean(row);
-}
-
-function latestProjectReview(db: StudioDatabase, projectId: string, assetId: string): ReviewSnapshotRow | null {
-  const scope = reviewProjectScope('review', projectId);
-  const row = db.prepare(`SELECT review.id, review.decision, review.feedback_json, review.context_json, review.task_id, review.round_id, review.created_at FROM review_decisions review WHERE review.asset_id = ? AND ${scope.sql} ORDER BY review.created_at DESC, review.rowid DESC LIMIT 1`).get(assetId, ...scope.params) as ReviewSnapshotRow | undefined;
-  return row || null;
-}
-
 function replaceDeliveryAssets(db: StudioDatabase, project: ProjectRow, deliveryId: string, assetIds: string[], timestamp: string): DeliveryAssetSnapshot[] {
   const assets = activeAssets(db, project.studio_id, assetIds);
   const ids = assets.map((asset) => asset.id);

@@ -5,6 +5,7 @@ import { appendStudioEvent, StudioDatabase, withTransaction } from '../studio/da
 import { selectInStudioSql } from '../domain/studio-scope';
 import { createId } from '../shared/ids';
 import { recoverAssetMediaOperations } from '../domain/assets';
+import { attributeOutputAsset } from '../domain/output-attribution';
 import { archiveStagedImage, inspectManagedImageFile, inspectManagedImageFileAsync, plannedArchivePath, resolveManagedMediaPath } from './archive';
 import { assertWorkspacePath, AssetBucket, ensureAssetBucket, ensureCacheDirectory, StudioPaths } from '../studio/workspace';
 
@@ -59,11 +60,13 @@ export function recoverGeneratedMediaCommits(db: StudioDatabase, paths: StudioPa
       withTransaction(db, () => {
         if (existing) {
           db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(asset_id, relation_type, target_type, target_id) DO NOTHING').run(createId('assetrel'), existing.id, 'output_of', 'run_item', entry.run_item_id, JSON.stringify({ runId: entry.run_id }), new Date().toISOString());
+          attributeOutputAsset(db, { studioId, assetId: existing.id, runId: entry.run_id, runItemId: entry.run_item_id });
           appendStudioEvent(db, { studioId, entityType: 'asset', entityId: existing.id, eventType: 'asset.recovered_reuse', payload: { runId: entry.run_id, runItemId: entry.run_item_id } });
         } else {
           const timestamp = new Date().toISOString();
           db.prepare('INSERT INTO assets (id, studio_id, kind, media_type, storage_path, content_hash, byte_size, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(entry.asset_id, studioId, 'generated', entry.media_type, entry.final_storage_path, entry.content_hash, entry.byte_size, entry.source_json, timestamp, timestamp);
           db.prepare('INSERT INTO asset_relations (id, asset_id, relation_type, target_type, target_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(createId('assetrel'), entry.asset_id, 'output_of', 'run_item', entry.run_item_id, JSON.stringify({ runId: entry.run_id }), timestamp);
+          attributeOutputAsset(db, { studioId, assetId: entry.asset_id, runId: entry.run_id, runItemId: entry.run_item_id });
           appendStudioEvent(db, { studioId, entityType: 'asset', entityId: entry.asset_id, eventType: 'asset.generated_recovered', payload: { runId: entry.run_id, runItemId: entry.run_item_id } });
         }
         db.prepare('DELETE FROM media_commit_journal WHERE asset_id = ? AND studio_id = ?').run(entry.asset_id, studioId);

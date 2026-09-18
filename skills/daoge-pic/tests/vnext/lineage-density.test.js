@@ -33,10 +33,15 @@ test('去冗余之后，图仍然知道自己属于哪一批', () => {
   assert.match(canvas, /createNode\('round'/i, '批次节点本身必须还在（它是画布的主干）');
 });
 
-test('画布仍保留「任务 / 批次 / 图」三层与项目、交付', () => {
+test('A7b 收敛：画布只铺「任务 / 批次 / 图」（项目是标题、资源/交付/共享素材各有其页）', () => {
   const canvas = readSource('web/src/creative-lineage-canvas.jsx');
-  for (const type of ['project', 'task', 'round', 'asset', 'delivery']) {
+  for (const type of ['task', 'round', 'asset']) {
     assert.match(canvas, new RegExp("createNode\\('" + type + "'"), type + ' 节点必须保留');
+  }
+  // 方案 4.3/6.2/7.11：项目是画布的标题与边界；规则资料、交付、共享素材各有稳定入口。
+  // 「收」= 换位置，不是删能力——这四条都有新家，所以不再各占一个画布节点。
+  for (const type of ['project', 'delivery', 'shared_asset', 'task_type', 'style_kit', 'brand_kit']) {
+    assert.doesNotMatch(canvas, new RegExp("createNode\\('" + type + "'"), type + ' 不该再作为画布节点创建（A7b）');
   }
 });
 

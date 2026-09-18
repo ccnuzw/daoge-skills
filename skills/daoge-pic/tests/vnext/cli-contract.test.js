@@ -353,9 +353,9 @@ function studioStatusResponse(studioId, protocol = {}) {
       studioId,
       protocol: {
         name: protocol.name || 'daoge-pic-skill-protocol',
-        version: protocol.version || '2.0.0',
-        runtimeVersion: protocol.runtimeVersion || '5.14.2',
-        supportedRange: protocol.supportedRange || '>=2.0.0 <3.0.0'
+        version: protocol.version || '3.0.0',
+        runtimeVersion: protocol.runtimeVersion || '6.0.0',
+        supportedRange: protocol.supportedRange || '>=3.0.0 <4.0.0'
       }
     }
   }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -371,7 +371,7 @@ test('CLI daemon reuse requires the authenticated Studio protocol endpoint and c
   assert.equal(compatible, true);
   assert.deepEqual(requests.map((request) => request.url), ['http://127.0.0.1:43123/api/studio']);
   assert.equal(requests[0].init.headers.authorization, 'Bearer ' + runtime.capability);
-  assert.equal(requests[0].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/2.0.0');
+  assert.equal(requests[0].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.0.0');
 
   assert.equal(await daemonCompatible(runtime, 'studio-runtime', async () => studioStatusResponse('studio-runtime', { runtimeVersion: '5.10.3' })), false);
   assert.equal(await daemonCompatible(runtime, 'studio-runtime', async () => studioStatusResponse('studio-runtime', { version: '1.9.0' })), false);
@@ -406,7 +406,7 @@ test('recorded daemon shuts down only after runtime, lock, manifest, health, ent
   assert.equal(requests[1].init.method, 'POST');
   assert.equal(requests[1].init.headers.authorization, 'Bearer ' + runtime.capability);
   assert.equal(requests[1].init.headers['x-daoge-operation-name'], 'daemon-shutdown');
-  assert.equal(requests[1].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/2.0.0');
+  assert.equal(requests[1].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.0.0');
   assert.deepEqual(processQueries, [runtime.pid]);
 });
 
@@ -431,7 +431,7 @@ test('recorded daemon refuses protocol downgrades during shutdown', async () => 
   }), /Skill 协议不兼容/);
 
   assert.equal(shutdownRequests.length, 1);
-  assert.equal(shutdownRequests[0].headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/2.0.0');
+  assert.equal(shutdownRequests[0].headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.0.0');
 });
 
 test('daemon process identity accepts a registered Skill symlink to the same entry', () => {

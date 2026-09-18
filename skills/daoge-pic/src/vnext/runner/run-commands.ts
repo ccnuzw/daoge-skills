@@ -814,9 +814,15 @@ export function retryGenerationRunItems(db: StudioDatabase, input: { studioId: s
     assertRetryBudget(db, input.studioId, runFromRow(run), candidates);
     const timestamp = nowIso();
     for (const item of candidates) {
-      if (item.error_json && item.error_json.includes('user_resolved_unknown_outcome')) throw new InvalidCommandError('An outcome resolved as unknown cannot be retried; create a new round after reviewing the result.');
+      // ⚠️ 已由用户核实并 `resolve-unknown` 结案的项（error code `user_resolved_unknown_outcome`）
+      // **允许在原运行内重试**。
+      //
+      // 之前这里一律拒绝，要求「新建轮次」。但那时用户已经确认过「没出图、没扣费」——
+      // 重试会派生新的 `request_id`，不可能重复计费；而**为补一张图新建一个批次**，
+      // 把「补图」变得比失败本身更麻烦（实测：三张里补一张，却要重走确认闸门）。
+      // 未结案的 `outcome_unknown` 仍然不可重试——它根本不在候选状态里，先核实再说。
       assertRunItemTransition(item.status, 'pending');
-      db.prepare("UPDATE run_items SET status = 'pending', request_id = ?, external_request_id = NULL, retry_at = NULL, lease_token = NULL, lease_worker_id = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?").run(createId('request'), timestamp, item.id);
+      db.prepare("UPDATE run_items SET status = 'pending', request_id = ?, external_request_id = NULL, retry_at = NULL, error_json = NULL, lease_token = NULL, lease_worker_id = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?").run(createId('request'), timestamp, item.id);
       if (timeoutMs !== undefined) applyRetryTimeout(db, item.id, timeoutMs, timestamp);
     }
     const override = timeoutMs === undefined ? {} : { timeoutMsOverrideMs: timeoutMs };
@@ -837,8 +843,8 @@ export function resumeGenerationRun(db: StudioDatabase, input: { studioId: strin
     if (unknown.total > 0) throw new InvalidCommandError('This run has provider requests with unknown outcomes and cannot resume automatically.');
     if (run.status === 'resume_pending') {
       const sessionId = requireValue(input.sessionId || '', 'sessionId');
-      const session = db.prepare('SELECT id, active_round_id FROM studio_sessions WHERE id = ? AND studio_id = ?').get(sessionId, input.studioId) as { id: string; active_round_id: string | null } | undefined;
-      if (!session || session.active_round_id !== run.round_id) throw new InvalidCommandError('A Studio Session confirmation for this creative round is required before resuming after restart.');
+      const session = db.prepare('SELECT id, agent_round_id FROM studio_sessions WHERE id = ? AND studio_id = ?').get(sessionId, input.studioId) as { id: string; agent_round_id: string | null } | undefined;
+      if (!session || session.agent_round_id !== run.round_id) throw new InvalidCommandError('A Studio Session confirmation for this creative round is required before resuming after restart.');
       db.prepare('INSERT INTO run_resume_confirmations (id, run_id, session_id, confirmed_at) VALUES (?, ?, ?, ?) ON CONFLICT(run_id, session_id) DO NOTHING').run(createId('resumeconfirm'), run.id, sessionId, nowIso());
     }
     assertRoundHasNoOpenSibling(db, run.round_id, run.id);

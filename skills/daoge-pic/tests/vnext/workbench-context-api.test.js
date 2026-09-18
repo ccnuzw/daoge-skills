@@ -24,15 +24,15 @@ test('Workbench Session context is readable, validates hierarchy, and never sele
     assert.equal(opened.status, 200);
     const session = opened.body.data;
     const initial = await requestJson(started, '/api/sessions/' + session.id);
-    assert.deepEqual(initial.body.data.session.activeProjectId, null);
+    assert.deepEqual(initial.body.data.session.agentProjectId, null);
     const project = await requestJson(started, '/api/projects', { method: 'POST', idempotencyKey: 'context-project', body: { name: 'P0 项目' } });
     const task = await requestJson(started, '/api/tasks', { method: 'POST', idempotencyKey: 'context-task', body: { projectId: project.body.data.value.id, name: 'P0 任务' } });
     const round = await requestJson(started, '/api/rounds', { method: 'POST', idempotencyKey: 'context-round', body: { taskId: task.body.data.value.id, purpose: 'exploration' } });
     const updated = await requestJson(started, '/api/sessions/' + session.id + '/context', { method: 'POST', idempotencyKey: 'context-select-round', body: { projectId: project.body.data.value.id, taskId: task.body.data.value.id, roundId: round.body.data.value.id } });
     assert.equal(updated.status, 200);
-    assert.deepEqual(updated.body.data, { ...session, activeProjectId: project.body.data.value.id, activeTaskId: task.body.data.value.id, activeRoundId: round.body.data.value.id, version: session.version + 1 });
+    assert.deepEqual(updated.body.data, { ...session, agentProjectId: project.body.data.value.id, agentTaskId: task.body.data.value.id, agentRoundId: round.body.data.value.id, version: session.version + 1 });
     const restored = await requestJson(started, '/api/sessions/' + session.id);
-    assert.equal(restored.body.data.session.activeRoundId, round.body.data.value.id);
+    assert.equal(restored.body.data.session.agentRoundId, round.body.data.value.id);
     const roundRuns = await requestJson(started, '/api/rounds/' + round.body.data.value.id + '/runs');
     assert.deepEqual(roundRuns.body.data.runs, []);
     const overview = await requestJson(started, '/api/tasks/' + task.body.data.value.id + '/overview');
@@ -68,15 +68,15 @@ test('Workbench direct creation writes project, task, round, and tab session con
     const project = await requestJsonAsWorkbench(started, '/api/projects', { key: 'direct-create-project', body: { name: 'Studio 直建项目', description: '创作者在 Studio 里直接建立。', sessionId: session.id } });
     assert.equal(project.status, 200);
     const afterProject = await requestJsonAsWorkbench(started, '/api/sessions/' + session.id);
-    assert.equal(afterProject.body.data.session.activeProjectId, project.body.data.value.id);
-    assert.equal(afterProject.body.data.session.activeTaskId, null);
+    assert.equal(afterProject.body.data.session.agentProjectId, project.body.data.value.id);
+    assert.equal(afterProject.body.data.session.agentTaskId, null);
 
     const task = await requestJsonAsWorkbench(started, '/api/tasks', { key: 'direct-create-task', body: { projectId: project.body.data.value.id, name: 'Studio 直建任务', intent: { createdFrom: 'workbench', goalType: 'exploration', targetCount: 6 }, sessionId: session.id } });
     assert.equal(task.status, 200);
     const afterTask = await requestJsonAsWorkbench(started, '/api/sessions/' + session.id);
-    assert.equal(afterTask.body.data.session.activeProjectId, project.body.data.value.id);
-    assert.equal(afterTask.body.data.session.activeTaskId, task.body.data.value.id);
-    assert.equal(afterTask.body.data.session.activeRoundId, null);
+    assert.equal(afterTask.body.data.session.agentProjectId, project.body.data.value.id);
+    assert.equal(afterTask.body.data.session.agentTaskId, task.body.data.value.id);
+    assert.equal(afterTask.body.data.session.agentRoundId, null);
 
     const round = await requestJsonAsWorkbench(started, '/api/rounds', { key: 'direct-create-round', body: { taskId: task.body.data.value.id, purpose: 'exploration', plan: { createdFrom: 'workbench', draftKind: 'studio-round-context' }, sessionId: session.id } });
     assert.equal(round.status, 200);

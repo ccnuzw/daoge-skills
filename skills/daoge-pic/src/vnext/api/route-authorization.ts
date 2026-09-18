@@ -14,6 +14,10 @@ import { LocalAccessError, LocalAuthentication } from './local-auth';
  *   2. It is the human gate itself — so it must be the one endpoint an agent token can never answer for itself
  *      (`cookie`, currently only `rounds.confirm`).
  *
+ * A stop-loss action is deliberately absent. Pausing or cancelling a run spends nothing and reduces spend, so
+ * there is no defence that needs to depend on who is calling; it used to be `bearer`, which is exactly why the
+ * human's stop button returned 403. Being absent means both principals may call it.
+ *
  * The dividing line is therefore "is there a defence that does not depend on who is calling", not "do we trust
  * the browser". See the comment above `providerSecretAction` in `server.ts` for the concrete reasoning.
  */
@@ -145,14 +149,6 @@ export const ROUTE_AUTHORIZATION_RULES: readonly RouteAuthorizationRule[] = [
     message: '外部请求对账必须由当前 Skill/CLI 显式发起。'
   },
   {
-    id: 'runs.pause',
-    methods: WRITE_METHODS,
-    pattern: /^\/api\/runs\/[^/]+\/pause$/,
-    sample: '/api/runs/run_1/pause',
-    actor: 'bearer',
-    message: '运行控制必须由当前 Skill/CLI 发起。'
-  },
-  {
     id: 'runs.outcomes-resolve',
     methods: WRITE_METHODS,
     pattern: /^\/api\/runs\/[^/]+\/outcomes\/resolve$/,
@@ -175,14 +171,6 @@ export const ROUTE_AUTHORIZATION_RULES: readonly RouteAuthorizationRule[] = [
     sample: '/api/runs/run_1/resume',
     actor: 'bearer',
     message: '运行恢复必须由当前 Skill/CLI 在用户重新确认后提交。'
-  },
-  {
-    id: 'runs.cancel',
-    methods: WRITE_METHODS,
-    pattern: /^\/api\/runs\/[^/]+\/cancel$/,
-    sample: '/api/runs/run_1/cancel',
-    actor: 'bearer',
-    message: '运行控制必须由当前 Skill/CLI 发起。'
   }
 ];
 

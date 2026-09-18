@@ -1,10 +1,11 @@
 import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, Image as ImageIcon, ImagePlus, Inbox, Library, LoaderCircle, LockKeyhole, Maximize2, MessageSquareText, PanelTop, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, LoaderCircle, LockKeyhole, Maximize2, MessageSquareText, PanelTop, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { REVIEW_ZOOM_MAX, REVIEW_ZOOM_MIN, clampReviewZoom, reviewKeyAction, reviewZoomStep } from './image-review-keys-model.mjs';
 import { DRAFT_BOUNDARY_COPY } from './boundary-copy.mjs';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
 import { runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
+import { failureAttributionLine } from './failure-copy-model.mjs';
 import { planPresentation, planStateLabel } from './plan-presentation.mjs';
 import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
 import { PromptWorkspace } from './prompt-workspace.jsx';
@@ -26,6 +27,7 @@ import { useAssetImport } from './use-asset-import.mjs';
 import { useProjectQualityMetrics } from './use-project-quality-metrics.mjs';
 import { purposeLabel } from './purpose-labels.mjs';
 import { projectEmptyState } from './project-empty-state-model.mjs';
+import { negotiateStudioVersion, versionProbeRequest, WORKBENCH_PROTOCOL_VERSION } from './version-negotiation-model.mjs';
 
 /** 窗口标题的基准值。取一次存下来——否则带着计数的标题会被下一次拼装再套一层「(2) (1) …」。 */
 const BASE_DOCUMENT_TITLE = document.title || 'DAOGE Pic Studio';
@@ -46,6 +48,10 @@ import { resolveUploadTarget } from './asset-import-model.mjs';
 import { chunkAssetIds, deliverableIntent, isSelectionWriteCurrent, keepCandidateIds, latestSelection, mergeSelectionAssets, needsKeepReview, nextBusySet, nextSelectedIds, normalizeAssetIds, selectionCandidates, selectionIdSet, shouldClearSelectionBusy } from './selection-model.mjs';
 import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, createProjectSearchIndex, createTaskSearchIndex, filterProjectIndex, filterTaskIndex, paginateWorkspaceItems } from './workspace-list-model.mjs';
 import { ProviderSettings } from './provider-settings.jsx';
+import { RequestQueueDock } from './request-queue.jsx';
+import { useRequestQueue } from './use-request-queue.mjs';
+import { useAgentPresence } from './use-agent-presence.mjs';
+import { queueRounds, requestProgress } from './request-progress-model.mjs';
 import { workbenchConversationId } from './workbench-session.mjs';
 import { CREATIVE_DERIVED_ACTIONS, CREATIVE_DERIVED_ACTION_BY_ID, creativeDerivedActionForPurpose } from './creative-actions.mjs';
 import { installBrowserErrorGuard } from './browser-error-guard.mjs';
@@ -134,7 +140,7 @@ async function api(path, options = {}) {
       method,
       headers: {
         accept: 'application/json',
-        'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0',
+        'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/' + WORKBENCH_PROTOCOL_VERSION,
         ...(hasJsonBody ? { 'content-type': 'application/json' } : {}),
         ...(options.contentType ? { 'content-type': options.contentType } : {}),
         ...(options.headers || {}),
@@ -266,7 +272,6 @@ const CREATION_COUNT_OPTIONS = ['', '2', '4', '6', '8', '12'];
 const CREATION_ASPECT_OPTIONS = ['', '1:1', '4:5', '3:4', '16:9', '9:16', '3:2'];
 const DERIVED_ROUND_ACTIONS = CREATIVE_DERIVED_ACTIONS.map((action) => ({ ...action, label: action.label || action.title }));
 const DERIVED_ACTION_BY_ID = CREATIVE_DERIVED_ACTION_BY_ID;
-const DERIVED_ACTION_BY_PURPOSE = Object.fromEntries(DERIVED_ROUND_ACTIONS.map((option) => [option.purpose, option]));
 const DERIVED_VARIATION_AXES = ['构图', '背景', '色彩', '风格', '姿势', '表情', '光影', '商业感'];
 const DERIVED_KEEP_CONSTRAINTS = ['主体', '产品', 'Logo', '人物身份', '构图大方向', '色彩氛围'];
 const DERIVED_REFINEMENT_GOALS = ['清晰度', '质感', '光影', '构图', '细节', '商业感'];
@@ -360,39 +365,6 @@ function CreationSuggestionChips({ label = '填入示例', options, onChoose }) 
   const values = listItems(options);
   if (!values.length) return null;
   return <div className="creation-suggestion-chips"><span>{label}</span><div>{values.map((item) => <button type="button" key={item} className="outline-button" onClick={() => onChoose(item)}>{item}</button>)}</div></div>;
-}
-
-function MaterialNeedChecklist({ materialNeeds, completedCounts = {}, title = '素材准备清单' }) {
-  const values = uniqueList(materialNeeds);
-  const signature = values.join('|');
-  const [checkedNeeds, setCheckedNeeds] = useState(new Set());
-  useEffect(() => {
-    const allowed = new Set(values);
-    setCheckedNeeds((current) => {
-      const next = new Set([...current].filter((item) => allowed.has(item)));
-      return next.size === current.size ? current : next;
-    });
-  }, [signature]);
-  if (!values.length) return null;
-  const toggleNeed = (need) => setCheckedNeeds((current) => {
-    const next = new Set(current);
-    if (next.has(need)) next.delete(need);
-    else next.add(need);
-    return next;
-  });
-  return <section className="material-need-checklist" aria-label={title}>
-    <header><div><p className="eyebrow">{title}</p><h3>先把素材准备清楚</h3><span>勾选只是个人准备提醒；只有导入素材或保存参考素材，才会真的写进 Studio。</span></div></header>
-    <ul>{values.map((need) => {
-      const preset = materialNeedUsagePreset(need);
-      const count = Number(completedCounts[need] || 0);
-      const checked = checkedNeeds.has(need);
-      return <li key={need} className={'material-need-item ' + (count ? 'is-complete' : checked ? 'is-prepared' : '')}>
-        <label><input type="checkbox" checked={checked || count > 0} onChange={() => toggleNeed(need)} /><span>{need}</span></label>
-        <small>{count ? count + ' 张已导入或已挂载' : preset.hint}</small>
-        <em>默认标注为：{preset.usageLabel}</em>
-      </li>;
-    })}</ul>
-  </section>;
 }
 
 function MaterialImportGuide({ materialNeeds, selectedNeed, completedCounts = {}, assetScope, selectedRound, onSelectNeed }) {
@@ -712,7 +684,7 @@ function ProjectTaskList({ project, tasks, onOpenTask, onCreateTask }) {
 
 
 
-function WorkspaceContextBar({ project, tasks = EMPTY, task, rounds, selectedRound, view, assetScope, sessionPlanStatus, onProject, onTasks, onSelectTask, onSelectRound, onCreateRound, onNavigate, onRestoreContext }) {
+function WorkspaceContextBar({ project, tasks = EMPTY, task, rounds, selectedRound, view, sessionPlanStatus, onProject, onTasks, onSelectTask, onSelectRound, onCreateRound, onNavigate, onRestoreContext }) {
   if (!project) return null;
   const scopedAssetTarget = selectedRound ? 'round' : task ? 'task' : 'project';
   const roundOptions = selectedRound && !rounds.some((round) => round.id === selectedRound.id) ? [selectedRound, ...rounds] : rounds;
@@ -962,32 +934,6 @@ function RoundCreationDialog({ task, rounds, currentRound, busy, error, onDismis
 }
 
 
-
-function ReferenceAssetPanel({ round, referenceAssets, busy, error, onOpenSelector, onPreview, onRemove }) {
-  if (!round) return null;
-  const materials = normalizeReferenceMaterials(round.plan || {});
-  const assetsById = new Map(referenceAssets.map((asset) => [asset.id, asset]));
-  const editable = round.status === 'draft';
-  return <section className="reference-panel" aria-label="本轮参考素材">
-    <header>
-      <div>
-        <p className="eyebrow">参考素材</p>
-        <h3>{materials.length ? materials.length + ' 张已挂载' : '尚未挂载参考素材'}</h3>
-        <span>{editable ? '可以直接从项目素材或共享素材选择；生成前仍由 Agent 整理并确认计划。' : '当前批次已进入确认或运行流程，参考素材请回到 Agent 修改计划。'}</span>
-      </div>
-      <button type="button" className="command-button" disabled={!editable || busy} onClick={onOpenSelector}><ImagePlus size={16} />{materials.length ? '管理参考素材' : '添加参考素材'}</button>
-    </header>
-    {materials.length ? <div className="reference-chip-list">{materials.map((item) => {
-      const asset = assetsById.get(item.assetId);
-      return <article className="reference-chip" key={item.assetId}>
-        {asset ? <button type="button" className="reference-chip-preview" onClick={() => onPreview([asset])} aria-label="预览参考素材"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button> : <span className="reference-chip-missing"><ImageIcon size={16} /></span>}
-        <div><b>{REFERENCE_USAGE_LABELS[item.usage] || item.usage}</b><span>{asset?.display?.label || item.assetId}</span>{item.note && <small>{item.note}</small>}</div>
-        {editable && <IconButton label="移除参考素材" onClick={() => onRemove(item.assetId)} disabled={busy}><X size={14} /></IconButton>}
-      </article>;
-    })}</div> : <div className="reference-empty"><ImagePlus size={18} /><span>先挂主体、风格、构图、色彩或遮罩参考，再回到 Agent 生成可确认计划。</span></div>}
-    {error && <div className="creation-form-error" role="alert" aria-live="assertive"><CircleAlert size={15} /><span>{error}</span></div>}
-  </section>;
-}
 
 function ReferenceAssetDialog({ project, task, round, sharedAssets, selectedMaterials, busy, error, onDismiss, onSave, onPreview }) {
   const pageSize = 24;
@@ -1274,7 +1220,7 @@ function RejectReviewDialog({ assets, canAddNegative, canCreateNextRound, initia
   </AccessibleDialog>;
 }
 
-function ImageInspectorDialog({ assets, zoom, selectedAssetIds, selectionBusyIds, selectedProject, selectedTask, fallbackTask, selectedRound, onClose, onZoom, onToggleDeliverable, onReview, onOpenDerive, onAddReference, onReject, onOpenReference }) {
+function ImageInspectorDialog({ assets, zoom, selectedAssetIds, selectionBusyIds, selectedProject, selectedTask, fallbackTask, selectedRound, onClose, onZoom, onToggleDeliverable, onOpenDerive, onAddReference, onReject, onOpenReference }) {
   const single = assets.length === 1 ? assets[0] : null;
   const singleSelected = single ? selectedAssetIds.has(single.id) : false;
   // 对比不设上限：布局是自适应网格（repeat(auto-fit)），2/4/6/8 张都并排，5 张以上也不再纵向堆叠。
@@ -1361,25 +1307,29 @@ function RunItemOutputThumbs({ assets, onInspect }) {
 
 function RunItemRow({ item, selected, onToggleSelected, onOpenDetail, onInspect, onRetry }) {
   const recovery = runItemRecovery(item);
+  // 归因（方案 4.10 第三条）：分清「我的问题」与「系统的问题」——下一步完全不同。
+  // 模型在非失败状态返回 null，所以成功的那张图旁边不会多出一句「等一等就能过」的噪音。
+  const attribution = failureAttributionLine(item);
   const retryable = retryableRunItems([item]).length > 0;
   const attempts = Number.isInteger(item.attempts) ? item.attempts : 0;
   return <article className={'run-item-row ' + (selected ? 'is-selected ' : '') + (retryable ? 'is-retryable' : '')}>
     <label className="run-item-select"><input type="checkbox" checked={selected} disabled={!retryable} onChange={() => onToggleSelected(item.id)} aria-label={'选择第 ' + item.sequence + ' 项用于批量重试'} /><span aria-hidden="true"><Check size={12} /></span></label>
     <div className="run-item-summary"><b>#{String(item.sequence).padStart(3, '0')}</b><RunItemOutputThumbs assets={item.outputAssets || EMPTY} onInspect={onInspect} /></div>
     <StatusPill value={item.status} scope="run_item" />
-    <div className="run-item-details"><span>尝试 {attempts} 次</span>{item.retryAt && <span>重试 {item.retryAt}</span>}{item.updatedAt && <span>更新 {new Date(item.updatedAt).toLocaleString('zh-CN')}</span>}{recovery.error && <span className="run-item-error">{recovery.error}</span>}{recovery.advice && <span className="run-item-recovery">{recovery.advice}</span>}</div>
-    <div className="run-item-actions"><button type="button" className="outline-button" onClick={() => onOpenDetail(item)}><Eye size={15} />详情</button>{retryable && <IconButton label={'回到会话重试第 ' + item.sequence + ' 项'} onClick={() => void onRetry(item.id)}><RefreshCw size={15} /></IconButton>}</div>
+    <div className="run-item-details"><span>尝试 {attempts} 次</span>{item.retryAt && <span>重试 {item.retryAt}</span>}{item.updatedAt && <span>更新 {new Date(item.updatedAt).toLocaleString('zh-CN')}</span>}{attribution && <span className={'run-item-attribution is-' + attribution.owner}>{attribution.label}</span>}{recovery.error && <span className="run-item-error">{recovery.error}</span>}{recovery.advice && <span className="run-item-recovery">{recovery.advice}</span>}</div>
+    <div className="run-item-actions"><button type="button" className="outline-button" onClick={() => onOpenDetail(item)}><Eye size={15} />详情</button>{retryable && <button type="button" className="outline-button" onClick={() => void onRetry(item.id)}><RefreshCw size={15} />重试</button>}</div>
   </article>;
 }
 
 function RunItemDetailDialog({ item, onDismiss, onInspect, onRetry }) {
   if (!item) return null;
   const recovery = runItemRecovery(item);
+  const attribution = failureAttributionLine(item);
   const retryable = retryableRunItems([item]).length > 0;
   return <AccessibleDialog label={'第 ' + item.sequence + ' 项出图详情'} onDismiss={onDismiss} className="run-item-detail-dialog">
     <header><div><p className="eyebrow">出图详情</p><h2>第 {item.sequence} 项</h2></div><IconButton label="关闭出图详情" onClick={onDismiss}><X size={16} /></IconButton></header>
-    <div className="run-item-detail-grid"><section><h3>状态</h3><StatusPill value={item.status} scope="run_item" /><p>已尝试 {Number.isInteger(item.attempts) ? item.attempts : 0} 次{item.retryAt ? '，下次重试 ' + item.retryAt : ''}。</p>{item.updatedAt && <p>最后更新：{new Date(item.updatedAt).toLocaleString('zh-CN')}</p>}</section><section><h3>恢复建议</h3>{recovery.error ? <p className="run-item-error">{recovery.error}</p> : <p>没有安全错误摘要。</p>}{recovery.advice && <p className="run-item-recovery">{recovery.advice}</p>}</section><section className="run-item-detail-assets"><h3>输出资产</h3>{item.outputAssets?.length ? <div>{item.outputAssets.map((asset) => <button type="button" key={asset.id} onClick={() => void onInspect(asset.id)}><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /><span>{asset.mediaType || 'image'} · {asset.mediaState || 'available'}</span></button>)}</div> : <p>这一项还没有输出资产。</p>}</section></div>
-    {retryable && <footer><button type="button" className="command-button" onClick={() => void onRetry(item.id)}><RefreshCw size={16} />回到会话重试此项</button></footer>}
+    <div className="run-item-detail-grid"><section><h3>状态</h3><StatusPill value={item.status} scope="run_item" /><p>已尝试 {Number.isInteger(item.attempts) ? item.attempts : 0} 次{item.retryAt ? '，下次重试 ' + item.retryAt : ''}。</p>{item.updatedAt && <p>最后更新：{new Date(item.updatedAt).toLocaleString('zh-CN')}</p>}</section><section><h3>恢复建议</h3>{attribution && <p className={'run-item-attribution is-' + attribution.owner}><b>{attribution.label}</b>：{attribution.advice}</p>}{recovery.error ? <p className="run-item-error">{recovery.error}</p> : <p>没有安全错误摘要。</p>}{recovery.advice && <p className="run-item-recovery">{recovery.advice}</p>}</section><section className="run-item-detail-assets"><h3>输出资产</h3>{item.outputAssets?.length ? <div>{item.outputAssets.map((asset) => <button type="button" key={asset.id} onClick={() => void onInspect(asset.id)}><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /><span>{asset.mediaType || 'image'} · {asset.mediaState || 'available'}</span></button>)}</div> : <p>这一项还没有输出资产。</p>}</section></div>
+    {retryable && <footer><button type="button" className="command-button" onClick={() => void onRetry(item.id)}><RefreshCw size={16} />重试此项（交给会话）</button></footer>}
   </AccessibleDialog>;
 }
 
@@ -1489,10 +1439,10 @@ function GenerationHistory({ selectedRound, runs, activeRunId, activeRun, runExe
 
           <div className="run-controls" aria-label="运行操作">
             <span className="run-controls-label">运行操作</span>
-            {['queued', 'running'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void onControlRun('pause')}><Pause size={16} />回到会话暂停</button>}
-            {activeRun.status === 'paused' && <button type="button" className="command-button" onClick={() => void onControlRun('resume')}><Play size={16} />回到会话继续</button>}
-            {['partial', 'failed'].includes(activeRun.status) && <button type="button" className="command-button" onClick={() => void onControlRun('retry')}><RefreshCw size={16} />回到会话重试</button>}
-            {canCancelActiveRun && <button type="button" className="danger-button" onClick={() => void onControlRun('cancel')}><X size={16} />回到会话取消</button>}
+            {['queued', 'running'].includes(activeRun.status) && <button type="button" className="outline-button" onClick={() => void onControlRun('pause')}><Pause size={16} />暂停运行</button>}
+            {activeRun.status === 'paused' && <button type="button" className="command-button" onClick={() => void onControlRun('resume')}><Play size={16} />继续运行（交给会话）</button>}
+            {['partial', 'failed'].includes(activeRun.status) && <button type="button" className="command-button" onClick={() => void onControlRun('retry')}><RefreshCw size={16} />重试没成的项（交给会话）</button>}
+            {canCancelActiveRun && <button type="button" className="danger-button" onClick={() => void onControlRun('cancel')}><X size={16} />取消运行</button>}
             <button type="button" className="run-advanced-button" aria-expanded={Boolean(advancedDetails)} onClick={onToggleAdvanced}><Ellipsis size={16} />{advancedDetails ? '收起技术详情' : '技术详情'}</button>
           </div>
 
@@ -1503,7 +1453,7 @@ function GenerationHistory({ selectedRound, runs, activeRunId, activeRun, runExe
               <div className="run-item-filters" aria-label="按状态筛选">{RUN_ITEM_FILTER_OPTIONS.map((option) => <button type="button" key={option.id} className={normalizedFilter === option.id ? 'is-active' : ''} onClick={() => onSetRunItemFilter(option.id)}>{option.label}<small>{runItemFilterCount(runItemPage.statusCounts, option.id)}</small></button>)}</div>
               <label className="run-item-sequence"><Search size={14} /><span>序号</span><input type="number" min="1" inputMode="numeric" value={normalizedSequence || ''} onChange={(event) => onSetRunItemSequence(event.target.value)} placeholder="任意" />{normalizedSequence !== null && <button type="button" aria-label="清除序号筛选" onClick={() => onSetRunItemSequence(null)}><X size={13} /></button>}</label>
               <label className="run-item-page-size"><span>每页</span><select aria-label="每页数量" value={normalizedPageSize} onChange={(event) => onSetRunItemPageSize(event.target.value)}>{RUN_ITEM_PAGE_SIZES.map((size) => <option value={size} key={size}>{size}</option>)}</select></label>
-              <div className="run-item-bulk"><button type="button" className="outline-button" disabled={!retryablePageItems.length} onClick={() => onSelectRetryablePageItems(!allRetryableSelected)}><Check size={15} />{allRetryableSelected ? '取消本页' : '选择可重试'}</button><button type="button" className="command-button" disabled={!selectedRetryableIds.length} onClick={() => void onRetrySelectedItems(selectedRetryableIds)}><RefreshCw size={15} />回到会话重试 {selectedRetryableIds.length || ''}</button></div>
+              <div className="run-item-bulk"><button type="button" className="outline-button" disabled={!retryablePageItems.length} onClick={() => onSelectRetryablePageItems(!allRetryableSelected)}><Check size={15} />{allRetryableSelected ? '取消本页' : '选择可重试'}</button><button type="button" className="command-button" disabled={!selectedRetryableIds.length} onClick={() => void onRetrySelectedItems(selectedRetryableIds)}><RefreshCw size={15} />重试选中的 {selectedRetryableIds.length || ''} 项（交给会话）</button></div>
             </div>
             <div className="run-item-list">{visibleRunItems.length ? visibleRunItems.map((item) => <RunItemRow key={item.id} item={item} selected={selectedRunItemIds.has(item.id)} onToggleSelected={onToggleRunItemSelection} onOpenDetail={onOpenRunItemDetail} onInspect={onInspectAsset} onRetry={onRetryItem} />) : <p className="empty-copy">当前筛选没有记录。</p>}</div>
             <nav className="run-item-pagination" aria-label="分页"><button type="button" className="outline-button" disabled={runItemPage.page <= 1} onClick={() => onSetRunItemPage(runItemPage.page - 1)}><ChevronLeft size={15} />上一页</button><span>第 {runItemPage.page} / {runItemPage.totalPages} 页</span><button type="button" className="outline-button" disabled={runItemPage.page >= runItemPage.totalPages} onClick={() => onSetRunItemPage(runItemPage.page + 1)}>下一页<ChevronRight size={15} /></button></nav>
@@ -1530,6 +1480,34 @@ class WorkbenchErrorBoundary extends Component {
   }
 }
 
+/**
+ * 版本协商闸门（方案 9.4）：授权之后、渲染 App 之前，先用**不带协议头**的
+ * `/api/studio` 和后台握一次手。不兼容时给一句人话，而不是让每个请求神秘失败。
+ */
+function StudioVersionGate() {
+  const [attempt, setAttempt] = useState(0);
+  const [negotiation, setNegotiation] = useState(null);
+  useEffect(() => {
+    let current = true;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch('/api/studio', versionProbeRequest({ signal: controller.signal }));
+        const payload = await response.json().catch(() => null);
+        const studio = payload && payload.ok === true ? payload.data : null;
+        if (current) setNegotiation(negotiateStudioVersion(studio));
+      } catch (error) {
+        if (current && !isAbortError(error)) setNegotiation({ compatible: false, message: '无法连接到本地 Studio。请确认后台服务在运行后重试。' });
+      }
+    })();
+    return () => { current = false; controller.abort(); };
+  }, [attempt]);
+
+  if (!negotiation) return <div className="loading-shell"><LoaderCircle size={22} className="spin" /><span>正在连接 Studio</span></div>;
+  if (negotiation.compatible) return <App />;
+  return <main className="local-auth-failure" role="alert"><CircleAlert size={26} /><div><h1>界面与后台服务版本不一致</h1><p>{negotiation.message}</p></div><button type="button" className="command-button" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={16} />重新检查</button></main>;
+}
+
 function LocalStudioAuthorizationGate() {
   const [attempt, setAttempt] = useState(0);
   const [authorizationError, setAuthorizationError] = useState('');
@@ -1547,7 +1525,7 @@ function LocalStudioAuthorizationGate() {
     return () => { current = false; };
   }, [attempt]);
 
-  if (authorized) return <App />;
+  if (authorized) return <StudioVersionGate />;
   if (!authorizationError) return <div className="loading-shell"><LoaderCircle size={22} className="spin" /><span>正在验证本地 Studio 授权</span></div>;
   return <main className="local-auth-failure" role="alert"><CircleAlert size={26} /><div><h1>无法授权本地 Studio</h1><p>{authorizationError}</p></div><button type="button" className="command-button" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={16} />重试授权</button></main>;
 }
@@ -1602,7 +1580,6 @@ function App() {
   const [referenceDialog, setReferenceDialog] = useState(null);
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [referenceError, setReferenceError] = useState('');
-  const [referenceAssets, setReferenceAssets] = useState(EMPTY);
   const [referenceResolver, setReferenceResolver] = useState(null);
   const [pendingReferenceAfterRound, setPendingReferenceAfterRound] = useState(null);
   const [derivedDialog, setDerivedDialog] = useState(null);
@@ -1633,18 +1610,14 @@ function App() {
   const [recoveryPhase, setRecoveryPhase] = useState('ready');
   const [pendingDerivedAfterTask, setPendingDerivedAfterTask] = useState(null);
   const [batchBusy, setBatchBusy] = useState(false);
-  const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0, canvasLayout: 0 });
+  const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0, canvasLayout: 0, requests: 0 });
   const inputRef = useRef(null);
   const batchBusyRef = useRef(false);
   const batchOperationRef = useRef(null);
   const deliveryInteractionRef = useRef(null);
   const deliveryOperationEpoch = useRef(0);
   const activeProjectIdRef = useRef(null);
-  const contextSignature = useRef('');
-  const contextWriteQueue = useRef(Promise.resolve());
   const sessionRef = useRef(null);
-  const desiredContextRef = useRef(null);
-  const restoredSessionContext = useRef(false);
   const selectedAssetIdsRef = useRef(new Set());
   const selectionBusyIdsRef = useRef(new Set());
   const selectionWriteQueue = useRef(Promise.resolve());
@@ -1657,7 +1630,6 @@ function App() {
   const advancedDetailRequests = useRef(null);
   const assetRequests = useRef(null);
   const assetProvenanceRequests = useRef(null);
-  const sessionRefreshRequests = useRef(null);
   const selectionRequests = useRef(null);
   const recoveryPhaseRef = useRef('ready');
   const recoveryTimerRef = useRef(null);
@@ -1672,11 +1644,10 @@ function App() {
   advancedDetailRequests.current ||= createLatestRequestGate();
   assetRequests.current ||= createLatestRequestGate();
   assetProvenanceRequests.current ||= createLatestRequestGate();
-  sessionRefreshRequests.current ||= createLatestRequestGate();
   selectionRequests.current ||= createLatestRequestGate();
   sharedAssetRequests.current ||= createLatestRequestGate();
   deliveryInteractionRef.current ||= createDeliveryInteractionGuard();
-  useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); assetProvenanceRequests.current?.cancel(); sessionRefreshRequests.current?.cancel(); }, []);
+  useEffect(() => () => { restartMonitorEpoch.current += 1; if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current); assetProvenanceRequests.current?.cancel(); }, []);
   const { view, projectId: activeProjectId, taskId: activeTaskId, roundId: activeRoundId, compareRoundIds = EMPTY, runId: activeRunId, assetScope, runItemFilter: activeRunItemFilter = DEFAULT_RUN_ITEM_FILTER, runItemPage: activeRunItemPage = 1, runItemPageSize: activeRunItemPageSize = DEFAULT_RUN_ITEM_PAGE_SIZE, runItemSequence: activeRunItemSequence = null } = route;
   const routeView = rendererForWorkbenchView(view);
   const studioView = isStudioView(view);
@@ -1702,6 +1673,37 @@ function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
   const { searchQuery, setSearchQuery, searchResults, searchLoading, searchError, openSearchResult } = useStudioSearch({ api, navigateRoute });
+  // 请求队列：唯一事实源是 studio_requests；事件驱动重取，前端不造影子状态（方案 4.2 / 红线 1）。
+  const { requests: studioRequests, pendingCount: pendingRequestCount, busy: requestBusy, send: sendRequest, withdraw: withdrawRequest } = useRequestQueue({ api, eventRevision: eventRevision.requests, reportError: reportRequestError });
+  // 就地回答追问（8.10#8）：回答作为一条新请求，context 指回上一条，agent 据此「续上」而不靠记忆。
+  const answerRequest = useCallback((request, answer) => sendRequest(answer, { projectId: request.projectId, taskId: request.taskId, previousRequestId: request.id }), [sendRequest]);
+  // agent 在场（方案 4.6 的「显示是最要紧的」）：状态卡 + 输入框旁的「在场 ≠ 胜任」提示。
+  const { presence: agentPresenceStatus } = useAgentPresence({ api, eventRevision: eventRevision.requests, reportError: reportRequestError });
+  // 队列是**全局底栏**，而它关联的批次可能不在当前视图已加载的数据里
+  // （比如停在项目列表页、还没进项目）。缺的按 id 补取。
+  //
+  // ⚠️ 补取结果**不是一次性缓存**：批次状态会变（最典型的就是用户在闸门点了确认）。
+  // 所以这里按 `progressRevision` 重取，而不是「已取过就永远跳过」——后者会让卡片
+  // 一直显示确认前的旧状态，只有整页刷新才恢复。合并时当前视图优先（见 `queueRounds`）。
+  const [linkedProgress, setLinkedProgress] = useState(() => new Map());
+  const [progressRevision, setProgressRevision] = useState(0);
+  useEffect(() => {
+    const needed = [...new Set(studioRequests.map((request) => request.resultRoundId).filter(Boolean))]
+      .filter((id) => !rounds.some((round) => round.id === id));
+    if (!needed.length) return undefined;
+    let cancelled = false;
+    // `/api/rounds/:id` 同时给出批次、它最近的运行、以及槽位计数——
+    // 有了这三样，卡片在**任何页面**都能算出真实进度（不必先进入那个项目/任务）。
+    void Promise.all(needed.map((id) => api('/api/rounds/' + encodeURIComponent(id))
+      .then((data) => (data?.round ? [id, { round: data.round, latestRun: data.latestRun || null, tally: data.tally || null }] : null))
+      .catch(() => null)))
+      .then((fetched) => { if (!cancelled) setLinkedProgress((current) => new Map([...current, ...fetched.filter(Boolean)])); });
+    return () => { cancelled = true; };
+  }, [studioRequests, rounds, api, progressRevision]);
+  const roundsForQueue = useMemo(() => queueRounds(rounds, linkedProgress), [rounds, linkedProgress]);
+  // 「agent 到哪一步了」全部由已有事实算出来（请求状态 + 关联批次 + 运行 + 槽位），
+  // 前端不新增、也不累加任何进度状态（红线：前端不造影子状态）。
+  const progressForRequest = useCallback((request) => requestProgress(request, { rounds: roundsForQueue, runs, runItems: lineageRunItems, linked: linkedProgress }), [roundsForQueue, runs, lineageRunItems, linkedProgress]);
 
   const openWorkbenchSession = useCallback(async () => {
     if (session) return session;
@@ -1717,23 +1719,6 @@ function App() {
     });
     return () => { cancelled = true; };
   }, [openWorkbenchSession, reportRequestError, session]);
-
-  const refreshWorkbenchSession = useCallback(async (sessionId) => {
-    const request = sessionRefreshRequests.current.begin(String(sessionId));
-    try {
-      const data = await api('/api/sessions/' + encodeURIComponent(sessionId), { signal: request.signal });
-      if (!request.isCurrent()) return null;
-      const nextSession = data.session;
-      if (nextSession) {
-        sessionRef.current = nextSession;
-        setSession(nextSession);
-      }
-      return nextSession || null;
-    } catch (nextError) {
-      if (isAbortError(nextError) || !request.isCurrent()) return null;
-      throw normalizeRequestError(nextError, '无法读取当前 Workbench 会话。', { operation: 'refresh-workbench-session', phase: 'loading' });
-    }
-  }, []);
 
 
   const refreshStudio = useCallback(async (request) => {
@@ -1988,6 +1973,9 @@ function App() {
     onSettled: () => setLoading(false)
   });
   const refresh = useCallback(async () => {
+    // 任何一次刷新都让「按 id 补取的批次快照」重取一遍——批次状态会变，
+    // 而卡片可能不在当前视图里（否则确认后卡片会停在旧状态，见 linkedProgress 注释）。
+    setProgressRevision((current) => current + 1);
     const refreshed = await refreshAll();
     return refreshed ? refreshAssets() : false;
   }, [refreshAll, refreshAssets]);
@@ -2002,7 +1990,8 @@ function App() {
       studioOverview: current.studioOverview + (plan.studioOverview ? 1 : 0),
       planVersions: current.planVersions + (plan.planVersions ? 1 : 0),
       runs: current.runs + (plan.refreshContext ? 1 : 0),
-      canvasLayout: current.canvasLayout + (plan.refreshCanvasLayout || plan.canvasLayout ? 1 : 0)
+      canvasLayout: current.canvasLayout + (plan.refreshCanvasLayout || plan.canvasLayout ? 1 : 0),
+      requests: current.requests + (plan.requests ? 1 : 0)
     }));
   }, []);
   eventRefreshCallbacks.current = {
@@ -2188,12 +2177,11 @@ function App() {
   const sharedAssetIds = useMemo(() => new Set(sharedAssets.map((asset) => asset.id)), [sharedAssets]);
   const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const referenceMaterials = useMemo(() => normalizeReferenceMaterials(selectedRound?.plan || {}), [selectedRound?.id, selectedRound?.version, selectedRound?.plan]);
-  const referenceAssetIds = useMemo(() => referenceMaterials.map((item) => item.assetId), [referenceMaterials]);
   const contextMaterialNeeds = useMemo(() => materialNeedsForContext(selectedProject, selectedTask, selectedRound, projectTemplates), [selectedProject, selectedTask, selectedRound, projectTemplates]);
   const materialNeedCounts = useMemo(() => materialNeedCompletionCounts(contextMaterialNeeds, assets, referenceMaterials), [contextMaterialNeeds.join('|'), assets, referenceMaterials]);
   const selectionAssetById = useMemo(() => new Map(selectionAssets.map((asset) => [asset.id, asset])), [selectionAssets]);
   const deliveryFlowAssets = deliveryCompletion ? deliveryCompletion.assetIds.map((assetId) => assetById.get(assetId) || selectionAssetById.get(assetId) || { id: assetId, display: { label: '已冻结交付图片' } }) : selectedAssets;
-  const selectedTaskStatus = taskPresentation(selectedTask, rounds);
+  
   const visibleRunItems = runItemPage.items;
   const lineageVisibleRunItems = view === 'lineage' ? lineageRunItems : visibleRunItems;
   const runExecutionStatus = runExecutionPresentationFromCounts(activeRun, runItemPage.statusCounts);
@@ -2205,19 +2193,6 @@ function App() {
   const importLabel = selectedImportNeed ? '导入“' + selectedImportNeed + '”' : selectedRound && assetScope === 'round' ? '添加为本轮参考' : '导入到项目';
   const deliverySelection = useMemo(() => projectDeliverySelection(selectedProject?.id || null, selectedAssets), [selectedProject?.id, selectedAssets]);
   const selectedDeliveryAssets = deliverySelection.eligibleAssets;
-  useEffect(() => {
-    if (!selectedProject || !referenceAssetIds.length) { setReferenceAssets(EMPTY); return undefined; }
-    const controller = new AbortController();
-    let current = true;
-    const params = new URLSearchParams({ projectId: selectedProject.id });
-    for (const assetId of referenceAssetIds) params.append('assetId', assetId);
-    void api('/api/assets/by-id?' + params.toString(), { signal: controller.signal }).then((data) => {
-      if (current) setReferenceAssets(data.assets || EMPTY);
-    }).catch((nextError) => {
-      if (current && !isAbortError(nextError)) setReferenceError(errorMessageForDisplay(normalizeRequestError(nextError, '无法读取参考素材。', { operation: 'load-reference-assets-by-id', phase: 'loading' }), '无法读取参考素材。'));
-    });
-    return () => { current = false; controller.abort(); };
-  }, [reportRequestError, selectedProject?.id, referenceAssetIds.join('|')]);
 
   const eligibleDeliveryIds = useMemo(() => new Set(deliveries.filter((delivery) => ['ready', 'exported'].includes(delivery.status)).map((delivery) => delivery.id)), [deliveries]);
 
@@ -2318,32 +2293,9 @@ function App() {
   useEffect(() => {
     if (assetProvenance && !assets.some((asset) => asset.id === assetProvenance.asset?.id)) setAssetProvenance(null);
   }, [assets, assetProvenance]);
-  useEffect(() => {
-    if (!session || restoredSessionContext.current || route.projectId || studioView) return;
-    restoredSessionContext.current = true;
-    if (session.activeProjectId) navigateRoute({ view: 'lineage', projectId: session.activeProjectId, taskId: session.activeTaskId, roundId: session.activeRoundId, compareRoundIds: session.activeRoundId ? [session.activeRoundId] : [], runId: null, assetScope: session.activeRoundId ? 'round' : session.activeTaskId ? 'task' : 'project' }, true);
-  }, [session, route.projectId, studioView, navigateRoute]);
-
-  useEffect(() => {
-    if (!session || !selectedProject || (activeTaskId && !selectedTask) || (activeRoundId && !selectedRound)) return;
-    const desired = { signature: [selectedProject.id, selectedTask?.id || '', selectedRound?.id || ''].join(':'), projectId: selectedProject.id, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null };
-    if (desired.signature === contextSignature.current) return;
-    contextSignature.current = desired.signature;
-    desiredContextRef.current = desired;
-    contextWriteQueue.current = contextWriteQueue.current.catch(() => undefined).then(async () => {
-      const current = sessionRef.current;
-      const target = desiredContextRef.current;
-      if (!current || !target || target.signature !== contextSignature.current) return;
-      try {
-        const next = await api('/api/sessions/' + encodeURIComponent(current.id) + '/context', { method: 'POST', idempotencyKey: uniqueKey('session-context'), body: { projectId: target.projectId, taskId: target.taskId, roundId: target.roundId, expectedVersion: current.version } });
-        sessionRef.current = next;
-        setSession(next);
-      } catch (nextError) {
-        contextSignature.current = '';
-        reportRequestError(nextError, '无法保存当前工作对象。', { operation: 'save-workbench-context', phase: 'committing' });
-      }
-    });
-  }, [session, selectedProject, selectedTask, selectedRound, activeTaskId, activeRoundId]);
+  // 「我在看哪儿」不再写进 Session。route 才是界面选中态的唯一来源；
+  // Session 上的 agent_* 指针属于 Agent（方案 7.7.3）。这里曾经把两者混在
+  // 同一列里互相覆盖，现在前端既不写它，也不再用它恢复视图。
 
   const review = async (assetId, decision, feedback = {}) => {
     try {
@@ -2450,13 +2402,6 @@ function App() {
     // 所以这里给它一个只带 id 的占位，避免 id 被丢掉 —— 但并进清单时不能塞占位，那是上一行的事。
     const keepEntries = uniqueIds.map((assetId) => assetById.get(assetId) || { id: assetId });
     enqueueSelectionWrite(projectId, uniqueIds, () => api('/api/projects/' + encodeURIComponent(projectId) + '/selection/batch', { method: 'POST', idempotencyKey: uniqueKey('canvas-selection'), body: { assetIds: uniqueIds, selected, keepAssetIds: keepCandidateIds(keepEntries, selected) } }), '无法更新创作谱系选片。');
-  };
-  const batchReview = async (assetIds, decision) => {
-    try {
-      const uniqueIds = [...new Set(assetIds)].filter(Boolean);
-      for (const assetId of uniqueIds) await api('/api/assets/' + encodeURIComponent(assetId) + '/review', { method: 'POST', idempotencyKey: uniqueKey('canvas-review'), body: { decision, taskId: selectedTask?.id, roundId: selectedRound?.id, feedback: {} } });
-      await refresh();
-    } catch (nextError) { reportRequestError(nextError, '无法批量保存评审。', { operation: 'save-batch-review', phase: 'committing' }); }
   };
   const inspectAsset = async (assetId) => {
     const request = assetProvenanceRequests.current.begin(String(assetId));
@@ -2596,10 +2541,6 @@ function App() {
     setCreationDialog(null);
     setCreationError('');
   };
-  const afterCreationContext = async (currentSession, projectId, taskId = null, roundId = null) => {
-    contextSignature.current = [projectId || '', taskId || '', roundId || ''].join(':');
-    if (currentSession?.id) await refreshWorkbenchSession(currentSession.id);
-  };
   const createProjectFromStudio = async (form) => {
     if (creationBusy) return;
     if (!form.name) { setCreationError('请输入项目名称。'); return; }
@@ -2607,10 +2548,8 @@ function App() {
     setCreationError('');
     setError('');
     try {
-      const currentSession = sessionRef.current || session || await openWorkbenchSession();
-      const receipt = await api('/api/projects', { method: 'POST', idempotencyKey: uniqueKey('studio-project-create'), body: { name: form.name, description: form.description || undefined, templateId: form.templateId || undefined, templateVersion: form.templateVersion || undefined, sessionId: currentSession?.id } });
+      const receipt = await api('/api/projects', { method: 'POST', idempotencyKey: uniqueKey('studio-project-create'), body: { name: form.name, description: form.description || undefined, templateId: form.templateId || undefined, templateVersion: form.templateVersion || undefined } });
       const project = receipt.value;
-      await afterCreationContext(currentSession, project.id);
       setCreationDialog(null);
       await refresh();
       navigateRoute(selectProject(route, project.id));
@@ -2627,15 +2566,13 @@ function App() {
     setCreationError('');
     setError('');
     try {
-      const currentSession = sessionRef.current || session || await openWorkbenchSession();
-      const taskReceipt = await api('/api/tasks', { method: 'POST', idempotencyKey: uniqueKey('studio-task-create'), body: { projectId: selectedProject.id, name: form.name, taskTypeId: form.taskTypeId || undefined, styleKitId: form.styleKitId || undefined, brandKitId: form.brandKitId || undefined, intent: form.intent, sessionId: currentSession?.id } });
+      const taskReceipt = await api('/api/tasks', { method: 'POST', idempotencyKey: uniqueKey('studio-task-create'), body: { projectId: selectedProject.id, name: form.name, taskTypeId: form.taskTypeId || undefined, styleKitId: form.styleKitId || undefined, brandKitId: form.brandKitId || undefined, intent: form.intent } });
       const createdTask = taskReceipt.value;
       let createdRound = null;
       if (form.createRound) {
-        const roundReceipt = await api('/api/rounds', { method: 'POST', idempotencyKey: uniqueKey('studio-round-create'), body: { taskId: createdTask.id, purpose: form.roundPurpose, plan: form.plan, sessionId: currentSession?.id } });
+        const roundReceipt = await api('/api/rounds', { method: 'POST', idempotencyKey: uniqueKey('studio-round-create'), body: { taskId: createdTask.id, purpose: form.roundPurpose, plan: form.plan } });
         createdRound = roundReceipt.value;
       }
-      await afterCreationContext(currentSession, selectedProject.id, createdTask.id, createdRound?.id || null);
       setCreationDialog(null);
       await refresh();
       navigateRoute(createdRound ? { view: 'lineage', projectId: selectedProject.id, taskId: createdTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' } : selectTask(route, createdTask.id));
@@ -2651,8 +2588,7 @@ function App() {
     setCreationError('');
     setError('');
     try {
-      const currentSession = sessionRef.current || session || await openWorkbenchSession();
-      const receipt = await api('/api/rounds', { method: 'POST', idempotencyKey: uniqueKey('studio-round-create'), body: { taskId: selectedTask.id, purpose: form.purpose, parentRoundId: form.parentRoundId || undefined, plan: form.plan, sessionId: currentSession?.id } });
+      const receipt = await api('/api/rounds', { method: 'POST', idempotencyKey: uniqueKey('studio-round-create'), body: { taskId: selectedTask.id, purpose: form.purpose, parentRoundId: form.parentRoundId || undefined, plan: form.plan } });
       const createdRound = receipt.value;
       const pendingReference = pendingReferenceAfterRound;
       let referenceAttachError = '';
@@ -2667,7 +2603,6 @@ function App() {
         }
         setPendingReferenceAfterRound(null);
       }
-      await afterCreationContext(currentSession, selectedProject.id, selectedTask.id, createdRound.id);
       setCreationDialog(null);
       if (referenceAttachError) setError('批次已创建，但参考素材未能自动加入：' + referenceAttachError);
       await refresh();
@@ -2702,7 +2637,7 @@ function App() {
   const taskForId = (taskId, taskList = tasks) => taskList.find((task) => task.id === taskId) || null;
   const roundForId = (roundId, roundList = rounds) => roundList.find((round) => round.id === roundId) || null;
   const draftRoundsForTask = (task, roundList = rounds) => task ? roundList.filter((round) => round.taskId === task.id && round.status === 'draft') : EMPTY;
-  const draftRoundsForCurrentTask = () => draftRoundsForTask(selectedTask);
+  
   const referenceTaskIdsForAssets = (sourceAssets, roundList = rounds) => [...new Set(sourceAssets.flatMap((asset) => {
     const sourceRound = roundForId(asset?.display?.roundId || asset?.source?.roundId || asset?.source?.creativeRoundId || null, roundList);
     return [asset?.display?.taskId, asset?.source?.taskId, asset?.source?.creativeTaskId, sourceRound?.taskId].filter(Boolean);
@@ -2790,9 +2725,7 @@ function App() {
     if (!selectedTask || selectedTask.id !== targetTask.id) navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: targetTask.id, roundId: null, compareRoundIds: [], runId: null, assetScope: 'task' });
     openCreationDialog('round');
   };
-  const removeRoundReference = (assetId) => {
-    void saveRoundReferenceMaterials(referenceMaterials.filter((item) => item.assetId !== assetId), false);
-  };
+  
   const openDerivedRoundDialog = (nextAssets, purpose = 'variation', actionId = '') => {
     const sourceAssets = (nextAssets || EMPTY).filter((asset) => asset && !asset.deletedAt);
     if (!selectedProject) { setError('请先打开一个项目，再继续创作。'); return; }
@@ -2821,10 +2754,8 @@ function App() {
     setDerivedError('');
     setError('');
     try {
-      const currentSession = sessionRef.current || session || await openWorkbenchSession();
-      const receipt = await api('/api/rounds/derived', { method: 'POST', idempotencyKey: uniqueKey('studio-derived-round'), body: { ...form, taskId: selectedTask.id, sessionId: currentSession?.id } });
+      const receipt = await api('/api/rounds/derived', { method: 'POST', idempotencyKey: uniqueKey('studio-derived-round'), body: { ...form, taskId: selectedTask.id } });
       const createdRound = receipt.value;
-      await afterCreationContext(currentSession, selectedProject.id, selectedTask.id, createdRound.id);
       setDerivedDialog(null);
       setNotice('已基于图片创建下一轮草稿，并设为当前批次。已回到创作平台；请让会话整理可确认的计划。');
       await refresh();
@@ -2891,12 +2822,10 @@ function App() {
       for (const asset of rejectedAssets) await api('/api/assets/' + encodeURIComponent(asset.id) + '/review', { method: 'POST', idempotencyKey: uniqueKey('reject-review'), body: { decision: 'reject', taskId: selectedTask?.id, roundId: selectedRound?.id, feedback } });
       setRejectDialog(null);
       if (createNextRound) {
-        const currentSession = sessionRef.current || session || await openWorkbenchSession();
         const form = rejectFeedbackToDerivedForm(feedback, rejectedAssets);
-        const receipt = await api('/api/rounds/derived', { method: 'POST', idempotencyKey: uniqueKey('reject-derived-round'), body: { ...form, taskId: selectedTask.id, sessionId: currentSession?.id } });
+        const receipt = await api('/api/rounds/derived', { method: 'POST', idempotencyKey: uniqueKey('reject-derived-round'), body: { ...form, taskId: selectedTask.id } });
         const createdRound = receipt.value;
-        await afterCreationContext(currentSession, selectedProject.id, selectedTask.id, createdRound.id);
-        setNotice('不采用原因已保存，并已创建带反例参考的下一轮草稿。请让会话基于新的信息整理计划。');
+          setNotice('不采用原因已保存，并已创建带反例参考的下一轮草稿。请让会话基于新的信息整理计划。');
         await refresh();
         navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: selectedTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' });
         return;
@@ -2952,18 +2881,63 @@ function App() {
     const pageIds = retryableRunItems(visibleRunItems).map((item) => item.id);
     setSelectedRunItemIds((current) => { const next = new Set(current); for (const itemId of pageIds) { if (selected) next.add(itemId); else next.delete(itemId); } return next; });
   };
-  const retryRunItemsByIds = async (itemIds) => {
-    if (!activeRun) return;
-    const retryIds = [...new Set(itemIds)].filter(Boolean);
-    if (!retryIds.length) return;
-    setError('重试需要回到会话，由会话在你确认后执行。');
+  /**
+   * 「花动作」（重试 / 恢复）**不直调 bearer**。
+   *
+   * 它们会重新花钱，属于 Agent Bearer 权限；浏览器只有确认 Cookie，直调必然 403。
+   * 所以界面**不装作能直接执行**，而是把意图写成一条**共享请求队列**里的请求
+   * （带 `intent` + `runId` + `itemIds`，agent 据此精确执行，不必从一句话里猜），
+   * 由在场的 agent 接单后跑。这保持了角色分离：用户点按钮表达意图，agent 花钱执行。
+   *
+   * 之前这两个按钮只弹一句「回到会话」，点了什么都不会发生——实测让人以为功能坏了。
+   */
+  const requestRunAction = async (intent, { runId = null, itemIds = [], label }) => {
+    const targetRunId = runId || activeRun?.id;
+    if (!targetRunId) return false;
+    // 项目是队列的容器（4.7）。运行视图里 `selectedProject` 偶尔还没解析出来
+    // （深链直达、或项目列表未加载），这时**不能静默拒绝**——先按任务反查它所属项目。
+    const owningTask = selectedTask || tasks.find((item) => item.id === selectedRound?.taskId) || null;
+    const projectId = selectedProject?.id || owningTask?.projectId || null;
+    if (!projectId) {
+      setError('这条重试还不知道属于哪个项目：请先从左侧进入它所在的项目，再点重试。');
+      return false;
+    }
+    const uniqueIds = [...new Set(itemIds)].filter(Boolean);
+    const text = uniqueIds.length ? label + '（共 ' + uniqueIds.length + ' 项）' : label;
+    const sent = await sendRequest(text, {
+      projectId,
+      taskId: selectedTask?.id || owningTask?.id || null,
+      roundId: activeRun?.roundId || selectedRound?.id || null,
+      intent, runId: targetRunId, itemIds: uniqueIds
+    });
+    // 成功与失败都要有一句话（「提交不了永远要有一句话」）。
+    if (sent) setNotice('已把「' + text + '」交给会话：agent 接单后会执行；进度见下方请求队列。');
+    else setError('没能把「' + text + '」交给会话（可能正在忙，请稍后再点一次）。');
+    return sent;
   };
+  const retryRunItemsByIds = async (itemIds) => { await requestRunAction('retry', { itemIds, label: '重试这批里没成的项' }); };
   const retryRunItem = async (itemId) => retryRunItemsByIds([itemId]);
+  /**
+   * 运行控制两类分治（方案 4.9 / 规格书 §2.2）：
+   *   - 暂停 / 取消是**止损**：cookie 直达，点了就生效；
+   *   - 重试 / 恢复会**重新花钱**：保持 bearer，界面不直调——**改为写进请求队列派给 agent**。
+   */
   const controlRun = async (action, runId = activeRun?.id) => {
     const targetRunId = runId || activeRun?.id;
     if (!targetRunId) return;
-    const labels = { pause: '暂停运行', resume: '恢复运行', cancel: '取消运行', retry: '重试运行' };
-    setError((labels[action] || '运行控制') + '需要回到当前智能体会话，由受控 CLI/Agent 在确认后执行。');
+    if (action === 'pause' || action === 'cancel') {
+      const labels = { pause: '暂停运行', cancel: '取消运行' };
+      const paths = { pause: '/pause', cancel: '/cancel' };
+      try {
+        await api('/api/runs/' + encodeURIComponent(targetRunId) + paths[action], { method: 'POST', idempotencyKey: uniqueKey('run-' + action), body: {} });
+        setNotice(labels[action] + '已生效。');
+        await refresh();
+      } catch (nextError) {
+        reportRequestError(nextError, '无法' + labels[action] + '。', { operation: 'run-' + action, phase: 'committing' });
+      }
+      return;
+    }
+    await requestRunAction(action, { runId: targetRunId, label: action === 'resume' ? '继续这一批的运行' : '重试这一批没成的项' });
   };
   const copyRunPrompt = async (run) => {
     try {
@@ -2989,24 +2963,57 @@ function App() {
     } catch (nextError) { reportRequestError(nextError, '无法复制本次提示词。', { operation: 'copy-run-prompt', phase: 'requesting' }); }
   };
   const openGenerationConfirmation = async (targetRound = selectedRound) => {
-    if (!targetRound || targetRound.status !== 'awaiting_confirmation') return;
+    // ⚠️ 这里原来是一个**静默 return**：状态不符就什么都不做。
+    // 用户点了「审阅并确认计划」却毫无反应，只能猜是不是自己点错了。
+    // 「提交不了」永远要有一句话，哪怕只是「这一批已经确认过了」。
+    const round = targetRound?.id ? rounds.find((item) => item.id === targetRound.id) || targetRound : targetRound;
+    if (!round?.id) { setNotice('请先选择要确认的批次。'); return; }
+    if (round.status === 'active' || round.status === 'completed') { setNotice('这一批已经确认过了，不需要再确认。'); return; }
+    if (round.status !== 'awaiting_confirmation') { setNotice('这一批还没有可确认的计划；请先在会话里让 agent 写出计划。'); return; }
     setGenerationConfirmationBusy(true);
     setGenerationConfirmationError('');
     try {
-      let status = sessionPlanStatus;
-      if (!status?.pendingConfirmation || status.context?.round?.id !== targetRound.id) {
-        if (!session) throw new Error('当前 Workbench 尚未建立只读会话状态。');
-        status = await api('/api/sessions/' + encodeURIComponent(session.id) + '/plan-status');
-        setSessionPlanStatus(status);
+      // **按批次**读挑战，不读会话。
+      // 挑战是批次的属性，而界面看的是哪一批（路由）——这里原来读的是
+      // `GET /api/sessions/<自己>/plan-status`，那只在界面自己往 `agent_*` 写指针的年代成立；
+      // 指针收归 agent 独占之后这条读法必然拿到 null，确认按钮就会一直说
+      // 「请先由当前智能体会话发起挑战」，尽管挑战明明已经在了。
+      const data = await api('/api/rounds/' + encodeURIComponent(targetRound.id) + '/confirmation-challenge');
+      const pending = data?.pendingConfirmation;
+      if (!pending) {
+        // 「还没有挑战」是一个**明确的状态**，不是故障：计划在等人确认，但闸门要由
+        // agent 先发起挑战。所以给一句看得懂的指引，**不要**把它变成
+        // 「操作结果不明确 / 不可自动重试」这种吓人的错误（那是未知故障的说法）。
+        setNotice('这一批的计划正在等待确认，但会话还没有发起确认挑战；请在会话里让 agent 发起，然后回到这里点确认。');
+        return;
       }
-      if (!status.pendingConfirmation || status.context?.round?.id !== targetRound.id) throw new Error('请先由当前智能体会话发起这个计划的确认挑战。');
-      setGenerationConfirmation({ challenge: status.pendingConfirmation, round: targetRound });
+      setGenerationConfirmation({ challenge: pending, round: targetRound });
     } catch (nextError) {
       reportRequestError(nextError, '无法读取本次生成确认挑战。', { operation: 'load-generation-confirmation', phase: 'loading' });
     } finally {
       setGenerationConfirmationBusy(false);
     }
   };
+  /**
+   * 从请求卡片直达确认闸门。
+   *
+   * 闸门挂在批次节点上，但批次可能被画布的模式 / 筛选藏起来（用户就会「找不到该节点」）。
+   * 卡片是用户正在看的地方（4.2），所以这里直接定位到那一批并打开确认对话框，
+   * 不要求用户先去画布上把节点找出来。
+   */
+  const openRoundFromQueue = useCallback(async (roundId) => {
+    if (!roundId) return;
+    const round = roundsForQueue.find((item) => item.id === roundId) || null;
+    if (!round) {
+      setNotice('找不到这一批；它可能属于另一个任务或已被归档。');
+      return;
+    }
+    // 批次的返回体里只有 taskId，项目要从任务上找（队列是项目内的，但这样更稳）。
+    const owningTask = tasks.find((item) => item.id === round.taskId) || null;
+    navigateRoute({ view: 'lineage', projectId: round.projectId || owningTask?.projectId || selectedProject?.id || null, taskId: round.taskId, roundId: round.id, compareRoundIds: [round.id], runId: null, assetScope: 'round' });
+    if (round.status === 'awaiting_confirmation') await openGenerationConfirmation(round);
+  }, [navigateRoute, openGenerationConfirmation, roundsForQueue, selectedProject?.id, tasks]);
+
   const dismissGenerationConfirmation = () => {
     if (generationConfirmationBusy) return;
     setGenerationConfirmation(null);
@@ -3088,11 +3095,7 @@ function App() {
     return () => planVersionRequests.current.cancel();
   }, [view, selectedRound?.id, eventRevision.planVersions]);
   const dismissGuide = () => { window.localStorage.setItem('daoge-pic:guide-dismissed', '1'); };
-  const openImportEntry = () => {
-    if (!selectedProject) { openCreationDialog('project'); return; }
-    if (canImport && view !== 'library') { inputRef.current?.click(); return; }
-    navigateRoute({ view: 'assets', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' });
-  };
+  
 
 
   const renderAssetsView = () => <section className={'asset-stage ' + (selectedAssets.length && routeView === 'assets' ? 'has-selection' : '')}>
@@ -3136,9 +3139,6 @@ function App() {
       selectedAssetIds={selectedAssetIds}
       selectionBusyIds={selectionBusyIds}
       deliveries={deliveries}
-      taskTypes={taskTypes}
-      styleKits={styleKits}
-      brandKits={brandKits}
       sessionPlanStatus={sessionPlanStatus}
       layoutRevision={eventRevision.canvasLayout}
       onNavigate={navigateRoute}
@@ -3147,19 +3147,15 @@ function App() {
       onToggleAsset={markAsDeliverable}
       onDeselectAsset={deselectAsset}
       onBatchSelectAssets={setAssetsSelection}
-      onReviewAsset={review}
-      onBatchReviewAssets={batchReview}
       onSetAssetShared={setAssetShared}
       onDownloadAsset={downloadAsset}
       onCopyAsset={copyAsset}
-      onOpenProvider={openProviderDetails}
       onCreateTask={() => openCreationDialog('task')}
       onCreateRound={() => openCreationDialog('round')}
       onOpenReference={openReferenceDialog}
       onOpenDerive={openDerivedRoundDialog}
       onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)}
       onReject={openRejectReviewDialog}
-      onCreateDelivery={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })}
       onOpenConfirmation={(round) => void openGenerationConfirmation(round)}
     /> : null,
     assets: () => renderAssetsView(),
@@ -3197,9 +3193,10 @@ function App() {
           </div>
         </header>
         {!studioView ? <>
-          <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} assetScope={assetScope} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} onCreateRound={() => openCreationDialog('round')} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onRestoreContext={restoreSessionContext} />
+          <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} onCreateRound={() => openCreationDialog('round')} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onRestoreContext={restoreSessionContext} />
         </> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={restoreSessionContext} />}
       </div>
+      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: [...selectedAssetIds] }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} />
       <RuntimeHealthAlertStrip studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
       {connectionError && <WorkbenchErrorAlert error={connectionError} className="connection-error-strip" icon={CloudOff} dismissLabel="关闭连接错误" onDismiss={() => setConnectionError('')} onRetry={() => void retryWorkbenchError(connectionError, setConnectionError)} onReconnect={() => void reconnectWorkbenchError(connectionError, setConnectionError)} />}
       {error && <WorkbenchErrorAlert error={error} className="error-strip" onDismiss={() => setError('')} onRetry={() => void retryWorkbenchError(error, setError)} onReconnect={() => void reconnectWorkbenchError(error, setError)} />}
@@ -3210,7 +3207,7 @@ function App() {
 
     {assetProvenance && <aside className="asset-inspector" aria-label="资产来源与评审记录"><div className="asset-inspector-head"><div><p className="eyebrow">资产检查器</p><h2>{assetProvenance.asset?.kind === 'generated' ? '生成结果来源链' : '导入素材来源链'}</h2></div><IconButton label="关闭资产检查器" onClick={() => setAssetProvenance(null)}><X size={16} /></IconButton></div><div className="asset-inspector-section"><span>来源</span><p>{assetProvenance.asset?.kind === 'generated' ? '由已确认批次中的出图保存' : '导入到当前 Studio 的素材'}</p>{assetProvenance.outputs?.map((output) => <button type="button" key={output.runItem.id} className="trace-link" onClick={() => { navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id }); setAssetProvenance(null); }}><span>{output.project.name} / {output.task.name}</span><b>{output.round.purpose} · 出图 {output.runItem.sequence}</b></button>)}</div><div className="asset-inspector-section"><span>评审历史</span>{assetProvenance.reviews?.length ? assetProvenance.reviews.map((review) => <p key={review.id}><b>{review.decision === 'keep' ? '保留' : review.decision === 'review' ? '待复核' : review.decision === 'reject' ? '不采用' : '衍生方向'}</b> · {review.createdAt}</p>) : <p>尚未记录评审。</p>}</div><div className="asset-inspector-section"><span>交付引用</span>{assetProvenance.deliveries?.length ? assetProvenance.deliveries.map((delivery) => <p key={delivery.id}>{delivery.name} · {delivery.status}</p>) : <p>尚未加入交付草稿。</p>}</div><div className="asset-inspector-section"><span>批次版本</span>{assetProvenance.deliveryBatches?.length ? assetProvenance.deliveryBatches.map((batch) => <p key={batch.versionId}>{batch.name} · v{batch.versionNo} · {batch.status === 'ready' ? '已准备' : batch.status === 'draft' ? '草稿' : '已被新修订版本替代'}</p>) : <p>尚未加入版本化交付批次。</p>}</div></aside>}
     {generationConfirmation && <ConfirmationDialog label="确认创作计划" title={'确认这版计划（v' + generationConfirmation.round.planVersion + '）？'} message={confirmationPlanSummary(generationConfirmation.round)} note="确认会把这版计划绑定到当前 conversation 与计划哈希；确认本身不会调用生成服务，需要回到会话继续核算与出图。" confirmLabel="确认计划" busy={generationConfirmationBusy} error={generationConfirmationError} tone="warning" onCancel={dismissGenerationConfirmation} onConfirm={confirmGenerationPlan} />}
-    {previewAssets.length > 0 && <ImageInspectorDialog assets={previewAssets} zoom={previewZoom} selectedAssetIds={selectedAssetIds} selectionBusyIds={selectionBusyIds} selectedProject={selectedProject} selectedTask={selectedTask} fallbackTask={previewAssets.length === 1 ? taskForId(previewAssets[0]?.display?.taskId || previewAssets[0]?.source?.taskId || previewAssets[0]?.source?.creativeTaskId) : null} selectedRound={selectedRound} onClose={() => setPreviewAssets([])} onZoom={setPreviewZoom} onToggleDeliverable={markAsDeliverable} onReview={review} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} />}
+    {previewAssets.length > 0 && <ImageInspectorDialog assets={previewAssets} zoom={previewZoom} selectedAssetIds={selectedAssetIds} selectionBusyIds={selectionBusyIds} selectedProject={selectedProject} selectedTask={selectedTask} fallbackTask={previewAssets.length === 1 ? taskForId(previewAssets[0]?.display?.taskId || previewAssets[0]?.source?.taskId || previewAssets[0]?.source?.creativeTaskId) : null} selectedRound={selectedRound} onClose={() => setPreviewAssets([])} onZoom={setPreviewZoom} onToggleDeliverable={markAsDeliverable} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} />}
     {rejectDialog && <RejectReviewDialog assets={rejectDialog.assets} canAddNegative={Boolean(selectedRound && selectedRound.status === 'draft')} canCreateNextRound={Boolean(selectedProject && selectedTask)} initialCreateNextRound={rejectDialog.createNextRound} busy={rejectBusy} error={rejectError} onDismiss={dismissRejectDialog} onSave={saveRejectReview} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
     {providerDetails && <ProviderSettings request={api} onDismiss={() => setProviderDetails(null)} onChanged={refresh} />}
     {creationDialog === 'project' && <ProjectCreationDialog projectTemplates={projectTemplates} busy={creationBusy} error={creationError} onDismiss={dismissCreationDialog} onCreate={createProjectFromStudio} />}

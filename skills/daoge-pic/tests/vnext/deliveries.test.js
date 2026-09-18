@@ -145,7 +145,7 @@ test('exports managed assets with a contact sheet and redacted creative record',
     const record = fs.readFileSync(path.join(exported.directory, 'creative-record.json'), 'utf8');
     assert.match(record, /delivery evidence prompt/);
     assert.equal(record.includes('super-secret-key'), false);
-    assert.equal(record.includes('https:\/\/private-provider.example.test\/v1'), false);
+    assert.equal(record.includes('https://private-provider.example.test/v1'), false);
     assert.equal(fs.readdirSync(exported.directory).some((file) => file.endsWith('.png')), true);
     const defaultDelivery = createDelivery(db, { studioId: initialized.manifest.studioId, projectId: project.id, name: '默认交付', assetIds: [asset.id], idempotencyKey: 'default-delivery' });
     const defaultPrepared = prepareDelivery(db, { studioId: initialized.manifest.studioId, deliveryId: defaultDelivery.id, idempotencyKey: 'default-ready' });

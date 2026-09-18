@@ -5,7 +5,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 # DAOGE Pic vNext
 
-当前源码、运行时与最新不可变正式发布版本均为 `5.14.2`。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/2.0.0`，运行时兼容范围为 `>=5.14.2 <6.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
+当前源码与运行时版本为 `6.0.0`；`5.14.2` 是最新不可变正式发布版本，更早的均为历史发布。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/3.0.0`，运行时兼容范围为 `>=6.0.0 <7.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
 
 本文件是 Agent 执行协议，不是完整产品规格。产品、架构、Schema、Worker、ZIP、安全实现和验证证据分别以 `docs/daoge_pic_vnext_upgrade_spec_zh.md`、`docs/vnext_verification_evidence_zh.md`、源码与测试为准。用户可见沟通使用中文。
 
@@ -32,15 +32,15 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 | 层级 | 权威状态 / 事实 | 可写入角色 | 是否触发 Provider | 不变量 |
 | --- | --- | --- | --- | --- |
-| Studio Session | `activeProjectId` / `activeTaskId` / `activeRoundId` | Agent Bearer 或已授权 Workbench Cookie | 否 | 浏览器标签身份不等于 Agent conversation；每个真实 conversation 使用独立 Studio Session。 |
+| Studio Session | `agentProjectId` / `agentTaskId` / `agentRoundId`（**Agent 的工作指针**） | Agent Bearer（Workbench 的选中态由路由承载，不再写这里） | 否 | 浏览器标签身份不等于 Agent conversation；每个真实 conversation 使用独立 Studio Session。 |
 | Project / Task | project `active` / `archived`；task `draft` / `active` / `completed` / `archived` | Agent Bearer 或 Workbench Cookie | 否 | 创建只写 Studio API/SQLite；项目模板默认值来自 `/api/project-templates` 后端注册表。 |
 | Round | `draft` / `awaiting_confirmation` / `active` / `completed` / `archived` | `draft` 可由 Agent 或 Workbench 补上下文；确认后由 Agent 流程推进 | 否 | 新方向新建轮次；已确认或运行中的轮次不能由 Workbench 直接改参考上下文。 |
 | Plan version | `draft` / `awaiting_confirmation` / `confirmed` | Agent Bearer 写入；Workbench Cookie 只提交确认挑战 | 否 | `plan` 是计划写入，不是旧 `prepare`；确认只激活当前计划，不预检、不入队。 |
 | Preflight / Run | dry-run preview；run `queued` / `running` / `paused` / `resume_pending` / `partial` / `completed` / `failed` / `cancelled` 等 | Agent Bearer | `preflight` 否；`run` 是 | 绑定 session、conversation、plan hash、Provider 快照和并发；每轮只允许一个 Generation Run。 |
-| Run Item | `pending` / `leased` / `requesting` / `receiving` / `persisting` / `succeeded` / `retry_wait` / `blocked` / `cancel_requested` / `cancelled` / `outcome_unknown` / `failed` | Worker 与 Agent 控制命令 | 请求中是 | `outcome_unknown` 必须先由用户核实并 `resolve-unknown` 结案；不能直接重试。 |
+| Run Item | `pending` / `leased` / `requesting` / `receiving` / `persisting` / `succeeded` / `retry_wait` / `blocked` / `cancel_requested` / `cancelled` / `outcome_unknown` / `failed` | Worker 与 Agent 控制命令 | 请求中是 | `outcome_unknown` 必须先由用户核实并 `resolve-unknown` 结案；未结案不可重试，结案后可在原运行内重试。 |
 | Delivery | `draft` / `ready` / `exported` | Workbench Cookie 或受控 CLI | 否 | 准备冻结选片来源与评审，导出创建冻结图片实体；不存在公开 `delivery-complete` CLI。 |
 
-角色分离必须保持：Workbench Cookie 可做可视管理和人工确认；Agent Bearer 才能执行预检、入队、恢复、重试、取消和 unknown 结案；Worker 只处理已入队运行项。任何 UI、缓存、SSE 或文件夹状态都不是业务事实源。
+角色分离必须保持：Workbench Cookie 可做可视管理和人工确认，并可对运行执行**止损**动作（暂停 / 取消，不花钱、减少支出）；Agent Bearer 才能执行预检、入队、恢复、重试和 unknown 结案；Worker 只处理已入队运行项。任何 UI、缓存、SSE 或文件夹状态都不是业务事实源。
 
 ## 执行型启动协议（MUST）
 
@@ -52,7 +52,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 ### 首次启动顺序
 
 1. 先判断触发类型。
-2. 执行型触发先解析当前会话绑定的稳定工作区。已有明确绑定时复用；无法从会话或宿主上下文得到时，只询问这一项前置条件。不得使用临时目录、Skill 安装目录或任意当前目录代替稳定工作区。
+2. 执行型触发先解析当前会话绑定的稳定工作区。每个独立会话在该工作区的首次执行型触发**必须登记一次在场**（`agent-register --cli <name> --skill daoge-pic --skill-version <v>`），并在后续操作中续报；Studio 的状态卡据此显示「有没有人在听、接单的会不会按 daoge-pic 规范出图」。已有明确绑定时复用；无法从会话或宿主上下文得到时，只询问这一项前置条件。不得使用临时目录、Skill 安装目录或任意当前目录代替稳定工作区。
 3. 每个独立智能体会话在该工作区的首次执行型触发都可以安全运行普通 `node scripts/daoge.js open --workspace <path>`：
 
    ```bash
@@ -84,7 +84,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 ## 会话工作法
 
-1. 先完成“执行型启动协议”：Workbench 已打开或已安全复用，Studio Session 与稳定工作区已绑定，项目、任务和轮次上下文已创建或恢复。
+1. 先完成“执行型启动协议”：Workbench 已打开或已安全复用，Studio Session 与稳定工作区已绑定，项目、任务和轮次上下文已创建或恢复。**每次入场先读取请求队列**（见「请求队列」节）：处理等待中的用户请求，再继续本轮澄清。
 2. 再澄清目标、受众、数量、画幅、风格、限制条件、参考素材与交付用途，并把确认事实写入当前领域上下文。
 3. 给出用户可审阅的版本化计划：operation、提示词、数量、输出规格、引用素材、父轮次/父资产与风险。
 4. 未得到用户明确确认前，不得发起任何外部 Provider 调用。
@@ -127,13 +127,14 @@ node scripts/daoge.js <command> [--workspace <stable-workspace>]
 
 公开命令按职责分组：
 
-- 启动/诊断：`register-skill`、`doctor`、`studio`、`open`、`restart`、`status`。
+- 启动/诊断：`register-skill`、`agent-register`、`agent-list`、`doctor`、`studio`、`open`、`restart`、`status`。
 - Provider：`provider-list`、`provider-create`、`provider-update`、`provider-copy`、`provider-activate`、`provider-delete`、`provider-validate`、`provider-test`、`provider-models --workspace <path> --profile <id>`、`provider-import-env`。
 - 用量与预算：`usage-list`、`usage-summary`、`budget-get`、`budget-set --limit <non-negative-minor> --cost-unit <unit>`；读取按当前 Studio 的 profile/project/task/round/run/run-item 范围过滤，预算写入只接受 Bearer Skill/CLI，不能把未知成本当作零。
 - 会话与上下文：`session --conversation <id>`、`session-context`、`project`、`archive-project`、`task`、`round`。
 - 规则资料：`task-type`、`style-kit`、`brand-kit`。
 - 已确认模板快照：`template-list`、`template-get`、`template-save`、`template-archive`、`template-rollback`；读取和写入均只接受 Bearer Skill/CLI 请求，快照必须来自当前 Studio 的已确认轮次。
 - 计划与运行：`plan --plan <json|@->`、`confirm-challenge`、`preflight`、`run`、`pause`、`resume`、`cancel`、`retry`、`resolve-unknown`。
+- 请求队列：`request-list`、`request-detail`、`request-accept`、`request-done`、`request-reject`。
 - 交付：`delivery`、`delivery-update`、`delivery-ready`、`delivery-draft`、`delivery-export`、`delivery-batch`、`delivery-batch-revise`、`delivery-batch-ready`。`delivery-complete` 不是公开 CLI 命令。
 - 备份与升级评估：`backup-manifest`、`backup-restore-dry-run`、`backup-restore`、`backup-upgrade-assess`、`backup-rollback-point`。`backup-restore-dry-run` 只产出计划、不写入任何文件；`backup-restore` 是真正的执行器：先把改动文件写入同目录暂存区并按 manifest 逐文件校验哈希，再用原子 rename 替换，任一步失败即把已替换的文件按原样回滚（新建的文件会被删除）。执行前会拒绝「目标 Studio 的 daemon 正在运行」这一情形——在运行中的 daemon 底下替换 `studio.db` 只会得到损坏的 Studio。恢复范围仅限 manifest 记录的文件，未记录的现有文件不会被删除。升级评估的「当前运行时与支持范围」由 daemon 自证（`--current-*` 与 `--supported-*` 参数已移除，不受调用方声明影响）。
 
@@ -154,9 +155,25 @@ node scripts/daoge.js template-archive --workspace <path> --template <template-i
 node scripts/daoge.js template-rollback --workspace <path> --template <template-id> --version <n>
 ```
 
-同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`；`5.14.2` 是当前源码/运行时版本，`5.14.1` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
+同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/3.0.0`；`6.0.0` 是当前源码/运行时版本，`5.14.2` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
 
 固定查询端点：`GET /api/studio` 是协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History；确认模板读取使用 Bearer-only 的 `/api/confirmed-templates` 列表和详情端点，写入使用其 Bearer-only POST save/archive/rollback 端点。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝；Skill 必须改用正确端点或受控 CLI，不得猜测 `/api/studio/...`、旧命令或工作区文件。
+
+## 请求队列（受限请求入口）
+
+Workbench 的受限请求入口与 Agent 对话共用**同一条队列**（`studio_requests`，一行一请求，状态用列表达）。队列接的是「用户说的话」，不是「出图指令」——两类话都接，分别处理。
+
+- **每次入场先看队列**（MUST）：`request-list` 列出 `pending` 条目；条目自带 `context_json`（项目 / 任务 / 选中的图 + **机器可读的流程要求**）。用户请求需走 daoge-pic 计划流程时，条目会声明它，Agent 按声明执行，不靠自觉。
+- **领单用租约**：`request-accept --request <id>` 原子领取并写租约（`lease_token` + 过期时间）；同一单**不能被两个 Agent 重复消费**。租约过期未处理会自动回队；连续 3 次超时标记失败。
+- **长活要续租（MUST）**：写计划 → 等用户确认 → 预检 → 出图 → 收图之间可能隔很久（人工确认急不来）。**每次等待或每个阶段之间调 `request-renew --request <id>`**，否则租约到期会把这一单判成「被领过但没完成」。
+  例外已内建：若这一单关联的批次正卡在 `awaiting_confirmation`（球在用户脚下），过期时**只松开租约、保留 `accepted`**，不计失败、也不会被别的 Agent 抢走——但 Agent 仍应在用户确认后回来把活干完（`request-done`）。
+- **出图类请求**：按正常流程产出计划 → 用户在 Workbench 确认 → 预检 → 入队运行；请求通过 `result_round_id` 关联到产生的轮次。
+- **花动作请求（重试 / 恢复）**：Workbench 里的重试 / 恢复按钮**不直调 Bearer**（会重新花钱），而是把意图写成请求：`context_json` 带 `intent`（`retry` / `resume`）、`runId` 与 `itemIds`（可选，缺省表示整批）。Agent 接单后**按这三个字段精确执行** `retry` / `resume`，不要从自然语言里猜；完成后 `request-done` 带回结果。暂停 / 取消是止损动作，仍由 Workbench 直达，不经队列。
+- **非出图类请求**（如「帮我看看这批怎么样」）：Agent 以普通对话回应，`request-done --request <id> --reply <text>` 把回复内容带回发起处显示。
+- **需要追问时**：用 `request-done --request <id> --needs-input <text>`（或等价形态）把问题带回请求卡片；用户在卡片内联回答，回答续上同一请求，Agent 不丢上下文。
+- **做不了**：`request-reject --request <id> --reason <text>`，文案用人话（如「这个我做不了：目前只能出图片」），状态标「无法处理」，不让用户沮丧。
+- **上下文连续性靠数据，不靠记忆**：请求的 `context_json` 会带上 `previousRequestId`（就地回答追问时自动写入）。接单后 `request-list` 能看到它，`request-detail --request <id>` 会把上一条的原话一并返回；**原话住在请求表里**，计划只写 `requestId` 外键，不复制文本。写计划时把 `requestId` 放进 `plan`，服务端会校验它确属本 Studio。
+- **未接单可撤**：Workbench 可撤回还没被领取的请求；**不插队**。
 
 ## 幂等命令恢复
 
@@ -168,7 +185,7 @@ node scripts/daoge.js template-rollback --workspace <path> --template <template-
 - 超时可以只在重试时覆盖：`retry --timeout-ms <1000..600000>`。它只改写该项的请求 payload，**不改写已确认的计划快照**，并把覆盖值记进 `run.queued` / `run.items_retried` 事件；因此超时属于重试参数，不需要重新确认计划。请求超时默认 120000 ms，上限 10 分钟。
 - 外部请求结果不明时，运行项进入 `outcome_unknown`，绝不自动重放。用户核实无结果后，才可用 `resolve-unknown` 将指定项结案。
 - daemon 重启时，未安全完成的运行进入 `resume_pending`；再次外部调用前必须在会话中得到用户确认，并以 `resume --session <session-id>` 记录。Workbench 只能显示等待状态，不能绕过会话继续。
-- `retry` 只允许 `failed`、`blocked` 或 `retry_wait`；`outcome_unknown` 不可直接重试。
+- `retry` 只允许 `failed`、`blocked` 或 `retry_wait`；未结案的 `outcome_unknown` 不可直接重试。用户核实「没出图、没扣费」并 `resolve-unknown` 结案后，该运行项转为 `failed`，**可在原运行内重试**（重试会派生新的 `request_id`，不会重复计费；不必为补一张图新建轮次）。
 - 并发只属于 Generation Run：预检未指定时默认 `4`，串行使用 `1`，显式值只接受 `1..1000`；并发变化必须重新预检。
 - 缺失媒体持久标记为不可用，不得作为参考图、遮罩或交付候选；对账确认恢复后才重新可用。
 - 下载、复制、交付导出和 ZIP 必须使用受验证 snapshot 流式读取；路径穿越、跨 Studio/跨项目访问、超出上限或客户端断连都不能形成错误交付。
@@ -184,11 +201,11 @@ node scripts/daoge.js template-rollback --workspace <path> --template <template-
 
 ## Workbench 边界与可访问性
 
-Workbench 可用于：项目/任务/轮次导航与直接创建、创作谱系、Generation History、SSE 状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。Workbench 不提供第二个聊天入口，不直接调用 Provider，不展示 Provider 密钥。
+Workbench 可用于：项目/任务/轮次导航与直接创建、创作谱系、Generation History、SSE 状态、素材导入、范围筛选、搜索、放大/双图对比、选择、批注、来源检查、共享、回收、恢复、交付历史、下载/复制和 ZIP。Workbench **不提供开放式对话**；它提供一个**受限请求入口**（请求—回执—追问，无对话历史）：用户说出的那句话进入共享请求队列，由在场 Agent 按第「请求队列」节接单。Workbench 不直接调用 Provider，不展示 Provider 密钥。
 
 Workbench 顶部持续显示 daemon 与 Worker 池脱敏健康状态；SSE cursor 失效或本地事件批次溢出时，必须先完成权威快照恢复，再推进 cursor。图片查看、确认、搜索和错误状态必须保持可访问性：`role="dialog"`、`aria-modal`、焦点约束、Escape 关闭、live region 和可见焦点。
 
-Workbench 不可用于：自然语言对话、绕过会话确认、一键触发 Provider 生成、展示 Provider 密钥、直接指定任意绝对路径、匿名访问、跨 Studio 访问，或把浏览器状态、文件夹和 SSE 当业务事实。
+Workbench 不可用于：开放式对话（受限请求入口不属于开放式对话）、绕过会话确认、一键触发 Provider 生成、展示 Provider 密钥、直接指定任意绝对路径、匿名访问、跨 Studio 访问，或把浏览器状态、文件夹和 SSE 当业务事实。
 
 ## 回答规范
 

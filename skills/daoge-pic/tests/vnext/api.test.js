@@ -148,10 +148,15 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     const queued = await requestJson(started, '/api/runs', { method: 'POST', idempotencyKey: 'queue', body: { roundId: round.body.data.value.id, preflightId: preflight.body.data.value.preview.id, confirmToken: preflight.body.data.value.confirmToken } });
     assert.equal(queued.status, 200);
     assert.equal(queued.body.data.value.status, 'queued');
-    for (const suffix of ['/pause', '/cancel', '/retry']) {
-      const rejectedWorkbenchControl = await requestJsonAsWorkbench(started, '/api/runs/' + queued.body.data.value.id + suffix, { cookie, idempotencyKey: 'workbench-run-control-' + suffix.slice(1), body: {} });
-      assert.equal(rejectedWorkbenchControl.status, 403, suffix + ' must require Skill/CLI bearer auth');
-    }
+    // 会重新花钱的动作仍只认 bearer：cookie 调用被拒（规格书 §2.2）。
+    const rejectedWorkbenchRetry = await requestJsonAsWorkbench(started, '/api/runs/' + queued.body.data.value.id + '/retry', { cookie, idempotencyKey: 'workbench-run-retry', body: {} });
+    assert.equal(rejectedWorkbenchRetry.status, 403, '/retry must require Skill/CLI bearer auth');
+    // 止损动作（暂停 / 取消）不再需要 bearer：真人（cookie）点了就生效——这是修过的真缺陷。
+    const pausedByWorkbench = await requestJsonAsWorkbench(started, '/api/runs/' + queued.body.data.value.id + '/pause', { cookie, idempotencyKey: 'workbench-run-pause', body: {} });
+    assert.equal(pausedByWorkbench.status, 200, '/pause must be open to the Workbench cookie');
+    // 取消对真人开放，agent（bearer）也同样能止损 —— 移出鉴权表 = 两者皆可，不是删掉 agent 的能力。
+    const cancelledByAgent = await requestJson(started, '/api/runs/' + queued.body.data.value.id + '/cancel', { method: 'POST', idempotencyKey: 'agent-run-cancel', body: {} });
+    assert.equal(cancelledByAgent.status, 200, '/cancel must remain available to the agent too');
     const rejectedPutRunControl = await requestJson(started, '/api/runs/' + queued.body.data.value.id + '/pause', { method: 'PUT', idempotencyKey: 'run-pause-put-rejected', body: {} });
     assert.equal(rejectedPutRunControl.status, 404);
     assert.equal(queued.body.data.value.executionConcurrency, 1000);
@@ -174,11 +179,10 @@ test('local Studio API keeps Provider keys private and requires confirmed rounds
     assert.deepEqual(Object.keys(publicItems.body.data.items[0]).sort(), ['attempts', 'error', 'id', 'outputAssets', 'result', 'retryAt', 'runId', 'sequence', 'status', 'updatedAt']);
     const forbiddenItemKeys = new Set(['leaseToken', 'leaseExpiresAt', 'requestId', 'promptPayload', 'prompt_payload_json']);
     assert.equal(recursiveKeys(publicItems.body.data).some((key) => forbiddenItemKeys.has(key)), false);
-    const paused = await requestJson(started, '/api/runs/' + runId + '/pause', { method: 'POST', idempotencyKey: 'pause-once', body: {} });
-    assert.equal(paused.status, 200);
-    const invalidTransition = await requestJson(started, '/api/runs/' + runId + '/pause', { method: 'POST', idempotencyKey: 'pause-twice', body: {} });
+    // 状态机本身不变：已取消的运行不能再暂停。
+    const invalidTransition = await requestJson(started, '/api/runs/' + runId + '/pause', { method: 'POST', idempotencyKey: 'pause-after-cancel', body: {} });
     assert.equal(invalidTransition.status, 409);
-    assert.deepEqual(invalidTransition.body.error, { code: 'invalid_state_transition', message: 'Invalid run transition: paused -> pausing', details: { entity: 'run', from: 'paused', to: 'pausing' } });
+    assert.deepEqual(invalidTransition.body.error, { code: 'invalid_state_transition', message: 'Invalid run transition: cancelled -> pausing', details: { entity: 'run', from: 'cancelled', to: 'pausing' } });
   } finally {
     if (started) await started.service.close();
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -750,7 +754,7 @@ test('local Studio service serves the built Workbench and managed image files', 
     started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const page = await fetch(started.url + '/');
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /<div id=\"root\"><\/div>/);
+    assert.match(await page.text(), /<div id="root"><\/div>/);
     const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLTDQAAAABJRU5ErkJggg==', 'base64');
     const upload = await fetchStudio(started, '/api/assets/import', {
       method: 'POST',

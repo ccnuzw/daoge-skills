@@ -399,7 +399,12 @@ test('retries only explicit safe failed items and never requeues unknown outcome
     assert.equal(listGenerationRunItems(fixture.db, queued.value.id)[1].status, 'outcome_unknown');
     assert.throws(() => retryGenerationRunItems(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'retry-unknown' }), InvalidCommandError);
     resolveUnknownRunItems(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'resolve-for-retry-guard' });
-    assert.throws(() => retryGenerationRunItems(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'retry-resolved-unknown' }), InvalidCommandError);
+    // 用户核实「没出图、没扣费」并结案后，**允许在原运行内重试**：重试会派生新的 request_id，
+    // 不可能重复计费；而「为补一张图新建一个轮次」把补图变得比失败本身更麻烦（实测）。
+    const retriedResolved = retryGenerationRunItems(fixture.db, { studioId: fixture.initialized.manifest.studioId, runId: queued.value.id, itemIds: [items[1].id], idempotencyKey: 'retry-resolved-unknown' });
+    assert.deepEqual(retriedResolved.value.retriedItemIds, [items[1].id]);
+    assert.equal(listGenerationRunItems(fixture.db, queued.value.id)[1].status, 'pending');
+    assert.equal(fixture.db.prepare('SELECT error_json FROM run_items WHERE id = ?').get(items[1].id).error_json, null, '重试要清掉结案时写下的错误标记');
   } finally {
     closeStudioDatabase(fixture.db);
     cleanup(fixture.workspaceRoot);

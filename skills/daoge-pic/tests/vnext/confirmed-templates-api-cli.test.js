@@ -65,7 +65,7 @@ function requestJson(started, pathname, options = {}) {
     headers: {
       accept: 'application/json',
       authorization: 'Bearer ' + started.access.bearerToken,
-      'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0',
+      'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/3.0.0',
       ...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
       ...(options.key ? { 'idempotency-key': options.key } : {})
     },
@@ -149,7 +149,7 @@ test('confirmed-template API rejects Workbench Cookie reads and writes', async (
     });
     assert.equal(cookieResponse.status, 200);
     const cookie = (cookieResponse.headers.get('set-cookie') || '').split(';', 1)[0];
-    const headers = { accept: 'application/json', cookie, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/2.0.0' };
+    const headers = { accept: 'application/json', cookie, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/3.0.0' };
     const getResponse = await fetch(fixture.started.url + '/api/confirmed-templates', { headers });
     assert.equal(getResponse.status, 403);
     const postResponse = await fetch(fixture.started.url + '/api/confirmed-templates', {

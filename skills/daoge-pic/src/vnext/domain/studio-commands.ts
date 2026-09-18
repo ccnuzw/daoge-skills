@@ -17,9 +17,17 @@ export interface StudioSession {
   id: string;
   studioId: string;
   conversationId: string;
-  activeProjectId: string | null;
-  activeTaskId: string | null;
-  activeRoundId: string | null;
+  /**
+   * The Agent's working pointer, not the Workbench's view state.
+   *
+   * It used to be called `active_*` and was written by both sides: the
+   * Workbench stamped "what I am looking at" here while the Agent wrote "what I
+   * am operating on", so the two overwrote each other. The interface's
+   * selection is carried by the route now; this column belongs to the Agent.
+   */
+  agentProjectId: string | null;
+  agentTaskId: string | null;
+  agentRoundId: string | null;
   version: number;
 }
 
@@ -59,9 +67,9 @@ interface StoredSession {
   id: string;
   studio_id: string;
   conversation_id: string;
-  active_project_id: string | null;
-  active_task_id: string | null;
-  active_round_id: string | null;
+  agent_project_id: string | null;
+  agent_task_id: string | null;
+  agent_round_id: string | null;
   version: number;
 }
 
@@ -147,9 +155,9 @@ function sessionFromRow(row: StoredSession): StudioSession {
     id: row.id,
     studioId: row.studio_id,
     conversationId: row.conversation_id,
-    activeProjectId: row.active_project_id,
-    activeTaskId: row.active_task_id,
-    activeRoundId: row.active_round_id,
+    agentProjectId: row.agent_project_id,
+    agentTaskId: row.agent_task_id,
+    agentRoundId: row.agent_round_id,
     version: row.version
   };
 }
@@ -260,7 +268,7 @@ export async function executeIdempotentAsync<T>(db: StudioDatabase, studioId: st
 
 export function getStudioSession(db: StudioDatabase, input: { studioId: string; sessionId: string }): StudioSession {
   ensureStudio(db, input.studioId);
-  const session = db.prepare('SELECT id, studio_id, conversation_id, active_project_id, active_task_id, active_round_id, version FROM studio_sessions WHERE id = ?').get(requireValue(input.sessionId, 'sessionId')) as StoredSession | undefined;
+  const session = db.prepare('SELECT id, studio_id, conversation_id, agent_project_id, agent_task_id, agent_round_id, version FROM studio_sessions WHERE id = ?').get(requireValue(input.sessionId, 'sessionId')) as StoredSession | undefined;
   if (!session || session.studio_id !== input.studioId) throw new StudioNotFoundError('Studio session not found: ' + input.sessionId);
   return sessionFromRow(session);
 }
@@ -270,7 +278,7 @@ export function openOrAttachStudioSession(db: StudioDatabase, input: { studioId:
   const conversationId = requireValue(input.conversationId, 'conversationId');
   return withTransaction(db, () => {
     ensureStudio(db, studioId);
-    const existing = db.prepare('SELECT id, studio_id, conversation_id, active_project_id, active_task_id, active_round_id, version FROM studio_sessions WHERE conversation_id = ?').get(conversationId) as StoredSession | undefined;
+    const existing = db.prepare('SELECT id, studio_id, conversation_id, agent_project_id, agent_task_id, agent_round_id, version FROM studio_sessions WHERE conversation_id = ?').get(conversationId) as StoredSession | undefined;
     if (existing) {
       if (existing.studio_id !== studioId) throw new InvalidCommandError('A conversation cannot attach to two Studios.');
       return sessionFromRow(existing);
@@ -279,14 +287,14 @@ export function openOrAttachStudioSession(db: StudioDatabase, input: { studioId:
     const id = createId('session');
     db.prepare('INSERT INTO studio_sessions (id, studio_id, conversation_id, version, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)').run(id, studioId, conversationId, timestamp, timestamp);
     appendStudioEvent(db, { studioId, entityType: 'studio_session', entityId: id, eventType: 'session.attached', payload: { conversationId } });
-    return { id, studioId, conversationId, activeProjectId: null, activeTaskId: null, activeRoundId: null, version: 1 };
+    return { id, studioId, conversationId, agentProjectId: null, agentTaskId: null, agentRoundId: null, version: 1 };
   });
 }
 
 
 export function updateStudioSessionContext(db: StudioDatabase, input: { studioId: string; sessionId?: string; projectId?: string; taskId?: string; roundId?: string; expectedVersion?: unknown }): StudioSession | null {
   if (!input.sessionId) return null;
-  const session = db.prepare('SELECT id, studio_id, conversation_id, active_project_id, active_task_id, active_round_id, version FROM studio_sessions WHERE id = ?').get(requireValue(input.sessionId, 'sessionId')) as StoredSession | undefined;
+  const session = db.prepare('SELECT id, studio_id, conversation_id, agent_project_id, agent_task_id, agent_round_id, version FROM studio_sessions WHERE id = ?').get(requireValue(input.sessionId, 'sessionId')) as StoredSession | undefined;
   if (!session || session.studio_id !== input.studioId) throw new StudioNotFoundError('Studio session not found: ' + input.sessionId);
   let projectId = input.projectId || null;
   let taskId = input.taskId || null;
@@ -306,11 +314,11 @@ export function updateStudioSessionContext(db: StudioDatabase, input: { studioId
   if (input.expectedVersion !== undefined && (!Number.isSafeInteger(input.expectedVersion) || Number(input.expectedVersion) < 1)) throw new InvalidCommandError('Session context expectedVersion must be a positive integer.');
   const timestamp = nowIso();
   const updated = input.expectedVersion === undefined
-    ? db.prepare('UPDATE studio_sessions SET active_project_id = ?, active_task_id = ?, active_round_id = ?, version = version + 1, updated_at = ? WHERE id = ?').run(projectId, taskId, roundId, timestamp, session.id)
-    : db.prepare('UPDATE studio_sessions SET active_project_id = ?, active_task_id = ?, active_round_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?').run(projectId, taskId, roundId, timestamp, session.id, Number(input.expectedVersion));
+    ? db.prepare('UPDATE studio_sessions SET agent_project_id = ?, agent_task_id = ?, agent_round_id = ?, version = version + 1, updated_at = ? WHERE id = ?').run(projectId, taskId, roundId, timestamp, session.id)
+    : db.prepare('UPDATE studio_sessions SET agent_project_id = ?, agent_task_id = ?, agent_round_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?').run(projectId, taskId, roundId, timestamp, session.id, Number(input.expectedVersion));
   if (Number(updated.changes) !== 1) throw new VersionConflictError('Studio session context changed; refresh before writing again.');
   appendStudioEvent(db, { studioId: input.studioId, entityType: 'studio_session', entityId: session.id, eventType: 'session.context_updated', payload: { projectId, taskId, roundId } });
-  return { ...sessionFromRow(session), activeProjectId: projectId, activeTaskId: taskId, activeRoundId: roundId, version: session.version + 1 };
+  return { ...sessionFromRow(session), agentProjectId: projectId, agentTaskId: taskId, agentRoundId: roundId, version: session.version + 1 };
 }
 
 export function createProject(db: StudioDatabase, input: { studioId: string; name: string; description?: string; templateId?: string; templateVersion?: number; sessionId?: string; idempotencyKey: string }): CommandReceipt<Project> {
@@ -343,7 +351,7 @@ export function archiveProject(db: StudioDatabase, input: { studioId: string; pr
     db.prepare("UPDATE creative_rounds SET status = 'archived', version = version + 1, updated_at = ? WHERE task_id IN (SELECT id FROM creative_tasks WHERE project_id = ?) AND status != 'archived'").run(timestamp, project.id);
     db.prepare("UPDATE creative_tasks SET status = 'archived', version = version + 1, updated_at = ? WHERE project_id = ? AND status != 'archived'").run(timestamp, project.id);
     db.prepare("UPDATE projects SET status = 'archived', archived_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND studio_id = ?").run(timestamp, timestamp, project.id, input.studioId);
-    db.prepare('UPDATE studio_sessions SET active_project_id = NULL, active_task_id = NULL, active_round_id = NULL, version = version + 1, updated_at = ? WHERE studio_id = ? AND active_project_id = ?').run(timestamp, input.studioId, project.id);
+    db.prepare('UPDATE studio_sessions SET agent_project_id = NULL, agent_task_id = NULL, agent_round_id = NULL, version = version + 1, updated_at = ? WHERE studio_id = ? AND agent_project_id = ?').run(timestamp, input.studioId, project.id);
     appendStudioEvent(db, { studioId: input.studioId, entityType: 'project', entityId: project.id, eventType: 'project.archived', payload: {} });
     return { ...projectFromRow(project), status: 'archived', version: project.version + 1 };
   }, input);

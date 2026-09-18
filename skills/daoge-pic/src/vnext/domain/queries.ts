@@ -4,6 +4,7 @@ import { existsInStudioSql, ScopedEntityType } from './studio-scope';
 import { GenerationRun } from '../runner/run-commands';
 import { RUN_ITEM_STATUSES, RunItemStatus } from './states';
 import { SafeErrorDetail, safeErrorDetail, safeErrorSummary } from '../shared/safe-error';
+import { purposeLabel } from '../shared/purpose-labels';
 
 interface StoredProject { id: string; studio_id: string; name: string; description: string | null; template_id: string | null; template_version: number | null; status: Project['status']; version: number; }
 interface StoredTask { id: string; project_id: string; task_type_id: string | null; name: string; intent_json: string; status: CreativeTask['status']; version: number; }
@@ -171,7 +172,7 @@ export function listRunItemsForQuery(db: StudioDatabase, studioId: string, runId
   }), page, pageSize: query.pageSize, total, totalPages, allTotal, statusCounts };
 }
 
-export interface StudioSearchResult { entityType: 'project' | 'task' | 'round'; entityId: string; label: string; projectId: string; taskId?: string; purpose?: string; status?: string; }
+export interface StudioSearchResult { entityType: 'project' | 'task' | 'round' | 'asset'; entityId: string; label: string; projectId: string; taskId?: string; roundId?: string; purpose?: string; status?: string; }
 
 export function searchStudio(db: StudioDatabase, studioId: string, query: string, limit = 25): StudioSearchResult[] {
   const term = String(query || '').trim();
@@ -179,6 +180,41 @@ export function searchStudio(db: StudioDatabase, studioId: string, query: string
   const safeQuery = term.split(/\s+/).map((token) => token.replace(/[^\p{L}\p{N}_-]/gu, '')).filter(Boolean).map((token) => token + '*').join(' AND ');
   if (!safeQuery) return [];
   const boundedLimit = Math.min(50, Math.max(1, Number.isInteger(limit) ? limit : 25));
-  const rows = db.prepare('WITH candidates AS (SELECT entity_type, entity_id, rank AS ordering FROM studio_search WHERE studio_id = ? AND studio_search MATCH ? ORDER BY rank LIMIT ?) SELECT candidate.ordering, \'project\' AS entity_type, project.id AS entity_id, project.name AS label, project.id AS project_id, NULL AS task_id, NULL AS purpose, project.status FROM candidates candidate JOIN projects project ON candidate.entity_type = \'project\' AND project.id = candidate.entity_id AND project.studio_id = ? UNION ALL SELECT candidate.ordering, \'task\' AS entity_type, task.id AS entity_id, task.name AS label, task.project_id, task.id AS task_id, NULL AS purpose, task.status FROM candidates candidate JOIN creative_tasks task ON candidate.entity_type = \'task\' AND task.id = candidate.entity_id JOIN projects project ON project.id = task.project_id AND project.studio_id = ? UNION ALL SELECT candidate.ordering, \'round\' AS entity_type, round.id AS entity_id, task.name || \' / \' || round.purpose AS label, task.project_id, round.task_id, round.purpose, round.status FROM candidates candidate JOIN creative_rounds round ON candidate.entity_type = \'round\' AND round.id = candidate.entity_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id AND project.studio_id = ? ORDER BY ordering').all(studioId, safeQuery, boundedLimit, studioId, studioId, studioId) as Array<{ entity_type: StudioSearchResult['entityType']; entity_id: string; label: string; project_id: string; task_id: string | null; purpose: string | null; status: string | null }>;
-  return rows.map((row) => ({ entityType: row.entity_type, entityId: row.entity_id, label: row.label, projectId: row.project_id, ...(row.task_id ? { taskId: row.task_id } : {}), ...(row.purpose ? { purpose: row.purpose } : {}), ...(row.status ? { status: row.status } : {}) }));
+  // 批次 label 不再拼英文枚举：协议字段留在库里，拼给人看时必须走翻译表（方案 7.9.1）。
+  const rows = db.prepare(
+    'WITH candidates AS (SELECT entity_type, entity_id, rank AS ordering FROM studio_search WHERE studio_id = ? AND studio_search MATCH ? ORDER BY rank LIMIT ?), matched AS (' +
+    ' SELECT candidate.ordering, \'project\' AS entity_type, project.id AS entity_id, project.name AS label, project.id AS project_id, NULL AS task_id, NULL AS round_id, NULL AS purpose, project.status FROM candidates candidate JOIN projects project ON candidate.entity_type = \'project\' AND project.id = candidate.entity_id AND project.studio_id = ?' +
+    ' UNION ALL SELECT candidate.ordering, \'task\' AS entity_type, task.id AS entity_id, task.name AS label, task.project_id, task.id AS task_id, NULL AS round_id, NULL AS purpose, task.status FROM candidates candidate JOIN creative_tasks task ON candidate.entity_type = \'task\' AND task.id = candidate.entity_id JOIN projects project ON project.id = task.project_id AND project.studio_id = ?' +
+    ' UNION ALL SELECT candidate.ordering, \'round\' AS entity_type, round.id AS entity_id, task.name AS label, task.project_id, round.task_id, round.id AS round_id, round.purpose, round.status FROM candidates candidate JOIN creative_rounds round ON candidate.entity_type = \'round\' AND round.id = candidate.entity_id JOIN creative_tasks task ON task.id = round.task_id JOIN projects project ON project.id = task.project_id AND project.studio_id = ?' +
+    // 图：项目归属先看 run 链（含 output_of 关系回退，覆盖历史数据），导入图回退到 attached_to 关系；
+    // 两条都取不到就不进结果（共享素材不属于任何项目）。生产批次用相关子查询取一条，避免重复行。
+    ' UNION ALL SELECT candidate.ordering, \'asset\' AS entity_type, asset.id AS entity_id, COALESCE(asset.source_json, \'{}\') AS label, ' +
+    '(SELECT project.id FROM projects project WHERE project.studio_id = ? AND project.id = COALESCE(' +
+    '(SELECT task.project_id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.asset_id = asset.id OR item.id IN (SELECT relation.target_id FROM asset_relations relation WHERE relation.asset_id = asset.id AND relation.relation_type = \'output_of\' AND relation.target_type = \'run_item\') LIMIT 1), ' +
+    '(SELECT relation.target_id FROM asset_relations relation WHERE relation.asset_id = asset.id AND relation.target_type = \'project\' LIMIT 1))) AS project_id, ' +
+    '(SELECT task.id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id JOIN creative_tasks task ON task.id = round.task_id WHERE item.asset_id = asset.id OR item.id IN (SELECT relation.target_id FROM asset_relations relation WHERE relation.asset_id = asset.id AND relation.relation_type = \'output_of\' AND relation.target_type = \'run_item\') LIMIT 1) AS task_id, ' +
+    '(SELECT round.id FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id WHERE item.asset_id = asset.id OR item.id IN (SELECT relation.target_id FROM asset_relations relation WHERE relation.asset_id = asset.id AND relation.relation_type = \'output_of\' AND relation.target_type = \'run_item\') LIMIT 1) AS round_id, ' +
+    '(SELECT round.purpose FROM run_items item JOIN generation_runs run ON run.id = item.run_id JOIN creative_rounds round ON round.id = run.round_id WHERE item.asset_id = asset.id OR item.id IN (SELECT relation.target_id FROM asset_relations relation WHERE relation.asset_id = asset.id AND relation.relation_type = \'output_of\' AND relation.target_type = \'run_item\') LIMIT 1) AS purpose, ' +
+    'NULL AS status FROM candidates candidate JOIN assets asset ON candidate.entity_type = \'asset\' AND asset.id = candidate.entity_id AND asset.studio_id = ?' +
+    ') SELECT * FROM matched WHERE project_id IS NOT NULL ORDER BY ordering'
+  ).all(studioId, safeQuery, boundedLimit, studioId, studioId, studioId, studioId, studioId) as Array<{ entity_type: StudioSearchResult['entityType']; entity_id: string; label: string; project_id: string; task_id: string | null; round_id: string | null; purpose: string | null; status: string | null }>;
+  return rows.map((row) => ({ entityType: row.entity_type, entityId: row.entity_id, label: row.entity_type === 'round' ? roundSearchLabel(row.label, row.purpose) : row.entity_type === 'asset' ? assetSearchLabel(row.label, row.purpose) : row.label, projectId: row.project_id, ...(row.task_id ? { taskId: row.task_id } : {}), ...(row.round_id ? { roundId: row.round_id } : {}), ...(row.purpose ? { purpose: row.purpose } : {}), ...(row.status ? { status: row.status } : {}) }));
+}
+
+/** 「任务名 · 探索新方向」——不再出现英文枚举。 */
+function roundSearchLabel(taskName: string, purpose: string | null): string {
+  const translated = purposeLabel(purpose);
+  return translated ? taskName + ' · ' + translated : taskName;
+}
+
+/** 「任务名 · 探索新方向的一张图」，让图片结果也能一眼看出出处。 */
+function assetSearchLabel(sourceJson: string, purpose: string | null): string {
+  let filename = '';
+  try {
+    const parsed = JSON.parse(sourceJson) as Record<string, unknown>;
+    filename = typeof parsed.originalFilename === 'string' ? parsed.originalFilename.trim() : '';
+  } catch { filename = ''; }
+  if (filename) return filename;
+  const translated = purposeLabel(purpose);
+  return translated ? '图片 · ' + translated : '图片';
 }
