@@ -79,7 +79,7 @@ agent 连接管理需要一个**持久化的在场事实源**，本批拟新增 
 2. **租约防重复消费**——两个 agent 抢同一单只有一个成功；领单写 `lease_token` + 过期时间。
 3. **租约过期自愈**——`accepted` 超期自动回 `pending`；连续 3 次超时标记失败（8.10 #2）。
 4. **队列条目自带流程要求**——`context_json` 必须含机器可读的流程声明，agent 读到的是带规格的条目。
-5. **鉴权角色**——`runs.pause`/`runs.cancel` = cookie；`runs.retry`/`runs.resume`/`runs.outcomes-resolve` = bearer；`rounds.confirm` = cookie-only。
+5. **鉴权角色**——`runs.pause`/`runs.cancel` = **移出鉴权表（两者皆可）**（⚠️ 原写「= cookie」，D1 施工核查时修正，见 D 组日志与规格书 §2.2）；`runs.retry`/`runs.resume`/`runs.outcomes-resolve` = bearer；`rounds.confirm` = cookie-only。
 6. **schema 契约扩展**——`studio_requests` 存在且列齐全；`assets.project_id`、`run_items.asset_id` 外键存在；`canvas_layouts` 无 `scope_*` 且一项目一份；`canvas_node_layouts.entity_type` 收敛到 4 项；`studio_sessions` 用 `agent_*`。
 7. **协议 3.0.0 四处一致**——`protocol-version.json` / `main.jsx` 协议头 / `package-smoke.js` / `SKILL.md` 必须同为 3.0.0。
 8. **agent 在场显示**——`GET /api/agents` 有数据；前端系统面板有状态卡；未申报 daoge-pic 时输入框旁有提示（「在场 ≠ 胜任」）。
@@ -166,7 +166,7 @@ agent 连接管理需要一个**持久化的在场事实源**，本批拟新增 
 
 | # | 任务 | 要点 | 依据 |
 |---|---|---|---|
-| **D1** | **`runs.pause` / `runs.cancel` → cookie** | 止损动作不花钱、减少支出；改 `route-authorization.ts` + `route-authorization.test.js` + SKILL.md 第 43 行 | 规格书 §2.2 / 方案 4.9 |
+| **D1** | **`runs.pause` / `runs.cancel` → 移出鉴权表（两者皆可）** ⚠️ **施工核查修正：原写「→ cookie」，实际按规格书自己的判据移出鉴权表**（登记成 cookie 会造出第二个 cookie-only 端点、且删掉 agent 的止损能力）。改 `route-authorization.ts` + `route-authorization.test.js` + SKILL.md 第 43 行；**规格书 §2.2 措辞已同步回改** | 规格书 §2.2 / 方案 4.9 |
 | **D2** | **保持 bearer** | `runs.retry` / `runs.resume` / `runs.outcomes-resolve`；界面按钮**走队列**（本批只锁「不得直调」，「走队列」三批补） | 规格书 §2.2 / 方案 4.9 |
 | **D3** | **版本协商落地** | 与 0.5 同一项；握手带协议与运行时版本，不兼容给人话 | 方案 9.4 |
 

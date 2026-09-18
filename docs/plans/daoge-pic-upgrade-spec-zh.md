@@ -52,10 +52,12 @@
 - **判据（`route-authorization.ts` 表头原话的精神）**：
   **会花钱、会起停进程、会改存储凭据的动作 → `bearer`（可追责的一方）；
   人的闸门 → `cookie`；其余一律默认「两者皆可」，不登记。**
-- **本次只动一条**：`runs.pause` / `runs.cancel` → `cookie`（**止损动作不花钱、减少支出**；原登记防的是 agent 自作主张，结果防住了人）。
+- **本次只动一条**：`runs.pause` / `runs.cancel` **移出鉴权表 → 两者皆可**（**止损动作不花钱、减少支出**；原登记防的是 agent 自作主张，结果防住了人）。
+  ⚠️ **不是登记成 `cookie`**：登记成 cookie 会产生**第二个 cookie-only 端点**，与本节判据、§2.3 及鉴权表表头的「cookie-only 只有 `rounds.confirm`」冲突；还会**删掉 agent 的止损能力**（CLI `pause`/`cancel` 走 bearer 会 403，违反红线「工程能力只加强不删」）。
+  移出鉴权表同时满足四条：① 符合本节判据（止损没有任何「不依赖调用方身份的防线」）；② 人（cookie）能直接止损；③ agent 仍能止损；④ cookie-only 仍只有确认一条。
 - **保持 bearer 的**：`runs.retry` / `runs.resume` / `runs.outcomes-resolve`（会重新花钱）——界面按钮走队列 → agent 执行。
 - **检查法**：新增或修改任何路由时，问一句「**有没有一道不依赖调用方身份的防线**」——有 → 登记；没有 → 不登记。
-- **连带**：改 `runs.pause/cancel` 必须同步改 `SKILL.md` 第 43 行（该行把「取消」列为 Bearer 专属）与 `route-authorization.test.js`。
+- **连带**：改 `runs.pause/cancel` 必须同步改 `SKILL.md` 第 43 行（现为「Workbench Cookie 可执行止损；Agent Bearer 才有预检/入队/恢复/重试/unknown」）与 `route-authorization.test.js`（`BEARER_ONLY` 去掉两条 + 新增「止损动作两者皆可」守卫）。
 
 ### 2.3 确认闸门只有人能过
 
