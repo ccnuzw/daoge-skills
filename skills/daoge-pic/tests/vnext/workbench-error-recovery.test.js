@@ -39,8 +39,9 @@ test('Workbench async failures use classified safe error state instead of raw th
 });
 
 test('API retry callbacks are limited to reads and idempotent mutations', async () => {
-  const source = readSource('web/src/main.jsx');
-  const api = blockBetween(source, 'async function api(path, options = {}) {', 'function projectArchiveUrl');
+  // 批 E（第 9 批）迁移：api 请求口搬去 app/api.js（块边界改为文件尾）。
+  const source = readSource('web/src/app/api.js');
+  const api = source.slice(source.indexOf('export async function api(path, options = {}) {'));
 
   assert.match(api, /const canReplay = readRequest \|\| Boolean\(options\.idempotencyKey\);/);
   assert.match(api, /const retry = canReplay \? \(typeof options\.retry === 'function' \? options\.retry : \(\) => api\(path, requestOptions\)\) : null;/);

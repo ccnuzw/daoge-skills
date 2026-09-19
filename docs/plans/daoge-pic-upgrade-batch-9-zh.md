@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | 2026-09-19 | **施工单编制完成**。前置：批 D 已推送（`e80f993`/`e64b85d`，工作区干净）。本批 = 界面宪法 §8.2 批 E：**App 拆 app/+views/ · 画布拆三件 · CSS 按块归属 · G1–G13 全绿** | 开工 |
 | 2026-09-19 | **E1.1 完成**：`IconButton`/`StatusPill` → `components/`；`AssetCard`/`AssetSelectionStrip`/`ListPager` → `app/asset-surfaces.jsx`。main **3370 → 3295 行**；build ✓ / lint 0 / **全量 895 项 → 893 通过 / 0 失败 / 2 跳过** / 三屏冒烟全过；G24 源级守卫已跟着搬到新家 | 继续 E1.2 |
+| 2026-09-19 | **E1.2 完成**：13 个创建/引用/衍生/驳回对话框 + 33 个文案助手 → `app/creation-dialogs.jsx` + `app/creation-model.mjs`；`api` 请求口与其 5 助手 → `app/api.js`。main **3295 → 2577 行**；3 处源级守卫迁移（协议头/边界句/api 重试）后全量 895→893/0/2；新建批次与新建项目对话框实测正常 | 继续 E1.3 |
 
 ## 0. 前置
 

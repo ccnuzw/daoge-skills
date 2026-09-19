@@ -41,12 +41,12 @@ test('草稿边界句只有一个来源', () => {
 });
 
 test('草稿阶段每个提示点都复用同一个常量', () => {
-  const main = read('main.jsx');
-  // 7 个弹窗各一处：4 处直接用默认句，3 处用「常量 + 各自独有的一句动作提示」拼接。
-  assert.equal((main.match(/<ExecutionBoundaryNote/g) || []).length, 7);
-  assert.equal((main.match(/<ExecutionBoundaryNote \/>/g) || []).length, 4);
-  assert.equal((main.match(/DRAFT_BOUNDARY_COPY \+ '/g) || []).length, 3);
-  assert.equal((main.match(/import \{ DRAFT_BOUNDARY_COPY \} from '\.\/boundary-copy\.mjs';/g) || []).length, 1);
+  // 批 E（第 9 批）迁移：7 个弹窗的边界句随对话框族搬去 app/creation-dialogs.jsx——**总量口径不变**。
+  const faces = [read('main.jsx'), read('app/creation-dialogs.jsx')].join('\n');
+  assert.equal((faces.match(/<ExecutionBoundaryNote/g) || []).length, 7);
+  assert.equal((faces.match(/<ExecutionBoundaryNote \/>/g) || []).length, 4);
+  assert.equal((faces.match(/DRAFT_BOUNDARY_COPY \+ '/g) || []).length, 3);
+  assert.equal((faces.match(/import \{ DRAFT_BOUNDARY_COPY \} from '\.\.?\/boundary-copy\.mjs';/g) || []).length, 2);
 
   // 动作面板是第 8 处，同样复用常量，不再自带一整句工程话。
   const launcher = read('creative-action-launcher.jsx');

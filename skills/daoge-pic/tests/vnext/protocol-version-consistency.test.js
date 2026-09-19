@@ -31,7 +31,8 @@ test('制品版本升到 6.0.0，协议声明升到 3.1.0（9.8 的加法）', (
 
 test('协议版本号的四处硬编码同步改成 3.1.0', () => {
   // 前端把协议头拼成「名字 + 版本常量」，所以这里锁的是两段都在、且常量值正确。
-  assert.match(readSource('web/src/main.jsx'), /'daoge-pic-skill-protocol\/'\s*\+\s*WORKBENCH_PROTOCOL_VERSION/, '前端协议头必须由名字与版本常量拼成');
+  // 批 E（第 9 批）迁移：协议头拼接随 api 请求口搬到 app/api.js。
+  assert.match(readSource('web/src/app/api.js'), /'daoge-pic-skill-protocol\/'\s*\+\s*WORKBENCH_PROTOCOL_VERSION/, '前端协议头必须由名字与版本常量拼成');
   const frontendProtocol = readSource('web/src/version-negotiation-model.mjs');
   assert.match(frontendProtocol, /PROTOCOL_NAME = 'daoge-pic-skill-protocol'/, '协议名必须来自共享常量');
   assert.match(frontendProtocol, /WORKBENCH_PROTOCOL_VERSION = '3\.1\.0'/, '前端协议版本必须是 3.1.0');
