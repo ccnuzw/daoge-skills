@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Bookmark, Check, ChevronLeft, ChevronRight, Copy, Download, Ellipsis, Eye, GitFork, MessageSquareText, RotateCcw, Share2, Trash2, X } from 'lucide-react';
 import { assetThumbnailUrl } from '../asset-media-url.mjs';
 import { IconButton } from '../components/IconButton.jsx';
-import { CreativeActionLauncher } from '../creative-action-launcher.jsx';
 
 /** 资产面（界面批 E 搬运，行为零变化）：卡片 / 已选条 / 分页。 */
 export function ListPager({ page, totalPages, total, onPageChange }) {
@@ -10,7 +9,7 @@ export function ListPager({ page, totalPages, total, onPageChange }) {
   return <nav className="workspace-list-pager" aria-label="列表分页"><button type="button" className="outline-button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}><ChevronLeft size={14} />上一页</button><span>第 {page} / {totalPages} 页 · 共 {total} 项</span><button type="button" className="outline-button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>下一页<ChevronRight size={14} /></button></nav>;
 }
 
-export function AssetCard({ asset, selected, selectionBusy, shared, previewFit = 'contain', selectedTask, fallbackTask, selectedRound, onToggleSelect, onReview, onTrash, onRestore, onPreview, onInspect, onDownload, onCopy, onSetShared, onOpenDerive, onAddReference, onReject, onOpenReference }) {
+export function AssetCard({ asset, selected, selectionBusy, shared, previewFit = 'contain', onToggleSelect, onReview, onTrash, onRestore, onPreview, onInspect, onDownload, onCopy, onSetShared }) {
   const [annotating, setAnnotating] = useState(false);
   const [note, setNote] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -28,9 +27,6 @@ export function AssetCard({ asset, selected, selectionBusy, shared, previewFit =
   const roundLabel = asset.display?.roundSequence ? (({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[asset.display.roundPurpose] || '创作') + ' · 第 ' + asset.display.roundSequence + ' 轮' : null;
   const contextLabel = asset.display?.taskName && roundLabel ? asset.display.taskName + ' · ' + roundLabel : asset.display?.taskName || roundLabel;
   const stateLabel = asset.deletedAt ? '回收站' : asset.review?.decision === 'keep' ? '已选成果' : asset.review?.decision === 'review' ? '未定' : asset.review?.decision === 'reject' ? '不采用' : asset.review?.decision === 'derive' ? '可继续' : selected ? '已选' : '未评审';
-  const menuDerive = (nextAssets, purpose, actionId) => runMenuAction(() => onOpenDerive(nextAssets, purpose, actionId));
-  const menuReference = (nextAssets, usage) => runMenuAction(() => onAddReference(nextAssets, usage));
-  const menuReject = (nextAssets, options) => runMenuAction(() => onReject(nextAssets, options));
   return <article className={'asset-card is-preview-' + previewFit + ' ' + (asset.deletedAt ? 'is-trashed ' : '') + (selected ? 'is-selected' : '')}>
     <div className="asset-preview">
       {asset.deletedAt ? <div className="trash-preview"><Trash2 size={24} strokeWidth={1.4} /></div> : <button type="button" className="asset-preview-button" onClick={() => onPreview([asset])} aria-label="放大查看素材"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button>}
@@ -38,9 +34,9 @@ export function AssetCard({ asset, selected, selectionBusy, shared, previewFit =
       <div className="asset-card-tools"><IconButton label={menuOpen ? '关闭更多操作' : '更多操作'} onClick={() => setMenuOpen((value) => !value)}><Ellipsis size={17} /></IconButton></div>
     </div>
     {menuOpen && <div className="asset-action-menu">{asset.deletedAt ? <button type="button" onClick={() => runMenuAction(() => onRestore(asset.id))}><RotateCcw size={15} /><span>恢复资产</span></button> : <>
-      <section className="asset-action-section is-primary"><p className="asset-action-label">继续</p><CreativeActionLauncher compact assets={[asset]} selectedTask={selectedTask} fallbackTask={fallbackTask} selectedRound={selectedRound} label="用这张继续" onOpenDerive={menuDerive} onAddReference={menuReference} onReject={menuReject} onOpenReference={onOpenReference} /></section>
+      
       <section className="asset-action-section"><p className="asset-action-label">获取图片</p><div><button type="button" onClick={() => runMenuAction(() => onPreview([asset]))}><Eye size={15} /><span>放大查看</span></button><button type="button" onClick={() => runMenuAction(() => onCopy(asset))}><Copy size={15} /><span>复制图片</span></button><button type="button" aria-label="下载原图" onClick={() => runMenuAction(() => onDownload(asset))}><Download size={15} /><span>下载原图</span></button></div></section>
-      <section className="asset-action-section"><p className="asset-action-label">评审和管理</p><div><button type="button" onClick={() => runMenuAction(() => onReject([asset], { createNextRound: false }))}><X size={15} /><span>不采用</span></button><button type="button" onClick={() => { setAnnotating(true); setMenuOpen(false); }}><MessageSquareText size={15} /><span>批注</span></button><button type="button" onClick={() => runMenuAction(() => onSetShared(asset, !shared))}><Share2 size={15} /><span>{shared ? '取消共享' : '共享素材'}</span></button><button type="button" onClick={() => runMenuAction(() => onInspect(asset.id))}><GitFork size={15} /><span>查看来源</span></button><button type="button" className="danger" role="menuitem" onClick={() => runMenuAction(() => onTrash(asset.id))}><Trash2 size={15} /><span>移入回收站</span></button></div></section>
+      <section className="asset-action-section"><p className="asset-action-label">管理</p><div><button type="button" onClick={() => { setAnnotating(true); setMenuOpen(false); }}><MessageSquareText size={15} /><span>批注</span></button><button type="button" onClick={() => runMenuAction(() => onSetShared(asset, !shared))}><Share2 size={15} /><span>{shared ? '取消共享' : '共享素材'}</span></button><button type="button" onClick={() => runMenuAction(() => onInspect(asset.id))}><GitFork size={15} /><span>查看来源</span></button><button type="button" className="danger" role="menuitem" onClick={() => runMenuAction(() => onTrash(asset.id))}><Trash2 size={15} /><span>移入回收站</span></button></div></section>
     </>}</div>}
     <div className="asset-meta"><div><strong>{assetLabel}</strong><span className="asset-state">{stateLabel}</span></div>{contextLabel && <span className="asset-context-line" title={contextLabel}>{contextLabel}</span>}</div>
     {annotating && <div className="annotation-editor"><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="记录本轮反馈" /><button type="button" className="outline-button" disabled={!note.trim()} onClick={saveNote}>保存批注</button></div>}

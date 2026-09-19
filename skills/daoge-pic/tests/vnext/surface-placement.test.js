@@ -18,8 +18,10 @@ test('G24 资产页是后台：没有评审动作，但「去交付」不许收�
   const stripStart = surface.indexOf('function AssetSelectionStrip');
   const stripEnd = surface.indexOf('function ListPager');
   const strip = surface.slice(stripStart, stripEnd > stripStart ? stripEnd : undefined);
-  assert.doesNotMatch(strip, /CreativeActionLauncher/, '资产选择条不许复制画布的评审启动器');
-  assert.doesNotMatch(strip, /预览挑图|onReject/, '资产页不许有挑图入口与评审动作（「不采用」只剩状态词，不是按钮）');
+  assert.doesNotMatch(surface, /CreativeActionLauncher/, '资产面（条与卡）都不许复制画布的评审启动器');
+  assert.doesNotMatch(surface, /onReject/, '资产面不许有评审决定（onReject）');
+  assert.doesNotMatch(surface, /<span>不采用<\/span>/, '「不采用」只许作为状态词出现，不许是按钮');
+  assert.doesNotMatch(strip, /预览挑图/, '资产页不许有挑图入口');
   assert.match(strip, /放大查看/, '查看入口改叫「放大查看」');
   assert.match(strip, /去交付/, 'A4：发起挂选中——「去交付」不许收回本页');
   assert.match(strip, /打包下载/, '打包下载仍在');
