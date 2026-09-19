@@ -21,7 +21,8 @@ test('⚠️ Enter 的放大必须真的放大（判据是基准 1×，不是缩
   assert.notEqual(m.REVIEW_ZOOM_TOGGLE_BASE, m.REVIEW_ZOOM_MIN, '切换基准不能等于缩放下限（那正是这个 bug 的成因）');
   // 接线：组件必须用模型给的目标，不在组件里另写一遍判据。
   const { readSource } = require('./source-text');
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.match(main, /onZoom\(reviewZoomToggleTarget\(zoom\)\)/, 'Enter 必须走模型给的目标倍率');
   assert.doesNotMatch(main, /clampReviewZoom\(zoom\) > REVIEW_ZOOM_MIN \? 1 : 2/, '不许再拿缩放下限当切换判据');
 });
@@ -73,13 +74,14 @@ test('接线：预览态真的绑了键位，对比支持 3–4 张、缩放到 
 });
 
 test('挑图链路完整：三个入口与弹层的每个决策回调都接通', () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6a/E1.6b）迁移：选区入口在 views/assets.jsx，弹层在 app/workbench-shell.jsx。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx') + '\n' + readSource('web/src/views/assets.jsx');
   // 入口 1：选区工具条的「预览」按钮（选中图之后出现）。
   assert.match(main, /onPreview=\{\(nextAssets\) => \{ setPreviewZoom\(1\); setPreviewAssets\(nextAssets\); \}\}/, '选区工具条的预览必须接到弹层');
   // 入口 2：选中 2 张及以上即可对比（布局自适应网格，上限交给布局而不是按钮）。
   assert.match(main, /selectedAssets\.length >= 2 && <IconButton/, '对比按钮必须支持 2 张及以上');
   // 弹层的每个回调必须真的传进去——canReview 靠 onToggleDeliverable，缺了它空格/X 会静默失效。
-  const dialog = main.match(/<ImageInspectorDialog[\s\S]*?onReject=[^ ]*/)?.[0] || '';
+  const dialog = main.match(/<ImageInspectorDialog[^\n]*/)?.[0] || '';
   for (const prop of ['onToggleDeliverable=', 'onReject=', 'onZoom=', 'onClose=']) {
     assert.ok(dialog.includes(prop), '预览弹层缺回调：' + prop);
   }

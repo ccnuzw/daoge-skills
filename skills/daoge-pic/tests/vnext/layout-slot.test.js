@@ -37,6 +37,7 @@ test('状态槽组件存在，且 shell 里只有一处接入', () => {
   // ⚠️ 不能 require `.jsx`（JSX 语法进不了 require）——用 source-text 的单一入口读源码。
   assert.equal(webSourceExists('web/src/components/StatusSlot.jsx'), true, '状态槽组件尚未实现：web/src/components/StatusSlot.jsx');
   assert.match(readSource('web/src/components/StatusSlot.jsx'), /data-region="status"/, '状态槽必须带 data-region="status"（测试只认钩子）');
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.equal((main.match(/<StatusSlot /g) || []).length, 1, 'shell 里状态槽只许接一处（常驻横带 ≤3 的一半靠它）');
 });

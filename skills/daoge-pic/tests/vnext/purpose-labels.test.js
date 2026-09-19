@@ -37,7 +37,8 @@ test('studio search renders purpose through the shared label, never the raw enum
 });
 
 test('the round purpose options take their labels from the shared module', async () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.match(main, /purpose-labels\.mjs/, 'main.jsx 必须从共享模块取 label');
   assert.doesNotMatch(main, /label: '探索新方向'/, 'label 文案不该在 main.jsx 里硬编码（防回退：新增枚举只改一处）');
 });

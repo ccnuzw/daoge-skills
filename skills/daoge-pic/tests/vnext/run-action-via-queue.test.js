@@ -17,7 +17,8 @@ const { readSource, readFrontendSource } = require('./source-text');
  */
 
 test('花动作走队列：重试 / 恢复有真实去处，且带结构化意图', () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   // ① 必须存在一个「把运行动作交给会话」的实现（而不是只弹提示）。
   assert.match(main, /requestRunAction/, '必须有「把运行动作写进队列」的实现');
   // ② 它必须走队列（sendRequest），并且带上 agent 能精确执行的结构化意图。

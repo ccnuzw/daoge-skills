@@ -12,7 +12,8 @@ const { QUEUE_IDLE_PX, QUEUE_MAX_PX, QUEUE_MAX_RATIO } = require('../../web/src/
  *       ③ 展开时画布**让位**（主列视口高 + 页面区可收缩），不许浮层盖住画布。
  */
 test('队列的 DOM 序在页面区之后（不再挤占内容顶部）', () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   const page = main.indexOf('data-region="scroll"');
   const dock = main.indexOf('<RequestQueueDock');
   const status = main.indexOf('<StatusSlot');

@@ -12,7 +12,8 @@ const { readSource } = require('./source-text');
  * G27 疑难/设置：narrow 已在注册表；设置宽度不新增裸 px（沿用 token/断点）。
  */
 test('G24 资产页是后台：没有评审动作，但「去交付」不许收回', () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   // 批 E（第 9 批）迁移：选择条搬去 app/asset-surfaces.jsx——断言跟着家走（源级守卫的正确姿势）。
   const surface = readSource('web/src/app/asset-surfaces.jsx');
   const stripStart = surface.indexOf('function AssetSelectionStrip');

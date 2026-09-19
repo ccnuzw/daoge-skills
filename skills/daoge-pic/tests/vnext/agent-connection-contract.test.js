@@ -117,7 +117,8 @@ test('输入框足够自由：是自由文本请求入口，不是「从下拉�
   const frontend = readFrontendSource();
   assert.match(frontend, /request-queue-model\.mjs/, '请求入口必须有队列模型');
   assert.match(frontend, /\/api\/requests/, '说出的那句话要真的进入队列');
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.doesNotMatch(main, /请求模板|从模板选择请求|request-template-select/, '绝不能把输入框做成模板下拉（方案 4.6 硬要求）');
 });
 

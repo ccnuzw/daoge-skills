@@ -77,7 +77,8 @@ test('界面按批次读得到待确认的挑战，不需要会话工作指针',
 });
 
 test('无挑战是「明确状态」而不是「操作结果不明确」——界面给指引，不报错', async () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   // 闸门要由 agent 先发起挑战。没有挑战时若抛普通 Error，会被归一化成
   // unknown_error → 「操作结果不明确 / 不可自动重试」，那是未知故障的说法，会误导人。
   // 第 4 批 Q1：这条判断收进了**单一来源**（confirmation-entry-model），界面只负责说出来。

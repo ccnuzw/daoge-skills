@@ -102,7 +102,8 @@ test('发起请求自带上下文，且必须选了项目（项目是容器）',
 });
 
 test('重试 / 恢复按钮不直调 bearer，而是把意图写进请求队列', () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   const control = main.slice(main.indexOf('const requestRunAction'), main.indexOf('const copyRunPrompt'));
   // 花动作必须走队列：带 intent + runId + itemIds 的 sendRequest。
   assert.match(control, /sendRequest\(/, '重试 / 恢复必须把意图写进队列');
@@ -117,7 +118,7 @@ test('重试 / 恢复按钮不直调 bearer，而是把意图写进请求队列'
 });
 
 test('接线到位：输入框是自由文本、队列来自唯一事实源、追问可就地回答', () => {
-  const main = readSource('web/src/main.jsx');
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.match(main, /RequestQueueDock/, '必须真的把队列界面渲染出来');
   assert.match(main, /use-request-queue\.mjs/, '队列状态必须走这个 hook');
   assert.match(main, /onAnswer=\{answerRequest\}/, '追问必须接上就地回答');
@@ -138,7 +139,7 @@ test('在场只能有一个来源：在场时不出现「agent 不在场」的�
   assert.match(dock, /const present = presence\?\.present === true/, '在场必须由 presence 对象派生（单一来源）');
   assert.doesNotMatch(dock, /present\s*=\s*false/, '不许再有一个独立的 present 默认值（那会与 presence 打架）');
   // 调用方必须把 presence 接上（没有它，判据就无从谈起）。
-  const main = readSource('web/src/main.jsx');
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.match(main, /<RequestQueueDock[\s\S]{0,400}presence=\{agentPresenceStatus\}/, '必须把 agent 在场传进队列 dock');
 });
 
@@ -147,6 +148,6 @@ test('队列事件驱动界面重取（accepted 立刻可见，不静默）', as
   assert.equal(studioEventRefreshPlan([{ entityType: 'request', eventType: 'request.accepted' }]).requests, true);
   assert.equal(studioEventRefreshPlan([{ eventType: 'request.done' }]).requests, true);
   assert.equal(studioEventRefreshPlan([{ eventType: 'asset.reviewed' }]).requests, false);
-  const main = readSource('web/src/main.jsx');
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.match(main, /eventRevision: eventRevision\.requests/, '队列必须挂到事件版本上');
 });

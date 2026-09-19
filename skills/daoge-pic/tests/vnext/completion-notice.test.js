@@ -50,7 +50,8 @@ test('通知只在已授权时发，且前端源码里不许主动索要权限',
   assert.doesNotMatch(completionNotificationCopy(3), /run|批次|asset|status/i);
 
   // 硬断言：全前端不许出现 requestPermission —— 权限只能由用户自己决定。
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.doesNotMatch(main, /Notification\.requestPermission/, '不许主动索要通知权限（方案 9.5：未授权则静默降级）');
 });
 

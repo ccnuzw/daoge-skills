@@ -75,11 +75,13 @@ test('只有确认出图弹窗解释「确认之后会怎样」，且只用真�
   assert.deepEqual(owners, ['main.jsx']);
 
   const main = read('main.jsx');
+  // 批 E（E1.6b）迁移：确认弹窗的渲染在 app/workbench-shell.jsx（文案模型仍在 main）。
+  const shell = read('app/workbench-shell.jsx');
   assert.equal((main.match(/function confirmationPlanSummary\(/g) || []).length, 1);
   assert.match(main, /先核算，再出图/);
-  assert.match(main, /confirmationPlanSummary\(generationConfirmation\.round\)/);
+  assert.match(shell, /confirmationPlanSummary\(generationConfirmation\.round\)/);
   // 工程细节留在技术详情层，不许悄悄删掉：确认≠调用生成服务。
-  assert.match(main, /note="确认会把这版计划绑定到当前 conversation 与计划哈希；确认本身不会调用生成服务/);
+  assert.match(shell, /note="确认会把这版计划绑定到当前 conversation 与计划哈希；确认本身不会调用生成服务/);
   // 不编承诺：时间与金额要等会话真正执行时才有依据，界面里不许出现预估话术。
   assert.doesNotMatch(main, /预计 ¥|预计¥|预计 \d+ 分钟/);
 });

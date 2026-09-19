@@ -49,7 +49,8 @@ test('握手请求不带协议头、走同源 cookie', async () => {
 });
 
 test('接线到位：授权之后先握手，界面自己那份协议版本是唯一来源', () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   assert.match(main, /StudioVersionGate/, '必须有版本协商闸门');
   assert.match(main, /versionProbeRequest\(/, '握手必须走不带协议头的请求');
   assert.match(main, /if \(authorized\) return <StudioVersionGate \/>/, '授权通过后先协商再渲染');

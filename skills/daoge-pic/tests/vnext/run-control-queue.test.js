@@ -18,7 +18,8 @@ const { readSource, readFrontendSource } = require('./source-text');
  */
 
 test('暂停 / 取消点了就生效：controlRun 必须真的发请求，而不是只提示', () => {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   // 断言「意图」而不是某个整行的字面拼接：这两条路径必须真的存在、且以 POST 发出去。
   assert.match(main, /pause:\s*'\/pause'/, '必须存在暂停端点');
   assert.match(main, /cancel:\s*'\/cancel'/, '必须存在取消端点');

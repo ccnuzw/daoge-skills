@@ -190,7 +190,8 @@ test('数据不全时降级，不编数字', async () => {
 
 test('接线：卡片显示进度，且「去确认」真的定位到那一批并打开闸门', () => {
   const dock = readSource('web/src/request-queue.jsx');
-  const main = readSource('web/src/main.jsx');
+  // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
+  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
   // 进度由 main 算（它持有批次 / 运行 / 槽位），dock 只负责渲染 —— 单一来源，不两头算。
   assert.match(dock, /progressValue\.canConfirm/, '计划就绪时要有确认入口');
   // 第 4 批 Q1：入口从「去确认计划」改成回执上的「就这么出」，并多一个「改一下」。
