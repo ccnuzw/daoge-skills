@@ -21,7 +21,8 @@ test('creative library resources separate reusable methods from project image in
   const shared = readFrontendSource();
   assert.match(component, /creativeLibraryResources\(\{ taskTypes, styleKits, brandKits, assets: \[\] \}\)/);
   assert.match(component, /onOpenSharedAssets/);
-  assert.match(main, /library: \(\) => <CreativeLibrary taskTypes=\{taskTypes\} styleKits=\{styleKits\} brandKits=\{brandKits\} sharedAssets=\{sharedAssets\}/);
-  assert.match(main, /'shared-assets': \(\) => <SharedAssets assets=\{sharedAssets\}/);
+  // A3：renderer 现在包在 PageFrame 里（宽度由注册表决定），绑定与 props 不变。
+  assert.match(main, /library: \(\) => page\('library', <CreativeLibrary taskTypes=\{taskTypes\} styleKits=\{styleKits\} brandKits=\{brandKits\} sharedAssets=\{sharedAssets\}/);
+  assert.match(main, /'shared-assets': \(\) => page\('shared-assets', <SharedAssets assets=\{sharedAssets\}/);
   assert.match(shared, /共享素材/);
 });

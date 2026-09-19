@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { PageHeader } from './components/PageHeader.jsx';
 import { Activity, Copy, Download, HardDrive, RefreshCw, ShieldAlert } from 'lucide-react';
 import { runtimeHealthPresentation } from './runtime-health.mjs';
 import { backupManifestFileName, backupManifestPayload, summarizeBackupManifest, troubleshootSummaryLine } from './troubleshoot-model.mjs';
@@ -92,13 +93,7 @@ function RecoveryBlock() {
 
 export function Troubleshoot({ request, studio, recoveryPhase, repairing, onRefresh, onCopyDiagnostic, onRepair }) {
   return <section className="guide-stage guide-stage-full troubleshoot-stage">
-    <header className="learning-masthead">
-      <div>
-        <p className="eyebrow">Studio 疑难处理</p>
-        <h2>出问题的时候从这里开始</h2>
-        <p>{TROUBLESHOOT_INTRO}</p>
-      </div>
-    </header>
+    <PageHeader kicker="Studio 疑难处理" title="出问题的时候从这里开始" description={TROUBLESHOOT_INTRO} />
     <StatusBlock studio={studio} recoveryPhase={recoveryPhase} repairing={repairing} onRefresh={onRefresh} onCopyDiagnostic={onCopyDiagnostic} onRepair={onRepair} />
     <BackupBlock request={request} />
     <RecoveryBlock />

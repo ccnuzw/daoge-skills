@@ -1,16 +1,10 @@
 import { Copy, Download, FolderKanban, Images, Info, Library, Share2, X } from 'lucide-react';
 import { assetThumbnailUrl } from './asset-media-url.mjs';
+import { PageHeader } from './components/PageHeader.jsx';
 
 export function SharedAssets({ assets, onDownload, onCopy, onSetShared, onOpenProjects }) {
   return <section className="shared-assets-stage">
-    <header className="shared-assets-head">
-      <div>
-        <p className="eyebrow">资料</p>
-        <h2>共享素材</h2>
-        <p>只显示你明确共享出来、可跨项目复用的图片。</p>
-      </div>
-      <button type="button" className="outline-button" onClick={onOpenProjects}><FolderKanban size={16} />项目素材</button>
-    </header>
+    <PageHeader kicker="资料" title="共享素材" description="只显示你明确共享出来、可跨项目复用的图片。"><button type="button" className="outline-button" onClick={onOpenProjects}><FolderKanban size={16} />项目素材</button></PageHeader>
 
     <details className="shared-assets-boundary">
       <summary><Info size={16} />共享说明</summary>

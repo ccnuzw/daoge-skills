@@ -1,0 +1,7 @@
+{
+  "_note": "字面量基线（界面方案 §4 S4 / 批 A A1 / G3 守卫）。口径：六位色值 #rrggbb 的**出现次数**。规则：只减不增——本文件里的数字每批只许下调；tokens/ 目录按设计允许字面量，故不登记。",
+  "files": {
+    "web/src/styles/base.css": 8,
+    "web/src/styles/surfaces/workbench.css": 1887
+  }
+}

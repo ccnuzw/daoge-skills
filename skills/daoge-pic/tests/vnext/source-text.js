@@ -98,14 +98,71 @@ function readSource(relativePath) {
   return normalizeSource(fs.readFileSync(path.join(SKILL_ROOT, relativePath), 'utf8'));
 }
 
+/**
+ * 样式表**不是一个文件**了（批 A A1 起 `styles.css` 是分层汇聚入口）。
+ * 这里按真实层叠顺序拼接：tokens → base → primitives → components → organisms → templates → surfaces。
+ * 未知的新层按文件名字典序追加在最后——保证 `readStyles()` 永远看得到全部样式，
+ * 而不是只看到入口那三行 @import（否则一堆样式断言会静默失效）。
+ */
+const STYLE_LAYER_ORDER = [
+  'web/src/tokens',
+  'web/src/styles/base.css',
+  'web/src/styles/primitives.css',
+  'web/src/styles/components.css',
+  'web/src/styles/organisms.css',
+  'web/src/styles/templates.css',
+  'web/src/styles/surfaces'
+];
+
+function styleFiles() {
+  const files = [];
+  const seen = new Set();
+  const pushFile = (relative) => {
+    const full = path.join(SKILL_ROOT, relative);
+    if (!seen.has(full) && fs.existsSync(full) && fs.statSync(full).isFile()) { seen.add(full); files.push(full); }
+  };
+  const walk = (relative) => {
+    const full = path.join(SKILL_ROOT, relative);
+    if (!fs.existsSync(full)) return;
+    if (fs.statSync(full).isFile()) { pushFile(relative); return; }
+    for (const entry of fs.readdirSync(full, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const child = relative + '/' + entry.name;
+      if (entry.isDirectory()) walk(child);
+      else if (entry.name.endsWith('.css')) pushFile(child);
+    }
+  };
+  for (const layer of STYLE_LAYER_ORDER) walk(layer);
+  // 兜底：未被上面规则覆盖到的样式文件（新增层）也要进结果。
+  const walkUnknown = (relative) => {
+    const full = path.join(SKILL_ROOT, relative);
+    if (!fs.existsSync(full)) return;
+    for (const entry of fs.readdirSync(full, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const child = relative + '/' + entry.name;
+      if (entry.isDirectory()) { if (child === 'web/src/styles/surfaces') continue; walkUnknown(child); continue; }
+      if (!entry.name.endsWith('.css')) continue;
+      if (/^web\/src\/(tokens|styles)\//.test(child)) continue;
+      pushFile(child);
+    }
+  };
+  walkUnknown('web/src');
+  return files;
+}
+
 function readStyles() {
-  return readSource(STYLESHEET);
+  return styleFiles().map((file) => normalizeSource(fs.readFileSync(file, 'utf8'))).join('\n');
+}
+
+/** 目标文件存在吗——给「已规划但还没实现」的守卫用（避免它们为了存在性判断去裸读前端源码）。 */
+function webSourceExists(relativePath) {
+  return fs.existsSync(path.join(SKILL_ROOT, relativePath));
 }
 
 module.exports = {
   FRONTEND_DIR,
   SKILL_ROOT,
   STYLESHEET,
+  styleFiles,
+  webSourceExists,
   frontendFiles,
   normalizeSource,
   readFrontendSource,

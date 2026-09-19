@@ -79,7 +79,7 @@ test('sidebar owns collapsible chrome, studio status controls, and manual entry'
   assert.match(css, /\.workspace-navigation \{ flex:1 1 auto; align-content:start/);
   assert.match(css, /\.studio-shell\.is-rail-collapsed/);
   assert.match(css, /\.rail-status-popover \{ position:absolute/);
-  assert.match(css, /@media \(max-width:800px\) \{[\s\S]*\.rail-utility-stack/);
+  assert.match(css, /@media \(max-width:900px\) \{[\s\S]*\.rail-utility-stack/);
 });
 
 test('styles cover all keyboard focus surfaces and reduced motion', () => {

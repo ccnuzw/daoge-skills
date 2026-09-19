@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { readSource } = require('./source-text');
+const { readSource, readStyles } = require('./source-text');
 
 /**
  * 检查器的守卫（方案 4.5）。
@@ -29,12 +29,14 @@ test('确认闸门与计划详情挂在批次上，而不是已被删除的计�
 
 test('检查器把三件事分清楚：它是什么 / 过程资产 / 确认', () => {
   const canvas = readSource('web/src/creative-lineage-canvas.jsx');
-  const styles = readSource('web/src/styles.css');
+  // 样式表已分层（批 A A1）：走 readStyles() 的单一入口，不再假设它在一个文件里。
+  const styles = readStyles();
   // 检查器有明确的分区标题（不是一坨按钮堆在一起）。
   assert.match(canvas, /lineage-inspector-section|过程资产/, '检查器必须有「过程资产」分区');
   // 窄窗口退化为抽屉（8.9 #20）。
   assert.match(styles, /\.lineage-inspector/);
-  assert.match(styles, /@media \(max-width:800px\)[\s\S]*lineage-inspector/, '窄窗口下检查器必须退化为抽屉');
+  // A5：断点收敛到 640/900/1280；原来的 800 档并进 900 档（意图不变：窄窗口退化为抽屉）。
+  assert.match(styles, /@media \(max-width:900px\)[\s\S]*lineage-inspector/, '窄窗口下检查器必须退化为抽屉');
   // 改计划弹窗必须是不透明的（AccessibleDialog 容器本身没有背景，每个弹窗自带）——
   // 缺背景 = 透明弹窗，能看到后面的画布（2026-09-17 刀哥实机抓到）。
   assert.match(styles, /\.accessible-dialog\.plan-edit-dialog \{[^}]*background:linear-gradient/, '改计划弹窗必须有不透明背景');

@@ -167,7 +167,8 @@ test('Workbench exposes a creator-facing reference material selector for draft r
   assert.match(main, /回到当前选择/);
   assert.match(styles, /\.reference-panel/);
   assert.match(styles, /\.reference-candidate-grid/);
-  assert.match(main, /assets: \(\) => renderAssetsView\(\)/);
+  // A3：renderer 现在包在 PageFrame 里（宽度由注册表决定），绑定关系不变。
+  assert.match(main, /assets: \(\) => page\('assets', renderAssetsView\(\)\)/);
   assert.match(main, /MATERIAL_NEED_USAGE_RULES/);
   assert.match(main, /MaterialImportGuide/);
   assert.match(main, /素材导入引导/);
@@ -424,6 +425,7 @@ test('lineage canvas is the creator-first project workspace', () => {
 
 test('Workbench renders route context errors as live alerts', () => {
   const main = readFrontendSource();
-  assert.match(main, /contextError && <div className="error-strip" role="alert" aria-live="assertive"/);
+  // A4：状态条收进 StatusSlot 的 items 后，条件从 `&&` 变成 `when:`，断言跟随（意图不变：仍是 alert/assertive）。
+  assert.match(main, /content: <div className="error-strip" role="alert" aria-live="assertive"/);
   assert.match(main, /关闭错误提示/);
 });

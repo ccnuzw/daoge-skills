@@ -1,0 +1,93 @@
+/*
+ * 设计 token —— 界面方案 §4 S4 / 批 A A1。
+ *
+ * 这是全仓**唯一允许出现字面量**的地方（颜色 / 字号 / 间距 / 圆角 / 阴影 / 层级）。
+ * 存量样式仍在 `styles/surfaces/*.css` 里带着字面量，替换是**棘轮式**的：
+ * `tokens/literal-baseline.json` 记录各文件当前的字面量数，**只减不增**（G3 守卫盯着）。
+ *
+ * 取值原则：颜色取**现网最高频的真实值**（不是新配色），
+ * 这样后续替换是「直替」而不是「重新设计」——本批只统一，不换向（§11 D5）。
+ */
+:root {
+  /* 面（浅纸面） */
+  --surface-page: #fbfcf8;
+  --surface-card: #fffef9;
+  --surface-raised: #f4f7f0;
+  --surface-sunken: #eef0e9;
+
+  /* 墨（文字三级） */
+  --ink-1: #26392d;
+  --ink-2: #5a6d5d;
+  --ink-3: #869486;
+
+  /* 线（两级） */
+  --line-1: #cbd1c7;
+  --line-2: #d7dfd4;
+
+  /* 强调 */
+  --accent: #456e53;
+  --accent-strong: #405e49;
+
+  /* 状态四组（各配 -bg / -ink） */
+  --danger: #a8665c;   --danger-bg: #efd2cb;   --danger-ink: #62231d;
+  --warning: #c58a3d;  --warning-bg: #faf1e0;  --warning-ink: #775018;
+  --ready: #3e7554;    --ready-bg: #eff7ed;    --ready-ink: #28613e;
+  --quiet: #869486;    --quiet-bg: #f4f7f0;    --quiet-ink: #5a6d5d;
+
+  /* 字号 8 档 */
+  --font-10: 10px;
+  --font-11: 11px;
+  --font-12: 12px;
+  --font-13: 13px;
+  --font-15: 15px;
+  --font-20: 20px;
+  --font-26: 26px;
+  --font-34: 34px;
+
+  /* 间距 6 档（+ 2px 发丝线） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --hairline: 2px;
+
+  /* 圆角 4 档 */
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --radius-3: 12px;
+  --radius-pill: 999px;
+
+  /* 阴影 3 档 */
+  --shadow-1: 0 1px 2px rgba(24, 33, 27, .06);
+  --shadow-2: 0 6px 18px rgba(24, 33, 27, .12);
+  --shadow-3: 0 18px 48px rgba(24, 33, 27, .18);
+
+  /* 层级 4 层 */
+  --z-sticky: 10;
+  --z-slot: 20;
+  --z-drawer: 30;
+  --z-dialog: 40;
+
+  /* 动效 */
+  --transition: 180ms ease;
+
+  /* 页面宽度三档（由 PageFrame 消费；view 不得自写 max-width） */
+  --page-max-wide: 1680px;
+  --page-max-standard: 1180px;
+  --page-max-narrow: 820px;
+}
+
+/* 深面（rail）：这些颜色只在 rail 作用域内使用，不上浅面 */
+.studio-rail {
+  --rail-bg: #191f1d;
+  --rail-line: rgba(233, 238, 225, .1);
+  --rail-ink-1: #edf0e8;
+  --rail-ink-2: #b9c1b6;
+  --rail-accent: #d4dd74;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --transition: 0ms; }
+}

@@ -38,6 +38,32 @@ export const VIEW_HOSTS = Object.freeze({
   troubleshoot: 'system'
 });
 
+/**
+ * 视图 → 宽度档（界面方案 §4 S3 / §5.4 / 批 A A2–A3 · G12 扩展）。
+ *
+ * 宽度**是页面的属性**，所以与「视图 → 宿主」一样进注册表：每个 view 声明一次，
+ * `PageFrame` 消费它。任何页面**不得自写 max-width**。
+ *
+ * 分档依据（方案 S3）：wide＝工作台面（创作平台 / 生成历史 / 批次清单）；
+ * standard＝列表面（项目 / 任务 / 资产 / 交付）；narrow＝阅读面（资料 / 共享素材 / 手册 / 疑难 / 计划审阅）。
+ */
+export const VIEW_LAYOUTS = Object.freeze({
+  lineage: 'wide',
+  runs: 'wide',
+  'studio-overview': 'wide',
+  projects: 'standard',
+  'project-overview': 'standard',
+  tasks: 'standard',
+  assets: 'standard',
+  trash: 'standard',
+  deliveries: 'standard',
+  prompts: 'narrow',
+  library: 'narrow',
+  'shared-assets': 'narrow',
+  guide: 'narrow',
+  troubleshoot: 'narrow'
+});
+
 /** 某个宿主下的全部视图（给高亮分组、以及「收起视图后去哪」提供依据）。 */
 export function viewsHostedBy(host) {
   return Object.keys(VIEW_HOSTS).filter((view) => VIEW_HOSTS[view] === host);

@@ -34,7 +34,8 @@ test('资产页说明自己是后台，并指出挑图在画布', async () => {
 test('资产页真的渲染它，且句子只有这一个来源', () => {
   const main = readFrontendSource('main.jsx');
   assert.match(main, /import \{ ASSET_BACKSTAGE_COPY \} from '\.\/asset-backstage-copy\.mjs';/);
-  assert.match(main, /className="asset-backstage-note">\{ASSET_BACKSTAGE_COPY\}/, '资产页要把它渲染出来');
+  // A3b：定位文案从独立说明条改由 PageHeader 的 description 呈现（内容不变、位置更正规）。
+  assert.match(main, /description=\{routeView === 'trash'[^}]*: ASSET_BACKSTAGE_COPY\}/, '资产页要把它渲染出来');
   // 防漂移：同一句话不许在 web/src 里手写第二遍。
   const root = path.join(__dirname, '..', '..', 'web', 'src');
   const offenders = [];

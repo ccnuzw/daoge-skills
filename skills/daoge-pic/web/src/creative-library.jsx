@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BookOpen, FolderKanban, Library, Palette, Search, Tag, X } from 'lucide-react';
 import { creativeLibraryResources, filterCreativeLibraryResources } from './creative-library-model.mjs';
+import { PageHeader } from './components/PageHeader.jsx';
 
 const FILTERS = [
   { id: 'all', label: '全部规则' },
@@ -42,17 +43,8 @@ export function CreativeLibrary({ taskTypes, styleKits, brandKits, sharedAssets,
   const counts = { task: taskTypes.length, style: styleKits.length, brand: brandKits.length };
 
   return <section className="creative-library">
-    <header className="library-masthead">
-      <div>
-        <p className="eyebrow">规则资料</p>
-        <h2>任务类型 / 风格包 / 品牌包</h2>
-        <p>这里只管理规则定义。共享图片在单独“共享素材”标签里查看，不和规则资料混放。</p>
-      </div>
-      <div className="library-masthead-actions">
-        <button type="button" className="outline-button" onClick={onOpenProjects}><FolderKanban size={16} />项目</button>
-        <button type="button" className="command-button" onClick={onOpenSharedAssets}><Library size={16} />共享素材</button>
-      </div>
-    </header>
+    <PageHeader kicker="规则资料" title="任务类型 / 风格包 / 品牌包" description="这里只管理规则定义。共享图片在单独“共享素材”标签里查看，不和规则资料混放。"><button type="button" className="outline-button" onClick={onOpenProjects}><FolderKanban size={16} />项目</button>
+        <button type="button" className="command-button" onClick={onOpenSharedAssets}><Library size={16} />共享素材</button></PageHeader>
 
     <section className="library-metrics is-three" aria-label="创作资料统计">
       <div><span>任务类型</span><b>{counts.task}</b></div>

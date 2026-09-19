@@ -51,7 +51,7 @@ export function RequestQueueDock({ requests, pendingCount, busy, presence, conte
     void onSend(value, context).then((sent) => { if (sent) setExpanded(true); });
   };
 
-  return <section className="request-dock" aria-label="请求队列">
+  return <section className="request-dock" data-region="bottom" aria-label="请求队列">
     <div className="request-composer">
       <MessageSquare size={16} aria-hidden="true" />
       <textarea

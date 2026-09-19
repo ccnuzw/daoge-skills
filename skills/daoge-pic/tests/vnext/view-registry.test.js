@@ -62,3 +62,19 @@ test('a NEW view cannot be added to WORKBENCH_VIEWS without declaring its host',
   const orphans = Object.keys(VIEW_HOSTS).filter((view) => !known.has(view));
   assert.deepEqual(orphans, [], '这些视图已不在 WORKBENCH_VIEWS 里，但注册表还留着：' + orphans.join(', '));
 });
+
+/**
+ * G12 扩展（界面方案 §4 S3 / §5.4 / 批 A A2/A3 与 B5）。
+ *
+ * 宽度档（`layout`）是**页面的属性**，所以它跟「视图 → 宿主」一样进注册表：
+ * 每个 view 声明一次，`PageFrame` 消费它——任何 view 不得自写宽度。
+ */
+test('every view declares a layout tier, and PageFrame consumes it', async () => {
+  const { VIEW_LAYOUTS } = await import('../../web/src/workbench-navigation-model.mjs');
+  const { WORKBENCH_VIEWS } = await import('../../web/src/workbench-route.mjs');
+  const allowed = new Set(['wide', 'standard', 'narrow']);
+  assert.deepEqual(Object.keys(VIEW_LAYOUTS).sort(), [...WORKBENCH_VIEWS].sort(), 'VIEW_LAYOUTS 必须与 WORKBENCH_VIEWS 一一对应');
+  for (const [view, layout] of Object.entries(VIEW_LAYOUTS)) {
+    assert.ok(allowed.has(layout), view + ' 的宽度档必须是 wide/standard/narrow，实得 ' + layout);
+  }
+});

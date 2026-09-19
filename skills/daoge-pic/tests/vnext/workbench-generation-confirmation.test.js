@@ -4,7 +4,7 @@ const { readFrontendSource, readSource } = require('./source-text');
 
 test('Workbench exposes the confirmation gate on the current pending plan view', () => {
   const source = readFrontendSource();
-  assert.match(source, /prompts: \(\) => <>.*human-confirmation-gate/s);
+  assert.match(source, /prompts: \(\) => page\('prompts', <>.*human-confirmation-gate/s);
   assert.match(source, /selectedRound\?\.status === 'awaiting_confirmation'/);
   assert.match(source, /审阅并确认计划/);
   assert.match(source, /openGenerationConfirmation\(\)/);
