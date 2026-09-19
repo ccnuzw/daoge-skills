@@ -81,9 +81,10 @@ test('接线：批次摘要在画布上用模型区分「没成」与「被挡�
  * 所以断言也改成盯这条路径。
  */
 test('接线：归因接在可达的 Runs 视图上（不是已经不可达的画布分支）', () => {
-  const main = readSource('web/src/main.jsx');
-  assert.match(main, /failure-copy-model\.mjs/, 'main.jsx 必须引入归因模型');
-  assert.match(main, /failureAttributionLine\(item\)/, 'Runs 视图必须真的调用它');
+  // 批 E（第 9 批）迁移：运行面搬去 app/run-surfaces.jsx——归因跟着家走。
+  const runs = readSource('web/src/app/run-surfaces.jsx');
+  assert.match(runs, /failure-copy-model\.mjs/, '运行面必须引入归因模型');
+  assert.match(runs, /failureAttributionLine\(item\)/, 'Runs 视图必须真的调用它');
   // 画布那条路径早就不存在了：代码与守卫都不该再提它。
   assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /failureAttribution/, '画布上不该再有归因（那条分支已不可达）');
 });

@@ -110,7 +110,8 @@ test('重试 / 恢复按钮不直调 bearer，而是把意图写进请求队列'
   // 绝不直调 bearer（会重新花钱）——这里不许出现运行控制端点。
   assert.doesNotMatch(control, /\/api\/runs\/[^']*\/(retry|resume)/, '浏览器不许直调重试 / 恢复（那是 Bearer 花动作）');
   // 行内「重试」按钮要真的在，且点了会派活。
-  assert.match(main, /onClick=\{\(\) => void onRetry\(item\.id\)\}><RefreshCw size=\{15\} \/>重试/, '行内要有直达的重试按钮');
+  // 批 E（第 9 批）迁移：行内重试按钮随 RunItemRow 搬去 app/run-surfaces.jsx。
+  assert.match(readSource('web/src/app/run-surfaces.jsx'), /onClick=\{\(\) => void onRetry\(item\.id\)\}><RefreshCw size=\{15\} \/>重试/, '行内要有直达的重试按钮');
   // 暂停 / 取消仍是 cookie 止损，点了就生效。
   assert.match(control, /paths\[action\]/, '止损动作仍要直达');
 });
