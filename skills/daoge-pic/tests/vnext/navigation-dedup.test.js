@@ -11,7 +11,8 @@ const { readSource, readFrontendSource } = require('./source-text');
  */
 
 function contextBarBlock() {
-  const main = readSource('web/src/main.jsx');
+  // 批 E（第 9 批）迁移：上下文条（面包屑）搬去 app/shell-pieces.jsx。
+  const main = readSource('web/src/app/shell-pieces.jsx');
   const start = main.indexOf('function WorkspaceContextBar');
   assert.ok(start !== -1, '找不到上下文条组件（它应当还在，只是降级为面包屑容器）');
   const next = main.indexOf('\nfunction ', start + 10);
