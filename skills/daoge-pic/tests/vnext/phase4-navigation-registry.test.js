@@ -69,9 +69,10 @@ test('sidebar owns collapsible chrome, studio status controls, and manual entry'
   assert.match(main, /is-rail-collapsed/);
   assert.doesNotMatch(readSource('web/src/main.jsx'), /RuntimeHealthControl/);
   assert.doesNotMatch(readSource('web/src/main.jsx'), /className="connection-state/);
-  assert.match(navigation, /ProviderStatusCard/);
-  assert.match(navigation, /RuntimeStatusCard/);
-  assert.match(navigation, /rail-system-panel/);
+  // 批 B B1：两张状态卡合并成一张（UnifiedStatusCard）——能力不变（明细 + 安全重启 + 疑难入口都在卡里）。
+  assert.match(navigation, /UnifiedStatusCard/);
+  assert.match(navigation, /data-region="rail-status"/);
+  assert.match(navigation, /rail-status-card/);
   assert.match(navigation, /创作手册/);
   assert.match(css, /\.rail-status-card/);
   assert.match(css, /\.rail-guide-card/);

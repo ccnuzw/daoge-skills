@@ -697,25 +697,25 @@ function ProjectTaskList({ project, tasks, onOpenTask, onCreateTask }) {
 
 
 
-function WorkspaceContextBar({ project, tasks = EMPTY, task, rounds, selectedRound, view, sessionPlanStatus, onProject, onTasks, onSelectTask, onSelectRound, onCreateRound, onNavigate, onRestoreContext }) {
+function WorkspaceContextBar({ project, projects = EMPTY, tasks = EMPTY, task, rounds, selectedRound, sessionPlanStatus, onSwitchProject, onSelectTask, onSelectRound, onRestoreContext }) {
   if (!project) return null;
-  const scopedAssetTarget = selectedRound ? 'round' : task ? 'task' : 'project';
   const roundOptions = selectedRound && !rounds.some((round) => round.id === selectedRound.id) ? [selectedRound, ...rounds] : rounds;
   const roundTaskLabel = (round) => !task && round?.taskId ? tasks.find((item) => item.id === round.taskId)?.name : '';
+  const segment = (label, current, options, onPick, emptyHint) => <details className="breadcrumb-segment">
+    <summary title={current ? label + '：' + current : label}>{label} · <b>{current || '未选'}</b></summary>
+    <div className="breadcrumb-menu" role="menu">{options.length ? options : <span className="breadcrumb-empty">{emptyHint}</span>}</div>
+  </details>;
+  // 批 B B2/B3：这一条**只剩面包屑**——只读路径 + 点开切换；导航在 rail，动作另有其位（D1）。
+  // 顶栏不放动作：新建批次去画布（空白双击/工具条），任务列表去 rail，导出一律在各自页面。
   return <div className="workspace-context" data-region="header">
-    <button type="button" className="workspace-context-project" onClick={onProject}><span>项目</span><b title={project.name}>{project.name}</b></button>
-    <label className="workspace-context-select workspace-context-task"><span>任务</span><select value={task?.id || ''} onChange={(event) => onSelectTask(event.target.value || null)}><option value="">选择任务</option>{tasks.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-    <button type="button" className="outline-button context-task-list" onClick={onTasks}><GitFork size={14} />任务列表</button>
-    <label className="workspace-context-select workspace-context-round"><span>批次</span><select value={selectedRound?.id || ''} disabled={!roundOptions.length} onChange={(event) => onSelectRound(event.target.value || null)}><option value="">选择批次</option>{roundOptions.map((round) => { const taskLabel = roundTaskLabel(round); return <option value={round.id} key={round.id}>{taskLabel ? taskLabel + ' / ' : ''}{ROUND_PURPOSE_LABELS[round.purpose] || round.purpose} · 计划 v{round.planVersion}</option>; })}</select></label>
-    <button type="button" className="outline-button context-create-round" disabled={!task} title={task ? '在当前任务中新建批次' : '先选择任务再新建批次'} onClick={onCreateRound}><Sparkles size={14} />新建批次</button>
-    <div className="task-local-tabs" aria-label="任务工作入口">
-      <button type="button" className={view === 'prompts' ? 'is-active' : ''} disabled={!selectedRound} onClick={() => onNavigate('prompts', { assetScope: 'round' })}>计划</button>
-      <button type="button" className={view === 'runs' ? 'is-active' : ''} disabled={!selectedRound} onClick={() => onNavigate('runs', { assetScope: 'round' })}>生成历史</button>
-      <button type="button" className={view === 'assets' ? 'is-active' : ''} onClick={() => onNavigate('assets', { assetScope: scopedAssetTarget })}>资产管理</button>
-      <button type="button" className={view === 'lineage' ? 'is-active' : ''} onClick={() => onNavigate('lineage', { assetScope: scopedAssetTarget })}>创作平台</button>
-      <button type="button" className={view === 'studio-overview' ? 'is-active' : ''} disabled={!task} onClick={() => onNavigate('studio-overview', { assetScope: 'task' })}>批次对比</button>
-    </div>
-    <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={onRestoreContext} />
+    <nav className="workspace-breadcrumb" data-region="breadcrumb" aria-label="当前位置">
+      {segment('项目', project.name, listItems(projects).map((item) => <button type="button" role="menuitem" key={item.id} className={item.id === project.id ? 'is-active' : ''} onClick={() => onSwitchProject?.(item.id)}>{item.name}</button>), '暂无其他项目')}
+      <span className="breadcrumb-sep" aria-hidden="true">›</span>
+      {segment('任务', task?.name || '', listItems(tasks).map((item) => <button type="button" role="menuitem" key={item.id} className={item.id === task?.id ? 'is-active' : ''} onClick={() => onSelectTask(item.id)}>{item.name}</button>), '这个项目还没有任务')}
+      <span className="breadcrumb-sep" aria-hidden="true">›</span>
+      {segment('批次', selectedRound ? '计划 v' + selectedRound.planVersion : '', roundOptions.map((round) => <button type="button" role="menuitem" key={round.id} className={round.id === selectedRound?.id ? 'is-active' : ''} onClick={() => onSelectRound(round.id)}>{(ROUND_PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion + (roundTaskLabel(round) ? ' · ' + roundTaskLabel(round) : '')}</button>), '还没有批次')}
+    </nav>
+    <div className="workspace-breadcrumb-trailing"><SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={onRestoreContext} /></div>
   </div>;
 }
 
@@ -3317,7 +3317,7 @@ await refresh();
   return <main className={'studio-shell' + (railCollapsed ? ' is-rail-collapsed' : '')} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files).filter((item) => item.type.startsWith('image/')); if (files.length && canImport) void upload(files); }} onPaste={(event) => { const files = [...event.clipboardData.files].filter((item) => item.type.startsWith('image/')); if (files.length && canImport) { event.preventDefault(); void upload(files); } }}>
     <aside className="studio-rail" aria-label="Studio 左侧控制栏">
       <div className="rail-brand-row"><div className="brand-mark" aria-label="DAOGE Pic"><span>DAOGE</span><b>Pic</b></div><button type="button" className="rail-collapse-toggle" onClick={() => setRailCollapsed((current) => !current)} title={railCollapsed ? '展开左侧栏' : '折叠左侧栏'} aria-label={railCollapsed ? '展开左侧栏' : '折叠左侧栏'} aria-pressed={railCollapsed}>{railCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}</button></div>
-      <WorkbenchNavigation view={view} project={selectedProject} task={selectedTask} round={selectedRound} provider={provider} studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onOpenProvider={openProviderDetails} onOpenGuide={() => navigateRoute({ view: 'guide' })} onCopyRuntimeDiagnostic={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
+      <WorkbenchNavigation view={view} project={selectedProject} task={selectedTask} round={selectedRound} provider={provider} studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onOpenProvider={openProviderDetails} onOpenGuide={() => navigateRoute({ view: 'guide' })} onCopyRuntimeDiagnostic={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} />
     </aside>
 
     <section className="work-surface">
@@ -3331,7 +3331,7 @@ await refresh();
           </div>
         </header>
         {!studioView ? <>
-          <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} onCreateRound={() => openCreationDialog('round')} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onRestoreContext={restoreSessionContext} />
+          <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} sessionPlanStatus={sessionPlanStatus}  onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} projects={projects} onSwitchProject={(projectId) => navigateRoute(selectProject(route, projectId))} onRestoreContext={restoreSessionContext} />
         </> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={restoreSessionContext} />}
       </div>
       <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: requestContextAssetIds({ canvasAssetIds: canvasSelectedAssetIds, selectedAssetIds: [...selectedAssetIds] }) }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} onEditPlan={openRoundPlanEdit} providerNotice={providerNotice} detection={agentDetection} detectionLoading={agentDetectionLoading} onDetect={detectAgents} connection={agentConnection} onConnectionChange={updateAgentConnection} />

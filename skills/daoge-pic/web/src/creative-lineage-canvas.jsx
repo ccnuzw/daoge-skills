@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, Pencil, Play, Redo2, RefreshCw, Save, Search, Share2, Sparkles, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, Pencil, Play, Plus, Redo2, RefreshCw, Save, Search, Share2, Sparkles, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { assetThumbnailUrl } from './asset-media-url.mjs';
 import { MINIMAP_HEIGHT, MINIMAP_WIDTH, clampWorldPoint, createMinimapGeometry, createMinimapItems, minimapToWorld, viewportRectForMinimap, worldToMinimap } from './lineage-minimap-model.mjs';
 import { LINEAGE_NODE_RENDER_LIMIT, lineageViewportBounds, virtualizeLineageNodes } from './lineage-viewport-model.mjs';
@@ -1305,6 +1305,8 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
       <div className="lineage-actions">
         <button type="button" onClick={fitAll}><Search size={15} />适应全部</button>
         {selectedKeys.size > 0 && <button type="button" onClick={fitSelection}><ZoomIn size={15} />适应选择</button>}
+        {/* D1：上下文条去重后，「新建批次」落在画布工具条（空白双击是第二条路，第 3 批 G2 已有）。 */}
+        {selectedTask && <button type="button" className="lineage-new-round" onClick={onCreateRound}><Plus size={15} />新建批次</button>}
         <button type="button" className={editing ? 'is-active' : ''} onClick={() => setEditing((value) => { const next = !value; if (!next) setTool('select'); return next; })}><Move size={15} />{editing ? '退出编辑' : '编辑模式'}</button>
         {editing && <>
           <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')}><BoxSelect size={15} />选择</button>
@@ -1369,7 +1371,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         {editing && settings.minimap && <LineageMinimap nodes={renderableNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} selectedKeys={selectedKeys} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
         {editing && shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
       </div>
-      <LineageInspector onEditPlan={openPlanEdit} batchQuality={inspectorBatchQuality} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onBatchSelectAssets={onBatchSelectAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={copyContextForNodes} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenConfirmation={onOpenConfirmation} onSaveRecipe={onSaveRecipe} />
+      <LineageInspector onEditPlan={openPlanEdit} runs={runs} batchQuality={inspectorBatchQuality} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onBatchSelectAssets={onBatchSelectAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={copyContextForNodes} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenConfirmation={onOpenConfirmation} onSaveRecipe={onSaveRecipe} />
     </div>
   </section>;
 }
@@ -1468,7 +1470,8 @@ function contextRouteForNode(node) {
   if (node.entityType === 'round') return { view: 'lineage', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' };
   return null;
 }
-function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onEditPlan, onSaveRecipe, batchQuality = '' }) {
+function LineageInspector({ tasks = EMPTY_ARRAY, runs = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onEditPlan, onSaveRecipe, batchQuality = '' }) {
+  const [inspectorTab, setInspectorTab] = useState('plan');
   if (!selectedNodes.length) {
     return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
       <p className="eyebrow">检查器</p>
@@ -1518,7 +1521,11 @@ function LineageInspector({ tasks = EMPTY_ARRAY, editing, node, selectedNodes, s
         人点一下批次，右侧就能确认，不用离开画布（方案 4.5）。 */}
     {node.entityType === 'round' && <>
       {batchQuality && <p className="lineage-quality-line" aria-label="这一批的质量">{batchQuality}</p>}
-      <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} onEditPlan={onEditPlan} onSaveRecipe={onSaveRecipe} />
+      {/* B4：批次的「计划 / 生成历史」就在检查器里——看计划与看运行都不离开画布（界面宪法 §5.8）。 */}
+      <div className="lineage-inspector-tabs" role="tablist" aria-label="批次信息">
+        {[['plan', '计划'], ['history', '生成历史']].map(([id, label]) => <button type="button" role="tab" key={id} aria-selected={inspectorTab === id} className={inspectorTab === id ? 'is-active' : ''} onClick={() => setInspectorTab(id)}>{label}</button>)}
+      </div>
+      {inspectorTab === 'plan' ? <PlanActions node={node} onNavigate={onNavigate} onCopyContext={onCopyContext} onOpenConfirmation={onOpenConfirmation} onEditPlan={onEditPlan} onSaveRecipe={onSaveRecipe} /> : <ReplyHistoryPanel node={node} runs={runs} onNavigate={onNavigate} />}
     </>}
     {isAsset ? <AssetActions tasks={tasks} node={node} selectedTask={selectedTask} selectedRound={selectedRound} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={onCopyContext} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /> : ['task', 'round'].includes(node.entityType) ? <NavigationActions node={node} onNavigate={onNavigate} onCreateRound={onCreateRound} /> : null}
     {editing && nodeLinks.length ? <SoftLinkList links={nodeLinks} node={node} onRemove={onRemoveLink} onUpdate={onUpdateLink} onReverse={onReverseLink} /> : null}
@@ -1531,6 +1538,23 @@ function RelationActions({ nodes, onCreate }) {
 function SoftLinkList({ links, node, onRemove, onUpdate, onReverse }) {
   return <div className="lineage-soft-links"><h3>人工标注</h3>{links.map((link) => <div key={link.id}><select value={link.linkType} onChange={(event) => onUpdate(link.id, { linkType: event.target.value, label: relationLabel(event.target.value) })}>{RELATION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input value={link.label} maxLength={80} onChange={(event) => onUpdate(link.id, { label: event.target.value })} aria-label="软连线标签" /><small>{link.sourceType === node.entityType && link.sourceId === node.entityId ? '指向 ' + nodeTypeLabel(link.targetType) + ' ' + shortId(link.targetId) : '来自 ' + nodeTypeLabel(link.sourceType) + ' ' + shortId(link.sourceId)}</small><button type="button" className="icon-button" aria-label="反转软连线方向" onClick={() => onReverse(link.id)}><GitFork size={13} /></button><button type="button" className="icon-button" aria-label="删除软连线" onClick={() => onRemove(link.id)}><X size={13} /></button></div>)}</div>;
 }
+/**
+ * 检查器里的「生成历史」页签（B4）：**就地**看这一批的运行，不再跳页。
+ * 仍保留「打开完整生成历史」——那是能力，不是入口重复（完整视图有分页/筛选/详情）。
+ */
+function ReplyHistoryPanel({ node, runs = EMPTY_ARRAY, onNavigate }) {
+  const roundRuns = listValue(runs).filter((run) => run.roundId === node?.entity?.id);
+  return <div className="lineage-run-history" data-block="inspector-history">
+    {roundRuns.length ? <ul>{roundRuns.map((run) => <li key={run.id}>
+      <button type="button" className="trace-link" onClick={() => onNavigate({ view: 'runs', taskId: node?.entity?.taskId || null, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: run.id, assetScope: 'round' })}>
+        <b>计划 v{run.planVersion ?? '?'}</b>
+        <span className={'lineage-status is-' + statusPresentation('run', run.status).tone}>{statusPresentation('run', run.status).label}</span>
+      </button>
+    </li>)}</ul> : <p className="lineage-note">这一批还没有运行记录。</p>}
+    <button type="button" className="outline-button" onClick={() => onNavigate({ view: 'runs', taskId: node?.entity?.taskId || null, roundId: node?.entity?.id || null, compareRoundIds: node?.entity?.id ? [node.entity.id] : [], runId: null, assetScope: 'round' })}>打开完整生成历史</button>
+  </div>;
+}
+
 function PlanActions({ node, onNavigate, onCopyContext, onOpenConfirmation, onEditPlan, onSaveRecipe }) {
   const detail = node.planDetail || roundPlanDetails(node.entity);
   const needsConfirmation = node.entity?.status === 'awaiting_confirmation';

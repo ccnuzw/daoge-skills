@@ -17,14 +17,18 @@ test('project assets expose page selection, configurable pagination, and multi-f
   assert.match(main, /正在导入.*completed.*total/);
   assert.match(main, /className="command-button asset-import-button"/);
   assert.match(main, /routeView === 'assets' && selectedProject && <button type="button" className="command-button asset-import-button"/);
-  assert.match(main, /function WorkspaceContextBar\(\{ project, tasks = EMPTY, task/);
-  assert.match(main, /className="workspace-context-select workspace-context-task"/);
+  // 批 B B2：上下文条降级为面包屑（签名随之变化），选择任务的能力仍在（onSelectTask 走面包屑菜单）。
+  assert.match(main, /function WorkspaceContextBar\(\{ project, projects = EMPTY, tasks = EMPTY, task/);
+  // §0.5 迁移：旧的常驻 select 换成面包屑的任务段（只读路径 + 点开切换）。
+  assert.match(main, /data-region="breadcrumb"/);
   assert.match(main, /onSelectTask=\{\(taskId\) => navigateRoute\(updateWorkbenchRoute/);
-  assert.match(main, /aria-label="任务工作入口"/);
-  assert.match(main, />资产管理<\/button>/);
-  assert.match(main, />创作平台<\/button>/);
-  assert.match(main, />生成历史<\/button>/);
-  assert.match(main, />批次对比<\/button>/);
+  assert.match(main, /aria-label="当前位置"/);
+  // 批 B B3：资产管理不再是页签（rail 才是它的家）；页签块整体退场。
+  assert.equal(main.includes('task-local-tabs'), false, '旧页签块应已删除');
+  assert.match(readSource('web/src/workbench-navigation.jsx'), /label: '资产管理'/);
+  // 批 B B3/B4：`创作平台` 不再是上下文条页签（rail 是它的家）。
+  // 批 B B3/B4：`生成历史` 不再是上下文条页签（检查器是它的家）。
+  // 批 B B3/B4：`批次对比` 不再是上下文条页签（检查器是它的家）。
   assert.doesNotMatch(readSource('web/src/main.jsx'), /className="task-more-tabs"/);
   assert.match(main, /if \(!session\) void openWorkbenchSession\(\)\.catch/);
   assert.match(main, /\[session\?\.id, session\?\.version, eventRevision\.planVersions/);

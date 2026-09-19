@@ -78,3 +78,20 @@ test('every view declares a layout tier, and PageFrame consumes it', async () =>
     assert.ok(allowed.has(layout), view + ' 的宽度档必须是 wide/standard/narrow，实得 ' + layout);
   }
 });
+
+/**
+ * G16 扩展（界面宪法 §5.2 / 批 B B5）。
+ *
+ * 每个 view 还要有一句**人话标签**：面包屑与 rail 用它，不许散落字面量、
+ * 更不许把英文枚举直接端给创作者（§4 S8）。
+ */
+test('every view declares a human label (breadcrumb and rail read it)', async () => {
+  const { VIEW_LABELS } = await import('../../web/src/workbench-navigation-model.mjs');
+  const { WORKBENCH_VIEWS } = await import('../../web/src/workbench-route.mjs');
+  assert.deepEqual(Object.keys(VIEW_LABELS).sort(), [...WORKBENCH_VIEWS].sort(), 'VIEW_LABELS 必须与 WORKBENCH_VIEWS 一一对应');
+  for (const [view, label] of Object.entries(VIEW_LABELS)) {
+    assert.equal(typeof label, 'string', view + ' 的 label 必须是字符串');
+    assert.ok(label.trim().length > 0, view + ' 的 label 不能是空的');
+    assert.equal(/^[a-z-]+$/.test(label), false, view + ' 的 label 不能是英文枚举：' + label);
+  }
+});

@@ -21,7 +21,10 @@ test('确认闸门与计划详情挂在批次上，而不是已被删除的计�
   assert.doesNotMatch(canvas, /entityType === 'plan' \? <PlanActions/, '计划详情不能挂在已删除的 plan 节点上');
   // ② 必须真的挂在批次上（B2 之后，「计划是批次的属性」）。
   //    写法上允许中间隔一层 JSX（D3 之后批次分支还渲染质量摘要），所以只锁「round 的分支里出现 PlanActions」。
-  assert.match(canvas, /entityType === 'round' && <[\s\S]{0,240}<PlanActions/, '计划详情与确认闸门必须挂在批次节点上');
+  // B4：批次分支里多了「计划 / 生成历史」页签，所以窗口放宽——但**仍在 round 分支内**。
+  assert.match(canvas, /entityType === 'round' && <[\s\S]{0,1200}<PlanActions/, '计划详情与确认闸门必须挂在批次节点上');
+  // 而且**默认就停在「计划」页签**——确认闸门不能藏在第二下点击后面。
+  assert.match(canvas, /useState\('plan'\)/, '检查器默认页签必须是计划');
   // ③ 确认闸门本身必须存在。
   assert.match(canvas, /lineage-confirmation-callout/, '确认闸门必须在检查器里（人不用离开画布）');
   assert.match(canvas, /审阅并确认计划/, '确认按钮必须真的在检查器里');

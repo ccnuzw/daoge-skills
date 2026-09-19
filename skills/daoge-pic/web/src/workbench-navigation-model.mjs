@@ -47,6 +47,28 @@ export const VIEW_HOSTS = Object.freeze({
  * 分档依据（方案 S3）：wide＝工作台面（创作平台 / 生成历史 / 批次清单）；
  * standard＝列表面（项目 / 任务 / 资产 / 交付）；narrow＝阅读面（资料 / 共享素材 / 手册 / 疑难 / 计划审阅）。
  */
+/**
+ * 视图 → 人话标签（界面宪法 §5.2 / 批 B B5）。
+ *
+ * 面包屑与 rail 都读它：**不许散落字面量**，更不许把英文枚举端给创作者（§4 S8）。
+ */
+export const VIEW_LABELS = Object.freeze({
+  projects: '项目管理',
+  'project-overview': '项目概览',
+  tasks: '任务',
+  lineage: '创作平台',
+  'studio-overview': '批次对比',
+  prompts: '计划',
+  runs: '生成历史',
+  assets: '资产管理',
+  trash: '回收站',
+  deliveries: '资产交付',
+  library: '规则资料',
+  'shared-assets': '共享素材',
+  guide: '创作手册',
+  troubleshoot: '疑难处理'
+});
+
 export const VIEW_LAYOUTS = Object.freeze({
   lineage: 'wide',
   runs: 'wide',
