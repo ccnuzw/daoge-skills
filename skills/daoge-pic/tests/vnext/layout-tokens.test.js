@@ -33,11 +33,13 @@ test('tokens 文件存在且包含 S4 规定的 token 名', () => {
 test('字面量基线存在，且基线之外的字面量只减不增', () => {
   if (!webSourceExists(BASELINE_RELATIVE)) assert.fail('字面量基线尚未建立：web/src/tokens/literal-baseline.json');
   const baseline = JSON.parse(readSource(BASELINE_RELATIVE));
-  const hexPattern = /#[0-9a-fA-F]{6}\b/g;
+  const patterns = { files: /#[0-9a-fA-F]{6}\b/g, rgba: /\brgba?\(/g };
   const offenders = [];
-  for (const [relative, allowed] of Object.entries(baseline.files || {})) {
-    const count = webSourceExists(relative) ? (readSource(relative).match(hexPattern) || []).length : 0;
-    if (count > Number(allowed)) offenders.push(relative + '：' + count + ' > 基线 ' + allowed);
+  for (const key of Object.keys(patterns)) {
+    for (const [relative, allowed] of Object.entries(baseline[key] || {})) {
+      const count = webSourceExists(relative) ? (readSource(relative).match(patterns[key]) || []).length : 0;
+      if (count > Number(allowed)) offenders.push(key + ' ' + relative + '：' + count + ' > 基线 ' + allowed);
+    }
   }
   assert.deepEqual(offenders, [], '这些文件的字面量比基线还多（基线只减不增）：\n' + offenders.join('\n'));
 });

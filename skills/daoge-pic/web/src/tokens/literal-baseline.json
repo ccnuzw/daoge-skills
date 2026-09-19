@@ -1,5 +1,5 @@
 {
-  "_note": "字面量基线（界面方案 §4 S4 / 批 A A1 / G3 守卫）。口径：六位色值 #rrggbb 的**出现次数**。规则：只减不增——本文件里的数字每批只许下调；tokens/ 目录按设计允许字面量，故不登记。 批 E（E3）按块拆分后：基线随文件重分配，总量只减不增。",
+  "_note": "字面量基线（界面方案 §4 S4 / 批 A A1 / G3 守卫）。口径：六位色值 #rrggbb 的**出现次数**。规则：只减不增——本文件里的数字每批只许下调；tokens/ 目录按设计允许字面量，故不登记。 批 E（E3）按块拆分后：基线随文件重分配，总量只减不增。 rgba 同口径：按文件登记，只减不增（批 E · E4）。",
   "files": {
     "web/src/styles/base.css": 8,
     "web/src/styles/blocks/assets.css": 153,
@@ -14,5 +14,20 @@
     "web/src/styles/blocks/settings.css": 143,
     "web/src/styles/blocks/shell.css": 122,
     "web/src/styles/blocks/viewer.css": 9
+  },
+  "rgba": {
+    "web/src/styles/blocks/assets.css": 30,
+    "web/src/styles/blocks/canvas.css": 42,
+    "web/src/styles/blocks/delivery.css": 5,
+    "web/src/styles/blocks/dialogs.css": 11,
+    "web/src/styles/blocks/info-pages.css": 5,
+    "web/src/styles/blocks/misc.css": 23,
+    "web/src/styles/blocks/projects.css": 3,
+    "web/src/styles/blocks/responsive.css": 3,
+    "web/src/styles/blocks/runs.css": 22,
+    "web/src/styles/blocks/settings.css": 18,
+    "web/src/styles/blocks/shell.css": 24,
+    "web/src/styles/blocks/viewer.css": 13,
+    "web/src/styles/components.css": 3
   }
 }

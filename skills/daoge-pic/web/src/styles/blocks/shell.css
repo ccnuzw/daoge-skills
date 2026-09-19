@@ -158,3 +158,4 @@
 .request-composer textarea { min-height: 32px; max-height: 96px; padding: 6px 0; resize: none; }
 .request-composer > .request-agent { align-self: center; display: inline-flex; align-items: center; gap: 5px; max-width: 220px; overflow: hidden; white-space: nowrap; color: var(--ink-2); font-size: var(--font-10); }
 .request-dock-body { display: grid; gap: 8px; max-height: min(320px, 35vh); overflow: auto; }
+.rail-status-card:focus-visible,.rail-status-details summary:focus-visible,.rail-guide-card { outline: 2px solid var(--accent); outline-offset: 2px; }
