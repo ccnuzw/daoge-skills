@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { readSource } = require('./source-text');
+const { readFrontendSource, readSource } = require('./source-text');
 
 /**
  * 首屏三形态的守卫（方案 4.7）。
@@ -38,8 +38,9 @@ test('三形态的判定与文案：三句话必须各不相同', async () => {
 
 test('接线：ProjectIndex 的空态必须走这个模型', () => {
   // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
-  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：同上
   assert.match(main, /project-empty-state-model\.mjs/, 'main.jsx 必须用这个模型');
   // 那句三场景共用的话不许再出现在源码里。
-  assert.doesNotMatch(readSource('web/src/main.jsx'), /还没有匹配项目/, '共用一句话的旧空态必须消失');
+  // 批 E（E1.6c）：模型文件的注释里会引用旧句做解释——断言前剥掉行注释，只看可见文案。
+  assert.doesNotMatch(readFrontendSource().replace(/\/\/[^\n]*/g, ''), /还没有匹配项目/, '共用一句话的旧空态必须消失');
 });

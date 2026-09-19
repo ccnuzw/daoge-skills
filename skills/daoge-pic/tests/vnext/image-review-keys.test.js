@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { readSource } = require('./source-text');
+const { readFrontendSource, readSource } = require('./source-text');
 
 /**
  * 挑图体验的守卫（方案 4.8）。
@@ -22,7 +22,7 @@ test('⚠️ Enter 的放大必须真的放大（判据是基准 1×，不是缩
   // 接线：组件必须用模型给的目标，不在组件里另写一遍判据。
   const { readSource } = require('./source-text');
   // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
-  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：同上
   assert.match(main, /onZoom\(reviewZoomToggleTarget\(zoom\)\)/, 'Enter 必须走模型给的目标倍率');
   assert.doesNotMatch(main, /clampReviewZoom\(zoom\) > REVIEW_ZOOM_MIN \? 1 : 2/, '不许再拿缩放下限当切换判据');
 });
@@ -64,7 +64,7 @@ test('缩放能放大到看清细节的程度（≥4 倍），且上下限夹得
 });
 
 test('接线：预览态真的绑了键位，对比支持 3–4 张、缩放到 4 倍', () => {
-  const main = readSource('web/src/main.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：接线分散到 app/ 与 views/——改读整个前端源码
   assert.match(main, /image-review-keys-model\.mjs/, 'main.jsx 必须用这个模型');
   assert.match(main, /reviewKeyAction\(/, '预览态必须真的调用键位映射');
   // 对比入口不再限死两张（方案：两张只够「选 A 还是选 B」）。
@@ -75,7 +75,7 @@ test('接线：预览态真的绑了键位，对比支持 3–4 张、缩放到 
 
 test('挑图链路完整：三个入口与弹层的每个决策回调都接通', () => {
   // 批 E（E1.6a/E1.6b）迁移：选区入口在 views/assets.jsx，弹层在 app/workbench-shell.jsx。
-  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx') + '\n' + readSource('web/src/views/assets.jsx');
+  const main = readFrontendSource() + '\n' + readSource('web/src/app/workbench-shell.jsx') + '\n' + readSource('web/src/views/assets.jsx');
   // 入口 1：选区工具条的「预览」按钮（选中图之后出现）。
   assert.match(main, /onPreview=\{\(nextAssets\) => \{ setPreviewZoom\(1\); setPreviewAssets\(nextAssets\); \}\}/, '选区工具条的预览必须接到弹层');
   // 入口 2：选中 2 张及以上即可对比（布局自适应网格，上限交给布局而不是按钮）。

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { readSource } = require('./source-text');
+const { readFrontendSource, readSource } = require('./source-text');
 
 function blockBetween(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -11,7 +11,7 @@ function blockBetween(source, start, end) {
 }
 
 test('Workbench session and provenance reads abort superseded requests before committing state', () => {
-  const source = readSource('web/src/main.jsx');
+  const source = readFrontendSource();
   // The Workbench no longer writes/reads the Session working pointer (方案 7.7.3):
   // the only Session read left is plan-status, and it must still abort a
   // superseded request before committing state.
@@ -30,7 +30,7 @@ test('Workbench session and provenance reads abort superseded requests before co
 });
 
 test('Workbench async failures use classified safe error state instead of raw thrown values', () => {
-  const source = readSource('web/src/main.jsx');
+  const source = readFrontendSource();
   assert.match(readSource('web/src/error-model.mjs'), /function normalizeRequestError\(value, fallback/);
   assert.match(source, /if \(normalized\.category === 'connection'\) setConnectionError\(normalized\);/);
   assert.match(source, /operation: 'load-lineage-run-items'/);

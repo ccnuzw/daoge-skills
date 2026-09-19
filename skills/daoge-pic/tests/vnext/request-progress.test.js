@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { readSource } = require('./source-text');
+const { readFrontendSource, readSource } = require('./source-text');
 
 /**
  * 「agent 到哪一步了」的守卫（方案 4.2 / 4.5 / 4.9）。
@@ -191,7 +191,7 @@ test('数据不全时降级，不编数字', async () => {
 test('接线：卡片显示进度，且「去确认」真的定位到那一批并打开闸门', () => {
   const dock = readSource('web/src/request-queue.jsx');
   // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
-  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：同上
   // 进度由 main 算（它持有批次 / 运行 / 槽位），dock 只负责渲染 —— 单一来源，不两头算。
   assert.match(dock, /progressValue\.canConfirm/, '计划就绪时要有确认入口');
   // 第 4 批 Q1：入口从「去确认计划」改成回执上的「就这么出」，并多一个「改一下」。
@@ -223,14 +223,14 @@ test('确认后卡片立刻更新：当前视图的事实必须覆盖补取的�
 });
 
 test('接线：确认后卡片立刻更新（刷新会重取补取快照，合并时当前视图优先）', () => {
-  const main = readSource('web/src/main.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：接线分散到 app/ 与 views/——改读整个前端源码
   assert.match(main, /queueRounds\(rounds, linkedProgress\)/, '合并必须走 queueRounds（当前视图优先）');
   assert.match(main, /setProgressRevision\(\(current\) => current \+ 1\)/, '刷新要重取补取的批次快照');
   assert.match(main, /progressRevision\]/, '补取 effect 要依赖刷新版本号，否则永远拿旧快照');
 });
 
 test('提交不了永远要有一句话：确认入口不许静默返回', async () => {
-  const main = readSource('web/src/main.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：接线分散到 app/ 与 views/——改读整个前端源码
   const block = main.slice(main.indexOf('const openGenerationConfirmation'), main.indexOf('const dismissGenerationConfirmation'));
   // 原来这里是 `if (!targetRound || targetRound.status !== 'awaiting_confirmation') return;`
   // ——点了毫无反应，用户只能猜。现在每一条出口都要给反馈。

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { readSource } = require('./source-text');
+const { readFrontendSource, readSource } = require('./source-text');
 
 /**
  * 「出完了叫我」的守卫（方案 9.5）。
@@ -51,12 +51,12 @@ test('通知只在已授权时发，且前端源码里不许主动索要权限',
 
   // 硬断言：全前端不许出现 requestPermission —— 权限只能由用户自己决定。
   // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
-  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：同上
   assert.doesNotMatch(main, /Notification\.requestPermission/, '不许主动索要通知权限（方案 9.5：未授权则静默降级）');
 });
 
 test('接线到位：未读计数挂到事件流上，标题真的会变，回到页面会清零', () => {
-  const main = readSource('web/src/main.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：接线分散到 app/ 与 views/——改读整个前端源码
   // 纯逻辑放在模型里，但模型不接线等于没有——这一组断言的就是「接线」。
   assert.match(main, /completion-notice-model\.mjs/, 'main.jsx 必须用这个模型');
   assert.match(main, /noticeTitle\(/, '必须真的去改标题（否则用户切回来之前什么都不知道）');

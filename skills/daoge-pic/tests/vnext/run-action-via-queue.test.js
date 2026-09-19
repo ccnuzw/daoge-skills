@@ -18,7 +18,7 @@ const { readSource, readFrontendSource } = require('./source-text');
 
 test('花动作走队列：重试 / 恢复有真实去处，且带结构化意图', () => {
   // 批 E（E1.6b）迁移：外壳 JSX 搬去 app/workbench-shell.jsx——源断言读「main + 壳」两处。
-  const main = readSource('web/src/main.jsx') + '\n' + readSource('web/src/app/workbench-shell.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：同上
   // ① 必须存在一个「把运行动作交给会话」的实现（而不是只弹提示）。
   assert.match(main, /requestRunAction/, '必须有「把运行动作写进队列」的实现');
   // ② 它必须走队列（sendRequest），并且带上 agent 能精确执行的结构化意图。
@@ -54,7 +54,7 @@ test('前端整体不许直调 bearer 的三个运行端点（与「走队列」
   assert.doesNotMatch(frontend, /\/api\/runs\/[^\n]{0,120}\/(retry|resume)/, '重试/恢复不许直调（会 403，且拆掉闸门）');
   assert.doesNotMatch(frontend, /\/api\/runs\/[^\n]{0,120}\/outcomes\/resolve/, '未知结案不许直调');
   // 反过来：暂停 / 取消**必须**直调（止损，cookie 可做）。
-  const main = readSource('web/src/main.jsx');
+  const main = readFrontendSource();  // 批 E（E1.6c）：接线分散到 app/ 与 views/——改读整个前端源码
   assert.match(main, /pause: '\/pause'/, '暂停必须直调');
   assert.match(main, /cancel: '\/cancel'/, '取消必须直调');
 });

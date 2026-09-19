@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { readSource, readStyles, webSourceExists } = require('./source-text');
+const { readFrontendSource, readSource, readStyles, webSourceExists } = require('./source-text');
 
 /**
  * G1 · `PageFrame` 的守卫（界面方案 §5.4 / 批 A A2–A3）。

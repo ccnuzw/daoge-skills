@@ -21,7 +21,11 @@ const SRC = path.join(__dirname, '../../web/src');
 const DOC = path.join(__dirname, '../../docs/daoge_pic_terminology_zh.md');
 
 const read = (name) => readSource('web/src/' + name);
-const listSources = () => fs.readdirSync(SRC).filter((name) => /\.(jsx|mjs)$/.test(name));
+// 批 E（E1.6c）：源码分到子目录（app/ views/ canvas/）——清单要递归，否则守卫会「看不见」它们。
+const listSources = () => ['', 'app/', 'views/', 'canvas/'].flatMap((dir) => {
+  const abs = path.join(SRC, dir);
+  return fs.existsSync(abs) ? fs.readdirSync(abs).filter((name) => /\.(jsx|mjs)$/.test(name)).map((name) => dir + name) : [];
+});
 
 // 「面向面」——一刀切会改坏东西，所以按面分文件。清单的唯一来源是术语单模块。
 const CONFIG_FACE = [...CONFIG_FACE_FILES];
@@ -46,7 +50,7 @@ test('草稿阶段每个提示点都复用同一个常量', () => {
   assert.equal((faces.match(/<ExecutionBoundaryNote/g) || []).length, 7);
   assert.equal((faces.match(/<ExecutionBoundaryNote \/>/g) || []).length, 4);
   assert.equal((faces.match(/DRAFT_BOUNDARY_COPY \+ '/g) || []).length, 3);
-  assert.equal((faces.match(/import \{ DRAFT_BOUNDARY_COPY \} from '\.\.?\/boundary-copy\.mjs';/g) || []).length, 2);
+  assert.equal((faces.match(/import \{ DRAFT_BOUNDARY_COPY \} from '\.\.?\/boundary-copy\.mjs';/g) || []).length, 1);  // 批 E（E1.6c）：入口不再引它——只剩对话框族
 
   // 动作面板是第 8 处，同样复用常量，不再自带一整句工程话。
   const launcher = read('creative-action-launcher.jsx');
@@ -71,11 +75,12 @@ test('旧的工程话免责句不再回潮', () => {
 });
 
 test('只有确认出图弹窗解释「确认之后会怎样」，且只用真实拿得到的事实', () => {
+  // 批 E（E1.6c）迁移：文案模型随 App 逻辑搬去 app/workbench-controller.jsx，渲染在 shell。
   const owners = listSources().filter((name) => read(name).includes('在此之前的所有操作都不会产生费用'));
-  assert.deepEqual(owners, ['main.jsx']);
+  assert.deepEqual(owners, ['app/workbench-controller.jsx']);
 
-  const main = read('main.jsx');
-  // 批 E（E1.6b）迁移：确认弹窗的渲染在 app/workbench-shell.jsx（文案模型仍在 main）。
+  const main = read('app/workbench-controller.jsx');
+  // 确认弹窗的渲染在 app/workbench-shell.jsx。
   const shell = read('app/workbench-shell.jsx');
   assert.equal((main.match(/function confirmationPlanSummary\(/g) || []).length, 1);
   assert.match(main, /先核算，再出图/);

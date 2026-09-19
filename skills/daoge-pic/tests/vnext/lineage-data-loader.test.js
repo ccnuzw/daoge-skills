@@ -94,7 +94,9 @@ test('lineage asset page failure never emits a completed loading event', async (
 
 test('Workbench wires lineage asset coverage through every loading phase', () => {
   const source = readFrontendSource();
-  assert.match(source, /const EMPTY_LINEAGE_ASSET_COVERAGE = Object\.freeze\(\{ loaded: 0, total: 0, loading: true \}\)/);
+  // 批 E（E1.6c）：字面量状态加了 @type any 断言——正则容它。
+  // 批 E（E1.6c）：JSDoc 会被规范化剥掉，断言容下多余空格与残留括号。
+  assert.match(source, /const EMPTY_LINEAGE_ASSET_COVERAGE = +\(?Object\.freeze\(\{ loaded: 0, total: 0, loading: true \}\)/);
   assert.match(source, /setLineageAssetCoverage\(EMPTY_LINEAGE_ASSET_COVERAGE\)/);
   assert.match(source, /setLineageAssetCoverage\(\{ loaded: streamedAssets\.length, total: nextTotal, loading: true \}\)/);
   assert.match(source, /setLineageAssetCoverage\(\{ loaded: nextAssets\.length, total: nextTotal, loading: false \}\)/);
