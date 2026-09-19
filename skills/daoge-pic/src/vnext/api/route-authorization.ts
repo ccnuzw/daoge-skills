@@ -149,6 +149,16 @@ export const ROUTE_AUTHORIZATION_RULES: readonly RouteAuthorizationRule[] = [
     message: '外部请求对账必须由当前 Skill/CLI 显式发起。'
   },
   {
+    id: 'sessions.context',
+    methods: WRITE_METHODS,
+    pattern: /^\/api\/sessions\/[^/]+\/context$/,
+    sample: '/api/sessions/ses_1/context',
+    actor: 'bearer',
+    // 规格书 §2.2（2026-09-19 第 4 批追加）：它记的是 **agent 的操作上下文**；
+    // 界面的选中态由路由承载，两侧都能写必然互相覆盖（方案 7.7.3）。
+    message: 'Agent 会话上下文只能由当前 Skill/CLI 写入；界面选中态由路由承载。'
+  },
+  {
     id: 'runs.outcomes-resolve',
     methods: WRITE_METHODS,
     pattern: /^\/api\/runs\/[^/]+\/outcomes\/resolve$/,

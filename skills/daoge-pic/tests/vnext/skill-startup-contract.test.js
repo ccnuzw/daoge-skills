@@ -119,7 +119,7 @@ test('README and authoritative specification preserve the same session-first sta
 
 test('Skill API guidance pins the protocol header and plan/history endpoints', () => {
   const commands = markdownSection(skill, '## 受控命令');
-  assert.match(commands, /x-daoge-skill-protocol: daoge-pic-skill-protocol\/3\.0\.0/);
+  assert.match(commands, /x-daoge-skill-protocol: daoge-pic-skill-protocol\/3\.1\.0/);
   assert.match(skill, />=6\.0\.0 <7\.0\.0/);
   assert.match(commands, /5\.14\.2[\s\S]*绝不能当作协议版本/);
   assert.match(commands, /GET \/api\/studio/);

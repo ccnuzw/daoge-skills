@@ -193,9 +193,12 @@ test('接线：卡片显示进度，且「去确认」真的定位到那一批�
   const main = readSource('web/src/main.jsx');
   // 进度由 main 算（它持有批次 / 运行 / 槽位），dock 只负责渲染 —— 单一来源，不两头算。
   assert.match(dock, /progressValue\.canConfirm/, '计划就绪时要有确认入口');
-  assert.match(dock, /去确认计划/, '入口文案要说得出口');
+  // 第 4 批 Q1：入口从「去确认计划」改成回执上的「就这么出」，并多一个「改一下」。
+  assert.match(dock, /就这么出/, '回执上的确认入口要说得出口');
+  assert.match(dock, /改一下/, '「改一下」必须和「就这么出」成对出现（否则回执只能接受或放弃）');
   assert.match(main, /progressForRequest/, 'main 必须把进度算出来传给卡片');
-  assert.match(main, /onOpenRound=\{openRoundFromQueue\}/, '「去确认 / 看这一批」必须接上');
+  assert.match(main, /onOpenRound=\{openRoundFromQueue\}/, '「就这么出 / 看这一批」必须接上');
+  assert.match(main, /onEditPlan=\{openRoundPlanEdit\}/, '「改一下」必须接上真实的计划编辑入口');
   assert.match(main, /openRoundFromQueue/, '必须有「从队列定位批次」的实现');
   // 进度必须由已有事实算（禁止前端累加影子进度）；
   // 批次/运行/槽位取自「当前视图 + 按 id 补取」——补取是为了全局底栏也能算对。
@@ -225,13 +228,16 @@ test('接线：确认后卡片立刻更新（刷新会重取补取快照，合�
   assert.match(main, /progressRevision\]/, '补取 effect 要依赖刷新版本号，否则永远拿旧快照');
 });
 
-test('提交不了永远要有一句话：确认入口不许静默返回', () => {
+test('提交不了永远要有一句话：确认入口不许静默返回', async () => {
   const main = readSource('web/src/main.jsx');
   const block = main.slice(main.indexOf('const openGenerationConfirmation'), main.indexOf('const dismissGenerationConfirmation'));
   // 原来这里是 `if (!targetRound || targetRound.status !== 'awaiting_confirmation') return;`
   // ——点了毫无反应，用户只能猜。现在每一条出口都要给反馈。
   assert.doesNotMatch(block, /status !== 'awaiting_confirmation'\)\s*return;/, '不许静默 return');
   assert.match(block, /setNotice\('请先选择要确认的批次。'\)/, '没选批次要说');
-  assert.match(block, /已经确认过了/, '已确认要说');
-  assert.match(block, /还没有可确认的计划/, '没有计划要说');
+  // 第 4 批 Q1：状态不符的理由收进单一来源，界面负责说出来。
+  assert.match(block, /setNotice\(closedEntry\.reason\)/, '状态不符也要把理由说出来');
+  const { confirmationEntry } = await import('../../web/src/confirmation-entry-model.mjs');
+  assert.match(confirmationEntry({ hasChallenge: true, roundStatus: 'active' }).reason, /已经确认过了/, '已确认要说');
+  assert.match(confirmationEntry({ hasChallenge: true, roundStatus: 'draft' }).reason, /草稿|计划/, '没有计划要说');
 });

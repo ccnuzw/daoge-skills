@@ -71,25 +71,42 @@ export function queueAttentionThresholdMs(minutes) {
 export function detectedCliSummary(detection) {
   const clis = Array.isArray(detection?.clis) ? detection.clis : [];
   const shared = detection?.shared || null;
-  const rows = clis.map((cli) => ({
-    name: String(cli?.name || ''),
-    onPath: cli?.onPath === true,
-    installed: cli?.onPath === true || cli?.homeExists === true || cli?.skillsExists === true,
-    hasDaogePic: cli?.hasDaogePic === true,
-    detail: [
-      cli?.onPath === true ? '命令可用' : '命令不在 PATH',
-      cli?.homeExists === true ? '已装' : '未见家目录',
-      cli?.hasDaogePic === true ? '含 daoge-pic' : '未装 daoge-pic'
-    ].join(' · ')
-  }));
+  const rows = clis.map((cli) => {
+    const name = String(cli?.name || '');
+    const label = String(cli?.label || name);
+    const command = String(cli?.command || name);
+    // 命令名与显示名不同时（`agy` 之于 Antigravity CLI）把命令写出来，否则用户不知道我们查的是什么。
+    const probed = command === label ? '命令' : '命令 ' + command + ' ';
+    const onPathText = cli?.onPath === true ? probed + '可用' : probed + '不在 PATH';
+    return {
+      name,
+      label,
+      command,
+      title: label === name ? name : label + '（' + name + '）',
+      onPath: cli?.onPath === true,
+      installed: cli?.onPath === true || cli?.homeExists === true || cli?.skillsExists === true,
+      hasDaogePic: cli?.hasDaogePic === true,
+      detail: [
+        onPathText,
+        cli?.homeExists === true ? '已装' : '未见家目录',
+        cli?.hasDaogePic === true ? '含 daoge-pic' : '未装 daoge-pic'
+      ].join(' · ')
+    };
+  });
   const installedCount = Number.isFinite(detection?.installedCount) ? detection.installedCount : rows.filter((row) => row.installed).length;
   const anyDaogePic = detection?.anyDaogePic === true || shared?.hasDaogePic === true || rows.some((row) => row.hasDaogePic);
+  // 认得的宿主有十几个，这台机器上通常只装了其中几个——装了的排前面，
+  // 没检测到的收成一行名字（名单本身也是「支持哪些宿主」的答案）。
+  const installedRows = rows.filter((row) => row.installed);
+  const missingRows = rows.filter((row) => !row.installed);
   return {
-    rows,
+    rows: [...installedRows, ...missingRows],
+    installedRows,
+    missingNames: missingRows.map((row) => row.title),
     installedCount,
     anyDaogePic,
     sharedHasDaogePic: shared?.hasDaogePic === true,
     headline: installedCount === 0 ? '没检测到已安装的 agent CLI' : '检测到 ' + installedCount + ' 个 agent CLI',
-    skillLine: anyDaogePic ? 'daoge-pic 已装载（至少一处）' : '没找到 daoge-pic；先 register-skill 再登记在场'
+    skillLine: anyDaogePic ? 'daoge-pic 已装载（至少一处）' : '没找到 daoge-pic；先 register-skill 装上（--host 选宿主，agents 一次给多数宿主）'
   };
 }

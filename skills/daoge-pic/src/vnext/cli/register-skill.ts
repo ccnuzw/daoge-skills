@@ -2,8 +2,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createId } from '../shared/ids';
+import { skillHostChoices, skillHostDirectory } from '../domain/agent-detect';
 
 export type SkillRegistrationScope = 'project' | 'user';
+
+/** user 范围的默认宿主：保持既有行为（老用户的安装位置不搬家）。 */
+export const DEFAULT_USER_SKILL_HOST = 'codex';
 
 export interface RegisterSkillOptions {
   scope: SkillRegistrationScope;
@@ -11,6 +15,8 @@ export interface RegisterSkillOptions {
   sourceRoot?: string;
   homeRoot?: string;
   platform?: NodeJS.Platform;
+  /** user 范围的宿主（`agents` = 跨宿主共享目录）；缺省 codex。未知宿主直接拒绝，不猜。 */
+  host?: string;
 }
 
 export interface SkillRegistrationResult {
@@ -65,8 +71,13 @@ export function registerSkill(options: RegisterSkillOptions): SkillRegistrationR
     registrationRoot = path.resolve(workspaceRoot);
     destination = path.join(registrationRoot, '.agents', 'skills', 'daoge-pic');
   } else {
+    const host = String(options.host || '').trim() || DEFAULT_USER_SKILL_HOST;
+    const hostDirectory = skillHostDirectory(host);
+    if (!hostDirectory) {
+      throw new Error('Unknown Skill host: ' + host + '（可用：' + skillHostChoices().join('、') + '）');
+    }
     registrationRoot = path.resolve(options.homeRoot || os.homedir());
-    destination = path.join(registrationRoot, '.codex', 'skills', 'daoge-pic');
+    destination = path.join(registrationRoot, ...hostDirectory.split('/'), 'daoge-pic');
   }
   if (lstatOrNull(destination)) throw new Error('Skill destination already exists: ' + destination);
 

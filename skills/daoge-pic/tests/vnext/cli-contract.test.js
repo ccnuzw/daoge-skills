@@ -53,6 +53,19 @@ test('Skill registration creates fail-if-exists project and user links to the in
     assert.throws(() => registerSkill({ scope: 'project', workspaceRoot: projectRoot, sourceRoot: skillRoot }), /already exists/);
     const user = registerSkill({ scope: 'user', homeRoot, sourceRoot: skillRoot });
     assert.equal(fs.realpathSync(user.destination), fs.realpathSync(skillRoot));
+    // --host：装到该宿主自己的 user 级 skills 目录；agents = 跨宿主共享目录。
+    // 位置写错等于「装了很多宿主一个也看不见」，所以逐个宿主钉住目的地。
+    for (const [host, relative] of [['opencode', '.config/opencode/skills'], ['omp', '.omp/agent/skills'], ['agents', '.agents/skills'], ['kimi', '.kimi/skills']]) {
+      const destination = path.join(homeRoot, ...relative.split('/'), 'daoge-pic');
+      const registered = registerSkill({ scope: 'user', homeRoot, sourceRoot: skillRoot, host });
+      assert.equal(registered.destination, destination, host + ' 的安装位置');
+      assert.equal(fs.realpathSync(registered.destination), fs.realpathSync(skillRoot));
+    }
+    assert.throws(() => registerSkill({ scope: 'user', homeRoot, sourceRoot: skillRoot, host: 'not-a-host' }), /Unknown Skill host/);
+    assert.equal(fs.existsSync(path.join(homeRoot, 'not-a-host')), false, '未知宿主不许就地新建目录');
+    assert.equal(parseCommand(['register-skill', '--scope', 'user']).host, undefined, '不写 --host 时沿用老行为');
+    assert.equal(parseCommand(['register-skill', '--scope', 'user', '--host', 'omp']).host, 'omp');
+    assert.throws(() => parseCommand(['register-skill', '--scope', 'user', '--host', 'nope']), /认得的宿主/);
     assert.equal(parseCommand(['register-skill', '--scope', 'user']).workspaceRoot, undefined);
     assert.equal(parseCommand(['register-skill', '--scope', 'project', '--workspace', projectRoot]).scope, 'project');
     assert.throws(() => parseCommand(['register-skill', '--scope', 'project']), /需要 --workspace/);
@@ -371,7 +384,7 @@ test('CLI daemon reuse requires the authenticated Studio protocol endpoint and c
   assert.equal(compatible, true);
   assert.deepEqual(requests.map((request) => request.url), ['http://127.0.0.1:43123/api/studio']);
   assert.equal(requests[0].init.headers.authorization, 'Bearer ' + runtime.capability);
-  assert.equal(requests[0].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.0.0');
+  assert.equal(requests[0].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.1.0');
 
   assert.equal(await daemonCompatible(runtime, 'studio-runtime', async () => studioStatusResponse('studio-runtime', { runtimeVersion: '5.10.3' })), false);
   assert.equal(await daemonCompatible(runtime, 'studio-runtime', async () => studioStatusResponse('studio-runtime', { version: '1.9.0' })), false);
@@ -406,7 +419,7 @@ test('recorded daemon shuts down only after runtime, lock, manifest, health, ent
   assert.equal(requests[1].init.method, 'POST');
   assert.equal(requests[1].init.headers.authorization, 'Bearer ' + runtime.capability);
   assert.equal(requests[1].init.headers['x-daoge-operation-name'], 'daemon-shutdown');
-  assert.equal(requests[1].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.0.0');
+  assert.equal(requests[1].init.headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.1.0');
   assert.deepEqual(processQueries, [runtime.pid]);
 });
 
@@ -431,7 +444,7 @@ test('recorded daemon refuses protocol downgrades during shutdown', async () => 
   }), /Skill 协议不兼容/);
 
   assert.equal(shutdownRequests.length, 1);
-  assert.equal(shutdownRequests[0].headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.0.0');
+  assert.equal(shutdownRequests[0].headers['x-daoge-skill-protocol'], 'daoge-pic-skill-protocol/3.1.0');
 });
 
 test('daemon process identity accepts a registered Skill symlink to the same entry', () => {

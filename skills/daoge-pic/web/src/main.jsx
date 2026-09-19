@@ -7,6 +7,7 @@ import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs
 import { runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
 import { failureAttributionLine, providerOutageCopy, providerOutageKind } from './failure-copy-model.mjs';
 import { ASSET_BACKSTAGE_COPY } from './asset-backstage-copy.mjs';
+import { recipeDraftFrom } from './recipe-model.mjs';
 import { providerRuntimeNotice } from './provider-runtime-model.mjs';
 import { planPresentation, planStateLabel } from './plan-presentation.mjs';
 import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
@@ -23,6 +24,8 @@ import { WorkbenchNavigation } from './workbench-navigation.jsx';
 import { deliveryIntentFromSelection, deliverySelectionMessage, projectDeliverySelection } from './delivery-workflow.mjs';
 import { inPlaceCreationRoute } from './canvas-creation-model.mjs';
 import { requestContextAssetIds } from './canvas-request-context.mjs';
+import { confirmationEntry } from './confirmation-entry-model.mjs';
+import { questionnaireVisible, defaultPurposeNote, DEFAULT_PURPOSE } from './plan-questionnaire-model.mjs';
 import { bootstrapLocalStudioSession } from './local-auth.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { ConfirmationDialog } from './confirmation-dialog.jsx';
@@ -881,9 +884,11 @@ function TaskCreationDialog({ project, projectTemplates = EMPTY, taskTypes, styl
 }
 
 
-function RoundCreationDialog({ task, rounds, currentRound, busy, error, onDismiss, onCreate }) {
-  const initialPurposeId = currentRound ? 'variation' : 'exploration';
+function RoundCreationDialog({ task, rounds, currentRound, recipes = EMPTY, busy, error, onDismiss, onCreate }) {
+  // 4.1 Q2：默认**不**要求先认领 5 个「轮次目的」——系统按描述推，想自己定点「改一下」。
+  const initialPurposeId = currentRound ? 'variation' : DEFAULT_PURPOSE;
   const initialPurpose = ROUND_PURPOSE_OPTIONS.find((option) => option.id === initialPurposeId) || ROUND_PURPOSE_OPTIONS[0];
+  const [advanced, setAdvanced] = useState(false);
   const [purpose, setPurpose] = useState(initialPurposeId);
   const [parentRoundId, setParentRoundId] = useState(currentRound?.id || '');
   const [targetCount, setTargetCount] = useState(initialPurpose.defaultCount || '');
@@ -926,14 +931,14 @@ function RoundCreationDialog({ task, rounds, currentRound, busy, error, onDismis
     <form className="creation-form" onSubmit={submit}>
       <header><div><p className="eyebrow">{task.name}</p><h2>新建批次</h2><span>选择这次创作要完成的事情，Studio 会给出推荐默认值、父批次提示和示例文本。这里创建的是草稿。</span></div><IconButton label="关闭新建批次" onClick={onDismiss}><X size={16} /></IconButton></header>
       <ExecutionBoundaryNote />
-      <section className="creation-section"><h3>选择批次目的</h3><div className="creation-choice-grid" role="radiogroup" aria-label="批次目的">{ROUND_PURPOSE_OPTIONS.map((option) => <button type="button" key={option.id} className={purpose === option.id ? 'is-active' : ''} aria-pressed={purpose === option.id} onClick={() => choosePurpose(option)}><b>{option.label}</b><span>{option.description}</span></button>)}</div></section>
-      <section className="creation-section creation-selection-detail"><div><b>{selectedPurpose.label}</b><span>{selectedPurpose.description}</span></div><div className="creation-detail-grid"><span><strong>推荐默认值</strong>{creationDefaultSummary(selectedPurpose)}</span><span><strong>父批次提示</strong>{shouldSuggestParent ? '建议绑定父批次或从资产节点发起。' : parentRoundId ? '已绑定父批次。' : '可作为新的探索起点。'}</span><span><strong>需要补充</strong>{listItems(selectedPurpose.recommendedInputs).join('、') || '无固定字段'}</span></div><button type="button" className="outline-button creation-apply-defaults" onClick={applyRecommendedDefaults}>套用推荐默认值</button></section>
-      <section className="creation-section is-two-columns"><label><span>父批次</span><select value={parentRoundId} onChange={(event) => setParentRoundId(event.target.value)}><option value="">不绑定父批次</option>{rounds.map((round) => <option value={round.id} key={round.id}>{ROUND_PURPOSE_LABELS[round.purpose] || round.purpose} · 计划 v{round.planVersion}</option>)}</select><small>{shouldSuggestParent ? '变体、精修、局部修改和补图通常需要父批次或父资产。' : '探索批次可以不绑定父批次。'}</small></label><label><span>目标数量</span><select value={targetCount} onChange={(event) => setTargetCount(event.target.value)}>{CREATION_COUNT_OPTIONS.map((value) => <option value={value} key={value || 'auto'}>{value ? value + ' 张' : '让 Agent 决定'}</option>)}</select></label><label><span>画幅</span><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>{CREATION_ASPECT_OPTIONS.map((value) => <option value={value} key={value || 'auto'}>{value || '沿用任务/由 Agent 决定'}</option>)}</select></label></section>
-      {purpose === 'variation' && <section className="creation-section"><CreationChoiceList label="希望变化的维度" values={variationAxes} options={DERIVED_VARIATION_AXES} onChange={setVariationAxes} /><CreationChoiceList label="希望保持不变" values={keepConstraints} options={DERIVED_KEEP_CONSTRAINTS} onChange={setKeepConstraints} /></section>}
-      {purpose === 'refinement' && <section className="creation-section"><CreationChoiceList label="希望精修的目标" values={refinementGoals} options={DERIVED_REFINEMENT_GOALS} onChange={setRefinementGoals} /><CreationChoiceList label="希望保持不变" values={keepConstraints} options={DERIVED_KEEP_CONSTRAINTS} onChange={setKeepConstraints} /></section>}
-      {purpose === 'edit' && <section className="creation-section is-two-columns"><label><span>要修改什么</span><textarea value={editInstruction} onChange={(event) => setEditInstruction(event.target.value)} placeholder="例如：替换背景中的植物和文字区域。" /></label><label><span>哪些内容保持不变</span><textarea value={preserveInstruction} onChange={(event) => setPreserveInstruction(event.target.value)} placeholder="例如：人物身份、产品轮廓、Logo 和主体光线。" /></label></section>}
-      {purpose === 'fill' && <section className="creation-section is-two-columns"><label><span>扩展或补充方向</span><textarea value={fillInstruction} onChange={(event) => setFillInstruction(event.target.value)} placeholder="例如：向左右扩展环境，补齐桌面和背景留白。" /></label><label><span>补图时保持不变</span><textarea value={fillPreserveInstruction} onChange={(event) => setFillPreserveInstruction(event.target.value)} placeholder="例如：主体位置、产品比例、光影方向不变。" /></label></section>}
-      <section className="creation-section"><label><span>本轮目标 <small>可选；特殊要求请说明输入、限制和交付用途</small></span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={briefPlaceholder} /></label><CreationSuggestionChips options={quickBriefs} onChoose={setBrief} /><p className="creation-hint">后续由会话把这一轮记下的内容整理成可审阅的计划；Studio 不会把这段文字直接发给生成服务。</p></section>
+      <section className="creation-section"><div className="creation-advanced-row"><div><h3>批次目的（可不选）</h3><span>{defaultPurposeNote()}</span></div><button type="button" className="outline-button" aria-expanded={advanced} onClick={() => setAdvanced((value) => !value)}>{advanced ? '收起' : '改一下'}</button></div>{questionnaireVisible({ mode: advanced ? 'advanced' : 'default' }) && <div className="creation-choice-grid" role="radiogroup" aria-label="批次目的">{ROUND_PURPOSE_OPTIONS.map((option) => <button type="button" key={option.id} className={purpose === option.id ? 'is-active' : ''} aria-pressed={purpose === option.id} onClick={() => choosePurpose(option)}><b>{option.label}</b><span>{option.description}</span></button>)}</div>}</section>
+      {questionnaireVisible({ mode: advanced ? 'advanced' : 'default' }) && <section className="creation-section creation-selection-detail"><div><b>{selectedPurpose.label}</b><span>{selectedPurpose.description}</span></div><div className="creation-detail-grid"><span><strong>推荐默认值</strong>{creationDefaultSummary(selectedPurpose)}</span><span><strong>父批次提示</strong>{shouldSuggestParent ? '建议绑定父批次或从资产节点发起。' : parentRoundId ? '已绑定父批次。' : '可作为新的探索起点。'}</span><span><strong>需要补充</strong>{listItems(selectedPurpose.recommendedInputs).join('、') || '无固定字段'}</span></div><button type="button" className="outline-button creation-apply-defaults" onClick={applyRecommendedDefaults}>套用推荐默认值</button></section>}
+      <section className="creation-section is-two-columns"><label><span>父批次（这一批有没有上一批？必答，可改）</span><select value={parentRoundId} onChange={(event) => setParentRoundId(event.target.value)}><option value="">不绑定父批次</option>{rounds.map((round) => <option value={round.id} key={round.id}>{ROUND_PURPOSE_LABELS[round.purpose] || round.purpose} · 计划 v{round.planVersion}</option>)}</select><small>{shouldSuggestParent ? '变体、精修、局部修改和补图通常需要父批次或父资产。' : '探索批次可以不绑定父批次。'}</small></label><label><span>目标数量</span><select value={targetCount} onChange={(event) => setTargetCount(event.target.value)}>{CREATION_COUNT_OPTIONS.map((value) => <option value={value} key={value || 'auto'}>{value ? value + ' 张' : '让 Agent 决定'}</option>)}</select></label><label><span>画幅</span><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>{CREATION_ASPECT_OPTIONS.map((value) => <option value={value} key={value || 'auto'}>{value || '沿用任务/由 Agent 决定'}</option>)}</select></label></section>
+      {advanced && purpose === 'variation' && <section className="creation-section"><CreationChoiceList label="希望变化的维度" values={variationAxes} options={DERIVED_VARIATION_AXES} onChange={setVariationAxes} /><CreationChoiceList label="希望保持不变" values={keepConstraints} options={DERIVED_KEEP_CONSTRAINTS} onChange={setKeepConstraints} /></section>}
+      {advanced && purpose === 'refinement' && <section className="creation-section"><CreationChoiceList label="希望精修的目标" values={refinementGoals} options={DERIVED_REFINEMENT_GOALS} onChange={setRefinementGoals} /><CreationChoiceList label="希望保持不变" values={keepConstraints} options={DERIVED_KEEP_CONSTRAINTS} onChange={setKeepConstraints} /></section>}
+      {advanced && purpose === 'edit' && <section className="creation-section is-two-columns"><label><span>要修改什么</span><textarea value={editInstruction} onChange={(event) => setEditInstruction(event.target.value)} placeholder="例如：替换背景中的植物和文字区域。" /></label><label><span>哪些内容保持不变</span><textarea value={preserveInstruction} onChange={(event) => setPreserveInstruction(event.target.value)} placeholder="例如：人物身份、产品轮廓、Logo 和主体光线。" /></label></section>}
+      {advanced && purpose === 'fill' && <section className="creation-section is-two-columns"><label><span>扩展或补充方向</span><textarea value={fillInstruction} onChange={(event) => setFillInstruction(event.target.value)} placeholder="例如：向左右扩展环境，补齐桌面和背景留白。" /></label><label><span>补图时保持不变</span><textarea value={fillPreserveInstruction} onChange={(event) => setFillPreserveInstruction(event.target.value)} placeholder="例如：主体位置、产品比例、光影方向不变。" /></label></section>}
+      <section className="creation-section"><label><span>本轮目标 <small>可选；特殊要求请说明输入、限制和交付用途</small></span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={briefPlaceholder} /></label><CreationSuggestionChips options={quickBriefs} onChoose={setBrief} />{listItems(recipes).length > 0 && <div className="creation-recipes" aria-label="我的配方"><span>我的配方（点了带出，可改）</span>{listItems(recipes).map((recipe) => <button type="button" key={recipe.id} className="outline-button" onClick={() => setBrief(String(recipe.definition?.prompt || ''))}>{recipe.name}</button>)}</div>}<p className="creation-hint">后续由会话把这一轮记下的内容整理成可审阅的计划；Studio 不会把这段文字直接发给生成服务。</p></section>
       <section className="creation-summary"><p className="eyebrow">创建摘要</p><strong>{selectedPurpose.label}</strong><span>{targetCount ? targetCount + ' 张' : '数量由 Agent 决定'} · {aspectRatio || '画幅由 Agent 决定'}</span><span>{parentRoundId ? '已绑定父批次' : '不绑定父批次'} · 草稿批次</span></section>
       <CreationError error={error} /><footer><button type="button" className="outline-button" onClick={onDismiss} disabled={busy}>取消</button><button type="submit" className="command-button" disabled={busy}>{busy ? '正在创建' : '创建批次'}</button></footer>
     </form>
@@ -1624,6 +1629,9 @@ function App() {
   const [runtimeRepairing, setRuntimeRepairing] = useState(false);
   const [recoveryPhase, setRecoveryPhase] = useState('ready');
   const [pendingDerivedAfterTask, setPendingDerivedAfterTask] = useState(null);
+  // 4.1 Q1：卡片上的「改一下」要真的展开那套控件——把「去画布打开这一批的计划编辑」记成一个待办，
+  // 由画布在拿到对应节点时消费（跨组件只传一个 id，不传回调，避免把画布内部状态暴露出去）。
+  const [pendingPlanEditRoundId, setPendingPlanEditRoundId] = useState(/** @type {string | null} */ (null));
   const [batchBusy, setBatchBusy] = useState(false);
   const [eventRevision, setEventRevision] = useState({ taskOverview: 0, creativeRecord: 0, studioOverview: 0, planVersions: 0, runs: 0, canvasLayout: 0, requests: 0 });
   const inputRef = useRef(null);
@@ -3033,8 +3041,9 @@ await refresh();
     // 「提交不了」永远要有一句话，哪怕只是「这一批已经确认过了」。
     const round = targetRound?.id ? rounds.find((item) => item.id === targetRound.id) || targetRound : targetRound;
     if (!round?.id) { setNotice('请先选择要确认的批次。'); return; }
-    if (round.status === 'active' || round.status === 'completed') { setNotice('这一批已经确认过了，不需要再确认。'); return; }
-    if (round.status !== 'awaiting_confirmation') { setNotice('这一批还没有可确认的计划；请先在会话里让 agent 写出计划。'); return; }
+    // 4.1 Q1：可不可以开闸门、开不了怎么跟人说——**单一来源**在 confirmation-entry-model。
+    const closedEntry = confirmationEntry({ hasChallenge: false, roundStatus: round.status });
+    if (!closedEntry.open && !String(closedEntry.reason).includes('挑战')) { setNotice(closedEntry.reason); return; }
     setGenerationConfirmationBusy(true);
     setGenerationConfirmationError('');
     try {
@@ -3045,11 +3054,12 @@ await refresh();
       // 「请先由当前智能体会话发起挑战」，尽管挑战明明已经在了。
       const data = await api('/api/rounds/' + encodeURIComponent(targetRound.id) + '/confirmation-challenge');
       const pending = data?.pendingConfirmation;
-      if (!pending) {
+      const entry = confirmationEntry({ hasChallenge: Boolean(pending), roundStatus: round.status });
+      if (!entry.open) {
         // 「还没有挑战」是一个**明确的状态**，不是故障：计划在等人确认，但闸门要由
         // agent 先发起挑战。所以给一句看得懂的指引，**不要**把它变成
         // 「操作结果不明确 / 不可自动重试」这种吓人的错误（那是未知故障的说法）。
-        setNotice('这一批的计划正在等待确认，但会话还没有发起确认挑战；请在会话里让 agent 发起，然后回到这里点确认。');
+        setNotice(entry.reason);
         return;
       }
       setGenerationConfirmation({ challenge: pending, round: targetRound });
@@ -3078,6 +3088,37 @@ await refresh();
     navigateRoute({ view: 'lineage', projectId: round.projectId || owningTask?.projectId || selectedProject?.id || null, taskId: round.taskId, roundId: round.id, compareRoundIds: [round.id], runId: null, assetScope: 'round' });
     if (round.status === 'awaiting_confirmation') await openGenerationConfirmation(round);
   }, [navigateRoute, openGenerationConfirmation, roundsForQueue, selectedProject?.id, tasks]);
+
+  /**
+   * 4.1 Q1：卡片上的「改一下」——定位到那一批并**打开计划编辑**（不是又一个「看这一批」）。
+   * 与 `openRoundFromQueue` 的区别只在最后一步：一个开闸门，一个开编辑器。
+   */
+  const openRoundPlanEdit = useCallback((roundId) => {
+    if (!roundId) return;
+    const round = roundsForQueue.find((item) => item.id === roundId) || null;
+    if (!round) { setNotice('找不到这一批；它可能属于另一个任务或已被归档。'); return; }
+    const owningTask = tasks.find((item) => item.id === round.taskId) || null;
+    navigateRoute({ view: 'lineage', projectId: round.projectId || owningTask?.projectId || selectedProject?.id || null, taskId: round.taskId, roundId: round.id, compareRoundIds: [round.id], runId: null, assetScope: 'round' });
+    setPendingPlanEditRoundId(round.id);
+  }, [navigateRoute, roundsForQueue, selectedProject?.id, tasks]);
+
+  /**
+   * 9.6「我的配方」：把这一批的可用配置存成配方（用户侧、跨项目复用）。
+   * 落在**用户可读写的库**（`style-kits`，两者皆可）上——`confirmed-templates` 是 bearer-only，
+   * 浏览器读不了也写不了，用它就要么越界、要么多绕一条队列。
+   */
+  const savePlanAsRecipe = useCallback(async (round) => {
+    if (!round?.id) return;
+    const task = tasks.find((item) => item.id === round.taskId) || null;
+    const draft = recipeDraftFrom({ plan: round.plan, task });
+    try {
+      await api('/api/style-kits', { method: 'POST', idempotencyKey: uniqueKey('style-kit-save'), body: { name: draft.name, definition: draft.definition } });
+      setNotice('已存为我的配方「' + draft.name + '」；下次发起时可以带出来，改了再出。');
+      await refresh();
+    } catch (nextError) {
+      reportRequestError(nextError, '没能存成配方。', { operation: 'save-recipe', phase: 'committing' });
+    }
+  }, [api, refresh, reportRequestError, tasks]);
 
   const dismissGenerationConfirmation = () => {
     if (generationConfirmationBusy) return;
@@ -3224,6 +3265,9 @@ await refresh();
       onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)}
       onReject={openRejectReviewDialog}
       onOpenConfirmation={(round) => void openGenerationConfirmation(round)}
+      onSaveRecipe={(round) => void savePlanAsRecipe(round)}
+      pendingPlanEditRoundId={pendingPlanEditRoundId}
+      onPendingPlanEditHandled={() => setPendingPlanEditRoundId(null)}
     /> : null,
     assets: () => renderAssetsView(),
     tasks: () => selectedProject ? <ProjectTaskList project={selectedProject} tasks={tasks} onCreateTask={() => openCreationDialog('task')} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null,
@@ -3263,7 +3307,7 @@ await refresh();
           <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} onCreateRound={() => openCreationDialog('round')} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onRestoreContext={restoreSessionContext} />
         </> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={restoreSessionContext} />}
       </div>
-      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: requestContextAssetIds({ canvasAssetIds: canvasSelectedAssetIds, selectedAssetIds: [...selectedAssetIds] }) }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} providerNotice={providerNotice} detection={agentDetection} detectionLoading={agentDetectionLoading} onDetect={detectAgents} connection={agentConnection} onConnectionChange={updateAgentConnection} />
+      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: requestContextAssetIds({ canvasAssetIds: canvasSelectedAssetIds, selectedAssetIds: [...selectedAssetIds] }) }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} onEditPlan={openRoundPlanEdit} providerNotice={providerNotice} detection={agentDetection} detectionLoading={agentDetectionLoading} onDetect={detectAgents} connection={agentConnection} onConnectionChange={updateAgentConnection} />
       {providerOutage && <div className="provider-outage-strip" role="alert" aria-live="assertive"><CircleAlert size={16} aria-hidden="true" /><span>{providerOutageCopy({ kind: providerOutage })}</span></div>}
       <RuntimeHealthAlertStrip studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
       {connectionError && <WorkbenchErrorAlert error={connectionError} className="connection-error-strip" icon={CloudOff} dismissLabel="关闭连接错误" onDismiss={() => setConnectionError('')} onRetry={() => void retryWorkbenchError(connectionError, setConnectionError)} onReconnect={() => void reconnectWorkbenchError(connectionError, setConnectionError)} />}
@@ -3283,7 +3327,7 @@ await refresh();
     {creationDialog === 'task' && selectedProject && <TaskCreationDialog project={selectedProject} projectTemplates={projectTemplates} taskTypes={taskTypes} styleKits={styleKits} brandKits={brandKits} busy={creationBusy} error={creationError} onDismiss={dismissCreationDialog} onCreate={createTaskFromStudio} />}
     {referenceResolver && selectedProject && <ReferenceRoundResolverDialog project={selectedProject} task={referenceResolver.task || selectedTask} tasks={referenceResolver.tasks || tasks} draftRounds={referenceResolver.draftRounds || EMPTY} assets={referenceResolver.assets || EMPTY} usage={referenceResolver.usage || 'subject'} busy={referenceBusy} error={referenceError} onDismiss={dismissReferenceResolver} onUseRound={(roundId) => void chooseReferenceRound(roundId)} onSelectTask={chooseReferenceTask} onCreateRound={createRoundForPendingReference} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
     {referenceDialog === 'round' && selectedProject && selectedTask && selectedRound && <ReferenceAssetDialog project={selectedProject} task={selectedTask} round={selectedRound} sharedAssets={sharedAssets} selectedMaterials={referenceMaterials} busy={referenceBusy} error={referenceError} onDismiss={dismissReferenceDialog} onSave={(materials) => void saveRoundReferenceMaterials(materials)} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
-    {creationDialog === 'round' && selectedTask && <RoundCreationDialog task={selectedTask} rounds={rounds} currentRound={selectedRound} busy={creationBusy} error={creationError} onDismiss={dismissCreationDialog} onCreate={createRoundFromStudio} />}
+    {creationDialog === 'round' && selectedTask && <RoundCreationDialog task={selectedTask} rounds={rounds} currentRound={selectedRound} recipes={styleKits} busy={creationBusy} error={creationError} onDismiss={dismissCreationDialog} onCreate={createRoundFromStudio} />}
     {derivedDialog && selectedProject && selectedTask && <DerivedRoundDialog project={selectedProject} task={selectedTask} rounds={rounds} currentRound={selectedRound} assets={derivedDialog.assets} initialPurpose={derivedDialog.purpose} initialActionId={derivedDialog.actionId} busy={derivedBusy} error={derivedError} onDismiss={dismissDerivedDialog} onCreate={createDerivedRoundFromAssets} onImportMask={importDerivedMaskAsset} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
     {confirmation && <ConfirmationDialog label={confirmation.kind === 'archive' ? '确认归档项目' : '确认移入回收站'} title={confirmation.kind === 'archive' ? '归档“' + confirmation.projectName + '”？' : '将图片移入回收站？'} message={confirmation.kind === 'archive' ? '归档后将关闭该项目下的任务与批次。未完成生成必须先暂停或取消。是否继续？' : '这张图片仍被选择、规则资料或交付引用。移入回收站不会删除已冻结交付；引用关系会保留但素材不可用。是否继续？'} confirmLabel={confirmation.kind === 'archive' ? '归档项目' : '移入回收站'} busy={confirmationBusy} error={confirmationError} tone="danger" onCancel={dismissConfirmation} onConfirm={confirmPendingAction} />}
   </main>;

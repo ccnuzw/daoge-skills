@@ -11,6 +11,13 @@ export interface PreflightPlan {
   referenceAssetIds?: string[];
   maskAssetId?: string;
   output?: Record<string, unknown>;
+  /**
+   * 「它为什么这么理解」——3–5 句**结论性说明**（方案 9.8 · 协议 3.1.0 的加法）。
+   *
+   * **可选**：旧计划没有这个字段照样能预检；它只是给人多一分判断依据，
+   * 不是执行参数（改了它不该改变出图结果）。推理的完整过程仍留在宿主会话，不进库。
+   */
+  understanding?: string;
 }
 
 export interface PreflightIssue {

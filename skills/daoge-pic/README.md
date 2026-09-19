@@ -82,13 +82,15 @@ npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\s
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
 
-`register-skill` 在 Windows 创建 junction，在其他平台创建目录符号链接；目标已存在时直接失败，不删除或覆盖。`doctor` 不读取 Provider 密钥、不连接 Provider、不产生计费请求。安装和注册后完整重启 Codex，使 Skill registry 重新加载。
+`register-skill` 在 Windows 创建 junction，在其他平台创建目录符号链接；目标已存在时直接失败，不删除或覆盖。`doctor` 不读取 Provider 密钥、不连接 Provider、不产生计费请求。安装和注册后完整重启对应宿主（Codex 等），使 Skill registry 重新加载。
 
 ### 全局安装
 
 ```bash
 npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.2/daoge-pic-5.14.2.tgz"
-daoge register-skill --scope user
+daoge register-skill --scope user                    # 缺省：~/.codex/skills
+daoge register-skill --scope user --host agents      # ~/.agents/skills：多数宿主都能读到
+daoge register-skill --scope user --host omp         # 也可以点名装给某个宿主
 ```
 
 Windows PowerShell：
@@ -96,7 +98,10 @@ Windows PowerShell：
 ```powershell
 npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.2/daoge-pic-5.14.2.tgz"
 daoge.cmd register-skill --scope user
+daoge.cmd register-skill --scope user --host agents
 ```
+
+`--host` 的取值：`agents`（跨宿主共享目录）、`workbuddy`、`codex`、`claude`、`opencode`、`gemini`、`agy`（Antigravity CLI）、`grok`、`omp`、`pi`、`cursor-agent`、`qwen`、`kimi`、`amp`、`droid`、`copilot`。写错会直接报错并列出可用值，不会新建目录；`agents` 是省事的那个——大多数主流宿主都会读 `~/.agents/skills`。装好后重启对应宿主，让它的 Skill registry 重新加载。Workbench 连接面板的「侦查」用的是同一张宿主表：它只报告这台机器上装了哪些、哪个装了 daoge-pic，不代管任何宿主的 skills。
 
 上述 URL 指向 `5.14.2` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
 
@@ -262,7 +267,7 @@ node scripts/daoge.js <command> --workspace /absolute/workspace
 
 | 场景 | 命令 |
 | --- | --- |
-| 注册 Skill | `register-skill --scope project --workspace <path>`；`register-skill --scope user` |
+| 注册 Skill | `register-skill --scope project --workspace <path>`；`register-skill --scope user [--host <agents\|codex\|claude\|opencode\|gemini\|agy\|grok\|omp\|pi\|cursor-agent\|qwen\|kimi\|amp\|droid\|copilot>]` |
 | 诊断 | `doctor --workspace <path> [--json true] [--redacted true]` |
 | 启动 / 复用 Workbench | `open --workspace <path> [--force true] [--allow-nested-studio true]` |
 | 查看 daemon 状态 | `studio --workspace <path>`；`status --workspace <path>` |

@@ -25,7 +25,10 @@ const BEARER_ONLY = [
   ['POST', '/api/runs/run_1/items/itm_1/reconcile', '对账'],
   ['POST', '/api/runs/run_1/outcomes/resolve', '运行控制'],
   ['POST', '/api/runs/run_1/retry', '运行控制'],
-  ['POST', '/api/runs/run_1/resume', '运行恢复']
+  ['POST', '/api/runs/run_1/resume', '运行恢复'],
+  // 第 4 批 X1（规格书 §2.2 2026-09-19 追加）：它记的是 **agent 的操作上下文**，
+  // 界面选中态已由路由承载；两侧都能写必然互相覆盖。
+  ['POST', '/api/sessions/ses_1/context', 'Agent 会话上下文']
 ];
 
 /** Workbench 必须能自己写的端点。这些绝不能被误伤成 bearer-only，否则界面按钮会永久 403。 */
@@ -49,7 +52,6 @@ const COOKIE_WRITABLE = [
   ['POST', '/api/providers/prf_1/models'],
   ['POST', '/api/providers/prf_1/activate'],
   ['POST', '/api/sessions/open'],
-  ['POST', '/api/sessions/ses_1/context'],
   ['POST', '/api/deliveries'],
   ['POST', '/api/delivery-batches'],
   ['PUT', '/api/deliveries/dlv_1/items']

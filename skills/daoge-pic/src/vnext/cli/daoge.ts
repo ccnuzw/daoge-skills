@@ -9,6 +9,7 @@ import { readStudioManifest, sameWorkspaceRoot, studioPaths } from '../studio/wo
 import { daemonEnvWithSecretBackend, readWorkspaceSecretBackend, writeWorkspaceSecretBackend, SECRET_BACKEND_CHOICES, type SecretBackendChoice } from '../studio/secret-backend-config';
 import { isSupportedProtocolVersion, isSupportedRuntimeVersion, RUNTIME_VERSION, SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
 import { registerSkill, SkillRegistrationScope } from './register-skill';
+import { skillHostChoices, skillHostDirectory } from '../domain/agent-detect';
 import { assertWorkspaceSupported, doctorWorkspace, formatDoctorReport, redactDoctorReport } from './doctor';
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
 export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; startedAt?: string; heartbeatAt: string; providerConcurrency?: ProviderConcurrencySnapshot | null; }
@@ -20,7 +21,7 @@ const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
 type LocalAction = 'status' | 'studio' | 'open' | 'restart' | 'register-skill' | 'doctor' | 'backup-restore' | 'provider-secret-backend';
-type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'non-negative-integer' | 'usage-limit' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope' | 'secret-backend';
+type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'non-negative-integer' | 'usage-limit' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope' | 'host' | 'secret-backend';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
   // summary 必填：用法文本由表生成，少了它这条命令在 --help 里就是一行没有说明的空壳。
@@ -45,6 +46,7 @@ const FLAG_HINTS: Record<FlagKind, string> = {
   'boolean': '<true|false>',
   'purpose': '<exploration|refinement|variation|edit|fill>',
   'scope': '<project|user>',
+  'host': '<宿主名>',
   'secret-backend': '<plaintext|system>'
 };
 interface ParsedCommand {
@@ -55,6 +57,7 @@ interface ParsedCommand {
   force?: boolean;
   allowNestedStudio?: boolean;
   scope?: SkillRegistrationScope;
+  host?: string;
   jsonOutput?: boolean;
   redactedOutput?: boolean;
   restoreInput?: JsonObject;
@@ -364,7 +367,7 @@ function query(values: Record<string, unknown>, entries: Array<[string, string]>
 
 const commandSchemas: Record<string, CommandSchema> = {
   status: { summary: '查看本工作区 Studio 与后台服务状态', action: 'status', flags: {} }, studio: { summary: '输出 Studio 与工作台地址，不打开浏览器', action: 'studio', flags: {} }, open: { summary: '打开或复用唯一工作台；嵌套 Studio 必须由用户显式允许', action: 'open', flags: { '--force': { kind: 'boolean' }, '--allow-nested-studio': { kind: 'boolean' } } }, restart: { summary: '优雅重启本工作区 Studio', action: 'restart', flags: {} },
-  'register-skill': { summary: '注册当前安装包；--scope user 注册到 ~/.codex/skills 且不需要 --workspace；目标已存在则拒绝', action: 'register-skill', flags: { '--scope': { kind: 'scope', required: true } } },
+  'register-skill': { summary: '注册当前安装包；--scope user 装到 --host 指定的宿主（缺省 codex，agents = 跨宿主共享目录）且不需要 --workspace；目标已存在则拒绝', action: 'register-skill', flags: { '--scope': { kind: 'scope', required: true }, '--host': { kind: 'host' } } },
   doctor: { summary: '不调用 Provider；检查工作区、SQLite、权限、sharp 与 Windows volume', action: 'doctor', flags: { '--json': { kind: 'boolean' }, '--redacted': { kind: 'boolean' } } },
   'provider-list': { summary: '列出全部生成服务配置，不含密钥', method: 'GET', flags: {}, pathname: () => '/api/providers' },
   'backup-manifest': { summary: '输出仅含安全相对路径的当前 Studio manifest', method: 'GET', flags: {}, pathname: () => '/api/backup/manifest' },
@@ -448,6 +451,10 @@ function validateFlag(name: string, raw: string, kind: FlagKind): unknown {
   if (kind === 'purpose') { if (!['exploration', 'refinement', 'variation', 'edit', 'fill'].includes(value)) throw new Error(name + ' 不是支持的创作目的。'); return value; }
   if (kind === 'execution-concurrency') return strictExecutionConcurrency(value);
   if (kind === 'scope') { if (value !== 'project' && value !== 'user') throw new Error(name + ' 只能是 project 或 user。'); return value; }
+  if (kind === 'host') {
+    if (!skillHostDirectory(value)) throw new Error(name + ' 不是认得的宿主：' + value + '（可用：' + skillHostChoices().join('、') + '）');
+    return value;
+  }
   if (kind === 'secret-backend') { if (!SECRET_BACKEND_CHOICES.includes(value as SecretBackendChoice)) throw new Error(name + ' 只能是 plaintext 或 system。'); return value as SecretBackendChoice; }
   const integer = Number(value);
   if (!Number.isSafeInteger(integer) || (kind === 'non-negative-integer' ? integer < 0 : integer < 1) || (kind === 'usage-limit' && integer > 10000)) throw new Error(name + ' 必须是' + (kind === 'non-negative-integer' ? '非负安全整数' : kind === 'usage-limit' ? '1 到 10000 的安全整数' : '正整数') + '。');
@@ -538,7 +545,7 @@ function parseCommand(args: string[]): ParsedCommand {
   const root = userRegistration && rawValues['--workspace'] === undefined ? undefined : workspaceRoot(rawValues['--workspace']);
   const markerCount = Object.values(values).filter((value) => value === STDIN_JSON_MARKER).length;
   if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
-  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}), ...(schema.action === 'provider-secret-backend' ? { secretBackend: values['--backend'] as SecretBackendChoice } : {}) };
+  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope, host: values['--host'] === undefined ? undefined : textValue(values, '--host') } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}), ...(schema.action === 'provider-secret-backend' ? { secretBackend: values['--backend'] as SecretBackendChoice } : {}) };
   const method = schema.method as HttpMethod;
   const operationName = method === 'GET' || rawValues['--idempotency-key'] ? undefined : rawValues['--operation-name'] ? explicitOperationName(rawValues['--operation-name']) : undefined;
   const idempotencyKey = method === 'GET' || operationName ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
@@ -563,6 +570,7 @@ function commandHelp(name: string): string {
   for (const [flag, flagSchema] of Object.entries(schema.flags)) {
     lines.push(`  ${flag} ${FLAG_HINTS[flagSchema.kind]}  ${flagSchema.required ? '必填' : '可选'}`);
   }
+  if (name === 'register-skill') lines.push(`  --host 可用：${skillHostChoices().join('、')}（agents = 跨宿主共享目录，多数宿主都能读到）`);
   if (schema.method && schema.method !== 'GET') {
     lines.push('  --idempotency-key <key>  可选，与 --operation-name 互斥');
     lines.push('  --operation-name <verb:scope>  可选，由 daemon 派生稳定 key');
@@ -599,7 +607,7 @@ export async function main(): Promise<void> {
   }
   const parsed = parseCommand(args);
   if (parsed.action === 'register-skill') {
-    process.stdout.write(JSON.stringify(registerSkill({ scope: parsed.scope as SkillRegistrationScope, workspaceRoot: parsed.workspaceRoot }), null, 2) + '\n');
+    process.stdout.write(JSON.stringify(registerSkill({ scope: parsed.scope as SkillRegistrationScope, workspaceRoot: parsed.workspaceRoot, host: parsed.host as string | undefined }), null, 2) + '\n');
     return;
   }
   const root = parsed.workspaceRoot as string;

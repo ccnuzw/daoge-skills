@@ -79,3 +79,30 @@ test('侦查摘要不编造：空报告说「没检测到」，有 daoge-pic 才
   assert.match(report.headline, /2 个/);
   assert.match(report.skillLine, /已装载/);
 });
+
+test('侦查摘要把装了的排前面，未检测到的收成一行名字（认得的宿主名单也是信息）', async () => {
+  const { detectedCliSummary } = await model();
+  const report = detectedCliSummary({
+    clis: [
+      { name: 'codex', label: 'codex', command: 'codex', onPath: false, homeExists: false, skillsExists: false, hasDaogePic: false },
+      { name: 'omp', label: 'omp', command: 'omp', onPath: true, homeExists: true, skillsExists: true, hasDaogePic: true },
+      { name: 'agy', label: 'Antigravity CLI', command: 'agy', onPath: false, homeExists: true, skillsExists: false, hasDaogePic: false },
+      { name: 'pi', label: 'pi', command: 'pi', onPath: false, homeExists: false, skillsExists: false, hasDaogePic: false }
+    ]
+  });
+  assert.deepEqual(report.installedRows.map((row) => row.name), ['omp', 'agy'], '装了的排前面，且保持报告顺序');
+  assert.deepEqual(report.missingNames, ['codex', 'pi']);
+  assert.deepEqual(report.rows.map((row) => row.name), ['omp', 'agy', 'codex', 'pi'], '整张表照旧都在，只是顺序变了');
+
+  const antigravity = report.installedRows.find((row) => row.name === 'agy');
+  assert.equal(antigravity.title, 'Antigravity CLI（agy）', '命令名不是产品名：标题给产品名，括号里给命令');
+  assert.match(antigravity.detail, /命令 agy 不在 PATH/, '面板要说清我们查的是哪个命令');
+  const omp = report.installedRows.find((row) => row.name === 'omp');
+  assert.equal(omp.title, 'omp', '产品名与命令同名时不画蛇添足');
+  assert.match(omp.detail, /^命令可用/);
+
+  const nothing = detectedCliSummary({ clis: [{ name: 'qwen', onPath: false, homeExists: false, skillsExists: false, hasDaogePic: false }] });
+  assert.deepEqual(nothing.installedRows, []);
+  assert.deepEqual(nothing.missingNames, ['qwen']);
+  assert.match(nothing.skillLine, /--host/, '没装 daoge-pic 时的指引要点出 --host 这个开关');
+});

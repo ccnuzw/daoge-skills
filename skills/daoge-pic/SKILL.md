@@ -5,7 +5,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 # DAOGE Pic vNext
 
-当前源码与运行时版本为 `6.0.0`；`5.14.2` 是最新不可变正式发布版本，更早的均为历史发布。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/3.0.0`，运行时兼容范围为 `>=6.0.0 <7.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
+当前源码与运行时版本为 `6.0.0`；`5.14.2` 是最新不可变正式发布版本，更早的均为历史发布。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/3.1.0`，运行时兼容范围为 `>=6.0.0 <7.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
 
 本文件是 Agent 执行协议，不是完整产品规格。产品、架构、Schema、Worker、ZIP、安全实现和验证证据分别以 `docs/daoge_pic_vnext_upgrade_spec_zh.md`、`docs/vnext_verification_evidence_zh.md`、源码与测试为准。用户可见沟通使用中文。
 
@@ -87,6 +87,8 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 1. 先完成“执行型启动协议”：Workbench 已打开或已安全复用，Studio Session 与稳定工作区已绑定，项目、任务和轮次上下文已创建或恢复。**每次入场先读取请求队列**（见「请求队列」节）：处理等待中的用户请求，再继续本轮澄清。
 2. 再澄清目标、受众、数量、画幅、风格、限制条件、参考素材与交付用途，并把确认事实写入当前领域上下文。
 3. 给出用户可审阅的版本化计划：operation、提示词、数量、输出规格、引用素材、父轮次/父资产与风险。
+   计划可带一个**可选的** `understanding`（3–5 句**结论性说明**，协议 3.1.0 起）——用一句人话回答
+   「你为什么这么理解」，供检查器显示；它是说明、不是执行参数，**推理链不进库**。旧计划没有它照样能预检。
 4. 未得到用户明确确认前，不得发起任何外部 Provider 调用。
 5. Workbench 完成确认后，先读取当前会话计划摘要和 Generation History。若当前轮次已有运行，必须显式选择并汇报该运行，不得再次预检或入队；没有运行时才执行预检。
 6. 预检证据仍与计划和 daemon 内存配置匹配时，才创建该轮次唯一运行。用户要求再次生成时新建衍生轮次，不复用原轮次创建第二批。
@@ -138,6 +140,8 @@ node scripts/daoge.js <command> [--workspace <stable-workspace>]
 - 交付：`delivery`、`delivery-update`、`delivery-ready`、`delivery-draft`、`delivery-export`、`delivery-batch`、`delivery-batch-revise`、`delivery-batch-ready`。`delivery-complete` 不是公开 CLI 命令。
 - 备份与升级评估：`backup-manifest`、`backup-restore-dry-run`、`backup-restore`、`backup-upgrade-assess`、`backup-rollback-point`。`backup-restore-dry-run` 只产出计划、不写入任何文件；`backup-restore` 是真正的执行器：先把改动文件写入同目录暂存区并按 manifest 逐文件校验哈希，再用原子 rename 替换，任一步失败即把已替换的文件按原样回滚（新建的文件会被删除）。执行前会拒绝「目标 Studio 的 daemon 正在运行」这一情形——在运行中的 daemon 底下替换 `studio.db` 只会得到损坏的 Studio。恢复范围仅限 manifest 记录的文件，未记录的现有文件不会被删除。升级评估的「当前运行时与支持范围」由 daemon 自证（`--current-*` 与 `--supported-*` 参数已移除，不受调用方声明影响）。
 
+`register-skill --scope user` 装到哪个宿主由 `--host` 决定：缺省 `codex`（`~/.codex/skills`）；`agents` 表示跨宿主共享目录（`~/.agents/skills`，多数主流宿主都读）；也可点名 `workbuddy` / `claude` / `opencode` / `gemini` / `agy`（Antigravity CLI）/ `grok` / `omp` / `pi` / `cursor-agent` / `qwen` / `kimi` / `amp` / `droid` / `copilot`。未知宿主直接拒绝并列出可用值，不新建目录；项目范围（`--scope project`）固定写 `<workspace>/.agents/skills`。Workbench 连接面板的「侦查」按同一张宿主表回答「这台机器上装了哪些、哪个装了 daoge-pic」；面板只把**宿主自己的目录**当证据（IDE 的数据目录不算装了 CLI）。
+
 高风险命令必须按完整签名执行，缺失参数时停止并补齐，不得猜测默认值或把 secret 写入 argv：
 
 ```bash
@@ -155,7 +159,7 @@ node scripts/daoge.js template-archive --workspace <path> --template <template-i
 node scripts/daoge.js template-rollback --workspace <path> --template <template-id> --version <n>
 ```
 
-同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/3.0.0`；`6.0.0` 是当前源码/运行时版本，`5.14.2` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
+同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/3.1.0`；`6.0.0` 是当前源码/运行时版本，`5.14.2` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
 
 固定查询端点：`GET /api/studio` 是协议协商与运行时状态端点；`GET /api/sessions/<session-id>/plan-status` 是当前会话计划摘要；`GET /api/rounds/<round-id>/runs` 是当前轮次 Generation History；确认模板读取使用 Bearer-only 的 `/api/confirmed-templates` 列表和详情端点，写入使用其 Bearer-only POST save/archive/rollback 端点。路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝；Skill 必须改用正确端点或受控 CLI，不得猜测 `/api/studio/...`、旧命令或工作区文件。
 
@@ -182,6 +186,15 @@ Workbench 的受限请求入口与 Agent 对话共用**同一条队列**（`stud
 ## 运行恢复与媒体边界
 
 - Provider 限流或临时故障进入有界重试；认证、模型、参数或权限错误不自动重试。
+- 接重试单时先查这张表（**原因 → 建议**），照表给建议，不要每次重新判断：
+  | 摘要里的信号 | 归谁 | 建议 |
+  |---|---|---|
+  | `quota` / `billing` / `insufficient` / `额度` / `余额` | 用户 | 先去生成服务充值或换一组配置，再重试 |
+  | `enospc` / `no space left` / `disk full` | 系统 | 先清理空间再继续；这一批不用重试 |
+  | `moderation` / `content policy` / `审核` / `敏感` | 用户 | 换一换描述或参数再试 |
+  | `rate limit` / `429` / `timeout` / `5xx` / `network` / `fetch failed` | 系统 | 等一会儿再重试，别反复点 |
+  | 都没有写明 | 未知 | 可以重试一次看看 |
+  关键词与前端 `failure-copy-model.mjs` 保持一致（有守卫对拍）；**先看具体原因（额度 / 磁盘），再看大类**。
 - 超时可以只在重试时覆盖：`retry --timeout-ms <1000..600000>`。它只改写该项的请求 payload，**不改写已确认的计划快照**，并把覆盖值记进 `run.queued` / `run.items_retried` 事件；因此超时属于重试参数，不需要重新确认计划。请求超时默认 120000 ms，上限 10 分钟。
 - 外部请求结果不明时，运行项进入 `outcome_unknown`，绝不自动重放。用户核实无结果后，才可用 `resolve-unknown` 将指定项结案。
 - daemon 重启时，未安全完成的运行进入 `resume_pending`；再次外部调用前必须在会话中得到用户确认，并以 `resume --session <session-id>` 记录。Workbench 只能显示等待状态，不能绕过会话继续。

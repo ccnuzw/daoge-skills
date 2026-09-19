@@ -105,7 +105,7 @@ function assertReleaseArtifact(tarballPath, expectedVersion) {
     expectedVersion,
     expectedRange
   };
-  if (!packageJson || packageJson.name !== 'daoge-pic' || packageJson.version !== expectedVersion || !protocolManifest || protocolManifest.protocol !== 'daoge-pic-skill-protocol' || protocolManifest.version !== '3.0.0' || protocolManifest.runtimeCompatibility !== expectedRange || runtimeVersion !== expectedVersion || runtimeRange !== expectedRange || declaredRuntimeVersion !== expectedVersion || declaredRuntimeRange !== expectedRange) {
+  if (!packageJson || packageJson.name !== 'daoge-pic' || packageJson.version !== expectedVersion || !protocolManifest || protocolManifest.protocol !== 'daoge-pic-skill-protocol' || protocolManifest.version !== '3.1.0' || protocolManifest.runtimeCompatibility !== expectedRange || runtimeVersion !== expectedVersion || runtimeRange !== expectedRange || declaredRuntimeVersion !== expectedVersion || declaredRuntimeRange !== expectedRange) {
     throw new Error(JSON.stringify(mismatch, null, 2));
   }
   return { paths, ...checked, version: packageJson.version, runtimeVersion, runtimeRange };

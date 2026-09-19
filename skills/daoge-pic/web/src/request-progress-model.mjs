@@ -158,6 +158,49 @@ function tallyFromCounts(counts) {
   return { total: made + failed + blocked + unknown + inFlight, made, failed, blocked, unknown, inFlight, notMade: failed + blocked + unknown };
 }
 
+/**
+ * 回执（方案 4.1 · 施工单 Q1）：把「我准备这么出」摆成人话。
+ *
+ * 它是**唯一需要人核对的判断**的载体——「有没有上一批」（结构性判断，猜错代价高）；
+ * 其余（几张、什么规格、改什么保持什么）都只是**可改**的默认值。
+ * 所以这里说的话里**不出现那 5 个内部术语**，也不出现裸 id。
+ */
+export function receiptFor(input = {}) {
+  const round = input.round || {};
+  const plan = input.plan || round.plan || {};
+  const parentRoundId = plan.parentRoundId || round.parentRoundId || null;
+  const count = Number.isFinite(Number(plan.itemCount)) ? Number(plan.itemCount) : (Number.isFinite(Number(plan.targetCount)) ? Number(plan.targetCount) : null);
+  const aspect = (plan.output && typeof plan.output === 'object' ? plan.output.aspectRatio : '') || plan.aspectRatio || '';
+  const changes = Array.isArray(plan.variationAxes) ? plan.variationAxes : [];
+  const goals = Array.isArray(plan.refinementGoals) ? plan.refinementGoals : [];
+  const keeps = Array.isArray(plan.keepConstraints) ? plan.keepConstraints : [];
+  const lines = [parentRoundId ? '在上一批的基础上继续' : '从零开始（没有上一批）'];
+  const size = [];
+  if (count) size.push('出 ' + count + ' 张');
+  if (aspect) size.push(String(aspect));
+  if (size.length) lines.push(size.join(' · '));
+  const changed = [...changes, ...goals];
+  if (changed.length || keeps.length) {
+    const parts = [];
+    if (changed.length) parts.push('改：' + changed.join('、'));
+    if (keeps.length) parts.push('保持：' + keeps.join('、'));
+    lines.push(parts.join('　　　'));
+  }
+  return { ready: Boolean(round.id || round.planVersion || plan.prompt || plan.itemCount), lines };
+}
+
+/**
+ * 「有没有上一批」是**必答题**（方案 4.1）：可以给建议，但必须明示、可否决。
+ * 猜错代价高——它是唯一结构性判断，所以不许静默推断。
+ */
+export function parentDecision(input = {}) {
+  return {
+    required: true,
+    suggested: input.parentRoundId || input.suggestedParentId || null,
+    revocable: true
+  };
+}
+
 export function requestProgress(request, { rounds = [], runs = [], runItems = [], linked = null } = {}) {
   const status = String(request?.status || '');
   const attempts = attemptNote(request);
@@ -212,7 +255,8 @@ export function requestProgress(request, { rounds = [], runs = [], runItems = []
   const base = { roundId, canConfirm: false, canWatch: true };
 
   if (round.status === 'awaiting_confirmation') {
-    return { ...base, stage: 'awaiting-confirmation', label: '计划已就绪 · 待你确认', detail: '确认后才会开始出图。', canConfirm: true };
+    // 4.1：不给一个「去确认」的空按钮——把**回执**摆回来，人只需要核对那一句。
+    return { ...base, stage: 'awaiting-confirmation', label: '计划已就绪 · 待你确认', detail: '确认后才会开始出图。', canConfirm: true, receipt: receiptFor({ request, round, plan: round.plan }) };
   }
   if (round.status === 'draft') {
     return { ...base, stage: 'drafting', label: 'agent 正在写计划…', detail: '', canConfirm: false };

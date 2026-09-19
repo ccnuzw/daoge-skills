@@ -18,7 +18,7 @@ export const FAILURE_OWNER_LABELS = Object.freeze({
 /** `outcome_unknown` 专用：不是「你要改」，也不是「等等就好」，是要人去核实。 */
 const VERIFY_OWNER_LABEL = '先确认这张出没出';
 
-const SYSTEM_SIGNALS = Object.freeze([
+export const SYSTEM_SIGNALS = Object.freeze([
   'rate limit', '429', 'timeout', 'timed out', 'network', 'connection',
   '502', '503', '504', 'server error', 'unavailable', 'overloaded', 'fetch failed',
   // 磁盘写不进去也是**系统的问题**（开放项 #26）：不写进来它就会掉进「原因没写明」，
@@ -26,8 +26,8 @@ const SYSTEM_SIGNALS = Object.freeze([
   'enospc', 'no space left', 'disk full', 'not enough space'
 ]);
 /** 磁盘满的专属签名（P4 要把它与「服务连不上」分开说：一个要清空间，一个只要等）。 */
-const DISK_SIGNALS = Object.freeze(['enospc', 'no space left', 'disk full', 'not enough space']);
-const MY_SIGNALS = Object.freeze([
+export const DISK_SIGNALS = Object.freeze(['enospc', 'no space left', 'disk full', 'not enough space']);
+export const MY_SIGNALS = Object.freeze([
   'moderation', 'content policy', 'policy', 'sensitive', 'review',
   '审核', '拦截', '违规', '敏感',
   'invalid', '参数', '尺寸', '不支持'

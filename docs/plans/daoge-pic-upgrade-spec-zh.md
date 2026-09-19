@@ -22,7 +22,7 @@
 | 维度 | 现状（5.14.2） | 目标（本次大版本） | 依据 |
 |---|---|---|---|
 | 制品版本 | `5.14.2` | **`6.0.0`** | 跨出运行时兼容上界 `>=5.14.2 <6.0.0`，语义上就是一次 breaking 大版本 |
-| Skill 协议 | `daoge-pic-skill-protocol/2.0.0` | **`/3.0.0`** | 请求队列是**协议级新能力**（agent 要按新协议读队列、回执），属 breaking |
+| Skill 协议 | `daoge-pic-skill-protocol/2.0.0` | **`/3.0.0`** →（第 4 批 9.8 追加）**`/3.1.0`** | 请求队列是**协议级新能力**（agent 要按新协议读队列、回执），属 breaking；3.1.0 是**加法**（`PreflightPlan.understanding` 可选字段），仍在 `>=3.0.0 <4.0.0` 内，3.0.0 的 agent 保持兼容 |
 | 运行时兼容范围 | `>=5.14.2 <6.0.0` | **`>=6.0.0 <7.0.0`** | 同制品版本一起改 |
 | `STUDIO_SCHEMA_VERSION` | `34` | **从 34 递增**（具体值实施时定） | 新库 schema 全量重设计；`database.ts` 仍是事实源 |
 | Node 运行时要求 | `>= 22.17.0` | **不变** | 与本次改造无关 |
@@ -56,6 +56,12 @@
   ⚠️ **不是登记成 `cookie`**：登记成 cookie 会产生**第二个 cookie-only 端点**，与本节判据、§2.3 及鉴权表表头的「cookie-only 只有 `rounds.confirm`」冲突；还会**删掉 agent 的止损能力**（CLI `pause`/`cancel` 走 bearer 会 403，违反红线「工程能力只加强不删」）。
   移出鉴权表同时满足四条：① 符合本节判据（止损没有任何「不依赖调用方身份的防线」）；② 人（cookie）能直接止损；③ agent 仍能止损；④ cookie-only 仍只有确认一条。
 - **保持 bearer 的**：`runs.retry` / `runs.resume` / `runs.outcomes-resolve`（会重新花钱）——界面按钮走队列 → agent 执行。
+- **第 4 批追加（2026-09-19 定）：`sessions.context` → `bearer`（agent 独占）**。
+  理由：它记的是 **agent 的操作上下文**（第 2 批已把 `active_*` 改名为 `agent_*` 归还给 agent），
+  而**界面的选中态已完全由路由承载**（`parseWorkbenchRoute` / `navigateRoute`），前端不再需要写它。
+  现状是**两侧都能写**——同一字段被两种意图共用，必然互相覆盖（方案 7.7.3 的原始结论）；
+  收成 bearer-only 就是把「谁写它」这件事定死。
+  ⚠️ 连带：`route-authorization.test.js` 的 BEARER_ONLY 增加一条 + `SKILL.md` 第 35 行同步（写入角色只剩 Agent Bearer）。
 - **检查法**：新增或修改任何路由时，问一句「**有没有一道不依赖调用方身份的防线**」——有 → 登记；没有 → 不登记。
 - **连带**：改 `runs.pause/cancel` 必须同步改 `SKILL.md` 第 43 行（现为「Workbench Cookie 可执行止损；Agent Bearer 才有预检/入队/恢复/重试/unknown」）与 `route-authorization.test.js`（`BEARER_ONLY` 去掉两条 + 新增「止损动作两者皆可」守卫）。
 

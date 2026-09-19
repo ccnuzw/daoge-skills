@@ -9,7 +9,7 @@
  */
 
 export const PROTOCOL_NAME = 'daoge-pic-skill-protocol';
-export const WORKBENCH_PROTOCOL_VERSION = '3.0.0';
+export const WORKBENCH_PROTOCOL_VERSION = '3.1.0';
 
 /** 读的是 daemon 的 `/api/studio` 返回体。 */
 export function negotiateStudioVersion(studio, options = {}) {

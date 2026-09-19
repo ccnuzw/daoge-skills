@@ -76,14 +76,22 @@ test('界面按批次读得到待确认的挑战，不需要会话工作指针',
   }
 });
 
-test('无挑战是「明确状态」而不是「操作结果不明确」——界面给指引，不报错', () => {
+test('无挑战是「明确状态」而不是「操作结果不明确」——界面给指引，不报错', async () => {
   const main = readSource('web/src/main.jsx');
   // 闸门要由 agent 先发起挑战。没有挑战时若抛普通 Error，会被归一化成
   // unknown_error → 「操作结果不明确 / 不可自动重试」，那是未知故障的说法，会误导人。
-  assert.match(main, /if \(!pending\) \{/, '必须显式处理「没有挑战」这一支');
-  assert.match(main, /setNotice\('这一批的计划正在等待确认[^']*确认挑战/, '要说清「去会话让 agent 发起」这个动作');
+  // 第 4 批 Q1：这条判断收进了**单一来源**（confirmation-entry-model），界面只负责说出来。
+  assert.match(main, /confirmationEntry\(\{ hasChallenge: Boolean\(pending\)/, '「能不能开闸门」要问确认入口模型，不许自己判断');
+  assert.match(main, /setNotice\(entry\.reason\)/, '模型给的指引必须说出来（不许静默）');
   const block = main.slice(main.indexOf('const openGenerationConfirmation'), main.indexOf('const dismissGenerationConfirmation'));
   assert.doesNotMatch(block, /throw new Error\('这个计划还没有可确认的挑战/, '不许把「没有挑战」当成错误抛出（会被报成「结果不明确」）');
+  // 行为：模型对「没有挑战」给的是**明确指引**（说清去会话让 agent 发起），不是故障话术。
+  const { confirmationEntry } = await import('../../web/src/confirmation-entry-model.mjs');
+  const noChallenge = confirmationEntry({ hasChallenge: false, roundStatus: 'awaiting_confirmation' });
+  assert.equal(noChallenge.open, false);
+  assert.match(noChallenge.reason, /会话/, '要说清「去会话让 agent 发起」这个动作');
+  assert.match(noChallenge.reason, /挑战/);
+  assert.doesNotMatch(noChallenge.reason, /结果不明确|不可自动重试/, '不许用未知故障的说法');
 });
 
 test('没有挑战时按批次读返回 null（界面据此不显示确认按钮，而不是报错）', async () => {

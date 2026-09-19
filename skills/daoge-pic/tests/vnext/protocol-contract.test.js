@@ -18,7 +18,7 @@ test('runtime exposes protocol version separately from artifact version and reje
     initializeStudio({ workspaceRoot });
     started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const studio = await requestJson(started, '/api/studio');
-    assert.deepEqual(studio.body.data.protocol, { name: 'daoge-pic-skill-protocol', version: '3.0.0', runtimeVersion: '6.0.0', supportedRange: '>=3.0.0 <4.0.0' });
+    assert.deepEqual(studio.body.data.protocol, { name: 'daoge-pic-skill-protocol', version: '3.1.0', runtimeVersion: '6.0.0', supportedRange: '>=3.0.0 <4.0.0' });
     assert.equal(studio.body.data.runtime.mode, 'standalone');
     assert.equal(studio.body.data.runtime.mediaWorkerPool.state, 'idle');
     assert.equal(studio.body.data.runtime.mediaWorkerPool.processCount, 0);
@@ -33,7 +33,7 @@ test('runtime exposes protocol version separately from artifact version and reje
     assert.equal(missingProtocol.status, 400);
     assert.match((await missingProtocol.json()).error.message, /必须声明/);
     const declaration = JSON.parse(fs.readFileSync(path.join(__dirname, '../..', 'protocol-version.json'), 'utf8'));
-    assert.equal(declaration.version, '3.0.0');
+    assert.equal(declaration.version, '3.1.0');
     assert.equal(declaration.runtimeCompatibility, '>=6.0.0 <7.0.0');
   } finally {
     if (started) await started.service.close();

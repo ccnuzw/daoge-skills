@@ -26,7 +26,7 @@ function attentionMessage(attention) {
  *
  * Studio 仍然不执行任何出图——这里只是排队叫号机，执行方永远是装着 skill 的 agent。
  */
-export function RequestQueueDock({ requests, pendingCount, busy, presence, context, progress, onSend, onWithdraw, onAnswer, onOpenRound, detection, detectionLoading, onDetect, connection, onConnectionChange, providerNotice = '' }) {
+export function RequestQueueDock({ requests, pendingCount, busy, presence, context, progress, onSend, onWithdraw, onAnswer, onOpenRound, onEditPlan, detection, detectionLoading, onDetect, connection, onConnectionChange, providerNotice = '' }) {
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState(false);
   // ⚠️ 在场**只有一个来源**（presence 对象）。
@@ -41,6 +41,8 @@ export function RequestQueueDock({ requests, pendingCount, busy, presence, conte
   const active = requests.filter((request) => ['pending', 'accepted'].includes(request.status));
   const visible = expanded ? requests.slice(0, 20) : active.slice(0, 4);
   const canSend = Boolean(context?.projectId) && Boolean(draft.trim()) && !busy;
+  // 侦查摘要只算一次——它同时给标题、行、未检测到的名单用。
+  const summary = detection ? detectedCliSummary(detection) : null;
 
   const submit = () => {
     if (!canSend) return;
@@ -72,21 +74,21 @@ export function RequestQueueDock({ requests, pendingCount, busy, presence, conte
       <div className="request-connection-body">
         <section className="request-connection-detect" aria-live="polite">
           <p className="eyebrow">这台机器上装了什么</p>
-          {detectionLoading && !detection ? <p className="request-connection-line">正在侦查…</p> : detection ? <><p className="request-connection-line">{detectedCliSummary(detection).headline} · {detectedCliSummary(detection).skillLine}</p><ul className="request-connection-clis">{detectedCliSummary(detection).rows.map((row) => <li key={row.name}><b>{row.name}</b><span>{row.detail}</span></li>)}</ul></> : <p className="request-connection-line">展开时自动侦查，不打扰。</p>}
+          {detectionLoading && !summary ? <p className="request-connection-line">正在侦查…</p> : summary ? <><p className="request-connection-line">{summary.headline} · {summary.skillLine}</p><ul className="request-connection-clis">{summary.installedRows.map((row) => <li key={row.name}><b>{row.title}</b><span>{row.detail}</span></li>)}</ul>{summary.missingNames.length > 0 && <p className="request-connection-line">另有 {summary.missingNames.length} 个未检测到：{summary.missingNames.join('、')}</p>}</> : <p className="request-connection-line">展开时自动侦查，不打扰。</p>}
         </section>
         <section className="request-connection-config">
           <p className="eyebrow">怎么唤起 agent</p>
-          <label>唤起命令<input value={connection?.invokeCommand || ''} onChange={(event) => onConnectionChange?.({ invokeCommand: event.target.value })} placeholder="例如：workbuddy / codex / claude" aria-label="唤起 agent 的命令" /></label>
+          <label>唤起命令<input value={connection?.invokeCommand || ''} onChange={(event) => onConnectionChange?.({ invokeCommand: event.target.value })} placeholder="例如：codex / claude / opencode / omp / pi / grok" aria-label="唤起 agent 的命令" /></label>
           <label>催促超时（分钟）<input type="number" min={MIN_ATTENTION_MINUTES} max={MAX_ATTENTION_MINUTES} value={connection?.attentionMinutes ?? MIN_ATTENTION_MINUTES} onChange={(event) => onConnectionChange?.({ attentionMinutes: event.target.value })} aria-label="agent 离线催促超时分钟数" /></label>
           <p className="request-connection-note">超时只影响「多久开始催你」；agent 的 skills 归宿主管理，Studio 只侦查不代管。</p>
         </section>
       </div>
     </details>
-    {visible.length > 0 && <ul className="request-cards">{visible.map((request) => <RequestCard key={request.id} request={request} busy={busy} progress={progress ? progress(request) : null} onWithdraw={onWithdraw} onAnswer={onAnswer} onOpenRound={onOpenRound} />)}</ul>}
+    {visible.length > 0 && <ul className="request-cards">{visible.map((request) => <RequestCard key={request.id} request={request} busy={busy} progress={progress ? progress(request) : null} onWithdraw={onWithdraw} onAnswer={onAnswer} onOpenRound={onOpenRound} onEditPlan={onEditPlan} />)}</ul>}
   </section>;
 }
 
-function RequestCard({ request, busy, progress: progressValue, onWithdraw, onAnswer, onOpenRound }) {
+function RequestCard({ request, busy, progress: progressValue, onWithdraw, onAnswer, onOpenRound, onEditPlan }) {
   const card = requestCardPresentation(request);
   const [answer, setAnswer] = useState('');
   const answerable = card.canAnswer && typeof onAnswer === 'function';
@@ -102,12 +104,14 @@ function RequestCard({ request, busy, progress: progressValue, onWithdraw, onAns
           于是 pending 时出现两遍「等待接单」——重复不是信息。 */}
       <p className="request-card-text">{request.text}</p>
     </div>
-    {progressValue && <p className={'request-card-progress is-' + progressValue.stage} role="status">
+    {progressValue && <div className={'request-card-progress is-' + progressValue.stage} role="status">
       <span className="request-card-stage">{progressValue.label}</span>
       {progressValue.detail && <span className="request-card-stage-detail">{progressValue.detail}</span>}
-      {progressValue.canConfirm && <button type="button" className="command-button request-card-confirm" disabled={busy} onClick={() => void onOpenRound?.(progressValue.roundId)}>去确认计划</button>}
+      {/* 4.1 回执：把「我准备这么出」摆回来——人只需要核对那一句（尤其是「有没有上一批」）。 */}
+      {progressValue.receipt?.ready && <ul className="request-card-receipt">{progressValue.receipt.lines.map((line) => <li key={line}>{line}</li>)}</ul>}
+      {progressValue.canConfirm && <span className="request-card-actions"><button type="button" className="command-button request-card-confirm" disabled={busy} onClick={() => void onOpenRound?.(progressValue.roundId)}>就这么出</button><button type="button" className="outline-button request-card-edit" disabled={busy} onClick={() => void onEditPlan?.(progressValue.roundId)}>改一下</button></span>}
       {progressValue.canWatch && !progressValue.canConfirm && <button type="button" className="outline-button request-card-watch" disabled={busy} onClick={() => void onOpenRound?.(progressValue.roundId)}>看这一批</button>}
-    </p>}
+    </div>}
     {card.text && <p className="request-card-note">{card.text}</p>}
     {card.reply && <p className="request-card-note is-reply"><Check size={13} aria-hidden="true" />{card.reply}</p>}
     {card.needsInput && <p className="request-card-note is-question">{card.question}</p>}

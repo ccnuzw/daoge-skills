@@ -9,12 +9,14 @@ const { createBackupManifest } = require('../../dist/vnext/backup/manifest');
 const { initializeStudio } = require('../../dist/vnext/studio/workspace');
 const { applyBackupRestore, recoverPendingBackupRestore } = require('../../dist/vnext/backup/restore');
 const { acquireDaemonLock } = require('../../dist/vnext/runtime/daemon-lock');
+const { SKILL_PROTOCOL_VERSION, RUNTIME_VERSION } = require('../../dist/vnext/shared/protocol');
 
+// 身份夹具**读单一来源**，不再写死版本号：协议升一次就漏一处，这种漂移没有信息量。
 const studio = {
   studioId: 'studio_restore_apply_fixture',
   protocolName: 'daoge-pic-skill-protocol',
-  protocolVersion: '3.0.0',
-  runtimeVersion: '6.0.0'
+  protocolVersion: SKILL_PROTOCOL_VERSION,
+  runtimeVersion: RUNTIME_VERSION
 };
 
 function workspace() {
@@ -276,7 +278,7 @@ test('the public backup-restore CLI uses the offline helper and returns nonzero 
     put(source, 'media/a.bin', 'source-a');
     const initialized = initializeStudio({ workspaceRoot: target });
     put(target, 'media/a.bin', 'original-a');
-    const manifest = createBackupManifest({ workspaceRoot: source, studio: { studioId: initialized.manifest.studioId, protocolName: 'daoge-pic-skill-protocol', protocolVersion: '3.0.0', runtimeVersion: '6.0.0' }, entries: [{ path: 'media/a.bin', category: 'media' }] });
+    const manifest = createBackupManifest({ workspaceRoot: source, studio: { studioId: initialized.manifest.studioId, protocolName: 'daoge-pic-skill-protocol', protocolVersion: SKILL_PROTOCOL_VERSION, runtimeVersion: RUNTIME_VERSION }, entries: [{ path: 'media/a.bin', category: 'media' }] });
     const success = runCli(target, source, manifest);
     assert.equal(success.status, 0, success.stderr);
     assert.equal(read(target, 'media/a.bin'), 'source-a');
