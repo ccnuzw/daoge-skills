@@ -8,6 +8,7 @@ import { createLineageExport, lineageExportFilename } from './lineage-export-mod
 import { statusPresentation } from './status-presentation.mjs';
 import { pendingRunItems } from './run-item-pagination.mjs';
 import { nodeMenuItems } from './lineage-menu-model.mjs';
+import { deriveAvailability } from './derive-path-model.mjs';
 import { applyPlanEdit, planEditForm, planEditIssues } from './plan-edit-model.mjs';
 import { batchFailureSummary } from './failure-copy-model.mjs';
 import { batchQualityCopy, reviewDistribution } from './batch-quality-model.mjs';
@@ -495,7 +496,7 @@ function LineageWorkspaceSummary({ selectedTask, selectedRound, runs = EMPTY_ARR
     </section>
   </div>;
 }
-export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onDeselectAsset }) {
+export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onDeselectAsset, onCanvasAssetSelection }) {
   tasks = listValue(tasks);
   rounds = listValue(rounds);
   runs = listValue(runs);
@@ -573,6 +574,10 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const filteredNodes = useMemo(() => nodes.filter((node) => !collapsedGroupIds.has(node.groupId) && visibleByMode(node, settings.mode || 'map', expandedRoundIds) && visibleByFilter(node, settings.filter, selectedKeys)), [nodes, collapsedGroupIds, selectedKeys, settings.filter, settings.mode, positions, expandedRoundIds]);
   const selectedNodes = useMemo(() => nodes.filter((node) => selectedKeys.has(node.key)), [nodes, selectedKeys]);
   const selectedAssetNodes = selectedNodes.filter((node) => isAssetNode(node));
+  // G1：画布圈选要成为「说一句」的指代。这里只把选中的**图 id** 往上报，
+  // 组合与去重交给纯模型（`requestContextAssetIds`），画布不持久化任何选中态。
+  const selectedCanvasAssetIds = useMemo(() => nodes.filter((node) => selectedKeys.has(node.key) && isAssetNode(node)).map((node) => node.entity.id).filter(Boolean), [nodes, selectedKeys]);
+  useEffect(() => { onCanvasAssetSelection?.(selectedCanvasAssetIds); }, [onCanvasAssetSelection, selectedCanvasAssetIds]);
   const primaryNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
   // 「质量跟着看的东西走」（方案 7.10.2）：选中批次时，检查器直接给这一批的评审分布。
   // 项目级指标留在 project-overview（能力只加强不删）——这里是加，不是搬走。
@@ -864,13 +869,15 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const nodeMenuContext = useCallback((node) => ({
     // 「去确认计划」只对等着确认的批次有意义。
     canReview: node?.entityType === 'round' && node?.entity?.status === 'awaiting_confirmation',
-    // 「拿出去」要有项目才能落到某次交付里。
+    // 「拿出去」要有项目才能落到某次交付里。**图上的交付由菜单模型按「已选定」把关**
+    // （`lineage-menu-model` 只在 `node.selectedAsset` 分支给 `deliver`），批次仍可整体去交付——
+    // 这里是既有能力，红线 2.4：只加强不删。
     canDeliver: Boolean(project?.id),
     // 草稿也能改计划（改后照样走确认）；有了出图记录才谈得上生成历史。
     canEditPlan: node?.entityType === 'round' && ['draft', 'awaiting_confirmation'].includes(node?.entity?.status),
     canHistory: node?.entityType === 'round' && !['draft', 'awaiting_confirmation'].includes(node?.entity?.status),
-    // 「照它再来」要经队列派给 agent——本批还没有队列，所以恒为 false（模型留了开关）。
-    canDerive: false,
+    // 「照它再来」＝本地建草稿（决策 D1，方案 4.3：复制出来是草稿，不是执行命令）。
+    canDerive: deriveAvailability(node).available,
     collapsed: positionsRef.current[node?.key]?.collapsed === true
   }), [project?.id]);
   /** 菜单项 → 动作。全走画布已有的回调，不新增能力、不绕过既有流程。 */
@@ -894,11 +901,20 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     if (itemId === 'reject') return onReject([entity], { createNextRound: false });
     if (itemId === 'download') return onDownloadAsset(entity);
     if (itemId === 'new-round') return onCreateRound();
+    // 「照它再来」走**本地草稿**（D1）：图节点用那张图；批次节点用它出的那些图。
+    // 只把来源图交给既有 `openDerivedRoundDialog`，不新增能力、不绕过确认闸门。
+    if (itemId === 'derive') {
+      const sourceAssets = node.entityType === 'asset'
+        ? [entity]
+        : nodes.filter((item) => isAssetNode(item) && item.roundId === entity?.id).map((item) => item.entity).filter(Boolean);
+      if (!sourceAssets.length) return;
+      return onOpenDerive?.(sourceAssets, 'variation', 'derive');
+    }
     if (itemId === 'preview') return onPreviewAsset(entity);
     if (itemId === 'edit-plan') return openPlanEdit(node);
     if (itemId === 'history') return onNavigate({ view: 'runs', taskId: entity?.taskId || null, roundId: entity?.id || null, compareRoundIds: entity?.id ? [entity.id] : [], runId: null, assetScope: 'round' });
     if (itemId === 'copy-plan') return void navigator.clipboard?.writeText('请基于 Workbench 创作谱系中的节点生成计划草稿；先不要真的出图，给我审阅确认。').catch(() => setSaveState({ status: 'error', message: '无法复制计划信息，请在会话里手动引用这个节点。' }));
-  }, [toggleNodeCollapsed, onNavigate, project?.id, onInspectAsset, onToggleAsset, onReject, onDownloadAsset, onCreateRound, onCreateTask, openPlanEdit, onPreviewAsset]);
+  }, [toggleNodeCollapsed, onNavigate, project?.id, onInspectAsset, onToggleAsset, onReject, onDownloadAsset, onCreateRound, onCreateTask, openPlanEdit, onPreviewAsset, onOpenDerive, nodes]);
 
   const undoLayout = useCallback(() => {
     const previous = historyRef.current.undo.pop();
@@ -1084,6 +1100,16 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     selectionRef.current = { startX: world.x, startY: world.y, currentX: world.x, currentY: world.y, additive: event.shiftKey };
     setSelectionBox(selectionRef.current);
     if (!event.shiftKey) setSelectedKeys(new Set());
+  };
+  /**
+   * G2：空白处双击就建任务（方案 4.3「空白双击新建」）。
+   * 只认「真的点在空白」——双击节点是展开/打开，不能顺手又建一个。
+   */
+  const handleCanvasDoubleClick = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('.lineage-node, .lineage-group, [data-lineage-no-zoom]')) return;
+    if (!project?.id) return;
+    onCreateTask?.();
   };
   const handleCanvasWheel = useCallback((event) => {
     const target = event.target instanceof Element ? event.target : null;
@@ -1310,7 +1336,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
     </div>
     {outlineOpen && <LineageTextView id="lineage-accessible-view" nodes={nodes} connections={allConnections} endpointByKey={endpointByKey} selectedKeys={selectedKeys} scope={scope} coverage={{ assets: { loaded: lineageAssetsLoaded, total: lineageAssetTotal, loading: lineageAssetLoading || !layoutReady }, runItems: { loaded: lineageRunItemsLoaded, total: lineageRunItemTotal, loading: runItemCoverage?.loading === true || !layoutReady } }} onFocus={selectAccessibleNode} onOpen={(node) => openNode(node, { onNavigate, onInspectAsset })} />}
     <div className="lineage-shell">
-      <div ref={canvasRef} tabIndex={0} className={'lineage-canvas bg-' + settings.background} onPointerDown={handleCanvasPointerDown} onKeyDown={handleKeyDown} onContextMenu={(event) => openContextMenu(event)} onDragOver={(event) => { if (dataTransferHasType(event.dataTransfer, 'application/x-daoge-lineage-node')) event.preventDefault(); }} aria-label="创作谱系画布；拖拽图片到批次上可建立引用，可用方向键微调选中节点">
+      <div ref={canvasRef} tabIndex={0} className={'lineage-canvas bg-' + settings.background} onPointerDown={handleCanvasPointerDown} onDoubleClick={handleCanvasDoubleClick} onKeyDown={handleKeyDown} onContextMenu={(event) => openContextMenu(event)} onDragOver={(event) => { if (dataTransferHasType(event.dataTransfer, 'application/x-daoge-lineage-node')) event.preventDefault(); }} aria-label="创作谱系画布；拖拽图片到批次上可建立引用，可用方向键微调选中节点">
         {!layoutReady && <div className="lineage-loading"><LoaderCircle size={18} className="spin" />读取谱系布局</div>}
         <svg className="lineage-edges" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}>
           <defs><marker id="lineage-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" /></marker></defs>

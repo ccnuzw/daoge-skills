@@ -26,7 +26,7 @@ function attentionMessage(attention) {
  *
  * Studio 仍然不执行任何出图——这里只是排队叫号机，执行方永远是装着 skill 的 agent。
  */
-export function RequestQueueDock({ requests, pendingCount, busy, presence, context, progress, onSend, onWithdraw, onAnswer, onOpenRound, detection, detectionLoading, onDetect, connection, onConnectionChange }) {
+export function RequestQueueDock({ requests, pendingCount, busy, presence, context, progress, onSend, onWithdraw, onAnswer, onOpenRound, detection, detectionLoading, onDetect, connection, onConnectionChange, providerNotice = '' }) {
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState(false);
   // ⚠️ 在场**只有一个来源**（presence 对象）。
@@ -65,6 +65,7 @@ export function RequestQueueDock({ requests, pendingCount, busy, presence, conte
       <button type="button" className="outline-button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '收起记录' : '全部记录'}{pendingCount ? ' · ' + pendingCount + ' 待接' : ''}</button>
     </div>
     <p className={'request-agent is-' + agent.tone} role="status"><span className="request-agent-dot" aria-hidden="true" />{agent.label}{agent.detail ? ' · ' + agent.detail : ''}</p>
+    {providerNotice && <p className="request-provider-notice" role="status"><CircleAlert size={14} aria-hidden="true" />{providerNotice}</p>}
     {attention.attention && <p className="request-attention" role="status"><CircleAlert size={14} aria-hidden="true" />{attentionMessage(attention)}</p>}
     <details className="request-connection" onToggle={(event) => { if (event.currentTarget.open) void onDetect?.(); }}>
       <summary>连接与唤起</summary>

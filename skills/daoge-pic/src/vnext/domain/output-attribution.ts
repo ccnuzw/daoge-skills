@@ -54,3 +54,16 @@ export function attributeImportedAssetProject(db: StudioDatabase, input: { studi
   if (!input.projectId) return;
   db.prepare('UPDATE assets SET project_id = ?, updated_at = ? WHERE id = ? AND studio_id = ? AND project_id IS NULL').run(input.projectId, new Date().toISOString(), input.assetId, input.studioId);
 }
+
+/**
+ * T1（A11 读侧，方案 7.7.1）：**只认列**的归属判断。
+ *
+ * 读侧从此与「关系链是否还在」解耦——列是写入时写死的约束，关系链只服务没有列值的历史行
+ * （那部分由 `scopedAssetCondition` 的回退分支承担）。Studio 谓词同样走 `selectInStudioSql`，
+ * 不手写（漏一处就是静默的跨租户读取）。
+ */
+export function assetBelongsToProject(db: StudioDatabase, input: { studioId: string; assetId: string; projectId: string }): boolean {
+  if (!input.assetId || !input.projectId) return false;
+  const row = db.prepare(selectInStudioSql('asset', 'asset.project_id AS project_id')).get(input.assetId, input.studioId) as { project_id: string | null } | undefined;
+  return Boolean(row && row.project_id === input.projectId);
+}

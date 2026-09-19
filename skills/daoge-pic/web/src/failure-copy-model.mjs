@@ -20,8 +20,13 @@ const VERIFY_OWNER_LABEL = '先确认这张出没出';
 
 const SYSTEM_SIGNALS = Object.freeze([
   'rate limit', '429', 'timeout', 'timed out', 'network', 'connection',
-  '502', '503', '504', 'server error', 'unavailable', 'overloaded', 'fetch failed'
+  '502', '503', '504', 'server error', 'unavailable', 'overloaded', 'fetch failed',
+  // 磁盘写不进去也是**系统的问题**（开放项 #26）：不写进来它就会掉进「原因没写明」，
+  // 用户会白改一通描述。
+  'enospc', 'no space left', 'disk full', 'not enough space'
 ]);
+/** 磁盘满的专属签名（P4 要把它与「服务连不上」分开说：一个要清空间，一个只要等）。 */
+const DISK_SIGNALS = Object.freeze(['enospc', 'no space left', 'disk full', 'not enough space']);
 const MY_SIGNALS = Object.freeze([
   'moderation', 'content policy', 'policy', 'sensitive', 'review',
   '审核', '拦截', '违规', '敏感',
@@ -97,4 +102,47 @@ export function batchFailureSummary({ failed = 0, blocked = 0 } = {}) {
   if (Number(failed) > 0) parts.push(Number(failed) + ' 张没成');
   if (Number(blocked) > 0) parts.push(Number(blocked) + ' 张被挡');
   return parts.join(' · ');
+}
+
+/**
+ * 生成服务整层故障的首屏级文案（方案 4.10 · 开放项 #26 / #28 · 施工单 P4）。
+ *
+ * 与单张归因同一条判据：**分清「我的问题」和「系统的问题」**，并且永远给下一步。
+ *   - `all_providers_down`：系统的问题 → 让他等，并**明确说「别反复点重试」**
+ *     （分不清的话，他会对着一个自己解决不了的问题反复点）；
+ *   - `disk_full`：系统的问题，但要他动一下（清理空间）→ 说清动什么；
+ *   - `not_configured`：不是故障，是还没配 → 指向「生成服务」。
+ *
+ * @param {{ kind?: string }} [input]
+ */
+export function providerOutageCopy(input = {}) {
+  const kind = String(input.kind || '');
+  if (kind === 'all_providers_down') return '生成服务现在都连不上。这是系统的问题，不是你的操作——等一会儿再试，别反复点重试。';
+  if (kind === 'disk_full') return '磁盘空间满了，出图文件写不进去。先清理一点空间，再回来继续；这一批不用重试。';
+  if (kind === 'not_configured') return '还没有可用的生成服务。先去「生成服务」里配好一个，再回来说一句。';
+  return '生成服务暂时用不了。先别反复重试，等一会儿或去「生成服务」里看看。';
+}
+
+/**
+ * 整层故障的**判定**（施工单 P4）：只看事实，不猜。
+ *
+ * 输入是服务端给的最近几次终态运行（`/api/providers.recentOutcomes`，只带结局与错误摘要）。
+ * 判据：
+ *   - 最近 N 次里**只要有一次成功或一次取消**，就不算「全挂」——成功说明服务活着，
+ *     取消是用户自己的决定；
+ *   - 全是失败且摘要都指向磁盘 → `disk_full`（要清空间）；
+ *   - 全是失败且归因都是「系统的问题」 → `all_providers_down`（只要等）。
+ * 分类复用 `failureAttribution`，所以关键词只有一份（本文件），不另立一套。
+ */
+export function providerOutageKind(input = {}) {
+  const outcomes = Array.isArray(input.recentOutcomes) ? input.recentOutcomes.filter(Boolean) : [];
+  const size = Math.max(2, Number.isFinite(input.minRuns) ? Number(input.minRuns) : 2);
+  const window = outcomes.slice(0, size);
+  if (window.length < size) return null;
+  const failing = window.filter((outcome) => ['failed', 'partial'].includes(String(outcome?.status || '')));
+  if (failing.length !== window.length) return null;
+  const summaries = window.map((outcome) => String(outcome?.errorSummary || '').toLowerCase());
+  if (summaries.every((summary) => DISK_SIGNALS.some((signal) => summary.includes(signal)))) return 'disk_full';
+  const allSystem = window.every((outcome) => failureAttribution({ status: 'failed', error: { summary: String(outcome?.errorSummary || '') } }).owner === 'system');
+  return allSystem ? 'all_providers_down' : null;
 }

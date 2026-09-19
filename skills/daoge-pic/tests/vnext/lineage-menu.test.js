@@ -54,7 +54,7 @@ test('每张菜单 3–4 项，且全是动词', async () => {
     nodeMenuItems({ entityType: 'task', entity: {} })
   ];
   for (const items of samples) {
-    assert.ok(items.length >= 3 && items.length <= MENU_ITEM_LIMIT, '菜单项数应在 3–4（详情占一格）之间：' + JSON.stringify(ids(items)));
+    assert.ok(items.length >= 3 && items.length <= MENU_ITEM_LIMIT + 1, '菜单项数应在 3–5（4 动词 + 详情）之间：' + JSON.stringify(ids(items)));
     assert.equal(items[items.length - 1].id, 'detail', '「详情」永远在最后一格');
     // 全是动词：不许出现「计划信息」「运行」这类名词项（方案 4.4 明文）。
     for (const item of items) {
@@ -71,10 +71,14 @@ test('批次菜单随折叠状态换说法；依赖队列的动作默认不出�
   assert.equal(expanded[0].id, 'toggle');
   assert.notEqual(collapsed[0].label, expanded[0].label, '折叠与展开两种状态下的说法必须不同');
 
-  // 「照它再来几张」要经队列派给 agent——本批没有队列，默认不该出现。
+  // 「照它再来几张」走本地草稿（施工单 G3 决策 D1）：不传 canDerive 默认不出现。
   assert.equal(nodeMenuItems(asset()).some((item) => item.id === 'derive'), false);
-  // 但模型留了开关，队列做完（三批）传 canDerive 就能开。
   assert.equal(nodeMenuItems(asset({ selectedAsset: true }), { canDerive: true }).some((item) => item.id === 'derive'), true);
+  // ⚠️ 可达性：候选图有 preview/keep/reject 三个动词，derive 是第 4 个——
+  // 菜单上限若把「详情」也算进去，它会被切掉（曾发生的真缺陷）。所以必须显式锁住。
+  const candidate = nodeMenuItems(asset(), { canDerive: true });
+  assert.equal(candidate.some((item) => item.id === 'derive'), true, '候选图的「照它再来几张」必须真的出现在菜单里');
+  assert.equal(candidate[candidate.length - 1].id, 'detail');
 });
 
 test('全节点菜单矩阵（2026-09-17 审计固化）：每类节点该有的都有', async () => {

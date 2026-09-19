@@ -138,16 +138,42 @@ test('⚠️ 视图里的 runs 未必覆盖这一批——不能据此断定「�
   assert.match(active.label, /1 \//, '进度按视图里的运行项算');
 });
 
-test('关联靠 plan.requestId 外键——一个请求出多批时取最后一批', async () => {
+test('关联靠 plan.requestId 外键；一个请求出多批时按「权威指向 → 在跑 → 最新运行 → 最新批次」挑', async () => {
   const { roundForRequest } = await model();
   const rounds = [
-    linkedRound({ id: 'rnd_1', plan: { requestId: 'req_1' } }),
-    linkedRound({ id: 'rnd_2', plan: { requestId: 'req_1' } }),
+    linkedRound({ id: 'rnd_1', plan: { requestId: 'req_1' }, createdAt: '2026-09-01T00:00:00.000Z' }),
+    linkedRound({ id: 'rnd_2', plan: { requestId: 'req_1' }, createdAt: '2026-09-02T00:00:00.000Z' }),
     linkedRound({ id: 'rnd_other', plan: { requestId: 'req_2' } })
   ];
-  assert.equal(roundForRequest({ id: 'req_1' }, rounds).id, 'rnd_2');
   assert.equal(roundForRequest({ id: 'req_3' }, rounds), null);
   assert.equal(roundForRequest({ id: 'req_1' }, []), null);
+  // ① 服务端写下的权威指向优先
+  assert.equal(roundForRequest({ id: 'req_1', resultRoundId: 'rnd_1' }, rounds, []).id, 'rnd_1');
+  // ② 有运行在跑的那一批优先（哪怕它不是最新创建的）
+  const runs = [
+    { id: 'run_a', roundId: 'rnd_1', status: 'running', createdAt: '2026-09-03T00:00:00.000Z' },
+    { id: 'run_b', roundId: 'rnd_2', status: 'completed', createdAt: '2026-09-04T00:00:00.000Z' }
+  ];
+  assert.equal(roundForRequest({ id: 'req_1' }, rounds, runs).id, 'rnd_1');
+  // ③ 没有在跑的：取运行最新的那一批
+  assert.equal(roundForRequest({ id: 'req_1' }, rounds, [{ id: 'run_b', roundId: 'rnd_2', status: 'completed', createdAt: '2026-09-04T00:00:00.000Z' }]).id, 'rnd_2');
+  // ④ 都没有运行：取最近创建的批次
+  assert.equal(roundForRequest({ id: 'req_1' }, rounds, []).id, 'rnd_2');
+});
+
+test('结单且带回复、又没有权威指向时：卡片只报「已完成」，不叠自相矛盾的批次进度', async () => {
+  const { requestProgress } = await model();
+  const rounds = [
+    linkedRound({ id: 'rnd_done', plan: { requestId: 'req_multi' }, status: 'active' }),
+    linkedRound({ id: 'rnd_norun', plan: { requestId: 'req_multi' }, status: 'active' })
+  ];
+  // 没有任何运行被加载 → 旧实现会挑到 rnd_norun 并显示「已确认 · 正在准备出图」
+  const progress = requestProgress(
+    { id: 'req_multi', status: 'done', resultRoundId: null, resultJson: JSON.stringify({ reply: '三张变种已出齐。' }) },
+    { rounds, runs: [], runItems: [] }
+  );
+  assert.equal(progress.stage, 'ended', '带回复的结单请求不再显示批次进度：' + JSON.stringify(progress));
+  assert.equal(progress.roundId, null);
 });
 
 test('数据不全时降级，不编数字', async () => {

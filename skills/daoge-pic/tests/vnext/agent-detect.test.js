@@ -10,6 +10,11 @@ const path = require('node:path');
  *
  * 判定全部走注入的探针（`probe`），所以测试不需要真的碰宿主目录，也不会
  * 因为跑测机器上恰好装了什么而变红。
+ *
+ * 夹具钉的是**路径身份**，不是拼写：探针和真实探针的 `fs.statSync` 一样按平台
+ * 解析路径。侦查会把家目录根解析成绝对路径，win32 下 `/home/creator` 这类无盘符
+ * 的根会补上当前盘符（`D:\home\creator`），夹具按原样比对就会把「侦查在这台机器上
+ * 找不到家目录」误报成回归——v6.0.0 的 Windows CI 四个组合全栽在这里。
  */
 
 function requireDetectModule() {
@@ -21,12 +26,15 @@ function requireDetectModule() {
 }
 
 function probeFor({ dirs = [], files = [], listings = {} } = {}) {
-  const dirSet = new Set(dirs);
-  const fileSet = new Set(files);
+  const canonical = (value) => path.resolve(value);
+  const dirSet = new Set(dirs.map(canonical));
+  const fileSet = new Set(files.map(canonical));
+  const listingSet = {};
+  for (const [key, value] of Object.entries(listings)) listingSet[canonical(key)] = value;
   return {
-    directoryExists: (value) => dirSet.has(value),
-    fileExists: (value) => fileSet.has(value),
-    listDirectory: (value) => listings[value] || []
+    directoryExists: (value) => dirSet.has(canonical(value)),
+    fileExists: (value) => fileSet.has(canonical(value)),
+    listDirectory: (value) => listingSet[canonical(value)] || []
   };
 }
 

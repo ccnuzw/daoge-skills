@@ -8,7 +8,13 @@
 // 菜单还要**随对象状态变**：候选 / 已选定 / 已交付 三套完全不同。
 // 这是纯函数，所以「三套不同」这件事能真跑单测（守卫见 tests/vnext/lineage-menu.test.js）。
 
-/** 每张菜单最多几项（方案 4.4：3–4 项）。主体项先占位，详情永远留一格。 */
+/**
+ * 每张菜单最多几个**动词**（方案 4.4：3–4 项，全是动词）。「详情」不计入、永远留一格。
+ *
+ * ⚠️ 这里曾经把「详情」也算进这个上限（`slice(0, LIMIT - 1)`），后果是候选图菜单的
+ * 第 4 个动词被**永远切掉**——`照它再来几张` 就此不可达（施工单 G3 实测抓到）。
+ * 4.4 的候选菜单本就是四个动词（就它了 / 不行 / 照它再来几张 / 拿出去）。
+ */
 export const MENU_ITEM_LIMIT = 4;
 
 /**
@@ -62,6 +68,6 @@ export function nodeMenuItems(node, { canReview = false, canDeliver = false, can
     body.push({ id: 'open', label: '打开' });
   }
 
-  // 主体项最多 3 条，「详情」永远占最后一格 —— 于是每张菜单 3–4 项（方案 4.4）。
-  return [...body.slice(0, MENU_ITEM_LIMIT - 1), { id: 'detail', label: '详情' }];
+  // 主体动词最多 4 条，「详情」永远占最后一格 —— 于是每张菜单 3–5 项（4 动词 + 详情，方案 4.4）。
+  return [...body.slice(0, MENU_ITEM_LIMIT), { id: 'detail', label: '详情' }];
 }

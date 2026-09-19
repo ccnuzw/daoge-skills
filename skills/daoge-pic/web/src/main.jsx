@@ -5,7 +5,9 @@ import { REVIEW_ZOOM_MAX, REVIEW_ZOOM_MIN, clampReviewZoom, reviewKeyAction, rev
 import { DRAFT_BOUNDARY_COPY } from './boundary-copy.mjs';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
 import { runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
-import { failureAttributionLine } from './failure-copy-model.mjs';
+import { failureAttributionLine, providerOutageCopy, providerOutageKind } from './failure-copy-model.mjs';
+import { ASSET_BACKSTAGE_COPY } from './asset-backstage-copy.mjs';
+import { providerRuntimeNotice } from './provider-runtime-model.mjs';
 import { planPresentation, planStateLabel } from './plan-presentation.mjs';
 import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
 import { PromptWorkspace } from './prompt-workspace.jsx';
@@ -18,7 +20,9 @@ import { CreatorDelivery } from './creator-delivery.jsx';
 import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 import { AssetStateLegend } from './asset-state-legend.jsx';
 import { WorkbenchNavigation } from './workbench-navigation.jsx';
-import { deliverySelectionMessage, projectDeliverySelection } from './delivery-workflow.mjs';
+import { deliveryIntentFromSelection, deliverySelectionMessage, projectDeliverySelection } from './delivery-workflow.mjs';
+import { inPlaceCreationRoute } from './canvas-creation-model.mjs';
+import { requestContextAssetIds } from './canvas-request-context.mjs';
 import { bootstrapLocalStudioSession } from './local-auth.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { ConfirmationDialog } from './confirmation-dialog.jsx';
@@ -586,9 +590,9 @@ function SessionPlanSummary({ sessionPlanStatus, onRestoreContext }) {
   </details>;
 }
 
-function AssetSelectionStrip({ assets, selectedTask, selectedRound, onRemove, onClear, onPreview, onDownloadArchive, onDeliver, onOpenDerive, onAddReference, onReject, onOpenReference }) {
+function AssetSelectionStrip({ assets, selectedTask, selectedRound, deliverIntent = null, onRemove, onClear, onPreview, onDownloadArchive, onDeliver, onOpenDerive, onAddReference, onReject, onOpenReference }) {
   return <section className="selection-strip">
-    <header><div><p className="eyebrow">已选图片</p><h2>{String(assets.length).padStart(2, '0')} 张</h2></div>{assets.length > 0 && <div className="selection-strip-actions"><button type="button" className="outline-button" title="打开查看器：← → 切图，空格保留，X 不采用" onClick={() => onPreview(assets)}><Eye size={15} />预览挑图</button><CreativeActionLauncher assets={assets} selectedTask={selectedTask} selectedRound={selectedRound} label="基于已选继续" onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /><button type="button" className="outline-button" onClick={onDeliver}><Check size={15} />去交付</button><button type="button" className="outline-button" onClick={onDownloadArchive}><Download size={15} />打包下载 {assets.length} 张</button><IconButton label="清空当前选片" onClick={onClear}><X size={15} /></IconButton></div>}</header>
+    <header><div><p className="eyebrow">已选图片</p><h2>{String(assets.length).padStart(2, '0')} 张</h2></div>{assets.length > 0 && <div className="selection-strip-actions"><button type="button" className="outline-button" title="打开查看器：← → 切图，空格保留，X 不采用" onClick={() => onPreview(assets)}><Eye size={15} />预览挑图</button><CreativeActionLauncher assets={assets} selectedTask={selectedTask} selectedRound={selectedRound} label="基于已选继续" onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} /><button type="button" className="outline-button" disabled={deliverIntent ? !deliverIntent.canStart : false} title={deliverIntent?.copy || ''} onClick={onDeliver}><Check size={15} />去交付</button><button type="button" className="outline-button" onClick={onDownloadArchive}><Download size={15} />打包下载 {assets.length} 张</button><IconButton label="清空当前选片" onClick={onClear}><X size={15} /></IconButton></div>}</header>
     {assets.length ? <div className="selection-strip-items">{assets.map((asset) => <article className="selection-item" key={asset.id}><button type="button" className="selection-preview" onClick={() => onPreview([asset])} aria-label="放大查看已选图片"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button><div className="selection-item-copy"><strong title={asset.display?.label || '已选素材'}>{asset.display?.label || '已选素材'}</strong><span>{asset.review?.decision === 'keep' ? '已保留' : asset.review?.decision === 'review' ? '待复核' : asset.review?.decision === 'derive' ? '衍生方向' : asset.review?.decision === 'reject' ? '不采用' : '尚未评审'}</span></div><button type="button" className="selection-remove" title="移出当前选片" aria-label="移出当前选片" onClick={() => onRemove(asset.id)}><X size={13} /></button></article>)}</div> : <div className="selection-strip-empty"><Bookmark size={18} /><span>当前没有已选图片</span></div>}
   </section>;
 }
@@ -1556,6 +1560,8 @@ function App() {
   const [deliveryCompletion, setDeliveryCompletion] = useState(null);
   const [deliveryCreating, setDeliveryCreating] = useState(false);
   const [selectedAssetIds, setSelectedAssetIds] = useState(new Set());
+  // G1：画布圈选（与「选片」是两条链）。只用于「这一句话指哪些图」，不落库、不持久化。
+  const [canvasSelectedAssetIds, setCanvasSelectedAssetIds] = useState(EMPTY);
   const [selectedImportNeed, setSelectedImportNeed] = useState('');
   const [projectTemplates, setProjectTemplates] = useState(EMPTY);
   const [selectionAssets, setSelectionAssets] = useState(EMPTY);
@@ -1751,7 +1757,7 @@ function App() {
     if (!request.isCurrent()) throw new DOMException('Stale refresh', 'AbortError');
     const nextProjects = projectData.projects || [];
     setStudio(studioData);
-    setProvider({ ...(providerData.status || {}), reconfigurationPending: providerData.runtime?.reconfigurationPending === true });
+    setProvider({ ...(providerData.status || {}), reconfigurationPending: providerData.runtime?.reconfigurationPending === true, runtime: providerData.runtime || null, recentOutcomes: providerData.recentOutcomes || [] });
     setProjects(nextProjects);
     setTaskTypes(taskTypeData.taskTypes || []);
     setProjectTemplates(projectTemplateData.templates || []);
@@ -2219,6 +2225,13 @@ function App() {
   const importLabel = selectedImportNeed ? '导入“' + selectedImportNeed + '”' : selectedRound && assetScope === 'round' ? '添加为本轮参考' : '导入到项目';
   const deliverySelection = useMemo(() => projectDeliverySelection(selectedProject?.id || null, selectedAssets), [selectedProject?.id, selectedAssets]);
   const selectedDeliveryAssets = deliverySelection.eligibleAssets;
+  // G4：「拿出去」挂选中——给得出就可用、给不出给人话（绝不给点了没用的按钮）。
+  const deliveryIntent = deliveryIntentFromSelection({ projectId: selectedProject?.id || null, selection: deliverySelection });
+  // P3/P4：provider 的运行时真相（限流/退避）与「还没配生成服务」都要在**不打开设置**的地方可见（决策 D2）。
+  const providerNotice = providerRuntimeNotice(provider?.runtime) || (provider?.configured === false ? providerOutageCopy({ kind: 'not_configured' }) : '');
+  // P4：整层故障（全挂 / 磁盘满）走**首屏级**提示条——由服务端给的「最近几次终态运行」事实判定，
+  // 分类复用 failure-copy-model 的单一来源（providerOutageKind）。
+  const providerOutage = providerOutageKind({ recentOutcomes: provider?.recentOutcomes });
 
   const eligibleDeliveryIds = useMemo(() => new Set(deliveries.filter((delivery) => ['ready', 'exported'].includes(delivery.status)).map((delivery) => delivery.id)), [deliveries]);
 
@@ -2603,7 +2616,18 @@ function App() {
       }
       setCreationDialog(null);
       await refresh();
-      navigateRoute(createdRound ? { view: 'lineage', projectId: selectedProject.id, taskId: createdTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' } : selectTask(route, createdTask.id));
+      // G2：建完留在画布（路由由 `inPlaceCreationRoute` 保证 view 不变），并聚焦新建的实体。
+      navigateRoute(inPlaceCreationRoute({
+        ...selectTask(route, createdTask.id),
+        view: 'lineage',
+        kind: createdRound ? 'round' : 'task',
+        id: createdRound ? createdRound.id : createdTask.id,
+        projectId: selectedProject.id,
+        taskId: createdTask.id,
+        compareRoundIds: createdRound ? [createdRound.id] : [],
+        runId: null,
+        assetScope: createdRound ? 'round' : 'task'
+      }));
     } catch (nextError) {
       setCreationError(errorMessageForDisplay(nextError, '无法创建任务。'));
     } finally {
@@ -2854,8 +2878,8 @@ function App() {
         const receipt = await api('/api/rounds/derived', { method: 'POST', idempotencyKey: uniqueKey('reject-derived-round'), body: { ...form, taskId: selectedTask.id } });
         const createdRound = receipt.value;
           setNotice('不采用原因已保存，并已创建带反例参考的下一轮草稿。请让会话基于新的信息整理计划。');
-        await refresh();
-        navigateRoute({ view: 'lineage', projectId: selectedProject.id, taskId: selectedTask.id, roundId: createdRound.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' });
+await refresh();
+      navigateRoute(inPlaceCreationRoute({ ...route, view: 'lineage', kind: 'round', id: createdRound.id, projectId: selectedProject.id, taskId: selectedTask.id, compareRoundIds: [createdRound.id], runId: null, assetScope: 'round' }));
         return;
       }
       const negativeSaved = addAsNegative ? await addAssetsToCurrentRoundReferences(rejectedAssets, 'negative') : false;
@@ -3155,8 +3179,9 @@ function App() {
         <div className="asset-hint">{routeView === 'trash' ? '当前项目回收站' : selectedAssetIds.size ? selectedAssetIds.size + ' 张已选择' : ASSET_SCOPE_LABELS[assetScope] + '资产'}</div>
       </div>
     </div>
+    {routeView === 'assets' && <p className="asset-backstage-note">{ASSET_BACKSTAGE_COPY}</p>}
     {routeView === 'assets' && selectedProject && <MaterialImportGuide materialNeeds={contextMaterialNeeds} selectedNeed={selectedImportNeed} completedCounts={materialNeedCounts} assetScope={assetScope} selectedRound={selectedRound} onSelectNeed={setSelectedImportNeed} />}
-    {routeView === 'assets' && selectedProject && selectedAssets.length > 0 && <AssetSelectionStrip assets={selectedAssets} selectedTask={selectedTask} selectedRound={selectedRound} onRemove={toggleSelection} onClear={() => void clearSelection()} onDownloadArchive={() => downloadProjectArchive(selectedAssets.map((asset) => asset.id))} onDeliver={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} />}
+    {routeView === 'assets' && selectedProject && selectedAssets.length > 0 && <AssetSelectionStrip assets={selectedAssets} selectedTask={selectedTask} selectedRound={selectedRound} deliverIntent={deliveryIntent} onRemove={toggleSelection} onClear={() => void clearSelection()} onDownloadArchive={() => downloadProjectArchive(selectedAssets.map((asset) => asset.id))} onDeliver={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} />}
     {visibleAssets.length ? <><div className={'asset-grid is-preview-' + assetPreviewFit}>{visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} selected={selectedAssetIds.has(asset.id)} selectionBusy={selectionBusyIds.has(asset.id)} shared={sharedAssetIds.has(asset.id)} previewFit={assetPreviewFit} selectedTask={selectedTask} fallbackTask={taskForId(asset?.display?.taskId || asset?.source?.taskId || asset?.source?.creativeTaskId)} selectedRound={selectedRound} onToggleSelect={markAsDeliverable} onReview={review} onTrash={trash} onRestore={restore} onInspect={inspectAsset} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />)}</div><nav className="asset-pagination" aria-label="资产分页"><button type="button" className="outline-button" disabled={assetPage <= 1} onClick={() => setAssetPage((current) => Math.max(1, current - 1))}><ChevronLeft size={15} />上一页</button><span>第 <b>{assetPage}</b> / {totalAssetPages} 页 · 共 {assetTotal} 张</span><button type="button" className="outline-button" disabled={assetPage >= totalAssetPages} onClick={() => setAssetPage((current) => Math.min(totalAssetPages, current + 1))}>下一页<ChevronRight size={15} /></button></nav></> : <div className="empty-stage asset-empty">{routeView === 'trash' ? <Archive size={30} strokeWidth={1.15} /> : <Inbox size={30} strokeWidth={1.15} />}<p>{routeView === 'trash' ? '当前项目回收站为空' : (assetScope === 'round' && !selectedRound ? '请先从任务里选择批次，再查看本轮结果。' : '当前范围内暂未找到资产。')}</p>{routeView === 'assets' && <button type="button" className="outline-button" onClick={() => inputRef.current?.click()}><Upload size={16} />导入图片</button>}</div>}
   </section>;
   const viewRenderers = {
@@ -3179,6 +3204,7 @@ function App() {
       sharedAssets={sharedAssets}
       selectedAssetIds={selectedAssetIds}
       selectionBusyIds={selectionBusyIds}
+      onCanvasAssetSelection={setCanvasSelectedAssetIds}
       deliveries={deliveries}
       sessionPlanStatus={sessionPlanStatus}
       layoutRevision={eventRevision.canvasLayout}
@@ -3237,7 +3263,8 @@ function App() {
           <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} view={view} sessionPlanStatus={sessionPlanStatus} onProject={() => navigateRoute({ view: 'project-overview', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} onCreateRound={() => openCreationDialog('round')} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} onRestoreContext={restoreSessionContext} />
         </> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={restoreSessionContext} />}
       </div>
-      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: [...selectedAssetIds] }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} detection={agentDetection} detectionLoading={agentDetectionLoading} onDetect={detectAgents} connection={agentConnection} onConnectionChange={updateAgentConnection} />
+      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: requestContextAssetIds({ canvasAssetIds: canvasSelectedAssetIds, selectedAssetIds: [...selectedAssetIds] }) }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} providerNotice={providerNotice} detection={agentDetection} detectionLoading={agentDetectionLoading} onDetect={detectAgents} connection={agentConnection} onConnectionChange={updateAgentConnection} />
+      {providerOutage && <div className="provider-outage-strip" role="alert" aria-live="assertive"><CircleAlert size={16} aria-hidden="true" /><span>{providerOutageCopy({ kind: providerOutage })}</span></div>}
       <RuntimeHealthAlertStrip studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onCopy={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} />
       {connectionError && <WorkbenchErrorAlert error={connectionError} className="connection-error-strip" icon={CloudOff} dismissLabel="关闭连接错误" onDismiss={() => setConnectionError('')} onRetry={() => void retryWorkbenchError(connectionError, setConnectionError)} onReconnect={() => void reconnectWorkbenchError(connectionError, setConnectionError)} />}
       {error && <WorkbenchErrorAlert error={error} className="error-strip" onDismiss={() => setError('')} onRetry={() => void retryWorkbenchError(error, setError)} onReconnect={() => void reconnectWorkbenchError(error, setError)} />}

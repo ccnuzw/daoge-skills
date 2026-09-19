@@ -34,6 +34,7 @@ import { listProjectSelectionAssets, setProjectAssetSelected, setProjectAssetsSe
 import { getCanvasLayout, saveCanvasLayout } from '../domain/canvas-layouts';
 import { agentPresence, registerStudioAgent, touchStudioAgent } from '../domain/agent-presence';
 import { detectAgentClis } from '../domain/agent-detect';
+import { recentRunOutcomes } from '../domain/provider-outage';
 import { claimStudioRequest, completeStudioRequest, createStudioRequest, expireStudioRequestLeases, getStudioRequest, linkRequestToRound, listStudioRequests, rejectStudioRequest, renewStudioRequestLease, requestContextOf, withdrawStudioRequest, REQUEST_STATUSES, type StudioRequestStatus } from '../domain/request-queue';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { studioEventWindow } from './events';
@@ -934,7 +935,19 @@ export class LocalStudioService {
       limits: desired.limits,
       descriptorVersion: desired.descriptorVersion,
       adapterVersion: desired.adapterVersion,
-      capabilities: desired.capabilities
+      capabilities: desired.capabilities,
+      // P2：「支持」≠「当前模型能用」。给每项能力一个**运行时态**——
+      // 除了描述符的支持与否，还带上「配置是否已生效」和说得清的不可用原因。
+      modelCapability: {
+        model: desired.model,
+        applied: !reconfigurationPending,
+        capabilities: {
+          generate: { available: desired.capabilities.generate, reason: desired.capabilities.generate ? null : '当前生成服务不支持生成。' },
+          edit: { available: desired.capabilities.edit, reason: desired.capabilities.edit ? null : '当前生成服务不支持编辑。' },
+          referenceImage: { available: desired.capabilities.referenceImage, reason: desired.capabilities.referenceImage ? null : '参考图未开启，或当前生成服务不支持。' },
+          mask: { available: desired.capabilities.mask, reason: desired.capabilities.mask ? null : '当前生成服务不支持遮罩。' }
+        }
+      }
     } : null;
     const safeActive = activeIdentity ? {
       profileId: activeIdentity.profileId,
@@ -1011,7 +1024,7 @@ export class LocalStudioService {
         const runtime = this.runtimeStatus().daemon;
         return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion, protocol: protocolStatus(), runtime });
       }
-      if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { descriptors: providerDescriptorSummaries(), profiles: listProviderProfiles(this.providerDb, this.initialized.paths), status: providerStatus(this.providerDb, this.initialized.paths), runtime: this.runtimeStatus() });
+      if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { descriptors: providerDescriptorSummaries(), profiles: listProviderProfiles(this.providerDb, this.initialized.paths), status: providerStatus(this.providerDb, this.initialized.paths), runtime: this.runtimeStatus(), recentOutcomes: recentRunOutcomes(this.db, { studioId: this.initialized.manifest.studioId }) });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });
       const requestDetailMatch = /^\/api\/requests\/([^/]+)$/.exec(parsed.pathname);
       if (request.method === 'GET' && requestDetailMatch) {

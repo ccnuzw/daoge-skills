@@ -3,6 +3,7 @@ import { Check, CircleAlert, Copy, KeyRound, LoaderCircle, Plus, Power, RefreshC
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { ConfirmationDialog } from './confirmation-dialog.jsx';
 import { createProviderEditForm, descriptorForProvider, normalizeProfileLimits } from './provider-settings-model.mjs';
+import { profileChangeNeedsTest } from './provider-connection-model.mjs';
 import { CONFIG_FACE_INTRO, CONFIG_GLOSSARY_COPY, CONFIG_TERM_GLOSSARY, configFieldHint } from './config-face-copy.mjs';
 
 const FALLBACK_PROVIDERS = [
@@ -68,10 +69,13 @@ function CapabilityPill({ label, active, detail }) {
   </li>;
 }
 
-function ProviderCapabilityCard({ descriptor, profile }) {
+function ProviderCapabilityCard({ descriptor, profile, modelCapability = null }) {
   if (!descriptor) return null;
   const referenceEnabled = profile ? profile.referenceEnabled : descriptor.reference?.defaultEnabled === true;
   const referenceActive = descriptor.reference?.supported && referenceEnabled;
+  // P2：「支持」≠「当前模型能用」。有运行时态时，把它说清楚（含不可用的原因）。
+  const runtimeEntries = modelCapability?.capabilities ? Object.entries(modelCapability.capabilities) : [];
+  const runtimeUnavailable = runtimeEntries.filter(([, value]) => value && value.available === false && value.reason);
   return <section className="provider-card provider-capability-card" aria-label="生成服务能力摘要">
     <header><ShieldCheck size={16} /><div><strong>{descriptor.displayName} 能力</strong><span>Descriptor v{descriptor.descriptorVersion || 1} · Adapter {descriptor.adapterVersion || 'http-image-v1'}</span></div></header>
     <p className="provider-card-note">下面这份清单由服务自己申报，标明它支持哪些功能；看不懂也不影响使用。</p>
@@ -81,6 +85,7 @@ function ProviderCapabilityCard({ descriptor, profile }) {
       <CapabilityPill label="遮罩" active={descriptor.mask?.supported} detail={descriptor.mask?.supported ? '支持' : '不支持'} />
       <CapabilityPill label="编辑" active={descriptor.operations?.edit} detail={descriptor.operations?.edit ? '支持' : '不支持'} />
     </ul>
+    {modelCapability && <p className="provider-card-note provider-runtime-capability">当前模型 <b>{modelCapability.model}</b>：{modelCapability.applied ? '配置已生效' : '配置还没生效（后台正在切换）'}{runtimeUnavailable.length ? '；' + runtimeUnavailable.map(([, value]) => value.reason).join(' ') : '；上面这些能力此刻都可用。'}</p>}
   </section>;
 }
 
@@ -189,19 +194,35 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
     return '';
   };
 
+  /**
+   * P1 配置即测：保存 / 切换后**自动测一次**（「配完就安心」）。
+   * 失败也要有一句话——不能静默；测的是 HTTP 端点，不起额外进程。
+   */
+  const autoTest = async (profileId) => {
+    if (!profileId) return '';
+    try {
+      const result = await request('/api/providers/' + encodeURIComponent(profileId) + '/test', { method: 'POST', idempotencyKey: crypto.randomUUID(), body: {} });
+      return '自动连接测试：' + connectionTestFeedback(result);
+    } catch (nextError) {
+      return '自动连接测试没成功：' + (nextError.message || '请手动测一次。');
+    }
+  };
   const persistSave = async () => {
     setBusy('save'); setError(''); setFeedback('');
     try {
       const limits = normalizeProfileLimits(form.limits);
-      if (mode === 'create') {
-        await request('/api/providers', { method: 'POST', idempotencyKey: crypto.randomUUID(), body: { name: form.name, providerId: form.providerId, model: form.model, baseUrl: form.baseUrl, apiKey: form.apiKey, endpointTrustMode: form.endpointTrustMode, options: { referenceEnabled: form.referenceEnabled }, limits, active: form.active } });
-      } else {
-        await request('/api/providers/' + encodeURIComponent(selected.id), { method: 'PUT', idempotencyKey: crypto.randomUUID(), body: { expectedConfigVersion: selected.configVersion, name: form.name, providerId: form.providerId, model: form.model, baseUrl: secretUpdate(form.baseUrlAction, form.baseUrl), apiKey: secretUpdate(form.apiKeyAction, form.apiKey), endpointTrustMode: form.endpointTrustMode, options: { referenceEnabled: form.referenceEnabled }, limits } });
-      }
+      const previousIdentity = mode === 'edit' && selected ? selected : null;
+      const secretReplaced = mode === 'edit' && (form.baseUrlAction === 'replace' || form.apiKeyAction === 'replace');
+      const saved = mode === 'create'
+        ? await request('/api/providers', { method: 'POST', idempotencyKey: crypto.randomUUID(), body: { name: form.name, providerId: form.providerId, model: form.model, baseUrl: form.baseUrl, apiKey: form.apiKey, endpointTrustMode: form.endpointTrustMode, options: { referenceEnabled: form.referenceEnabled }, limits, active: form.active } })
+        : await request('/api/providers/' + encodeURIComponent(selected.id), { method: 'PUT', idempotencyKey: crypto.randomUUID(), body: { expectedConfigVersion: selected.configVersion, name: form.name, providerId: form.providerId, model: form.model, baseUrl: secretUpdate(form.baseUrlAction, form.baseUrl), apiKey: secretUpdate(form.apiKeyAction, form.apiKey), endpointTrustMode: form.endpointTrustMode, options: { referenceEnabled: form.referenceEnabled }, limits } });
       setForm(null); setMode('idle'); setModelPicker({ profileId: null, models: [] });
       await load();
       await onChanged();
-      setFeedback('配置已保存；后台会自动换用新配置。之前已经算过的，需要重新算一次再出图。');
+      let feedback = '配置已保存；后台会自动换用新配置。之前已经算过的，需要重新算一次再出图。';
+      const nextIdentity = { profileId: saved?.id || previousIdentity?.id || null, configVersion: saved?.configVersion ?? previousIdentity?.configVersion ?? 0, providerId: form.providerId, model: form.model, secretChanged: secretReplaced };
+      if (profileChangeNeedsTest(previousIdentity, nextIdentity)) feedback += ' ' + await autoTest(nextIdentity.profileId);
+      setFeedback(feedback);
     } catch (nextError) { setError(nextError.message || '保存失败，配置没有改动。'); }
     finally { setBusy(''); }
   };
@@ -223,7 +244,11 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
       const result = await request('/api/providers/' + encodeURIComponent(target.id) + suffix, { method: 'POST', idempotencyKey: crypto.randomUUID(), body });
       if (name === 'validate') setFeedback(result.valid ? '本地校验通过。未发起网络连接。' + (result.warnings?.length ? ' 提示：' + result.warnings.join('；') : '') : '本地校验未通过：' + result.missing.join('、'));
       else if (name === 'test') setFeedback(connectionTestFeedback(result));
-      else { await load(); await onChanged(); setFeedback(name === 'activate' ? '已经改用这一组；后台会自动切换，之后的出图都用它。' : name === 'copy' ? '已复制这一组，副本默认不启用。' : (result.impact?.message || '配置已删除。')); }
+      else {
+        await load(); await onChanged();
+        if (name === 'activate') setFeedback('已经改用这一组；后台会自动切换，之后的出图都用它。 ' + await autoTest(target.id));
+        else setFeedback(name === 'copy' ? '已复制这一组，副本默认不启用。' : (result.impact?.message || '配置已删除。'));
+      }
     } catch (nextError) { setError(nextError.message || '操作失败，请重试。'); }
     finally { setBusy(''); }
   };
@@ -387,7 +412,7 @@ export function ProviderSettings({ request, onDismiss, onChanged }) {
               <details className="provider-secondary-panel">
                 <summary><span><strong>能力与安全限额</strong><small>辅助信息；展开看这个服务能做些什么，以及这组配置的上限</small></span><em>辅助信息</em></summary>
                 <div className="provider-secondary-grid">
-                  <ProviderCapabilityCard descriptor={selectedDescriptor} profile={selected} />
+                  <ProviderCapabilityCard descriptor={selectedDescriptor} profile={selected} modelCapability={selected?.active ? data?.runtime?.desired?.modelCapability || null : null} />
                   <ProviderLimitSummary limits={selected.limits} />
                 </div>
               </details>
