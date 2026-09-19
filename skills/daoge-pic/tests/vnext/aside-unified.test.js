@@ -14,7 +14,7 @@ const { readFrontendSource, readSource } = require('./source-text');
  * 队列按 C4/S1 走底部槽（展开即底栏），**不是**右栏的一种内容——这是决策，不是遗漏。
  */
 test('右栏唯一且打过 aside 标：批次 / 资产 / 空态三种内容都是一同一个容器', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-inspector.jsx'));
   assert.equal((canvas.match(/data-region="aside"/g) || []).length, 4, '四个分支（资产/空态/多选/单节点）都必须带同一个 aside 标');
   assert.match(canvas, /if \(asideSubject\(\{ explicit: assetProvenance \? 'assetProvenance' : null, selectedNodes \}\)\.kind === 'asset'\)/, '资产来源必须走 asideSubject 的优先级判据');
   const assetBranch = canvas.indexOf('kind === \'asset\'');
@@ -24,7 +24,7 @@ test('右栏唯一且打过 aside 标：批次 / 资产 / 空态三种内容都�
 });
 
 test('无选中也有内容：指标四项在三个分支里都渲染', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-inspector.jsx'));
   assert.equal((canvas.match(/\{metricsStrip\}/g) || []).length, 4, '三个分支 + 资产分支都要有指标条（4 处引用）');
   assert.match(canvas, /选择一个节点/, '空态说明必须还在（无选中不是空白页）');
 });

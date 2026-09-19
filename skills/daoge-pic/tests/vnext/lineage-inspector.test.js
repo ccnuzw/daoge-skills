@@ -15,7 +15,7 @@ const { readSource, readStyles } = require('./source-text');
  */
 
 test('确认闸门与计划详情挂在批次上，而不是已被删除的计划节点上', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-inspector.jsx'));
   // ① 不能挂在已删除的节点类型上（否则那段永远不渲染，等于没有）。
   assert.doesNotMatch(canvas, /entityType === 'plan' && <PlanActions/, '计划详情不能挂在已删除的 plan 节点上');
   assert.doesNotMatch(canvas, /entityType === 'plan' \? <PlanActions/, '计划详情不能挂在已删除的 plan 节点上');
@@ -31,7 +31,7 @@ test('确认闸门与计划详情挂在批次上，而不是已被删除的计�
 });
 
 test('检查器把三件事分清楚：它是什么 / 过程资产 / 确认', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-inspector.jsx'));
   // 样式表已分层（批 A A1）：走 readStyles() 的单一入口，不再假设它在一个文件里。
   const styles = readStyles();
   // 检查器有明确的分区标题（不是一坨按钮堆在一起）。
@@ -46,7 +46,7 @@ test('检查器把三件事分清楚：它是什么 / 过程资产 / 确认', ()
 });
 
 test('过程资产给得出「看生成历史」的入口', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-inspector.jsx'));
   // 方案 4.5：检查器承载过程资产（计划、提示词、快照、生成历史）——查看与复制。
   assert.match(canvas, /生成历史|看生成历史/, '过程资产里必须有「看生成历史」的入口');
 });
