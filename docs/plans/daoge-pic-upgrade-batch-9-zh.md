@@ -100,6 +100,27 @@ CSS 一块一文件且同一选择器不跨文件重复；G1–G13 全绿。
 - 给 E4 的建议：S12/S13 这类入口级故障应由**构建产物断言**兜住（CSS 产物存在 + 首屏非 fatal），
   与 G1–G13 一起列进守卫清单。
 
+### 2026-09-19 · **批 E 第三轮（E1.6c / E2 / E3 / E4 全部完成）——批 E 收工**
+
+| 片 | 提交 | 内容 | 结果 |
+| --- | --- | --- | --- |
+| E1.6c | `fcb8b24` | App 逻辑 → `app/workbench-controller.jsx`（`useWorkbenchController` 返回 119 props）；App 变 3 行薄壳 | **main 17 行 / app 文件 78 行（≤250 ✓）** |
+| E2.1 | `af9712b` | 89 个纯助手 → `canvas/lineage-shared.mjs` | 画布 1672 → 1261 |
+| E2.2 | `0db1a3c`+`2e11f3a` | 检查器簇 10 件 → `canvas/lineage-inspector.jsx`（187 行） | 画布 → 1095 |
+| E2.3 | `5539172` | 舞台簇 7 件 → `canvas/lineage-stage.jsx`（156 行） | 画布 → 957 |
+| E2.4 | `140bcf3` | 编排 → `canvas/creator-workbench.jsx`（921 行，保留 `CreativeLineageCanvas` 别名）；旧文件删除 | **画布三件归位 ✓** |
+| E3 | `6fc1f0f` | CSS 按块拆 12 个文件 + `responsive.css` 集中 @media；`style-ownership`（**G4**）落地；`:root` 归位 tokens、7 条死样式清理 | 字面量总量 1895 → **1867** |
+| E4 | `d652045` | `layer-and-size`：**G1**（views 无 max-width）**G2**（三档断点+901 对偶）**G5**（views/canvas 无状态条）**G7**（层依赖只向下，app 分共享面/壳三件）**G8**（app ≤250 / views ≤400 / canvas ≤1000）**G9**（:hover 必配 :focus-visible，补了 4 处焦点环）；**G3** 扩 rgba 棘轮（202 处冻结） | 全量 **902 → 900 通过 / 0 失败 / 2 跳过** |
+
+**G1–G13 覆盖对照（全绿）**：G1/G2/G5/G7/G8/G9 → `layer-and-size`；G3 → `layout-tokens`（hex+rgba 棘轮）；
+G4 → `style-ownership`；G6 → `bottom-slot`；G10 → `navigation-dedup`；G11 → `terminology-guard`（布局词+手册快捷键）；
+G12 → `view-registry`；G13 → `structure-hook`（data-region + 新测试禁 class 字面量）。
+
+**手法固化**：`tools/` 六个工具（lift / split_views / lift_shell / split_app / split_canvas / split_css / fix_imports）。
+本轮工具自身修掉 6 个 bug（export 空格、相对深度、跨度重复、漏 class、自 import、贪心截断），全部有提交记录。
+
+**搬运事故与纪律**：E2.2 曾带着构建错误推送（自 import），下一条提交立即修复并写明——**「先 build 再 push」这条没有例外**。
+
 ### 2026-09-19 · **批 E 第二轮（E1.6a/E1.6b 完成）**
 
 | 片 | 提交 | 内容 | 进展 |
