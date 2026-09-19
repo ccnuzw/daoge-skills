@@ -4,7 +4,8 @@ const { readFrontendSource, readSource } = require('./source-text');
 
 test('Workbench exposes the confirmation gate on the current pending plan view', () => {
   const source = readFrontendSource();
-  assert.match(source, /prompts: \(\) => page\('prompts', <>.*human-confirmation-gate/s);
+  // 批 E（E1.6）迁移：prompts 入口变成 <PromptsView/>，确认闸门在视图文件里。
+  assert.match(readSource('web/src/views/prompts.jsx'), /human-confirmation-gate/);
   assert.match(source, /selectedRound\?\.status === 'awaiting_confirmation'/);
   assert.match(source, /审阅并确认计划/);
   assert.match(source, /openGenerationConfirmation\(\)/);

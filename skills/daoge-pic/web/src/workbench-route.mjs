@@ -3,6 +3,9 @@ import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, normalizeRunItemFi
 export const WORKBENCH_VIEWS = ['projects', 'project-overview', 'lineage', 'tasks', 'assets', 'runs', 'studio-overview', 'prompts', 'library', 'shared-assets', 'guide', 'deliveries', 'trash', 'troubleshoot'];
 export const STUDIO_VIEWS = ['projects', 'library', 'shared-assets', 'guide', 'troubleshoot'];
 export const ASSET_SCOPES = ['round', 'task', 'project', 'studio'];
+
+/** 范围的人话标签（界面批 E 从 main.jsx 搬出：视图与壳共用）。 */
+export const ASSET_SCOPE_LABELS = { round: '当前批次', task: '当前任务', project: '当前项目', studio: '全部 Studio' };
 const PROJECT_CONTEXT_STUDIO_VIEWS = ['library', 'guide'];
 // The only views that actually render a run. Anywhere else a `runId` is a leftover from whichever view set it.
 const RUN_RENDERING_VIEWS = ['runs', 'lineage'];

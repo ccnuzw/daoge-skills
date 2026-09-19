@@ -172,7 +172,8 @@ test('Workbench exposes a creator-facing reference material selector for draft r
   assert.match(styles, /\.reference-panel/);
   assert.match(styles, /\.reference-candidate-grid/);
   // A3：renderer 现在包在 PageFrame 里（宽度由注册表决定），绑定关系不变。
-  assert.match(main, /assets: \(\) => page\('assets', renderAssetsView\(\)\)/);
+  // 批 E（E1.6）迁移：assets/trash 共用一个 AssetsView（视图文件）。
+  assert.match(readSource('web/src/views/assets.jsx'), /export function AssetsView/);
   assert.match(main, /MATERIAL_NEED_USAGE_RULES/);
   assert.match(main, /MaterialImportGuide/);
   assert.match(main, /素材导入引导/);

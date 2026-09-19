@@ -1,9 +1,9 @@
-import { CircleAlert, LoaderCircle, LockKeyhole, RefreshCw, X } from 'lucide-react';
+import { CircleAlert, LockKeyhole, X } from 'lucide-react';
 import { IconButton } from '../components/IconButton.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { canRetryWorkbenchError, errorMessageForDisplay, errorPresentation, isAbortError } from '../error-model.mjs';
+import { canRetryWorkbenchError, errorMessageForDisplay, errorPresentation } from '../error-model.mjs';
 import { bootstrapLocalStudioSession } from '../local-auth.mjs';
-import { negotiateStudioVersion, versionProbeRequest } from '../version-negotiation-model.mjs';
+import { versionProbeRequest } from '../version-negotiation-model.mjs';
 import { ROUND_PURPOSE_LABELS, listItems } from '../app/creation-model.mjs';
 import { api } from '../app/api.js';
 import { StatusPill } from '../components/StatusPill.jsx';

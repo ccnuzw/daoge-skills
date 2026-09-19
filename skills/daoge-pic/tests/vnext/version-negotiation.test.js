@@ -54,6 +54,8 @@ test('接线到位：授权之后先握手，界面自己那份协议版本是�
   assert.match(main, /versionProbeRequest\(/, '握手必须走不带协议头的请求');
   assert.match(main, /if \(authorized\) return <StudioVersionGate \/>/, '授权通过后先协商再渲染');
   // 协议版本只在一处声明；请求头从它取，而不是再写一遍字面量。
-  assert.doesNotMatch(main, /'x-daoge-skill-protocol': 'daoge-pic-skill-protocol\/3\.0\.0'/, '请求头不能再硬编码协议版本');
-  assert.match(main, /WORKBENCH_PROTOCOL_VERSION/, '请求头必须从共享常量取协议版本');
+  // 批 E（E1.6）迁移：请求口搬去 app/api.js——协议头断言跟着走。
+  assert.doesNotMatch(readSource('web/src/app/api.js'), /'x-daoge-skill-protocol': 'daoge-pic-skill-protocol\/3\.0\.0'/, '请求头不能再硬编码协议版本');
+  assert.match(readSource('web/src/app/api.js'), /'daoge-pic-skill-protocol\/'\s*\+\s*WORKBENCH_PROTOCOL_VERSION/, '请求头必须从共享常量取协议版本');
+  assert.match(readSource('web/src/app/api.js'), /import \{[^}]*WORKBENCH_PROTOCOL_VERSION[^}]*\}/, '请求头必须从共享常量取协议版本');
 });

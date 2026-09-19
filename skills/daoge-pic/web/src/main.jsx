@@ -1,26 +1,38 @@
-import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, LoaderCircle, LockKeyhole, Maximize2, MessageSquareText, PanelTop, Pause, Play, RefreshCw, Search, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Eye, ImagePlus, Inbox, LoaderCircle, Maximize2, RefreshCw, SlidersHorizontal, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { REVIEW_ZOOM_MAX, REVIEW_ZOOM_MIN, clampReviewZoom, reviewKeyAction, reviewZoomStep, reviewZoomToggleTarget } from './image-review-keys-model.mjs';
 import { DRAFT_BOUNDARY_COPY } from './boundary-copy.mjs';
-import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
-import { runExecutionPresentation, runHistoryOption, runItemRecovery, statusPresentation, taskPresentation } from './status-presentation.mjs';
-import { failureAttributionLine, providerOutageCopy, providerOutageKind } from './failure-copy-model.mjs';
+import { normalizeAdvancedDetails } from './advanced-details.mjs';
+import { runExecutionPresentation, statusPresentation } from './status-presentation.mjs';
+import { providerOutageCopy, providerOutageKind } from './failure-copy-model.mjs';
 import { ASSET_BACKSTAGE_COPY } from './asset-backstage-copy.mjs';
 import { recipeDraftFrom } from './recipe-model.mjs';
 import { providerRuntimeNotice } from './provider-runtime-model.mjs';
-import { planPresentation, planStateLabel } from './plan-presentation.mjs';
-import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
+import { planStateLabel } from './plan-presentation.mjs';
+import { ASSET_SCOPE_LABELS, ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
 import { PromptWorkspace } from './prompt-workspace.jsx';
 import { LearningCenter } from './learning-center.jsx';
-import { AssetCard, AssetSelectionStrip, ListPager } from './app/asset-surfaces.jsx';
+import { AssetCard, AssetSelectionStrip } from './app/asset-surfaces.jsx';
 import { api } from './app/api.js';
+import { AssetsView } from './views/assets.jsx';
+import { DeliveriesView } from './views/deliveries.jsx';
+import { GuideView } from './views/guide.jsx';
+import { LibraryView } from './views/library.jsx';
+import { LineageView } from './views/lineage.jsx';
+import { ProjectOverviewView } from './views/project-overview.jsx';
+import { ProjectsView } from './views/projects.jsx';
+import { PromptsView } from './views/prompts.jsx';
+import { RunsView } from './views/runs.jsx';
+import { SharedAssetsView } from './views/shared-assets.jsx';
+import { StudioOverviewView } from './views/studio-overview.jsx';
+import { TasksView } from './views/tasks.jsx';
 import { SessionPlanSummary, WorkspaceContextBar, WorkbenchErrorAlert } from './app/shell-pieces.jsx';
-import { RuntimeHealthAlertStrip, ProjectIndex, ManagedTaskList, ProjectOverview, ProjectQualityMetrics, ProjectTaskList } from './app/project-surfaces.jsx';
-import { RunItemOutputThumbs, RunItemRow, RunItemDetailDialog, RunItemProgressBar, GenerationHistory, EvidenceFacts, AdvancedDetailsPanel, DryRunEvidenceCard } from './app/run-surfaces.jsx';
+import { RuntimeHealthAlertStrip } from './app/project-surfaces.jsx';
+import { DryRunEvidenceCard } from './app/run-surfaces.jsx';
 
-import { CreationInfoList, CreationSuggestionChips, MaterialImportGuide, CreationError, ProjectCreationDialog, CreationChoiceList, TaskCreationDialog, RoundCreationDialog, ReferenceAssetDialog, ReferenceRoundResolverDialog, ToggleButtonList, DerivedRoundDialog, RejectReviewDialog } from './app/creation-dialogs.jsx';
-import { DERIVED_REFERENCE_PRESETS, DERIVED_REFERENCE_USAGE_NOTES, GENERIC_TASK_GOAL_FALLBACKS, REJECT_REASON_OPTIONS, ROUND_PURPOSE_LABELS, compactRecord, derivedPresetAllowed, listItems, materialNeedsForTemplate, projectTemplateForProject, projectTemplateName, uniqueList, CREATION_ASPECT_OPTIONS, CREATION_COUNT_OPTIONS, DERIVED_REFINEMENT_GOALS, DERIVED_ROUND_ACTIONS, DERIVED_VARIATION_AXES, DERIVED_ACTION_BY_ID, DERIVED_KEEP_CONSTRAINTS, PROJECT_TEMPLATE_UNAVAILABLE, REJECT_REASON_LABELS, ROUND_PURPOSE_OPTIONS, assetMatchesQuery, buildDerivedPresetMaterials, creationDefaultSummary, defaultDerivedPresetForPurpose, libraryDefinitionSummary, projectTemplateDefaultName, setIfEmptyOrDefault, taskGoalsForProjectTemplate, toggleChoice, usageCountsFromMaterials } from './app/creation-model.mjs';
+import { MaterialImportGuide, ProjectCreationDialog, TaskCreationDialog, RoundCreationDialog, ReferenceAssetDialog, ReferenceRoundResolverDialog, DerivedRoundDialog, RejectReviewDialog } from './app/creation-dialogs.jsx';
+import { ROUND_PURPOSE_LABELS, compactRecord, listItems, materialNeedsForTemplate, projectTemplateForProject, uniqueList } from './app/creation-model.mjs';
 import { IconButton } from './components/IconButton.jsx';
 import { StatusPill } from './components/StatusPill.jsx';
 import { Troubleshoot } from './troubleshoot.jsx';
@@ -36,7 +48,7 @@ import { inPlaceCreationRoute } from './canvas-creation-model.mjs';
 import { requestContextAssetIds } from './canvas-request-context.mjs';
 import { VIEW_LAYOUTS } from './workbench-navigation-model.mjs';
 import { confirmationEntry } from './confirmation-entry-model.mjs';
-import { questionnaireVisible, defaultPurposeNote, DEFAULT_PURPOSE } from './plan-questionnaire-model.mjs';
+import { DEFAULT_PURPOSE } from './plan-questionnaire-model.mjs';
 import { bootstrapLocalStudioSession } from './local-auth.mjs';
 import { AccessibleDialog } from './accessible-dialog.jsx';
 import { ConfirmationDialog } from './confirmation-dialog.jsx';
@@ -45,7 +57,7 @@ import { useAssetImport } from './use-asset-import.mjs';
 import { useProjectQualityMetrics } from './use-project-quality-metrics.mjs';
 import { purposeLabel } from './purpose-labels.mjs';
 import { projectEmptyState } from './project-empty-state-model.mjs';
-import { negotiateStudioVersion, versionProbeRequest, WORKBENCH_PROTOCOL_VERSION } from './version-negotiation-model.mjs';
+import { negotiateStudioVersion, versionProbeRequest } from './version-negotiation-model.mjs';
 
 /** 窗口标题的基准值。取一次存下来——否则带着计数的标题会被下一次拼装再套一层「(2) (1) …」。 */
 const BASE_DOCUMENT_TITLE = document.title || 'DAOGE Pic Studio';
@@ -53,18 +65,18 @@ import { useStudioSearch } from './use-studio-search.mjs';
 import { createLatestRequestGate, useRouteRefresh } from './use-route-refresh.mjs';
 import { studioEventRefreshPlan, useStudioEvents } from './use-studio-events.mjs';
 import { completionNotificationCopy, hasCompletionSignal, noticeTitle, shouldMarkUnread, shouldSendNotification } from './completion-notice-model.mjs';
-import { assetOriginalUrl, assetThumbnailUrl } from './asset-media-url.mjs';
+import { assetOriginalUrl } from './asset-media-url.mjs';
 import { ASSET_IMPORT_CONCURRENCY, mapWithConcurrency } from './bounded-concurrency.mjs';
 import { createEventRefreshQueue } from './refresh-coordinator.mjs';
 import { batchOperationSignature, createBatchOperationSnapshot, createDeliveryInteractionGuard, isDeliveryOperationCurrent } from './creator-delivery-model.mjs';
 import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, clampAssetPage, normalizeAssetPageSize } from './asset-pagination.mjs';
-import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, EMPTY_RUN_ITEM_PAGE, RUN_ITEM_FILTER_OPTIONS, RUN_ITEM_PAGE_SIZES, normalizeRunItemFilter, normalizeRunItemPage, normalizeRunItemPageNumber, normalizeRunItemPageSize, normalizeRunItemSequence, retryableRunItems, runItemFilterCount, runItemPageBounds, runItemProgress, selectableRunItemIds, serializeRunItemRequestQuery } from './run-item-pagination.mjs';
+import { DEFAULT_RUN_ITEM_FILTER, DEFAULT_RUN_ITEM_PAGE_SIZE, EMPTY_RUN_ITEM_PAGE, normalizeRunItemFilter, normalizeRunItemPage, normalizeRunItemPageNumber, normalizeRunItemPageSize, normalizeRunItemSequence, retryableRunItems, serializeRunItemRequestQuery } from './run-item-pagination.mjs';
 import { assetRefreshPath } from './asset-refresh-plan.mjs';
 import { EMPTY_LINEAGE_RUN_ITEM_COVERAGE, LINEAGE_ASSET_PAGE_SIZE, loadCompleteLineageAssets, loadCompleteLineageRunItems } from './lineage-data-loader.mjs';
-import { REFERENCE_USAGE_LABELS, REFERENCE_USAGE_OPTIONS, materialNeedUsagePreset } from './reference-usage-model.mjs';
+import { REFERENCE_USAGE_LABELS } from './reference-usage-model.mjs';
 import { resolveUploadTarget } from './asset-import-model.mjs';
 import { chunkAssetIds, deliverableIntent, isSelectionWriteCurrent, keepCandidateIds, latestSelection, mergeSelectionAssets, needsKeepReview, nextBusySet, nextSelectedIds, normalizeAssetIds, selectionCandidates, selectionIdSet, shouldClearSelectionBusy } from './selection-model.mjs';
-import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, createProjectSearchIndex, createTaskSearchIndex, filterProjectIndex, filterTaskIndex, paginateWorkspaceItems } from './workspace-list-model.mjs';
+import { paginateWorkspaceItems } from './workspace-list-model.mjs';
 import { ProviderSettings } from './provider-settings.jsx';
 import { RequestQueueDock } from './request-queue.jsx';
 import { AssetProvenanceBody } from './asset-provenance.jsx';
@@ -80,10 +92,10 @@ import { readAgentConnectionConfig, writeAgentConnectionConfig } from './agent-c
 import { beginCancelUndo, cancelUndoAvailable, cancelUndoLabel } from './cancel-undo-model.mjs';
 import { queueRounds, requestProgress } from './request-progress-model.mjs';
 import { workbenchConversationId } from './workbench-session.mjs';
-import { CREATIVE_DERIVED_ACTIONS, CREATIVE_DERIVED_ACTION_BY_ID, creativeDerivedActionForPurpose } from './creative-actions.mjs';
+import { creativeDerivedActionForPurpose } from './creative-actions.mjs';
 import { installBrowserErrorGuard } from './browser-error-guard.mjs';
 import { redactedRuntimeDiagnostic, runtimeHealthPresentation } from './runtime-health.mjs';
-import { canRetryWorkbenchError, createWorkbenchError, errorMessageForDisplay, errorPresentation, hasWorkbenchErrorMetadata, isAbortError, normalizeRequestError } from './error-model.mjs';
+import { canRetryWorkbenchError, createWorkbenchError, errorMessageForDisplay, hasWorkbenchErrorMetadata, isAbortError, normalizeRequestError } from './error-model.mjs';
 import './styles.css';
 
 /**
@@ -154,7 +166,6 @@ const RAIL_COLLAPSE_KEY = 'daoge-pic:rail-collapsed';
 /** @type {import('./lineage-data-loader.mjs').LineageCoverage} */
 const EMPTY_LINEAGE_ASSET_COVERAGE = Object.freeze({ loaded: 0, total: 0, loading: true });
 
-const ASSET_SCOPE_LABELS = { round: '当前批次', task: '当前任务', project: '当前项目', studio: '全部 Studio' };
 function normalizeReferenceMaterials(plan = {}) {
   const values = [];
   const seen = new Set();
@@ -2079,64 +2090,19 @@ await refresh();
    */
   const page = (view, node) => <PageFrame layout={VIEW_LAYOUTS[view] || 'standard'}>{node}</PageFrame>;
   const viewRenderers = {
-    projects: () => page('projects', <ProjectIndex projects={projects} projectTemplates={projectTemplates} onCreateProject={() => openCreationDialog('project')} onOpenProject={(projectId) => navigateRoute(selectProject(route, projectId))} onOpenProjectOverview={(projectId) => navigateRoute({ view: 'project-overview', projectId, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })} />),
-    'project-overview': () => page('project-overview', selectedProject ? <ProjectOverview project={selectedProject} projectTemplates={projectTemplates} tasks={tasks} selectedCount={selectedAssets.length} qualityMetrics={qualityMetrics} qualityMetricsLoading={qualityMetricsLoading} qualityMetricsError={qualityMetricsError} onRefreshQualityMetrics={refreshQualityMetrics} onCreateTask={() => openCreationDialog('task')} onArchive={openArchiveConfirmation} onOpenTasks={() => navigateRoute({ view: 'tasks', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenAssets={() => navigateRoute({ view: 'assets', assetScope: 'project', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenDeliveries={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null),
-    lineage: () => page('lineage', selectedProject ? <CreativeLineageCanvas
-      request={api}
-      project={selectedProject}
-      tasks={tasks}
-      selectedTask={selectedTask}
-      rounds={rounds}
-      selectedRound={selectedRound}
-      runs={runs}
-      activeRun={activeRun}
-      runItems={lineageVisibleRunItems}
-      runItemCoverage={lineageRunItemCoverage}
-      assets={visibleAssets}
-      assetTotal={assetTotal}
-      assetCoverage={lineageAssetCoverage}
-      sharedAssets={sharedAssets}
-      selectedAssetIds={selectedAssetIds}
-      selectionBusyIds={selectionBusyIds}
-      onCanvasAssetSelection={setCanvasSelectedAssetIds}
-      deliveries={deliveries}
-      assetProvenance={assetProvenance}
-      onCloseAssetProvenance={() => setAssetProvenance(null)}
-      onOpenAssetTrace={(output) => navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id })}
-      layoutRevision={eventRevision.canvasLayout}
-      onNavigate={navigateRoute}
-      onPreviewAsset={(asset) => { setPreviewZoom(1); setPreviewAssets([asset]); }}
-      onInspectAsset={inspectAsset}
-      onToggleAsset={markAsDeliverable}
-      onDeselectAsset={deselectAsset}
-      onBatchSelectAssets={setAssetsSelection}
-      onSetAssetShared={setAssetShared}
-      onDownloadAsset={downloadAsset}
-      onCopyAsset={copyAsset}
-      onCreateTask={() => openCreationDialog('task')}
-      onCreateRound={() => openCreationDialog('round')}
-      onOpenReference={openReferenceDialog}
-      onOpenDerive={openDerivedRoundDialog}
-      onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)}
-      onReject={openRejectReviewDialog}
-      onOpenConfirmation={(round) => void openGenerationConfirmation(round)}
-      onSaveRecipe={(round) => void savePlanAsRecipe(round)}
-      pendingPlanEditRoundId={pendingPlanEditRoundId}
-      onPendingPlanEditHandled={() => setPendingPlanEditRoundId(null)}
-    /> : null),
-    assets: () => page('assets', renderAssetsView()),
-    tasks: () => page('tasks', selectedProject ? <ProjectTaskList project={selectedProject} tasks={tasks} onCreateTask={() => openCreationDialog('task')} onOpenTask={(taskId) => navigateRoute(selectTask(route, taskId))} /> : null),
-    'studio-overview': () => page('studio-overview', <section className="overview-stage">
-      <PageHeader kicker="同一任务内的显式对比" title={selectedTask ? selectedTask.name : '请选择任务'} description={(studioOverview?.availableRounds?.length || 0) + ' 个可比较批次。比较不会推断或启动运行。'}>{taskOverview && <div className="overview-metrics"><span>批次 {taskOverview.summary?.roundCount || 0}</span><span>运行 {taskOverview.summary?.runCount || 0}</span><span>结果 {taskOverview.summary?.resultCount || 0}</span></div>}</PageHeader>
-      {selectedTask ? <><div className="compare-selector">{(studioOverview?.availableRounds || rounds).map((round) => <label key={round.id}><input type="checkbox" checked={compareRoundIds.includes(round.id)} onChange={() => toggleComparedRound(round.id)} /><span>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[round.purpose] || round.purpose} · 计划 v{round.planVersion}</span></label>)}</div>{studioOverview?.comparisons?.length ? <div className="comparison-grid">{studioOverview.comparisons.map((comparison) => <article key={comparison.round.id} className="comparison-column"><header><div><p>批次 {comparison.round.planVersion}</p><h3>{({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[comparison.round.purpose] || comparison.round.purpose}</h3></div><StatusPill value={comparison.round.status} scope="round" /></header><dl><div><dt>上游</dt><dd>{comparison.lineage?.rounds?.length ? '承接 ' + comparison.lineage.rounds.length + ' 个批次' : '首个方向'}</dd></div><div><dt>计划</dt><dd>{comparison.round.plan?.operation === 'edit' ? '编辑' : '生成'} · {comparison.round.plan?.itemCount || 0} 项</dd></div><div><dt>产出</dt><dd>{comparison.summary?.resultCount || 0} 个结果</dd></div></dl>{comparison.runsTruncated && <p className="comparison-truncated">仅显示最近 24 次运行</p>}<div className="comparison-runs">{comparison.runs?.map((run) => <section key={run.id}><button type="button" className="trace-link" onClick={() => navigateRoute({ view: 'runs', projectId: selectedProject?.id, taskId: selectedTask.id, roundId: comparison.round.id, compareRoundIds: [comparison.round.id], runId: run.id })}><b>出图 {run.items?.length || 0}</b><StatusPill value={run.status} scope="run" /></button><div className="comparison-assets">{run.items?.flatMap((item) => item.outputAssets || []).map((asset) => <button type="button" key={asset.id} title="查看资产来源与评审" onClick={() => void inspectAsset(asset.id)}><img src={assetThumbnailUrl(asset)} alt="批次结果" loading="lazy" decoding="async" /><span>{asset.review?.decision === 'keep' ? '保留' : asset.review?.decision === 'review' ? '待复核' : '未评审'}</span></button>)}</div></section>)}</div></article>)}</div> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>勾选一个或多个批次后，比较计划、运行、结果和当前评审。</p></div>}</> : <div className="empty-stage"><Columns3 size={30} strokeWidth={1.15} /><p>请先选择项目和任务，再打开创作总览。</p></div>}
-    </section>),
-    prompts: () => page('prompts', <><PromptWorkspace round={selectedRound} planVersions={planVersions} loading={planVersionsLoading} onRefresh={() => void refreshPlanVersions()} />{selectedRound?.status === 'awaiting_confirmation' && <section className="human-confirmation-gate"><div><p className="eyebrow">人工确认闸门 · 可写操作</p><h3>等待当前用户确认计划</h3><span>确认必须由你本人在这里点。会话只能发起确认请求；确认后由会话核算一遍，再开始出图。</span></div><button type="button" className="command-button" onClick={() => void openGenerationConfirmation()} disabled={!session || generationConfirmationBusy}><LockKeyhole size={16} />{generationConfirmationBusy ? '正在准备确认' : '审阅并确认计划'}</button></section>}</>),
-    runs: () => page('runs', <GenerationHistory selectedRound={selectedRound} runs={runs} activeRunId={activeRunId} activeRun={activeRun} runExecutionStatus={runExecutionStatus} runLifecycleStatus={runLifecycleStatus} taskOverview={taskOverview} creativeRecord={creativeRecord} visibleRunItems={visibleRunItems} runItemPage={runItemPage} runItemFilter={activeRunItemFilter} runItemPageSize={activeRunItemPageSize} runItemSequence={activeRunItemSequence} selectedRunItemIds={selectedRunItemIds} runItemDetail={runItemDetail} canCancelActiveRun={canCancelActiveRun} advancedDetails={advancedDetails} onSelectRun={(runId) => navigateRoute({ runId, runItemFilter: DEFAULT_RUN_ITEM_FILTER, runItemPage: 1, runItemPageSize: DEFAULT_RUN_ITEM_PAGE_SIZE, runItemSequence: null })} onControlRun={controlRun} onRetryItem={retryRunItem} onInspectAsset={inspectAsset} onSetRunItemFilter={setRunItemFilter} onSetRunItemPage={setRunItemPageNumber} onSetRunItemPageSize={setRunItemPageSizeValue} onSetRunItemSequence={setRunItemSequenceValue} onToggleRunItemSelection={toggleRunItemSelection} onSelectRetryablePageItems={selectRetryablePageItems} onRetrySelectedItems={retryRunItemsByIds} onOpenRunItemDetail={(item) => setRunItemDetailId(item.id)} onCloseRunItemDetail={() => setRunItemDetailId(null)} onToggleAdvanced={() => advancedDetails ? setAdvancedDetails(null) : void openAdvancedDetails()} onCloseAdvanced={() => setAdvancedDetails(null)} onCopyPrompt={copyRunPrompt} />),
-    guide: () => page('guide', <LearningCenter onDismiss={dismissGuide} onNavigate={(nextView) => navigateRoute({ view: nextView })} />),
-    library: () => page('library', <CreativeLibrary taskTypes={taskTypes} styleKits={styleKits} brandKits={brandKits} sharedAssets={sharedAssets} onOpenProjects={() => navigateRoute({ view: 'projects' })} onOpenSharedAssets={() => navigateRoute({ view: 'shared-assets' })} />),
-    'shared-assets': () => page('shared-assets', <SharedAssets assets={sharedAssets} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onOpenProjects={() => navigateRoute({ view: 'projects' })} />),
-    deliveries: () => page('deliveries', <CreatorDelivery project={selectedProject} selection={deliverySelection} deliveryName={deliveryName} deliveryCreating={deliveryCreating} completion={deliveryCompletion} frozen={Boolean(deliveryCompletion || deliveryCreating)} onDeliveryNameChange={setDeliveryName} includeCreativeRecord={deliveryIncludeCreativeRecord} onIncludeCreativeRecordChange={setDeliveryIncludeCreativeRecord} onCreate={() => void completeDelivery()} onOpenAssets={() => navigateRoute({ view: 'assets', assetScope: 'project', taskId: null, roundId: null, compareRoundIds: [], runId: null })} selectedAssets={deliveryFlowAssets} deliveries={deliveries} assets={assets} deliveryBusyId={deliveryBusyId} onDeliveryAction={deliveryAction} onRemoveSelection={(asset) => toggleSelection(asset.id)} onDownload={downloadAsset} onCopy={copyAsset} onArchiveProject={downloadProjectArchive} onArchiveDelivery={downloadDeliveryArchive} batches={deliveryBatches} batchName={batchName} selectedDeliveryIds={selectedDeliveryIds} batchBusy={batchBusy} onBatchNameChange={setBatchName} onToggleDelivery={toggleBatchDelivery} onBatchAction={batchAction} />),
-    trash: () => page('trash', renderAssetsView()),
+    'projects': () => page('projects', <ProjectsView assetScope={assetScope} compareRoundIds={compareRoundIds} navigateRoute={navigateRoute} openCreationDialog={openCreationDialog} projectTemplates={projectTemplates} projects={projects} route={route} view={view} />),
+    'project-overview': () => page('project-overview', <ProjectOverviewView assetScope={assetScope} assets={assets} compareRoundIds={compareRoundIds} deliveries={deliveries} navigateRoute={navigateRoute} openArchiveConfirmation={openArchiveConfirmation} openCreationDialog={openCreationDialog} projectTemplates={projectTemplates} qualityMetrics={qualityMetrics} qualityMetricsError={qualityMetricsError} qualityMetricsLoading={qualityMetricsLoading} refreshQualityMetrics={refreshQualityMetrics} route={route} selectedAssets={selectedAssets} selectedProject={selectedProject} tasks={tasks} view={view} />),
+    'lineage': () => page('lineage', <LineageView activeRun={activeRun} addAssetsToCurrentRoundReferences={addAssetsToCurrentRoundReferences} assetProvenance={assetProvenance} assetTotal={assetTotal} assets={assets} copyAsset={copyAsset} deliveries={deliveries} deselectAsset={deselectAsset} downloadAsset={downloadAsset} eventRevision={eventRevision} inspectAsset={inspectAsset} lineageAssetCoverage={lineageAssetCoverage} lineageRunItemCoverage={lineageRunItemCoverage} lineageVisibleRunItems={lineageVisibleRunItems} markAsDeliverable={markAsDeliverable} navigateRoute={navigateRoute} openCreationDialog={openCreationDialog} openDerivedRoundDialog={openDerivedRoundDialog} openGenerationConfirmation={openGenerationConfirmation} openReferenceDialog={openReferenceDialog} openRejectReviewDialog={openRejectReviewDialog} pendingPlanEditRoundId={pendingPlanEditRoundId} rounds={rounds} runs={runs} savePlanAsRecipe={savePlanAsRecipe} selectedAssetIds={selectedAssetIds} selectedProject={selectedProject} selectedRound={selectedRound} selectedTask={selectedTask} selectionBusyIds={selectionBusyIds} setAssetProvenance={setAssetProvenance} setAssetShared={setAssetShared} setAssetsSelection={setAssetsSelection} setCanvasSelectedAssetIds={setCanvasSelectedAssetIds} setPendingPlanEditRoundId={setPendingPlanEditRoundId} setPreviewAssets={setPreviewAssets} setPreviewZoom={setPreviewZoom} sharedAssets={sharedAssets} tasks={tasks} view={view} visibleAssets={visibleAssets} />),
+    'assets': () => page('assets', <AssetsView allPageAssetsSelected={allPageAssetsSelected} assetFilter={assetFilter} assetPage={assetPage} assetPageSize={assetPageSize} assetPreviewFit={assetPreviewFit} assetScope={assetScope} assetTotal={assetTotal} assets={assets} clearSelection={clearSelection} compareRoundIds={compareRoundIds} contextMaterialNeeds={contextMaterialNeeds} copyAsset={copyAsset} deliveries={deliveries} deliveryIntent={deliveryIntent} downloadAsset={downloadAsset} downloadProjectArchive={downloadProjectArchive} importLabel={importLabel} inputRef={inputRef} inspectAsset={inspectAsset} markAsDeliverable={markAsDeliverable} materialNeedCounts={materialNeedCounts} navigateRoute={navigateRoute} pageSelectionBusy={pageSelectionBusy} restore={restore} review={review} routeView={routeView} selectedAssetIds={selectedAssetIds} selectedAssets={selectedAssets} selectedImportNeed={selectedImportNeed} selectedProject={selectedProject} selectedRound={selectedRound} selectedTask={selectedTask} selectionBusyIds={selectionBusyIds} setAssetFilter={setAssetFilter} setAssetPage={setAssetPage} setAssetPageSize={setAssetPageSize} setAssetPreviewFit={setAssetPreviewFit} setAssetShared={setAssetShared} setPageSelection={setPageSelection} setPreviewAssets={setPreviewAssets} setPreviewZoom={setPreviewZoom} setSelectedImportNeed={setSelectedImportNeed} sharedAssetIds={sharedAssetIds} studio={studio} toggleSelection={toggleSelection} totalAssetPages={totalAssetPages} trash={trash} uploadProgress={uploadProgress} uploading={uploading} view={view} visibleAssets={visibleAssets} />),
+    'tasks': () => page('tasks', <TasksView navigateRoute={navigateRoute} openCreationDialog={openCreationDialog} route={route} selectedProject={selectedProject} tasks={tasks} />),
+    'studio-overview': () => page('studio-overview', <StudioOverviewView assets={assets} compareRoundIds={compareRoundIds} inspectAsset={inspectAsset} loading={loading} navigateRoute={navigateRoute} review={review} rounds={rounds} runs={runs} selectedProject={selectedProject} selectedTask={selectedTask} studioOverview={studioOverview} taskOverview={taskOverview} toggleComparedRound={toggleComparedRound} view={view} />),
+    'prompts': () => page('prompts', <PromptsView confirmation={confirmation} generationConfirmationBusy={generationConfirmationBusy} loading={loading} openGenerationConfirmation={openGenerationConfirmation} planVersions={planVersions} planVersionsLoading={planVersionsLoading} refreshPlanVersions={refreshPlanVersions} selectedRound={selectedRound} session={session} />),
+    'runs': () => page('runs', <RunsView activeRun={activeRun} activeRunId={activeRunId} activeRunItemFilter={activeRunItemFilter} activeRunItemPageSize={activeRunItemPageSize} activeRunItemSequence={activeRunItemSequence} advancedDetails={advancedDetails} canCancelActiveRun={canCancelActiveRun} controlRun={controlRun} copyRunPrompt={copyRunPrompt} creativeRecord={creativeRecord} inspectAsset={inspectAsset} navigateRoute={navigateRoute} openAdvancedDetails={openAdvancedDetails} retryRunItem={retryRunItem} retryRunItemsByIds={retryRunItemsByIds} runExecutionStatus={runExecutionStatus} runItemDetail={runItemDetail} runItemPage={runItemPage} runLifecycleStatus={runLifecycleStatus} runs={runs} selectRetryablePageItems={selectRetryablePageItems} selectedRound={selectedRound} selectedRunItemIds={selectedRunItemIds} setAdvancedDetails={setAdvancedDetails} setRunItemDetailId={setRunItemDetailId} setRunItemFilter={setRunItemFilter} setRunItemPageNumber={setRunItemPageNumber} setRunItemPageSizeValue={setRunItemPageSizeValue} setRunItemSequenceValue={setRunItemSequenceValue} taskOverview={taskOverview} toggleRunItemSelection={toggleRunItemSelection} visibleRunItems={visibleRunItems} />),
+    'guide': () => page('guide', <GuideView dismissGuide={dismissGuide} navigateRoute={navigateRoute} view={view} />),
+    'library': () => page('library', <LibraryView assets={assets} brandKits={brandKits} navigateRoute={navigateRoute} projects={projects} sharedAssets={sharedAssets} styleKits={styleKits} taskTypes={taskTypes} view={view} />),
+    'shared-assets': () => page('shared-assets', <SharedAssetsView assets={assets} copyAsset={copyAsset} downloadAsset={downloadAsset} navigateRoute={navigateRoute} projects={projects} setAssetShared={setAssetShared} sharedAssets={sharedAssets} view={view} />),
+    'deliveries': () => page('deliveries', <DeliveriesView assetScope={assetScope} assets={assets} batchAction={batchAction} batchBusy={batchBusy} batchName={batchName} compareRoundIds={compareRoundIds} completeDelivery={completeDelivery} copyAsset={copyAsset} deliveries={deliveries} deliveryAction={deliveryAction} deliveryBatches={deliveryBatches} deliveryBusyId={deliveryBusyId} deliveryCompletion={deliveryCompletion} deliveryCreating={deliveryCreating} deliveryFlowAssets={deliveryFlowAssets} deliveryIncludeCreativeRecord={deliveryIncludeCreativeRecord} deliveryName={deliveryName} deliverySelection={deliverySelection} downloadAsset={downloadAsset} downloadDeliveryArchive={downloadDeliveryArchive} downloadProjectArchive={downloadProjectArchive} navigateRoute={navigateRoute} selectedAssets={selectedAssets} selectedDeliveryIds={selectedDeliveryIds} selectedProject={selectedProject} setBatchName={setBatchName} setDeliveryIncludeCreativeRecord={setDeliveryIncludeCreativeRecord} setDeliveryName={setDeliveryName} toggleBatchDelivery={toggleBatchDelivery} toggleSelection={toggleSelection} view={view} />),
+    'trash': () => page('trash', <AssetsView allPageAssetsSelected={allPageAssetsSelected} assetFilter={assetFilter} assetPage={assetPage} assetPageSize={assetPageSize} assetPreviewFit={assetPreviewFit} assetScope={assetScope} assetTotal={assetTotal} assets={assets} clearSelection={clearSelection} compareRoundIds={compareRoundIds} contextMaterialNeeds={contextMaterialNeeds} copyAsset={copyAsset} deliveries={deliveries} deliveryIntent={deliveryIntent} downloadAsset={downloadAsset} downloadProjectArchive={downloadProjectArchive} importLabel={importLabel} inputRef={inputRef} inspectAsset={inspectAsset} markAsDeliverable={markAsDeliverable} materialNeedCounts={materialNeedCounts} navigateRoute={navigateRoute} pageSelectionBusy={pageSelectionBusy} restore={restore} review={review} routeView={routeView} selectedAssetIds={selectedAssetIds} selectedAssets={selectedAssets} selectedImportNeed={selectedImportNeed} selectedProject={selectedProject} selectedRound={selectedRound} selectedTask={selectedTask} selectionBusyIds={selectionBusyIds} setAssetFilter={setAssetFilter} setAssetPage={setAssetPage} setAssetPageSize={setAssetPageSize} setAssetPreviewFit={setAssetPreviewFit} setAssetShared={setAssetShared} setPageSelection={setPageSelection} setPreviewAssets={setPreviewAssets} setPreviewZoom={setPreviewZoom} setSelectedImportNeed={setSelectedImportNeed} sharedAssetIds={sharedAssetIds} studio={studio} toggleSelection={toggleSelection} totalAssetPages={totalAssetPages} trash={trash} uploadProgress={uploadProgress} uploading={uploading} view={view} visibleAssets={visibleAssets} />),
     troubleshoot: () => page('troubleshoot', <Troubleshoot request={api} studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onRefresh={() => void refresh()} onCopyDiagnostic={() => void copyRuntimeDiagnostic()} onRepair={() => void repairRuntime()} />)
   };
   const renderActiveView = viewRenderers[routeView];

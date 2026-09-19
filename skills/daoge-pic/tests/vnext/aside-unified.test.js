@@ -33,7 +33,7 @@ test('浮层与右栏不双开：画布视图的资产来源进右栏', () => {
   const main = readSource('web/src/main.jsx');
   assert.match(main, /\{assetProvenance && routeView !== 'lineage' && <aside [^>]*data-region="aside-overlay"/, '其它视图才开浮层，且用 aside-overlay 标区分');
   assert.match(main, /assetProvenance=\{assetProvenance\}/, '画布必须拿到资产来源');
-  assert.match(main, /onCloseAssetProvenance=\{\(\) => setAssetProvenance\(null\)\}/, '右栏里要能关掉它');
+  assert.match(readSource('web/src/views/lineage.jsx'), /onCloseAssetProvenance=\{\(\) => setAssetProvenance\(null\)\}/, '右栏里要能关掉它');
 });
 
 test('asideSubject 模型：显式 > 选中 > 空态', async () => {

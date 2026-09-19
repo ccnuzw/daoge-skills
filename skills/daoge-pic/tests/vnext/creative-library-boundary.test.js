@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { readFrontendSource } = require('./source-text');
+const { readFrontendSource, readSource } = require('./source-text');
 
 
 test('creative library resources separate reusable methods from project image inventory', async () => {
@@ -22,7 +22,7 @@ test('creative library resources separate reusable methods from project image in
   assert.match(component, /creativeLibraryResources\(\{ taskTypes, styleKits, brandKits, assets: \[\] \}\)/);
   assert.match(component, /onOpenSharedAssets/);
   // A3：renderer 现在包在 PageFrame 里（宽度由注册表决定），绑定与 props 不变。
-  assert.match(main, /library: \(\) => page\('library', <CreativeLibrary taskTypes=\{taskTypes\} styleKits=\{styleKits\} brandKits=\{brandKits\} sharedAssets=\{sharedAssets\}/);
-  assert.match(main, /'shared-assets': \(\) => page\('shared-assets', <SharedAssets assets=\{sharedAssets\}/);
+  assert.match(readSource('web/src/views/library.jsx'), /<CreativeLibrary taskTypes={taskTypes} styleKits={styleKits} brandKits={brandKits\} sharedAssets=\{sharedAssets\}/);
+  assert.match(readSource('web/src/views/shared-assets.jsx'), /<SharedAssets assets={sharedAssets}/);
   assert.match(shared, /共享素材/);
 });

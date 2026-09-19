@@ -56,5 +56,6 @@ test('asset cards tuck status help away, keep action labels readable, and show f
   assert.doesNotMatch(readSource('web/src/main.jsx'), /project-index-grid/);
   assert.doesNotMatch(styles, /project-index-grid/);
   assert.match(styles, /\.selection-strip-items article > button\.selection-remove \{ position:absolute; top:7px; right:7px;.*width:24px; height:24px;/);
-  assert.match(source, /Activity, Archive, Bookmark/);
+  // 批 E（E1.6）迁移：图标清单随组件分散到各文件——改为在整个前端源码里找这三个图标。
+  for (const icon of ['Activity', 'Archive', 'Bookmark']) assert.match(readFrontendSource(), new RegExp('\\b' + icon + '\\b'), icon + ' 必须在用');
 });
