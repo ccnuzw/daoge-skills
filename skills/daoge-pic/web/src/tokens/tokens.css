@@ -91,3 +91,6 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --transition: 0ms; }
 }
+
+/* 工作台布局令牌（批 E · E3：从 workbench.css 的 :root 归位到令牌层，G4 单一归属）。 */
+:root { --workbench-rail-width:276px; --workbench-rail-center-offset:138px; --workbench-page-pad:clamp(20px,4vw,64px); --workbench-content-max:1560px; }

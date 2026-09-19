@@ -111,7 +111,8 @@ const STYLE_LAYER_ORDER = [
   'web/src/styles/components.css',
   'web/src/styles/organisms.css',
   'web/src/styles/templates.css',
-  'web/src/styles/surfaces'
+  'web/src/styles/surfaces',
+  'web/src/styles/blocks'
 ];
 
 function styleFiles() {
