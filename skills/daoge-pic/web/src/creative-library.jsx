@@ -58,7 +58,7 @@ export function CreativeLibrary({ taskTypes, styleKits, brandKits, sharedAssets,
       <div><BookOpen size={18} /><span>规则资料不自动绑定任务、改写已确认计划或触发生成；使用前仍要回到会话形成计划快照。</span></div>
     </details>
 
-    <div className="library-toolbar">
+    <div className="library-toolbar" data-block="page-filter">
       <div className="library-search">
         <Search size={16} />
         <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="搜索规则资料" placeholder="搜索任务类型、风格或品牌规则" />
