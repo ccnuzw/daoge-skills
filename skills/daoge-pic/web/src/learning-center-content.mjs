@@ -15,6 +15,8 @@ export const LEARNING_PHASES = [
   { id: 'delivery', number: '05', label: '冻结交付' }
 ];
 
+import { SHORTCUT_ROWS } from './shortcut-model.mjs';
+
 export const LEARNING_TOPICS = [
   { id: 'projects', group: 'start', icon: 'project', kicker: '项目工作区', title: '从项目到任务，再到批次', summary: '项目是长期创作边界；任务是清晰目标；批次记录探索、优化、变体、编辑和补图。5.13.0 通过项目模板把创建表单和后续任务上下文连起来。', studio: '从项目概览进入任务，在项目与任务列表中使用名称搜索、生命周期筛选和有界分页，再查看批次、计划、运行与结果。普通新建项目、任务或批次后直接进入当前上下文，不弹出创建完成提示或推荐下一步卡片。', conversation: '生成计划、变更执行目标和 Provider 调用必须回到会话确认。模板只提供默认值和素材准备建议，不替代会话中的目标确认。', checkpoints: ['项目只承载一个业务主题', '任务必须能被创作者清楚描述', '新方向使用新批次，不覆盖历史', '项目与任务数量增长后仍通过搜索、筛选和分页定位', '创建后以当前上下文为准，素材准备清单在表单和资产导入引导中查看'], action: 'projects', actionLabel: '查看项目' },
   { id: 'sessions', group: 'start', icon: 'session', kicker: '启动与会话', title: '共享工作台，隔离每个真实会话', summary: '同一稳定 workspace 的并发会话共享唯一 daemon 与 Workbench（常驻本机的后台服务，以及这个界面），但每个真实 conversation（你和智能体的一次对话）使用独立 Studio Session（它自己的一份工作记录）。', studio: '普通打开可能新开 Workbench，也可能安全复用现有 Workbench；每个浏览器标签保存自己的界面身份，但它不代表智能体 conversation。', conversation: '每个真实 conversation 都创建或恢复自己的 Studio Session，再绑定项目、任务和批次上下文。', checkpoints: ['共享 daemon 不等于共享会话上下文', '一个会话切换项目不会覆盖另一个会话的上下文', '打开结果必须区分新打开与安全复用', '浏览器标签身份与智能体 conversation Session 不是同一概念'], action: null, actionLabel: '' },
@@ -31,6 +33,7 @@ export const LEARNING_TOPICS = [
   { id: 'recovery', group: 'delivery', icon: 'recovery', kicker: '回收与治理', title: '用项目回收站恢复误删成果', summary: '回收站只属于当前项目，只列出已软删除资产；恢复后回到原项目关系。', studio: '在项目侧栏底部打开回收站，确认要恢复的素材与来源后执行恢复。', conversation: '处理被引用资产影响、恢复策略或大范围整理前，先在会话中澄清。', checkpoints: ['共享素材和规则资料资源不进入项目回收站', '删除不通过文件夹表达业务状态', '恢复保留评审和来源事实'], action: null, actionLabel: '' },
   { id: 'safety', group: 'safety', icon: 'safety', kicker: '安全边界', title: '知道秘密存在哪里、哪些动作必须确认', summary: 'Provider Profile、密钥引用和 write-only（只写：填进去之后就不再显示）摘要保存在受本地权限保护的 Provider.db（一个独立的本机数据库文件）；显式 system secret backend（把密钥交给系统保管）可把 secret 存入系统后端。Studio 是视觉管理与受控操作界面，会话负责意图确认和外部执行决策。', studio: 'API Key 与完整 Base URL 只写不回显，也不进入 studio.db、事件、日志、导出或诊断；页面加载和保存不会自动访问 Provider。compatible_public 的明文 HTTP 会在发送凭据前拒绝；本地代理和企业私有端点必须显式选择信任模式。', conversation: '确认生成、继续恢复、修改外部请求和处理未知结果都必须回到会话。system secret backend 不可用时不能静默退回 SQLite 明文，旧配置测试证据也不能覆盖已变化的 Profile。', checkpoints: ['Provider.db 是 Profile、密钥引用和 write-only 摘要事实源', '密钥与完整 Base URL 不进入 studio.db、事件、日志、导出或诊断', '只有显式连接测试才访问 Provider', '外部未知结果不会自动重放', '公共兼容端点必须使用 HTTPS；密钥清理失败会持久排队并在后续启动重试'] },
   { id: 'offline-strategy', group: 'safety', icon: 'safety', kicker: '离线策略', title: '先离线比较，再明确联网', summary: '默认先在本地整理和比较提示策略；延后联网、显式 Canary（先用最小样本试一次联网）和真实 Provider（真正调用出图服务）各有不同的网络、隐私与计费取舍。', studio: 'Learning Center 只展示结构化策略对比，不发起网络请求、不排队、不生成。先看本地可做的部分，再由用户决定是否回到会话处理联网路径。', conversation: '如果要使用 Canary 或真实 Provider，必须在会话中明确数据范围、端点、预算和执行意图；延后联网不等于自动恢复。', checkpoints: ['默认路径不访问网络、不调用 Provider、不产生费用', '本地策略比较可以先完成目标、约束、参考角色和隐私范围整理', '延后联网只形成待办，不创建后台队列或自动重试', 'Canary 与真实 Provider 都必须由用户明确发起', '联网前重新核对提示词、参考素材、端点信任和预算'] },
+  { id: 'shortcuts', group: 'start', icon: 'check', kicker: '键盘', title: '画布快捷键', summary: '创作平台的画布支持一套键盘操作：拖动、框选、多选、撤销重做、微调、分组与适应选择。这张表与工具条「更多 → 快捷键」面板读的是同一份数据，不会各说各话。', studio: '在画布上直接按键即可；吸附开启时方向键按网格移动节点。', conversation: '快捷键只改变画布呈现（视图、分组、位置），不改项目事实；改事实仍走确认闸门。', checkpoints: SHORTCUT_ROWS.map(([label, keys]) => label + '：' + keys) },
 ];
 
 export const OFFLINE_STRATEGY_CENTER_COPY = Object.freeze({

@@ -57,6 +57,7 @@ import { chunkAssetIds, deliverableIntent, isSelectionWriteCurrent, keepCandidat
 import { PROJECT_PAGE_SIZE, TASK_OVERVIEW_PAGE_SIZE, TASK_PAGE_SIZE, createProjectSearchIndex, createTaskSearchIndex, filterProjectIndex, filterTaskIndex, paginateWorkspaceItems } from './workspace-list-model.mjs';
 import { ProviderSettings } from './provider-settings.jsx';
 import { RequestQueueDock } from './request-queue.jsx';
+import { AssetProvenanceBody } from './asset-provenance.jsx';
 import { PageFrame } from './templates/PageFrame.jsx';
 import { PageHeader } from './components/PageHeader.jsx';
 import { PageToolbar } from './components/PageToolbar.jsx';
@@ -3256,7 +3257,9 @@ await refresh();
       selectionBusyIds={selectionBusyIds}
       onCanvasAssetSelection={setCanvasSelectedAssetIds}
       deliveries={deliveries}
-      sessionPlanStatus={sessionPlanStatus}
+      assetProvenance={assetProvenance}
+      onCloseAssetProvenance={() => setAssetProvenance(null)}
+      onOpenAssetTrace={(output) => navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id })}
       layoutRevision={eventRevision.canvasLayout}
       onNavigate={navigateRoute}
       onPreviewAsset={(asset) => { setPreviewZoom(1); setPreviewAssets([asset]); }}
@@ -3320,7 +3323,7 @@ await refresh();
       <WorkbenchNavigation view={view} project={selectedProject} task={selectedTask} round={selectedRound} provider={provider} studio={studio} recoveryPhase={recoveryPhase} repairing={runtimeRepairing} onOpenProvider={openProviderDetails} onOpenGuide={() => navigateRoute({ view: 'guide' })} onCopyRuntimeDiagnostic={() => void copyRuntimeDiagnostic()} onRefresh={() => void refresh()} onRepair={() => void repairRuntime()} onNavigate={(nextView, changes = {}) => navigateRoute({ view: nextView, ...changes })} />
     </aside>
 
-    <section className="work-surface">
+    <section className={'work-surface' + (routeView === 'lineage' ? ' is-canvas' : '')}>
       <div className="workspace-chrome">
         <header className="surface-header">
           <div className="heading-group"><p className="eyebrow">{surfaceEyebrow(view, Boolean(selectedProject))}</p><h1>{surfaceTitle(view, selectedProject)}</h1><span>{surfaceSubtitle(view, selectedProject)}</span></div>
@@ -3334,13 +3337,17 @@ await refresh();
           <WorkspaceContextBar project={selectedProject} tasks={tasks} task={selectedTask} rounds={rounds} selectedRound={selectedRound} sessionPlanStatus={sessionPlanStatus}  onSelectTask={(taskId) => navigateRoute(updateWorkbenchRoute(route, { taskId, roundId: null, compareRoundIds: [], runId: null, assetScope: taskId ? 'task' : 'project' }))} onSelectRound={(roundId) => { const nextRound = rounds.find((round) => round.id === roundId); navigateRoute(updateWorkbenchRoute(route, { taskId: roundId ? nextRound?.taskId || selectedTask?.id || null : selectedTask?.id || null, roundId, compareRoundIds: roundId ? [roundId] : [], runId: null, assetScope: roundId ? 'round' : selectedTask ? 'task' : 'project' })); }} projects={projects} onSwitchProject={(projectId) => navigateRoute(selectProject(route, projectId))} onRestoreContext={restoreSessionContext} />
         </> : <SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={restoreSessionContext} />}
       </div>
-      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: requestContextAssetIds({ canvasAssetIds: canvasSelectedAssetIds, selectedAssetIds: [...selectedAssetIds] }) }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} onEditPlan={openRoundPlanEdit} providerNotice={providerNotice} detection={agentDetection} detectionLoading={agentDetectionLoading} onDetect={detectAgents} connection={agentConnection} onConnectionChange={updateAgentConnection} />
       <StatusSlot items={statusItems} />
-      {renderActiveView()}
+      {/* C4（第 7 批）：队列从「内容之上」挪到内容之后（底部槽）——首元素 y 越界的真因就是它。
+          页面区在画布视图是可收缩的滚动区，所以队列长高时画布**让位**，不会被盖住。 */}
+      <div className="work-scroll" data-region="scroll">
+        {renderActiveView()}
+      </div>
+      <RequestQueueDock requests={studioRequests} pendingCount={pendingRequestCount} busy={requestBusy} presence={agentPresenceStatus} progress={progressForRequest} onOpenRound={openRoundFromQueue} context={{ projectId: selectedProject?.id || null, taskId: selectedTask?.id || null, roundId: selectedRound?.id || null, assetIds: requestContextAssetIds({ canvasAssetIds: canvasSelectedAssetIds, selectedAssetIds: [...selectedAssetIds] }) }} onSend={sendRequest} onWithdraw={withdrawRequest} onAnswer={answerRequest} onEditPlan={openRoundPlanEdit} providerNotice={providerNotice} detection={agentDetection} detectionLoading={agentDetectionLoading} onDetect={detectAgents} connection={agentConnection} onConnectionChange={updateAgentConnection} selecting={previewAssets.length > 0} />
       {layoutAuditEnabled && <LayoutAuditOverlay layout={currentLayoutTier} screen={routeView} />}
     </section>
 
-    {assetProvenance && <aside className="asset-inspector" aria-label="资产来源与评审记录"><div className="asset-inspector-head"><div><p className="eyebrow">资产检查器</p><h2>{assetProvenance.asset?.kind === 'generated' ? '生成结果来源链' : '导入素材来源链'}</h2></div><IconButton label="关闭资产检查器" onClick={() => setAssetProvenance(null)}><X size={16} /></IconButton></div><div className="asset-inspector-section"><span>来源</span><p>{assetProvenance.asset?.kind === 'generated' ? '由已确认批次中的出图保存' : '导入到当前 Studio 的素材'}</p>{assetProvenance.outputs?.map((output) => <button type="button" key={output.runItem.id} className="trace-link" onClick={() => { navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id }); setAssetProvenance(null); }}><span>{output.project.name} / {output.task.name}</span><b>{output.round.purpose} · 出图 {output.runItem.sequence}</b></button>)}</div><div className="asset-inspector-section"><span>评审历史</span>{assetProvenance.reviews?.length ? assetProvenance.reviews.map((review) => <p key={review.id}><b>{review.decision === 'keep' ? '保留' : review.decision === 'review' ? '待复核' : review.decision === 'reject' ? '不采用' : '衍生方向'}</b> · {review.createdAt}</p>) : <p>尚未记录评审。</p>}</div><div className="asset-inspector-section"><span>交付引用</span>{assetProvenance.deliveries?.length ? assetProvenance.deliveries.map((delivery) => <p key={delivery.id}>{delivery.name} · {delivery.status}</p>) : <p>尚未加入交付草稿。</p>}</div><div className="asset-inspector-section"><span>批次版本</span>{assetProvenance.deliveryBatches?.length ? assetProvenance.deliveryBatches.map((batch) => <p key={batch.versionId}>{batch.name} · v{batch.versionNo} · {batch.status === 'ready' ? '已准备' : batch.status === 'draft' ? '草稿' : '已被新修订版本替代'}</p>) : <p>尚未加入版本化交付批次。</p>}</div></aside>}
+    {assetProvenance && routeView !== 'lineage' && <aside className="asset-inspector" data-region="aside-overlay" aria-label="资产来源与评审记录"><AssetProvenanceBody provenance={assetProvenance} onClose={() => setAssetProvenance(null)} onOpenTrace={(output) => navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id })} /></aside>}
     {generationConfirmation && <ConfirmationDialog label="确认创作计划" title={'确认这版计划（v' + generationConfirmation.round.planVersion + '）？'} message={confirmationPlanSummary(generationConfirmation.round)} note="确认会把这版计划绑定到当前 conversation 与计划哈希；确认本身不会调用生成服务，需要回到会话继续核算与出图。" confirmLabel="确认计划" busy={generationConfirmationBusy} error={generationConfirmationError} tone="warning" onCancel={dismissGenerationConfirmation} onConfirm={confirmGenerationPlan} />}
     {previewAssets.length > 0 && <ImageInspectorDialog assets={previewAssets} zoom={previewZoom} selectedAssetIds={selectedAssetIds} selectionBusyIds={selectionBusyIds} selectedProject={selectedProject} selectedTask={selectedTask} fallbackTask={previewAssets.length === 1 ? taskForId(previewAssets[0]?.display?.taskId || previewAssets[0]?.source?.taskId || previewAssets[0]?.source?.creativeTaskId) : null} selectedRound={selectedRound} onClose={() => setPreviewAssets([])} onZoom={setPreviewZoom} onToggleDeliverable={markAsDeliverable} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} />}
     {rejectDialog && <RejectReviewDialog assets={rejectDialog.assets} canAddNegative={Boolean(selectedRound && selectedRound.status === 'draft')} canCreateNextRound={Boolean(selectedProject && selectedTask)} initialCreateNextRound={rejectDialog.createNextRound} busy={rejectBusy} error={rejectError} onDismiss={dismissRejectDialog} onSave={saveRejectReview} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}

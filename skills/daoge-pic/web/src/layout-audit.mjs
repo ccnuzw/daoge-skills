@@ -1,3 +1,4 @@
+import { QUEUE_IDLE_PX as BOTTOM_SLOT_IDLE_PX } from './bottom-slot-model.mjs';
 /**
  * 布局预算（界面方案 §4 S1 / §8.1 / 批 A A6 · 决策 D6）。纯函数，可单测。
  *
@@ -14,7 +15,6 @@
  *   ③ 未知 kind 直接报错，不许悄悄按某一档算。
  */
 export const STATUS_BAR_ALLOWANCE_PX = 44;
-export const BOTTOM_SLOT_IDLE_PX = 48;
 export const MAX_PERSISTENT_BANDS = 3;
 
 export const LAYOUT_BUDGETS = Object.freeze({
@@ -34,7 +34,7 @@ function round(value, digits = 3) {
 }
 
 /**
- * @param {{ kind?: 'workbench'|'list'|'reading', viewport?: { width: number, height: number }, regions?: { topbar?: number, status?: number, header?: number, toolbar?: number, bottom?: number, firstElementY?: number, bands?: number } }} [input]
+ * @param {{ kind?: 'workbench'|'list'|'reading', viewport?: { width: number, height: number }, regions?: { topbar?: number, status?: number, header?: number, toolbar?: number, bottom?: number, firstElementY?: number, bands?: number, expanded?: boolean } }} [input]
  */
 export function layoutBudgets(input = {}) {
   const budget = LAYOUT_BUDGETS[input.kind];
@@ -52,7 +52,9 @@ export function layoutBudgets(input = {}) {
   const topChrome = topbar + status + header + toolbar;
   const contentRatio = (height - topChrome - bottom) / height;
   const allowance = status > 0 ? STATUS_BAR_ALLOWANCE_PX : 0;
-  const expanded = bottom > BOTTOM_SLOT_IDLE_PX;
+  // 展开与否**问底部槽自己**（data-slot）：提醒行（S7）会让高度超过空闲值，
+  // 但那是「少而必要」的常显内容，不该因此豁免掉主区占比的检查。
+  const expanded = regions.expanded === undefined ? bottom > BOTTOM_SLOT_IDLE_PX : regions.expanded === true;
   const violations = [];
   if (!expanded && contentRatio + 1e-9 < budget.contentRatio) {
     violations.push({ id: 'contentRatio', actual: round(contentRatio), limit: budget.contentRatio, unit: 'ratio' });
@@ -73,5 +75,5 @@ export function layoutBudgets(input = {}) {
 export function layoutAuditLine({ kind, viewport, result, screen = '' }) {
   const percent = Math.round(result.contentRatio * 100);
   const mark = result.violations.length ? '⚠️ 越界：' + result.violations.map((item) => item.id).join('、') : '✓';
-  return [screen || kind, viewport.width + '×' + viewport.height, '主区 ' + percent + '%', '顶部 chrome ' + result.topChrome + 'px', '首元素 y ' + result.firstElementY + 'px', '横带 ' + result.bands, mark].join(' / ');
+  return [screen || kind, viewport.width + '×' + viewport.height, '主区 ' + percent + '%', '顶部常驻 ' + result.topChrome + 'px', '首元素 y ' + result.firstElementY + 'px', '横带 ' + result.bands, mark].join(' / ');
 }

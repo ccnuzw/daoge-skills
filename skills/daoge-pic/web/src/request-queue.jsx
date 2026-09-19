@@ -3,6 +3,7 @@ import { Send, X, CircleAlert, MessageSquare, Check, CornerDownLeft } from 'luci
 import { requestCardPresentation, queueAttention } from './request-queue-model.mjs';
 import { agentPresencePresentation } from './agent-presence-model.mjs';
 import { detectedCliSummary, queueAttentionThresholdMs, MIN_ATTENTION_MINUTES, MAX_ATTENTION_MINUTES } from './agent-connection-model.mjs';
+import { bottomSlotPlan } from './bottom-slot-model.mjs';
 
 /**
  * 催什么，取决于**下一步该做什么**——三句话对应三个不同的动作。
@@ -26,7 +27,7 @@ function attentionMessage(attention) {
  *
  * Studio 仍然不执行任何出图——这里只是排队叫号机，执行方永远是装着 skill 的 agent。
  */
-export function RequestQueueDock({ requests, pendingCount, busy, presence, context, progress, onSend, onWithdraw, onAnswer, onOpenRound, onEditPlan, detection, detectionLoading, onDetect, connection, onConnectionChange, providerNotice = '' }) {
+export function RequestQueueDock({ requests, pendingCount, busy, presence, context, progress, onSend, onWithdraw, onAnswer, onOpenRound, onEditPlan, detection, detectionLoading, onDetect, connection, onConnectionChange, providerNotice = '', selecting = false }) {
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState(false);
   // ⚠️ 在场**只有一个来源**（presence 对象）。
@@ -51,7 +52,13 @@ export function RequestQueueDock({ requests, pendingCount, busy, presence, conte
     void onSend(value, context).then((sent) => { if (sent) setExpanded(true); });
   };
 
-  return <section className="request-dock" data-region="bottom" aria-label="请求队列">
+  // S7：需要你回答的追问**不许折叠**——所以「有待回话的卡片」时默认就把记录摊开。
+  const needsYou = requests.some((request) => requestCardPresentation(request).canAnswer);
+  // C4/S1：三态由模型说了算——空闲恒 48px，展开 ≤min(320px, 35% 视口高)；选片时展开层收起（I1）。
+  const slot = bottomSlotPlan({ queue: expanded || needsYou ? 'expanded' : 'folded', viewportHeight: typeof window === 'undefined' ? 900 : window.innerHeight, selecting });
+  const showBody = slot.state === 'expanded';
+  return <section className={'request-dock is-' + slot.state} data-slot={slot.state} data-region="bottom" aria-label="请求队列">
+    {/* C4（第 7 批）：底部槽空闲恒 48px（S1 预算）——所以这一行就是常态的全部。 */}
     <div className="request-composer">
       <MessageSquare size={16} aria-hidden="true" />
       <textarea
@@ -63,28 +70,30 @@ export function RequestQueueDock({ requests, pendingCount, busy, presence, conte
         rows={1}
         disabled={!context?.projectId}
       />
+      <span className={'request-agent is-' + agent.tone} role="status" title={agent.detail || undefined}><span className="request-agent-dot" aria-hidden="true" />{agent.label}</span>
       <button type="button" className="command-button" disabled={!canSend} onClick={submit}><Send size={15} />{busy ? '发送中' : '发起'}</button>
-      <button type="button" className="outline-button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? '收起记录' : '全部记录'}{pendingCount ? ' · ' + pendingCount + ' 待接' : ''}</button>
+      <button type="button" className="outline-button" onClick={() => setExpanded((value) => !value)} aria-expanded={showBody}>{showBody ? '收起记录' : '全部记录'}{pendingCount ? ' · ' + pendingCount + ' 待接' : ''}</button>
     </div>
-    <p className={'request-agent is-' + agent.tone} role="status"><span className="request-agent-dot" aria-hidden="true" />{agent.label}{agent.detail ? ' · ' + agent.detail : ''}</p>
     {providerNotice && <p className="request-provider-notice" role="status"><CircleAlert size={14} aria-hidden="true" />{providerNotice}</p>}
     {attention.attention && <p className="request-attention" role="status"><CircleAlert size={14} aria-hidden="true" />{attentionMessage(attention)}</p>}
-    <details className="request-connection" onToggle={(event) => { if (event.currentTarget.open) void onDetect?.(); }}>
-      <summary>连接与唤起</summary>
-      <div className="request-connection-body">
-        <section className="request-connection-detect" aria-live="polite">
-          <p className="eyebrow">这台机器上装了什么</p>
-          {detectionLoading && !summary ? <p className="request-connection-line">正在侦查…</p> : summary ? <><p className="request-connection-line">{summary.headline} · {summary.skillLine}</p><ul className="request-connection-clis">{summary.installedRows.map((row) => <li key={row.name}><b>{row.title}</b><span>{row.detail}</span></li>)}</ul>{summary.missingNames.length > 0 && <p className="request-connection-line">另有 {summary.missingNames.length} 个未检测到：{summary.missingNames.join('、')}</p>}</> : <p className="request-connection-line">展开时自动侦查，不打扰。</p>}
-        </section>
-        <section className="request-connection-config">
-          <p className="eyebrow">怎么唤起 agent</p>
-          <label>唤起命令<input value={connection?.invokeCommand || ''} onChange={(event) => onConnectionChange?.({ invokeCommand: event.target.value })} placeholder="例如：codex / claude / opencode / omp / pi / grok" aria-label="唤起 agent 的命令" /></label>
-          <label>催促超时（分钟）<input type="number" min={MIN_ATTENTION_MINUTES} max={MAX_ATTENTION_MINUTES} value={connection?.attentionMinutes ?? MIN_ATTENTION_MINUTES} onChange={(event) => onConnectionChange?.({ attentionMinutes: event.target.value })} aria-label="agent 离线催促超时分钟数" /></label>
-          <p className="request-connection-note">超时只影响「多久开始催你」；agent 的 skills 归宿主管理，Studio 只侦查不代管。</p>
-        </section>
-      </div>
-    </details>
-    {visible.length > 0 && <ul className="request-cards">{visible.map((request) => <RequestCard key={request.id} request={request} busy={busy} progress={progress ? progress(request) : null} onWithdraw={onWithdraw} onAnswer={onAnswer} onOpenRound={onOpenRound} onEditPlan={onEditPlan} />)}</ul>}
+    {showBody && <div className="request-dock-body" data-block="dock-body">
+      <details className="request-connection" onToggle={(event) => { if (event.currentTarget.open) void onDetect?.(); }}>
+        <summary>连接与唤起</summary>
+        <div className="request-connection-body">
+          <section className="request-connection-detect" aria-live="polite">
+            <p className="eyebrow">这台机器上装了什么</p>
+            {detectionLoading && !summary ? <p className="request-connection-line">正在侦查…</p> : summary ? <><p className="request-connection-line">{summary.headline} · {summary.skillLine}</p><ul className="request-connection-clis">{summary.installedRows.map((row) => <li key={row.name}><b>{row.title}</b><span>{row.detail}</span></li>)}</ul>{summary.missingNames.length > 0 && <p className="request-connection-line">另有 {summary.missingNames.length} 个未检测到：{summary.missingNames.join('、')}</p>}</> : <p className="request-connection-line">展开时自动侦查，不打扰。</p>}
+          </section>
+          <section className="request-connection-config">
+            <p className="eyebrow">怎么唤起 agent</p>
+            <label>唤起命令<input value={connection?.invokeCommand || ''} onChange={(event) => onConnectionChange?.({ invokeCommand: event.target.value })} placeholder="例如：codex / claude / opencode / omp / pi / grok" aria-label="唤起 agent 的命令" /></label>
+            <label>催促超时（分钟）<input type="number" min={MIN_ATTENTION_MINUTES} max={MAX_ATTENTION_MINUTES} value={connection?.attentionMinutes ?? MIN_ATTENTION_MINUTES} onChange={(event) => onConnectionChange?.({ attentionMinutes: event.target.value })} aria-label="agent 离线催促超时分钟数" /></label>
+            <p className="request-connection-note">超时只影响「多久开始催你」；agent 的 skills 归宿主管理，Studio 只侦查不代管。</p>
+          </section>
+        </div>
+      </details>
+      {visible.length > 0 && <ul className="request-cards">{visible.map((request) => <RequestCard key={request.id} request={request} busy={busy} progress={progress ? progress(request) : null} onWithdraw={onWithdraw} onAnswer={onAnswer} onOpenRound={onOpenRound} onEditPlan={onEditPlan} />)}</ul>}
+    </div>}
   </section>;
 }
 

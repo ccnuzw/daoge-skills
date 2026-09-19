@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, Pencil, Play, Plus, Redo2, RefreshCw, Save, Search, Share2, Sparkles, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, Gauge, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, Pencil, Play, Plus, Redo2, RefreshCw, Save, Search, Share2, SlidersHorizontal, Sparkles, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { assetThumbnailUrl } from './asset-media-url.mjs';
+import { AssetProvenanceBody } from './asset-provenance.jsx';
 import { MINIMAP_HEIGHT, MINIMAP_WIDTH, clampWorldPoint, createMinimapGeometry, createMinimapItems, minimapToWorld, viewportRectForMinimap, worldToMinimap } from './lineage-minimap-model.mjs';
 import { LINEAGE_NODE_RENDER_LIMIT, lineageViewportBounds, virtualizeLineageNodes } from './lineage-viewport-model.mjs';
 import { createAccessibleLineage, redactLineageText } from './lineage-accessible-model.mjs';
@@ -8,6 +9,8 @@ import { createLineageExport, lineageExportFilename } from './lineage-export-mod
 import { statusPresentation } from './status-presentation.mjs';
 import { pendingRunItems } from './run-item-pagination.mjs';
 import { nodeMenuItems } from './lineage-menu-model.mjs';
+import { asideMetrics, asideSubject } from './aside-model.mjs';
+import { SHORTCUT_ROWS } from './shortcut-model.mjs';
 import { deriveAvailability } from './derive-path-model.mjs';
 import { understandingNote } from './plan-understanding-model.mjs';
 import { applyPlanEdit, planEditForm, planEditIssues } from './plan-edit-model.mjs';
@@ -443,61 +446,7 @@ function statusCountText(counts) {
   return parts.length ? parts.join(' / ') : '暂无运行';
 }
 
-function sessionContextLine(sessionPlanStatus, selectedTask, selectedRound) {
-  const context = sessionPlanStatus?.context;
-  if (context?.project?.name) {
-    const round = context.round;
-    return [safeDisplayText(context.task?.name, '任务', 80), round ? (PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion : '未绑定批次'].filter(Boolean).join(' / ');
-  }
-  if (selectedRound) return (PURPOSE_LABELS[selectedRound.purpose] || selectedRound.purpose) + ' · 计划 v' + selectedRound.planVersion;
-  if (selectedTask) return safeDisplayText(selectedTask.name, '任务', 80);
-  return '未绑定活动批次';
-}
-
-function planStatusLine(sessionPlanStatus, selectedRound) {
-  const contextRound = sessionPlanStatus?.context?.round;
-  const round = selectedRound || contextRound;
-  const pendingForRound = Boolean(sessionPlanStatus?.pendingConfirmation && (!selectedRound || !contextRound?.id || contextRound.id === selectedRound.id));
-  if (pendingForRound) return '待确认；确认后由会话核算一遍，再出图。';
-  if (sessionPlanStatus?.confirmation?.confirmed && (!selectedRound || !contextRound?.id || contextRound.id === selectedRound.id)) return '计划已确认；核算和出图仍由会话执行。';
-  if (sessionPlanStatus?.latestRun && (!selectedRound || !contextRound?.id || contextRound.id === selectedRound.id)) return '最近运行：' + statusPresentation('run', sessionPlanStatus.latestRun.status).label;
-  if (round?.status === 'draft') return '还没开工，可继续补充参考或整理计划。';
-  if (round) return '状态：' + statusPresentation('generic', round.status).label;
-  return '';
-}
-
-function LineageWorkspaceSummary({ selectedTask, selectedRound, runs = EMPTY_ARRAY, sessionPlanStatus, graph, mode, onMode, onOpenTasks, onCreateTask }) {
-  const reviews = graph.metrics.reviews || {};
-  const currentMode = CREATOR_MODES.find(([value]) => value === mode) || CREATOR_MODES[0];
-  const undecided = (reviews.unreviewed || 0) + (reviews.review || 0);
-  const metrics = [
-    { key: 'selected', className: 'is-delivery', value: graph.metrics.selected || reviews.keep || 0, label: '成果' },
-    { key: 'undecided', className: 'is-unreviewed', value: undecided, label: '未定' },
-    { key: 'reject', className: 'is-reject', value: reviews.reject || 0, label: '不采用' },
-    { key: 'runs', className: 'is-runs', value: runs.length, label: '运行', title: statusCountText(runStatusCounts(runs)) }
-  ];
-  const contextStatus = planStatusLine(sessionPlanStatus, selectedRound);
-  return <div className="lineage-workspace-summary" data-lineage-no-zoom>
-    <section className="lineage-focus-strip" aria-label="谱系当前视图与已记下的条件">
-      <div className="lineage-context-card">
-        <span>条件</span>
-        <strong>{sessionContextLine(sessionPlanStatus, selectedTask, selectedRound)}</strong>
-        {contextStatus && <small>{contextStatus}</small>}
-        <div className="lineage-context-actions"><button type="button" className="outline-button" onClick={onOpenTasks}><GitFork size={14} />任务列表</button><button type="button" className="outline-button" onClick={onCreateTask}><Sparkles size={14} />新建任务</button></div>
-      </div>
-      <section className="lineage-mode-panel" aria-label="画布视角切换">
-        <div className="lineage-mode-heading"><span>画布视角</span><strong>{currentMode[1]}</strong></div>
-        <div className="lineage-mode-grid" role="radiogroup" aria-label="切换画布视角">
-          {CREATOR_MODES.map(([value, label, description]) => <button type="button" key={value} className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} title={description} onClick={() => onMode(value)}><strong>{label}</strong></button>)}
-        </div>
-      </section>
-      <section className="lineage-metrics-strip" aria-label="创作决策统计">
-        {metrics.map((item) => <article key={item.key} className={item.className} title={item.title || item.label}><b>{item.value}</b><span>{item.label}</span></article>)}
-      </section>
-    </section>
-  </div>;
-}
-export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, sessionPlanStatus = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onDeselectAsset, onCanvasAssetSelection, onSaveRecipe, pendingPlanEditRoundId = null, onPendingPlanEditHandled }) {
+export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, assetProvenance = null, onCloseAssetProvenance = null, onOpenAssetTrace = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onDeselectAsset, onCanvasAssetSelection, onSaveRecipe, pendingPlanEditRoundId = null, onPendingPlanEditHandled }) {
   tasks = listValue(tasks);
   rounds = listValue(rounds);
   runs = listValue(runs);
@@ -1295,13 +1244,21 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   const searchListId = 'lineage-search-results';
   const activeSearchOptionId = activeNodeSearch ? 'lineage-search-option-' + nodeSearchIndex : undefined;
 
+  // C5（第 7 批）：这四项从「常显横带」移进右栏顶部——信息一个不丢，常显面积减少（模型：aside-model.mjs）。
+  const inspectorMetrics = asideMetrics({ graph, runs, statusText: (list) => statusCountText(runStatusCounts(list)) });
+  // 模式切换从焦点条搬进工具条（C1）：名字与动作不变，只是换了家。
+  const mode = settings.mode || 'map';
+  const onMode = (value) => updateSettings({ mode: value }, false);
   const toolbarMode = CREATOR_MODES.find(([value]) => value === (settings.mode || 'map')) || CREATOR_MODES[0];
   return <section className={'lineage-stage ' + (editing ? 'is-editing' : 'is-browsing')} aria-label="创作谱系">
-    <header className="lineage-toolbar" data-lineage-no-zoom>
-      <div className="lineage-toolbar-title">
-        <h2>{editing ? '布局编辑' : toolbarMode[1]}</h2>
-        <span>{editing ? '只调整画布呈现，不改项目事实。' : toolbarMode[2]}</span>
-      </div>
+    {/* C1（第 7 批）：四条 chrome 收成这一条 48px——并打上 toolbar 标，让布局审计真的看得见它。 */}
+    <header className="lineage-toolbar" data-region="toolbar" data-lineage-no-zoom>
+      <details className="lineage-popover lineage-mode-menu" data-popover="mode">
+        <summary title={editing ? '只调整画布呈现，不改项目事实。' : toolbarMode[2]}><strong>{editing ? '布局编辑' : toolbarMode[1]}</strong></summary>
+        <div className="lineage-popover-body lineage-mode-list" role="radiogroup" aria-label="切换画布视角">
+          {CREATOR_MODES.map(([value, label, description]) => <button type="button" key={value} className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} title={description} onClick={() => onMode(value)}><strong>{label}</strong></button>)}
+        </div>
+      </details>
       <div className="lineage-actions">
         <button type="button" onClick={fitAll}><Search size={15} />适应全部</button>
         {selectedKeys.size > 0 && <button type="button" onClick={fitSelection}><ZoomIn size={15} />适应选择</button>}
@@ -1325,27 +1282,42 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
             </div>
           </details>
         </>}
-        <button type="button" onClick={exportLineageSummary}><Download size={15} />导出摘要</button>
-        <button type="button" className={outlineOpen ? 'is-active' : ''} aria-pressed={outlineOpen} aria-controls="lineage-accessible-view" aria-label={outlineOpen ? '收起列表文字谱系视图' : '打开列表文字谱系视图'} onClick={() => setOutlineOpen((value) => !value)}><BookOpen size={15} />{outlineOpen ? '收起文字谱系' : '文字谱系'}</button>
+      </div>
+      <div className="lineage-toolbar-tail">
+        <details className="lineage-popover lineage-filter-popover" data-popover="filter">
+          <summary aria-label={'筛选：' + (FILTERS.find(([value]) => value === settings.filter) || FILTERS[0])[1]}><SlidersHorizontal size={14} />{(FILTERS.find(([value]) => value === settings.filter) || FILTERS[0])[1]}</summary>
+          <div className="lineage-popover-body">
+            <p className="eyebrow">筛选</p>
+            <div className="lineage-choice-row">{FILTERS.map(([value, label]) => <button type="button" key={value} className={settings.filter === value ? 'is-active' : ''} onClick={() => updateSettings({ filter: value })}>{label}</button>)}</div>
+            {editing && <><p className="eyebrow">背景</p><div className="lineage-choice-row">{BACKGROUNDS.map(([value, label]) => <button type="button" key={value} className={settings.background === value ? 'is-active' : ''} onClick={() => updateSettings({ background: value })}>{label}</button>)}</div></>}
+          </div>
+        </details>
+        {/* C2：一长串 11px 统计收进浮层——数字一个不少，常显只剩下面那个保存指示点。 */}
+        <details className="lineage-popover lineage-stats-popover" data-popover="stats">
+          <summary><Gauge size={14} />统计</summary>
+          <div className="lineage-popover-body lineage-stats">
+            <dl><div><dt>资产</dt><dd>{assetCountLabel}</dd></div><div><dt>单张出图记录</dt><dd>{runItemCountLabel}</dd></div><div><dt>已选</dt><dd>{graph.metrics.selected}</dd></div><div><dt>异常</dt><dd>{graph.metrics.issues}</dd></div><div><dt>分组</dt><dd>{groups.length}</dd></div><div><dt>标注</dt><dd>{validManualLinks.length}</dd></div>{culledCount ? <div><dt>已虚拟化</dt><dd>{culledCount} 个节点</dd></div> : null}{renderedCanvasModel.limited ? <div><dt>活动窗口上限</dt><dd>{LINEAGE_NODE_RENDER_LIMIT} 个画布元素</dd></div> : null}{batchBusy ? <div><dt>批量选片</dt><dd>同步中</dd></div> : null}</dl>
+          </div>
+        </details>
+        <div className="lineage-searchbar" data-lineage-no-zoom>
+          <label className="lineage-search-input">
+            <Search size={14} />
+            <input value={nodeSearchQuery} onChange={(event) => { setNodeSearchQuery(event.target.value); setNodeSearchIndex(0); }} onKeyDown={handleNodeSearchKeyDown} placeholder="搜索节点名称、类型、ID、状态" aria-label="搜索谱系节点" role="combobox" aria-autocomplete="list" aria-expanded={Boolean(nodeSearchQuery && nodeSearchResults.length)} aria-controls={searchListId} aria-activedescendant={activeSearchOptionId} />
+          </label>
+          {nodeSearchQuery && <span className="lineage-search-hint">{nodeSearchResults.length ? nodeSearchResults.length + ' 个结果' : '无匹配节点'}</span>}
+          {nodeSearchQuery && nodeSearchResults.length ? <div className="lineage-search-results" id={searchListId} role="listbox" aria-label="谱系节点搜索结果">{nodeSearchResults.map((node, index) => <button type="button" role="option" aria-selected={index === nodeSearchIndex} id={'lineage-search-option-' + index} key={node.key} className={index === nodeSearchIndex ? 'is-active' : ''} onClick={() => { setNodeSearchIndex(index); focusNode(node); }}><strong>{node.title}</strong><small>{nodeTypeLabel(node.entityType)} · {shortId(node.entityId)}</small></button>)}</div> : null}
+        </div>
+        <details className="lineage-popover lineage-more" data-popover="more">
+          <summary aria-label="更多画布动作">更多</summary>
+          <div className="lineage-popover-body">
+            <button type="button" onClick={exportLineageSummary}><Download size={15} />导出摘要</button>
+            <button type="button" className={outlineOpen ? 'is-active' : ''} aria-pressed={outlineOpen} aria-controls="lineage-accessible-view" aria-label={outlineOpen ? '收起列表文字谱系视图' : '打开列表文字谱系视图'} onClick={() => setOutlineOpen((value) => !value)}><BookOpen size={15} />{outlineOpen ? '收起文字谱系' : '文字谱系'}</button>
+          </div>
+        </details>
+        {/* C2：保存态降为一个指示点；**失败仍有一行字**（aria-live），「变红点」不算通知到位。 */}
+        <span className={'lineage-save-indicator is-' + saveState.status} data-save={saveState.status} role="status" aria-live="polite" title={saveState.message}>{saveState.status === 'error' ? <><Save size={13} aria-hidden="true" />{saveState.message}</> : <Save size={13} aria-label={saveState.message} />}</span>
       </div>
     </header>
-    <LineageWorkspaceSummary selectedTask={selectedTask} selectedRound={selectedRound} runs={runs} sessionPlanStatus={sessionPlanStatus} graph={graph} mode={settings.mode || 'map'} onMode={(mode) => updateSettings({ mode }, false)} onOpenTasks={() => onNavigate({ view: 'tasks', projectId: project?.id || null, taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })} onCreateTask={onCreateTask} />
-
-    <div className="lineage-filterbar" data-lineage-no-zoom>
-      <div>{FILTERS.map(([value, label]) => <button type="button" key={value} className={settings.filter === value ? 'is-active' : ''} onClick={() => updateSettings({ filter: value })}>{label}</button>)}</div>
-      {editing && <div>{BACKGROUNDS.map(([value, label]) => <button type="button" key={value} className={settings.background === value ? 'is-active' : ''} onClick={() => updateSettings({ background: value })}>{label}</button>)}</div>}
-      <span className={'lineage-save-state is-' + saveState.status}><Save size={13} />{saveState.message}</span>
-      <span>{assetCountLabel} · {runItemCountLabel} · {graph.metrics.selected} 张已选 · {graph.metrics.issues} 个异常 · {groups.length} 个分组 · {validManualLinks.length} 条标注{culledCount ? ' · 已虚拟化 ' + culledCount + ' 个节点' : ''}{renderedCanvasModel.limited ? ' · 活动窗口最多渲染 ' + LINEAGE_NODE_RENDER_LIMIT + ' 个画布元素' : ''}{batchBusy ? ' · 批量选片同步中' : ''}</span>
-    </div>
-
-    <div className="lineage-searchbar" data-lineage-no-zoom>
-      <label className="lineage-search-input">
-        <Search size={14} />
-        <input value={nodeSearchQuery} onChange={(event) => { setNodeSearchQuery(event.target.value); setNodeSearchIndex(0); }} onKeyDown={handleNodeSearchKeyDown} placeholder="搜索节点名称、类型、ID、状态" aria-label="搜索谱系节点" role="combobox" aria-autocomplete="list" aria-expanded={Boolean(nodeSearchQuery && nodeSearchResults.length)} aria-controls={searchListId} aria-activedescendant={activeSearchOptionId} />
-      </label>
-      <span>{nodeSearchQuery ? (nodeSearchResults.length ? nodeSearchResults.length + ' 个结果' : '无匹配节点') : '输入关键词快速定位节点'}</span>
-      {nodeSearchQuery && nodeSearchResults.length ? <div className="lineage-search-results" id={searchListId} role="listbox" aria-label="谱系节点搜索结果">{nodeSearchResults.map((node, index) => <button type="button" role="option" aria-selected={index === nodeSearchIndex} id={'lineage-search-option-' + index} key={node.key} className={index === nodeSearchIndex ? 'is-active' : ''} onClick={() => { setNodeSearchIndex(index); focusNode(node); }}><strong>{node.title}</strong><small>{nodeTypeLabel(node.entityType)} · {shortId(node.entityId)}</small></button>)}</div> : null}
-    </div>
     {outlineOpen && <LineageTextView id="lineage-accessible-view" nodes={nodes} connections={allConnections} endpointByKey={endpointByKey} selectedKeys={selectedKeys} scope={scope} coverage={{ assets: { loaded: lineageAssetsLoaded, total: lineageAssetTotal, loading: lineageAssetLoading || !layoutReady }, runItems: { loaded: lineageRunItemsLoaded, total: lineageRunItemTotal, loading: runItemCoverage?.loading === true || !layoutReady } }} onFocus={selectAccessibleNode} onOpen={(node) => openNode(node, { onNavigate, onInspectAsset })} />}
     <div className="lineage-shell">
       <div ref={canvasRef} tabIndex={0} className={'lineage-canvas bg-' + settings.background} onPointerDown={handleCanvasPointerDown} onDoubleClick={handleCanvasDoubleClick} onKeyDown={handleKeyDown} onContextMenu={(event) => openContextMenu(event)} onDragOver={(event) => { if (dataTransferHasType(event.dataTransfer, 'application/x-daoge-lineage-node')) event.preventDefault(); }} aria-label="创作谱系画布；拖拽图片到批次上可建立引用，可用方向键微调选中节点">
@@ -1371,7 +1343,7 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
         {editing && settings.minimap && <LineageMinimap nodes={renderableNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} selectedKeys={selectedKeys} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
         {editing && shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
       </div>
-      <LineageInspector onEditPlan={openPlanEdit} runs={runs} batchQuality={inspectorBatchQuality} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onBatchSelectAssets={onBatchSelectAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={copyContextForNodes} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenConfirmation={onOpenConfirmation} onSaveRecipe={onSaveRecipe} />
+      <LineageInspector onEditPlan={openPlanEdit} runs={runs} metrics={inspectorMetrics} assetProvenance={assetProvenance} onCloseAssetProvenance={onCloseAssetProvenance} onOpenAssetTrace={onOpenAssetTrace} batchQuality={inspectorBatchQuality} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onBatchSelectAssets={onBatchSelectAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={copyContextForNodes} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenConfirmation={onOpenConfirmation} onSaveRecipe={onSaveRecipe} />
     </div>
   </section>;
 }
@@ -1470,10 +1442,22 @@ function contextRouteForNode(node) {
   if (node.entityType === 'round') return { view: 'lineage', taskId: node.entity.taskId, roundId: node.entity.id, compareRoundIds: [node.entity.id], runId: null, assetScope: 'round' };
   return null;
 }
-function LineageInspector({ tasks = EMPTY_ARRAY, runs = EMPTY_ARRAY, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onEditPlan, onSaveRecipe, batchQuality = '' }) {
+function LineageInspector({ tasks = EMPTY_ARRAY, runs = EMPTY_ARRAY, metrics = EMPTY_ARRAY, assetProvenance = null, onCloseAssetProvenance = null, onOpenAssetTrace = null, editing, node, selectedNodes, selectedAssetNodes, selectedTask, selectedRound, batchBusy, groupTitle, nodeLinks, onGroupTitleChange, onCreateGroup, onCreateLink, onRemoveLink, onUpdateLink, onReverseLink, onClear, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCopyContext, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onEditPlan, onSaveRecipe, batchQuality = '' }) {
   const [inspectorTab, setInspectorTab] = useState('plan');
+  // C5：指标四项在右栏顶部——**无选中也在**（常显信息减少，一个不丢）。
+  const metricsStrip = metrics.length ? <section className="lineage-metrics-strip is-aside" data-block="aside-metrics" aria-label="创作决策统计">
+    {metrics.map((item) => <article key={item.key} className={item.className} title={item.title || item.label}><b>{item.value}</b><span>{item.label}</span></article>)}
+  </section> : null;
+  // C3：显式打开的资产来源**优先**——批次与资产共用这一个右栏（不再另开浮层；判据见 aside-model.mjs）。
+  if (asideSubject({ explicit: assetProvenance ? 'assetProvenance' : null, selectedNodes }).kind === 'asset') {
+    return <aside className="lineage-inspector is-open" data-region="aside" data-lineage-no-zoom>
+      {metricsStrip}
+      <AssetProvenanceBody provenance={assetProvenance} onClose={onCloseAssetProvenance} onOpenTrace={onOpenAssetTrace} />
+    </aside>;
+  }
   if (!selectedNodes.length) {
-    return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
+    return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-region="aside" data-lineage-no-zoom>
+      {metricsStrip}
       <p className="eyebrow">检查器</p>
       <h2>选择一个节点</h2>
       <p>{editing ? '编辑模式可多选、分组或添加标注。' : '单击节点查看详情；节点相关动作会在这里出现。'}</p>
@@ -1483,7 +1467,8 @@ function LineageInspector({ tasks = EMPTY_ARRAY, runs = EMPTY_ARRAY, editing, no
   if (!node) {
     const selectedAssetIds = selectedAssetNodes.map((item) => item.entity.id).filter(Boolean);
     const selectedAssets = selectedAssetNodes.map((item) => item.entity).filter(Boolean);
-    return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
+    return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-region="aside" data-lineage-no-zoom>
+      {metricsStrip}
       <div className="lineage-inspector-head">
         <div><p className="eyebrow">批量操作</p><h2>{selectedNodes.length} 个节点</h2></div>
         <button type="button" className="icon-button" aria-label="清除选择" onClick={onClear}><X size={15} /></button>
@@ -1507,7 +1492,8 @@ function LineageInspector({ tasks = EMPTY_ARRAY, runs = EMPTY_ARRAY, editing, no
   }
   const entity = node.entity;
   const isAsset = isAssetNode(node);
-  return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-lineage-no-zoom>
+  return <aside className={'lineage-inspector' + (selectedNodes.length ? ' is-open' : '')} data-region="aside" data-lineage-no-zoom>
+    {metricsStrip}
     <div className="lineage-inspector-head">
       <div><p className="eyebrow">检查器</p><h2>{node.title}</h2></div>
       <button type="button" className="icon-button" aria-label="清除选择" onClick={onClear}><X size={15} /></button>
@@ -1681,6 +1667,6 @@ function LineageMinimap({ nodes, boundsNodes = nodes, groups = [], viewport, can
   </div>;
 }
 function ShortcutPanel({ onClose }) {
-  const rows = [['拖动画布', '中键 / Cmd / Ctrl + 拖拽'], ['框选节点', '空白处拖拽'], ['多选', 'Shift / Cmd 点击'], ['全选', 'Cmd/Ctrl + A'], ['撤销 / 重做', 'Cmd/Ctrl + Z / Shift+Z'], ['微调节点', '方向键；吸附开启时按网格移动'], ['组成分组', '选中多个节点后按 G'], ['适应选择', 'F'], ['关闭面板', 'Esc']];
+  const rows = SHORTCUT_ROWS;
   return <aside className="lineage-shortcut-panel" data-lineage-no-zoom><div><p className="eyebrow">快捷键</p><button type="button" className="icon-button" aria-label="关闭快捷键" onClick={onClose}><X size={14} /></button></div>{rows.map(([action, shortcut]) => <p key={action}><strong>{action}</strong><span>{shortcut}</span></p>)}</aside>;
 }

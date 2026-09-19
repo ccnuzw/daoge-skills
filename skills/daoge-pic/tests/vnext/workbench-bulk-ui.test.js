@@ -256,7 +256,7 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(styles, /\.lineage-primary-actions/);
   assert.match(styles, /\.lineage-utility-row/);
   assert.doesNotMatch(styles, /\.lineage-inspector-menu|\.lineage-menu-panel|\.lineage-action-card|\.lineage-reference-actions|\.lineage-reference-grid|\.lineage-reference-chip|\.lineage-creative-actions/);
-  assert.match(styles, /\.lineage-mode-panel/);
+  assert.match(styles, /\.lineage-mode-menu/);
   assert.match(styles, /\.lineage-metrics-strip/);
   assert.match(styles, /\.derived-purpose-board/);
   assert.match(styles, /\.derived-arrangement-grid/);
@@ -392,12 +392,15 @@ test('lineage canvas is the creator-first project workspace', () => {
   // 画布 mode 是同一张图上的三种看法（收敛前五种），名字不得再和左侧一级入口撞车
   // （旧名里「项目地图/资产分支/交付路线」与入口近义、「批次对比」与页签同名）。
   assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'批次对比'/);
-  assert.match(lineage, /LineageWorkspaceSummary/);
-  assert.match(lineage, /lineage-focus-strip/);
+  // 批 C（第 7 批）迁移：焦点条退场——模式进工具条、指标进右栏，但**名字一个没丢**。
+  assert.doesNotMatch(lineage, /LineageWorkspaceSummary/);
+  assert.doesNotMatch(lineage, /lineage-focus-strip/);
+  assert.match(lineage, /lineage-mode-menu/);
+  assert.match(lineage, /lineage-inspector' \+ \(selectedNodes\.length \? ' is-open' : ''\)\} data-region="aside"/);
   assert.match(lineage, /toolbarMode/);
   assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /创作地图|创作者工作台/);
-  assert.match(styles, /\.lineage-focus-strip/);
-  assert.match(styles, /\.lineage-focus-strip \{ display:grid; grid-template-columns:minmax\(260px,\.9fr\) minmax\(360px,1\.25fr\) minmax\(320px,\.85fr\)/);
+  assert.doesNotMatch(styles, /\.lineage-focus-strip/);
+  assert.match(styles, /\.lineage-toolbar \{ display: flex;[\s\S]{0,160}min-height: 48px; height: 48px;/);
   assert.match(lineage, /title=\{description\} onClick=\{\(\) => onMode\(value\)\}><strong>\{label\}<\/strong><\/button>/);
   assert.match(styles, /\.lineage-thumb img \{ display:block; width:100%; height:126px; object-fit:contain;/);
   assert.doesNotMatch(styles, /\.lineage-workspace-hero/);
@@ -407,10 +410,11 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /反例参考/);
   assert.match(lineage, /label: '不采用'/);
   assert.match(lineage, /设为当前批次/);
-  assert.match(lineage, /lineage-context-actions/);
-  assert.match(lineage, /任务列表/);
-  assert.match(lineage, /lineage-mode-grid" role="radiogroup"/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /<details className="lineage-mode-panel"/);
+  // 批 C（第 7 批）迁移：条件卡退场（任务列表去 rail、新建任务去任务页），模式换到工具条浮层。
+  assert.doesNotMatch(lineage, /lineage-context-actions/);
+  assert.match(readSource('web/src/workbench-navigation.jsx'), /rail-sub-entry/);
+  assert.match(lineage, /lineage-mode-list" role="radiogroup"/);
+  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /className="lineage-mode-panel"/);
   assert.match(lineage, /lineage-edit-more/);
   assert.match(lineage, /boundsNodes=\{nodes\}/);
   assert.match(lineage, /event\.stopPropagation\(\)/);

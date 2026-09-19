@@ -33,6 +33,14 @@ export const TERMS = Object.freeze([
   { internal: '毫秒', level: '收回', scope: 'creator', creator: '换算成秒', forbidInCreator: true },
   { internal: 'SQLite', level: '收回', scope: 'creator', creator: '本地数据库', forbidInCreator: true },
   { internal: 'schema', level: '收回', scope: 'creator', creator: '数据格式', forbidInCreator: true },
+  // —— 布局词（收回）：写给实现看的英文，创作者面一律不许出现 ——
+  // 为什么要单列：这批把界面骨架（rail / aside / chrome / slot / panel）重构了一遍，
+  // 实现词最容易顺着注释、类名漂进用户文案。它们的家是设计文档，不是屏幕。
+  { internal: 'rail', level: '收回', scope: 'creator', creator: '侧栏', forbidInCreator: true, layoutWord: true },
+  { internal: 'aside', level: '收回', scope: 'creator', creator: '检查器', forbidInCreator: true, layoutWord: true },
+  { internal: 'chrome', level: '收回', scope: 'creator', creator: '常驻横带', forbidInCreator: true, layoutWord: true },
+  { internal: 'slot', level: '收回', scope: 'creator', creator: '栏位', forbidInCreator: true, layoutWord: true },
+  { internal: 'panel', level: '收回', scope: 'creator', creator: '面板', forbidInCreator: true, layoutWord: true },
   // —— 译好：创作者需要理解，给自然说法 ——
   { internal: 'Provider', level: '译好', scope: 'creator', creator: '生成服务', hint: '出图用的那家服务' },
   { internal: '预检', level: '译好', scope: 'creator', creator: '开工前核算', hint: '先算一遍要出几张、能不能跑通，这一步不出图' },
@@ -81,6 +89,21 @@ export const ADVANCED_DETAILS_ALLOWED_COPY = Object.freeze([
   '预检',          // main.jsx：技术详情里该区块的小标题
   '没有预检记录。'  // main.jsx：该区块的空态
 ]);
+
+
+// 可见文案命中判定：英文布局词按**词边界**（`rail` 不许误伤 `trail`），中文词照旧子串。
+// 这个助手是布局词治理（批 C）落地时补的——之前的 includes 只对中文安全。
+export function hitsInVisibleCopy(copy, words) {
+  return words.filter((word) => (
+    /^[a-z0-9-]+$/i.test(word)
+      ? new RegExp('(^|[^a-z0-9-])' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^a-z0-9-]|$)', 'i').test(copy)
+      : copy.includes(word)
+  ));
+}
+
+export function layoutWords() {
+  return TERMS.filter((term) => term.layoutWord).map((term) => term.internal);
+}
 
 export function termsAtLevel(level) {
   return TERMS.filter((term) => term.level === level);

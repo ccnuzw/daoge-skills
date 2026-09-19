@@ -209,23 +209,23 @@
 .lineage-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; border-bottom:1px solid #c4cec3; padding:2px 0 8px; }
 .lineage-toolbar-title h2 { margin:0 0 3px; color:#25362d; font-family:"Songti SC","STSong",serif; font-size:21px; line-height:1.2; }
 .lineage-toolbar-title > span { display:block; max-width:560px; color:#5c6e61; font-size:11px; line-height:1.45; }
-.lineage-workspace-summary { display:block; margin:6px 0 10px; }
-.lineage-focus-strip { display:grid; grid-template-columns:minmax(260px,.9fr) minmax(360px,1.25fr) minmax(320px,.85fr); grid-template-areas:"context mode metrics"; gap:8px; min-width:0; align-items:stretch; }
-.lineage-context-card { grid-area:context; display:grid; grid-template-columns:minmax(0,1fr) auto; align-content:center; gap:3px 10px; min-width:0; border:1px solid #c6d1c2; border-left:3px solid #496e51; padding:8px 10px; background:rgba(255,254,249,.72); }
-.lineage-context-card > span,.lineage-mode-heading span { color:#748176; font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
-.lineage-context-card strong { overflow:hidden; color:#263c31; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
-.lineage-context-card small { overflow:hidden; color:#647466; font-size:11px; line-height:1.35; text-overflow:ellipsis; white-space:nowrap; }
+
+
+
+
+
+
 .lineage-context-actions { grid-row:1 / 4; grid-column:2; display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 .lineage-context-actions .outline-button { min-height:30px; padding:0 8px; font-size:11px; }
-.lineage-mode-panel { grid-area:mode; display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:8px; border:1px solid #c7d0c4; padding:6px; background:#fbfcf8; }
-.lineage-mode-heading { display:grid; align-content:center; gap:3px; border-right:1px solid #d7ded4; padding-right:8px; }
-.lineage-mode-heading strong { color:#253a2d; font-size:12px; white-space:nowrap; }
-.lineage-mode-heading small { display:none; }
-.lineage-mode-grid { display:flex; align-items:center; flex-wrap:wrap; gap:4px; min-width:0; border:0; background:transparent; }
-.lineage-mode-grid button { display:inline-flex; align-items:center; justify-content:center; min-height:32px; border:1px solid #c7d0c4; padding:0 9px; background:#fbfcf8; color:#34463a; text-align:center; cursor:pointer; transition:background .18s ease,color .18s ease,box-shadow .18s ease,border-color .18s ease; }
-.lineage-mode-grid button:hover,.lineage-mode-grid button.is-active { border-color:#405e49; background:#263d30; color:#f7faf2; box-shadow:inset 0 -2px #c8d95f; }
-.lineage-mode-grid strong { font-size:11px; white-space:nowrap; }
-.lineage-mode-grid span { display:none; }
+
+
+
+
+
+
+
+
+
 .lineage-metrics-strip { grid-area:metrics; display:grid; grid-template-columns:repeat(4,minmax(62px,1fr)); gap:1px; border:1px solid #c8d1c5; background:#c8d1c5; }
 .lineage-metrics-strip article { display:flex; align-items:center; justify-content:space-between; gap:6px; min-height:48px; padding:6px 8px; background:#fbfcf8; }
 .lineage-metrics-strip b { color:#22362a; font-family:Georgia,serif; font-size:15px; font-weight:600; }
@@ -500,8 +500,6 @@
 .lineage-shortcut-panel p { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; margin:0; border-top:1px solid #dce3d9; padding:8px 0; color:#607264; font-size:11px; }
 .lineage-shortcut-panel strong { color:#2f4336; }
 .lineage-shortcut-panel span { color:#756138; font-weight:700; }
-@media (max-width:1280px) { .lineage-focus-strip { grid-template-columns:minmax(280px,1fr) minmax(280px,1fr); grid-template-areas:"context metrics" "mode mode"; }.lineage-mode-grid { flex-wrap:wrap; }.lineage-metrics-strip { grid-template-columns:repeat(4,minmax(0,1fr)); } }
-@media (max-width:900px) { .lineage-focus-strip { grid-template-columns:1fr; grid-template-areas:"context" "mode" "metrics"; }.lineage-context-card,.lineage-mode-panel { grid-template-columns:1fr; }.lineage-context-actions { grid-row:auto; grid-column:auto; }.lineage-mode-heading { border-right:0; border-bottom:1px solid #d7ded4; padding:0 0 8px; }.lineage-mode-grid { align-items:stretch; }.lineage-mode-grid button { flex:1 1 140px; }.lineage-metrics-strip,.lineage-primary-actions { grid-template-columns:1fr; }.lineage-utility-row { grid-template-columns:1fr; }.lineage-context-card strong { white-space:normal; } }
 @media (max-width:1280px) { .lineage-toolbar { grid-template-columns:1fr; align-items:start; }.lineage-actions { justify-content:flex-start; }.lineage-shell { grid-template-columns:1fr; }.lineage-inspector { min-height:260px; }.lineage-canvas { height:68vh; } }
 @media (max-width:640px) { .lineage-stage { padding-top:18px; }.lineage-filterbar { align-items:flex-start; flex-direction:column; }.lineage-filterbar > span { margin-left:0; }.lineage-actions,.lineage-filterbar > div { justify-content:flex-start; overflow-x:auto; flex-wrap:nowrap; width:100%; padding-bottom:2px; }.lineage-actions button,.lineage-filterbar button,.lineage-template-select { flex:0 0 auto; min-height:44px; }.lineage-canvas { min-height:540px; height:64vh; }.lineage-minimap { display:none; }.lineage-inspector-actions,.lineage-relation-tools { grid-template-columns:1fr; }.lineage-inspector dl div { grid-template-columns:1fr; gap:3px; } }
 @media (max-width:640px) { .lineage-searchbar { grid-template-columns:1fr; }.lineage-search-results { grid-column:1; }.lineage-search-results button { min-width:180px; } }
@@ -1501,3 +1499,52 @@
 .request-card-progress.is-failed .request-card-stage { color:#8f3b2e; }
 .request-card-stage-detail { color:#6b7a6d; font-weight:400; }
 .request-card-progress .request-card-confirm, .request-card-progress .request-card-watch { min-height:26px; margin-left:auto; padding:0 9px; font-size:11px; }
+
+/* 第 7 批（界面批 C）C4：画布视图的主列改成视口高——页面区可收缩，底部槽长高时画布**让位**（不遮挡）。
+   S1 预算：底部槽空闲恒 48px；展开 ≤min(320px, 35vh)。 */
+.work-surface.is-canvas { height: 100vh; display: flex; flex-direction: column; padding-bottom: 0; }
+.work-surface.is-canvas .work-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.work-surface.is-canvas .request-dock { flex: 0 0 auto; }
+.request-dock { margin-top: 10px; }
+.request-composer { grid-template-columns: auto minmax(0, 1fr) auto auto auto; min-height: 48px; box-sizing: border-box; align-items: center; padding: 6px 11px; }
+.request-composer textarea { min-height: 32px; max-height: 96px; padding: 6px 0; resize: none; }
+.request-composer > .request-agent { align-self: center; display: inline-flex; align-items: center; gap: 5px; max-width: 220px; overflow: hidden; white-space: nowrap; color: var(--ink-2); font-size: var(--font-10); }
+.request-dock-body { display: grid; gap: 8px; max-height: min(320px, 35vh); overflow: auto; }
+@media (max-width: 900px) { .request-composer > .request-agent { display: none; } }
+
+/* 第 7 批（界面批 C）C1/C2：**一条 48px 工具条**取代四条横带；筛选与统计进浮层；
+   模式切换从焦点条搬来此处。高度是硬约束：S1 的顶部 chrome 预算靠它。 */
+.lineage-toolbar { display: flex; align-items: center; gap: 8px; min-height: 48px; height: 48px; padding: 0; }
+.lineage-actions { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: nowrap; overflow: hidden; }
+.lineage-toolbar-tail { display: flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; }
+.lineage-popover { position: relative; }
+.lineage-popover > summary { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); background: var(--surface-card); color: var(--ink-1); font-size: var(--font-11); cursor: pointer; list-style: none; white-space: nowrap; }
+.lineage-popover > summary::-webkit-details-marker { display: none; }
+.lineage-popover[open] > summary { border-color: var(--accent); }
+.lineage-popover-body { position: absolute; z-index: var(--z-drawer); top: calc(100% + 6px); left: 0; min-width: 220px; max-height: min(360px, 50vh); overflow: auto; display: grid; gap: 8px; border: 1px solid var(--line-2); padding: 10px 12px; background: var(--surface-raised); box-shadow: var(--shadow-3); }
+.lineage-more > .lineage-popover-body, .lineage-stats-popover > .lineage-popover-body { right: 0; left: auto; }
+.lineage-popover-body .eyebrow { margin: 0; }
+.lineage-choice-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.lineage-choice-row button { height: 28px; border: 1px solid var(--line-2); padding: 0 9px; background: var(--surface-card); color: var(--ink-2); font: inherit; font-size: var(--font-11); cursor: pointer; }
+.lineage-choice-row button.is-active { border-color: var(--accent); background: var(--accent); color: var(--surface-card); }
+.lineage-mode-list { min-width: 200px; gap: 4px; }
+.lineage-mode-list button { display: flex; align-items: center; justify-content: flex-start; width: 100%; height: 32px; border: 1px solid var(--line-2); padding: 0 10px; background: var(--surface-card); color: var(--ink-1); font: inherit; font-size: var(--font-11); cursor: pointer; }
+.lineage-mode-list button.is-active { border-color: var(--accent); }
+.lineage-mode-menu > summary { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.lineage-stats dl { display: grid; grid-template-columns: repeat(3, minmax(72px, 1fr)); gap: 8px 12px; margin: 0; }
+.lineage-stats div { display: grid; gap: 1px; }
+.lineage-stats dt { color: var(--ink-3); font-size: var(--font-10); }
+.lineage-stats dd { margin: 0; color: var(--ink-1); font-size: var(--font-12); white-space: nowrap; }
+.lineage-searchbar { position: relative; display: flex; align-items: center; gap: 6px; }
+.lineage-searchbar .lineage-search-input { display: inline-flex; align-items: center; gap: 5px; height: 32px; border: 1px solid var(--line-2); padding: 0 8px; background: var(--surface-card); }
+.lineage-searchbar .lineage-search-input input { width: 170px; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink-1); font: inherit; font-size: var(--font-11); }
+.lineage-search-hint { color: var(--ink-3); font-size: var(--font-10); white-space: nowrap; }
+.lineage-search-results { position: absolute; z-index: var(--z-drawer); top: calc(100% + 6px); right: 0; width: 320px; max-height: 300px; overflow: auto; display: grid; border: 1px solid var(--line-2); background: var(--surface-raised); box-shadow: var(--shadow-3); }
+.lineage-search-results button { display: grid; gap: 2px; border: 0; border-bottom: 1px solid var(--line-2); padding: 8px 10px; background: transparent; color: var(--ink-1); text-align: left; font: inherit; cursor: pointer; }
+.lineage-search-results button.is-active { background: var(--surface-sunken); }
+.lineage-save-indicator { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-3); font-size: var(--font-10); white-space: nowrap; }
+.lineage-save-indicator.is-saving, .lineage-save-indicator.is-queued { color: var(--warning); }
+.lineage-save-indicator.is-error { color: var(--danger); }
+/* C5：指标四项的家在右栏顶部（无选中也在）——横带里的旧网格不再适用。 */
+.lineage-metrics-strip.is-aside { grid-area: auto; margin: 0 0 var(--space-2); }
+@media (max-width: 900px) { .lineage-toolbar { height: auto; min-height: 48px; flex-wrap: wrap; padding: 4px 0; } .lineage-toolbar-tail { width: 100%; margin-left: 0; flex-wrap: wrap; } .lineage-searchbar .lineage-search-input input { width: 120px; } }

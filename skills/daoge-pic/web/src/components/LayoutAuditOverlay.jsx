@@ -30,6 +30,7 @@ export function LayoutAuditOverlay({ layout = 'standard', screen = '' }) {
         header: heightOf('header'),
         toolbar: heightOf('toolbar'),
         bottom: heightOf('bottom'),
+        expanded: document.querySelector('[data-region="bottom"]')?.getAttribute('data-slot') === 'expanded',
         firstElementY: page ? Math.round(page.getBoundingClientRect().top) : 0,
         // 常驻横带：顶部（topbar / 状态槽）+ 底部槽，各自存在才算一条。
         bands: ['topbar', 'status', 'bottom'].filter((region) => heightOf(region) > 0).length
@@ -53,7 +54,7 @@ export function LayoutAuditOverlay({ layout = 'standard', screen = '' }) {
     <header><b>布局体检 · {result.kind}</b><span>{screen}</span></header>
     <dl>
       <div><dt>主区占比</dt><dd className={bad('contentRatio') ? 'is-bad' : ''}>{Math.round(result.contentRatio * 100)}%</dd></div>
-      <div><dt>顶部 chrome</dt><dd className={bad('topChrome') ? 'is-bad' : ''}>{result.topChrome}px</dd></div>
+      <div><dt>顶部常驻</dt><dd className={bad('topChrome') ? 'is-bad' : ''}>{result.topChrome}px</dd></div>
       <div><dt>首元素 y</dt><dd className={bad('firstElementY') ? 'is-bad' : ''}>{result.firstElementY}px</dd></div>
       <div><dt>常驻横带</dt><dd className={bad('bands') ? 'is-bad' : ''}>{result.bands}</dd></div>
     </dl>

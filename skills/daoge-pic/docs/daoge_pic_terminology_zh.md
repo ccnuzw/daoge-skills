@@ -40,6 +40,11 @@
 | `毫秒` | 收回 | creator | 换算成秒 |
 | `SQLite` | 收回 | creator | 本地数据库 |
 | `schema` | 收回 | creator | 数据格式 |
+| `rail` | 收回 | creator | 侧栏 |
+| `aside` | 收回 | creator | 检查器 |
+| `chrome` | 收回 | creator | 常驻横带（审计工具里叫「顶部常驻」） |
+| `slot` | 收回 | creator | 栏位 |
+| `panel` | 收回 | creator | 面板 |
 | `Provider` | 译好 | creator | 生成服务 |
 | `预检` | 译好 | creator | 开工前核算 |
 | `轮次` | 译好 | creator | 批次 |
