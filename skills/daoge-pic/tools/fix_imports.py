@@ -49,10 +49,11 @@ def fix(path, imap, keep):
     body_lines = [l for l in text.split('\n') if not l.startswith('import ')]
     body = '\n'.join(body_lines).lstrip('\n')
     used = set(re.findall(r'\b([A-Za-z_][A-Za-z0-9_]*)\b', body)) | set(keep)
+    self_name = pathlib.Path(path).name
     by = {}
     for n in sorted(used):
         mod = imap.get(n)
-        if mod:
+        if mod and not mod.endswith(self_name):   # 不给自己 import 自己
             by.setdefault(rel(mod), []).append(n)
     head = ''
     for mod, ns in sorted(by.items()):
