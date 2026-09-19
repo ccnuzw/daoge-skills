@@ -73,6 +73,34 @@ CSS 一块一文件且同一选择器不跨文件重复；G1–G13 全绿。
 
 ## 4. 实施日志
 
+### 2026-09-19 · **批 E 阶段性回报（E1.1–E1.5 完成，E1.6/E2/E3/E4 待续）**
+
+**已完成（每片一提交，全量每片都绿）**：
+
+| 片 | 提交 | 内容 | main 行数 |
+| --- | --- | --- | --- |
+| E1.1 | `24abd69` | IconButton/StatusPill → components/；AssetCard/AssetSelectionStrip/ListPager → app/asset-surfaces.jsx | 3370 → 3295 |
+| （收口） | `6435502` | 资产卡菜单去掉评审动作（批 D 的账，§7.4） | — |
+| E1.2 | `f4ea5c7` | 13 个对话框 + 33 助手 + api 请求口 → app/creation-dialogs.jsx / creation-model.mjs / api.js | 3295 → 2577 |
+| E1.3 | `66f1649` | 8 个运行面组件 → app/run-surfaces.jsx；搬迁手法固化为 `tools/lift.py` | 2577 → 2368 |
+| E1.4 | `9046c65` | 6 个项目/任务面组件 → app/project-surfaces.jsx | 2382 → 2296 |
+| E1.5 | `023beb4` | 三件外壳（摘要/面包屑/错误条）→ app/shell-pieces.jsx | → 2212 |
+
+**总账**：main.jsx **3370 → 2212 行（−34%）**；新增 `app/` 模块 7 个 + `components/` 2 个；全量 **895/893/0/2** 全程未降；
+build/lint 每片 0；浏览器冒烟覆盖：资产（只读查看器）、交付、资料三页、运行页、项目/概览页、新建批次/新建项目对话框、面包屑与 rail。
+**守卫迁移 8 处**（源级断言跟着代码搬家：G24 选择条、协议头、边界句、api 重试、归因接线、行内重试、导航去重、库边界）。
+
+**工具 `tools/lift.py` 的三个 bug（都在过程中修掉并留档）**：
+① 同名既作组件又作助手 → 跨度重复 → 同一区间被切两次（吃掉 `StudioVersionGate` 开头）；
+②「下一个顶层声明」正则漏 `class` → `GenerationHistory` 的跨度吞掉 `WorkbenchErrorBoundary` 类；
+③ 拼装未去重 → 重复定义（TS 报 redeclare）。
+
+**待续（下一批从这里接）**：
+- **E1.6 App 收敛**：`viewRenderers` 逐个变 `views/*.jsx` 组件（props 显式化），App ≤250；`StudioVersionGate`/`LocalStudioAuthorizationGate` 随 App 一起搬（它们渲染 `<App/>`，现在留 main 是为了不制造循环依赖）。
+- **E2 画布拆分**：`canvas/lineage-inspector.jsx`（检查器簇）→ `canvas/lineage-stage.jsx`（舞台簇）→ `canvas/creator-workbench.jsx`（编排）。
+- **E3 CSS 按块归属** + `style-ownership-guard`（G4）。
+- **E4 G1–G13 全绿**：补齐缺的（G1 views 无 max-width / G3 全层无裸字面量 / G4 归属 / G5 views 不渲染全宽状态条 / G7 层依赖 / G8 行数上限 / G9 hover 必带 focus-visible / G10 导航去重全量）。
+
 ### 2026-09-19 · 施工单编制完成（开工）
 
 ### 2026-09-19 · **E1.1 实施日志**
