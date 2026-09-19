@@ -15,6 +15,7 @@
 | 日期 | 进度 | 下一步 |
 |---|---|---|
 | 2026-09-19 | **施工单编制完成（未开工）**。前置 = 第 4 批收束（第 4 批仍在改 `web/src/main.jsx`，本批会与它撞车）；决策 D1–D7 已按建议拍板 | 第 4 批收束并推送后，写 0.3 守卫桩并确认红 |
+| 2026-09-19 | **前置已满足**：第 4 批已收束并推送（`ec3d220`，工作区干净）；界面方案同日两轮审计（数字对账 + **以人为本专项**，见方案 §12），本单 §0.1/§0.3/§0.5/§0.6/§8 已同步（迁移面 21→29 处、G11 前置改批 C、新增「不许弄坏的八条交互」） | 写 0.3 的 7 个守卫桩并确认红 |
 
 > **本批不做**（留给后续批次，别顺手做）：
 > **批 B 的导航去重**（rail 三区重排、面包屑替换上下文条、页签移入检查器）、**批 C 的创作平台 chrome 收敛**（四条 chrome 收成一条、队列贴底、`Aside` 统一）、**批 D 的三面归位**、**批 E 的拆分与 CSS 分块**。
@@ -38,6 +39,7 @@
 | 守卫 | 为什么会被破坏 | 处置 |
 |---|---|---|
 | `provider-runtime-state.test.js` | 断言 `className="provider-outage-strip"`；A4 把这条并进 `StatusSlot` | 断言迁到钩子 `data-region="status"` + `data-tone`（G13） |
+| `asset-backstage.test.js` | 断言 `className="asset-backstage-note"`（第 3 批 H1 加的）；A3 换外层容器时会触及 | 属**组件内部**呈现：容器换了它仍在 → 预期不改；若失败按钩子迁移 |
 | `workbench-bulk-ui.test.js` | 10 处 class 断言，其中 `className="error-strip"` 属状态位；其余 `asset-action-*` / `selection-item*` / `lineage-mode-panel` 会被 A3 的容器替换影响 | 逐条迁移：属于状态位的走钩子；属于组件内部的保留在组件自己的测试里 |
 | `asset-card-layout.test.js` | 9 处 class 断言（`project-index-list` / `asset-select-control` / `asset-card-tools` / `asset-view-*` / `inspector-image-frame`） | A3 只换**外层容器**，组件内部 class 不动 → 预期不改；若因容器替换而失败，按钩子迁移 |
 | `phase4-navigation-registry.test.js` | 断言 `const viewRenderers = {`、`const renderActiveView = viewRenderers[routeView]`、`const mainItems = [`、四个一级入口 label | A3 保留 `viewRenderers` 结构（拆分在批 E），本批**预期不改** |
@@ -59,6 +61,58 @@
 | **G5** | `tests/vnext/layout-audit-model.test.js` | 预算纯函数：给定各区高度返回 `主区占比 / 顶部 chrome / 首元素 y / 越界标记`；阈值取方案 §11 D6 的三档表 |
 | **G12 扩展** | `tests/vnext/view-registry.test.js`（既有文件） | 每个 view 在注册表里声明合法 `layout` 档位，且与 `PageFrame` 实际使用的档一致 |
 | **G13** | `tests/vnext/structure-hook.test.js` | 每个 view 根元素带 `data-region="page"`；**新增测试文件不得出现 `className="…"` 字面量断言**（既有断言按 §0.1 迁移，迁移进度记在第 8 节） |
+| **G11 扩展** | — | **本批不做**（刀哥 2026-09-19 定）：布局词进术语单 + 快捷键进手册表属 **批 C**（两条前置也在批 C 建） |
+
+### 0.5 G13 迁移清单（29 处，随本批交付）
+
+口径：`className="…"` 字面量断言按**用途**分三类，**不是一律迁**——迁错了反而把「组件内部结构」变成公共契约。
+
+| 类 | 处理 | 处数 |
+|---|---|---|
+| **迁钩子**（状态位 / 页面容器 / 将被替换的外壳） | A3/A4 落地时同批改成 `data-region` / `data-tone` / `data-action` | **4** |
+| **保留在组件内**（组件自己的结构，是它的实现细节） | 不动；将来组件重构时随组件测试一起改 | **20** |
+| **保留为删除守卫**（`assert.doesNotMatch`，防旧类复活） | **永不迁**：它断言的是「那个东西不存在」，钩子表达不了这个意思 | **5** |
+| 合计 | 4 + 20 + 5 | **29** |
+
+**必须迁的 4 处（本批 A3/A4 完成时同步改）**：
+
+| # | 位置 | 现状断言 | 迁到 |
+|---|---|---|---|
+| 1 | `provider-runtime-state.test.js:142` | `className="provider-outage-strip"` | `data-region="status"` + `data-tone="provider-outage"`（A4 收敛进 `StatusSlot`） |
+| 2 | `workbench-bulk-ui.test.js:427` | `className="error-strip" role="alert" aria-live="assertive"` | `data-region="status"` + `data-tone="error"`，**`role`/`aria-live` 断言原样保留** |
+| 3 | `workbench-bulk-ui.test.js:21` | `className="workspace-context-select workspace-context-task"` | 随 **B2** 面包屑替换一起重写（本批可先不动，登记为跨批项） |
+| 4 | `local-auth-workbench.test.js:64` | `className="local-auth-failure"` | `data-region="gate"`（L6 鉴权门，是外壳级区域） |
+
+**保留在组件内的 20 处**（分文件，合计 9+5+3+1+1+1 = 20）：`asset-card-layout` 9（`asset-select-control` / `asset-card-tools` /
+`asset-view-options` / `asset-view-current` / `asset-grid` / `inspector-image-frame` / `project-index-list` /
+`asset-action-menu` / legend 的 `className={className}`）、`workbench-bulk-ui` 5（`asset-import-button` ×2 /
+`selection-item` / `selection-item-copy` / `asset-action-menu`）、`terminology-guard` 3（`confirmation-dialog-note` /
+`provider-glossary-panel` / `provider-profile-panel`）、`creator-delivery-ui` 1、`lineage-menu` 1、`asset-backstage` 1。
+
+> ⚠️ **一处例外要写进 G13 的注释**：`asset-backstage-note`（第 3 批加的）是**页面级说明条**，
+> 若批 D 把它并入 `PageHeader.description`，这条断言随批 D 一起迁（不是本批）。
+
+**保留为删除守卫的 5 处**：`task-more-tabs`（`workbench-bulk-ui:28`）、`asset-action-group`（`:275`）、
+`lineage-mode-panel`（`:408`）、`connection-state`（`phase4-navigation-registry:71`）、
+`provider-model-fetch`（`provider-settings-ui:17`）。
+
+### 0.6 不许弄坏的交互（对齐界面方案 §3.1，2026-09-19 创作者的八条判据）
+
+本批虽然「行为零变化」，但 **A3 换外层容器、A4 收敛状态条** 会碰到交互——以下八条是**红线**，
+每条在 §0.3 之外**不新建守卫**（它们由批 B/C/D 的验收销账），但**本批实测必须逐条确认没坏**：
+
+| # | 判据 | 批 A 的具体风险点 | 实测怎么做 |
+|---|---|---|---|
+| I1 | 选中 + 说一句能同时成立 | A3 换容器时不要把 composer 挪进任何「条件渲染」 | 选一张图后，输入框仍在且可发送 |
+| I2 | 挑完就地接下一步 | A3 只换外层，**放大层/选片条/资产卡的「继续」保留** | 放大一张图，能看到「用这张继续」 |
+| I3 | 已出的图立即可用 | A3/A4 不许给画布加遮挡层 | 出图中已出的图可点选、可评审 |
+| I4 | 选中是一切动作的前提 | A3 不许把浮条收进工具条 | 选中节点 → 浮条出现 |
+| I5 | 控制就地 | A3 不许把批次级运行控制挪进检查器 | 批次节点上仍有暂停/取消/重试入口 |
+| I7 | 出完了叫我 | A4 的状态槽别把「未读完成」吞了（它在标题+顶栏，不属状态槽） | 标题计数仍在 |
+| I8 | 卡片的四种形态可就地读完、追问就地答 | A4 收敛时卡片区不动 | 卡片仍能内联回答 |
+| — | **alert 级不折叠** | A4 把 `provider-outage` 折进「还有 N 条」就错了（S7） | 同时触发两条时，alert 级那条仍在最上且 assertive |
+
+> 判据全文与出处见 `studio-interface-layout-plan-zh.md` §3.1 与 §12 的专项审计记录。
 
 ### 0.4 环境与影响提示
 
@@ -164,7 +218,9 @@
 - 编制依据：方案 `studio-interface-layout-plan-zh.md` v2 §8.2 批 A；D1–D7 已于同日拍板。
 - 已核实但**尚未执行**的两处现状：
   - `web/src/styles.css` 现有 68 个 `@media` 块（13 个宽度断点 + reduced-motion），映射表见 §4.1；
-  - `tests/vnext` 中 10 个文件共 21 处 `className="…"` 字面量断言（`workbench-bulk-ui` 10 处、`asset-card-layout` 9 处、`terminology-guard` 3 处、其余 7 个文件各 1 处），是 G13 要收口的那一层。
+  - `tests/vnext` 中 **10 个文件共 29 处** `className="…"` 字面量断言（审后复算：`workbench-bulk-ui` 10、`asset-card-layout` 9、
+  `terminology-guard` 3、`provider-settings-ui` / `provider-runtime-state` / `phase4-navigation-registry` / `local-auth-workbench` / `lineage-menu` 各 1，其余为 0），是 G13 要收口的那一层。
+  ⚠️ 原写「21 处」——第 3/4 批又添了几条（含 `provider-outage-strip`、`asset-backstage-note`），按 **29 处**执行。
 - **待办**：第 4 批收束 → 写 §0.3 的 7 个守卫桩 → 确认红 → 按 A1→A7 动代码。
 
 ---
