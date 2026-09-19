@@ -1,5 +1,5 @@
 import { api } from '../app/api.js';
-import { CreativeLineageCanvas } from '../creative-lineage-canvas.jsx';
+import { CreativeLineageCanvas } from '../canvas/creator-workbench.jsx';
 
 /** 界面批 E（E1.6）从 main.jsx 的 viewRenderers 拆出（行为零变化）。 */
 export function LineageView({ activeRun, addAssetsToCurrentRoundReferences, assetProvenance, assetTotal, assets, copyAsset, deliveries, deselectAsset, downloadAsset, eventRevision, inspectAsset, lineageAssetCoverage, lineageRunItemCoverage, lineageVisibleRunItems, markAsDeliverable, navigateRoute, openCreationDialog, openDerivedRoundDialog, openGenerationConfirmation, openReferenceDialog, openRejectReviewDialog, pendingPlanEditRoundId, rounds, runs, savePlanAsRecipe, selectedAssetIds, selectedProject, selectedRound, selectedTask, selectionBusyIds, setAssetProvenance, setAssetShared, setAssetsSelection, setCanvasSelectedAssetIds, setPendingPlanEditRoundId, setPreviewAssets, setPreviewZoom, sharedAssets, tasks, view, visibleAssets }) {

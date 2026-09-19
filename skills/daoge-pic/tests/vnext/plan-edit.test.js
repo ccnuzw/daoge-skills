@@ -43,7 +43,7 @@ test('编辑计划：只覆盖「提示词」与「数量」，其余字段原�
 });
 
 test('接线：检查器里有「编辑计划」，且写计划带 expectedVersion、改完提示重新确认', () => {
-  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-inspector.jsx'));
+  const canvas = (readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-inspector.jsx'));
   assert.match(canvas, /plan-edit-model\.mjs/, '画布必须用这个模型');
   assert.match(canvas, /编辑计划/, '检查器里必须有「编辑计划」入口');
   assert.match(canvas, /rounds\/[^']*\/plan|rounds\/' \+[^\n]*'\/plan/, '必须调用写计划的端点');

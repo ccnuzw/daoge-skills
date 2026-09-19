@@ -24,8 +24,10 @@ test('四项指标的算法在模型里，且数字口径与旧横带一致', ()
 });
 
 test('画布只消费模型，不自己算、也不新增请求', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
-  assert.match(canvas, /import \{ asideMetrics, asideSubject \} from '\.\/aside-model\.mjs'/, '必须走右栏模型');
+  const canvas = readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-inspector.jsx');
+  // 批 E（E2）：两个名字分住两个文件（编排用 metrics、检查器用 subject）——分别断言。
+  assert.match(canvas, /import \{[^}]*asideMetrics[^}]*\} from '\.\.?\/aside-model\.mjs'/, '必须走右栏模型（metrics）');
+  assert.match(canvas, /import \{[^}]*asideSubject[^}]*\} from '\.\.?\/aside-model\.mjs'/, '必须走右栏模型（subject）');
   assert.match(canvas, /const inspectorMetrics = asideMetrics\(\{ graph, runs, statusText: \(list\) => statusCountText\(runStatusCounts\(list\)\) \}\)/, '四项只从既有事实源派生');
   assert.doesNotMatch(canvas, /fetch\(/, '画布不许为指标新增请求');
   const model = readSource('web/src/aside-model.mjs');

@@ -11,8 +11,8 @@ const { SHORTCUT_ROWS } = require('../../web/src/shortcut-model.mjs');
  *       ② 面板与创作手册都读它——手册抄一份就一定会漂（术语守卫的同一课）。
  */
 test('快捷键表只有一个来源，且两处都读它', () => {
-  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-stage.jsx'));
-  assert.match(canvas, /import \{ SHORTCUT_ROWS \} from '\.\/shortcut-model\.mjs'/, '快捷键面板必须读模型');
+  const canvas = (readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-stage.jsx'));
+  assert.match(canvas, /import \{ SHORTCUT_ROWS \} from '\.\.?\/shortcut-model\.mjs'/, '快捷键面板必须读模型');
   assert.match(canvas, /const rows = SHORTCUT_ROWS;/, '面板不许再内联那张表');
   const content = readSource('web/src/learning-center-content.mjs');
   assert.match(content, /import \{ SHORTCUT_ROWS \} from '\.\/shortcut-model\.mjs'/, '手册必须读同一份模型');

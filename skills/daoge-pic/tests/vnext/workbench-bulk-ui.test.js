@@ -211,9 +211,9 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(actions, /CREATIVE_ACTION_ENTRIES/);
   assert.match(actions, /more-similar/);
   assert.match(actions, /feedback-to-next-round/);
-  assert.match(main, /import \{ CreativeActionLauncher \} from '\.\/creative-action-launcher\.jsx'/);
+  assert.match(main, /import \{ CreativeActionLauncher \} from '\.\.?\/creative-action-launcher\.jsx'/);
   assert.match(main, /CreativeActionLauncher/);
-  assert.match(lineage, /import \{ CreativeActionLauncher \} from '\.\/creative-action-launcher\.jsx'/);
+  assert.match(lineage, /import \{ CreativeActionLauncher \} from '\.\.?\/creative-action-launcher\.jsx'/);
   assert.match(lineage, /<CreativeActionLauncher/);
   assert.match(launcher, /export function CreativeActionLauncher/);
   assert.match(launcher, /先选用途，再选还没开工的批次/);
@@ -246,7 +246,7 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(main, /为什么不采用/);
   assert.match(main, /同时加入当前这一轮作为反例参考/);
   assert.match(lineage, /LineageAssetGetActions/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /function LineageContinueMenu|function LineageReferenceActions|function LineageCreativeActions/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /function LineageContinueMenu|function LineageReferenceActions|function LineageCreativeActions/);
   assert.match(styles, /\.creative-action-launcher/);
   assert.match(styles, /\.creative-action-panel/);
   assert.match(styles, /\.creative-action-card/);
@@ -270,7 +270,7 @@ test('Workbench exposes one shared image action launcher and structured reject-t
   assert.match(styles, /\.mask-lite-panel/);
   assert.match(styles, /\.mask-lite-actions/);
   assert.doesNotMatch(readSource('web/src/main.jsx'), /推荐下一步|ContextActionRecommendations|推荐动作只创建\/选择上下文/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /lineage-next-actions|标记保留|标记待复核|标记可衍生/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /lineage-next-actions|标记保留|标记待复核|标记可衍生/);
   assert.doesNotMatch(styles, /context-action-recommendations|context-action-row|lineage-next-actions|project-next-step/);
   assert.match(main, /className="asset-action-menu"/);
   assert.match(styles, /\.asset-action-menu/);
@@ -347,7 +347,7 @@ test('lineage canvas preserves group soft links as layout endpoints', () => {
   assert.match(lineage, /endpointByKey/);
   assert.match(lineage, /nodeKey\('group', rendered\.id\)/);
   assert.match(lineage, /payloadEndpointKeys/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /payloadNodeKeys\.has\(nodeKey\(link\.sourceType, link\.sourceId\)\) && payloadNodeKeys\.has/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /payloadNodeKeys\.has\(nodeKey\(link\.sourceType, link\.sourceId\)\) && payloadNodeKeys\.has/);
 });
 
 test('lineage canvas exposes complete data loading and keyboard-accessible overlays', () => {
@@ -359,7 +359,7 @@ test('lineage canvas exposes complete data loading and keyboard-accessible overl
   assert.match(main, /loadCompleteLineageAssets\(route/);
   assert.match(lineage, /assetCountLabel/);
   assert.match(lineage, /runItemCountLabel/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /居中选择/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /居中选择/);
   assert.match(lineage, /role="combobox"/);
   assert.match(lineage, /aria-activedescendant=\{activeSearchOptionId\}/);
   assert.match(lineage, /role="listbox"/);
@@ -392,14 +392,14 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /画布视角/);
   // 画布 mode 是同一张图上的三种看法（收敛前五种），名字不得再和左侧一级入口撞车
   // （旧名里「项目地图/资产分支/交付路线」与入口近义、「批次对比」与页签同名）。
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'批次对比'/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /'项目地图'|'任务创作流'|'资产分支'|'交付路线'|'批次对比'/);
   // 批 C（第 7 批）迁移：焦点条退场——模式进工具条、指标进右栏，但**名字一个没丢**。
   assert.doesNotMatch(lineage, /LineageWorkspaceSummary/);
   assert.doesNotMatch(lineage, /lineage-focus-strip/);
   assert.match(lineage, /lineage-mode-menu/);
   assert.match(lineage, /lineage-inspector' \+ \(selectedNodes\.length \? ' is-open' : ''\)\} data-region="aside"/);
   assert.match(lineage, /toolbarMode/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /创作地图|创作者工作台/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /创作地图|创作者工作台/);
   assert.doesNotMatch(styles, /\.lineage-focus-strip/);
   assert.match(styles, /\.lineage-toolbar \{ display: flex;[\s\S]{0,160}min-height: 48px; height: 48px;/);
   assert.match(lineage, /title=\{description\} onClick=\{\(\) => onMode\(value\)\}><strong>\{label\}<\/strong><\/button>/);
@@ -415,7 +415,7 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.doesNotMatch(lineage, /lineage-context-actions/);
   assert.match(readSource('web/src/workbench-navigation.jsx'), /rail-sub-entry/);
   assert.match(lineage, /lineage-mode-list" role="radiogroup"/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /className="lineage-mode-panel"/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /className="lineage-mode-panel"/);
   assert.match(lineage, /lineage-edit-more/);
   assert.match(lineage, /boundsNodes=\{nodes\}/);
   assert.match(lineage, /event\.stopPropagation\(\)/);
@@ -428,8 +428,8 @@ test('lineage canvas is the creator-first project workspace', () => {
   assert.match(lineage, /node\.entity\?\.status === 'awaiting_confirmation'/);
   assert.match(lineage, /审阅并确认计划/);
   // 意图不变：画布只展示状态，不直接执行重试。运行控制接线已整体移出画布，剩下这两条否定断言兜底。
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /onControlRun\('(?:pause|resume|cancel)'/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /onRetryRunItem\(item\.id\)/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /onControlRun\('(?:pause|resume|cancel)'/);
+  assert.doesNotMatch(readSource('web/src/canvas/creator-workbench.jsx'), /onRetryRunItem\(item\.id\)/);
 });
 
 test('Workbench renders route context errors as live alerts', () => {

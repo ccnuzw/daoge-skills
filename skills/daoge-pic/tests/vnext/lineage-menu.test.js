@@ -104,7 +104,7 @@ test('全节点菜单矩阵（2026-09-17 审计固化）：每类节点该有的
 
 test('「去交付」是导航不是自动送入——文案必须诚实，且不能丢任务上下文', async () => {
   const { nodeMenuItems } = await import('../../web/src/lineage-menu-model.mjs');
-  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-stage.jsx'));
+  const canvas = (readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-stage.jsx'));
   // 交付的创建在交付页内完成，产品没有「从画布自动送入」的流程——
   // 文案若说「送去交付」会让人以为图已被送入，实际只是跳转。与选片工具条的「去交付」统一。
   assert.doesNotMatch(canvas, /'送去交付'/, '不许承诺「送入」——实际是导航');
@@ -122,7 +122,7 @@ test('「去交付」是导航不是自动送入——文案必须诚实，且�
 });
 
 test('接线：画布的右键菜单与浮出工具条都用这个模型', () => {
-  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-stage.jsx'));
+  const canvas = (readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-stage.jsx'));
   assert.match(canvas, /lineage-menu-model\.mjs/, '画布必须用这个模型');
   assert.match(canvas, /nodeMenuItems\(/, '菜单必须按节点算项');
   // 可发现性（方案 4.4）：右键有先天缺陷，选中时要有同内容的浮出工具条。
@@ -130,7 +130,7 @@ test('接线：画布的右键菜单与浮出工具条都用这个模型', () =>
 });
 
 test('菜单必须在点击选项时存活到 click（按下瞬间不得被画布卸载）', () => {
-  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-stage.jsx'));
+  const canvas = (readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-stage.jsx'));
   // 画布的 handleCanvasPointerDown 对左键一律 setContextMenu(null)：若菜单容器不阻止
   // pointerdown 冒泡，用户**按下**菜单项的瞬间菜单就被卸载，随后的 click 落在已消失的
   // 按钮上 —— 所有选项「点击无效」（2026-09-17 刀哥实机抓到）。

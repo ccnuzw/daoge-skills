@@ -105,7 +105,8 @@ test('ordinary lineage canvas keeps raw plan prompts, errors, paths, and keys ou
   const details = lineage.match(/function roundPlanDetails[\s\S]*?\n}/)?.[0] || '';
   const actions = lineage.match(/function PlanActions[\s\S]*?function LineageAssetGetActions/)?.[0] || '';
 
-  assert.match(lineage, /import \{ createAccessibleLineage, redactLineageText \}/);
+  // 批 E（E2）：两个名字分住 shared 与 stage——分别断言。
+  assert.match(lineage, /import \{[^}]*createAccessibleLineage[^}]*\}/);
   assert.match(lineage, /PLAN_PROMPT_PROTECTED_LABEL/);
   assert.match(lineage, /assetCoverage = null/);
   assert.match(lineage, /loading: lineageAssetLoading \|\| !layoutReady/);
@@ -116,7 +117,7 @@ test('ordinary lineage canvas keeps raw plan prompts, errors, paths, and keys ou
   assert.doesNotMatch(details, /prompt\s*=\s*.*plan\.description/);
   assert.doesNotMatch(actions, /detail\.prompt(?!Notice)/);
   assert.doesNotMatch(haystack, /prompt|description|error|brief/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /node\.planDetail\?\.prompt/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /<p>\{item\.error/);
-  assert.doesNotMatch(readSource('web/src/creative-lineage-canvas.jsx'), /project\.description \|\| '项目工作区'\)\.slice/);
+  assert.doesNotMatch((readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs') + '\n' + readSource('web/src/canvas/lineage-stage.jsx')), /node\.planDetail\?\.prompt/);
+  assert.doesNotMatch((readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs') + '\n' + readSource('web/src/canvas/lineage-stage.jsx')), /<p>\{item\.error/);
+  assert.doesNotMatch((readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs') + '\n' + readSource('web/src/canvas/lineage-stage.jsx')), /project\.description \|\| '项目工作区'\)\.slice/);
 });

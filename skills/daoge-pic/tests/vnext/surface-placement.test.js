@@ -34,7 +34,7 @@ test('G24 资产页是后台：没有评审动作，但「去交付」不许收�
   assert.match(main, /\{readOnly \? <p [^>]*>挑图与评审在创作平台；这里只做查看。<\/p> : /, '只读时动作条换成一句说明');
   assert.match(main, /!asset\.deletedAt && !readOnly && <label/, '只读时不渲染「选为成果」勾选');
   // 画布的评审仍在（不许一起删掉）
-  assert.match(readSource('web/src/creative-lineage-canvas.jsx'), /onReject/, '画布评审必须原样保留');
+  assert.match(readSource('web/src/canvas/creator-workbench.jsx'), /onReject/, '画布评审必须原样保留');
 });
 
 test('G25 交付步骤条仅在有草稿时展开，历史仍同屏', () => {

@@ -11,7 +11,7 @@ const { readSource, readStyles } = require('./source-text');
  *       ③ **清点表逐条在**：收掉的每个控件都必须有新家，一个都不能丢（批 B 丢过「安全重启」）。
  */
 test('四条 chrome 收成一条，且打过 toolbar 标（审计才看得见）', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = readSource('web/src/canvas/creator-workbench.jsx');
   assert.doesNotMatch(canvas, /lineage-focus-strip/, '焦点条必须退场（模式进工具条，指标进右栏）');
   assert.doesNotMatch(canvas, /LineageWorkspaceSummary/, '工作区摘要组件不得留在画布里');
   assert.doesNotMatch(canvas, /lineage-filterbar/, '筛选条不得再是常驻横带');
@@ -24,7 +24,7 @@ test('四条 chrome 收成一条，且打过 toolbar 标（审计才看得见）
 });
 
 test('清点表：收掉的控件每个都有新家（一个不丢）', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = readSource('web/src/canvas/creator-workbench.jsx');
   const toolbar = canvas.slice(canvas.indexOf('data-region="toolbar"'), canvas.indexOf('</header>', canvas.indexOf('data-region="toolbar"')));
   // 工具条本体的动作
   for (const label of ['适应全部', '适应选择', '新建批次', '编辑模式', '选择', '拖动画布', '自动整理', '自动整理', '重置视图', '撤销', '重做', '吸附', '小地图', '快捷键']) {
@@ -52,7 +52,7 @@ test('清点表：收掉的控件每个都有新家（一个不丢）', () => {
 });
 
 test('工具条唯一：画布只有一条常驻横带', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = readSource('web/src/canvas/creator-workbench.jsx');
   assert.equal((canvas.match(/data-region="toolbar"/g) || []).length, 1, '整张画布只允许一条打标工具条');
   const stage = canvas.slice(canvas.indexOf('lineage-stage'), canvas.indexOf('lineage-shell'));
   assert.equal((stage.match(/<header /g) || []).length, 1, '画布区只允许一条 header 横带（编辑态只换段）');

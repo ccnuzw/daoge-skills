@@ -1,57 +1,25 @@
+import { asideMetrics } from '../aside-model.mjs';
+import { batchQualityCopy, reviewDistribution } from '../batch-quality-model.mjs';
+import { LineageInspector, PlanEditDialog } from '../canvas/lineage-inspector.jsx';
+import { BACKGROUNDS, CREATOR_MODES, DEFAULT_SETTINGS, DEFAULT_VIEWPORT, EMPTY_ARRAY, FILTERS, HISTORY_LIMIT, PERSISTED_NODE_TYPES, PURPOSE_LABELS, REFERENCE_TARGET_TYPES, SAVE_STATUS_LABELS, SNAP_SIZE, TEMPLATE_OPTIONS, applySavedLayout, assetSourceRoundId, assetSourceTaskId, boundsForItems, buildGraph, canWriteTextClipboard, clampScale, clientId, connectionLabelPoint, connectionPath, currentLayoutSnapshot, dataTransferHasType, defaultCollapsedFor, endpointFromNode, findFreeSlot, groupMemberBounds, hasOwn, idSetValue, intersects, isAssetNode, lineageExportLink, listValue, manualConnection, nodeKey, nodeSearchHaystack, nodeTypeLabel, normalizeViewport, openNode, positionedItems, relatedLinksForNode, relationLabel, runStatusCounts, safeMenuPoint, selectedNodeContextLine, serializeGroup, shortId, snapshotKey, text, visibleByFilter, visibleByMode } from '../canvas/lineage-shared.mjs';
+import { LineageContextMenu, LineageGroup, LineageMinimap, LineageNode, LineageTextView, ShortcutPanel } from '../canvas/lineage-stage.jsx';
+import { deriveAvailability } from '../derive-path-model.mjs';
+import { createLineageExport, lineageExportFilename } from '../lineage-export-model.mjs';
+import { nodeMenuItems } from '../lineage-menu-model.mjs';
+import { LINEAGE_NODE_RENDER_LIMIT, lineageViewportBounds, virtualizeLineageNodes } from '../lineage-viewport-model.mjs';
+import { applyPlanEdit, planEditForm, planEditIssues } from '../plan-edit-model.mjs';
+import { statusPresentation } from '../status-presentation.mjs';
+import { BookOpen, BoxSelect, Columns3, Download, Gauge, Grid2X2, LoaderCircle, MapIcon, Move, Plus, Redo2, Save, Search, SlidersHorizontal, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Bookmark, BoxSelect, Check, Columns3, Copy, Download, Eye, Gauge, GitFork, Grid2X2, Image, LoaderCircle, Map as MapIcon, Move, Pencil, Play, Plus, Redo2, RefreshCw, Save, Search, Share2, SlidersHorizontal, Sparkles, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { assetThumbnailUrl } from './asset-media-url.mjs';
-import { AssetProvenanceBody } from './asset-provenance.jsx';
-import { MINIMAP_HEIGHT, MINIMAP_WIDTH, clampWorldPoint, createMinimapGeometry, createMinimapItems, minimapToWorld, viewportRectForMinimap, worldToMinimap } from './lineage-minimap-model.mjs';
-import { LINEAGE_NODE_RENDER_LIMIT, lineageViewportBounds, virtualizeLineageNodes } from './lineage-viewport-model.mjs';
-import { createAccessibleLineage, redactLineageText } from './lineage-accessible-model.mjs';
-import { createLineageExport, lineageExportFilename } from './lineage-export-model.mjs';
-import { statusPresentation } from './status-presentation.mjs';
-import { pendingRunItems } from './run-item-pagination.mjs';
-import { nodeMenuItems } from './lineage-menu-model.mjs';
-import { LineageContextMenu, LineageGroup, LineageMinimap, LineageNode, LineageTextView, NodeIcon, ShortcutPanel } from './canvas/lineage-stage.jsx';
-import { AssetActions, GroupActions, LineageAssetGetActions, LineageInspector, NavigationActions, PlanActions, PlanEditDialog, RelationActions, ReplyHistoryPanel, SoftLinkList } from './canvas/lineage-inspector.jsx';
-import { BACKGROUNDS, CREATOR_MODES, DEFAULT_SETTINGS, DEFAULT_VIEWPORT, EMPTY_ARRAY, EMPTY_ROUND_SET, EMPTY_SET, FILTERS, HISTORY_LIMIT, LINEAGE_SENSITIVE_PATTERNS, NODE_SIZE, OPERATION_LABELS, PERSISTED_NODE_TYPES, PLAN_PROMPT_PROTECTED_LABEL, PURPOSE_LABELS, REFERENCE_TARGET_TYPES, RELATION_OPTIONS, REVIEW_LABELS, SAFE_NODE_SUMMARY_LABEL, SAVE_STATUS_LABELS, SNAP_SIZE, TEMPLATE_OPTIONS, applySavedLayout, assetBadges, assetLabel, assetSourceRoundId, assetSourceTaskId, assetState, boundsForItems, buildGraph, canWriteTextClipboard, clampScale, clientId, clonePlain, connectionLabelPoint, connectionPath, contextRouteForNode, createNode, currentLayoutSnapshot, dataTransferHasType, defaultCollapsedFor, deliveryAssetIds, endpointFromKey, endpointFromNode, findFreeSlot, groupMemberBounds, hasOwn, hasProtectedLineageText, idSetValue, intersects, isAssetNode, lineageExportLink, listValue, manualConnection, mediaUnavailable, nodeKey, nodeSearchHaystack, nodeTypeLabel, normalizeCanvasMode, normalizeViewport, openNode, planOutputSummary, positionedItems, rectsOverlap, relatedLinksForNode, relationLabel, reviewDecisionCounts, roundMaskAssetIds, roundOutputSummary, roundParentAssetIds, roundPlanDetails, roundReferenceMaterials, runStatusCounts, safeDisplayText, safeMenuPoint, safeNodeSubtitle, safeNodeTitle, safeSearchToken, selectedNodeContextLine, serializeGroup, shortId, snapshotKey, taskForAsset, taskForAssets, taskRounds, text, usageLabel, visibleByFilter, visibleByMode } from './canvas/lineage-shared.mjs';
-import { asideMetrics, asideSubject } from './aside-model.mjs';
-import { SHORTCUT_ROWS } from './shortcut-model.mjs';
-import { deriveAvailability } from './derive-path-model.mjs';
-import { understandingNote } from './plan-understanding-model.mjs';
-import { applyPlanEdit, planEditForm, planEditIssues } from './plan-edit-model.mjs';
-import { batchFailureSummary } from './failure-copy-model.mjs';
-import { batchQualityCopy, reviewDistribution } from './batch-quality-model.mjs';
-import { AccessibleDialog } from './accessible-dialog.jsx';
-import { CreativeActionLauncher } from './creative-action-launcher.jsx';
 
-// 这是同一张图上的三种「看法」，不是三个去处 —— 名字必须和左侧一级入口明显区分。
-// 2026-09-17 从五种收敛为三种（刀哥裁定）：折叠 + 去冗余之后，「按批次」与全局重合、「按任务」与按图片重合。
-// 只有这三类节点会持久化位置（外加系统生成的 group）；其余只在渲染期存在。
-// 这两个空值既当默认值又当返回值。用 Object.freeze 会让类型变成 readonly，
-// 而下面所有用到它的地方都只读取、不修改，所以声明成普通可变类型更贴合实际用法。
-/** @type {Set<string>} */
+/** 创作平台编排组件（界面批 E · E2.4：画布三件 = lineage-stage / lineage-inspector / creator-workbench）。 */
 
-/** 批次节点的输出摘要：把原先散在「运行 / 出图槽位」节点上的结果收回批次（方案 4.3 第二刀）。
- *  失败口径与 4.10 一致：failed 与 blocked 都要说，outcome_unknown 也要计入「没成」。 */
-
-/** 折叠的默认值：可折叠的节点（批次）**默认收起**——「默认一个批次 = 一个节点，双击展开」（方案 4.3 第一刀）。 */
-
-/** 两个矩形是否重叠（增量插入时用来避让已占位的区域）。 */
-
-/**
- * 增量插入：新节点**不重排已有布局**，但也不能落在别人身上。
- * 节点自带的坐标来自固定公式（按索引排布），而用户可能挪过节点——两者一撞就叠在一起。
- * 所以从自带位置起沿 y 向下找第一个不重叠的空位；探测有上限，找不到就退回原位（宁可重叠，不要跑到天边）。
- */
-
-/** @param {any} [overrides] 节点上允许覆盖/追加任意字段（title、subtitle、searchText、deliveredAsset…） */
-
-/** 旧布局可能存着已收敛的模式值，归一化到语义最近的新模式（flow≈按图片，rounds≈全局）。 */
-
-function statusCountText(counts) {
+export function statusCountText(counts) {
   const parts = Object.entries(counts || {}).filter(([, value]) => value > 0).map(([status, value]) => statusPresentation('run', status).label + ' ' + value);
   return parts.length ? parts.join(' / ') : '暂无运行';
 }
 
-export function CreativeLineageCanvas({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, assetProvenance = null, onCloseAssetProvenance = null, onOpenAssetTrace = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onDeselectAsset, onCanvasAssetSelection, onSaveRecipe, pendingPlanEditRoundId = null, onPendingPlanEditHandled }) {
+export function CreatorWorkbench({ request, project, tasks, selectedTask, rounds, selectedRound, runs, activeRun, runItems, runItemCoverage = null, assets, assetCoverage = null, assetTotal = null, sharedAssets, selectedAssetIds, selectionBusyIds, deliveries, assetProvenance = null, onCloseAssetProvenance = null, onOpenAssetTrace = null, layoutRevision = 0, onNavigate, onPreviewAsset, onInspectAsset, onToggleAsset, onBatchSelectAssets, onSetAssetShared, onDownloadAsset, onCopyAsset, onCreateTask, onCreateRound, onOpenReference, onOpenDerive, onAddReference, onReject, onOpenConfirmation, onDeselectAsset, onCanvasAssetSelection, onSaveRecipe, pendingPlanEditRoundId = null, onPendingPlanEditHandled }) {
   tasks = listValue(tasks);
   rounds = listValue(rounds);
   runs = listValue(runs);
@@ -949,8 +917,5 @@ export function CreativeLineageCanvas({ request, project, tasks, selectedTask, r
   </section>;
 }
 
-/**
- * 检查器里的「生成历史」页签（B4）：**就地**看这一批的运行，不再跳页。
- * 仍保留「打开完整生成历史」——那是能力，不是入口重复（完整视图有分页/筛选/详情）。
- */
-
+/** 兼容别名（旧名仍在用：views 与守卫）。 */
+export const CreativeLineageCanvas = CreatorWorkbench;

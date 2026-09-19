@@ -65,7 +65,7 @@ test('批次摘要把「没成」与「被挡」分开说——两者的下一�
 });
 
 test('接线：批次摘要在画布上用模型区分「没成」与「被挡」', () => {
-  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs'));
+  const canvas = (readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs'));
   assert.match(canvas, /failure-copy-model\.mjs/, '画布必须用这个模型');
   assert.match(canvas, /batchFailureSummary\(/, '批次摘要必须区分「没成」与「被挡」');
 });
@@ -86,5 +86,5 @@ test('接线：归因接在可达的 Runs 视图上（不是已经不可达的�
   assert.match(runs, /failure-copy-model\.mjs/, '运行面必须引入归因模型');
   assert.match(runs, /failureAttributionLine\(item\)/, 'Runs 视图必须真的调用它');
   // 画布那条路径早就不存在了：代码与守卫都不该再提它。
-  assert.doesNotMatch((readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs')), /failureAttribution/, '画布上不该再有归因（那条分支已不可达）');
+  assert.doesNotMatch((readSource('web/src/canvas/creator-workbench.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs')), /failureAttribution/, '画布上不该再有归因（那条分支已不可达）');
 });

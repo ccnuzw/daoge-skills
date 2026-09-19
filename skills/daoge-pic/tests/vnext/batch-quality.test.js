@@ -42,7 +42,7 @@ test('质量摘要是人话：只说有的，不说零', async () => {
 });
 
 test('接线：canvas 的统计委托给模型，检查器的批次视图渲染质量摘要', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = readSource('web/src/canvas/creator-workbench.jsx');
   // 单一来源：canvas 自己不再手写一份统计。
   assert.match(canvas, /batch-quality-model\.mjs/, '画布必须用这个模型');
   // 旧的独立实现必须消失（否则两份口径迟早漂移）。
