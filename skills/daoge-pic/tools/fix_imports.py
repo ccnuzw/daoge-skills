@@ -15,9 +15,12 @@ TS = ['npx', 'tsc', '--noEmit', '--allowJs', '--checkJs', '--jsx', 'react-jsx', 
       '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck']
 
 
-def source_map():
-    text = subprocess.run(['git', 'show', 'HEAD:skills/daoge-pic/web/src/main.jsx'],
-                          cwd=ROOT.parent.parent, capture_output=True, text=True).stdout
+def source_map(map_from=None):
+    if map_from:
+        text = (ROOT / map_from).read_text()
+    else:
+        text = subprocess.run(['git', 'show', 'HEAD:skills/daoge-pic/web/src/main.jsx'],
+                              cwd=ROOT.parent.parent, capture_output=True, text=True).stdout
     imap, lucide = {}, []
     for m in re.finditer(r"^import \{([^}]+)\} from '([^']+)';", text, re.M):
         names = [x.strip().split(' as ')[-1] for x in m.group(1).split(',')]
@@ -31,11 +34,11 @@ def source_map():
     return imap, lucide
 
 
-def rel(mod, in_app=True):
-    if not in_app:
-        return mod
-    if mod.startswith('./app/'):
-        return './' + mod[len('./app/'):]
+def rel(mod):
+    # 目标文件在 web/src 下一层（app/ canvas/ views/）：'./x' → '../x'；'./app/x' → './x'；'./canvas/x' → './x'
+    for sub in ('app/', 'canvas/', 'views/'):
+        if mod.startswith('./' + sub):
+            return './' + mod[len('./' + sub):]
     return ('../' + mod[2:]) if mod.startswith('./') else mod
 
 
@@ -61,8 +64,11 @@ def fix(path, imap, keep):
 
 
 if __name__ == '__main__':
-    imap, lucide = source_map()
     args = sys.argv[1:]
+    map_from = args[args.index('--map-from') + 1] if '--map-from' in args else None
+    imap, lucide = source_map(map_from)
     keep = args[args.index('--keep') + 1:] if '--keep' in args else []
+    for skip in ([map_from] if map_from else []):
+        args = [a for a in args if a != skip]
     for f in [a for a in args if not a.startswith('--') and a not in keep]:
         fix(f, imap, keep)

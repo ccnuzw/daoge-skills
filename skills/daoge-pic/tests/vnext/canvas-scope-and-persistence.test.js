@@ -12,7 +12,7 @@ const { readSource } = require('./source-text');
  */
 
 test('A7b：共享素材 / 交付 / 规则资料节点不再上画布，但图的「已共享 / 已交付」标记还在', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs'));
   for (const type of ['shared_asset', 'delivery', 'task_type', 'style_kit', 'brand_kit']) {
     assert.equal(canvas.includes("createNode('" + type + "'"), false, type + ' 不该再作为画布节点创建');
   }
@@ -24,7 +24,7 @@ test('A7b：共享素材 / 交付 / 规则资料节点不再上画布，但图�
 });
 
 test('A7c：保存只落「用户动过」的节点，其余交给自动布局', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs'));
   // 唯一判据是一个显式集合，而不是「位置和公式不一样吗」这种事后猜测。
   assert.match(canvas, /explicitKeysRef/, '必须有「哪些算人动过」的单一判据');
   assert.match(canvas, /markExplicit/, '必须有标记入口');
@@ -38,7 +38,7 @@ test('A7c：保存只落「用户动过」的节点，其余交给自动布局',
 });
 
 test('A7c：哪些动作算「人动过」（拖拽 / 微调 / 折叠 / 分组 / 自动整理）', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs'));
   // 拖拽：只有真的动过（超过阈值）才算，防「点一下也标成手动布局」。
   assert.match(canvas, /dragRef\.current\.moved = true;[\s\S]{0,200}explicitKeysRef\.current\.add/, '拖拽越过阈值必须标记');
   // 键盘微调 / 折叠 / 分组 / 取消分组。
@@ -52,7 +52,7 @@ test('A7c：哪些动作算「人动过」（拖拽 / 微调 / 折叠 / 分组 /
 });
 
 test('A7c：撤销/重做要把「哪些算人动过」一起回退', () => {
-  const canvas = readSource('web/src/creative-lineage-canvas.jsx');
+  const canvas = (readSource('web/src/creative-lineage-canvas.jsx') + '\n' + readSource('web/src/canvas/lineage-shared.mjs'));
   assert.match(canvas, /explicitKeys: \[\.\.\.\(explicitKeys \|\| EMPTY_SET\)\]/, '快照必须带上显式集合');
   assert.match(canvas, /hasOwn\(patch, 'explicitKeys'\)/, '恢复快照必须能还原显式集合');
   assert.match(canvas, /applyLayoutSnapshot\(previous\);[\s\S]{0,160}persistLayout\(\)/, '撤销要落库');
