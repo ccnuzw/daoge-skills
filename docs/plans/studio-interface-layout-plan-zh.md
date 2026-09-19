@@ -591,7 +591,9 @@ PageFrame(standard)
 
 > 纪律：每批**纯前端**；开工先写守卫桩（规格书 §3.1）；收尾双端 typecheck → lint → 回归 → build。
 >
-> **批 A 的施工单已签发**：`daoge-pic-upgrade-batch-5-zh.md`（2026-09-19 编制，待第 4 批收束后开工）。
+> **批 A 的施工单**：`daoge-pic-upgrade-batch-5-zh.md`（已完工推送 `0b8f86b`）。
+> **批 B 的施工单**：`daoge-pic-upgrade-batch-6-zh.md`（已完工推送 `44325a9`）。
+> **批 C 的施工单已签发**：`daoge-pic-upgrade-batch-7-zh.md`（2026-09-19 编制，待刀哥拍板 D1–D4 后开工）。
 
 #### 批 A · 底座（可量化、可见）
 
