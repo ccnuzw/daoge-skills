@@ -593,7 +593,8 @@ PageFrame(standard)
 >
 > **批 A 的施工单**：`daoge-pic-upgrade-batch-5-zh.md`（已完工推送 `0b8f86b`）。
 > **批 B 的施工单**：`daoge-pic-upgrade-batch-6-zh.md`（已完工推送 `44325a9`）。
-> **批 C 的施工单**：`daoge-pic-upgrade-batch-7-zh.md`（已完成待提交）。**实测验收**：`lineage / 1600×950 / 主区 86% / 顶部常驻 84px / 首元素 y 147px / 横带 1 / ✓`——四条 chrome 195px 收成一条 48px；队列从内容之上挪到底部槽（首元素 355→147）；展开时画布让位（703→375）。
+> **批 C 的施工单**：`daoge-pic-upgrade-batch-7-zh.md`（已完成待提交）。
+> **批 D 的施工单**：`daoge-pic-upgrade-batch-8-zh.md`（已完工推送 `e80f993`）。**实测验收**：`lineage / 1600×950 / 主区 86% / 顶部常驻 84px / 首元素 y 147px / 横带 1 / ✓`——四条 chrome 195px 收成一条 48px；队列从内容之上挪到底部槽（首元素 355→147）；展开时画布让位（703→375）。
 
 #### 批 A · 底座（可量化、可见）
 
