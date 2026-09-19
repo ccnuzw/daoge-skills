@@ -12,10 +12,27 @@ import { RequestQueueDock } from '../request-queue.jsx';
 import { StudioSearch } from '../studio-search.jsx';
 import { WorkbenchNavigation } from '../workbench-navigation.jsx';
 import { selectProject, updateWorkbenchRoute } from '../workbench-route.mjs';
+import { createDialogFocusSession } from '../accessible-dialog-model.mjs';
+import { useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 
 /** 界面批 E（E1.6b）从 App 的返回壳搬出（行为零变化）。 */
 export function WorkbenchShell({ EMPTY, ImageInspectorDialog, addAssetsToCurrentRoundReferences, agentConnection, agentDetection, agentDetectionLoading, agentPresenceStatus, answerRequest, assetProvenance, brandKits, canImport, canvasSelectedAssetIds, chooseReferenceRound, chooseReferenceTask, confirmGenerationPlan, confirmPendingAction, confirmation, confirmationBusy, confirmationError, confirmationPlanSummary, copyRuntimeDiagnostic, createDerivedRoundFromAssets, createProjectFromStudio, createRoundForPendingReference, createRoundFromStudio, createTaskFromStudio, creationBusy, creationDialog, creationError, currentLayoutTier, derivedBusy, derivedDialog, derivedError, detectAgents, dismissConfirmation, dismissCreationDialog, dismissDerivedDialog, dismissGenerationConfirmation, dismissReferenceDialog, dismissReferenceResolver, dismissRejectDialog, generationConfirmation, generationConfirmationBusy, generationConfirmationError, importDerivedMaskAsset, inputRef, layoutAuditEnabled, markAsDeliverable, navigateRoute, openDerivedRoundDialog, openProviderDetails, openReferenceDialog, openRejectReviewDialog, openRoundFromQueue, openRoundPlanEdit, openSearchResult, pendingRequestCount, previewAssets, previewZoom, progressForRequest, projectTemplates, projects, provider, providerDetails, providerNotice, railCollapsed, recoveryPhase, referenceBusy, referenceDialog, referenceError, referenceMaterials, referenceResolver, refresh, rejectBusy, rejectDialog, rejectError, renderActiveView, repairRuntime, requestBusy, restoreSessionContext, rounds, route, routeView, runtimeRepairing, saveRejectReview, saveRoundReferenceMaterials, searchError, searchLoading, searchQuery, searchResults, selectedAssetIds, selectedProject, selectedRound, selectedTask, selectionBusyIds, sendRequest, sessionPlanStatus, setAssetProvenance, setPreviewAssets, setPreviewZoom, setProviderDetails, setRailCollapsed, setSearchQuery, sharedAssets, statusItems, studio, studioRequests, studioView, styleKits, surfaceEyebrow, surfaceSubtitle, surfaceTitle, taskForId, taskTypes, tasks, updateAgentConnection, upload, view, withdrawRequest }) {
+  // S3（界面瑕疵专项）：资产来源浮层是**非模态**对话面（fixed 侧浮层，背景仍可用）——
+  // 补上 role="dialog" 语义、焦点进入/返回与 Escape 关闭；不置 aria-modal：背景没有被 inert。
+  const assetInspectorRef = useRef(null);
+  useEffect(() => {
+    const panel = assetInspectorRef.current;
+    if (!assetProvenance || !panel) return undefined;
+    const focusSession = createDialogFocusSession({
+      dialog: panel,
+      activeElement: () => document.activeElement instanceof HTMLElement ? document.activeElement : null,
+      dismiss: () => setAssetProvenance(null)
+    });
+    focusSession.mount();
+    return () => focusSession.dispose();
+  }, [assetProvenance]);
+
   return (
 <main className={'studio-shell' + (railCollapsed ? ' is-rail-collapsed' : '')} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files).filter((item) => item.type.startsWith('image/')); if (files.length && canImport) void upload(files); }} onPaste={(event) => { const files = [...event.clipboardData.files].filter((item) => item.type.startsWith('image/')); if (files.length && canImport) { event.preventDefault(); void upload(files); } }}>
     <aside className="studio-rail" aria-label="Studio 左侧控制栏">
@@ -30,7 +47,7 @@ export function WorkbenchShell({ EMPTY, ImageInspectorDialog, addAssetsToCurrent
           <div className="header-actions">
             <StudioSearch query={searchQuery} results={searchResults} loading={searchLoading} error={searchError} onQueryChange={setSearchQuery} onOpenResult={openSearchResult} />
             <IconButton label="刷新工作台" onClick={() => void refresh()}><RefreshCw size={17} /></IconButton>
-            <input ref={inputRef} className="file-input" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void upload(event.target.files)} />
+            <input ref={inputRef} className="file-input" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" aria-label="导入图片文件" onChange={(event) => void upload(event.target.files)} />
           </div>
         </header>
         {!studioView ? <>
@@ -47,7 +64,7 @@ export function WorkbenchShell({ EMPTY, ImageInspectorDialog, addAssetsToCurrent
       {layoutAuditEnabled && <LayoutAuditOverlay layout={currentLayoutTier} screen={routeView} />}
     </section>
 
-    {assetProvenance && routeView !== 'lineage' && <aside className="asset-inspector" data-region="aside-overlay" aria-label="资产来源与评审记录"><AssetProvenanceBody provenance={assetProvenance} onClose={() => setAssetProvenance(null)} onOpenTrace={(output) => navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id })} /></aside>}
+    {assetProvenance && routeView !== 'lineage' && <aside ref={assetInspectorRef} className="asset-inspector" data-region="aside-overlay" role="dialog" tabIndex={-1} aria-label="资产来源与评审记录"><AssetProvenanceBody provenance={assetProvenance} onClose={() => setAssetProvenance(null)} onOpenTrace={(output) => navigateRoute({ view: 'runs', projectId: output.project.id, taskId: output.task.id, roundId: output.round.id, runId: output.run.id })} /></aside>}
     {generationConfirmation && <ConfirmationDialog label="确认创作计划" title={'确认这版计划（v' + generationConfirmation.round.planVersion + '）？'} message={confirmationPlanSummary(generationConfirmation.round)} note="确认会把这版计划绑定到当前 conversation 与计划哈希；确认本身不会调用生成服务，需要回到会话继续核算与出图。" confirmLabel="确认计划" busy={generationConfirmationBusy} error={generationConfirmationError} tone="warning" onCancel={dismissGenerationConfirmation} onConfirm={confirmGenerationPlan} />}
     {previewAssets.length > 0 && <ImageInspectorDialog readOnly={routeView === 'assets' || routeView === 'trash'} assets={previewAssets} zoom={previewZoom} selectedAssetIds={selectedAssetIds} selectionBusyIds={selectionBusyIds} selectedProject={selectedProject} selectedTask={selectedTask} fallbackTask={previewAssets.length === 1 ? taskForId(previewAssets[0]?.display?.taskId || previewAssets[0]?.source?.taskId || previewAssets[0]?.source?.creativeTaskId) : null} selectedRound={selectedRound} onClose={() => setPreviewAssets([])} onZoom={setPreviewZoom} onToggleDeliverable={markAsDeliverable} onOpenDerive={openDerivedRoundDialog} onAddReference={(nextAssets, usage) => void addAssetsToCurrentRoundReferences(nextAssets, usage)} onReject={openRejectReviewDialog} onOpenReference={openReferenceDialog} />}
     {rejectDialog && <RejectReviewDialog assets={rejectDialog.assets} canAddNegative={Boolean(selectedRound && selectedRound.status === 'draft')} canCreateNextRound={Boolean(selectedProject && selectedTask)} initialCreateNextRound={rejectDialog.createNextRound} busy={rejectBusy} error={rejectError} onDismiss={dismissRejectDialog} onSave={saveRejectReview} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
