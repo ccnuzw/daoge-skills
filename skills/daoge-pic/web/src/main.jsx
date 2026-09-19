@@ -1,6 +1,6 @@
 import { Component, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Download, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, LoaderCircle, LockKeyhole, Maximize2, MessageSquareText, PanelTop, Pause, Play, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Columns3, Copy, Ellipsis, Eye, FolderKanban, GitFork, ImagePlus, Inbox, LoaderCircle, LockKeyhole, Maximize2, MessageSquareText, PanelTop, Pause, Play, RefreshCw, Search, SlidersHorizontal, Sparkles, Tag, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { REVIEW_ZOOM_MAX, REVIEW_ZOOM_MIN, clampReviewZoom, reviewKeyAction, reviewZoomStep, reviewZoomToggleTarget } from './image-review-keys-model.mjs';
 import { DRAFT_BOUNDARY_COPY } from './boundary-copy.mjs';
 import { dryRunEvidence, normalizeAdvancedDetails } from './advanced-details.mjs';
@@ -13,6 +13,9 @@ import { planPresentation, planStateLabel } from './plan-presentation.mjs';
 import { ASSET_SCOPES, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from './workbench-route.mjs';
 import { PromptWorkspace } from './prompt-workspace.jsx';
 import { LearningCenter } from './learning-center.jsx';
+import { IconButton } from './components/IconButton.jsx';
+import { StatusPill } from './components/StatusPill.jsx';
+import { AssetCard, AssetSelectionStrip, ListPager } from './app/asset-surfaces.jsx';
 import { Troubleshoot } from './troubleshoot.jsx';
 import { CreativeLibrary } from './creative-library.jsx';
 import { SharedAssets } from './shared-assets.jsx';
@@ -96,7 +99,6 @@ function apiErrorOptions(options, overrides = {}) {
   }
   return { ...modelOptions, ...overrides };
 }
-
 
 function retryOptions(options) {
   const next = { ...options };
@@ -244,7 +246,6 @@ async function writeImageBlobToClipboard(image) {
   return false;
 }
 
-
 function uniqueKey(prefix) {
   return prefix + '-' + crypto.randomUUID();
 }
@@ -319,7 +320,6 @@ const REJECT_REASON_OPTIONS = [
   { id: 'other', label: '其他' }
 ];
 const REJECT_REASON_LABELS = Object.fromEntries(REJECT_REASON_OPTIONS.map((option) => [option.id, option.label]));
-
 
 function compactRecord(record) {
   const value = {};
@@ -476,7 +476,6 @@ function assetMatchesQuery(asset, query) {
   return [asset.id, asset.kind, asset.mediaType, asset.display?.label, asset.display?.taskName].filter(Boolean).some((value) => String(value).toLowerCase().includes(normalized));
 }
 
-
 function rejectFeedbackToDerivedForm(feedback, assets) {
   const sourceAssetIds = listItems(assets).map((asset) => asset.id).filter(Boolean);
   const reasons = uniqueList(feedback?.reasons || []);
@@ -501,9 +500,6 @@ function rejectFeedbackToDerivedForm(feedback, assets) {
   };
 }
 
-
-
-
 function runExecutionPresentationFromCounts(run, statusCounts) {
   if (!run) return runExecutionPresentation(null, EMPTY);
   if (['completed', 'partial', 'failed', 'cancelled', 'paused', 'resume_pending', 'pausing'].includes(run.status)) return statusPresentation('run', run.status);
@@ -519,15 +515,6 @@ function statusLabel(value) { return statusPresentation('generic', value).label;
 
 // `presentation` 和 `value` 二选一：传了解析好的展示结果就不用再传原始状态值，
 // 没传时由 `scope` + `value` 现场解析。
-function StatusPill({ value = null, scope = 'generic', presentation = null }) {
-  const semantics = presentation || statusPresentation(scope, value);
-  return <span className={'status-pill ' + semantics.tone}>{semantics.label}</span>;
-}
-
-function IconButton({ label, children, onClick, disabled = false, tone = 'default' }) {
-  return <button className={'icon-button ' + tone} type="button" onClick={onClick} disabled={disabled} title={label} aria-label={label}>{children}</button>;
-}
-
 function surfaceTitle(view, project = null) {
   if (view === 'project-overview') return project?.name || '项目总览';
   return ({
@@ -561,7 +548,6 @@ function surfaceSubtitle(view, project) {
   if (project) return project.name;
   return '先选择或创建一个项目，再进入创作。';
 }
-
 
 function RuntimeHealthAlertStrip({ studio, recoveryPhase, repairing, onCopy, onRefresh, onRepair }) {
   const presentation = runtimeHealthPresentation(studio?.runtime, recoveryPhase);
@@ -598,18 +584,6 @@ function SessionPlanSummary({ sessionPlanStatus, onRestoreContext }) {
       {context ? <><p className="eyebrow">当前选择</p><h3>{context.project.name} / {context.task.name}</h3><span>{purpose} · 计划 v{context.round.planVersion}</span><div className="session-plan-state"><StatusPill value={context.round.status} scope="round" /><span>{sessionPlanStatus.confirmation?.confirmed ? '当前计划已由用户确认' : '当前计划尚未人工确认'}</span>{sessionPlanStatus.latestRun && <span>最近运行：{statusLabel(sessionPlanStatus.latestRun.status)}</span>}</div><button type="button" className="outline-button" onClick={onRestoreContext}>回到当前选择</button></> : <><p className="eyebrow">当前会话</p><h3>未绑定活动批次</h3><span>确认计划前，请先选择项目、任务和还没开工的批次。</span></>}
     </div>
   </details>;
-}
-
-function AssetSelectionStrip({ assets, deliverIntent = null, onRemove, onClear, onPreview, onDownloadArchive, onDeliver }) {
-  return <section className="selection-strip">
-    <header><div><p className="eyebrow">已选图片</p><h2>{String(assets.length).padStart(2, '0')} 张</h2></div>{assets.length > 0 && <div className="selection-strip-actions"><button type="button" className="outline-button" title="放大查看；挑图在创作平台" onClick={() => onPreview(assets)}><Eye size={15} />放大查看</button><button type="button" className="outline-button" disabled={deliverIntent ? !deliverIntent.canStart : false} title={deliverIntent?.copy || ''} onClick={onDeliver}><Check size={15} />去交付</button><button type="button" className="outline-button" onClick={onDownloadArchive}><Download size={15} />打包下载 {assets.length} 张</button><IconButton label="清空当前选片" onClick={onClear}><X size={15} /></IconButton></div>}</header>
-    {assets.length ? <div className="selection-strip-items">{assets.map((asset) => <article className="selection-item" key={asset.id}><button type="button" className="selection-preview" onClick={() => onPreview([asset])} aria-label="放大查看已选图片"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button><div className="selection-item-copy"><strong title={asset.display?.label || '已选素材'}>{asset.display?.label || '已选素材'}</strong><span>{asset.review?.decision === 'keep' ? '已保留' : asset.review?.decision === 'review' ? '待复核' : asset.review?.decision === 'derive' ? '衍生方向' : asset.review?.decision === 'reject' ? '不采用' : '尚未评审'}</span></div><button type="button" className="selection-remove" title="移出当前选片" aria-label="移出当前选片" onClick={() => onRemove(asset.id)}><X size={13} /></button></article>)}</div> : <div className="selection-strip-empty"><Bookmark size={18} /><span>当前没有已选图片</span></div>}
-  </section>;
-}
-
-function ListPager({ page, totalPages, total, onPageChange }) {
-  if (totalPages <= 1) return <span className="workspace-list-total">共 {total} 项</span>;
-  return <nav className="workspace-list-pager" aria-label="列表分页"><button type="button" className="outline-button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}><ChevronLeft size={14} />上一页</button><span>第 {page} / {totalPages} 页 · 共 {total} 项</span><button type="button" className="outline-button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>下一页<ChevronRight size={14} /></button></nav>;
 }
 
 function ProjectIndex({ projects, projectTemplates = EMPTY, onOpenProject, onOpenProjectOverview, onCreateProject }) {
@@ -691,12 +665,9 @@ function ProjectQualityMetrics({ metrics, loading, error, onRefresh }) {
   </section>;
 }
 
-
 function ProjectTaskList({ project, tasks, onOpenTask, onCreateTask }) {
   return <section className="project-tasks-stage"><PageHeader kicker={project.name} title="任务" description="搜索、按状态筛选并分页管理每个独立创作目标。常用目标直接选择，特殊目标再自定义。">{project.status !== 'archived' && <button type="button" className="command-button" onClick={onCreateTask}><FolderKanban size={16} />新建任务</button>}</PageHeader><ManagedTaskList tasks={tasks} pageSize={TASK_PAGE_SIZE} actionLabel="查看批次" emptyMessage="这个项目还没有任务。创作者可以在 Studio 直接新建任务，并把它设为当前工作对象。" onOpenTask={onOpenTask} /></section>;
 }
-
-
 
 function WorkspaceContextBar({ project, projects = EMPTY, tasks = EMPTY, task, rounds, selectedRound, sessionPlanStatus, onSwitchProject, onSelectTask, onSelectRound, onRestoreContext }) {
   if (!project) return null;
@@ -887,7 +858,6 @@ function TaskCreationDialog({ project, projectTemplates = EMPTY, taskTypes, styl
   </AccessibleDialog>;
 }
 
-
 function RoundCreationDialog({ task, rounds, currentRound, recipes = EMPTY, busy, error, onDismiss, onCreate }) {
   // 4.1 Q2：默认**不**要求先认领 5 个「轮次目的」——系统按描述推，想自己定点「改一下」。
   const initialPurposeId = currentRound ? 'variation' : DEFAULT_PURPOSE;
@@ -948,8 +918,6 @@ function RoundCreationDialog({ task, rounds, currentRound, recipes = EMPTY, busy
     </form>
   </AccessibleDialog>;
 }
-
-
 
 function ReferenceAssetDialog({ project, task, round, sharedAssets, selectedMaterials, busy, error, onDismiss, onSave, onPreview }) {
   const pageSize = 24;
@@ -1279,46 +1247,6 @@ function ImageInspectorDialog({ assets, zoom, selectedAssetIds, selectionBusyIds
   </AccessibleDialog>;
 }
 
-
-
-
-function AssetCard({ asset, selected, selectionBusy, shared, previewFit = 'contain', selectedTask, fallbackTask, selectedRound, onToggleSelect, onReview, onTrash, onRestore, onPreview, onInspect, onDownload, onCopy, onSetShared, onOpenDerive, onAddReference, onReject, onOpenReference }) {
-  const [annotating, setAnnotating] = useState(false);
-  const [note, setNote] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
-  const saveNote = () => {
-    if (!note.trim()) return;
-    onReview(asset.id, 'review', { note: note.trim() });
-    setNote('');
-    setAnnotating(false);
-  };
-  const runMenuAction = (callback) => {
-    callback();
-    setMenuOpen(false);
-  };
-  const assetLabel = asset.display?.label || (asset.kind === 'generated' ? '生成结果' : '导入素材');
-  const roundLabel = asset.display?.roundSequence ? (({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[asset.display.roundPurpose] || '创作') + ' · 第 ' + asset.display.roundSequence + ' 轮' : null;
-  const contextLabel = asset.display?.taskName && roundLabel ? asset.display.taskName + ' · ' + roundLabel : asset.display?.taskName || roundLabel;
-  const stateLabel = asset.deletedAt ? '回收站' : asset.review?.decision === 'keep' ? '已选成果' : asset.review?.decision === 'review' ? '未定' : asset.review?.decision === 'reject' ? '不采用' : asset.review?.decision === 'derive' ? '可继续' : selected ? '已选' : '未评审';
-  const menuDerive = (nextAssets, purpose, actionId) => runMenuAction(() => onOpenDerive(nextAssets, purpose, actionId));
-  const menuReference = (nextAssets, usage) => runMenuAction(() => onAddReference(nextAssets, usage));
-  const menuReject = (nextAssets, options) => runMenuAction(() => onReject(nextAssets, options));
-  return <article className={'asset-card is-preview-' + previewFit + ' ' + (asset.deletedAt ? 'is-trashed ' : '') + (selected ? 'is-selected' : '')}>
-    <div className="asset-preview">
-      {asset.deletedAt ? <div className="trash-preview"><Trash2 size={24} strokeWidth={1.4} /></div> : <button type="button" className="asset-preview-button" onClick={() => onPreview([asset])} aria-label="放大查看素材"><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button>}
-      {!asset.deletedAt && <label className="asset-select-control"><input type="checkbox" checked={selected} disabled={selectionBusy} onChange={() => onToggleSelect(asset)} /><span><Bookmark size={13} fill={selected ? 'currentColor' : 'none'} />{selected ? '已选成果' : '选为成果'}</span></label>}
-      <div className="asset-card-tools"><IconButton label={menuOpen ? '关闭更多操作' : '更多操作'} onClick={() => setMenuOpen((value) => !value)}><Ellipsis size={17} /></IconButton></div>
-    </div>
-    {menuOpen && <div className="asset-action-menu">{asset.deletedAt ? <button type="button" onClick={() => runMenuAction(() => onRestore(asset.id))}><RotateCcw size={15} /><span>恢复资产</span></button> : <>
-      <section className="asset-action-section is-primary"><p className="asset-action-label">继续</p><CreativeActionLauncher compact assets={[asset]} selectedTask={selectedTask} fallbackTask={fallbackTask} selectedRound={selectedRound} label="用这张继续" onOpenDerive={menuDerive} onAddReference={menuReference} onReject={menuReject} onOpenReference={onOpenReference} /></section>
-      <section className="asset-action-section"><p className="asset-action-label">获取图片</p><div><button type="button" onClick={() => runMenuAction(() => onPreview([asset]))}><Eye size={15} /><span>放大查看</span></button><button type="button" onClick={() => runMenuAction(() => onCopy(asset))}><Copy size={15} /><span>复制图片</span></button><button type="button" aria-label="下载原图" onClick={() => runMenuAction(() => onDownload(asset))}><Download size={15} /><span>下载原图</span></button></div></section>
-      <section className="asset-action-section"><p className="asset-action-label">评审和管理</p><div><button type="button" onClick={() => runMenuAction(() => onReject([asset], { createNextRound: false }))}><X size={15} /><span>不采用</span></button><button type="button" onClick={() => { setAnnotating(true); setMenuOpen(false); }}><MessageSquareText size={15} /><span>批注</span></button><button type="button" onClick={() => runMenuAction(() => onSetShared(asset, !shared))}><Share2 size={15} /><span>{shared ? '取消共享' : '共享素材'}</span></button><button type="button" onClick={() => runMenuAction(() => onInspect(asset.id))}><GitFork size={15} /><span>查看来源</span></button><button type="button" className="danger" role="menuitem" onClick={() => runMenuAction(() => onTrash(asset.id))}><Trash2 size={15} /><span>移入回收站</span></button></div></section>
-    </>}</div>}
-    <div className="asset-meta"><div><strong>{assetLabel}</strong><span className="asset-state">{stateLabel}</span></div>{contextLabel && <span className="asset-context-line" title={contextLabel}>{contextLabel}</span>}</div>
-    {annotating && <div className="annotation-editor"><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="记录本轮反馈" /><button type="button" className="outline-button" disabled={!note.trim()} onClick={saveNote}>保存批注</button></div>}
-  </article>;
-}
-
 function RunItemOutputThumbs({ assets, onInspect }) {
   if (!assets?.length) return <span className="run-item-output is-empty">暂无图像</span>;
   return <span className="run-item-output">{assets.slice(0, 3).map((asset, index) => <button type="button" key={asset.id} aria-label={'查看第 ' + (index + 1) + ' 个结果资产来源'} title="查看结果资产来源" onClick={() => void onInspect(asset.id)}><img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" /></button>)}{assets.length > 3 && <em>+{assets.length - 3}</em>}</span>;
@@ -1413,7 +1341,6 @@ function DryRunEvidenceCard({ dryRun }) {
     <details className="advanced-raw-evidence"><summary>查看原始摘要</summary><pre>{JSON.stringify(evidence.details, null, 2)}</pre></details>
   </article>;
 }
-
 
 function GenerationHistory({ selectedRound, runs, activeRunId, activeRun, runExecutionStatus, runLifecycleStatus, taskOverview, creativeRecord, visibleRunItems, runItemPage, runItemFilter, runItemPageSize, runItemSequence, selectedRunItemIds, runItemDetail, canCancelActiveRun, advancedDetails, onSelectRun, onControlRun, onRetryItem, onInspectAsset, onSetRunItemFilter, onSetRunItemPage, onSetRunItemPageSize, onSetRunItemSequence, onToggleRunItemSelection, onSelectRetryablePageItems, onRetrySelectedItems, onOpenRunItemDetail, onCloseRunItemDetail, onToggleAdvanced, onCloseAdvanced, onCopyPrompt }) {
   const plan = activeRun ? planPresentation(activeRun.planSnapshot) : null;
@@ -1753,7 +1680,6 @@ function App() {
     });
     return () => { cancelled = true; };
   }, [openWorkbenchSession, reportRequestError, session]);
-
 
   const refreshStudio = useCallback(async (request) => {
     const signal = request.signal;
@@ -3207,7 +3133,6 @@ await refresh();
   }, [view, selectedRound?.id, eventRevision.planVersions]);
   const dismissGuide = () => { window.localStorage.setItem('daoge-pic:guide-dismissed', '1'); };
   
-
 
   const renderAssetsView = () => <section className={'asset-stage ' + (selectedAssets.length && routeView === 'assets' ? 'has-selection' : '')}>
     <PageHeader

@@ -13,7 +13,11 @@ const { readSource } = require('./source-text');
  */
 test('G24 资产页是后台：没有评审动作，但「去交付」不许收回', () => {
   const main = readSource('web/src/main.jsx');
-  const strip = main.slice(main.indexOf('function AssetSelectionStrip'), main.indexOf('function ListPager'));
+  // 批 E（第 9 批）迁移：选择条搬去 app/asset-surfaces.jsx——断言跟着家走（源级守卫的正确姿势）。
+  const surface = readSource('web/src/app/asset-surfaces.jsx');
+  const stripStart = surface.indexOf('function AssetSelectionStrip');
+  const stripEnd = surface.indexOf('function ListPager');
+  const strip = surface.slice(stripStart, stripEnd > stripStart ? stripEnd : undefined);
   assert.doesNotMatch(strip, /CreativeActionLauncher/, '资产选择条不许复制画布的评审启动器');
   assert.doesNotMatch(strip, /预览挑图|onReject/, '资产页不许有挑图入口与评审动作（「不采用」只剩状态词，不是按钮）');
   assert.match(strip, /放大查看/, '查看入口改叫「放大查看」');

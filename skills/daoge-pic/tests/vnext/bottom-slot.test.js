@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { readSource, readStyles } = require('./source-text');
-const { bottomSlotPlan, QUEUE_IDLE_PX, QUEUE_MAX_PX, QUEUE_MAX_RATIO } = require('../../web/src/bottom-slot-model.mjs');
+const { QUEUE_IDLE_PX, QUEUE_MAX_PX, QUEUE_MAX_RATIO } = require('../../web/src/bottom-slot-model.mjs');
 
 /**
  * G19 · 队列贴底让位（界面批 C · C4 / S1）。
