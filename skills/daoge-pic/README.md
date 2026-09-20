@@ -278,13 +278,13 @@ node scripts/daoge.js <command> --workspace /absolute/workspace
 | 场景 | 命令 |
 | --- | --- |
 | 启动 / 诊断 | `register-skill`、`agent-register`、`agent-list`、`doctor`、`studio`、`open`、`restart`、`status` |
-| 注册 Skill | `register-skill --scope project --workspace <path>`；`register-skill --scope user [--host <agents|codex|claude|opencode|gemini|agy|grok|omp|pi|cursor-agent|qwen|kimi|amp|droid|copilot>]` |
+| 注册 Skill | `register-skill --scope project --workspace <path>`；`register-skill --scope user [--host <agents\|codex\|claude\|opencode\|gemini\|agy\|grok\|omp\|pi\|cursor-agent\|qwen\|kimi\|amp\|droid\|copilot>]` |
 | Provider | `provider-list`、`provider-create`、`provider-update`、`provider-copy`、`provider-activate`、`provider-delete`、`provider-validate`、`provider-test`、`provider-models`、`provider-import-env` |
 | 用量与预算 | `usage-list`、`usage-summary`、`budget-get`、`budget-set --limit <n> --cost-unit <unit>` |
 | 会话与上下文 | `session --conversation <id>`、`session-context`、`project`、`archive-project`、`task`、`round` |
 | 规则资料 | `task-type`、`style-kit`、`brand-kit` |
 | 已确认模板快照 | `template-list`、`template-get`、`template-save`、`template-archive`、`template-rollback` |
-| 计划与运行 | `plan --plan <json|@->`、`confirm-challenge`、`preflight`、`run`、`pause`、`resume`、`cancel`、`retry`、`resolve-unknown` |
+| 计划与运行 | `plan --plan <json\|@->`、`confirm-challenge`、`preflight`、`run`、`pause`、`resume`、`cancel`、`retry`、`resolve-unknown` |
 | 请求队列 | `request-list`、`request-detail`、`request-accept`、`request-renew`、`request-done`、`request-reject` |
 | 交付 | `delivery`、`delivery-update`、`delivery-ready`、`delivery-draft`、`delivery-export`、`delivery-batch`、`delivery-batch-revise`、`delivery-batch-ready` |
 | 备份与升级评估 | `backup-manifest`、`backup-restore-dry-run`、`backup-restore`、`backup-upgrade-assess`、`backup-rollback-point` |
