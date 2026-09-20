@@ -68,9 +68,13 @@ test('G26 资料三页共用同一个页内筛选位', () => {
 test('G27 疑难与设置：narrow 档 + 不新增裸宽度', async () => {
   const { VIEW_LAYOUTS } = await import('../../web/src/workbench-navigation-model.mjs');
   assert.equal(VIEW_LAYOUTS.troubleshoot, 'narrow');
-  assert.equal(VIEW_LAYOUTS.library, 'narrow');
-  assert.equal(VIEW_LAYOUTS['shared-assets'], 'narrow');
-  assert.equal(VIEW_LAYOUTS.guide, 'narrow');
+  // 2026-09-20 标准修订（刀哥）：资料三页原按「阅读面」给 narrow(820)，实测只用到主区 75–76%，
+  // 左右空一大片 → 提到 **full**（吃满主区）。三者实为「浏览面」——目录+详情 / 卡片网格 /
+  // 分阶段指引，薄正文自带 620–680px 行宽上限，所以放宽页面不会拉长行。
+  // 先试过 wide(1680)：1440–2048 视窗够用（99–100%），但 2560 只剩 76%，"两边一大片空"原样复现。
+  assert.equal(VIEW_LAYOUTS.library, 'full');
+  assert.equal(VIEW_LAYOUTS['shared-assets'], 'full');
+  assert.equal(VIEW_LAYOUTS.guide, 'full');
   const styles = readSource('web/src/styles/surfaces/workbench.css');
   const bareWidths = [];
   for (const match of styles.matchAll(/(max-)?width:\s*(\d{3,})px/g)) {
