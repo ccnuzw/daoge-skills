@@ -52,7 +52,7 @@ test('创作手册用产品词：口语步骤名退场（拿出去 / 看出图 /
   assert.match(chrome, /title="从提出需求到资产交付"/);
   assert.doesNotMatch(chrome, /拿出去/);
   assert.match(chrome, /比如：选片、交付、快捷键/);
-  assert.match(chrome, /对话决定做什么，界面呈现过程与结果/);
+  assert.match(chrome, /对话决定怎么出图，界面呈现结果并承接确认/);
 });
 
 test('底部四张卡同一外观：不许再出现「第一张另起一套」', () => {
@@ -63,7 +63,19 @@ test('底部四张卡同一外观：不许再出现「第一张另起一套」',
   const section = chrome.match(/<section[^>]*data-region="learning-boundaries"[^>]*>([\s\S]*?)<\/section>/);
   assert.ok(section, '使用边界区块必须带 data-region="learning-boundaries" 钩子');
   assert.equal((section[1].match(/<div>/g) || []).length, 4, '使用边界保持四张卡');
-  assert.equal((section[1].match(/<b>/g) || []).length, 1, '四张卡同结构：只有标题卡带加粗标题');
+  assert.equal((section[1].match(/<b>/g) || []).length, 4, '四张卡同结构：各带一个加粗前导词');
+  for (const lead of ['使用边界', '界面', '对话', '你']) assert.match(section[1], new RegExp('<b>' + lead + '</b>'), '四张卡的主体：' + lead);
+});
+
+test('底部分工卡说的是当前版本的边界（确认在界面、核实是你的事）', () => {
+  const chrome = readSource('web/src/learning-center.jsx');
+  const section = chrome.match(/<section[^>]*data-region="learning-boundaries"[^>]*>([\s\S]*?)<\/section>/);
+  assert.ok(section, '使用边界区块必须在');
+  // 旧卡说「确认计划必须回到对话」——当前版本里确认挑战只能由 Workbench 的授权 Cookie 提交，这句已过期
+  assert.doesNotMatch(section[1], /必须回到对话/, '不许把确认计划说成「回到对话」');
+  assert.match(section[1], /未确认不出图/, '人的闸门：未确认不出图');
+  assert.match(section[1], /未核实不重放/, '人的闸门：未核实不重放');
+  assert.match(section[1], /在场 agent/, '界面按钮把请求排给在场 agent（不是直调）');
 });
 
 test('离线策略专题整体退场（一页对照表不是创作者要的）', () => {
