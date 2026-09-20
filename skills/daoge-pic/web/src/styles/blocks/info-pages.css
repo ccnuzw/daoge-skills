@@ -1,10 +1,10 @@
-.library-stage { position: relative; z-index: 1; padding-top: 31px; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(250px, .8fr); gap: 34px; }
+.library-stage { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(250px, .8fr); gap: 34px; }
 .library-column { min-width: 0; }
 .library-head { display: flex; gap: 10px; align-items: flex-start; padding-bottom: 17px; border-bottom: 1px solid #cbd1c7; color: #435247; }
 .library-head h2 { margin: 5px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 21px; font-weight: 600; color: #2b382f; }
 .guide-nudge { width:100%; margin:14px 0 0; border:1px solid #b9c9bd; border-left:3px solid #4b7562; padding:9px 12px; background:#f2f6ef; color:#365543; font:inherit; font-size:12px; text-align:left; cursor:pointer; }
 .guide-nudge:hover { background:#e8f0e5; }
-.prompt-stage,.guide-stage { position:relative; z-index:1; padding-top:30px; }
+.prompt-stage,.guide-stage { position:relative; z-index:1; }
 .prompt-stage-head,.guide-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; padding:22px 0 18px; border-bottom:1px solid #cad3c7; }
 .prompt-stage-head h2,.guide-hero h2 { margin:5px 0 7px; color:#29382f; font-family:"Songti SC","STSong",serif; font-size:28px; }
 .prompt-stage-head span,.guide-hero p { max-width:680px; color:#657568; font-size:12px; line-height:1.6; }
@@ -46,7 +46,8 @@
 .learning-filter-bar { display:flex; flex-wrap:wrap; gap:6px; margin:16px 0; }
 .learning-filter-bar button { min-height:30px; border:1px solid #ccd6ca; padding:0 10px; background:#fdfef9; color:#657566; font:inherit; font-size:10px; cursor:pointer; }
 .learning-filter-bar button:hover,.learning-filter-bar button.is-active { border-color:#4c765a; background:#2b4936; color:#f2f7ef; }
-.learning-workbench { display:grid; grid-template-columns:minmax(285px,.9fr) minmax(0,1.85fr); min-height:512px; border-top:1px solid #bdcabd; border-bottom:1px solid #bdcabd; }
+/* 同上：主题目录列按比例走、上限 430px。 */
+.learning-workbench { display:grid; grid-template-columns:minmax(285px,min(33%,430px)) minmax(0,1fr); min-height:512px; border-top:1px solid #bdcabd; border-bottom:1px solid #bdcabd; }
 .learning-topic-index { display:flex; flex-direction:column; border-right:1px solid #c9d4c7; background:#f4f7f1; }
 .learning-topic-index > button { display:grid; grid-template-columns:22px minmax(0,1fr) 14px; align-items:center; gap:9px; min-height:70px; border:0; border-bottom:1px solid #d8e0d5; padding:10px 14px; background:transparent; color:#5d6e60; font:inherit; text-align:left; cursor:pointer; }
 .learning-topic-index > button:last-child { border-bottom:0; }
@@ -72,12 +73,14 @@
 .learning-checklist li { display:flex; align-items:flex-start; gap:8px; color:#455849; font-size:11px; line-height:1.55; }
 .learning-checklist li svg { flex:0 0 auto; margin-top:1px; color:#49805d; }
 .learning-topic-action { margin-top:22px; }
-.learning-boundaries { display:grid; grid-template-columns:1.25fr repeat(3,1fr); gap:0; margin-top:22px; border-top:1px solid #bdcabd; border-bottom:1px solid #bdcabd; }
-.learning-boundaries > div { display:flex; align-items:flex-start; gap:8px; min-height:94px; padding:16px; color:#5c6d5f; }
-.learning-boundaries > div + div { border-left:1px solid #d4ddd2; }
-.learning-boundaries h3 { margin:5px 0 0; color:#2e4435; font-family:"Songti SC","STSong",serif; font-size:16px; line-height:1.45; }
-.learning-boundaries span { font-size:10px; line-height:1.65; }
-.learning-boundaries svg { flex:0 0 auto; color:#4d7e5b; }
+/* 使用边界：底部四张**同族**卡片——同样的框、同样的强调边、同样的图标章与字号。
+   第一张是这条带子的标题卡（图标 + 加粗标题 + 一句原则），其余三张各说一条规则；
+   不再有「深色大卡 + 三张浅卡」两套外观（刀哥实机：第一张卡片的样式和风格要和其余的统一）。 */
+.learning-boundaries { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:22px; }
+.learning-boundaries > div { display:grid; grid-template-columns:34px minmax(0,1fr); align-content:start; gap:12px; min-width:0; min-height:112px; border:1px solid #c6d2c5; border-top:3px solid #78977e; padding:16px; background:#fbfcf8; box-shadow:0 7px 18px rgba(34,50,40,.05); color:#45584a; }
+.learning-boundaries svg { display:block; width:34px; height:34px; margin:0; border:1px solid #b8cbb9; padding:8px; background:#e4eee3; color:#356747; }
+.learning-boundaries span { align-self:start; color:#45584a; font-size:11px; line-height:1.7; text-wrap:pretty; }
+.learning-boundaries b { display:block; margin-bottom:2px; color:#2e4435; font-size:12px; }
 .guide-stage-full footer { margin-top:18px; }
 .library-masthead { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:24px; padding-bottom:22px; border-bottom:1px solid #bfcbbe; }
 .library-masthead h2 { margin:5px 0 8px; color:#26392d; font-family:"Songti SC","STSong",serif; font-size:32px; line-height:1.25; letter-spacing:0; }
@@ -100,7 +103,9 @@
 .library-resource-count { color:#718073; font-size:10px; text-align:right; white-space:nowrap; }
 .library-notice { display:flex; align-items:center; gap:8px; margin-top:14px; border:1px solid #b6ceb9; border-left:3px solid #4b805d; padding:9px 11px; background:#f0f7ee; color:#3e6147; font-size:11px; }
 .library-notice .icon-button { width:26px; height:26px; margin-left:auto; }
-.library-workbench { display:grid; grid-template-columns:minmax(310px,.92fr) minmax(0,1.78fr); min-height:520px; margin-top:16px; border-top:1px solid #bdcabd; border-bottom:1px solid #bdcabd; }
+/* 目录列按比例走、但给个上限：1085px 主区时仍是原来的 ~34%（376px），
+   主区再宽就停在 460px——多出来的宽度全给详情，目录不至于拉成一条空白长条。 */
+.library-workbench { display:grid; grid-template-columns:minmax(310px,min(34%,460px)) minmax(0,1fr); min-height:520px; margin-top:16px; border-top:1px solid #bdcabd; border-bottom:1px solid #bdcabd; }
 .library-resource-index { display:flex; flex-direction:column; border-right:1px solid #c9d4c7; background:#f3f7f1; }
 .library-resource-index > button { display:grid; grid-template-columns:22px minmax(0,1fr) 14px; align-items:center; gap:10px; min-height:78px; border:0; border-bottom:1px solid #d7e0d5; padding:10px 14px; background:transparent; color:#5a6d5d; font:inherit; text-align:left; cursor:pointer; }
 .library-resource-index > button:last-child { border-bottom:0; }
@@ -172,7 +177,7 @@
 .library-boundary span { font-size:10px; line-height:1.65; }
 .library-metrics.is-three { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .library-boundary-top { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.shared-assets-stage { padding:30px 0 42px; }
+.shared-assets-stage { padding:0 0 42px; }
 .shared-assets-head { display:flex; align-items:end; justify-content:space-between; gap:22px; padding-bottom:20px; border-bottom:1px solid #c7d2c5; }
 .shared-assets-head h2 { margin:5px 0 8px; color:#26392d; font-family:"Songti SC","STSong",serif; font-size:31px; line-height:1.25; letter-spacing:0; }
 .shared-assets-head p:not(.eyebrow) { max-width:680px; margin:0; color:#637365; font-size:13px; line-height:1.7; }
@@ -180,7 +185,9 @@
 .shared-assets-boundary div { display:flex; align-items:flex-start; gap:8px; min-height:64px; padding:13px 14px; color:#5e705f; font-size:11px; line-height:1.65; }
 .shared-assets-boundary div + div { border-left:1px solid #d7e0d5; }
 .shared-assets-boundary svg { flex:0 0 auto; margin-top:1px; color:#4e815d; }
-.shared-assets-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:11px; margin-top:20px; }
+/* 卡片网格跟着宽度走：多出来的宽度用来**多放几张**，而不是把每张撑成 400px 的大图
+   （与资产页 `.asset-grid` 同一口径；窄屏的 3 列 / 2 列覆盖仍在 responsive.css 里）。 */
+.shared-assets-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:11px; margin-top:20px; }
 .shared-assets-grid article { position:relative; min-width:0; border:1px solid #cbd7cb; background:#fffef9; }
 .shared-assets-grid > article > img { display:block; width:100%; aspect-ratio:1; object-fit:cover; background:#e6ece3; }
 .shared-asset-info { display:grid; gap:4px; padding:9px; }
@@ -196,14 +203,6 @@
 .shared-assets-empty p { max-width:480px; font-size:12px; line-height:1.65; }
 .shared-assets-head > div { min-width:0; flex:1 1 auto; }
 .shared-assets-head p:not(.eyebrow) { max-width:740px; line-break:strict; text-wrap:pretty; }
-.learning-boundaries { grid-template-columns:1.25fr repeat(3,minmax(0,1fr)); gap:10px; border:0; }
-.learning-boundaries > div { display:grid; min-width:0; min-height:112px; border:1px solid #c6d2c5; padding:16px; background:#fbfcf8; box-shadow:0 7px 18px rgba(34,50,40,.05); color:#45584a; }
-.learning-boundaries > div:first-child { align-content:space-between; border-color:#2a4734; background:#2a4734; box-shadow:none; color:#edf4eb; }
-.learning-boundaries > div:first-child .eyebrow { width:max-content; margin:0; color:#bcd0be; white-space:nowrap; }
-.learning-boundaries > div:first-child h3 { margin:16px 0 0; color:#f4f7f0; font-size:18px; line-height:1.45; }
-.learning-boundaries > div:not(:first-child) { grid-template-columns:34px minmax(0,1fr); align-content:start; gap:12px; border-top:3px solid #78977e; }
-.learning-boundaries > div:not(:first-child) svg { display:block; width:34px; height:34px; margin:0; border:1px solid #b8cbb9; padding:8px; background:#e4eee3; color:#356747; }
-.learning-boundaries > div:not(:first-child) span { align-self:start; color:#45584a; font-size:11px; line-height:1.7; text-wrap:pretty; }
 .guide-nudge { position:fixed; z-index:18; left:276px; bottom:24px; width:min(360px, calc(100vw - 300px)); margin:0; box-shadow:0 14px 36px rgba(28,43,34,.14); }
 .library-boundary,.shared-assets-boundary { margin-top:14px; }
 .library-boundary > summary,.shared-assets-boundary > summary { list-style:none; display:inline-flex; align-items:center; gap:7px; min-height:34px; border:1px solid #c5d0c3; padding:0 10px; background:#fbfcf8; color:#3e5444; font-size:12px; cursor:pointer; }

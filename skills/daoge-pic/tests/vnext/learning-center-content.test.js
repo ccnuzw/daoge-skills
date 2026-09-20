@@ -55,6 +55,17 @@ test('创作手册用产品词：口语步骤名退场（拿出去 / 看出图 /
   assert.match(chrome, /对话决定做什么，界面呈现过程与结果/);
 });
 
+test('底部四张卡同一外观：不许再出现「第一张另起一套」', () => {
+  // 刀哥实机：第一张卡（使用边界）的样式和风格要跟其余三张统一。
+  const css = readSource('web/src/styles/blocks/info-pages.css');
+  assert.doesNotMatch(css, /\.learning-boundaries[^{]*:first-child/, '使用边界的第一张卡不许再有独立外观');
+  const chrome = readSource('web/src/learning-center.jsx');
+  const section = chrome.match(/<section[^>]*data-region="learning-boundaries"[^>]*>([\s\S]*?)<\/section>/);
+  assert.ok(section, '使用边界区块必须带 data-region="learning-boundaries" 钩子');
+  assert.equal((section[1].match(/<div>/g) || []).length, 4, '使用边界保持四张卡');
+  assert.equal((section[1].match(/<b>/g) || []).length, 1, '四张卡同结构：只有标题卡带加粗标题');
+});
+
 test('离线策略专题整体退场（一页对照表不是创作者要的）', () => {
   const content = readSource('web/src/learning-center-content.mjs') + readSource('web/src/learning-center.jsx');
   assert.doesNotMatch(content, /offline-strategy|离线策略/);
