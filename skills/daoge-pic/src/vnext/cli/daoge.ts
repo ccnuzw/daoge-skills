@@ -8,11 +8,12 @@ import { healthStudioId, shutdownVerifiedDaemon } from './daemon-shutdown';
 import { readStudioManifest, sameWorkspaceRoot, studioPaths } from '../studio/workspace';
 import { daemonEnvWithSecretBackend, readWorkspaceSecretBackend, writeWorkspaceSecretBackend, SECRET_BACKEND_CHOICES, type SecretBackendChoice } from '../studio/secret-backend-config';
 import { isSupportedProtocolVersion, isSupportedRuntimeVersion, RUNTIME_VERSION, SKILL_PROTOCOL_NAME, SKILL_PROTOCOL_VERSION } from '../shared/protocol';
+import { currentBuildId } from '../shared/build-identity';
 import { registerSkill, SkillRegistrationScope } from './register-skill';
 import { skillHostChoices, skillHostDirectory } from '../domain/agent-detect';
 import { assertWorkspaceSupported, doctorWorkspace, formatDoctorReport, redactDoctorReport } from './doctor';
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
-export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; startedAt?: string; heartbeatAt: string; providerConcurrency?: ProviderConcurrencySnapshot | null; }
+export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; startedAt?: string; heartbeatAt: string; buildId?: string; providerConcurrency?: ProviderConcurrencySnapshot | null; }
 
 type JsonObject = Record<string, unknown>;
 const STDIN_JSON_MARKER = Object.freeze({ __daogeJsonStdin: true });
@@ -20,7 +21,7 @@ const STDIN_SECRET_MARKER = Object.freeze({ __daogeSecretStdin: true });
 const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
-type LocalAction = 'status' | 'studio' | 'open' | 'restart' | 'register-skill' | 'doctor' | 'backup-restore' | 'provider-secret-backend';
+type LocalAction = 'status' | 'studio' | 'open' | 'enter' | 'stop' | 'restart' | 'register-skill' | 'reference' | 'round-status' | 'doctor' | 'backup-restore' | 'provider-secret-backend';
 type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'non-negative-integer' | 'usage-limit' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope' | 'host' | 'secret-backend';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
@@ -62,12 +63,42 @@ interface ParsedCommand {
   redactedOutput?: boolean;
   restoreInput?: JsonObject;
   secretBackend?: SecretBackendChoice;
+  enter?: EnterInput;
+  referenceTopic?: string;
+  referenceSection?: string;
+  roundStatus?: { roundId: string; sessionId: string };
+  planChallenge?: { roundId: string; sessionId: string };
 }
 
-function workspaceRoot(value: string | undefined): string {
-  const root = String(value || process.env.DAOGE_WORKSPACE_ROOT || '').trim();
-  if (!root) throw new Error('需要 --workspace 或 DAOGE_WORKSPACE_ROOT。不会使用不稳定的当前目录作为 Studio 工作区。');
-  return path.resolve(root);
+/**
+ * 稳定工作区的解析顺序：显式参数 → `DAOGE_WORKSPACE_ROOT` → 从 cwd 向上找到**已经落盘**的 Studio。
+ *
+ * 第三步只认现存的 `daoge-studio/studio.json`：它不创建、不推断、不看 Skill 安装目录，
+ * 所以「任意当前目录」依然当不了工作区（那是数据分裂的入口），而 agent 也不必再靠 glob
+ * 满盘找 studio.json —— 那次实测里这正是两轮往返。
+ */
+export function resolveWorkspaceRoot(explicit?: string, startDirectory = process.cwd()): string {
+  const requested = String(explicit || process.env.DAOGE_WORKSPACE_ROOT || '').trim();
+  if (requested) return path.resolve(requested);
+  let candidate = path.resolve(startDirectory);
+  while (true) {
+    if (fs.existsSync(studioPaths(candidate).manifestPath)) return candidate;
+    const parent = path.dirname(candidate);
+    if (parent === candidate) break;
+    candidate = parent;
+  }
+  throw new Error('需要 --workspace 或 DAOGE_WORKSPACE_ROOT（或在已初始化的 Studio 目录内运行）。不会使用不稳定的当前目录作为 Studio 工作区。');
+}
+
+/**
+ * 安装动作必须显式说清装进哪个工作区：register-skill 写的是工作区级目录（`<workspace>/.agents/skills`），
+ * 不能让「从 cwd 往上找到的 Studio」替用户决定装到哪儿。其它命令可以从 cwd 解析 —— 它们要么只读，
+ * 要么只动 `<workspace>/daoge-studio`，认错工作区最多是找不到 Studio，不会把东西写进别人的仓库。
+ */
+function workspaceRootForCommand(name: string, requested: string | undefined): string | undefined {
+  if (name !== 'register-skill') return resolveWorkspaceRoot(requested);
+  if (requested === undefined || String(requested).trim() === '') throw new Error('需要 --workspace：register-skill 不会从当前目录推断要装进哪个工作区。');
+  return resolveWorkspaceRoot(requested);
 }
 
 export function assertImplicitStudioCreationAllowed(workspaceRoot: string, allowNestedStudio = false): void {
@@ -107,7 +138,16 @@ function readRuntime(workspaceRoot: string): RuntimeRecord | null {
 }
 function publicRuntime(record: RuntimeRecord | null): Record<string, unknown> | null {
   if (!record) return null;
-  return { pid: record.pid, url: record.url, workspaceRoot: record.workspaceRoot, heartbeatAt: record.heartbeatAt, providerConcurrency: record.providerConcurrency || null };
+  return { pid: record.pid, url: record.url, workspaceRoot: record.workspaceRoot, heartbeatAt: record.heartbeatAt, ...(record.buildId === undefined ? {} : { buildId: record.buildId }), providerConcurrency: record.providerConcurrency || null };
+}
+/**
+ * agent 面向的精简运行时：只留 pid 与构建身份。
+ * 不带 url / workspaceRoot / heartbeat / 并发明细：既省每次调用的 token，也避免把裸 Workbench origin
+ * 塞进 agent 上下文（「不得暴露裸 origin」的边界）。需要地址请用 `daoge studio`。
+ */
+function compactRuntime(record: RuntimeRecord | null): Record<string, unknown> | null {
+  if (!record) return null;
+  return { pid: record.pid, ...(record.buildId === undefined ? {} : { buildId: record.buildId }) };
 }
 
 function workbenchBootstrapUrl(record: RuntimeRecord): string {
@@ -158,6 +198,40 @@ export async function daemonCompatible(record: RuntimeRecord, expectedStudioId: 
 
 function sleep(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
+export interface DaemonBuildStatus { cliBuildId: string; daemonBuildId: string | null; staleBuild: boolean; activeRequests: number; }
+
+/**
+ * 「这个 daemon 跑的是不是当前这份安装」——协议/运行时版本都是区间，答不了这个问题。
+ * 看不见 daemon 身份（旧构建根本不报 buildId）也算陈旧：那就是它比本 CLI 老。
+ * `activeRequests` 一起返回，是因为「换进程」只应该在**没有在飞请求**时做。
+ */
+export async function daemonBuildStatus(record: RuntimeRecord | null, fetchImpl: typeof fetch = fetch): Promise<DaemonBuildStatus> {
+  const cliBuildId = currentBuildId();
+  if (!record || !record.capability) return { cliBuildId, daemonBuildId: null, staleBuild: false, activeRequests: 0 };
+  let daemonBuildId: string | null = null;
+  let activeRequests = 0;
+  try {
+    const response = await fetchImpl(new URL('/api/studio', record.url), {
+      headers: { accept: 'application/json', authorization: 'Bearer ' + record.capability, 'x-daoge-skill-protocol': SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION },
+      signal: AbortSignal.timeout(800)
+    });
+    if (response.ok) {
+      const payload = await response.json() as { ok?: unknown; data?: unknown };
+      const data = jsonRecord(payload.data);
+      if (payload.ok === true && data) {
+        if (typeof data.buildId === 'string') daemonBuildId = data.buildId;
+        const runtime = jsonRecord(data.runtime);
+        const concurrency = runtime ? jsonRecord(runtime.providerConcurrency) : null;
+        const active = concurrency ? Number(concurrency.active) : 0;
+        activeRequests = Number.isFinite(active) && active > 0 ? active : 0;
+      }
+    }
+  } catch {
+    /* 探不到身份就是探不到：下面按「陈旧」处理，而不是假装它是新的 */
+  }
+  return { cliBuildId, daemonBuildId, staleBuild: daemonBuildId !== cliBuildId, activeRequests };
+}
+
 function assertSupportedNodeRuntime(): void {
   const [major, minor] = process.versions.node.split('.').map(Number);
   if (!Number.isInteger(major) || !Number.isInteger(minor) || major < 22 || (major === 22 && minor < 17)) {
@@ -184,15 +258,24 @@ function recordedOwnerPid(workspaceRoot: string): number | null {
 }
 
 
+/**
+ * 等旧 daemon 真正「放手」，判据是**事实**而不是「进程还在不在」：
+ * 它自己退出时会删掉 runtime 记录（见 runtime/daemon.ts 的 close()），所以
+ * 「记录不再属于它」且「不再响应健康检查」就是放手了。
+ *
+ * 不拿 `kill(pid, 0)` 当判据：调用方若是那个 daemon 的父进程且从不 wait()，
+ * 子进程会变成僵尸 —— 僵尸不响应 HTTP，但 kill(pid, 0) 依然成功，于是每一次
+ * 受控重启都会干等满 10 秒再报「未能在 10 秒内安全停止」。陈旧记录 + 无活进程
+ * 的情况由此同样收敛：记录被清掉、健康检查无人应答，立刻放手。
+ */
 async function waitForDaemonRelease(workspaceRoot: string, record: RuntimeRecord): Promise<void> {
   for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
-    const live = livePid(record.pid);
+    const current = readRuntime(workspaceRoot);
+    const stillHoldsRecord = Boolean(current && current.pid === record.pid);
     const responding = await healthy(record.url);
-    if (!live && !responding) {
-      const current = readRuntime(workspaceRoot);
-      if (current?.pid === record.pid) fs.rmSync(runtimePath(workspaceRoot), { force: true });
-      // A stale daemon.lock observation never blocks the next SQLite lock acquisition.
-      // Only an exact pid+ownerId holder removes its own record during normal shutdown.
+    if (!stillHoldsRecord && !responding) {
+      // A stale daemon.lock observation never blocks the next SQLite lock acquisition:
+      // only an exact pid+ownerId holder removes its own record during normal shutdown.
       return;
     }
     await sleep(100);
@@ -262,31 +345,28 @@ async function stopSpawnedDaemon(child: ChildProcess): Promise<void> {
 }
 
 
-async function restartDaemon(workspaceRoot: string): Promise<{ previousPid: number | null; daemon: RuntimeRecord }> {
+/**
+ * 重启 = **换进程**。
+ *
+ * 旧实现走 daemon 内 `/api/restart` 的同进程重初始化：PID 不变、`startedAt` 变新，
+ * 于是 CLI 判定「重启成功」，而内存里仍是旧代码 —— 2026-09-20 的实测里，agent 为了
+ * 证明这件事花了 14 分钟（ps lstart / git 历史 / backup manifest 探针）。现在只有换进程
+ * 才算重启，并且换完必须自证：PID 必须变化、新进程必须报告与本 CLI 一致的构建身份。
+ */
+async function restartDaemon(workspaceRoot: string): Promise<{ previousPid: number | null; previousBuild: DaemonBuildStatus | null; daemon: RuntimeRecord }> {
   const existing = readRuntime(workspaceRoot);
-  const previousPid = existing?.pid || null;
-  if (existing?.capability) {
-    const studioId = readStudioId(workspaceRoot);
-    if (await healthy(existing.url, studioId) && await daemonCompatible(existing, studioId)) {
-      const previousStartedAt = existing.startedAt;
-      await api(existing, 'POST', '/api/restart', {}, 'daemon-restart-' + randomUUID());
-      for (let attempt = 0; attempt < DAEMON_LIFECYCLE_ATTEMPTS; attempt += 1) {
-        await sleep(100);
-        const restarted = readRuntime(workspaceRoot);
-        if (restarted?.pid === existing.pid
-          && restarted.capability === existing.capability
-          && restarted.startedAt
-          && restarted.startedAt !== previousStartedAt
-          && await healthy(restarted.url, studioId)
-          && await daemonCompatible(restarted, studioId)) {
-          return { previousPid, daemon: restarted };
-        }
-      }
-      throw new Error('Studio daemon 未能在 ' + DAEMON_LIFECYCLE_ATTEMPTS / 10 + ' 秒内完成受控重启。');
-    }
+  const previousPid = existing && livePid(existing.pid) ? existing.pid : null;
+  const previousBuild = existing ? await daemonBuildStatus(existing) : null;
+  if (existing) {
+    // 记录还在但没有活进程：它只是残留，删掉即可，不必走受控关闭。
+    if (previousPid === null) fs.rmSync(runtimePath(workspaceRoot), { force: true });
+    else await stopRecordedDaemon(workspaceRoot, existing);
   }
-  if (existing) await stopRecordedDaemon(workspaceRoot, existing);
-  return { previousPid, daemon: await ensureDaemon(workspaceRoot) };
+  const daemon = await ensureDaemon(workspaceRoot);
+  if (previousPid !== null && daemon.pid === previousPid) throw new Error('Studio daemon 重启后 PID 未变化，拒绝把同一个进程当作新进程汇报。');
+  const build = await daemonBuildStatus(daemon);
+  if (build.staleBuild) throw new Error('Studio daemon 重启后仍未加载当前构建（daemon ' + (build.daemonBuildId || 'unknown') + ' / cli ' + build.cliBuildId + '），拒绝谎报重启成功。');
+  return { previousPid, previousBuild, daemon };
 }
 
 async function ensureDaemon(workspaceRoot: string): Promise<RuntimeRecord> {
@@ -351,6 +431,159 @@ export async function openOrReuseWorkbench(record: RuntimeRecord, force = false,
   }
 }
 
+export interface ProjectSummary { id: string; name: string; status: string; }
+export interface EnterInput { conversation: string; project?: string; task?: string; round?: string; cli?: string; cliVersion?: string; skill?: string; skillVersion?: string; restartStale?: boolean; }
+export type ProjectResolution = 'matched' | 'ambiguous' | 'not-found' | 'not-requested';
+
+export interface ConversationResolution { id: string; source: string; }
+
+/** 宿主环境里可以被信任的会话身份变量；顺序即优先级。 */
+const CONVERSATION_ENVIRONMENT = ['DAOGE_CONVERSATION_ID', 'OMP_CONVERSATION_ID'];
+
+/**
+ * conversation 身份只能来自宿主：CLI 不猜、不编、也不复用别的会话 ——
+ * 「哪个会话在说话」是宿主的事实，不是可以推断的东西。实测里 agent 为了拿到自己的
+ * conversation ID 翻了四轮宿主目录；现在它只需要读这一条规则。
+ */
+export function resolveConversation(requested: string | undefined, environment: NodeJS.ProcessEnv = process.env): ConversationResolution {
+  const value = String(requested || '').trim();
+  if (value && value !== 'auto') return { id: value, source: 'flag' };
+  for (const name of CONVERSATION_ENVIRONMENT) {
+    const candidate = String(environment[name] || '').trim();
+    if (candidate) return { id: candidate, source: 'env:' + name };
+  }
+  throw new Error('无法确定当前 conversation ID：传 --conversation <id>，或让宿主导出 ' + CONVERSATION_ENVIRONMENT.join(' / ') + ' 后再用 --conversation auto。CLI 不会替会话猜测身份。');
+}
+
+/** Narrow the daemon project list to what a connection needs: id, name, status. */
+export function projectSummaries(value: unknown): ProjectSummary[] {
+  const data = jsonRecord(value);
+  const list = data && Array.isArray(data.projects) ? data.projects : [];
+  return list.flatMap((item) => {
+    const record = jsonRecord(item);
+    if (!record) return [];
+    const id = stringField(record, 'id');
+    const name = stringField(record, 'name');
+    return id && name ? [{ id, name, status: stringField(record, 'status') }] : [];
+  });
+}
+
+/**
+ * 项目名 → projectId 的确定性解析，绝不替用户猜。
+ *
+ * 归档是真实存在的坑：本机的 Studio 里「鉴权表复验临时项目」active/archived 各有一个，
+ * 旧规则会把精确输入判成 ambiguous，让用户为一个早就不用的项目再确认一次。规则改为
+ * 先分档（active 优先），档内唯一才算命中：
+ *   1. 精确 projectId 命中即为准 —— 调用方给的是唯一事实；
+ *   2. 精确项目名：唯一 active → 命中；多个 active → ambiguous；没有 active 时唯一 archived → 命中；
+ *   3. 包含匹配按同一分档判定；候选永远 active 在前、archived 在后。
+ */
+export function resolveProjectSelection(projects: ProjectSummary[], requested: string): { resolution: ProjectResolution; matched: ProjectSummary | null; candidates: ProjectSummary[] } {
+  const wanted = requested.trim();
+  if (!wanted) return { resolution: 'not-requested', matched: null, candidates: [] };
+  const byId = projects.find((project) => project.id === wanted);
+  if (byId) return { resolution: 'matched', matched: byId, candidates: [] };
+  const decide = (matches: ProjectSummary[]): { resolution: ProjectResolution; matched: ProjectSummary | null; candidates: ProjectSummary[] } => {
+    const active = matches.filter((project) => project.status !== 'archived');
+    const archived = matches.filter((project) => project.status === 'archived');
+    if (active.length === 1) return { resolution: 'matched', matched: active[0], candidates: [] };
+    if (active.length > 1) return { resolution: 'ambiguous', matched: null, candidates: [...active, ...archived] };
+    if (archived.length === 1) return { resolution: 'matched', matched: archived[0], candidates: [] };
+    if (archived.length > 1) return { resolution: 'ambiguous', matched: null, candidates: archived };
+    return { resolution: 'not-found', matched: null, candidates: [] };
+  };
+  const exact = projects.filter((project) => project.name === wanted);
+  if (exact.length) return decide(exact);
+  const partial = projects.filter((project) => project.name.includes(wanted));
+  return partial.length ? decide(partial) : { resolution: 'not-found', matched: null, candidates: [] };
+}
+
+/**
+ * One command that does what the startup protocol used to stretch across five CLI calls:
+ * ensure the daemon is healthy, open or reuse the Workbench, register presence, open the
+ * conversation's Studio session, resolve the project by name/id and bind it, then read the
+ * pending request queue. Every step is idempotent, so re-running it on a live session is safe.
+ *
+ * 额外做两件实测里最贵的事：① 陈旧 daemon（跑的不是当前构建）在**没有在飞请求**时当场换进程，
+ * 用户不必再等一轮 14 分钟的侦探戏；② 返回里带上构建身份与会话身份来源，让 agent 一轮就能
+ * 汇报事实，而不是去翻宿主目录和进程时间戳。
+ */
+export async function enterStudio(record: RuntimeRecord, input: EnterInput, force = false, opener: (url: string) => Promise<void> = openWorkbenchUrl): Promise<JsonObject> {
+  const conversation = resolveConversation(input.conversation);
+  let active = record;
+  let build = await daemonBuildStatus(active);
+  let staleRestart: JsonObject | null = null;
+  let staleReason: string | null = null;
+  if (build.staleBuild) {
+    // 「陈旧」有两种正当的不作为：用户关掉了自愈，或正在出图不能换进程。
+    // 两者都要说明白 —— agent 的汇报不能只有 staleBuild: true 而没有下文。
+    if (input.restartStale === false) staleReason = 'restart-stale-disabled';
+    else if (build.activeRequests > 0) staleReason = 'active-requests';
+    else {
+      const restarted = await restartDaemon(active.workspaceRoot);
+      staleRestart = { previousPid: restarted.previousPid, previousBuildId: restarted.previousBuild ? restarted.previousBuild.daemonBuildId : null };
+      active = restarted.daemon;
+      build = await daemonBuildStatus(active);
+    }
+  }
+  const workbench = await openOrReuseWorkbench(active, force, opener);
+  const registration = input.cli
+    ? jsonRecord(await api(active, 'POST', '/api/agents/register', {
+        cliName: input.cli,
+        ...(input.cliVersion === undefined ? {} : { cliVersion: input.cliVersion }),
+        ...(input.skill === undefined ? {} : { skills: [{ name: input.skill, ...(input.skillVersion === undefined ? {} : { version: input.skillVersion }) }] })
+      }, 'enter-agent-' + randomUUID()))
+    : null;
+  const agent = registration ? jsonRecord(registration.agent) || registration : null;
+  // /api/sessions/open dedupes by conversationId, so the random idempotency key only makes the
+  // call retry-safe without freezing the session row.
+  const session = jsonRecord(await api(active, 'POST', '/api/sessions/open', { conversationId: conversation.id }, 'enter-session-' + randomUUID())) || {};
+  const sessionId = stringField(session, 'id');
+  if (!sessionId) throw new Error('Studio 未返回有效的会话标识。');
+  const projects = projectSummaries(await api(active, 'GET', '/api/projects', {}));
+  const selection = resolveProjectSelection(projects, input.project || '');
+  const context = selection.matched
+    ? jsonRecord(await api(active, 'POST', '/api/sessions/' + encodeURIComponent(sessionId) + '/context', {
+        projectId: selection.matched.id,
+        ...(input.task === undefined ? {} : { taskId: input.task }),
+        ...(input.round === undefined ? {} : { roundId: input.round })
+      }, 'enter-context-' + randomUUID()))
+    : null;
+  const pending = jsonRecord(await api(active, 'GET', '/api/requests?status=pending&limit=20', {})) || {};
+  const boundProjectId = context ? stringField(context, 'agentProjectId') : stringField(session, 'agentProjectId');
+  const boundTaskId = context ? stringField(context, 'agentTaskId') : stringField(session, 'agentTaskId');
+  const boundRoundId = context ? stringField(context, 'agentRoundId') : stringField(session, 'agentRoundId');
+  const pendingList = Array.isArray(pending.requests) ? pending.requests : [];
+  const agentSummary = agent ? {
+    cliName: stringField(agent, 'cliName') || null,
+    skillName: stringField(agent, 'skillName') || null,
+    skillVersion: stringField(agent, 'skillVersion') || null
+  } : null;
+  return {
+    workspaceRoot: active.workspaceRoot,
+    daemon: compactRuntime(active),
+    build,
+    ...(staleRestart ? { staleRestart } : {}),
+    ...(staleReason ? { staleReason } : {}),
+    workbench,
+    agent: agentSummary,
+    conversationSource: conversation.source,
+    contextBound: Boolean(context),
+    session: {
+      id: sessionId,
+      projectId: boundProjectId || null,
+      taskId: boundTaskId || null,
+      roundId: boundRoundId || null
+    },
+    projectResolution: selection.resolution,
+    project: selection.matched,
+    // 只有解析不到唯一项目时才回传全量目录；命中时给一个计数就够 —— 这一项就是 ~1.7 KB。
+    ...(selection.matched ? { projectCount: projects.length } : { projectCandidates: selection.candidates, projects }),
+    pendingRequestCount: pendingList.length,
+    pendingRequests: pendingList.slice(0, 10)
+  };
+}
+
 function textValue(values: Record<string, unknown>, name: string): string { return values[name] as string; }
 function jsonValue(values: Record<string, unknown>, name: string): unknown { return values[name] || {}; }
 function listValue(values: Record<string, unknown>, name: string): string[] { return (values[name] as string[] | undefined) || []; }
@@ -365,8 +598,36 @@ function query(values: Record<string, unknown>, entries: Array<[string, string]>
   return params.length ? '?' + params.join('&') : '';
 }
 
+function skillReferenceDirectory(): string { return path.resolve(__dirname, '..', '..', '..', 'references'); }
+export function skillReferencePath(topic: string): string {
+  if (!/^[A-Za-z0-9-]+$/.test(topic)) throw new Error('--topic 只能是附录名（不含 .md，例如 queue）。');
+  return path.join(skillReferenceDirectory(), topic + '.md');
+}
+/** 只取某一份附录里的一个章节：从该标题到下一个同级或更高级标题为止。 */
+export function skillReferenceSection(text: string, heading: string): string {
+  const lines = text.split('\n');
+  const wanted = heading.trim();
+  const headings = lines.flatMap((line, index) => {
+    const match = /^(#{1,6})\s+(.*)$/.exec(line);
+    return match ? [{ index, level: match[1].length, text: match[2].trim() }] : [];
+  });
+  const target = headings.find((item) => item.text === wanted);
+  if (!target) throw new Error('未找到章节：' + wanted + '。可用：' + [...new Set(headings.map((item) => item.text))].join('、'));
+  let end = lines.length;
+  for (const item of headings) {
+    if (item.index > target.index && item.level <= target.level) { end = item.index; break; }
+  }
+  return lines.slice(target.index, end).join('\n').trimEnd() + '\n';
+}
+
 const commandSchemas: Record<string, CommandSchema> = {
-  status: { summary: '查看本工作区 Studio 与后台服务状态', action: 'status', flags: {} }, studio: { summary: '输出 Studio 与工作台地址，不打开浏览器', action: 'studio', flags: {} }, open: { summary: '打开或复用唯一工作台；嵌套 Studio 必须由用户显式允许', action: 'open', flags: { '--force': { kind: 'boolean' }, '--allow-nested-studio': { kind: 'boolean' } } }, restart: { summary: '优雅重启本工作区 Studio', action: 'restart', flags: {} },
+  status: { summary: '查看本工作区 Studio 与后台服务状态', action: 'status', flags: {} }, studio: { summary: '输出 Studio 与工作台地址，不打开浏览器', action: 'studio', flags: {} }, open: { summary: '打开或复用唯一工作台；嵌套 Studio 必须由用户显式允许', action: 'open', flags: { '--force': { kind: 'boolean' }, '--allow-nested-studio': { kind: 'boolean' } } },
+  enter: { summary: '一次完成连接：确保 daemon、打开或复用 Workbench、登记在场、建立会话、按项目名进入项目、读取请求队列', action: 'enter', flags: { '--conversation': { kind: 'text', required: true }, '--project': { kind: 'text' }, '--task': { kind: 'text' }, '--round': { kind: 'text' }, '--cli': { kind: 'text' }, '--cli-version': { kind: 'text' }, '--skill': { kind: 'text' }, '--skill-version': { kind: 'text' }, '--restart-stale': { kind: 'boolean' }, '--force': { kind: 'boolean' }, '--allow-nested-studio': { kind: 'boolean' } } },
+  stop: { summary: '受控关闭本工作区 Studio，不自动重启；要再起来请用 enter 或 open', action: 'stop', flags: {} },
+  reference: { summary: '按需打印 Skill 附录 references/<topic>.md（无需 --workspace）；--section 只打印某一节', action: 'reference', flags: { '--topic': { kind: 'text', required: true }, '--section': { kind: 'text' } } },
+  'round-status': { summary: '一次读取当前轮次的计划摘要与 Generation History（替代两次调用）', action: 'round-status', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } } },
+  'project-list': { summary: '列出当前 Studio 的项目（含归档），用于把项目名解析成 projectId', method: 'GET', flags: {}, pathname: () => '/api/projects' },
+  restart: { summary: '优雅重启本工作区 Studio', action: 'restart', flags: {} },
   'register-skill': { summary: '注册当前安装包；--scope user 装到 --host 指定的宿主（缺省 codex，agents = 跨宿主共享目录）且不需要 --workspace；目标已存在则拒绝', action: 'register-skill', flags: { '--scope': { kind: 'scope', required: true }, '--host': { kind: 'host' } } },
   doctor: { summary: '不调用 Provider；检查工作区、SQLite、权限、sharp 与 Windows volume', action: 'doctor', flags: { '--json': { kind: 'boolean' }, '--redacted': { kind: 'boolean' } } },
   'provider-list': { summary: '列出全部生成服务配置，不含密钥', method: 'GET', flags: {}, pathname: () => '/api/providers' },
@@ -411,7 +672,7 @@ const commandSchemas: Record<string, CommandSchema> = {
   'delivery-batch-revise': { summary: '修订交付批次', method: 'POST', flags: { '--batch': { kind: 'text', required: true }, '--deliveries': { kind: 'list', required: true } }, pathname: (v) => '/api/delivery-batches/' + encoded(v, '--batch') + '/revisions', body: (v) => ({ deliveryIds: listValue(v, '--deliveries') }) },
   'delivery-batch-ready': { summary: '冻结批次版本', method: 'POST', flags: { '--version': { kind: 'text', required: true } }, pathname: (v) => '/api/delivery-batch-versions/' + encoded(v, '--version') + '/ready', body: () => ({}) },
   round: { summary: '在任务下新建轮次', method: 'POST', flags: { '--task': { kind: 'text', required: true }, '--purpose': { kind: 'purpose', required: true }, '--parent': { kind: 'text' }, '--session': { kind: 'text' } }, pathname: () => '/api/rounds', body: (v) => ({ taskId: textValue(v, '--task'), purpose: textValue(v, '--purpose'), parentRoundId: v['--parent'], sessionId: v['--session'] }) },
-  plan: { summary: '写入计划；@- 从 stdin 读取 JSON', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--plan': { kind: 'json', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/plan', body: (v) => ({ expectedVersion: numberValue(v, '--version'), plan: jsonValue(v, '--plan') }) },
+  plan: { summary: '写入计划；@- 从 stdin 读取 JSON；--challenge true 同时创建确认挑战', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--plan': { kind: 'json', required: true }, '--session': { kind: 'text' }, '--challenge': { kind: 'boolean' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/plan', body: (v) => ({ expectedVersion: numberValue(v, '--version'), plan: jsonValue(v, '--plan') }) },
   'confirm-challenge': { summary: '只创建 Workbench 人工确认挑战', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/confirmation-challenge', body: (v) => ({ sessionId: textValue(v, '--session') }) },
   preflight: { summary: '开工前核算；只接受已人工确认会话', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true }, '--concurrency': { kind: 'execution-concurrency' }, '--usage-estimate': { kind: 'json' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/preflight', body: (v) => ({ sessionId: textValue(v, '--session'), executionConcurrency: v['--concurrency'], ...(v['--usage-estimate'] === undefined ? {} : { usageEstimate: v['--usage-estimate'] }) }) },
   run: { summary: '按预检结果开始出图', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--preflight': { kind: 'text', required: true }, '--confirm-token': { kind: 'text', required: true } }, pathname: () => '/api/runs', body: (v) => ({ roundId: textValue(v, '--round'), preflightId: textValue(v, '--preflight'), confirmToken: textValue(v, '--confirm-token') }) },
@@ -515,6 +776,8 @@ export function materializeStdinJson(body: JsonObject): JsonObject {
 
 function parseCommand(args: string[]): ParsedCommand {
   const name = args[0] || '';
+  // `daoge reference queue` 与 `daoge reference --topic queue` 等价：附录名更常作为位置参数出现。
+  if (name === 'reference' && args[1] && !args[1].startsWith('--')) args = ['reference', '--topic', args[1], ...args.slice(2)];
   const schema = commandSchemas[name];
   if (!schema) throw new Error('未知 vNext 命令。\n' + usage());
   const mutation = Boolean(schema.method && schema.method !== 'GET');
@@ -541,15 +804,15 @@ function parseCommand(args: string[]): ParsedCommand {
     if (action === 'replace' && !hasSecret) throw new Error('替换 API Key 必须使用 --api-key-stdin @-。');
     if (action !== 'replace' && hasSecret) throw new Error('--api-key-stdin 只能与 --api-key-action replace 一起使用。');
   }
-  const userRegistration = name === 'register-skill' && values['--scope'] === 'user';
-  const root = userRegistration && rawValues['--workspace'] === undefined ? undefined : workspaceRoot(rawValues['--workspace']);
+  const withoutWorkspace = name === 'reference' || (name === 'register-skill' && values['--scope'] === 'user' && rawValues['--workspace'] === undefined);
+  const root = withoutWorkspace ? undefined : workspaceRootForCommand(name, rawValues['--workspace'] as string | undefined);
   const markerCount = Object.values(values).filter((value) => value === STDIN_JSON_MARKER).length;
   if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
-  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope, host: values['--host'] === undefined ? undefined : textValue(values, '--host') } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}), ...(schema.action === 'provider-secret-backend' ? { secretBackend: values['--backend'] as SecretBackendChoice } : {}) };
+  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' || schema.action === 'enter' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'enter' ? { enter: { conversation: textValue(values, '--conversation'), ...(values['--project'] === undefined ? {} : { project: textValue(values, '--project') }), ...(values['--task'] === undefined ? {} : { task: textValue(values, '--task') }), ...(values['--round'] === undefined ? {} : { round: textValue(values, '--round') }), ...(values['--cli'] === undefined ? {} : { cli: textValue(values, '--cli') }), ...(values['--cli-version'] === undefined ? {} : { cliVersion: textValue(values, '--cli-version') }), ...(values['--skill'] === undefined ? {} : { skill: textValue(values, '--skill') }), ...(values['--skill-version'] === undefined ? {} : { skillVersion: textValue(values, '--skill-version') }), ...(values['--restart-stale'] === undefined ? {} : { restartStale: values['--restart-stale'] === true }) } } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope, host: values['--host'] === undefined ? undefined : textValue(values, '--host') } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}), ...(schema.action === 'provider-secret-backend' ? { secretBackend: values['--backend'] as SecretBackendChoice } : {}), ...(schema.action === 'reference' ? { referenceTopic: textValue(values, '--topic'), ...(values['--section'] === undefined ? {} : { referenceSection: textValue(values, '--section') }) } : {}), ...(schema.action === 'round-status' ? { roundStatus: { roundId: textValue(values, '--round'), sessionId: textValue(values, '--session') } } : {}) };
   const method = schema.method as HttpMethod;
   const operationName = method === 'GET' || rawValues['--idempotency-key'] ? undefined : rawValues['--operation-name'] ? explicitOperationName(rawValues['--operation-name']) : undefined;
   const idempotencyKey = method === 'GET' || operationName ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
-  return { name, workspaceRoot: root, request: { method, pathname: (schema.pathname as (input: Record<string, unknown>) => string)(values), body: schema.body ? schema.body(values) : {}, idempotencyKey, operationName } };
+  return { name, workspaceRoot: root, request: { method, pathname: (schema.pathname as (input: Record<string, unknown>) => string)(values), body: schema.body ? schema.body(values) : {}, idempotencyKey, operationName }, ...(name === 'plan' && values['--challenge'] === true ? { planChallenge: { roundId: textValue(values, '--round'), sessionId: values['--session'] === undefined ? '' : textValue(values, '--session') } } : {}) };
 }
 
 function commandLine(name: string, schema: CommandSchema): string {
@@ -560,13 +823,18 @@ function commandLine(name: string, schema: CommandSchema): string {
   return `daoge ${name} --workspace <path>${flags}${note}`;
 }
 
+/** 速览行：agent 用来发现命令，不背负 69 条全签名。 */
+function commandLineBrief(name: string, schema: CommandSchema): string {
+  return `daoge ${name}  # ${schema.summary || ''}`.trimEnd();
+}
+
 function commandHelp(name: string): string {
   const schema = commandSchemas[name];
   const lines = ['daoge ' + name];
   if (schema.summary) lines.push('  ' + schema.summary);
   lines.push('');
   lines.push('参数：');
-  lines.push(`  --workspace <path>  ${name === 'register-skill' ? 'project 范围必填；user 范围不需要' : '必填，Studio 工作区根目录'}`);
+  lines.push(`  --workspace <path>  ${name === 'reference' ? '不需要（附录不依赖工作区）' : name === 'register-skill' ? 'project 范围必填；user 范围不需要' : '必填；在已初始化的 Studio 目录内运行时可省略'}`);
   for (const [flag, flagSchema] of Object.entries(schema.flags)) {
     lines.push(`  ${flag} ${FLAG_HINTS[flagSchema.kind]}  ${flagSchema.required ? '必填' : '可选'}`);
   }
@@ -590,6 +858,21 @@ function usage(): string {
     '查看某个命令的参数：daoge <命令> --help',
     ''
   ];
+  for (const name of Object.keys(commandSchemas)) lines.push(commandLineBrief(name, commandSchemas[name]));
+  lines.push('');
+  lines.push('完整签名：daoge --help --full 或 daoge <命令> --help。');
+  return lines.join('\n');
+}
+
+/** 全签名清单：只在明确要看签名时输出。 */
+function usageFull(): string {
+  const lines = [
+    'DAOGE Pic vNext Studio',
+    '',
+    '用法：daoge <命令> --workspace <项目根> [参数]',
+    '查看某个命令的参数：daoge <命令> --help',
+    ''
+  ];
   for (const name of Object.keys(commandSchemas)) lines.push(commandLine(name, commandSchemas[name]));
   lines.push('');
   lines.push('POST/PUT 可使用 --operation-name <verb:scope> 由 daemon 派生稳定 key；高级恢复仍可使用 --idempotency-key <key>，两者互斥。');
@@ -600,7 +883,7 @@ export async function main(): Promise<void> {
   assertSupportedNodeRuntime();
   const args = process.argv.slice(2);
   const command = args[0] || 'help';
-  if (command === 'help' || command === '--help' || command === '-h') { process.stdout.write(usage() + '\n'); return; }
+  if (command === 'help' || command === '--help' || command === '-h') { process.stdout.write((args.includes('--full') ? usageFull() : usage()) + '\n'); return; }
   if (args.includes('--help') || args.includes('-h')) {
     if (!commandSchemas[command]) { process.stderr.write('未知 vNext 命令：' + command + '。\n'); process.exitCode = 1; return; }
     process.stdout.write(commandHelp(command) + '\n'); return;
@@ -608,6 +891,18 @@ export async function main(): Promise<void> {
   const parsed = parseCommand(args);
   if (parsed.action === 'register-skill') {
     process.stdout.write(JSON.stringify(registerSkill({ scope: parsed.scope as SkillRegistrationScope, workspaceRoot: parsed.workspaceRoot, host: parsed.host as string | undefined }), null, 2) + '\n');
+    return;
+  }
+  if (parsed.action === 'reference') {
+    const topic = String(parsed.referenceTopic || '');
+    const file = skillReferencePath(topic);
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+      const directory = skillReferenceDirectory();
+      const available = fs.existsSync(directory) ? fs.readdirSync(directory).filter((name) => name.endsWith('.md')).map((name) => name.slice(0, -3)).sort() : [];
+      throw new Error('未知附录：' + topic + '。可用：' + available.join('、'));
+    }
+    const body = fs.readFileSync(file, 'utf8');
+    process.stdout.write(parsed.referenceSection ? skillReferenceSection(body, parsed.referenceSection) : body);
     return;
   }
   const root = parsed.workspaceRoot as string;
@@ -634,12 +929,24 @@ export async function main(): Promise<void> {
   }
   if (parsed.action === 'status') {
     const record = readRuntime(root);
-    process.stdout.write(JSON.stringify({ workspaceRoot: root, daemon: publicRuntime(record), healthy: Boolean(record && await healthy(record.url)) }, null, 2) + '\n');
+    const isHealthy = Boolean(record && await healthy(record.url));
+    process.stdout.write(JSON.stringify({ workspaceRoot: root, daemon: compactRuntime(record), healthy: isHealthy, build: await daemonBuildStatus(isHealthy ? record : null) }) + '\n');
+    return;
+  }
+  if (parsed.action === 'stop') {
+    const existing = readRuntime(root);
+    if (!existing || !livePid(existing.pid)) {
+      if (existing) fs.rmSync(runtimePath(root), { force: true });
+      process.stdout.write(JSON.stringify({ workspaceRoot: root, stopped: false, reason: 'not-running', previousPid: existing ? existing.pid : null }, null, 2) + '\n');
+      return;
+    }
+    await stopRecordedDaemon(root, existing);
+    process.stdout.write(JSON.stringify({ workspaceRoot: root, stopped: true, previousPid: existing.pid }, null, 2) + '\n');
     return;
   }
   if (!manifest) {
     assertWorkspaceSupported(root);
-    assertImplicitStudioCreationAllowed(root, parsed.action === 'open' && parsed.allowNestedStudio === true);
+    assertImplicitStudioCreationAllowed(root, (parsed.action === 'open' || parsed.action === 'enter') && parsed.allowNestedStudio === true);
   }
   if (parsed.action === 'provider-secret-backend') {
     const paths = studioPaths(root);
@@ -654,21 +961,46 @@ export async function main(): Promise<void> {
   }
   if (parsed.action === 'restart') {
     const restarted = await restartDaemon(root);
-    process.stdout.write(JSON.stringify({ workspaceRoot: root, previousPid: restarted.previousPid, daemon: publicRuntime(restarted.daemon) }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({
+      workspaceRoot: root,
+      previousPid: restarted.previousPid,
+      previousBuildId: restarted.previousBuild ? restarted.previousBuild.daemonBuildId : null,
+      build: await daemonBuildStatus(restarted.daemon),
+      daemon: compactRuntime(restarted.daemon)
+    }, null, 2) + '\n');
     return;
   }
   const record = await ensureDaemon(root);
+  if (parsed.action === 'round-status') {
+    const input = parsed.roundStatus as { roundId: string; sessionId: string };
+    const planStatus = await api(record, 'GET', '/api/sessions/' + encodeURIComponent(input.sessionId) + '/plan-status', {});
+    const runs = await api(record, 'GET', '/api/rounds/' + encodeURIComponent(input.roundId) + '/runs', {});
+    process.stdout.write(JSON.stringify({ planStatus, runs }) + '\n');
+    return;
+  }
   if (parsed.action === 'studio') { process.stdout.write(JSON.stringify({ workspaceRoot: root, daemon: publicRuntime(record), workbench: { origin: record.url, command: ['daoge', 'open', '--workspace', root] } }, null, 2) + '\n'); return; }
   if (parsed.action === 'open') {
     const workbench = await openOrReuseWorkbench(record, parsed.force === true);
-    process.stdout.write(JSON.stringify({ workspaceRoot: root, workbenchOrigin: record.url, ...workbench }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ workspaceRoot: root, ...workbench }, null, 2) + '\n');
+    return;
+  }
+  if (parsed.action === 'enter') {
+    // agent 是主要消费者：紧凑 JSON 比 2 空格缩进省约 25% 的 token。
+    process.stdout.write(JSON.stringify(await enterStudio(record, parsed.enter as EnterInput, parsed.force === true)) + '\n');
     return;
   }
   const request = parsed.request as NonNullable<ParsedCommand['request']>;
   const result = await api(record, request.method, request.pathname, materializeStdinJson(request.body), request.idempotencyKey, request.operationName);
+  if (parsed.planChallenge) {
+    const challengeInput = parsed.planChallenge;
+    if (!challengeInput.sessionId) throw new Error('plan --challenge true 需要同时给出 --session。');
+    const challenge = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(challengeInput.roundId) + '/confirmation-challenge', { sessionId: challengeInput.sessionId }, undefined, 'plan-challenge-' + randomUUID());
+    process.stdout.write(JSON.stringify({ plan: result, challenge }, null, 2) + '\n');
+    return;
+  }
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
 
-export { parseCommand, commandSchemas, commandHelp, usage };
+export { parseCommand, commandSchemas, commandHelp, usage, usageFull };
 
 if (require.main === module) void main().catch((error) => { process.stderr.write((error instanceof Error ? error.message : 'DAOGE Pic 命令失败。') + '\n'); process.exitCode = 1; });

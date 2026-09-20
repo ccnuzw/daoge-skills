@@ -2,6 +2,17 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 6.1.0 - 2026-09-21
+
+**小版本（连接与 token 效率）**：协议仍 `3.1.0`、Studio schema 仍 `41`、运行时兼容范围仍 `>=6.0.0 <7.0.0`，可与 6.0.0 daemon / Workbench 平滑共存，无需数据迁移。
+
+- 版本元数据：package/runtime `6.1.0`；Skill protocol `daoge-pic-skill-protocol/3.1.0`；运行时兼容范围 `>=6.0.0 <7.0.0`；Studio schema `41`。正式制品 `daoge-pic-6.1.0.tgz` 为 710,823 bytes，npm shasum 为 `074a93d3df6682a84a5cfa02ef48525690c6d163`，SHA-256 为 `fa11259f76350eb4e8304e68c3f443bdc4210c4129a234685e4f6c95c17a7890`。
+- **一步连接**：新增 `daoge enter`，一次调用内完成 daemon 就绪、打开/复用 Workbench、登记在场、建立/恢复会话、按项目名进入项目、读取请求队列；补上 `session-context --project` 只吃 internal projectId 的断点。
+- **项目解析**：`--project` 接受项目名或 projectId；精确名 / 精确 id / 唯一包含才绑定（active 优先于 archived）；歧义或找不到返回 `projectResolution` 与候选，绝不猜、不新建重名项目；新增 `project-list`。
+- **构建身份**：daemon 启动时钉住 `dist/vnext` 内容哈希；`status` / `enter` 返回 `build.staleBuild`，陈旧且无在飞请求时 `enter` 自动换进程并报 `staleRestart`；新增 `daoge stop`。禁止用 ps / 时间戳 / git 反推 daemon 新旧。
+- **会话身份**：`enter --conversation auto` 读 `DAOGE_CONVERSATION_ID` / `OMP_CONVERSATION_ID`，拿不到 fail-loud；返回 `conversationSource` 与 `contextBound`。
+- **CLI token 效率**：`enter` 输出精简约 80% 且默认紧凑；`--help` 默认速览、全签名移入 `--help --full`；新增 `reference <topic> --section <标题>`、`round-status`（合并 plan-status + runs）与 `plan --challenge true`（写计划同时建挑战）；`enter` / `status` / `open` / `restart` 不再回显 origin。
+- **Skill 渐进披露**：SKILL.md 从约 10.6k 压到约 3.2k tokens，长尾拆入 `references/`（boundaries / startup / build-identity / flow / queue / commands / recovery / delivery / state-model / provider-keys / workbench），新增 `daoge reference <topic>` 供任何宿主按需取用；新增体积上限与「附录是封闭集合」守卫。
 ## daoge-pic 6.0.0 - 2026-09-20
 
 **大版本（以人为本重构）**：跨出运行时兼容上界，Studio schema 追加 7 条迁移，Skill 协议升到 3.x，Workbench 全站界面按新的界面标准重做。主题是把创作动线（建立项目 → 提出需求 → 生成运行 → 选片评审 → 资产交付）放回首屏，把工程细节收进二级。

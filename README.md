@@ -2,7 +2,7 @@
 
 面向中文工作流的 DAOGE Skill 系列。每个 Skill 都是**可独立安装、独立使用、独立演进**的能力包：Skill 把自然语言需求转成可执行的标准流程，附带的脚本、参考资料和本地工作台让关键过程可检查、可恢复、可交付。
 
-> **版本状态**：`daoge-pic` 当前稳定正式版本为 [6.0.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.0.0)——这是一次**以人为本的大版本重构**（请求队列、创作画布、全站界面标准、协议 3.1.0、schema 41）；发布说明见 [`6.0.0 发布说明`](./docs/daoge_pic_6.0.0_release_notes_zh.md)，`5.14.2` 及更早版本保持为不可变历史发布。
+> **版本状态**：`daoge-pic` 当前稳定正式版本为 [6.1.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.0)——这是一次**连接与 token 效率小版本**（一步 `enter` 连接、构建身份自愈、CLI 输出精简、SKILL 渐进披露）；发布说明见 [`6.1.0 发布说明`](./docs/daoge_pic_6.1.0_release_notes_zh.md)，`6.0.0`、`5.14.2` 及更早版本保持为不可变历史发布。
 
 当前仓库包含两项彼此独立的能力：
 
@@ -41,10 +41,10 @@ daoge-pic
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
 ```
 
-安装 `daoge-pic` 当前稳定版（`6.0.0`）：
+安装 `daoge-pic` 当前稳定版（`6.1.0`）：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -52,7 +52,7 @@ npx daoge doctor --workspace /absolute/workspace
 Windows PowerShell 使用 `.cmd` shim，不需要放宽执行策略：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
@@ -62,14 +62,14 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 需要全局安装时：
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
 daoge register-skill --scope user
 ```
 
 Windows PowerShell：
 
 ```powershell
-npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
 daoge.cmd register-skill --scope user
 ```
 
@@ -137,6 +137,7 @@ Workbench **不提供开放式对话**，只提供一个受限请求入口：用
 ├── SECURITY.md
 ├── CHANGELOG.md
 ├── docs/                             # 系列资料、发布说明、历史证据
+│   ├── daoge_pic_6.1.0_release_notes_zh.md
 │   ├── daoge_pic_6.0.0_release_notes_zh.md
 │   ├── release_sop_zh.md
 │   └── plans/                        # 重构方案、规格书与批次施工单
@@ -154,16 +155,16 @@ Workbench **不提供开放式对话**，只提供一个受限请求入口：用
         ├── src/vnext/                # SQLite Studio、运行、媒体与安全逻辑
         ├── web/src/                  # React Workbench 源码（app / views / canvas / styles / tokens）
         ├── docs/                     # vNext 规格与验证证据
-        └── references/provider.env.example
+        └── references/               # SKILL.md 的按需附录（agent 在执行时按触发条件读取）
 ```
 
-`SKILL.md` 供智能体在任务触发时读取，README 面向使用者与维护者。请优先从各 Skill 自己的 README 进入具体流程。
+`SKILL.md` 供智能体在任务触发时读取，README 面向使用者与维护者。请优先从各 Skill 自己的 README 进入具体流程。`skills/daoge-pic/SKILL.md` 是常驻执行协议（约 10.6 KB / 约 3.2k tokens），长尾策略放在 `references/` 目录并在主文件里逐条给出触发条件：命令总表与高风险签名、运行恢复、交付、状态模型、Provider/密钥、Workbench 边界。
 
 ## 发布与反馈
 
 每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。
 
-- `daoge-pic` 当前稳定正式版本为 [v6.0.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.0.0)；发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
+- `daoge-pic` 当前稳定正式版本为 [v6.1.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.0)；`v6.0.0` 及更早为不可变历史发布。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
 - 系列级变更记录见 [CHANGELOG.md](./CHANGELOG.md)。

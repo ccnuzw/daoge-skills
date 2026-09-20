@@ -1,6 +1,6 @@
 export const SKILL_PROTOCOL_NAME = 'daoge-pic-skill-protocol';
 export const SKILL_PROTOCOL_VERSION = '3.1.0';
-export const RUNTIME_VERSION = '6.0.0';
+export const RUNTIME_VERSION = '6.1.0';
 export const SUPPORTED_PROTOCOL_RANGE = '>=3.0.0 <4.0.0';
 export const RUNTIME_COMPATIBILITY_RANGE = '>=6.0.0 <7.0.0';
 

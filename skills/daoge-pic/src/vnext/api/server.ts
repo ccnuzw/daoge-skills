@@ -19,6 +19,7 @@ import { StateTransitionError } from '../domain/states';
 import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listScopedStudioAssetsByIds, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { isInStudio, notInStudioMessage, selectInStudioSql, ScopedEntityType } from '../domain/studio-scope';
+import { currentBuildId } from '../shared/build-identity';
 import { getQualityMetrics } from '../domain/quality-metrics';
 import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { getLatestRun, listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
@@ -1022,7 +1023,8 @@ export class LocalStudioService {
       }
       if (request.method === 'GET' && parsed.pathname === '/api/studio') {
         const runtime = this.runtimeStatus().daemon;
-        return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion, protocol: protocolStatus(), runtime });
+        // buildId 让任何调用方都能判断「这个 daemon 是不是当前这份安装」；版本区间做不到这件事。
+        return success(response, { studioId: this.initialized.manifest.studioId, schemaVersion: this.initialized.manifest.schemaVersion, protocol: protocolStatus(), buildId: currentBuildId(), runtime });
       }
       if (request.method === 'GET' && parsed.pathname === '/api/providers') return success(response, { descriptors: providerDescriptorSummaries(), profiles: listProviderProfiles(this.providerDb, this.initialized.paths), status: providerStatus(this.providerDb, this.initialized.paths), runtime: this.runtimeStatus(), recentOutcomes: recentRunOutcomes(this.db, { studioId: this.initialized.manifest.studioId }) });
       if (request.method === 'GET' && parsed.pathname === '/api/projects') return success(response, { projects: listProjects(this.db, this.initialized.manifest.studioId) });

@@ -19,7 +19,9 @@ test('vNext source tree excludes the retired workflow and static workbench', () 
   }
   assert.deepEqual(entries(path.join(skillRoot, 'src')), ['vnext']);
   assert.deepEqual(entries(path.join(skillRoot, 'tests')), ['vnext']);
-  assert.deepEqual(entries(path.join(skillRoot, 'references')), ['provider.env.example']);
+  // references/ 是 agent 按需读的附录（SKILL.md 里逐条给出触发条件）：
+  // 封闭白名单，新增必须连同 SKILL.md 的索引与 package gate 一起改。
+  assert.deepEqual(entries(path.join(skillRoot, 'references')), ['boundaries.md', 'build-identity.md', 'commands.md', 'delivery.md', 'flow.md', 'provider-keys.md', 'provider.env.example', 'queue.md', 'recovery.md', 'startup.md', 'state-model.md', 'workbench.md']);
   // docs/ 只放人读文档。新增术语单（人读版，与 web/src/terminology.mjs 由测试锁一致）。
   assert.deepEqual(entries(path.join(skillRoot, 'docs')), ['daoge_pic_terminology_zh.md', 'daoge_pic_vnext_upgrade_spec_zh.md', 'vnext_verification_evidence_zh.md']);
 });

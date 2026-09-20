@@ -60,11 +60,12 @@ test('Skill startup protocol classifies triggers and opens before session contex
 });
 
 test('Skill cross-conversation reuse, safe fallback, unconfigured Provider, and startup report remain explicit', () => {
-  const protocol = markdownSection(skill, '## 执行型启动协议（MUST）');
-  const reuse = markdownSection(protocol, '### 跨会话复用');
-  const fallback = markdownSection(protocol, '### 打开失败与安全访问');
-  const provider = markdownSection(protocol, '### Provider 未配置');
-  const report = markdownSection(protocol, '### 首次状态汇报');
+  // 启动细节已移入按需附录：主文件只留主线，规则在 startup.md 里逐条对拍。
+  const startupAppendix = read('references/startup.md');
+  const reuse = markdownSection(startupAppendix, '## 跨会话复用');
+  const fallback = markdownSection(startupAppendix, '## 打开失败与安全访问');
+  const provider = markdownSection(startupAppendix, '## Provider 未配置');
+  const report = markdownSection(startupAppendix, '## 首次状态汇报');
 
   assert.match(reuse, /每个独立智能体会话[\s\S]*调用普通 `open`[\s\S]*daemon[\s\S]*presence\/open-claim/);
   assert.match(reuse, /活动 Workbench[\s\S]*最近认证连接[\s\S]*未过期 claim[\s\S]*不调用 OS opener/);
@@ -119,13 +120,15 @@ test('README and authoritative specification preserve the same session-first sta
 
 test('Skill API guidance pins the protocol header and plan/history endpoints', () => {
   const commands = markdownSection(skill, '## 受控命令');
+  // 完整命令目录与高风险签名住在按需附录里；主文件只留「按完整签名执行」的规则与端点表。
+  const commandCatalog = read('references/commands.md');
   assert.match(commands, /x-daoge-skill-protocol: daoge-pic-skill-protocol\/3\.1\.0/);
   assert.match(skill, />=6\.0\.0 <7\.0\.0/);
   assert.match(commands, /5\.14\.2[\s\S]*绝不能当作协议版本/);
   assert.match(commands, /GET \/api\/studio/);
   assert.match(commands, /GET \/api\/sessions\/<session-id>\/plan-status/);
   assert.match(commands, /GET \/api\/rounds\/<round-id>\/runs/);
-  assert.match(commands, /provider-models --workspace <path> --profile <id>/);
+  assert.match(commandCatalog, /provider-models --workspace <path> --profile <id>/);
   assert.match(commands, /未找到请求的 Studio API/);
   assert.match(commands, /不得[\s\S]*猜测 `\/api\/studio\/\.\.\./);
 });
@@ -152,12 +155,14 @@ test('SKILL.md stays a thin agent protocol while retaining execution-critical ru
   assert.match(boundaries, /system backend[\s\S]*fail-closed[\s\S]*不得静默退回明文/);
   assert.match(boundaries, /API Key 与完整 Base URL[\s\S]*不得进入 Studio DB、事件、日志、导出、诊断或回复/);
 
-  const workspace = markdownSection(skill, '## 工作区、Provider 与密钥');
+  // 工作区/Provider 细节已移入 provider-keys.md；主文件只留更新时间戳与密钥边界。
+  const workspace = read('references/provider-keys.md');
   assert.match(workspace, /Provider 能力、端点信任[\s\S]*Provider Descriptor/);
   assert.match(workspace, /显式连接测试和模型列表读取[\s\S]*只在用户点击时访问 Provider/);
   assert.match(workspace, /compatible_public[\s\S]*HTTPS[\s\S]*local_proxy[\s\S]*enterprise_private/);
 
   const commands = markdownSection(skill, '## 受控命令');
+  const commandCatalog = read('references/commands.md');
   for (const signature of [
     /provider-create --workspace <path>[\s\S]*--api-key-stdin @-/,
     /provider-update --workspace <path>[\s\S]*--profile <id>[\s\S]*--version <n>[\s\S]*--base-url-action <keep\|replace\|clear>[\s\S]*--api-key-action <keep\|replace\|clear>/,
@@ -166,23 +171,59 @@ test('SKILL.md stays a thin agent protocol while retaining execution-critical ru
     /run --workspace <path>[\s\S]*--preflight <dry-run-id>[\s\S]*--confirm-token <daemon-token>/,
     /resume --workspace <path>[\s\S]*--run <run-id>[\s\S]*--session <session-id>/,
     /resolve-unknown --workspace <path>[\s\S]*--items <item-id,\.\.\.>/
-  ]) assert.match(commands, signature);
+  ]) assert.match(commandCatalog, signature);
   assert.match(commands, /不得猜测默认值或把 secret 写入 argv/);
   assert.doesNotMatch(commands, /daoge (?:prepare|execute|ingest)\b/);
   assert.doesNotMatch(commands, /\/prepare/);
   assert.doesNotMatch(commands, /delivery-complete\s+--workspace/);
 });
 
-test('6.0.0 is the current source version while 5.14.2 remains the latest immutable release', () => {
+test('按需附录是封闭集合：SKILL.md 的索引、references/ 的文件与被移出的策略三者一致', () => {
+  const index = markdownSection(skill, '## 按需深入（references/）');
+  const listed = [...index.matchAll(/`references\/([A-Za-z0-9._-]+)`/g)].map((match) => match[1]);
+  const appendix = fs.readdirSync(path.join(skillRoot, 'references')).filter((name) => name !== 'provider.env.example').sort();
+  assert.deepEqual([...new Set(listed)].sort(), appendix, 'SKILL.md 必须逐条指向每一份附录，附录也只允许这些文件');
+
+  for (const name of appendix) {
+    const body = read('references/' + name);
+    assert.ok(body.length > 400, name + ' 不能是空壳（被移出的策略必须真的在里面）');
+    assert.match(body, /^# /, name + ' 要有标题');
+  }
+
+  // 位置换了，规则没丢：每一条被移出主文件的策略都在它的附录里钉着。
+  assert.match(read('references/commands.md'), /provider-create --workspace <path>[\s\S]*--api-key-stdin @-/);
+  assert.match(read('references/commands.md'), /--operation-name <verb:scope>[\s\S]*--idempotency-key <stable-key>/);
+  assert.match(read('references/commands.md'), /预算闸门只在计划声明了已知成本估算时才会硬拒绝/);
+  assert.match(read('references/state-model.md'), /\| Delivery \| `draft` \/ `ready` \/ `exported`/);
+  assert.match(read('references/state-model.md'), /角色分离必须保持[\s\S]*Worker 只处理已入队运行项/);
+  assert.match(read('references/recovery.md'), /`outcome_unknown`[\s\S]*`resolve-unknown`/);
+  assert.match(read('references/recovery.md'), /`enospc` \/ `no space left` \/ `disk full`/);
+  assert.match(read('references/delivery.md'), /`draft -> ready -> exported`/);
+  assert.match(read('references/workbench.md'), /Workbench \*\*不提供开放式对话\*\*/);
+  assert.match(read('references/provider-keys.md'), /198\.18\.0\.0\/15[\s\S]*169\.254\.169\.254/);
+  assert.match(read('references/boundaries.md'), /confirm_token[\s\S]*plan_hash \+ preflight_id \+ conversation_id/);
+  assert.match(read('references/queue.md'), /awaiting_confirmation[\s\S]*只松开租约/);
+  assert.match(read('references/startup.md'), /活动 Workbench[\s\S]*最近认证连接[\s\S]*未过期 claim/);
+  assert.match(read('references/build-identity.md'), /禁止[\s\S]*ps[\s\S]*git[\s\S]*14 分钟/);
+  assert.match(read('references/flow.md'), /已有运行[\s\S]*不得再次预检或入队/);
+
+  // 反向：主文件不该再背着长尾表格与全量签名（拆分的收益就是这个）。
+  const main = read('SKILL.md');
+  assert.doesNotMatch(main, /template-save --workspace/);
+  assert.doesNotMatch(main, /\| Run Item \|/);
+  assert.ok(Buffer.byteLength(main, 'utf8') < 12000, 'SKILL.md 要保持瘦（当前 ' + Buffer.byteLength(main, 'utf8') + ' B）：常驻文本越小，每轮提示的固定成本越低');
+});
+
+test('6.1.0 is the current source version while 6.0.0/5.14.2 remain immutable releases', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const currentDocs = `${skill}\n${readme}\n${spec}`;
 
-  assert.equal(packageJson.version, '6.0.0');
-  assert.equal(packageLock.version, '6.0.0');
-  assert.equal(packageLock.packages[''].version, '6.0.0');
-  assert.match(skill, /6\.0\.0/);
-  assert.match(readme, /6\.0\.0/);
+  assert.equal(packageJson.version, '6.1.0');
+  assert.equal(packageLock.version, '6.1.0');
+  assert.equal(packageLock.packages[''].version, '6.1.0');
+  assert.match(skill, /6\.1\.0/);
+  assert.match(readme, /6\.1\.0/);
   assert.match(evidence, /5\.14\.2/);
   assert.doesNotMatch(currentDocs, /5\.11\.0[^。\n]{0,120}(?:待发布|候选)|(?:待发布|候选)[^。\n]{0,120}5\.11\.0/);
   assert.match(readme, /GitHub[^。\n]*资产[^。\n]*不表示[^。\n]*npm registry/);

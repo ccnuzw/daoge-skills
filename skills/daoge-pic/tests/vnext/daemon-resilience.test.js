@@ -477,15 +477,21 @@ test('controlled restart preserves its port and Workbench authorization across d
     const restart = spawnSync(process.execPath, [cliEntry, 'restart', '--workspace', workspaceRoot], { encoding: 'utf8', timeout: process.platform === 'win32' ? 45000 : 15000 });
     assert.equal(restart.status, 0, restart.stderr);
     const restartResult = JSON.parse(restart.stdout);
+    // 「重启」= 换进程。同一个 PID 只可能是同进程重初始化，而重初始化永远不会加载新代码 ——
+    // 2026-09-20 的实测里，agent 正是被这个「同 PID 的成功重启」骗进了 14 分钟的侦探戏。
     assert.equal(restartResult.previousPid, first.pid);
-    assert.equal(restartResult.daemon.pid, first.pid);
+    assert.notEqual(restartResult.daemon.pid, first.pid, 'restart must respawn the daemon instead of reinitializing it in place');
+    assert.equal(restartResult.previousBuildId, first.buildId, 'restart must report the build the previous process was running');
+    assert.equal(restartResult.build.staleBuild, false, 'the respawned daemon must prove it loaded the current build');
+    assert.equal(restartResult.build.daemonBuildId, restartResult.build.cliBuildId);
     const restarted = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
     const restartedOwner = JSON.parse(fs.readFileSync(ownerRecordPath, 'utf8'));
-    assert.equal(restarted.pid, first.pid);
-    assert.equal(restarted.url, first.url);
+    assert.equal(restarted.pid, restartResult.daemon.pid);
+    assert.equal(restarted.buildId, restartResult.build.daemonBuildId);
+    assert.equal(restarted.url, first.url, 'a respawned daemon must keep the port the open Workbench tab is talking to');
     assert.equal(restarted.capability, first.capability);
     assert.equal(firstOwner.pid, first.pid);
-    assert.equal(restartedOwner.pid, first.pid);
+    assert.equal(restartedOwner.pid, restarted.pid);
     assert.notEqual(restartedOwner.ownerId, firstOwner.ownerId, 'controlled restart must release and reacquire the SQLite mutex');
     assert.equal((await fetchEventually(restarted.url + '/api/studio', { headers: { cookie } })).status, 200);
     const normalClaim = await fetchEventually(restarted.url + '/api/workbench/open-claim', { method: 'POST', headers: { authorization: 'Bearer ' + restarted.capability, 'x-daoge-skill-protocol': 'daoge-pic-skill-protocol/3.0.0', 'content-type': 'application/json' }, body: JSON.stringify({ claimToken: 'n'.repeat(43) }) });
@@ -494,8 +500,11 @@ test('controlled restart preserves its port and Workbench authorization across d
     assert.deepEqual((await forcedClaim.json()).data, { claimed: true, reused: false, reason: 'forced-opener-claim' });
     assert.equal((await fetchEventually(restarted.url + '/api/projects', { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:9', 'content-type': 'application/json', 'idempotency-key': 'hostile-local-page' }, body: JSON.stringify({ name: 'blocked' }) })).status, 403);
     assert.equal((await fetchEventually(restarted.url + '/api/shutdown', { method: 'POST', headers: { cookie, origin: restarted.url, 'content-type': 'application/json', 'idempotency-key': 'cookie-shutdown-blocked' }, body: '{}' })).status, 403);
-    await stopDaemon(daemon, workspaceRoot);
+    // 重启换了进程之后，旧的 child 句柄已经不是当前 daemon：清理必须对准新进程，
+    // 旧句柄交给 Node 回收（它已经从 shutdown 里退出了）。
     daemon = null;
+    await shutdownDaemonRuntime(workspaceRoot, restarted.pid);
+    await waitFor(() => !fs.existsSync(runtimePath), 'restarted daemon released its runtime record');
     assert.equal(fs.existsSync(runtimePath), false);
     assert.equal(fs.existsSync(ownerRecordPath), false);
     assert.equal(fs.existsSync(coordinationDatabasePath), true);

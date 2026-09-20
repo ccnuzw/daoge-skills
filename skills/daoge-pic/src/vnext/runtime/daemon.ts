@@ -4,6 +4,7 @@ import { LocalStudioService } from '../api/server';
 import { promoteDueRetryWaitItems, reconcileTerminalRuns, recoverExpiredLeases } from '../runner/run-commands';
 import { recoverStudioStartupAsync } from '../runner/startup-recovery';
 import { createId, nowIso } from '../shared/ids';
+import { currentBuildId } from '../shared/build-identity';
 import { appendStudioEvent } from '../studio/database';
 import { providerSnapshot } from '../studio/provider-config';
 import { providerStatus, resolveActiveProviderConfig } from '../studio/provider-store';
@@ -44,6 +45,7 @@ interface RuntimeRecord {
   workspaceRoot: string;
   startedAt: string;
   heartbeatAt: string;
+  buildId: string;
   provider: ProviderIdentity | null;
   providerConcurrency: ProviderConcurrencySnapshot | null;
   workerPool: { mode: 'child_process'; size: number; pids: number[]; health: ProcessPoolHealth } | null;
@@ -159,6 +161,8 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
   process.on('SIGHUP', stop);
 
   try {
+    // 身份必须在启动时钉住：进程只可能跑这一刻的 dist，之后重建也不许改口（见 shared/build-identity.ts）。
+    const buildId = currentBuildId();
     recoverPendingBackupRestore(paths.workspaceRoot);
     const initialized = initializeStudio({ workspaceRoot: paths.workspaceRoot, hardenAccess: false });
     // Capability, session token and gate secret are workspace-scoped authorization state that has to outlive a
@@ -181,7 +185,7 @@ export async function runStudioDaemon(options: StudioDaemonOptions): Promise<'st
     let activeProvider: ProviderIdentity | null = null;
     const startedAt = nowIso();
     const workerId = createId('worker_pool');
-    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), provider: activeProvider, providerConcurrency: workerPool ? workerPool.concurrencySnapshot() : null, workerPool: workerPool ? { mode: 'child_process', size: workerPool.processIds().length, pids: workerPool.processIds(), health: workerPool.healthSnapshot() } : null, mediaWorkerPool: mediaWorkerPool ? { mode: 'child_process', size: mediaWorkerPool.processIds().length, pids: mediaWorkerPool.processIds(), health: mediaWorkerPool.healthSnapshot() } : null });
+    const runtimeRecord = (): RuntimeRecord => ({ pid: process.pid, url: startedUrl, capability, port: Number(new URL(startedUrl).port), workspaceRoot: initialized.paths.workspaceRoot, startedAt, heartbeatAt: nowIso(), buildId, provider: activeProvider, providerConcurrency: workerPool ? workerPool.concurrencySnapshot() : null, workerPool: workerPool ? { mode: 'child_process', size: workerPool.processIds().length, pids: workerPool.processIds(), health: workerPool.healthSnapshot() } : null, mediaWorkerPool: mediaWorkerPool ? { mode: 'child_process', size: mediaWorkerPool.processIds().length, pids: mediaWorkerPool.processIds(), health: mediaWorkerPool.healthSnapshot() } : null });
 
     const requestedPort = options.port === 0 ? 0 : options.port || rememberedPort(portPath);
     const started = await daemonService.listen(requestedPort);

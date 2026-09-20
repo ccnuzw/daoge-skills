@@ -1,9 +1,9 @@
 # DAOGE Pic vNext
 
-> **最近正式发布版本**：[`6.0.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.0.0)
-> **当前源码与运行时**：`6.0.0`（以人为本重构的大版本；`5.14.2` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
+> **最近正式发布版本**：[`6.1.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.0)
+> **当前源码与运行时**：`6.1.0`（一步连接与 token 效率小版本；`6.0.0`、`5.14.2` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
 > **运行时兼容范围**：`>=6.0.0 <7.0.0`。
-> **Skill protocol**：`daoge-pic-skill-protocol 3.1.0`，独立于制品版本；`6.0.0` 不是协议版本。
+> **Skill protocol**：`daoge-pic-skill-protocol 3.1.0`，独立于制品版本；`6.1.0` 不是协议版本。
 > **Studio schema**：`41`（自 34 起追加迁移 35–41；旧库与旧素材不迁移，原地存档）。
 > **安装来源**：GitHub Release `.tgz` 资产；这不表示包已发布到 npm registry。
 
@@ -14,6 +14,7 @@ DAOGE Pic 让 **Agent 和创作者工作台一起干活**：Agent 负责收敛�
 ## 目录
 
 - [创作怎么走：五步动线](#创作怎么走五步动线)
+- [6.1.0：一步连接与 token 效率](#610一步连接与-token-效率)
 - [6.0.0：以人为本重构](#600以人为本重构)
 - [安装](#安装)
 - [启动与会话顺序](#启动与会话顺序)
@@ -38,6 +39,19 @@ DAOGE Pic 让 **Agent 和创作者工作台一起干活**：Agent 负责收敛�
 | **5. 资产交付** | 交付页「准备 → 导出」，下载或打包 | 冻结选片来源与评审，导出创建冻结图片实体 | `deliveries` / 导出物 |
 
 一句话：**主区一眼可见，辅助贴边，系统默认闭嘴。**
+
+## 6.1.0：一步连接与 token 效率
+
+**小版本，重点让 Agent 连得更顺、更省；协议仍 `3.1.0`、Studio schema 仍 `41`、兼容范围仍 `>=6.0.0 <7.0.0`，可与 6.0.0 daemon/Workbench 平滑共存。**
+
+| 领域 | 变化 | 你得到什么 |
+| --- | --- | --- |
+| 一步连接 | 新增 `daoge enter`：一次调用内完成 daemon 就绪、打开/复用 Workbench、登记在场、建立会话、**按项目名进入项目**、读请求队列 | 「连接到 Studio 并进入项目 X」从多轮变成一条命令 |
+| 项目解析 | `--project` 接受项目名或 `projectId`；精确名 / 精确 id / 唯一包含才绑定，歧义或找不到返回候选，绝不新建重名项目 | 不再出现「进入项目」无命令可用 |
+| 构建身份 | daemon 自证是否当前构建（`build.staleBuild`），陈旧且无在飞请求时自动换进程；新增 `daoge stop` | 不用再靠 `ps`/时间戳/git 猜 daemon 新旧 |
+| 上下文来源 | `enter --conversation auto` 读宿主环境变量，拿不到就 fail-loud；返回 `conversationSource` / `contextBound` | 会话身份有事实来源 |
+| Token 效率 | `enter` 输出精简约 80% 且默认紧凑；`--help` 默认速览、全签名走 `--help --full`；`reference --section` 只读一节；`round-status`、`plan --challenge` 各合并一次往返 | 单次会话少约 4–5k tokens、少 2 个模型回合 |
+| Skill 瘦身 | SKILL.md 从约 10.6k 压到约 3.2k tokens，长尾拆成 `references/` 按需附录，`daoge reference <topic>` 跨宿主取用 | 常驻上下文降到约三分之一 |
 
 ## 6.0.0：以人为本重构
 
@@ -71,7 +85,7 @@ DAOGE Pic 让 **Agent 和创作者工作台一起干活**：Agent 负责收敛�
 ### 推荐：项目级安装
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -79,7 +93,7 @@ npx daoge doctor --workspace /absolute/workspace
 Windows PowerShell：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
@@ -89,7 +103,7 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ### 全局安装
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
 daoge register-skill --scope user                    # 缺省：~/.codex/skills
 daoge register-skill --scope user --host agents      # ~/.agents/skills：多数宿主都能读到
 daoge register-skill --scope user --host omp         # 也可以点名装给某个宿主
@@ -98,14 +112,14 @@ daoge register-skill --scope user --host omp         # 也可以点名装给某�
 Windows PowerShell：
 
 ```powershell
-npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
 daoge.cmd register-skill --scope user
 daoge.cmd register-skill --scope user --host agents
 ```
 
 `--host` 的取值：`agents`（跨宿主共享目录）、`workbuddy`、`codex`、`claude`、`opencode`、`gemini`、`agy`（Antigravity CLI）、`grok`、`omp`、`pi`、`cursor-agent`、`qwen`、`kimi`、`amp`、`droid`、`copilot`。写错会直接报错并列出可用值，不会新建目录；`agents` 是省事的那个——大多数主流宿主都会读 `~/.agents/skills`。装好后重启对应宿主，让它的 Skill registry 重新加载。Workbench 连接面板的「侦查」用的是同一张宿主表：它只报告这台机器上装了哪些、哪个装了 daoge-pic，不代管任何宿主的 skills。
 
-上述 URL 指向 `6.0.0` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
+上述 URL 指向 `6.1.0` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
 
 ### 直接试用 main 分支源码
 
@@ -138,13 +152,19 @@ npx daoge studio --workspace /absolute/workspace
 ### 会话优先的启动顺序
 
 1. 先判断请求类型。**执行型触发**包括使用 daoge-pic / 刀哥生图、生成、编辑、衍生、导入、管理、选片、查看 Generation History、恢复、重试、取消或交付。**咨询/开发型触发**包括只讨论架构、配置、源码、文档、测试或尚未决定使用；这类请求不自动启动 Studio 或打开 Workbench。
-2. 执行型触发先解析稳定工作区。已有绑定就复用；无法从上下文获得时，只询问这个路径。不要使用临时目录、Skill 安装目录、任意 cwd 或任意当前目录代替稳定工作区。
+2. 执行型触发先解析稳定工作区：显式 `--workspace` > `DAOGE_WORKSPACE_ROOT` > cwd 或它的某个祖先是已落盘的 Studio（含 `daoge-studio/studio.json`）—— 最后一种由 CLI 自己向上找。已有绑定就复用；无法从上下文获得时，只询问这个路径。不要使用临时目录、Skill 安装目录、任意 cwd 或任意当前目录代替稳定工作区。
 3. 每个独立智能体会话在该工作区首次执行时，都可以安全运行普通 `node scripts/daoge.js open --workspace <path>`。这是本地准备，不是外部 Provider 调用，不需要生成确认，也不得自动执行 Provider 连接测试。去重由 daemon 的内存 presence/open-claim 协议负责：首个 claim 持有者调用默认浏览器，活动 Workbench、最近认证连接或未过期 claim 会让其他调用返回 reused。
 4. 根据 CLI 结果汇报访问状态：`opened:true,reused:false` 表示已打开；`opened:false,reused:true` 表示已复用。OS opener 不承诺聚焦既有标签，也不得声称一定会聚焦标签；daemon 只保证普通 open 最多触发一个实际 opener。
 5. Workbench 已打开或复用后，才用当前真实 conversation ID 创建或恢复独立 Studio Session，再创建或恢复项目/任务/批次上下文，然后开始创作澄清、计划与领域写入。**每次入场先读请求队列**（`request-list`），处理等待中的用户请求。
 6. 如果自动打开失败但 daemon 健康，只提示用户安全地重试 `node scripts/daoge.js open --workspace <path>`；安装包语境可用 `npx daoge open --workspace <path>`。不要复制或要求用户粘贴 bootstrap URL、capability、Cookie、session token；裸 Workbench origin 也不是主要访问方式。
 7. 没有 active Provider Profile 不阻止 Studio 启动或 Workbench 打开。先在 Workbench 的生成服务页配置并激活 Profile，再回到会话继续；页面打开、加载和保存不得自动测试连接，只有用户明确发起的连接测试才会访问 Provider。
 8. `open --force true` 只用于用户明确要求新开标签；普通启动不得 force。`--allow-nested-studio true` 只表示用户确认要在已有父级 Studio 内创建另一个隔离 Studio；它不合并或共享两个 Studio 的数据。
+
+> **更快：一条命令完成第 3–5 步。** `node scripts/daoge.js enter --workspace <path> --conversation <id> --project <项目名或 id> [--cli <宿主 CLI 名>] [--skill daoge-pic] [--skill-version <v>]` 在一次进程内确保 daemon、打开或复用 Workbench、登记在场、建立会话、按项目名进入项目并读取请求队列。项目名解析是确定的：精确名、精确 id 或唯一包含（active 优先于 archived）才绑定；同名多个会返回 `projectCandidates` 让你选，绝不猜、也不会新建重名项目。`project-list` 可单独列出项目。
+
+> **会话身份**：`--conversation` 只认显式 ID 或 `auto`（读宿主环境变量 `DAOGE_CONVERSATION_ID` / `OMP_CONVERSATION_ID`）；两者都没有时 CLI 直接报错，不会替会话编一个 ID，也不需要去翻宿主的会话目录。
+
+> **运行时新鲜度**：协议版本与运行时版本都是区间，判断不了「daemon 是不是当前这份安装」，所以 `/api/studio` 与 `daemon.json` 都带 `buildId`（`dist/vnext` 的内容哈希，进程启动时钉住）。`status` 返回 `build.staleBuild`；`enter` 默认在**可证明陈旧且没有在飞请求**时当场换进程（`--restart-stale false` 可关）；`restart` 一定换进程并自证新 PID + 新构建，`stop` 只做受控关闭、不自动重启。旧 daemon 不报 `buildId` 就等于陈旧 —— 那正是「文件是新的、跑的是旧的」最容易骗过人的地方。
 
 请求根没有 Studio manifest 时，CLI 会先检查祖先目录。发现有效父级 Studio 后，默认在创建 daemon、manifest 或 Workbench 前拒绝初始化，避免误把仓库子目录变成数据不互通的第二个 Studio。
 
@@ -277,7 +297,7 @@ node scripts/daoge.js <command> --workspace /absolute/workspace
 
 | 场景 | 命令 |
 | --- | --- |
-| 启动 / 诊断 | `register-skill`、`agent-register`、`agent-list`、`doctor`、`studio`、`open`、`restart`、`status` |
+| 启动 / 诊断 | `enter`（一步连接：daemon + Workbench + 会话 + 项目 + 请求队列）、`stop`（受控关闭，不自动重启）、`register-skill`、`agent-register`、`agent-list`、`doctor`、`studio`、`open`、`restart`、`project-list`、`status` |
 | 注册 Skill | `register-skill --scope project --workspace <path>`；`register-skill --scope user [--host <agents\|codex\|claude\|opencode\|gemini\|agy\|grok\|omp\|pi\|cursor-agent\|qwen\|kimi\|amp\|droid\|copilot>]` |
 | Provider | `provider-list`、`provider-create`、`provider-update`、`provider-copy`、`provider-activate`、`provider-delete`、`provider-validate`、`provider-test`、`provider-models`、`provider-import-env` |
 | 用量与预算 | `usage-list`、`usage-summary`、`budget-get`、`budget-set --limit <n> --cost-unit <unit>` |
@@ -296,7 +316,7 @@ node scripts/daoge.js <command> --workspace /absolute/workspace
 --idempotency-key <stable-key>
 ```
 
-大计划用 `--plan @-` 从 stdin 传输；每次命令最多一个 `@-`，stdin 必须是单个 JSON 对象。受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)。
+大计划用 `--plan @-` 从 stdin 传输；每次命令最多一个 `@-`，stdin 必须是单个 JSON 对象。受控 CLI 的完整列表与会话执行规则见 [SKILL.md](SKILL.md)；命令总表、高风险签名、运行恢复、交付、状态模型、Provider/密钥与 Workbench 边界放在 `references/` 目录，由 SKILL.md 按触发条件指向（智能体在执行时按需读取，不必常驻上下文）。
 
 ## 开发与验证
 
@@ -309,12 +329,12 @@ npm test
 npm run test:package
 ```
 
-6.0.0 已执行验证（发布前）：
+6.1.0 已执行验证（发布前，macOS）：
 
-- macOS `npm run build`：通过；Vite 转换 1703 个模块，Workbench 产物 JS 708.48 kB、CSS 233.03 kB，只有非阻断大小提示。
-- macOS `npm test`：全量回归 918 项，916 通过、0 失败、2 项仅 Windows 实机用例跳过。
-- `npm run test:package`：发布清单 188 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
-- **Windows CI**（`windows-2022` / `windows-2025` × Node `22.17.0` / `24`）：四个组合全部通过（每个组合 918 项、914 通过、0 失败、4 项 symlink 用例按平台跳过）。
+- `npm run build`：通过；Vite 转换 1703 个模块，Workbench 产物 JS 708.48 kB、CSS 233.03 kB，只有非阻断大小提示。
+- `npm test`：全量回归 930 项，928 通过、0 失败、2 项条件跳过。
+- `npm run test:package`：发布清单 201 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
+- Windows CI（`windows-2022` / `windows-2025`）在本版本 push 后由 `.github/workflows/daoge-pic-windows.yml` 运行；6.0.0 的四组合历史结果见验证记录。
 - 最终制品的大小和 SHA-256 记录在 GitHub Release、仓库根发布说明和 `.tgz.sha256` sidecar 中；本 README 随包发布，不嵌入会改变自身内容的归档哈希。
 
 发布前最低验证：
@@ -331,6 +351,7 @@ npm run test:package
 - 受控会话协议：[SKILL.md](SKILL.md)
 - 长期权威产品与架构规格：[docs/daoge_pic_vnext_upgrade_spec_zh.md](docs/daoge_pic_vnext_upgrade_spec_zh.md)
 - 发布验证记录：[docs/vnext_verification_evidence_zh.md](docs/vnext_verification_evidence_zh.md)
-- GitHub Release：[`daoge-pic-v6.0.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.0.0)
+- GitHub Release：[`daoge-pic-v6.1.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.0)
+- v6.0.0 历史 GitHub Release：[`daoge-pic-v6.0.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.0.0)
 - v5.14.2 历史 GitHub Release：[`daoge-pic-v5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2)
 - v5.14.1 / v5.14.0 / v5.13.0 / v5.11.0 及更早历史证据分章记录在验证记录中；完整升级流水见 [CHANGELOG](../../CHANGELOG.md)。

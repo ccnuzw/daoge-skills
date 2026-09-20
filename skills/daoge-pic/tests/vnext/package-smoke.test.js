@@ -26,12 +26,24 @@ const metadata = [{ filename: 'daoge-pic-fixture.tgz', files: [
   { path: 'README.md' },
   { path: 'protocol-version.json' },
   { path: 'references/provider.env.example' },
+  { path: 'references/boundaries.md' },
+  { path: 'references/build-identity.md' },
+  { path: 'references/commands.md' },
+  { path: 'references/delivery.md' },
+  { path: 'references/flow.md' },
+  { path: 'references/provider-keys.md' },
+  { path: 'references/queue.md' },
+  { path: 'references/recovery.md' },
+  { path: 'references/startup.md' },
+  { path: 'references/state-model.md' },
+  { path: 'references/workbench.md' },
   { path: 'docs/daoge_pic_vnext_upgrade_spec_zh.md' },
   { path: 'docs/vnext_verification_evidence_zh.md' }
 ] }];
 
-function writeTarball(file, extraPaths = [], version = '5.14.2') {
-  const paths = [...new Set([...metadata[0].files.map((entry) => entry.path), 'package.json', ...extraPaths])];
+function writeTarball(file, extraPaths = [], version = '5.14.2', omittedPaths = []) {
+  const omitted = new Set(omittedPaths);
+  const paths = [...new Set([...metadata[0].files.map((entry) => entry.path), 'package.json', ...extraPaths])].filter((name) => !omitted.has(name));
   const chunks = [];
   for (const name of paths) {
     const content = name === 'package.json'
@@ -80,6 +92,25 @@ test('release artifact verifier validates package version and rejects retired fi
   }
 });
 
+test('已发布制品只校验身份与卫生，完整性只对当前工作树打出来的包成立', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-frozen-artifact-'));
+  try {
+    // 冻结制品：没有本次新增的按需附录，但它就是那份已发布的 6.0.0 —— 不该被当成缺失。
+    const frozen = path.join(root, 'frozen.tgz');
+    writeTarball(frozen, [], '5.14.2', ['references/commands.md', 'references/recovery.md']);
+    assert.deepEqual(assertReleaseArtifact(frozen, '5.14.2').missing, []);
+    // 卫生对任何包都成立：冻结制品里混进数据库照样拒绝。
+    const dirty = path.join(root, 'dirty.tgz');
+    writeTarball(dirty, ['dist/cache/studio.db']);
+    assert.throws(() => assertReleaseArtifact(dirty, '5.14.2'), /studio\.db/);
+    // 当前工作树打包必须完整：缺一份附录就是缺一件 agent 要读的策略。
+    const currentPaths = metadata[0].files.map((entry) => entry.path);
+    assert.throws(() => assertPackagePaths(currentPaths.filter((file) => file !== 'references/commands.md')), /references\/commands\.md/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('package smoke parser accepts npm JSON with no leading newline and surrounding warnings', () => {
   const json = JSON.stringify(metadata);
   assert.deepEqual(parsePackJson(json), metadata);
@@ -97,6 +128,8 @@ test('package smoke allowlist rejects maps and retired source paths', () => {
   assert.throws(() => assertPackagePaths([...paths, 'dist/vnext/cli/legacy-daemon.js']), /legacy-daemon\.js/);
   assert.throws(() => assertPackagePaths([...paths, 'src/vnext/cli/daoge.ts']), /src\/vnext/);
   assert.throws(() => assertPackagePaths([...paths, 'notes.txt']), /notes\.txt/);
+  // references/ 是封闭白名单：附录之外的草稿不许混进发布包。
+  assert.throws(() => assertPackagePaths([...paths, 'references/old-draft.md']), /old-draft\.md/);
   for (const sensitivePath of [
     'dist/daoge-studio/Provider.db',
     'dist/daoge-studio/studio.db',

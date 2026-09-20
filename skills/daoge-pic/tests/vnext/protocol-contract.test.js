@@ -18,7 +18,7 @@ test('runtime exposes protocol version separately from artifact version and reje
     initializeStudio({ workspaceRoot });
     started = await startLocalStudioService({ hardenAccess: false, workspaceRoot });
     const studio = await requestJson(started, '/api/studio');
-    assert.deepEqual(studio.body.data.protocol, { name: 'daoge-pic-skill-protocol', version: '3.1.0', runtimeVersion: '6.0.0', supportedRange: '>=3.0.0 <4.0.0' });
+    assert.deepEqual(studio.body.data.protocol, { name: 'daoge-pic-skill-protocol', version: '3.1.0', runtimeVersion: '6.1.0', supportedRange: '>=3.0.0 <4.0.0' });
     assert.equal(studio.body.data.runtime.mode, 'standalone');
     assert.equal(studio.body.data.runtime.mediaWorkerPool.state, 'idle');
     assert.equal(studio.body.data.runtime.mediaWorkerPool.processCount, 0);

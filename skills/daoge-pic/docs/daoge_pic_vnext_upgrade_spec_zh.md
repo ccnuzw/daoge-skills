@@ -1,6 +1,6 @@
 # DAOGE Pic vNext 升级规格
 
-文档类别：vNext 长期权威产品与架构规格。当前源码/runtime 为 `6.0.0`；[`5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2) 及更早制品保持不可变历史发布。实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
+文档类别：vNext 长期权威产品与架构规格。当前源码/runtime 为 `6.1.0`；[`5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2) 及更早制品保持不可变历史发布。实现状态与机器验证不由本文件重复声明，分别见 `src/vnext/`、`web/` 和 `docs/vnext_verification_evidence_zh.md`。
 
 ## 1. 定位与结论
 
@@ -455,10 +455,16 @@ Studio 常驻导航固定提供项目入口、全局学习中心入口和生成/
       SKILL.md
       scripts/daoge.js
       dist/
-        runtime/
+        vnext/
         workbench/
       references/
+        commands.md
+        delivery.md
+        provider-keys.md
         provider.env.example
+        recovery.md
+        state-model.md
+        workbench.md
 
 ### 13.2 技术选择
 
@@ -557,4 +563,4 @@ vNext 第一版不包含：
 
 ## 18. 规格解释
 
-本规格定义 vNext 稳定产品与目标架构；当前发布源码版本为 `6.0.0`，`5.14.2` 及更早版本为历史发布，具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。
+本规格定义 vNext 稳定产品与目标架构；当前发布源码版本为 `6.1.0`，`6.0.0`、`5.14.2` 及更早版本为历史发布，具体实现状态、机器验证与发布证据由对应版本源码和独立验证记录证明，不从需求文字反推。后续代码、目录、命令或测试变化也不得自行改写本规格事实。

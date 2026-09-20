@@ -21,15 +21,22 @@ test('CLI launcher and direct dist entry expose the same help contract', () => {
   assert.equal(launcher.status, 0, launcher.stderr);
   assert.equal(direct.status, 0, direct.stderr);
   assert.equal(launcher.stdout, direct.stdout);
+  // 速览（默认）只列命令名 + 一句话；全签名要显式 --full。两者都必须与 dist 入口一致。
+  const launcherFull = spawnSync(process.execPath, [path.join(skillRoot, 'scripts', 'daoge.js'), '--help', '--full'], { encoding: 'utf8' });
+  const directFull = spawnSync(process.execPath, [path.join(skillRoot, 'dist', 'vnext', 'cli', 'daoge.js'), '--help', '--full'], { encoding: 'utf8' });
+  assert.equal(launcherFull.status, 0, launcherFull.stderr);
+  assert.equal(launcherFull.stdout, directFull.stdout);
+  assert.ok(Buffer.byteLength(launcher.stdout, 'utf8') < Buffer.byteLength(launcherFull.stdout, 'utf8') / 1.5, '速览必须明显短于全签名');
   for (const command of ['register-skill', 'archive-project', 'provider-list', 'provider-create', 'provider-update', 'restart', 'preflight', 'run', 'pause', 'resume', 'cancel', 'retry', 'resolve-unknown']) {
     assert.equal(launcher.stdout.includes('daoge ' + command + ' '), true);
   }
   assert.equal((launcher.stdout.match(/daoge preflight/g) || []).length, 1);
-  assert.match(launcher.stdout, /daoge preflight .*--concurrency <1..1000>/);
-  assert.doesNotMatch(launcher.stdout, /worker-concurrency|daoge config/);
-  assert.doesNotMatch(launcher.stdout, /daoge run .*--concurrency/);
-  assert.doesNotMatch(launcher.stdout, /--api-key <|--api-key> <|--api-key \u003ckey\u003e/);
-  assert.match(launcher.stdout, /--api-key-stdin @-/);
+  assert.doesNotMatch(launcher.stdout, /--concurrency <1\.\.1000>/, '速览不背签名');
+  assert.match(launcherFull.stdout, /daoge preflight .*--concurrency <1..1000>/);
+  assert.doesNotMatch(launcherFull.stdout, /worker-concurrency|daoge config/);
+  assert.doesNotMatch(launcherFull.stdout, /daoge run .*--concurrency/);
+  assert.doesNotMatch(launcherFull.stdout, /--api-key <|--api-key> <|--api-key \u003ckey\u003e/);
+  assert.match(launcherFull.stdout, /--api-key-stdin @-/);
 });
 
 test('CLI module exports main without executing it during import', () => {

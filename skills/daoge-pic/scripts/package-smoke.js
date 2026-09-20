@@ -77,7 +77,7 @@ function tarFile(tarballPath, expectedPath) {
 function assertReleaseArtifact(tarballPath, expectedVersion) {
   if (!fs.existsSync(tarballPath)) throw new Error('Release artifact does not exist: ' + tarballPath);
   const paths = tarEntries(tarballPath);
-  const checked = assertPackagePaths(paths);
+  const checked = assertPackagePaths(paths, { requireCurrentFiles: false });
   const packageContent = tarFile(tarballPath, 'package.json');
   const protocolContent = tarFile(tarballPath, 'dist/vnext/shared/protocol.js');
   const protocolTypes = tarFile(tarballPath, 'dist/vnext/shared/protocol.d.ts');
@@ -94,7 +94,20 @@ function assertReleaseArtifact(tarballPath, expectedVersion) {
   const runtimeRange = protocolContent?.toString('utf8').match(/exports\.RUNTIME_COMPATIBILITY_RANGE = ['"]([^'"]+)['"]/u)?.[1] || null;
   const declaredRuntimeVersion = protocolTypes?.toString('utf8').match(/RUNTIME_VERSION = ["']([^"']+)["']/u)?.[1] || null;
   const declaredRuntimeRange = protocolTypes?.toString('utf8').match(/RUNTIME_COMPATIBILITY_RANGE = ["']([^"']+)["']/u)?.[1] || null;
-  const expectedRange = '>=' + expectedVersion + ' <7.0.0';
+  // 运行时兼容范围是**独立声明**（对 6.x 始终是 `>=6.0.0 <7.0.0`），不能从制品版本反推下界：
+  // minor/patch 升级不改变下界，用 `>=<version>` 去比会把 6.1.0 的合法制品误判成假升级。
+  // 只要求：三处声明一致、是合法区间、且制品版本落在区间内。
+  const RANGE_PATTERN = /^>=(\d+)\.(\d+)\.(\d+)\s+<(\d+)\.(\d+)\.(\d+)$/;
+  const parseRange = (value) => (typeof value === 'string' ? RANGE_PATTERN.exec(value) : null);
+  const manifestRange = parseRange(protocolManifest && protocolManifest.runtimeCompatibility);
+  const codeRange = parseRange(runtimeRange);
+  const typesRange = parseRange(declaredRuntimeRange);
+  const triple = (match, offset) => match.slice(offset, offset + 3).map(Number);
+  const compare = (left, right) => left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+  const artifactMatch = /^(\d+)\.(\d+)\.(\d+)$/.exec(expectedVersion);
+  const artifactParts = artifactMatch ? artifactMatch.slice(1, 4).map(Number) : null;
+  const rangeContainsVersion = (match) => Boolean(artifactParts && match && compare(artifactParts, triple(match, 1)) >= 0 && compare(artifactParts, triple(match, 4)) < 0);
+  const rangesConsistent = Boolean(manifestRange && codeRange && typesRange && manifestRange[0] === codeRange[0] && codeRange[0] === typesRange[0] && rangeContainsVersion(manifestRange));
   const mismatch = {
     package: packageJson,
     protocolManifest,
@@ -103,9 +116,10 @@ function assertReleaseArtifact(tarballPath, expectedVersion) {
     declaredRuntimeVersion,
     declaredRuntimeRange,
     expectedVersion,
-    expectedRange
+    declaredRange: protocolManifest && protocolManifest.runtimeCompatibility,
+    rangesConsistent
   };
-  if (!packageJson || packageJson.name !== 'daoge-pic' || packageJson.version !== expectedVersion || !protocolManifest || protocolManifest.protocol !== 'daoge-pic-skill-protocol' || protocolManifest.version !== '3.1.0' || protocolManifest.runtimeCompatibility !== expectedRange || runtimeVersion !== expectedVersion || runtimeRange !== expectedRange || declaredRuntimeVersion !== expectedVersion || declaredRuntimeRange !== expectedRange) {
+  if (!packageJson || packageJson.name !== 'daoge-pic' || packageJson.version !== expectedVersion || !protocolManifest || protocolManifest.protocol !== 'daoge-pic-skill-protocol' || protocolManifest.version !== '3.1.0' || !rangesConsistent || runtimeVersion !== expectedVersion || declaredRuntimeVersion !== expectedVersion) {
     throw new Error(JSON.stringify(mismatch, null, 2));
   }
   return { paths, ...checked, version: packageJson.version, runtimeVersion, runtimeRange };
@@ -123,15 +137,28 @@ function isSensitivePackagePath(file) {
     || /(?:^|\/)[^/]*\.log(?:$|[.-])/.test(lower);
 }
 
-function assertPackagePaths(paths) {
-  const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/cli/daemon-shutdown.js', 'dist/vnext/cli/daemon-shutdown.d.ts', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'protocol-version.json', 'references/provider.env.example', 'docs/daoge_pic_vnext_upgrade_spec_zh.md', 'docs/vnext_verification_evidence_zh.md'];
-  // 允许集必须覆盖 src/vnext 的每个子目录——新增目录而忘了这里，会在发布时才炸
-  //（2026-09-20 抓到 `skill/` 缺席；守卫见 tests/vnext/package-smoke.test.js）。
-  const allowed = /^(dist\/(?:vnext\/(?:api|backup|cli|domain|media|provenance|providers|runner|runtime|shared|skill|studio|usage)\/[A-Za-z0-9._/-]+|workbench\/(?:index\.html|assets\/[A-Za-z0-9._-]+))$|scripts\/daoge\.js$|references\/provider\.env\.example$|docs\/(?:daoge_pic_vnext_upgrade_spec_zh|vnext_verification_evidence_zh)\.md$|README\.md$|SKILL\.md$|protocol-version\.json$|LICENSE$|package\.json$)/;
-  const missing = required.filter((file) => !paths.includes(file));
-  const unexpected = paths.filter((file) => !allowed.test(file));
+// Skill 附录（references/）是封闭白名单：只有这些文件允许上包，别的 md（草稿、旧材料）
+// 一律按 retired 拒绝。允许集、必需集、retired 与安装后校验共用这一个来源 ——
+// 发布包内容的表只准有一份，否则迟早出现「改了三处漏一处」。
+const PACKAGE_REFERENCES = ['provider.env.example', 'boundaries.md', 'build-identity.md', 'commands.md', 'delivery.md', 'flow.md', 'provider-keys.md', 'queue.md', 'recovery.md', 'startup.md', 'state-model.md', 'workbench.md'];
+const PACKAGE_REFERENCE_PATHS = PACKAGE_REFERENCES.map((name) => 'references/' + name);
+const PACKAGE_REFERENCE_PATTERN = PACKAGE_REFERENCES.map((name) => name.replace(/\./g, '\\.')).join('|');
+const ALLOWED_PACKAGE_PATH = new RegExp('^(dist\\/(?:vnext\\/(?:api|backup|cli|domain|media|provenance|providers|runner|runtime|shared|skill|studio|usage)\\/[A-Za-z0-9._/-]+|workbench\\/(?:index\\.html|assets\\/[A-Za-z0-9._-]+))$|scripts\\/daoge\\.js$|references\\/(?:' + PACKAGE_REFERENCE_PATTERN + ')$|docs\\/(?:daoge_pic_vnext_upgrade_spec_zh|vnext_verification_evidence_zh)\\.md$|README\\.md$|SKILL\\.md$|protocol-version\\.json$|LICENSE$|package\\.json$)');
+const RETIRED_PACKAGE_PATH = new RegExp('^(app|agents|src|tests|references\\/(?!' + PACKAGE_REFERENCE_PATTERN + '$)|Dockerfile$|docker-compose\\.yml$|\\.env\\.example$|\\.dockerignore$)');
+
+/**
+ * 包内容校验分两层，别混为一谈：
+ * - **卫生**（unexpected / maps / retired / sensitive）对任何包都成立：不许混进源码、地图、数据库、日志。
+ * - **完整**（required：CLI、Workbench、协议、SKILL.md 的按需附录…）只对**从当前工作树打出来的包**
+ *   成立。已发布制品是冻结的：它不可能含有发布之后才新增的文件，要求它含有等于要求它自我背叛。
+ *   身份与版本另由 assertReleaseArtifact 校验。
+ */
+function assertPackagePaths(paths, { requireCurrentFiles = true } = {}) {
+  const required = ['dist/vnext/cli/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/cli/daemon-shutdown.js', 'dist/vnext/cli/daemon-shutdown.d.ts', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'scripts/daoge.js', 'SKILL.md', 'README.md', 'protocol-version.json', ...PACKAGE_REFERENCE_PATHS, 'docs/daoge_pic_vnext_upgrade_spec_zh.md', 'docs/vnext_verification_evidence_zh.md'];
+  const missing = requireCurrentFiles ? required.filter((file) => !paths.includes(file)) : [];
+  const unexpected = paths.filter((file) => !ALLOWED_PACKAGE_PATH.test(file));
   const maps = paths.filter((file) => file.endsWith('.map'));
-  const retired = paths.filter((file) => /^(app|agents|src|tests|references\/(?!provider\.env\.example$)|Dockerfile$|docker-compose\.yml$|\.env\.example$|\.dockerignore$)/.test(file) || file.includes('legacy-adapters') || file.includes('legacy-daemon'));
+  const retired = paths.filter((file) => RETIRED_PACKAGE_PATH.test(file) || file.includes('legacy-adapters') || file.includes('legacy-daemon'));
   const sensitive = paths.filter(isSensitivePackagePath);
   if (missing.length || unexpected.length || maps.length || retired.length || sensitive.length) throw new Error(JSON.stringify({ missing, unexpected, maps, retired, sensitive }, null, 2));
   return { missing, unexpected, maps, retired, sensitive };
@@ -160,7 +187,7 @@ function runPackageSmoke({ runCommand, makeTemp, removeSync, skillRoot, requireR
     fs.writeFileSync(path.join(consumerRoot, 'package.json'), JSON.stringify({ private: true }, null, 2) + '\n');
     runNpm(runCommand, ['install', tarballPath, '--ignore-scripts'], { cwd: consumerRoot });
     const installedRoot = path.join(consumerRoot, 'node_modules', 'daoge-pic');
-    const runtimeRequired = ['scripts/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/cli/daemon-shutdown.js', 'dist/vnext/cli/daemon-shutdown.d.ts', 'dist/vnext/shared/windows.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'protocol-version.json', 'references/provider.env.example'];
+    const runtimeRequired = ['scripts/daoge.js', 'dist/vnext/cli/daemon.js', 'dist/vnext/cli/daemon-shutdown.js', 'dist/vnext/cli/daemon-shutdown.d.ts', 'dist/vnext/shared/windows.js', 'dist/vnext/studio/provider-store.js', 'dist/vnext/runtime/restart.js', 'dist/workbench/index.html', 'protocol-version.json', ...PACKAGE_REFERENCE_PATHS];
     const runtimeMissing = runtimeRequired.filter((file) => !fs.existsSync(path.join(installedRoot, file)));
     if (runtimeMissing.length) throw new Error(JSON.stringify({ runtimeMissing }, null, 2));
     const installedBin = path.join(consumerRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'daoge.cmd' : 'daoge');

@@ -47,7 +47,7 @@ function existingAncestor(targetPath: string): string {
     candidate = parent;
   }
   const stat = fs.lstatSync(candidate);
-  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('workspace_reparse_point: Workspace ancestors must be real directories.');
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('workspace_reparse_point: Workspace ancestors must be real directories. 工作区路径不能经过符号链接：macOS 的 /tmp 就是指向 /private/tmp 的链接，请改用真实路径（例如 /private/tmp/<name>）。');
   return candidate;
 }
 
