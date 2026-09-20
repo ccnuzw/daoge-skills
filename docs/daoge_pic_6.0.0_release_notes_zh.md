@@ -1,8 +1,8 @@
 # DAOGE Pic v6.0.0 发布说明
 
-- 发布日期：待定（本文件为发布材料草案；制品与验证数字在正式发布前回填）
+- 发布日期：2026-09-20
 - Git 标签：`daoge-pic-v6.0.0`
-- 状态：待发布
+- 状态：正式发布
 - 影响 Skill：`daoge-pic`。
 - package/runtime 版本：`6.0.0`。
 - Skill protocol：`daoge-pic-skill-protocol/3.1.0`（独立于制品版本）。
@@ -95,24 +95,20 @@
 
 ## 发布制品
 
-> 待正式发布前用真实 `npm pack` 结果回填，不伪造大小与哈希。
-
 - 文件：`daoge-pic-6.0.0.tgz`
-- 大小：待回填
-- npm shasum：待回填
-- SHA-256：待回填
-- GitHub Release 资产：待回填
+- 大小：694,985 bytes
+- npm shasum：`5e72b9c3f599eda419ddc66a7f7e242a9f1504a8`
+- SHA-256：`699780cc567e3a77d7f7540068774f115d486ceb3062bcb5693bb381eabbbd22`
+- GitHub Release 资产：https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz
 - checksum sidecar：`skills/daoge-pic/daoge-pic-6.0.0.tgz.sha256`
 
 ## 验证结果
 
-> 待正式发布前用真实 `npm test` / `npm run test:package` / `verify:evidence --with-package` 结果回填。
-
-- `npm run typecheck:vnext` / `typecheck:web`：待回填
-- `npm run build`：待回填
-- `npm test`：待回填（全量 vNext 回归计数）
-- `npm run test:package`：待回填（发布清单文件数、unexpected/maps/retired/sensitive）
-- `npm run verify:evidence --with-package`：待回填
+- `npm run typecheck:vnext` / `typecheck:web`：通过。
+- `npm run build`：通过；Vite 转换 1703 个模块，Workbench 产物 JS 708.48 kB、CSS 233.03 kB，只有非阻断大小提示。
+- `npm test`：全量 vNext 回归 918 项，916 通过、0 失败、0 取消、2 项仅 Windows 实机用例跳过。
+- `npm run test:package`：发布清单 188 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；临时安装、真实 bin、help、register-skill、doctor 与 `sharp` 全部通过。
+- `npm run verify:evidence --with-package`：真实构建与真实回归已写入 `docs/vnext_verification_evidence_zh.md` 第 19 节。
 - 所有本地验证均不调用真实图片 Provider，不产生计费生成请求。
 
 ## 安装

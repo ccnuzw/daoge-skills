@@ -6,7 +6,7 @@
 
 **大版本（以人为本重构）**：跨出运行时兼容上界，Studio schema 追加 7 条迁移，Skill 协议升到 3.x，Workbench 全站界面按新的界面标准重做。主题是把创作动线（建立项目 → 提出需求 → 生成运行 → 选片评审 → 资产交付）放回首屏，把工程细节收进二级。
 
-- 版本元数据：package/runtime `6.0.0`；Skill protocol `daoge-pic-skill-protocol/3.1.0`；运行时兼容范围 `>=6.0.0 <7.0.0`；Studio schema `41`（自 34 起追加迁移 35–41）。正式制品 `daoge-pic-6.0.0.tgz` 的尺寸与 SHA-256 记录在对应 GitHub Release 与包外 sidecar。
+- 版本元数据：package/runtime `6.0.0`；Skill protocol `daoge-pic-skill-protocol/3.1.0`；运行时兼容范围 `>=6.0.0 <7.0.0`；Studio schema `41`（自 34 起追加迁移 35–41）。正式制品 `daoge-pic-6.0.0.tgz` 为 694,985 bytes，npm shasum 为 `5e72b9c3f599eda419ddc66a7f7e242a9f1504a8`，SHA-256 为 `699780cc567e3a77d7f7540068774f115d486ceb3062bcb5693bb381eabbbd22`。
 - **请求队列**：Studio 与 Agent 共用 `studio_requests` 一条队列（领单租约、续租心跳、回执、就地追问）；「重试 / 恢复」走队列，暂停 / 取消仍由 Workbench 直达。
 - **协议**：3.0.0 引入请求队列（breaking）；3.1.0 为加法字段 `PreflightPlan.understanding`（旧 agent 兼容）；新增 daemon ↔ Studio 版本协商握手。
 - **画布**：折叠到批次级、去冗余、增量布局、系统生成分组与连线、圈选发起、就地建任务/批次；视图收敛为三种（全局 / 按图片 / 按交付）。
