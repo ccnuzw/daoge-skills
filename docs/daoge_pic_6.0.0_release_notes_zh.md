@@ -109,6 +109,7 @@
 - `npm test`：全量 vNext 回归 918 项，916 通过、0 失败、0 取消、2 项仅 Windows 实机用例跳过。
 - `npm run test:package`：发布清单 188 个文件，`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`；临时安装、真实 bin、help、register-skill、doctor 与 `sharp` 全部通过。
 - `npm run verify:evidence --with-package`：真实构建与真实回归已写入 `docs/vnext_verification_evidence_zh.md` 第 19 节。
+- **Windows CI**（GitHub Actions `DAOGE Pic Windows`，run `35501995277`，commit `ba355a1`）：`windows-2022` / `windows-2025` × Node `22.17.0` / `24` **四个组合全部通过**。每个组合 `npm test` 918 项、914 通过、0 失败、4 项 symlink 用例按平台条件跳过；`npm run test:package` 发布清单 188 文件、`unexpected/maps/retired/sensitive = 0`，安装、cmd shim、junction 注册、doctor 与 `sharp` 全部通过。这是自 2026-09-17 以来 Windows 门禁首次全绿（长期根因是 `dist/vnext/skill/failure-advice` 未进包允许集，已在本版本修掉）。
 - 所有本地验证均不调用真实图片 Provider，不产生计费生成请求。
 
 ## 安装
