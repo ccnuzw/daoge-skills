@@ -2,6 +2,25 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 6.0.0 - 2026-09-20
+
+**大版本（以人为本重构）**：跨出运行时兼容上界，Studio schema 追加 7 条迁移，Skill 协议升到 3.x，Workbench 全站界面按新的界面标准重做。主题是把创作动线（建立项目 → 提出需求 → 生成运行 → 选片评审 → 资产交付）放回首屏，把工程细节收进二级。
+
+- 版本元数据：package/runtime `6.0.0`；Skill protocol `daoge-pic-skill-protocol/3.1.0`；运行时兼容范围 `>=6.0.0 <7.0.0`；Studio schema `41`（自 34 起追加迁移 35–41）。正式制品 `daoge-pic-6.0.0.tgz` 的尺寸与 SHA-256 记录在对应 GitHub Release 与包外 sidecar。
+- **请求队列**：Studio 与 Agent 共用 `studio_requests` 一条队列（领单租约、续租心跳、回执、就地追问）；「重试 / 恢复」走队列，暂停 / 取消仍由 Workbench 直达。
+- **协议**：3.0.0 引入请求队列（breaking）；3.1.0 为加法字段 `PreflightPlan.understanding`（旧 agent 兼容）；新增 daemon ↔ Studio 版本协商握手。
+- **画布**：折叠到批次级、去冗余、增量布局、系统生成分组与连线、圈选发起、就地建任务/批次；视图收敛为三种（全局 / 按图片 / 按交付）。
+- **挑图与出图过程**：2–4 张对比、4× 缩放、预览态键盘、占位符逐张填充、「出完了叫我」、取消运行 5 秒撤销。
+- **失败与恢复**：四类人话归因、「原因 → 建议」映射表、provider 全挂 / 磁盘满首屏提示、`outcome_unknown` 先对账再请人核实、重试走队列。
+- **agent 连接**：`GET /api/agents/detect` 侦查与连接面板、在场登记与状态卡。
+- **Provider / 用量 / 预算**：系统凭据存储 fail-closed、端点信任模式、`usage-list` / `usage-summary` / `budget-get` / `budget-set`、`preflight --usage-estimate`。
+- **我的配方**：`confirmed_templates` / `style_kits` / `brand_kits` 用户侧入口，带出可改、不自动执行。
+- **界面重设计（批 A–E）**：token / PageFrame / 状态槽 / 三档断点、rail 三区 + 一张状态卡、面包屑替换上下文条、创作平台一条 48px 工具条、队列贴底让位、Aside 统一、三面归位、App / 画布 / CSS 拆分与 G1–G25 守卫。
+- **鉴权**：`runs.pause` / `runs.cancel` 移出鉴权表（两者皆可）；`sessions.context` 收为 bearer-only；`rounds.confirm` 仍 cookie-only。
+- **数据**：旧结构数据与图片资产全部不迁移；旧库与素材原地存档，回滚 = 停新 daemon、起旧 daemon。
+- 本版本明确不做：§9.9 出图过程「预计还要多久」、就地建项目、画布级菜单项移入工具栏。
+- 全量回归：918 项，916 通过 / 0 失败 / 2 跳过（本地 macOS，Node 22+；发布前复跑为准）。
+
 ## daoge-pic 5.14.2 - 2026-09-16
 
 - 版本元数据收口到 package/runtime `5.14.2`，Skill protocol 保持 `2.0.0`，运行时兼容范围更新为 `>=5.14.2 <6.0.0`；正式制品 `daoge-pic-5.14.2.tgz` 为 623,346 bytes，npm shasum 为 `f880aa826cab5a7efb85d542da3b484a99e545a1`，SHA-256 为 `6e38ff8a208048c163575051d494cb5856df2e6325b8e9ca31ccbc166ad3bdf3`。

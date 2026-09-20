@@ -8,7 +8,7 @@
 
 - `daoge-pic`
 
-本 SOP 针对当前 vNext 发布模型：运行时版本、Skill protocol 版本和发布制品版本相互独立。当前工作树的运行时为 `5.14.1`，协议为 `daoge-pic-skill-protocol/2.0.0`，兼容范围为 `>=5.14.1 <6.0.0`。发布渠道是 GitHub Release 的不可变 `.tgz`，不是 npm registry；不要把工作树、`main` 或旧 daemon 当作正式发布物。
+本 SOP 针对当前 vNext 发布模型：运行时版本、Skill protocol 版本和发布制品版本相互独立。当前工作树的运行时为 `6.0.0`，协议为 `daoge-pic-skill-protocol/3.1.0`，兼容范围为 `>=6.0.0 <7.0.0`。发布渠道是 GitHub Release 的不可变 `.tgz`，不是 npm registry；不要把工作树、`main` 或旧 daemon 当作正式发布物。
 
 ## 1. 发布前门禁
 
@@ -24,7 +24,7 @@ git log --oneline -3
 
 1. 所有本次需要发布的源码、迁移、构建脚本和回归测试都已纳入提交；未跟踪文件必须逐一审阅，不能把本地运行时目录、数据库、日志、Provider 配置或凭据加入提交。
 2. `daoge-studio/runtime/`、`Provider.db`、`provider.env`、`*.sqlite-*`、`*.db-*` 和任何真实 API key 均不在提交、制品、日志或 release notes 中。
-3. 版本元数据一致：`skills/daoge-pic/package.json`、`package-lock.json`、`protocol-version.json` 和编译产物的 runtime 常量均指向当前版本；协议仍单独保持 `2.0.0`。
+3. 版本元数据一致：`skills/daoge-pic/package.json`、`package-lock.json`、`protocol-version.json` 和编译产物的 runtime 常量均指向当前版本；协议单独保持 `3.1.0`（与制品版本相互独立）。
 4. README、`SKILL.md`、升级说明和验证证据使用 vNext 端点、CLI 与工作区目录，不再引用旧 `prepare` / `execute` / `ingest`、静态 `workspace/*.html` 或旧 daemon。
 5. 生成证据在最终冻结前重新产生并检查；历史版本的测试计数、哈希和安装 URL 只能保留为历史事实。
 
@@ -84,10 +84,10 @@ vNext 的契约测试包含在 `npm test` 的 `tests/vnext/*.test.js` 集合中�
 
 ```bash
 (cd skills/daoge-pic && npm pack --pack-destination .)
-(cd skills/daoge-pic && shasum -a 256 daoge-pic-5.14.1.tgz > daoge-pic-5.14.1.tgz.sha256)
+(cd skills/daoge-pic && shasum -a 256 daoge-pic-6.0.0.tgz > daoge-pic-6.0.0.tgz.sha256)
 npm --prefix skills/daoge-pic run test:package
 npm --prefix skills/daoge-pic run verify:evidence -- --with-package
-(cd skills/daoge-pic && shasum -a 256 -c daoge-pic-5.14.1.tgz.sha256)
+(cd skills/daoge-pic && shasum -a 256 -c daoge-pic-6.0.0.tgz.sha256)
 ```
 
 `test:package` 使用 `--require-release-artifact`，因此必须在最终 tarball 真实生成后执行；它不会覆盖稳定制品。发布后包外记录 `.tgz` 与 `.sha256` sidecar，哈希不要写回包内文档，避免自引用。
@@ -99,20 +99,20 @@ npm --prefix skills/daoge-pic run verify:evidence -- --with-package
 发布说明必须先确认状态、安装命令、升级建议、重启要求、`.env` 迁移边界和不兼容变化均已写清。确认 tag 尚未存在后：
 
 ```bash
-git tag -a daoge-pic-v5.14.1 -m "daoge-pic 5.14.1"
-git push origin daoge-pic-v5.14.1
-gh release create daoge-pic-v5.14.1 \
-  skills/daoge-pic/daoge-pic-5.14.1.tgz#daoge-pic-5.14.1.tgz \
-  skills/daoge-pic/daoge-pic-5.14.1.tgz.sha256#daoge-pic-5.14.1.tgz.sha256 \
+git tag -a daoge-pic-v6.0.0 -m "daoge-pic 6.0.0"
+git push origin daoge-pic-v6.0.0
+gh release create daoge-pic-v6.0.0 \
+  skills/daoge-pic/daoge-pic-6.0.0.tgz#daoge-pic-6.0.0.tgz \
+  skills/daoge-pic/daoge-pic-6.0.0.tgz.sha256#daoge-pic-6.0.0.tgz.sha256 \
   --repo ccnuzw/daoge-skills \
-  --title "daoge-pic v5.14.1" \
-  --notes-file docs/daoge_pic_5.14.1_release_notes_zh.md
+  --title "daoge-pic v6.0.0" \
+  --notes-file docs/daoge_pic_6.0.0_release_notes_zh.md
 ```
 
 ## 6. 发布后验证
 
 ```bash
-gh release view daoge-pic-v5.14.1 --repo ccnuzw/daoge-skills
+gh release view daoge-pic-v6.0.0 --repo ccnuzw/daoge-skills
 git fetch origin --tags
 git tag -l 'daoge-pic-v*'
 ```
@@ -120,7 +120,7 @@ git tag -l 'daoge-pic-v*'
 确认 Release 同时包含 `.tgz` 和 `.tgz.sha256`，下载后的文件使用 sidecar 校验；安装命令必须指向该固定 Release 资产，而不是 `main` 或 npm registry。安装 consumer 后执行：
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.1/daoge-pic-5.14.1.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -129,7 +129,7 @@ npx daoge doctor --workspace /absolute/workspace
 
 ## 7. 升级与兼容性边界
 
-- 5.14.1 与 5.14.0 及更早版本的 daemon 不兼容；同一工作区不得混用旧 daemon、旧 CLI 和本版本运行时。协议名/版本仍是 `daoge-pic-skill-protocol/2.0.0`，不要把它写成制品版本。
+- 6.0.0 与 5.14.x 及更早版本的 daemon 不兼容；同一工作区不得混用旧 daemon、旧 CLI 和本版本运行时。协议名/版本为 `daoge-pic-skill-protocol/3.1.0`，不要把它写成制品版本。
 - 这是 vNext 工作流：不使用旧 `prepare`、`execute`、`ingest`、`task_spec.json`、`results.html` 或静态工作区作为入口。运行必须经过会话计划、人工确认、preflight 和 daemon confirm token。
 - 升级已有 Studio 前先执行 `backup-manifest` 与 `backup-upgrade-assess`，再按备份/恢复文档执行相应 dry-run 或受控恢复；不要在 daemon 运行时直接替换 SQLite。
 - `provider.env` 只作为既有工作区的一次性迁移输入；新工作区不创建该文件。Provider Profile、密钥引用和 write-only 摘要的事实源是 `daoge-studio/Provider.db` 或显式系统凭据后端。不要把 API key 写入命令参数、日志、提交或 release notes。

@@ -5,7 +5,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 # DAOGE Pic vNext
 
-当前源码与运行时版本为 `6.0.0`；`5.14.2` 是最新不可变正式发布版本，更早的均为历史发布。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/3.1.0`，运行时兼容范围为 `>=6.0.0 <7.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
+当前源码与运行时版本为 `6.0.0`；`6.0.0` 是最新正式发布版本，`5.14.2` 及更早的均为历史发布。不兼容的旧 daemon 不得与本版本混用。Skill protocol 为 `daoge-pic-skill-protocol/3.1.0`，运行时兼容范围为 `>=6.0.0 <7.0.0`，二者都独立于制品版本；制品版本绝不能当作协议版本。
 
 本文件是 Agent 执行协议，不是完整产品规格。产品、架构、Schema、Worker、ZIP、安全实现和验证证据分别以 `docs/daoge_pic_vnext_upgrade_spec_zh.md`、`docs/vnext_verification_evidence_zh.md`、源码与测试为准。用户可见沟通使用中文。
 

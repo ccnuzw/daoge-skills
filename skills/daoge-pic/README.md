@@ -1,9 +1,9 @@
 # DAOGE Pic vNext
 
-> **最近正式发布版本**：[`5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2)
+> **最近正式发布版本**：[`6.0.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.0.0)
 > **当前源码与运行时**：`6.0.0`（以人为本重构的大版本；`5.14.2` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
 > **运行时兼容范围**：`>=6.0.0 <7.0.0`。
-> **Skill protocol**：`daoge-pic-skill-protocol 3.0.0`，独立于制品版本；`6.0.0` 不是协议版本。
+> **Skill protocol**：`daoge-pic-skill-protocol 3.1.0`，独立于制品版本；`6.0.0` 不是协议版本。
 > **安装来源**：GitHub Release `.tgz` 资产；这不表示包已发布到 npm registry。
 
 DAOGE Pic 是 Agent + 创作者工作台协作的本地图像创作管理平台。Agent 负责澄清、规划、确认、受控执行和风险恢复；Studio Workbench 负责符合创作者操作习惯的结构化项目/任务/轮次创建、Provider 设置、创作谱系、Generation History、素材、选片、复核和交付。
@@ -12,6 +12,7 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 
 ## 目录
 
+- [6.0.0 重点升级](#600-重点升级)
 - [5.14.2 重点升级](#5142-重点升级)
 - [5.14.1 重点升级](#5141-重点升级)
 - [5.11.0 历史升级](#5110-重点升级)
@@ -24,6 +25,21 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 - [常用 CLI](#常用-cli)
 - [开发与验证](#开发与验证)
 - [文档与发布证据](#文档与发布证据)
+
+## 6.0.0 重点升级
+
+**这是 breaking 大版本（以人为本重构）**：跨出运行时兼容上界，Studio schema 追加 7 条迁移，Skill 协议升到 3.x，Workbench 全站界面按新的界面标准重做。主题是把创作动线（建立项目 → 提出需求 → 生成运行 → 选片评审 → 资产交付）放回首屏。
+
+| 领域 | 变化 | 用户收益 |
+| --- | --- | --- |
+| 请求队列 | Workbench 的受限请求入口与 Agent 对话共用 `studio_requests` 一条队列：领单租约、续租心跳、回执、就地追问。 | 界面上说的那句话有 Agent 接单；重试 / 恢复走队列，不绕过人工确认。 |
+| 问法与回执 | 建批次默认不再弹「目的问卷」；卡片先给人话回执与「就这么出 / 改一下」。 | 少一步问答，计划先看后人审。 |
+| 创作画布 | 折叠到批次级、去冗余、增量布局、系统生成分组与连线、圈选发起、就地建任务 / 批次；视图收敛为三种。 | 画布只留结构与图，平时布局稳定，重排只在主动点「整理」时发生。 |
+| 挑图与出图 | 2–4 张对比、4× 缩放、预览态键盘、占位符逐张填充、「出完了叫我」、取消运行 5 秒撤销。 | 挑图在创作平台，等待有形状，离开也不错过。 |
+| 失败与恢复 | 四类人话归因、「原因 → 建议」表、provider 全挂 / 磁盘满首屏提示、`outcome_unknown` 先对账再请人核实。 | 出事时先看原因与建议，不瞎等也不误重试。 |
+| Provider / 用量 | 系统凭据存储 fail-closed、端点信任模式、`usage-*` / `budget-*` 与 `preflight --usage-estimate`。 | 密钥不落库不上屏；账本区分已知与未知成本。 |
+| 界面重设计 | 批 A–E：token / PageFrame / 状态槽 / 三档断点、rail 三区 + 状态卡、面包屑、一条 48px 工具条、队列贴底让位、三面归位、App / 画布 / CSS 拆分。 | 每屏同一套骨架；主区一眼可见，系统默认闭嘴。 |
+| 数据与鉴权 | 旧结构数据与图片资产全部不迁移；`runs.pause` / `runs.cancel` 两者皆可，`sessions.context` 收为 bearer-only，`rounds.confirm` 仍 cookie-only。 | 回滚 = 停新 daemon 起旧 daemon；确认闸门只有人能过。 |
 
 ## 5.14.2 重点升级
 
@@ -69,7 +85,7 @@ vNext 是一次不兼容替换：不读取或迁移旧 `task_spec.json`、旧 `p
 ### 推荐：项目级安装
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.2/daoge-pic-5.14.2.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -77,7 +93,7 @@ npx daoge doctor --workspace /absolute/workspace
 Windows PowerShell：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.2/daoge-pic-5.14.2.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
@@ -87,7 +103,7 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ### 全局安装
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.2/daoge-pic-5.14.2.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
 daoge register-skill --scope user                    # 缺省：~/.codex/skills
 daoge register-skill --scope user --host agents      # ~/.agents/skills：多数宿主都能读到
 daoge register-skill --scope user --host omp         # 也可以点名装给某个宿主
@@ -96,14 +112,14 @@ daoge register-skill --scope user --host omp         # 也可以点名装给某�
 Windows PowerShell：
 
 ```powershell
-npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v5.14.2/daoge-pic-5.14.2.tgz"
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.0.0/daoge-pic-6.0.0.tgz"
 daoge.cmd register-skill --scope user
 daoge.cmd register-skill --scope user --host agents
 ```
 
 `--host` 的取值：`agents`（跨宿主共享目录）、`workbuddy`、`codex`、`claude`、`opencode`、`gemini`、`agy`（Antigravity CLI）、`grok`、`omp`、`pi`、`cursor-agent`、`qwen`、`kimi`、`amp`、`droid`、`copilot`。写错会直接报错并列出可用值，不会新建目录；`agents` 是省事的那个——大多数主流宿主都会读 `~/.agents/skills`。装好后重启对应宿主，让它的 Skill registry 重新加载。Workbench 连接面板的「侦查」用的是同一张宿主表：它只报告这台机器上装了哪些、哪个装了 daoge-pic，不代管任何宿主的 skills。
 
-上述 URL 指向 `5.14.2` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
+上述 URL 指向 `6.0.0` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
 
 ### 直接试用 main 分支源码
 
@@ -254,7 +270,7 @@ daemon 启动时记录 active Profile 的 `profileId + configVersion`；活动�
 - 参考图和遮罩只能引用当前项目资产，或当前 Studio 明确 `shared_across_projects` 的共享素材；计划写入、确认、预检、排队和 Worker 读取前都会重复校验。
 - 导入、生成、回收和恢复使用 staging、原子移动、持久 journal 与启动对账。缺失媒体会被持久标记为不可用，恢复确认前不能作为参考图、遮罩或交付候选。
 - 下载、复制、交付导出和 ZIP 使用受验证 snapshot 流式读取。文件替换、路径穿越、跨 Studio/跨项目访问、超出条目或聚合上限、客户端断连都不能形成错误交付。
-- Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/2.0.0`。`GET /api/studio` 是协议协商与运行时状态端点；路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝。不要猜测 `/api/studio/...`、旧命令或工作区文件。
+- Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/3.1.0`。`GET /api/studio` 是协议协商与运行时状态端点；路径或方法不在当前端点表内时，daemon 会以 `未找到请求的 Studio API。` 拒绝。不要猜测 `/api/studio/...`、旧命令或工作区文件。
 
 ## 常用 CLI
 
@@ -310,10 +326,18 @@ npm test
 npm run test:package
 ```
 
-5.14.2 已执行验证：
+6.0.0 已执行验证（发布前）：
 
-- macOS `npm test`：576 项，574 通过、0 失败、2 项仅 Windows 实机用例跳过。
-- `npm run test:package`：发布清单 164 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
+- macOS `npm run build`：通过；Vite 转换 1703 个模块，Workbench 产物 JS 708.48 kB、CSS 233.03 kB，只有非阻断大小提示。
+- macOS `npm test`：全量回归 918 项，916 通过、0 失败、2 项仅 Windows 实机用例跳过。
+- `npm run test:package`：发布清单 188 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
+- 最终制品的大小和 SHA-256 记录在 GitHub Release、仓库根发布说明和 `.tgz.sha256` sidecar 中；本 README 随包发布，不嵌入会改变自身内容的归档哈希。
+- 所有本地验证均未调用真实图片 Provider，未产生计费生成请求。
+
+5.14.2 历史验证：
+
+- macOS `npm test`：656 项，654 通过、0 失败、2 项仅 Windows 实机用例跳过。
+- `npm run test:package`：发布清单 170 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
 - 实机复验（本机 daemon 重启到 `5.14.2` 后）：Provider 面板的本地校验返回 `valid=true`、连接测试返回 `connected=true status=200`、获取模型返回 3 个真实模型；带 cookie 的跨源请求仍返回 403；`/api/studio` 自报 `runtimeVersion=5.14.2`。
 - 最终制品的大小和 SHA-256 记录在 GitHub Release、仓库根发布说明和 `.tgz.sha256` sidecar 中；本 README 随包发布，不嵌入会改变自身内容的归档哈希。
 
@@ -336,7 +360,8 @@ npm run test:package
 - 受控会话协议：[SKILL.md](SKILL.md)
 - 长期权威产品与架构规格：[docs/daoge_pic_vnext_upgrade_spec_zh.md](docs/daoge_pic_vnext_upgrade_spec_zh.md)
 - 发布验证记录：[docs/vnext_verification_evidence_zh.md](docs/vnext_verification_evidence_zh.md)
-- GitHub Release：[`daoge-pic-v5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2)
+- GitHub Release：[`daoge-pic-v6.0.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.0.0)
+- v5.14.2 历史 GitHub Release：[`daoge-pic-v5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2)
 - v5.14.1 历史 GitHub Release：[`daoge-pic-v5.14.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.1)
 - v5.14.0 历史 GitHub Release：[`daoge-pic-v5.14.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.0)
 - v5.13.0 历史 GitHub Release：[`daoge-pic-v5.13.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.13.0)
