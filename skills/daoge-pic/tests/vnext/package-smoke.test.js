@@ -113,6 +113,18 @@ test('package smoke allowlist rejects maps and retired source paths', () => {
   ]) assert.throws(() => assertPackagePaths([...paths, sensitivePath]), new RegExp(sensitivePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotThrow(() => assertPackagePaths(paths));
 });
+
+test('包清单的允许集覆盖 src/vnext 的每个子目录（新目录不会再拖到发布时才炸）', () => {
+  // 2026-09-20 抓到：批 4 新增 `src/vnext/skill/failure-advice.ts`，其 dist 产物不在允许集里，
+  // `npm run test:package` 直到第一次做发布前检查才报 unexpected。这里把「src 有、清单无」钉死。
+  const paths = metadata[0].files.map((file) => file.path);
+  const srcRoot = path.resolve(__dirname, '../../src/vnext');
+  for (const entry of fs.readdirSync(srcRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const sample = 'dist/vnext/' + entry.name + '/sample.js';
+    assert.doesNotThrow(() => assertPackagePaths([...paths, sample]), 'src/vnext/' + entry.name + ' 不在包清单允许集里：' + sample);
+  }
+});
 test('package smoke waits for the dist lock before packing', async () => {
   const skillRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-package-smoke-lock-root-'));
   const lockRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daoge-pic-package-smoke-lock-'));

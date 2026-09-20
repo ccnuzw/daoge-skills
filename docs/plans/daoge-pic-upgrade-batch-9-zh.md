@@ -8,6 +8,7 @@
 | 2026-09-19 | **E1.1 完成**：`IconButton`/`StatusPill` → `components/`；`AssetCard`/`AssetSelectionStrip`/`ListPager` → `app/asset-surfaces.jsx`。main **3370 → 3295 行**；build ✓ / lint 0 / **全量 895 项 → 893 通过 / 0 失败 / 2 跳过** / 三屏冒烟全过；G24 源级守卫已跟着搬到新家 | 继续 E1.2 |
 | 2026-09-19 | **E1.2 完成**：13 个创建/引用/衍生/驳回对话框 + 33 个文案助手 → `app/creation-dialogs.jsx` + `app/creation-model.mjs`；`api` 请求口与其 5 助手 → `app/api.js`。main **3295 → 2577 行**；3 处源级守卫迁移（协议头/边界句/api 重试）后全量 895→893/0/2；新建批次与新建项目对话框实测正常 | 继续 E1.3 |
 | 2026-09-19 | **E1.3 完成**：8 个运行面组件 + 2 助手 → `app/run-surfaces.jsx`。main **2577 → 2368 行**。顺手把搬迁手法固化成 `tools/lift.py`（行界+编译器驱动补 import；修了三个工具 bug：跨度重复导致重复切割、`class` 不在顶层正则里、拼装未去重）。2 处源级守卫迁移后全量 895→893/0/2；运行页冒烟通过 | 继续 E1.4 |
+| 2026-09-20 | **E3 顺序修回（用户报障：右侧主功能区不能上下移动）**：`surfaces/workbench.css` 按文件名汇总，把 `responsive.css` 挤到 runs/settings/shell/viewer 之前——那四个块的基规则反过来压住断点覆盖。桌面端 `.work-surface` 的 `overflow:hidden` 盖掉 901px 档的 `overflow-y:auto`（主区 100dvh + 裁切，内容只剩上半截）；≤900px 折叠失效共 **127 处声明**。同类问题还有 G4 的盲区：逗号列表成员跨文件重复查不出来，`.error-strip` 因此从浮层退回文档流、各 `*-stage` 的 `padding-top` 与 `.eyebrow` 配色也被顺序改掉。修法＝十一条基块按「复现巨石文件层叠结果」排定并钉死、`responsive.css` 最后，并补 G4 第二条守卫（顺序 + 块清单）。逐宽度（380/640/900/1000/1280/1440）对照拆分前 `workbench.css`：桌面 **24 → 1** 处声明差异（剩下那处是任务行 28px 图标列，实测更对），窄屏残留全是「断点覆盖终于生效」。实测：创作手册 3395px 内容可滚到底（同一页面把 `overflow-y` 设回 `hidden` 后 wheel 为 0，即修前的实际表现）；800/390px 恢复单列折叠、composer 三列、无横向溢出 | 已修 |
 
 ## 0. 前置
 
@@ -68,10 +69,29 @@ CSS 一块一文件且同一选择器不跨文件重复；G1–G13 全绿。
 
 | 开放项 | 本批动作 |
 | --- | --- |
-| 队列是否进 Aside（批 C 留） | 搬运不动行为；结论记在 §5 |
-| 死 CSS（`.workspace-context-select` 等） | 随 E3.1 拆块时一并清（同文件内） |
+| 队列是否进 Aside（批 C 留） | ✅ 结论补记（2026-09-20）：**展开层进 Aside、常驻只留底栏一行**——批 C 已按 §5.8/§5.9 实现（见批 7 验收 #5「右栏只有一个 Aside：批次 / 资产 / 队列展开三种内容互斥出现」）；搬运批未改行为，原文「结论记在 §5」的 §5 从未存在，此行为销账 |
+| 死 CSS（`.workspace-context-select` 等） | ✅ 已清（2026-09-20 核：样式里只剩 `components.css` 的退场记录注释，规则已不存） |
 
 ## 4. 实施日志
+
+### 2026-09-20 · 发布前检查（刀哥拍板：先检查、暂不发）——**抓到一个发布阻塞项并修掉**
+
+**§1 门禁**（SOP §1）：45 个未提交文件（并行会话的 Disclosure / rail 卡重构 + 我的 S18–S20）——**发布前必须先全部落库**；
+变更集里没有 `daoge-studio/`、`Provider.db`、`provider.env`、runtime 或日志；`git diff --check` 干净。
+**版本元数据一致**：`package.json` / `package-lock.json` = `6.0.0`；`protocol-version.json` 协议 `3.1.0`、运行时范围 `>=6.0.0 <7.0.0`；编译常量 `RUNTIME_VERSION='6.0.0'`。
+**§2**：`typecheck:vnext` ✓、`build` ✓（含 workbench）、`verify:evidence:check` **退出码 0** ✓、六个脚本 `node --check` ✓、全量回归 **916 / 914 通过 / 0 失败 / 2 跳过**。
+**§3**：`npm pack --dry-run` 188 文件，无 src/tests/map/敏感项。
+
+**🚧 阻塞项（已修）**：`npm run test:package` 首跑失败——`assertPackagePaths` 报 2 个 unexpected：
+`dist/vnext/skill/failure-advice.{js,d.ts}`（第 4 批 9.7 新增模块；它只有测试消费者，`failure-advice.test.js` 直接 require dist）。
+**因为一直没发版，没人跑到 `test:package`**，这个坑从第 4 批一直藏到今天。修法：`scripts/package-smoke.js` 允许集补 `skill`；
+并补**防复发守卫**——`package-smoke.test.js` 断言「`src/vnext/` 的每个子目录都必须在允许集里」。复跑冒烟：
+188 文件，`unexpected/maps/retired/sensitive = 0`，`installed/bin/help/registered/doctor/sharp` 全 true ✓。
+
+**📄 两处发布材料缺口（未做，属发布动作）**：① `docs/release_sop_zh.md` 仍停在 `5.14.1` / 协议 `2.0.0`
+（版本、升级边界、Release 命令都要更新到 `6.0.0` / `3.1.0`）；② `docs/daoge_pic_6.0.0_release_notes_zh.md` 不存在。
+**结论**：**源码侧就绪；发布材料未就绪**——按刀哥决议**暂不发**；材料补齐后再走 SOP §4–§6（制品 → sidecar → 证据 → tag → GitHub Release），push 前单独确认。
+**清理**：试跑生成的 `daoge-pic-6.0.0.tgz` 已删除（不留发布物）。
 
 ### 2026-09-20 · **界面瑕疵专项 · 第二轮（对话框 / 快捷键 / 画布）——已收口**
 
