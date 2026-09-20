@@ -10,18 +10,13 @@ function blockBetween(source, start, end) {
   return source.slice(startIndex, endIndex);
 }
 
-test('Workbench session and provenance reads abort superseded requests before committing state', () => {
+test('Workbench reads abort superseded requests before committing state', () => {
   const source = readFrontendSource();
-  // The Workbench no longer writes/reads the Session working pointer (方案 7.7.3):
-  // the only Session read left is plan-status, and it must still abort a
-  // superseded request before committing state.
-  const session = blockBetween(source, "if (!session) { setSessionPlanStatus(null); return undefined; }", 'const selectedProject = useMemo');
+  // 「当前会话」面板（会话计划摘要）在 2026-09-20 移除：它读的是 Workbench 自己那个
+  // 浏览器会话的 `plan-status`，而工作指针现在只属于 Agent 会话，读出来永远是 null。
+  // 会话侧已无读取，剩下的读取仍必须遵守「被顶替的请求先 abort 再提交状态」。
   const provenance = blockBetween(source, 'const inspectAsset = async (assetId) => {', 'const downloadAsset =');
 
-  assert.match(session, /controller\.abort\(\)/);
-  assert.match(session, /signal: controller\.signal/);
-  assert.match(session, /isAbortError\(nextError\)/);
-  assert.match(session, /setSessionPlanStatus\(data\)/);
   assert.match(provenance, /\.begin\(String\(/);
   assert.match(provenance, /signal: request\.signal/);
   assert.match(provenance, /!request\.isCurrent\(\)/);
@@ -34,7 +29,6 @@ test('Workbench async failures use classified safe error state instead of raw th
   assert.match(readSource('web/src/error-model.mjs'), /function normalizeRequestError\(value, fallback/);
   assert.match(source, /if \(normalized\.category === 'connection'\) setConnectionError\(normalized\);/);
   assert.match(source, /operation: 'load-lineage-run-items'/);
-  assert.doesNotMatch(blockBetween(source, "if (!session) { setSessionPlanStatus(null); return undefined; }", 'const selectedProject = useMemo'), /setError\(nextError \|\|/);
   assert.doesNotMatch(blockBetween(source, 'const inspectAsset = async (assetId) => {', 'const downloadAsset ='), /setError\(nextError \|\|/);
 });
 

@@ -12,7 +12,10 @@ const { readSource, readStyles } = require('./source-text');
  */
 test('统计收进浮层：不再是常显横带', () => {
   const canvas = readSource('web/src/canvas/creator-workbench.jsx');
-  assert.match(canvas, /<details [^>]*data-popover="stats">/, '统计必须是一个浮层（details）');
+  // 浮层收回批（2026-09-20）：浮层一律走 `Disclosure`（原生 details + 选中即收/点外收/Esc 收）。
+  // 这里断言的**钩子**（data-popover）与「它是浮层、不是常显横带」的意图都没变——
+  // 改的只是「浮层由谁渲染」，旧断言锁的是 `<details` 这个字面实现。
+  assert.match(canvas, /<Disclosure [^>]*data-popover="stats"/, '统计必须是浮层（走统一的可收起浮层）');
   assert.doesNotMatch(canvas, /lineage-save-state/, '旧的常显保存文本必须退场');
   assert.doesNotMatch(canvas, /\{assetCountLabel\} · \{runItemCountLabel\}/, '统计不许再以「·」串接常显');
 });

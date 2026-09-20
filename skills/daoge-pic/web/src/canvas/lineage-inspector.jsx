@@ -2,6 +2,7 @@ import { AccessibleDialog } from '../accessible-dialog.jsx';
 import { asideSubject } from '../aside-model.mjs';
 import { AssetProvenanceBody } from '../asset-provenance.jsx';
 import { CreativeActionLauncher } from '../creative-action-launcher.jsx';
+import { Disclosure } from '../components/Disclosure.jsx';
 import { planEditIssues } from '../plan-edit-model.mjs';
 import { understandingNote } from '../plan-understanding-model.mjs';
 import { statusPresentation } from '../status-presentation.mjs';
@@ -162,7 +163,7 @@ export function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selected
   if (node.externalSharedAsset) return <div className="lineage-inspector-stack">
     <CreativeActionLauncher assets={[asset]} selectedTask={selectedTask} fallbackTask={fallbackTask} selectedRound={selectedRound} label="继续使用" onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} />
     <LineageAssetGetActions asset={asset} onPreviewAsset={onPreviewAsset} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} />
-    <details className="lineage-secondary-actions"><summary>更多信息</summary><div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onCopyContext('reference', [node])}><Copy size={15} />复制参考信息</button></div></details>
+    <Disclosure className="lineage-secondary-actions" summary={<summary>更多信息</summary>}><div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onCopyContext('reference', [node])}><Copy size={15} />复制参考信息</button></div></Disclosure>
   </div>;
   return <div className="lineage-inspector-stack">
     <div className="lineage-primary-actions">
@@ -170,7 +171,7 @@ export function AssetActions({ tasks = EMPTY_ARRAY, node, selectedTask, selected
       <CreativeActionLauncher assets={[asset]} selectedTask={selectedTask} fallbackTask={fallbackTask} selectedRound={selectedRound} label="继续创作" onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenReference={onOpenReference} />
     </div>
     <LineageAssetGetActions asset={asset} onPreviewAsset={onPreviewAsset} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} />
-    <details className="lineage-secondary-actions"><summary>更多信息</summary><div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onSetAssetShared(asset, !node.sharedAsset)}><Share2 size={15} />{node.sharedAsset ? '取消共享' : '共享素材'}</button></div></details>
+    <Disclosure className="lineage-secondary-actions" summary={<summary>更多信息</summary>}><div className="lineage-inspector-actions"><button type="button" className="outline-button" onClick={() => onInspectAsset(asset.id)}><GitFork size={15} />查看来源</button><button type="button" className="outline-button" onClick={() => onSetAssetShared(asset, !node.sharedAsset)}><Share2 size={15} />{node.sharedAsset ? '取消共享' : '共享素材'}</button></div></Disclosure>
   </div>;
 }
 

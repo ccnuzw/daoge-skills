@@ -9,8 +9,13 @@
 
 .page-frame {
   width: 100%;
+  /* 居中（2026-09-20 刀哥定）：内容列居中，顶栏 / 状态槽 / 底部槽与它同一条**中轴**。
+     宽度仍只来自 tier 令牌（S3）；`width:100%` 是给画布那种纵向 flex 容器兜底的——
+     没有它，auto 外边距会把元素收成内容宽度（S22 记的就是这个毛病）。
+     顶部留白 2026-09-20 由 12 收到 **4**：分隔线到内容原本空 24px（顶栏底距 12 + 这里 12），
+     现在整条缝是 12px（底距 8 + 这里 4），省下的 12px 全给画布与列表首屏。 */
   margin: 0 auto;
-  padding: var(--space-6) var(--space-4) 42px;
+  padding: var(--space-1) var(--space-4) 42px;
 }
 .page-frame.is-wide { max-width: var(--page-max-wide); }
 .page-frame.is-standard { max-width: var(--page-max-standard); }

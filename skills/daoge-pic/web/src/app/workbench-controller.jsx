@@ -1,7 +1,6 @@
 import { AccessibleDialog } from '../accessible-dialog.jsx';
 import { normalizeAdvancedDetails } from '../advanced-details.mjs';
 import { readAgentConnectionConfig, writeAgentConnectionConfig } from '../agent-connection-model.mjs';
-import { ASSET_BACKSTAGE_COPY } from '../asset-backstage-copy.mjs';
 import { resolveUploadTarget } from '../asset-import-model.mjs';
 import { assetOriginalUrl } from '../asset-media-url.mjs';
 import { ASSET_PAGE_SIZES, DEFAULT_ASSET_PAGE_SIZE, assetPageCount, clampAssetPage, normalizeAssetPageSize } from '../asset-pagination.mjs';
@@ -397,7 +396,6 @@ export function useWorkbenchController() {
   const [tasks, setTasks] = useState(EMPTY);
   const [rounds, setRounds] = useState(EMPTY);
   const [runs, setRuns] = useState(EMPTY);
-  const [sessionPlanStatus, setSessionPlanStatus] = useState(null);
   const [runItemPage, setRunItemPage] = useState(EMPTY_RUN_ITEM_PAGE);
   const [lineageRunItems, setLineageRunItems] = useState(EMPTY);
   const [lineageRunItemCoverage, setLineageRunItemCoverage] = useState(EMPTY_LINEAGE_RUN_ITEM_COVERAGE);
@@ -949,18 +947,6 @@ export function useWorkbenchController() {
     } catch (nextError) { reportRequestError(nextError, '无法安全重启 Studio。', { operation: 'restart-studio', phase: 'requesting' }); }
     finally { setRuntimeRepairing(false); }
   };
-  useEffect(() => {
-    if (!session) { setSessionPlanStatus(null); return undefined; }
-    const controller = new AbortController();
-    let current = true;
-    void api('/api/sessions/' + encodeURIComponent(session.id) + '/plan-status', { signal: controller.signal }).then((data) => {
-      if (current) setSessionPlanStatus(data);
-    }).catch((nextError) => {
-      if (current && !isAbortError(nextError)) reportRequestError(nextError, '无法读取当前会话计划状态。', { operation: 'load-session-plan-status', phase: 'loading' });
-    });
-    return () => { current = false; controller.abort(); };
-  }, [session?.id, session?.version, eventRevision.planVersions, eventRevision.creativeRecord, eventRevision.runs, reportRequestError]);
-
   const selectedProject = useMemo(() => activeProjectId ? projects.find((project) => project.id === activeProjectId) || null : null, [projects, activeProjectId]);
   const { qualityMetrics, qualityMetricsLoading, qualityMetricsError, refreshQualityMetrics } = useProjectQualityMetrics({ api, projectId: selectedProject?.id || null, view });
   const selectedTask = useMemo(() => activeTaskId ? tasks.find((task) => task.id === activeTaskId) || null : null, [tasks, activeTaskId]);
@@ -1461,10 +1447,6 @@ export function useWorkbenchController() {
     }
   };
 
-  const restoreSessionContext = (context) => {
-    if (!context?.project?.id) return;
-    navigateRoute({ view: 'lineage', projectId: context.project.id, taskId: context.task?.id || null, roundId: context.round?.id || null, compareRoundIds: context.round?.id ? [context.round.id] : [], runId: null, assetScope: context.round?.id ? 'round' : context.task?.id ? 'task' : 'project' });
-  };
   const openReferenceDialog = () => {
     if (!selectedProject || !selectedTask || !selectedRound) { setError('请先选择项目、任务和批次。'); return; }
     if (selectedRound.status !== 'draft') { setError('当前批次已进入确认或运行流程，参考素材请回到 Agent 修改计划。'); return; }
@@ -1988,29 +1970,7 @@ await refresh();
     return () => planVersionRequests.current.cancel();
   }, [view, selectedRound?.id, eventRevision.planVersions]);
   const dismissGuide = () => { window.localStorage.setItem('daoge-pic:guide-dismissed', '1'); };
-  
 
-  const renderAssetsView = () => <section className={'asset-stage ' + (selectedAssets.length && routeView === 'assets' ? 'has-selection' : '')}>
-    <PageHeader
-      kicker={routeView === 'trash' ? '回收站' : (selectedProject?.name || '项目资产')}
-      title={routeView === 'trash' ? '回收站' : '资产'}
-      description={routeView === 'trash' ? '这里是被回收的图片；还原后回到项目资产。' : ASSET_BACKSTAGE_COPY}
-    />
-    <PageToolbar label="资产工具"><span className="asset-count">{assetTotal.toString().padStart(2, '0')}</span><span className="asset-count-label">{routeView === 'trash' ? '回收站图片' : '张图片'}</span>{routeView === 'assets' && <div className="asset-scope-control" aria-label="资产范围">{ASSET_SCOPES.filter((scope) => scope !== 'studio').map((scope) => <button type="button" key={scope} className={assetScope === scope ? 'is-active' : ''} disabled={(scope === 'round' && !selectedRound) || (scope === 'task' && !selectedTask) || (scope === 'project' && !selectedProject)} onClick={() => navigateRoute({ assetScope: scope })}>{ASSET_SCOPE_LABELS[scope]}</button>)}</div>}
-        {routeView === 'assets' && selectedProject && <button type="button" className="command-button asset-import-button" disabled={uploading} onClick={() => inputRef.current?.click()}><Upload size={16} />{uploading && uploadProgress ? '正在导入 ' + uploadProgress.completed + '/' + uploadProgress.total : importLabel}</button>}
-        <div className="asset-filter" aria-label="素材筛选"><SlidersHorizontal size={14} />{[['all', '全部'], ['generated', '生成'], ['import', '导入']].map(([value, label]) => <button type="button" key={value} className={assetFilter === value ? 'is-active' : ''} onClick={() => { setAssetFilter(value); setAssetPage(1); }}>{label}</button>)}</div>
-        {routeView === 'assets' && visibleAssets.length > 0 && <button type="button" className="outline-button asset-select-page" disabled={pageSelectionBusy} onClick={() => void setPageSelection(!allPageAssetsSelected)}><Check size={15} />{allPageAssetsSelected ? '取消全选本页' : '全选本页'}</button>}
-        <details className="asset-view-options"><summary><SlidersHorizontal size={14} />显示<span className="asset-view-current">{assetPreviewFit === 'adaptive' ? '自适应卡片' : assetPreviewFit === 'cover-top' ? '填满裁切' : '完整显示'}</span></summary><div className="asset-view-panel"><label className="asset-page-size"><span>每页</span><select aria-label="每页资产数量" value={assetPageSize} onChange={(event) => { setAssetPageSize(normalizeAssetPageSize(event.target.value)); setAssetPage(1); }}>{ASSET_PAGE_SIZES.map((size) => <option value={size} key={size}>{size}</option>)}</select><span>张</span></label><div className="asset-view-mode" aria-label="缩略图显示方式"><span>缩略图显示方式</span><button type="button" aria-pressed={assetPreviewFit === 'adaptive'} className={assetPreviewFit === 'adaptive' ? 'is-active' : ''} onClick={() => setAssetPreviewFit('adaptive')}>自适应卡片<span>按原图比例展示</span></button><button type="button" aria-pressed={assetPreviewFit === 'contain'} className={assetPreviewFit === 'contain' ? 'is-active' : ''} onClick={() => setAssetPreviewFit('contain')}>完整显示<span>留白不裁切</span></button><button type="button" aria-pressed={assetPreviewFit === 'cover-top'} className={assetPreviewFit === 'cover-top' ? 'is-active' : ''} onClick={() => setAssetPreviewFit('cover-top')}>填满裁切<span>铺满卡片，优先显示上半部</span></button></div></div></details>
-        {routeView === 'assets' && selectedProject && <AssetStateLegend title="状态说明" compact collapsed />}
-        {routeView === 'assets' && selectedProject && <button type="button" className="outline-button asset-trash-link" onClick={() => navigateRoute({ view: 'trash', taskId: null, roundId: null, compareRoundIds: [], runId: null, assetScope: 'project' })}><Trash2 size={15} />回收站</button>}
-        {routeView === 'trash' && selectedProject && <button type="button" className="outline-button" onClick={() => navigateRoute({ view: 'assets', assetScope: 'project' })}><ImagePlus size={15} />返回素材</button>}
-        {selectedAssets.length >= 2 && <IconButton label={'对比选中的 ' + selectedAssets.length + ' 张素材'} onClick={() => { setPreviewZoom(1); setPreviewAssets(selectedAssets); }}><Eye size={16} /></IconButton>}
-        <div className="asset-hint">{routeView === 'trash' ? '当前项目回收站' : selectedAssetIds.size ? selectedAssetIds.size + ' 张已选择' : ASSET_SCOPE_LABELS[assetScope] + '资产'}</div>
-    </PageToolbar>
-    {routeView === 'assets' && selectedProject && <MaterialImportGuide materialNeeds={contextMaterialNeeds} selectedNeed={selectedImportNeed} completedCounts={materialNeedCounts} assetScope={assetScope} selectedRound={selectedRound} onSelectNeed={setSelectedImportNeed} />}
-    {routeView === 'assets' && selectedProject && selectedAssets.length > 0 && <AssetSelectionStrip assets={selectedAssets} deliverIntent={deliveryIntent} onRemove={toggleSelection} onClear={() => void clearSelection()} onDownloadArchive={() => downloadProjectArchive(selectedAssets.map((asset) => asset.id))} onDeliver={() => navigateRoute({ view: 'deliveries', taskId: null, roundId: null, compareRoundIds: [], runId: null })} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />}
-    {visibleAssets.length ? <><div className={'asset-grid is-preview-' + assetPreviewFit}>{visibleAssets.map((asset) => <AssetCard key={asset.id} asset={asset} selected={selectedAssetIds.has(asset.id)} selectionBusy={selectionBusyIds.has(asset.id)} shared={sharedAssetIds.has(asset.id)} previewFit={assetPreviewFit} onReview={review} onToggleSelect={markAsDeliverable} onTrash={trash} onRestore={restore} onInspect={inspectAsset} onDownload={downloadAsset} onCopy={copyAsset} onSetShared={setAssetShared} onPreview={(nextAssets) => { setPreviewZoom(1); setPreviewAssets(nextAssets); }} />)}</div><nav className="asset-pagination" aria-label="资产分页"><button type="button" className="outline-button" disabled={assetPage <= 1} onClick={() => setAssetPage((current) => Math.max(1, current - 1))}><ChevronLeft size={15} />上一页</button><span>第 <b>{assetPage}</b> / {totalAssetPages} 页 · 共 {assetTotal} 张</span><button type="button" className="outline-button" disabled={assetPage >= totalAssetPages} onClick={() => setAssetPage((current) => Math.min(totalAssetPages, current + 1))}>下一页<ChevronRight size={15} /></button></nav></> : <div className="empty-stage asset-empty">{routeView === 'trash' ? <Archive size={30} strokeWidth={1.15} /> : <Inbox size={30} strokeWidth={1.15} />}<p>{routeView === 'trash' ? '当前项目回收站为空' : (assetScope === 'round' && !selectedRound ? '请先从任务里选择批次，再查看本轮结果。' : '当前范围内暂未找到资产。')}</p>{routeView === 'assets' && <button type="button" className="outline-button" onClick={() => inputRef.current?.click()}><Upload size={16} />导入图片</button>}</div>}
-  </section>;
   /**
    * A3：八屏共用 PageFrame —— 宽度只由注册表的 `layout` 档决定（页面不得自写 max-width）。
    * 这里包一层而不是改每个组件：**行为零变化**，先把「容器与宽度」统一；各屏自己的页头换 `PageHeader`
@@ -2055,5 +2015,5 @@ await refresh();
   const layoutAuditEnabled = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('audit') === 'layout';
   const currentLayoutTier = VIEW_LAYOUTS[routeView] || 'standard';
 
-  return { EMPTY, ImageInspectorDialog, loading, addAssetsToCurrentRoundReferences, agentConnection, agentDetection, agentDetectionLoading, agentPresenceStatus, answerRequest, assetProvenance, brandKits, canImport, canvasSelectedAssetIds, chooseReferenceRound, chooseReferenceTask, confirmGenerationPlan, confirmPendingAction, confirmation, confirmationBusy, confirmationError, confirmationPlanSummary, copyRuntimeDiagnostic, createDerivedRoundFromAssets, createProjectFromStudio, createRoundForPendingReference, createRoundFromStudio, createTaskFromStudio, creationBusy, creationDialog, creationError, currentLayoutTier, derivedBusy, derivedDialog, derivedError, detectAgents, dismissConfirmation, dismissCreationDialog, dismissDerivedDialog, dismissGenerationConfirmation, dismissReferenceDialog, dismissReferenceResolver, dismissRejectDialog, generationConfirmation, generationConfirmationBusy, generationConfirmationError, importDerivedMaskAsset, inputRef, layoutAuditEnabled, markAsDeliverable, navigateRoute, openDerivedRoundDialog, openProviderDetails, openReferenceDialog, openRejectReviewDialog, openRoundFromQueue, openRoundPlanEdit, openSearchResult, pendingRequestCount, previewAssets, previewZoom, progressForRequest, projectTemplates, projects, provider, providerDetails, providerNotice, railCollapsed, recoveryPhase, referenceBusy, referenceDialog, referenceError, referenceMaterials, referenceResolver, refresh, rejectBusy, rejectDialog, rejectError, renderActiveView, repairRuntime, requestBusy, restoreSessionContext, rounds, route, routeView, runtimeRepairing, saveRejectReview, saveRoundReferenceMaterials, searchError, searchLoading, searchQuery, searchResults, selectedAssetIds, selectedProject, selectedRound, selectedTask, selectionBusyIds, sendRequest, sessionPlanStatus, setAssetProvenance, setPreviewAssets, setPreviewZoom, setProviderDetails, setRailCollapsed, setSearchQuery, sharedAssets, statusItems, studio, studioRequests, studioView, styleKits, surfaceEyebrow, surfaceSubtitle, surfaceTitle, taskForId, taskTypes, tasks, updateAgentConnection, upload, view, withdrawRequest };
+  return { EMPTY, ImageInspectorDialog, loading, addAssetsToCurrentRoundReferences, agentConnection, agentDetection, agentDetectionLoading, agentPresenceStatus, answerRequest, assetProvenance, brandKits, canImport, canvasSelectedAssetIds, chooseReferenceRound, chooseReferenceTask, confirmGenerationPlan, confirmPendingAction, confirmation, confirmationBusy, confirmationError, confirmationPlanSummary, copyRuntimeDiagnostic, createDerivedRoundFromAssets, createProjectFromStudio, createRoundForPendingReference, createRoundFromStudio, createTaskFromStudio, creationBusy, creationDialog, creationError, currentLayoutTier, derivedBusy, derivedDialog, derivedError, detectAgents, dismissConfirmation, dismissCreationDialog, dismissDerivedDialog, dismissGenerationConfirmation, dismissReferenceDialog, dismissReferenceResolver, dismissRejectDialog, generationConfirmation, generationConfirmationBusy, generationConfirmationError, importDerivedMaskAsset, inputRef, layoutAuditEnabled, markAsDeliverable, navigateRoute, openDerivedRoundDialog, openProviderDetails, openReferenceDialog, openRejectReviewDialog, openRoundFromQueue, openRoundPlanEdit, openSearchResult, pendingRequestCount, previewAssets, previewZoom, progressForRequest, projectTemplates, projects, provider, providerDetails, providerNotice, railCollapsed, recoveryPhase, referenceBusy, referenceDialog, referenceError, referenceMaterials, referenceResolver, refresh, rejectBusy, rejectDialog, rejectError, renderActiveView, repairRuntime, requestBusy, rounds, route, routeView, runtimeRepairing, saveRejectReview, saveRoundReferenceMaterials, searchError, searchLoading, searchQuery, searchResults, selectedAssetIds, selectedProject, selectedRound, selectedTask, selectionBusyIds, sendRequest, setAssetProvenance, setPreviewAssets, setPreviewZoom, setProviderDetails, setRailCollapsed, setSearchQuery, sharedAssets, statusItems, studio, studioRequests, studioView, styleKits, surfaceEyebrow, surfaceSubtitle, surfaceTitle, taskForId, taskTypes, tasks, updateAgentConnection, upload, view, withdrawRequest };
 }

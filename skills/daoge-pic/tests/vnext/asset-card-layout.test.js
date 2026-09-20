@@ -14,7 +14,9 @@ test('asset cards tuck status help away, keep action labels readable, and show f
   assert.match(assetCard.slice(0, previewEnd), /className="asset-card-tools"/);
   assert.doesNotMatch(assetCard.slice(0, previewEnd), /asset-action-menu/);
   assert.match(source, /<AssetStateLegend title="状态说明" compact collapsed \/>/);
-  assert.match(legend, /return <details className=\{className\} aria-label=\{title\}>/);
+  // 浮层收回批（2026-09-20）：折叠态图例与「显示」浮层改为共用 Disclosure；
+  // 断言从 `<details` 字面实现迁到组件钩子（意图不变：它们仍是折叠浮层）。
+  assert.match(legend, /return <Disclosure className=\{className\} aria-label=\{title\} summary=\{<summary><FileCheck2/);
   assert.match(styles, /\.asset-select-control \{ top:8px; bottom:auto;/);
   assert.match(styles, /\.asset-state-legend\.is-collapsed > \.asset-state-legend-panel \{ position:absolute;/);
   assert.match(styles, /\.asset-action-menu \{ grid-template-columns:1fr; gap:8px; \}/);
@@ -23,7 +25,7 @@ test('asset cards tuck status help away, keep action labels readable, and show f
   assert.match(source, /ASSET_PREVIEW_FIT_KEY = 'daoge-pic:asset-preview-fit'/);
   assert.match(source, /previewFit=\{assetPreviewFit\}/);
   assert.match(source, /className=\{'asset-card is-preview-' \+ previewFit/);
-  assert.match(source, /<details className="asset-view-options"><summary><SlidersHorizontal size=\{14\} \/>显示<span className="asset-view-current">/);
+  assert.match(source, /<Disclosure className="asset-view-options" summary=\{<summary><SlidersHorizontal size=\{14\} \/>显示<span className="asset-view-current">/);
   assert.match(source, /saved === 'cover' \|\| saved === 'cover-top' \? 'cover-top' : saved === 'adaptive' \? 'adaptive' : 'contain'/);
   assert.match(source, /aria-pressed=\{assetPreviewFit === 'adaptive'\}/);
   assert.match(source, /aria-pressed=\{assetPreviewFit === 'contain'\}/);

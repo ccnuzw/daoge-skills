@@ -3,6 +3,7 @@ import { batchQualityCopy, reviewDistribution } from '../batch-quality-model.mjs
 import { LineageInspector, PlanEditDialog } from '../canvas/lineage-inspector.jsx';
 import { BACKGROUNDS, CREATOR_MODES, DEFAULT_SETTINGS, DEFAULT_VIEWPORT, EMPTY_ARRAY, FILTERS, HISTORY_LIMIT, PERSISTED_NODE_TYPES, PURPOSE_LABELS, REFERENCE_TARGET_TYPES, SAVE_STATUS_LABELS, SNAP_SIZE, TEMPLATE_OPTIONS, applySavedLayout, assetSourceRoundId, assetSourceTaskId, boundsForItems, buildGraph, canWriteTextClipboard, clampScale, clientId, connectionLabelPoint, connectionPath, currentLayoutSnapshot, dataTransferHasType, defaultCollapsedFor, endpointFromNode, findFreeSlot, groupMemberBounds, hasOwn, idSetValue, intersects, isAssetNode, lineageExportLink, listValue, manualConnection, nodeKey, nodeSearchHaystack, nodeTypeLabel, normalizeViewport, openNode, positionedItems, relatedLinksForNode, relationLabel, runStatusCounts, safeMenuPoint, selectedNodeContextLine, serializeGroup, shortId, snapshotKey, text, visibleByFilter, visibleByMode } from '../canvas/lineage-shared.mjs';
 import { LineageContextMenu, LineageGroup, LineageMinimap, LineageNode, LineageTextView, ShortcutPanel } from '../canvas/lineage-stage.jsx';
+import { Disclosure } from '../components/Disclosure.jsx';
 import { deriveAvailability } from '../derive-path-model.mjs';
 import { createLineageExport, lineageExportFilename } from '../lineage-export-model.mjs';
 import { nodeMenuItems } from '../lineage-menu-model.mjs';
@@ -822,12 +823,11 @@ export function CreatorWorkbench({ request, project, tasks, selectedTask, rounds
   return <section className={'lineage-stage ' + (editing ? 'is-editing' : 'is-browsing')} aria-label="创作谱系">
     {/* C1（第 7 批）：四条 chrome 收成这一条 48px——并打上 toolbar 标，让布局审计真的看得见它。 */}
     <header className="lineage-toolbar" data-region="toolbar" data-lineage-no-zoom>
-      <details className="lineage-popover lineage-mode-menu" data-popover="mode">
-        <summary title={editing ? '只调整画布呈现，不改项目事实。' : toolbarMode[2]}><strong>{editing ? '布局编辑' : toolbarMode[1]}</strong></summary>
+      <Disclosure className="lineage-popover lineage-mode-menu" data-popover="mode" summary={<summary title={editing ? '只调整画布呈现，不改项目事实。' : toolbarMode[2]}><strong>{editing ? '布局编辑' : toolbarMode[1]}</strong></summary>}>
         <div className="lineage-popover-body lineage-mode-list" role="radiogroup" aria-label="切换画布视角">
           {CREATOR_MODES.map(([value, label, description]) => <button type="button" key={value} className={mode === value ? 'is-active' : ''} aria-pressed={mode === value} title={description} onClick={() => onMode(value)}><strong>{label}</strong></button>)}
         </div>
-      </details>
+      </Disclosure>
       <div className="lineage-actions">
         <button type="button" onClick={fitAll}><Search size={15} />适应全部</button>
         {selectedKeys.size > 0 && <button type="button" onClick={fitSelection}><ZoomIn size={15} />适应选择</button>}
@@ -838,8 +838,7 @@ export function CreatorWorkbench({ request, project, tasks, selectedTask, rounds
           <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')}><BoxSelect size={15} />选择</button>
           <button type="button" className={tool === 'pan' ? 'is-active' : ''} onClick={() => setTool('pan')}><Move size={15} />拖动画布</button>
           <button type="button" onClick={autoArrange}><Columns3 size={15} />自动整理</button>
-          <details className="lineage-edit-more">
-            <summary><Grid2X2 size={15} />编辑设置</summary>
+          <Disclosure className="lineage-edit-more" closeOnSelect={false} summary={<summary><Grid2X2 size={15} />编辑设置</summary>}>
             <div className="lineage-edit-menu">
               <button type="button" onClick={resetView}><ZoomOut size={15} />重置视图</button>
               <button type="button" onClick={undoLayout} disabled={!historyCounts.undo}><Undo2 size={15} />撤销</button>
@@ -849,25 +848,23 @@ export function CreatorWorkbench({ request, project, tasks, selectedTask, rounds
               <button type="button" onClick={() => updateSettings({ minimap: !settings.minimap })}><MapIcon size={15} />{settings.minimap ? '隐藏小地图' : '显示小地图'}</button>
               <button type="button" onClick={() => setShortcutsOpen((value) => !value)}><BookOpen size={15} />快捷键</button>
             </div>
-          </details>
+          </Disclosure>
         </>}
       </div>
       <div className="lineage-toolbar-tail">
-        <details className="lineage-popover lineage-filter-popover" data-popover="filter">
-          <summary aria-label={'筛选：' + (FILTERS.find(([value]) => value === settings.filter) || FILTERS[0])[1]}><SlidersHorizontal size={14} />{(FILTERS.find(([value]) => value === settings.filter) || FILTERS[0])[1]}</summary>
+        <Disclosure className="lineage-popover lineage-filter-popover" data-popover="filter" summary={<summary aria-label={'筛选：' + (FILTERS.find(([value]) => value === settings.filter) || FILTERS[0])[1]}><SlidersHorizontal size={14} />{(FILTERS.find(([value]) => value === settings.filter) || FILTERS[0])[1]}</summary>}>
           <div className="lineage-popover-body">
             <p className="eyebrow">筛选</p>
             <div className="lineage-choice-row">{FILTERS.map(([value, label]) => <button type="button" key={value} className={settings.filter === value ? 'is-active' : ''} onClick={() => updateSettings({ filter: value })}>{label}</button>)}</div>
             {editing && <><p className="eyebrow">背景</p><div className="lineage-choice-row">{BACKGROUNDS.map(([value, label]) => <button type="button" key={value} className={settings.background === value ? 'is-active' : ''} onClick={() => updateSettings({ background: value })}>{label}</button>)}</div></>}
           </div>
-        </details>
+        </Disclosure>
         {/* C2：一长串 11px 统计收进浮层——数字一个不少，常显只剩下面那个保存指示点。 */}
-        <details className="lineage-popover lineage-stats-popover" data-popover="stats">
-          <summary><Gauge size={14} />统计</summary>
+        <Disclosure className="lineage-popover lineage-stats-popover" data-popover="stats" summary={<summary><Gauge size={14} />统计</summary>}>
           <div className="lineage-popover-body lineage-stats">
             <dl><div><dt>资产</dt><dd>{assetCountLabel}</dd></div><div><dt>单张出图记录</dt><dd>{runItemCountLabel}</dd></div><div><dt>已选</dt><dd>{graph.metrics.selected}</dd></div><div><dt>异常</dt><dd>{graph.metrics.issues}</dd></div><div><dt>分组</dt><dd>{groups.length}</dd></div><div><dt>标注</dt><dd>{validManualLinks.length}</dd></div>{culledCount ? <div><dt>已虚拟化</dt><dd>{culledCount} 个节点</dd></div> : null}{renderedCanvasModel.limited ? <div><dt>活动窗口上限</dt><dd>{LINEAGE_NODE_RENDER_LIMIT} 个画布元素</dd></div> : null}{batchBusy ? <div><dt>批量选片</dt><dd>同步中</dd></div> : null}</dl>
           </div>
-        </details>
+        </Disclosure>
         <div className="lineage-searchbar" data-lineage-no-zoom>
           <label className="lineage-search-input">
             <Search size={14} />
@@ -876,13 +873,12 @@ export function CreatorWorkbench({ request, project, tasks, selectedTask, rounds
           {nodeSearchQuery && <span className="lineage-search-hint">{nodeSearchResults.length ? nodeSearchResults.length + ' 个结果' : '无匹配节点'}</span>}
           {nodeSearchQuery && nodeSearchResults.length ? <div className="lineage-search-results" id={searchListId} role="listbox" aria-label="谱系节点搜索结果">{nodeSearchResults.map((node, index) => <button type="button" role="option" aria-selected={index === nodeSearchIndex} id={'lineage-search-option-' + index} key={node.key} className={index === nodeSearchIndex ? 'is-active' : ''} onClick={() => { setNodeSearchIndex(index); focusNode(node); }}><strong>{node.title}</strong><small>{nodeTypeLabel(node.entityType)} · {shortId(node.entityId)}</small></button>)}</div> : null}
         </div>
-        <details className="lineage-popover lineage-more" data-popover="more">
-          <summary aria-label="更多画布动作">更多</summary>
+        <Disclosure className="lineage-popover lineage-more" data-popover="more" summary={<summary aria-label="更多画布动作">更多</summary>}>
           <div className="lineage-popover-body">
             <button type="button" onClick={exportLineageSummary}><Download size={15} />导出摘要</button>
             <button type="button" className={outlineOpen ? 'is-active' : ''} aria-pressed={outlineOpen} aria-controls="lineage-accessible-view" aria-label={outlineOpen ? '收起列表文字谱系视图' : '打开列表文字谱系视图'} onClick={() => setOutlineOpen((value) => !value)}><BookOpen size={15} />{outlineOpen ? '收起文字谱系' : '文字谱系'}</button>
           </div>
-        </details>
+        </Disclosure>
         {/* C2：保存态降为一个指示点；**失败仍有一行字**（aria-live），「变红点」不算通知到位。 */}
         <span className={'lineage-save-indicator is-' + saveState.status} data-save={saveState.status} role="status" aria-live="polite" title={saveState.message}>{saveState.status === 'error' ? <><Save size={13} aria-hidden="true" />{saveState.message}</> : <Save size={13} aria-label={saveState.message} />}</span>
       </div>
@@ -910,7 +906,9 @@ export function CreatorWorkbench({ request, project, tasks, selectedTask, rounds
         {planEdit && <PlanEditDialog node={planEdit.node} form={planEdit.form} busy={planEditBusy} error={planEditError} onChange={(form) => setPlanEdit({ ...planEdit, form })} onSave={() => void savePlanEdit()} onDismiss={() => setPlanEdit(null)} />}
         {contextMenu && <LineageContextMenu editing={editing} menu={contextMenu} node={contextNode} nodeItems={contextNode ? nodeMenuItems(contextNode, nodeMenuContext(contextNode)) : EMPTY_ARRAY} onNodeItem={(itemId) => runNodeMenuItem(itemId, contextNode)} selectedCount={selectedNodes.length} canOpen={Boolean(contextNode)} canGroup={editing && selectedNodes.length > 1} onClose={() => setContextMenu(null)} onOpen={() => contextNode && openNode(contextNode, { onNavigate, onInspectAsset })} onFit={fitSelection} onGroup={createGroup} onCopy={() => copyContextForNodes('reference', contextNode ? [contextNode] : selectedNodes)} onExport={exportLineageSummary} onShortcuts={() => setShortcutsOpen(true)} />}
         {editing && settings.minimap && <LineageMinimap nodes={renderableNodes} boundsNodes={nodes} groups={renderedGroups} viewport={viewport} canvasSize={canvasSize} selectedKeys={selectedKeys} searchMatchKeys={nodeSearchMatchKeys} onViewportChange={updateViewport} />}
-        {editing && shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
+        {/* 界面瑕疵专项 S18：面板只在 `editing` 时渲染，导致**浏览模式**下右键「查看快捷键」点了没反应。
+    面板是只读表，两种模式都该能看——门控交给 `shortcutsOpen` 自己。 */}
+        {shortcutsOpen && <ShortcutPanel onClose={() => setShortcutsOpen(false)} />}
       </div>
       <LineageInspector onEditPlan={openPlanEdit} runs={runs} metrics={inspectorMetrics} assetProvenance={assetProvenance} onCloseAssetProvenance={onCloseAssetProvenance} onOpenAssetTrace={onOpenAssetTrace} batchQuality={inspectorBatchQuality} tasks={tasks} editing={editing} node={primaryNode} selectedNodes={selectedNodes} selectedAssetNodes={selectedAssetNodes} selectedTask={selectedTask} selectedRound={selectedRound} batchBusy={batchBusy} groupTitle={groupTitle} nodeLinks={primaryLinks} onGroupTitleChange={setGroupTitle} onCreateGroup={createGroup} onCreateLink={createManualLink} onRemoveLink={removeManualLink} onUpdateLink={updateManualLink} onReverseLink={reverseManualLink} onClear={() => setSelectedKeys(new Set())} onNavigate={onNavigate} onPreviewAsset={onPreviewAsset} onInspectAsset={onInspectAsset} onToggleAsset={onToggleAsset} onBatchSelectAssets={onBatchSelectAssets} onSetAssetShared={onSetAssetShared} onDownloadAsset={onDownloadAsset} onCopyAsset={onCopyAsset} onCopyContext={copyContextForNodes} onCreateRound={onCreateRound} onOpenReference={onOpenReference} onOpenDerive={onOpenDerive} onAddReference={onAddReference} onReject={onReject} onOpenConfirmation={onOpenConfirmation} onSaveRecipe={onSaveRecipe} />
     </div>

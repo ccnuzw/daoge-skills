@@ -31,7 +31,8 @@ test('project assets expose page selection, configurable pagination, and multi-f
   // 批 B B3/B4：`批次对比` 不再是上下文条页签（检查器是它的家）。
   assert.doesNotMatch(readSource('web/src/main.jsx'), /className="task-more-tabs"/);
   assert.match(main, /if \(!session\) void openWorkbenchSession\(\)\.catch/);
-  assert.match(main, /\[session\?\.id, session\?\.version, eventRevision\.planVersions/);
+  // 「当前会话」面板 2026-09-20 移除，连同它对 plan-status 的读取（
+  // 那条读的永远是 Workbench 自己会话的空指针）。会话侧的读取已不存在。
   assert.match(main, /复制完整提示词/);
   assert.match(main, /onCopyPrompt\(activeRun\)/);
   assert.match(main, /\/api\/rounds\/' \+ encodeURIComponent\(selectedRound\.id\) \+ '\/plan-versions/);
@@ -95,7 +96,8 @@ test('Workbench exposes Studio-first creation controls without a second chat flo
   assert.match(main, /setTargetCount\(selectedGoal\.defaultCount \|\| ''\)/);
   assert.doesNotMatch(readSource('web/src/main.jsx'), /TASK_CREATION_GOALS/);
   assert.doesNotMatch(readSource('web/src/main.jsx'), /ROUND_CREATION_PURPOSES/);
-  assert.match(main, /两条入口、一条流程/);
+  // 2026-09-20（S29）：`两条入口、一条流程` 那句随项目管理页头一起删掉了——它描述的是**已退场**的两条入口说法，
+  // 断言它存在会把删掉的文案又钉回来。创建入口本身的断言（新建项目 / 新建任务 / 新建批次）留在下面。
   assert.match(main, /新建项目/);
   assert.match(main, /新建任务/);
   assert.match(main, /新建批次/);
@@ -168,7 +170,6 @@ test('Workbench exposes a creator-facing reference material selector for draft r
   assert.match(main, /选择本轮参考素材/);
   assert.match(main, /主体参考/);
   assert.match(main, /api\('\/api\/rounds\/'.*\/draft-context/);
-  assert.match(main, /回到当前选择/);
   assert.match(styles, /\.reference-panel/);
   assert.match(styles, /\.reference-candidate-grid/);
   // A3：renderer 现在包在 PageFrame 里（宽度由注册表决定），绑定关系不变。

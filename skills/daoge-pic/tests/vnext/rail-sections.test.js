@@ -32,4 +32,15 @@ test('状态区只有一张卡（两张合并成一张）', () => {
 test('provider 退避/限流的结论落在这张卡里（S7 唯一常显位置）', () => {
   const rail = railSource();
   assert.match(rail, /providerRuntimeNotice|runtimeReasonLabel/, '状态卡必须消费 provider 的运行时结论（限流/退避）');
+  assert.match(rail, /providerRuntimeHeadline/, '常显行要用 ≤14 字的短句（长句进明细）');
+});
+
+test('状态卡的常显行是结论本身，不放进会被 CSS 藏掉的第二个槽', () => {
+  const rail = railSource();
+  const start = rail.indexOf('function UnifiedStatusCard');
+  const card = rail.slice(start, rail.indexOf('function RailAuxCard', start));
+  assert.match(card, /<strong>\{headline\}<\/strong>/, '常显行必须直接渲染算出来的结论');
+  assert.doesNotMatch(card, /<strong>系统状态<\/strong>/, '常显行不许退回固定词——那正是「结论被关掉」时的形态');
+  // 结论曾经放在 `<small>` 里，被 `.rail-status-copy small{display:none}` 在任何宽度都关掉。
+  assert.doesNotMatch(card, /<small>\{conclusion\}|<small>\{headline\}/, '常显行不许再放进 small 槽');
 });

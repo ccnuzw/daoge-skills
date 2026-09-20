@@ -1,55 +1,26 @@
-import { CircleAlert, LockKeyhole, X } from 'lucide-react';
+import { CircleAlert, X } from 'lucide-react';
 import { IconButton } from '../components/IconButton.jsx';
-import { useEffect, useRef, useState } from 'react';
+import { Disclosure } from '../components/Disclosure.jsx';
+import { useEffect, useState } from 'react';
 import { canRetryWorkbenchError, errorMessageForDisplay, errorPresentation } from '../error-model.mjs';
 import { bootstrapLocalStudioSession } from '../local-auth.mjs';
 import { versionProbeRequest } from '../version-negotiation-model.mjs';
 import { ROUND_PURPOSE_LABELS, listItems } from '../app/creation-model.mjs';
 import { api } from '../app/api.js';
-import { StatusPill } from '../components/StatusPill.jsx';
-
-import { statusPresentation } from '../status-presentation.mjs';
-
 const EMPTY = [];
-
-function statusLabel(value) { return statusPresentation('generic', value).label; }
 
 // `presentation` 和 `value` 二选一：传了解析好的展示结果就不用再传原始状态值，
 // 没传时由 `scope` + `value` 现场解析。
 
 /** 界面批 E 从 main.jsx 搬出（行为零变化）。 */
 
-export function SessionPlanSummary({ sessionPlanStatus, onRestoreContext }) {
-  const detailsRef = useRef(null);
-  useEffect(() => {
-    const closeOnOutsidePointer = (event) => {
-      const details = detailsRef.current;
-      if (!details?.open || details.contains(event.target)) return;
-      details.open = false;
-    };
-    document.addEventListener('pointerdown', closeOnOutsidePointer);
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
-  }, []);
-  if (!sessionPlanStatus) return null;
-  const context = sessionPlanStatus.context;
-  const purpose = context ? (({ exploration: '探索', refinement: '优化', variation: '变体', edit: '编辑', fill: '补图' })[context.round.purpose] || context.round.purpose) : '';
-  const compactLabel = context ? purpose + ' · 计划 v' + context.round.planVersion : '未绑定批次';
-  return <details ref={detailsRef} className={'session-plan-summary ' + (!context ? 'is-empty' : '')}>
-    <summary><LockKeyhole size={14} aria-hidden="true" /><span>当前会话</span><b>{compactLabel}</b></summary>
-    <div className="session-plan-popover" aria-label="当前会话只读计划摘要">
-      {context ? <><p className="eyebrow">当前选择</p><h3>{context.project.name} / {context.task.name}</h3><span>{purpose} · 计划 v{context.round.planVersion}</span><div className="session-plan-state"><StatusPill value={context.round.status} scope="round" /><span>{sessionPlanStatus.confirmation?.confirmed ? '当前计划已由用户确认' : '当前计划尚未人工确认'}</span>{sessionPlanStatus.latestRun && <span>最近运行：{statusLabel(sessionPlanStatus.latestRun.status)}</span>}</div><button type="button" className="outline-button" onClick={onRestoreContext}>回到当前选择</button></> : <><p className="eyebrow">当前会话</p><h3>未绑定活动批次</h3><span>确认计划前，请先选择项目、任务和还没开工的批次。</span></>}
-    </div>
-  </details>;
-}
-
-export function WorkspaceContextBar({ project, projects = EMPTY, tasks = EMPTY, task, rounds, selectedRound, sessionPlanStatus, onSwitchProject, onSelectTask, onSelectRound, onRestoreContext }) {
+export function WorkspaceContextBar({ project, projects = EMPTY, tasks = EMPTY, task, rounds, selectedRound, onSwitchProject, onSelectTask, onSelectRound }) {
   if (!project) return null;
   const roundOptions = selectedRound && !rounds.some((round) => round.id === selectedRound.id) ? [selectedRound, ...rounds] : rounds;
   const roundTaskLabel = (round) => !task && round?.taskId ? tasks.find((item) => item.id === round.taskId)?.name : '';
-  const segment = (label, current, options, onPick, emptyHint) => <details className="breadcrumb-segment">
-    <summary title={current ? label + '：' + current : label}>{label} · <b>{current || '未选'}</b></summary>
+  const segment = (label, current, options, emptyHint) => <Disclosure className="breadcrumb-segment" summary={<summary title={current ? label + '：' + current : label}>{label} · <b>{current || '未选'}</b></summary>}>
     <div className="breadcrumb-menu" role="menu">{options.length ? options : <span className="breadcrumb-empty">{emptyHint}</span>}</div>
-  </details>;
+  </Disclosure>;
   // 批 B B2/B3：这一条**只剩面包屑**——只读路径 + 点开切换；导航在 rail，动作另有其位（D1）。
   // 顶栏不放动作：新建批次去画布（空白双击/工具条），任务列表去 rail，导出一律在各自页面。
   return <div className="workspace-context" data-region="header">
@@ -60,7 +31,6 @@ export function WorkspaceContextBar({ project, projects = EMPTY, tasks = EMPTY, 
       <span className="breadcrumb-sep" aria-hidden="true">›</span>
       {segment('批次', selectedRound ? '计划 v' + selectedRound.planVersion : '', roundOptions.map((round) => <button type="button" role="menuitem" key={round.id} className={round.id === selectedRound?.id ? 'is-active' : ''} onClick={() => onSelectRound(round.id)}>{(ROUND_PURPOSE_LABELS[round.purpose] || round.purpose) + ' · 计划 v' + round.planVersion + (roundTaskLabel(round) ? ' · ' + roundTaskLabel(round) : '')}</button>), '还没有批次')}
     </nav>
-    <div className="workspace-breadcrumb-trailing"><SessionPlanSummary sessionPlanStatus={sessionPlanStatus} onRestoreContext={onRestoreContext} /></div>
   </div>;
 }
 

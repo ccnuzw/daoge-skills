@@ -152,5 +152,9 @@ export function LineageMinimap({ nodes, boundsNodes = nodes, groups = [], viewpo
 
 export function ShortcutPanel({ onClose }) {
   const rows = SHORTCUT_ROWS;
-  return <aside className="lineage-shortcut-panel" data-lineage-no-zoom><div><p className="eyebrow">快捷键</p><button type="button" className="icon-button" aria-label="关闭快捷键" onClick={onClose}><X size={14} /></button></div>{rows.map(([action, shortcut]) => <p key={action}><strong>{action}</strong><span>{shortcut}</span></p>)}</aside>;
+  // 界面瑕疵专项 S20：面板从右键菜单打开时焦点留在 body，Esc 到不了画布的处理器——
+  // 面板自己接住初始焦点（焦点在面板内时 keydown 会冒泡到画布容器，Esc 即「关闭最上层」）。
+  const panelRef = useRef(null);
+  useEffect(() => { panelRef.current?.focus(); }, []);
+  return <aside ref={panelRef} tabIndex={-1} aria-label="画布快捷键" className="lineage-shortcut-panel" data-lineage-no-zoom><div><p className="eyebrow">快捷键</p><button type="button" className="icon-button" aria-label="关闭快捷键" onClick={onClose}><X size={14} /></button></div>{rows.map(([action, shortcut]) => <p key={action}><strong>{action}</strong><span>{shortcut}</span></p>)}</aside>;
 }

@@ -60,11 +60,18 @@ test('P2 /api/providers 的运行时带上「当前模型能不能用」', async
 });
 
 test('P3 退避 / 限流能翻成一句人话，健康时不打扰', async () => {
-  const { providerRuntimeNotice } = await moduleOrFail('provider-runtime-model.mjs', 'provider 运行时模型');
+  const { providerRuntimeHeadline, providerRuntimeNotice } = await moduleOrFail('provider-runtime-model.mjs', 'provider 运行时模型');
   assert.equal(providerRuntimeNotice({ providerConcurrency: { lastReason: 'healthy' } }), '', '健康时不说废话');
   assert.equal(providerRuntimeNotice(null), '');
   assert.match(providerRuntimeNotice({ providerConcurrency: { lastReason: 'rate_limited', active: 2, max: 8 } }), /放慢|限流/);
   assert.match(providerRuntimeNotice({ providerConcurrency: { lastReason: 'memory_pressure' } }), /内存|放慢/);
+  // 常显短句：rail 状态卡那一行只有 ~197px（≈14–15 个汉字），23–24 字的整句会被省略号截掉后半句。
+  assert.equal(providerRuntimeHeadline({ providerConcurrency: { lastReason: 'healthy' } }), '', '健康时同样不打扰');
+  assert.equal(providerRuntimeHeadline(null), '');
+  for (const reason of ['rate_limited', 'memory_pressure', 'memory']) {
+    const headline = providerRuntimeHeadline({ providerConcurrency: { lastReason: reason } });
+    assert.ok(headline.length > 0 && headline.length <= 14, reason + ' 的常显短句必须存在且 ≤14 字，实际：' + headline);
+  }
 });
 
 test('P4 provider 全挂 / 磁盘满：说人话 + 下一步，不用术语', async () => {

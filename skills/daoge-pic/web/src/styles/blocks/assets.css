@@ -1,10 +1,9 @@
-.asset-stage, .run-stage { position: relative; z-index: 1; padding-top: 30px; }
+.asset-stage, .run-stage { position: relative; z-index: 1; }
 .asset-scope-control { display: flex; align-items: center; gap: 3px; margin-bottom: 14px; overflow-x: auto; scrollbar-width: none; }
 .asset-scope-control > span { flex: 0 0 auto; margin-right: 7px; color: #6d796f; font-size: 11px; }
 .asset-scope-control button { flex: 0 0 auto; border: 1px solid #c4ccc1; background: rgba(255,255,255,.42); color: #647066; padding: 5px 8px; font-size: 11px; cursor: pointer; }
 .asset-scope-control button.is-active { border-color: #34443a; background: #29362d; color: #f6f4eb; }
 .asset-scope-control button:disabled { opacity: .42; cursor: not-allowed; }
-.asset-stage, .run-stage { padding-top: 30px; }
 .asset-stage-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
 .asset-count { font-family: "Songti SC", "STSong", serif; font-size: 32px; color: #28352d; }
 .asset-count-label { margin-left: 8px; color: #68736a; font-size: 12px; }
@@ -135,19 +134,21 @@
 .asset-view-options summary { list-style:none; display:inline-flex; align-items:center; gap:6px; min-height:32px; border:1px solid #c4ccc1; padding:0 9px; background:rgba(255,255,255,.5); color:#657166; font-size:11px; cursor:pointer; }
 .asset-view-options summary::-webkit-details-marker { display:none; }
 .asset-view-options[open] summary { border-color:#34443a; background:#29362d; color:#f6f4eb; }
-.asset-view-options .asset-view-panel { position:absolute; z-index:12; right:0; top:calc(100% + 6px); display:grid; gap:8px; min-width:230px; border:1px solid #bcc7b9; padding:8px; background:#fbfcf8; box-shadow:0 14px 30px rgba(26,38,30,.16); }
+.asset-view-options .asset-view-panel { position:absolute; z-index:12; right:0; top:calc(100% + 6px); display:grid; gap:8px; width:min(268px, calc(100vw - 32px)); border:1px solid #bcc7b9; padding:8px; background:#fbfcf8; box-shadow:0 14px 30px rgba(26,38,30,.16); }
 .asset-view-current { margin-left:2px; border-left:1px solid #d3dccf; padding-left:6px; color:#2d4635; font-weight:800; }
-.asset-view-mode { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; border:1px solid #d5ded2; padding:6px; background:#f3f7ef; }
+/* 一列一行：三列并排时每格只有 63px，而「铺满卡片，优先显示上半部」要 108px（实测溢出 53px）。
+   工具条自己 `white-space:nowrap`，所以这里必须显式改回可换行——否则文字只会溢出格子。 */
+.asset-view-mode { display:grid; grid-template-columns:minmax(0,1fr); gap:4px; border:1px solid #d5ded2; padding:6px; background:#f3f7ef; }
 .asset-view-mode > span { grid-column:1 / -1; color:#68786b; font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
-.asset-view-mode button { display:grid; align-content:center; gap:2px; min-height:40px; border:1px solid #c7d1c4; background:#fffef9; color:#536356; font:inherit; font-size:10px; cursor:pointer; }
-.asset-view-mode button span { color:#78877a; font-size:9px; line-height:1.2; }
+.asset-view-mode button { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:baseline; gap:8px; width:100%; min-height:32px; border:1px solid #c7d1c4; padding:6px 8px; background:#fffef9; color:#536356; font:inherit; font-size:11px; text-align:left; white-space:normal; cursor:pointer; }
+.asset-view-mode button span { color:#78877a; font-size:10px; line-height:1.35; }
 .asset-view-mode button.is-active { border-color:#274d34; background:#315f3f; color:#fffef9; }
 .asset-view-mode button.is-active span { color:#e9f4e3; }
 .asset-view-options[open] .asset-view-current { border-left-color:rgba(246,244,235,.42); color:#fffef9; }
 .asset-grid.is-preview-adaptive .asset-preview img,.asset-card.is-preview-adaptive .asset-preview img { width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; object-position:center; background:transparent; }
 .asset-grid.is-preview-contain .asset-preview img,.asset-card.is-preview-contain .asset-preview img { width:100%; height:100%; object-fit:contain; background-color:#e7eee4; background-image:linear-gradient(45deg,rgba(70,88,73,.12) 25%,transparent 25%),linear-gradient(-45deg,rgba(70,88,73,.12) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,rgba(70,88,73,.12) 75%),linear-gradient(-45deg,transparent 75%,rgba(70,88,73,.12) 75%); background-size:18px 18px; background-position:0 0,0 9px,9px -9px,-9px 0; }
 .asset-grid.is-preview-cover-top .asset-preview img,.asset-card.is-preview-cover-top .asset-preview img { width:100%; height:100%; object-fit:cover; object-position:center top; background:#dfe7dc; }
-.selection-strip { position:fixed; z-index:24; left:calc(50vw + var(--workbench-rail-center-offset)); right:auto; bottom:18px; top:auto; width:min(var(--workbench-content-max), calc(100vw - var(--workbench-rail-width) - var(--workbench-page-pad) - var(--workbench-page-pad))); max-width:none; margin:0; transform:translateX(-50%); border:1px solid #94ae99; border-left:4px solid #3e7554; padding:9px 0; background:rgba(249,251,246,.98); box-shadow:0 18px 48px rgba(24,38,29,.24); }
+.selection-strip { position:fixed; z-index:24; left:calc(50vw + var(--workbench-rail-center-offset)); right:auto; bottom:18px; top:auto; width:min(var(--page-max-wide), calc(100vw - var(--workbench-rail-width) - var(--workbench-page-pad) - var(--workbench-page-pad))); max-width:none; margin:0; transform:translateX(-50%); border:1px solid #94ae99; border-left:4px solid #3e7554; padding:9px 0; background:rgba(249,251,246,.98); box-shadow:0 18px 48px rgba(24,38,29,.24); }
 .selection-strip header { padding-bottom:8px; }
 .selection-strip h2 { font-size:15px; }
 .selection-strip-items { max-height:76px; }
@@ -172,7 +173,6 @@
 .asset-action-menu .creative-action-card b,.asset-action-menu .creative-action-card small { overflow:visible; text-overflow:clip; white-space:normal; }
 .asset-action-menu .creative-reference-chip { min-height:38px; white-space:normal; }
 .asset-action-menu .creative-action-boundary { font-size:10px; }
-.asset-backstage-note { margin:0 0 10px; border-left:3px solid #b8c7b6; padding:7px 11px; background:#f5f8f1; color:#5a6d5d; font-size:11.5px; }
 .asset-state-legend-panel,
 .asset-state-legend-panel * { white-space: normal; }
 .asset-action-menu > button:focus-visible,.asset-action-group button { outline: 2px solid var(--accent); outline-offset: 2px; }

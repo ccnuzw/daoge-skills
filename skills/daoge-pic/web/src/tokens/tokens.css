@@ -74,7 +74,10 @@
   --transition: 180ms ease;
 
   /* 页面宽度三档（由 PageFrame 消费；view 不得自写 max-width） */
-  --page-max-wide: 1680px;
+  /* wide 2026-09-20 由 1680 → 2400（刀哥：资料三页 820 只用到主区 75–76%，两侧空一大片）。
+     顶栏 / 状态槽 / 页面列 / 画布舞台共用这一条列（S19），所以抬高一档 = 整条列一起变宽；
+     2400 是"再长就难扫读"的上限：1440–2048 视窗本来就是满宽，2560/3008 这类屏上利用率 90–100%。 */
+  --page-max-wide: 2400px;
   --page-max-standard: 1180px;
   --page-max-narrow: 820px;
 }
@@ -92,5 +95,14 @@
   :root { --transition: 0ms; }
 }
 
-/* 工作台布局令牌（批 E · E3：从 workbench.css 的 :root 归位到令牌层，G4 单一归属）。 */
-:root { --workbench-rail-width:276px; --workbench-rail-center-offset:138px; --workbench-page-pad:clamp(20px,4vw,64px); --workbench-content-max:1560px; }
+/* 工作台布局令牌（批 E · E3：从 workbench.css 的 :root 归位到令牌层，G4 单一归属）。
+ *
+ * ⚠️ 「内容最大宽度」**只有一个来源**：`--page-max-wide`（§4 S3 的 wide 档）。
+ * 这里曾经还有一个 `--workbench-content-max:1560px`，与 wide 档差 120px——
+ * 于是顶栏按 1560 算、页面列按 1680 算，宽屏上两条左边缘永远对不上。
+ */
+:root { --workbench-rail-width:276px; --workbench-rail-center-offset:138px; --workbench-page-pad:var(--space-6); }
+
+/* 内边距走**台阶**，不随窗口连续滑动：`clamp(20px,4vw,64px)` 让整块内容在拖窗口时一直横移，
+ * 这正是「自适应就跳动」的来源之一。档位只有 640/900/1280 三档（G2 守卫）。 */
+@media (max-width:1280px) { :root { --workbench-page-pad:var(--space-5); } }

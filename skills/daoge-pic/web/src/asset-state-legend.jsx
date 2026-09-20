@@ -1,4 +1,5 @@
 import { Check, FileCheck2, GitFork, PackageCheck, X } from 'lucide-react';
+import { Disclosure } from './components/Disclosure.jsx';
 
 const ICONS = { unreviewed: FileCheck2, keep: Check, reject: X, derive: GitFork, delivery: PackageCheck };
 
@@ -13,10 +14,9 @@ export const ASSET_STATE_LEGEND_ITEMS = Object.freeze([
 export function AssetStateLegend({ title = '状态图例', compact = false, collapsed = false }) {
   const className = 'asset-state-legend ' + (compact ? 'is-compact ' : '') + (collapsed ? 'is-collapsed' : '');
   const items = ASSET_STATE_LEGEND_ITEMS.map((item) => { const Icon = ICONS[item.id] || FileCheck2; return <article key={item.id} className={'legend-' + item.id}><Icon size={14} /><b>{item.label}</b><span>{item.description}</span></article>; });
-  if (collapsed) return <details className={className} aria-label={title}>
-    <summary><FileCheck2 size={14} /><span>{title}</span></summary>
+  if (collapsed) return <Disclosure className={className} aria-label={title} summary={<summary><FileCheck2 size={14} /><span>{title}</span></summary>}>
     <div className="asset-state-legend-panel">{items}</div>
-  </details>;
+  </Disclosure>;
   return <aside className={className} aria-label={title}>
     <header><p className="eyebrow">{title}</p><span>选片、评审和交付使用同一组创作者语义。</span></header>
     <div className="asset-state-legend-panel">{items}</div>

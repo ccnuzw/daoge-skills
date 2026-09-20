@@ -1,9 +1,6 @@
 .connection-state { display: inline-flex; align-items: center; gap: 7px; margin-right: 5px; color: #4a6258; font-size: 11px; white-space: nowrap; }
 .connection-state.is-error { color: #9b4d42; }
-.provider-details { position: relative; z-index: 1; max-width: 1560px; margin: 16px auto 0; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: start; gap: 18px; padding: 14px 16px; border: 1px solid #cbd1c7; background: rgba(255,255,255,.5); }
-.provider-details h2 { margin: 4px 0 0; color: #2a392e; font-size: 15px; }
 .provider-details-content { display: grid; gap: 4px; color: #536158; font-size: 11px; line-height: 1.5; }
-.provider-details code { overflow-wrap: anywhere; color: #36443a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .provider-settings-head { flex:0 0 auto; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:20px; border-bottom:1px solid rgba(91,108,95,.24); padding:18px 22px 15px; background:rgba(241,243,236,.96); backdrop-filter:blur(12px); }
 .provider-settings-title h2 { margin:5px 0 7px; font-family:"Songti SC","STSong",serif; font-size:30px; line-height:1.15; }
 .provider-settings-title > span { display:block; max-width:660px; color:#617065; font-size:12px; line-height:1.55; }
@@ -105,7 +102,14 @@
 .provider-actions-panel > header small { color:#69786c; font-size:11px; line-height:1.55; text-align:right; white-space:nowrap; }
 .provider-actions-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:10px; min-width:0; }
 .provider-actions-grid button,.provider-model-fetch { min-height:44px; justify-content:center; gap:7px; white-space:normal; line-height:1.25; text-align:center; }
-.provider-actions-grid .danger-button { grid-column:auto; }
+/* 同排按钮的造型：`.command-button` / `.outline-button` 有自己的底色描边，而 `.danger-button`
+   此前只有 `cursor` 与焦点框——没有底色/描边/字号，UA 在 `color-scheme:dark` 下把它画成
+   16px 的深灰原生按钮，夹在一排 outline-button 里像另一个产品。这里按同排尺寸收口，
+   危险动作**只换色相不换形状**（danger 三件套令牌）。 */
+.provider-actions-grid .danger-button { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:44px; border:1px solid var(--danger); padding:0 12px; background:var(--surface-card); color:var(--danger-ink); font:inherit; font-size:var(--font-12); cursor:pointer; }
+.provider-actions-grid .danger-button:hover { border-color:var(--danger-ink); background:var(--danger-bg); }
+.provider-actions-grid .danger-button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.provider-actions-grid .danger-button:disabled { opacity:.55; cursor:not-allowed; }
 .provider-model-fetch { justify-self:start; align-self:end; width:auto; min-height:38px; padding:0 12px; font-size:11px; white-space:nowrap; }
 .provider-model-picker { display:grid; gap:10px; }
 .provider-model-picker--form { border-top:1px solid #d4ddd1; padding-top:12px; }

@@ -23,8 +23,7 @@ const CLASS_LITERAL_BASELINE = Object.freeze({
   'phase4-navigation-registry.test.js': 1,
   'local-auth-workbench.test.js': 1,
   'lineage-menu.test.js': 1,
-  'creator-delivery-ui.test.js': 1,
-  'asset-backstage.test.js': 1
+  'creator-delivery-ui.test.js': 1
 });
 
 test('每个 view 都由 PageFrame 包着（钩子由模板带，页面不自写）', async () => {

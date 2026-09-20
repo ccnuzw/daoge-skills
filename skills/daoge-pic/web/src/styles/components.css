@@ -21,21 +21,22 @@
 .breadcrumb-menu button:hover, .breadcrumb-menu button.is-active { background: var(--surface-raised); }
 .breadcrumb-menu button.is-active { font-weight: 700; }
 .breadcrumb-empty { display: block; padding: var(--space-2) var(--space-3); color: var(--ink-3); font-size: var(--font-11); }
-.workspace-breadcrumb-trailing { display: flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; }
 
-/* ── rail：合并后的系统状态卡（一张卡 + 明细；S7 唯一常显位置） ───── */
-.rail-status-card { display: grid; gap: var(--space-1); border: 1px solid var(--rail-line); border-left: 2px solid var(--rail-accent); padding: var(--space-2) var(--space-3); background: rgba(255, 255, 255, .03); }
+/* ── rail：系统状态卡（S7 唯一常显位置）。卡只是**挂载点**：行在 summary 上，浮层锚在卡上 ── */
+.rail-status-card { position: relative; display: grid; border: 0; border-left: 2px solid transparent; padding: 0; background: transparent; color: var(--rail-ink-2); }
 .rail-status-card.is-danger { border-left-color: var(--danger); }
 .rail-status-card.is-warning { border-left-color: var(--warning); }
-.rail-status-head { display: flex; align-items: center; gap: var(--space-2); }
-.rail-status-card .rail-status-copy { display: grid; gap: 2px; min-width: 0; }
-.rail-status-card .rail-status-copy strong { color: var(--rail-ink-1); font-size: var(--font-11); font-weight: 700; }
-.rail-status-card .rail-status-copy small { overflow: hidden; color: var(--rail-ink-2); font-size: var(--font-10); text-overflow: ellipsis; white-space: nowrap; }
+.rail-status-card .rail-status-copy { display: block; min-width: 0; }
+.rail-status-card .rail-status-copy strong { display: block; overflow: hidden; color: var(--rail-ink-1); font-size: var(--font-11); font-weight: 700; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .rail-status-card .rail-status-icon { display: grid; place-items: center; width: 22px; height: 22px; color: var(--rail-ink-2); }
-.rail-status-more > summary { margin-top: var(--space-1); color: var(--rail-ink-2); font-size: var(--font-10); cursor: pointer; list-style: none; }
+/* 常显行＝卡头本身就是那个开关（决策 D1/D3 拍板）：结论直接写在 summary 里，
+   行尾一个 › 表态；「看明细」小字退场，也不再有会被 CSS 关掉的第二个文字槽。 */
+.rail-status-more > summary { display: flex; align-items: center; gap: var(--space-2); min-height: 40px; width: 100%; padding: 0 var(--space-2); color: inherit; font-size: var(--font-11); cursor: pointer; list-style: none; }
 .rail-status-more > summary::-webkit-details-marker { display: none; }
-.rail-status-more > summary::before { content: '›'; display: inline-block; margin-right: var(--space-1); transition: transform 180ms ease; }
-.rail-status-more[open] > summary::before { transform: rotate(90deg); }
+.rail-status-more > summary::after { content: '›'; margin-left: auto; color: var(--rail-ink-2); transition: transform 180ms ease; }
+.rail-status-more[open] > summary::after { transform: rotate(90deg); }
+.rail-status-more > summary:hover { background: rgba(255, 255, 255, .04); color: var(--rail-ink-1); }
+.rail-status-more > summary:focus-visible { outline: 2px solid var(--rail-accent); outline-offset: -2px; }
 .rail-status-row { display: grid; gap: var(--space-1); margin-top: var(--space-2); border-top: 1px solid var(--rail-line); padding-top: var(--space-2); }
 .rail-status-row span { display: grid; gap: 2px; min-width: 0; }
 .rail-status-row b { color: var(--rail-ink-1); font-size: var(--font-10); }
@@ -45,14 +46,14 @@
 .rail-status-card .outline-button:hover { background: rgba(255, 255, 255, .06); }
 .rail-troubleshoot-entry { justify-content: center; margin-top: var(--space-2); }
 
-/* rail：工作区里的「任务列表」子入口（B3/D1：导航去重后它落在 rail，不在顶栏） */
-.rail-sub-entry { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 32px; border: 0; border-left: 2px solid transparent; padding: 0 var(--space-2) 0 var(--space-4); background: transparent; color: var(--rail-ink-2); font: inherit; font-size: var(--font-11); text-align: left; cursor: pointer; }
-.rail-sub-entry:hover { color: var(--rail-ink-1); background: rgba(255, 255, 255, .04); }
-.rail-sub-entry[aria-current='page'] { border-left-color: var(--rail-accent); color: var(--rail-ink-1); }
+/* rail：工作区里的「任务列表」子入口（B3/D1：导航去重后它落在 rail，不在顶栏）。
+   ⚠️ 2026-09-20（S24）：这里曾给子入口单独一套尺寸与配色（32px / 11px / 14px 图标 / 16px 缩进），
+   与它上面四行并排像两种控件。现在 rail 行的**唯一来源是 shell.css 的 `.workspace-navigation button`**
+   （同高 40 / 同字号 12 / 同内缩 10 / 同 hover 与激活色）。`rail-sub-entry` 只作语义钩子保留，
+   不要再在这里给它加尺寸——那就是又开了一套写法。 */
 
 @media (max-width: 640px) {
   .workspace-context { flex-direction: column; align-items: stretch; gap: var(--space-2); }
-  .workspace-breadcrumb-trailing { justify-content: flex-end; }
 }
 
 /* 检查器页签：计划 / 生成历史（B4；看计划与看运行都不离开画布） */

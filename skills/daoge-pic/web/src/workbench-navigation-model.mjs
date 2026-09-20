@@ -73,16 +73,23 @@ export const VIEW_LAYOUTS = Object.freeze({
   lineage: 'wide',
   runs: 'wide',
   'studio-overview': 'wide',
+  // 资料三页（规则资料 / 共享素材 / 创作手册）2026-09-20 由 narrow 提到 **wide**（刀哥：主内容区太窄，
+  // 左右空一大片，利用率要到 90%+）。它们原来按「阅读面」给 820px，而这实为**浏览面**
+  // （目录 + 详情 / 卡片网格 / 分阶段指引），薄正文自带 620–680px 行宽上限，放宽页面不会拉长行。
+  // 同时 `--page-max-wide` 1680 → 2400：1680 在 2560 这类屏上只剩 76%，"两边一大片空"会原样复现。
+  library: 'wide',
+  'shared-assets': 'wide',
+  guide: 'wide',
   projects: 'standard',
   'project-overview': 'standard',
   tasks: 'standard',
-  assets: 'standard',
-  trash: 'standard',
-  deliveries: 'standard',
+  // 资产 / 回收站 / 交付 2026-09-20 由 standard(1180) 提到 **wide**（刀哥：这三屏才是真正吃空间的模块——
+  // 选图看图、对比、打包交付）。1180 在 1920 视窗只剩 75%、2560 只剩 54%，而它们的卡片网格是自适应的：
+  // 宽度到手就变成「一屏多看到几张」，这正是选片时最缺的东西。
+  assets: 'wide',
+  trash: 'wide',
+  deliveries: 'wide',
   prompts: 'narrow',
-  library: 'narrow',
-  'shared-assets': 'narrow',
-  guide: 'narrow',
   troubleshoot: 'narrow'
 });
 

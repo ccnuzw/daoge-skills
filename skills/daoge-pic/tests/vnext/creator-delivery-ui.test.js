@@ -7,7 +7,6 @@ test('creator delivery keeps the normal path focused and exposes direct picture 
   const delivery = readFrontendSource();
   const main = readFrontendSource();
   assert.match(delivery, /挑选图片/);
-  assert.match(delivery, /按草稿、准备、导出三个阶段完成交付/);
   assert.match(delivery, /创建唯一草稿/);
   assert.match(delivery, /下载、复制或打包/);
   assert.match(delivery, /<details className="creator-delivery-batches">/);

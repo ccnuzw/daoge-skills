@@ -26,7 +26,11 @@
 .lineage-edit-menu .lineage-template-select { width:100%; max-width:none; min-height:34px; }
 .lineage-filterbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:14px 0; color:#66766a; font-size:11px; }
 .lineage-filterbar > span { margin-left:auto; color:#54675b; }
-.lineage-searchbar { display:grid; grid-template-columns:minmax(260px,420px) auto minmax(260px,1fr); align-items:center; gap:10px; margin:-4px 0 14px; color:#637468; font-size:11px; }
+/* 只留配色：版面（position/display/gap）由下面 C1 的 48px 工具条规则定义。
+   这里原先还有 `margin:-4px 0 14px`——那是「搜索独占一行」年代的间距，工具条改成
+   单行 flex 之后它把搜索框整体抬高 9px（负上边距把盒子往上顶，下边距又把行高撑到 42），
+   于是搜索框与「全部/统计/更多」永远差半个头：对齐问题就出在这。 */
+.lineage-searchbar { color:#637468; font-size:11px; }
 .lineage-search-input { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:7px; border:1px solid #c3ceb9; background:#f4f7ee; padding:0 9px; color:#637468; }
 .lineage-search-input input { min-width:0; height:34px; border:0; background:transparent; color:#283b30; font:inherit; font-size:12px; outline:0; }
 .lineage-search-input:focus-within { border-color:#6d8248; box-shadow:0 0 0 3px rgba(109,130,72,.16); }
@@ -237,24 +241,38 @@
 .lineage-shortcut-panel p { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; margin:0; border-top:1px solid #dce3d9; padding:8px 0; color:#607264; font-size:11px; }
 .lineage-shortcut-panel strong { color:#2f4336; }
 .lineage-shortcut-panel span { color:#756138; font-weight:700; }
-.lineage-stage { padding-top:8px; }
+.lineage-stage { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; padding-top:0; }
 .lineage-toolbar { padding:0 0 10px; }
-.lineage-canvas { height:calc(100vh - 210px); min-height:600px; }
-.lineage-shell { min-height:600px; }
+.lineage-canvas { height:100%; min-height:420px; }
+.lineage-shell { flex:1 1 auto; min-height:0; }
 .lineage-inspector .creative-action-launcher { display:block; min-width:0; }
 .lineage-inspector .creative-action-launcher > summary { width:100%; justify-content:flex-start; }
 .lineage-inspector .creative-action-panel { position:static; width:100%; box-shadow:none; }
 .lineage-inspector-stack { display:grid; gap:10px; }
 .lineage-inspector-actions.is-creative-actions,.lineage-inspector-actions.is-reference-actions { align-items:stretch; }
 .lineage-toolbar { display: flex; align-items: center; gap: 8px; min-height: 48px; height: 48px; padding: 0; }
-.lineage-actions { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: nowrap; overflow: hidden; }
-.lineage-toolbar-tail { display: flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; }
+.lineage-actions { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1 1 auto; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+/* 按钮不许被挤扁：`nowrap` + 不收缩，否则「适应全部」会被压成 42px 宽、文字竖排成 62px 高，
+   而工具条高度是写死的 48px——溢出直接盖到画布上（1024px 宽实测如此）。
+   放不下时左组横向滚动（与 ≤900px 的 rail/面包屑同一套做法），**不静默裁掉**。
+   左组弹性、两头固定：收缩量全部由可滚动的左组吸收，视角菜单与右组不被压。 */
+.lineage-actions > button, .lineage-actions > .lineage-edit-more > summary { flex: 0 0 auto; white-space: nowrap; }
+.lineage-toolbar > .lineage-mode-menu { flex: 0 0 auto; }
+.lineage-toolbar-tail { display: flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; flex: 0 0 auto; }
 .lineage-popover { position: relative; }
 .lineage-popover > summary { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); background: var(--surface-card); color: var(--ink-1); font-size: var(--font-11); cursor: pointer; list-style: none; white-space: nowrap; }
 .lineage-popover > summary::-webkit-details-marker { display: none; }
 .lineage-popover[open] > summary { border-color: var(--accent); }
 .lineage-popover-body { position: absolute; z-index: var(--z-drawer); top: calc(100% + 6px); left: 0; min-width: 220px; max-height: min(360px, 50vh); overflow: auto; display: grid; gap: 8px; border: 1px solid var(--line-2); padding: 10px 12px; background: var(--surface-raised); box-shadow: var(--shadow-3); }
 .lineage-more > .lineage-popover-body, .lineage-stats-popover > .lineage-popover-body { right: 0; left: auto; }
+/* 「更多」里的两个动作（导出摘要 / 文字谱系）此前**一条规则都没有**：`color-scheme:dark` 下
+   UA 把它们画成 16px 居中、2px outset、`cursor:default` 的深灰原生按钮——同一条工具条的浮层里
+   唯独这两行像别的产品。按同一根工具条里模式菜单的行样式（`.lineage-mode-list button`）收口：
+   整宽、左对齐、32px、描边，图标与文字才排成一行。 */
+.lineage-more > .lineage-popover-body > button { display: flex; align-items: center; justify-content: flex-start; gap: 6px; width: 100%; height: 32px; border: 1px solid var(--line-2); padding: 0 10px; background: var(--surface-card); color: var(--ink-1); font: inherit; font-size: var(--font-11); text-align: left; cursor: pointer; }
+.lineage-more > .lineage-popover-body > button:hover { border-color: var(--accent); }
+.lineage-more > .lineage-popover-body > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lineage-more > .lineage-popover-body > button.is-active { border-color: var(--accent); color: var(--accent); }
 .lineage-popover-body .eyebrow { margin: 0; }
 .lineage-choice-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .lineage-choice-row button { height: 28px; border: 1px solid var(--line-2); padding: 0 9px; background: var(--surface-card); color: var(--ink-2); font: inherit; font-size: var(--font-11); cursor: pointer; }

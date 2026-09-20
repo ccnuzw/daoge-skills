@@ -3,7 +3,7 @@
 .project-switcher { display: flex; gap: 9px; align-items: center; padding: 10px; border-radius: 4px; font-size: 13px; }
 .project-switcher > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-switcher:hover, .project-switcher.is-active { background: #27302a; color: #f6f7ef; }
-.overview-stage { position:relative; z-index:1; padding-top:30px; }
+.overview-stage { position:relative; z-index:1; }
 .overview-head { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; padding-bottom:16px; border-bottom:1px solid #cbd1c7; }
 .overview-head h2 { margin:6px 0; color:#29382f; font-family:"Songti SC","STSong",serif; font-size:25px; }
 .overview-head span { color:#6d796e; font-size:11px; line-height:1.5; }
@@ -16,17 +16,20 @@
 .task-local-tabs button { min-height:30px; border:1px solid #cbd5c9; padding:0 8px; background:#fffef9; color:#627163; font:inherit; font-size:11px; cursor:pointer; }
 .task-local-tabs button.is-active { border-color:#4e7e60; background:#e4efe4; color:#294d37; }
 .task-local-tabs button:disabled { opacity:.45; cursor:not-allowed; }
-.project-index-stage,.project-overview-stage,.project-tasks-stage { position:relative; z-index:1; padding-top:32px; }
-.project-index-stage > header,.project-tasks-stage > header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; border-bottom:1px solid #cad3c7; padding-bottom:16px; }
+.project-index-stage,.project-overview-stage,.project-tasks-stage { position:relative; z-index:1; }
+/* `.project-index-stage > header, .project-tasks-stage > header`（18px 下距 + 16px 下内边距 + 分隔线）
+   随本项目这两页的页头一起退场（2026-09-20 S29：那两行是重复的「我在哪」，删掉后这条规则再无匹配元素）。 */
 .project-index-stage h2,.project-overview-head h2,.project-tasks-stage h2 { margin:5px 0; color:#2d4032; font-family:"Songti SC","STSong",serif; font-size:28px; }
 .project-index-stage header span,.project-tasks-stage header span,.project-overview-head > div > span { color:#68786b; font-size:12px; line-height:1.6; }
 .project-index-list,.project-task-list { display:grid; border-top:1px solid #ccd6ca; }
-.project-index-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; border-bottom:1px solid #dce2d9; }
+.project-index-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; }
 .project-index-list .project-index-main,.project-task-list button { display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:10px; min-height:68px; border:0; padding:10px 12px; background:transparent; color:#405344; text-align:left; cursor:pointer; }
+/* 两个列表的行共用同一条发丝分隔线：项目行是容器、任务行是按钮本身，所以选择器分两处写。 */
+.project-index-row,.project-task-list button { border-bottom:1px solid var(--line-2); }
 .project-index-overview { display:inline-flex; align-items:center; gap:5px; margin:0 12px 0 0; min-height:30px; border:1px solid #cbd5c9; padding:0 10px; background:#fffef9; color:#4c7959; font:inherit; font-size:11px; cursor:pointer; }
 .project-index-overview:hover { border-color:#4e7e60; background:#e4efe4; }
 .project-index-row:hover,.project-task-list button:hover { background:#f3f7f1; }
-.project-index-list .project-index-main > svg { color:#4d7b5d; }
+.project-index-list .project-index-main > svg,.project-task-list button > svg { color:#4d7b5d; }
 .project-index-list span,.project-task-list span { min-width:0; }
 .project-index-list b,.project-task-list b { display:block; overflow:hidden; color:#304434; font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
 .project-index-list small,.project-task-list small { display:block; margin-top:3px; color:#778578; font-size:10px; }
@@ -41,10 +44,7 @@
 .project-task-panel { margin-top:26px; }
 .project-task-panel > header { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .project-task-panel h3 { margin:4px 0 0; color:#304535; font-size:16px; }
-.project-task-list button { grid-template-columns:minmax(0,1fr) auto; }
 .project-task-list.is-full { margin-top:18px; }
-.workspace-list-toolbar { display:grid; grid-template-columns:minmax(240px,1fr) auto; align-items:center; gap:12px; margin:0 0 14px; }
-.workspace-list-toolbar.is-task { margin-top:12px; }
 .workspace-list-search { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:8px; min-width:0; min-height:40px; border:1px solid #c5d0c3; padding:0 10px; background:#fffef9; color:#647467; }
 .workspace-list-search input { width:100%; min-width:0; height:38px; border:0; outline:0; background:transparent; color:#304236; font:inherit; font-size:12px; }
 .workspace-list-search input::placeholder { color:#8c998e; }
@@ -87,4 +87,4 @@
 .project-template-label { display:block; margin-top:6px; color:#607264; font-size:11px; }
 .reference-toolbar .workspace-list-filters { justify-content:flex-start; overflow-x:auto; }
 .reference-toolbar .workspace-list-search { min-width:0; }
-.project-index-row:focus-visible,.project-task-list button { outline: 2px solid var(--accent); outline-offset: 2px; }
+.project-index-row:focus-visible,.project-task-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

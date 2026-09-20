@@ -1,4 +1,5 @@
 import { statusSlotPlan } from '../status-slot-model.mjs';
+import { Disclosure } from './Disclosure.jsx';
 
 /**
  * 状态槽（界面方案 §4 S7 / §5.1 / 批 A A4）。
@@ -13,9 +14,8 @@ export function StatusSlot({ items = [], label = '系统状态' }) {
   if (!plan.primary) return null;
   return <section className="status-slot" data-region="status" data-tone={plan.primary.tone} aria-label={label}>
     <div className="status-slot-primary" data-block="status-primary">{plan.primary.content}</div>
-    {plan.overflowCount > 0 && <details className="status-slot-overflow" data-block="status-overflow">
-      <summary>还有 {plan.overflowCount} 条 · {plan.overflowLabel}</summary>
+    {plan.overflowCount > 0 && <Disclosure className="status-slot-overflow" data-block="status-overflow" summary={<summary>还有 {plan.overflowCount} 条 · {plan.overflowLabel}</summary>}>
       <div className="status-slot-overflow-body">{plan.overflow.map((item) => <div key={item.id}>{item.content}</div>)}</div>
-    </details>}
+    </Disclosure>}
   </section>;
 }

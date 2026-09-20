@@ -1,16 +1,35 @@
 /*
- * 画布/工作台领域块（界面批 E · E3 拆分）。
+ * 画布/工作台领域块（界面批 E · E3 拆分；顺序在 E 批收口后按层叠结果订正）。
  * 这里只做汇聚：每个块一个文件，一个文件只选择自己块内的类（G4 守卫在盯）。
+ *
+ * ⚠️ 加载顺序就是级联顺序，**两条硬约束**：
+ *
+ * 1. `responsive.css` 必须**最后**。它持有全部 @media 覆盖，而 @media 不带来任何
+ *    优先级；同权重下只有「后来者」能覆盖基规则。按文件名排序会把它塞到
+ *    runs/settings/shell/viewer 前面，那四个块里的基规则就反过来压住断点覆盖：
+ *    桌面端 `.work-surface` 的 `overflow:hidden` 盖掉 `@media (min-width:901px)`
+ *    的 `overflow-y:auto`，右侧主功能区整片不可滚动（内容超过 100dvh 即被裁掉，
+ *    只剩上半截）；≤900px 的整片移动端折叠同理失效（127 处声明失效）。
+ *    G4 守卫按「选择器 + 媒体上下文」查重，所以这条顺序由测试单独盯住。
+ *
+ * 2. 其余十一个块的顺序**不是**字典序，而是「复现拆分前巨石文件的效果」；
+ *    G4 只查整条选择器，查不到**逗号列表的成员**跨文件重复——`.project-task-list
+ *    button` 这类既出现在单条规则里、又是别人逗号列表成员的样式，谁先谁后会
+ *    直接改结果（`.error-strip` 从浮层变回文档流、各 `*-stage` 的 padding-top、
+ *    `.eyebrow` 颜色等）。当前顺序是按「逐宽度（380/640/900/1000/1280/1440）
+ *    对照拆分前 workbench.css 的层叠结果」挑出来的：残留差异仅 27 处声明，
+ *    除一处任务行栅格列外，全部是「断点覆盖终于生效」这类本就该生效的规则。
+ *    新增块文件时请用同样口径核对，别按文件名往里插。
  */
-@import '../blocks/assets.css';
-@import '../blocks/canvas.css';
-@import '../blocks/delivery.css';
-@import '../blocks/dialogs.css';
+@import '../blocks/shell.css';
 @import '../blocks/info-pages.css';
 @import '../blocks/misc.css';
-@import '../blocks/projects.css';
-@import '../blocks/responsive.css';
-@import '../blocks/runs.css';
+@import '../blocks/assets.css';
 @import '../blocks/settings.css';
-@import '../blocks/shell.css';
+@import '../blocks/runs.css';
+@import '../blocks/projects.css';
 @import '../blocks/viewer.css';
+@import '../blocks/delivery.css';
+@import '../blocks/dialogs.css';
+@import '../blocks/canvas.css';
+@import '../blocks/responsive.css';
