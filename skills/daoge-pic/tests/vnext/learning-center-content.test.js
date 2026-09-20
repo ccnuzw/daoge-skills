@@ -1,22 +1,52 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { readFrontendSource, readSource } = require('./source-text');
 
-test('learning center covers every core Studio domain with structured guidance', async () => {
+/**
+ * 创作手册（Studio 学习中心）—— 2026-09-20 标准修订后的守卫。
+ *
+ * 新标准（刀哥委托）：这是一本**给创作者看**的手册，不是系统规格书。
+ *   ① 覆盖同一条创作动线：建项目 → 说一句 → 看出图 → 挑图 → 拿出去；
+ *   ② 每个主题都要能直接上手：「界面上怎么做」+「回对话怎么说」+ 至少三条要点；
+ *   ③ 说人话：工程词退场；躲不开的术语首次出现给即时解释（名词表兜底）；
+ *   ④ 产品事实保留（状态图例、成果 keep、ZIP、冻结、重试、就这么出…），但用人话写。
+ */
+
+test('创作手册覆盖同一条创作动线，且每个主题都能直接上手', async () => {
   const { LEARNING_FILTERS, LEARNING_PHASES, LEARNING_TOPICS } = await import('../../web/src/learning-center-content.mjs');
   const ids = new Set(LEARNING_TOPICS.map((topic) => topic.id));
-  for (const required of ['projects', 'sessions', 'provider', 'plans', 'preflight', 'runs', 'history', 'assets', 'references', 'lineage', 'library', 'delivery', 'recovery', 'safety']) assert.equal(ids.has(required), true);
-  assert.equal(ids.size, LEARNING_TOPICS.length);
+  for (const required of ['projects', 'sessions', 'provider', 'plans', 'preflight', 'runs', 'history', 'assets', 'references', 'lineage', 'library', 'delivery', 'recovery', 'safety', 'shortcuts']) {
+    assert.equal(ids.has(required), true, '缺主题：' + required);
+  }
+  assert.equal(ids.size, LEARNING_TOPICS.length, '主题 id 不许重复');
+  assert.deepEqual(LEARNING_PHASES.map((phase) => phase.id), ['projects', 'plans', 'runs', 'assets', 'delivery'], '动线五步：建项目 → 说一句 → 看出图 → 挑图 → 拿出去');
   assert.equal(LEARNING_FILTERS.some((item) => item.id === 'assets'), true);
-  assert.deepEqual(LEARNING_PHASES.map((phase) => phase.id), ['projects', 'plans', 'runs', 'assets', 'delivery']);
   for (const topic of LEARNING_TOPICS) {
-    assert.ok(topic.summary && topic.studio && topic.conversation);
-    assert.ok(Array.isArray(topic.checkpoints) && topic.checkpoints.length >= 3);
-    assert.ok(['start', 'create', 'assets', 'delivery', 'safety'].includes(topic.group));
+    assert.ok(topic.kicker && topic.title && topic.summary, topic.id + ' 缺「标题 / 摘要」');
+    assert.ok(topic.studio && topic.conversation, topic.id + ' 必须同时给「界面上怎么做」与「回对话怎么说」');
+    assert.ok(Array.isArray(topic.checkpoints) && topic.checkpoints.length >= 3, topic.id + ' 的要点少于 3 条');
+    assert.ok(['start', 'create', 'assets', 'delivery', 'safety'].includes(topic.group), topic.id + ' 的分组不在动线里');
   }
 });
 
-test('learning center matches the stable session, Provider, preflight, history, asset, and delivery contracts', async () => {
+test('创作手册说人话：工程词退场', async () => {
+  const { LEARNING_TOPICS } = await import('../../web/src/learning-center-content.mjs');
+  const text = LEARNING_TOPICS.map((topic) => [topic.title, topic.summary, topic.studio, topic.conversation, ...topic.checkpoints].join(' ')).join('\n');
+  for (const jargon of ['daemon', 'SSE', 'SQLite', 'Canary', 'write-only', 'Provider.db', 'studio.db', '预检', '端点', '脱敏']) {
+    assert.doesNotMatch(text, new RegExp(jargon.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&')), '手册正文里还有工程词：' + jargon);
+  }
+  assert.doesNotMatch(text, /v5\.1[0-9]/, '手册里还留着旧版本号');
+});
+
+test('离线策略专题整体退场（一页对照表不是创作者要的）', () => {
+  const content = readSource('web/src/learning-center-content.mjs') + readSource('web/src/learning-center.jsx');
+  assert.doesNotMatch(content, /offline-strategy|离线策略/);
+  assert.equal(fs.existsSync(path.join(__dirname, '../../web/src/offline-strategy-model.mjs')), false, 'offline-strategy-model.mjs 必须随专题一起退场');
+});
+
+test('创作手册保留产品事实（人话版）', async () => {
   const { LEARNING_TOPICS } = await import('../../web/src/learning-center-content.mjs');
   const topicText = (id) => {
     const topic = LEARNING_TOPICS.find((item) => item.id === id);
@@ -24,65 +54,45 @@ test('learning center matches the stable session, Provider, preflight, history, 
     return [topic.title, topic.summary, topic.studio, topic.conversation, ...topic.checkpoints].join(' ');
   };
 
-  const sessions = topicText('sessions');
-  assert.match(sessions, /共享唯一 daemon 与 Workbench/);
-  assert.match(sessions, /独立 Studio Session/);
-  assert.match(sessions, /新打开与安全复用/);
-
-  const projects = topicText('projects');
-  assert.match(projects, /普通新建项目、任务或批次后直接进入当前上下文/);
-  assert.match(projects, /生成计划、变更执行目标和 Provider 调用必须回到会话确认/);
-  assert.doesNotMatch(projects, /创建项目、任务和批次，以及变更创作目标/);
-
-  const provider = topicText('provider');
-  assert.match(provider, /Provider\.db/);
-  assert.match(provider, /只写/);
-  assert.match(provider, /不会自动连接 Provider/);
-  assert.match(provider, /明确发起“连接测试”/);
-
-  const safety = topicText('safety');
-  assert.match(safety, /不进入 studio\.db、事件、日志、导出或诊断/);
-  assert.match(safety, /system secret backend/);
-  assert.match(safety, /不能静默退回 SQLite 明文/);
-  assert.doesNotMatch(safety, /密钥不进入数据库/);
-
-  const preflight = topicText('preflight');
-  assert.match(preflight, /1\.\.1000/);
-  assert.match(preflight, /默认 4/);
-  assert.match(preflight, /串行使用 1/);
-  assert.match(preflight, /queue 和 run 阶段不能另改/);
-  assert.match(preflight, /计划、Profile 版本或并发变化时必须重新预检/);
-
-  const history = topicText('history');
-  assert.match(history, /明确选择/);
-  assert.match(history, /活跃运行和最新运行都不会被静默/);
-  assert.match(history, /刷新和 SSE 重连/);
-
-  assert.match(topicText('projects'), /名称搜索、生命周期筛选和有界分页/);
+  // 说一句 → 回执 → 确认（人的闸门）
+  assert.match(topicText('plans'), /就这么出/);
+  assert.match(topicText('plans'), /改一下/);
+  assert.match(topicText('plans'), /不会出图、不会花钱/);
+  // 核算不花钱
+  assert.match(topicText('preflight'), /不产生费用|不出图/);
+  assert.match(topicText('preflight'), /重新核算/);
+  // 出图过程：暂停/取消/补图/完成提醒
+  assert.match(topicText('runs'), /暂停或取消/);
+  assert.match(topicText('runs'), /重试这 N 张/);
+  assert.match(topicText('runs'), /出完了叫我/);
+  // 出图记录：显式选择
+  assert.match(topicText('history'), /先选一次出图/);
+  assert.match(topicText('history'), /短 ID/);
+  // 挑图：状态图例五态 + 只 keep 进交付 + 快捷键
   const assets = topicText('assets');
-  assert.match(assets, /默认每页 24 张/);
-  assert.match(assets, /16、24、32、48、64、96/);
-  assert.match(assets, /一次导入多张图片/);
-  assert.match(assets, /全选本页/);
   assert.match(assets, /状态图例/);
-  assert.match(assets, /未定资产不能进入交付/);
-  assert.match(assets, /成果 \/ keep/);
-  assert.match(assets, /不采用可转成反例/);
-  assert.match(assets, /可继续创作必须创建新批次/);
-
+  assert.match(assets, /成果 keep/);
+  assert.match(assets, /不采用/);
+  assert.match(assets, /交付冻结/);
+  assert.match(assets, /全选本页/);
+  // 参考与衍生：跨项目边界 + 新批次
+  assert.match(topicText('references'), /明确共享/);
+  assert.match(topicText('references'), /衍生是新批次/);
+  // 画布：三视角 + 编辑模式
+  assert.match(topicText('lineage'), /全局 \/ 按图片 \/ 按交付/);
+  assert.match(topicText('lineage'), /编辑模式/);
+  // 交付：三阶段 + ZIP + 冻结
   const delivery = topicText('delivery');
-  assert.match(delivery, /全选或取消全选交付图片/);
+  assert.match(delivery, /准备/);
+  assert.match(delivery, /导出/);
   assert.match(delivery, /ZIP/);
-
-  const lineage = topicText('lineage');
-  assert.match(lineage, /只保存布局、视口、分组、人工软连线和资料节点位置/);
-  assert.match(lineage, /资料节点不会预检、运行或访问 Provider/);
-  assert.match(lineage, /回到会话审阅/);
-
-  const library = topicText('library');
-  assert.match(library, /项目内打开规则资料会保留当前项目壳/);
-  assert.match(library, /项目内打开规则资料不关闭当前项目/);
-  assert.match(library, /不绑定任务、批次、计划或运行/);
+  assert.match(delivery, /冻结/);
+  // 安全：密钥只写 + 确认只能人点
+  const safety = topicText('safety');
+  assert.match(safety, /只写不回显/);
+  assert.match(safety, /计划确认只能由你亲手点/);
+  // 生成服务：不会自动联网
+  assert.match(topicText('provider'), /不会联网/);
 });
 
 test('learning center only deep-links to Studio-global views', () => {

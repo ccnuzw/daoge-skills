@@ -217,8 +217,6 @@
 @media (max-width:900px) { .reference-panel > header,.reference-dialog-body > header,.reference-toolbar { grid-template-columns:1fr; }.reference-selected article { grid-template-columns:1fr; }.reference-selected .icon-button { justify-self:end; }.reference-dialog { width:calc(100vw - 16px); max-height:calc(100vh - 16px); } }
 @media (max-width:900px) { .asset-action-menu .creative-reference-grid { grid-template-columns:1fr; } }
 @media (max-width:900px) { .derived-source-strip,.derived-source-strip.is-board { grid-template-columns:1fr; }.derived-purpose-board > header { flex-direction:column; }.derived-arrangement-grid { grid-template-columns:1fr; }.mask-lite-panel { grid-template-columns:1fr; }.mask-lite-actions { justify-content:flex-start; }.reference-round-options { grid-template-columns:1fr; } }
-@media (max-width:1280px) { .offline-strategy-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:900px) { .offline-strategy-heading { grid-template-columns:1fr; }.offline-strategy-default { min-width:0; width:max-content; }.offline-strategy-grid { grid-template-columns:1fr; }.offline-strategy-focus-summary { flex-direction:column; gap:3px; } }
 @media (max-width:900px) { .lineage-text-count { text-align:left; }.lineage-text-coverage dl { grid-template-columns:1fr; }.lineage-text-coverage dl > div { align-items:flex-start; flex-direction:column; gap:4px; } }
 @media (max-width:640px) { .provider-glossary-list > div { grid-template-columns:1fr; gap:3px; } }
 @media (max-width:640px) { .learning-glossary-list > div { grid-template-columns:1fr; gap:2px; } }

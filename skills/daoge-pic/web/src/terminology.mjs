@@ -20,7 +20,7 @@ export const TERM_SCOPES = Object.freeze(['creator', 'config', 'doc']);
 
 // 按「面向面」分文件。新增前端文件时先在这里归类 —— 未归类的文件会被守卫报为漏配。
 export const CONFIG_FACE_FILES = Object.freeze(['provider-settings.jsx', 'provider-settings-model.mjs', 'config-face-copy.mjs']);
-export const DOC_FACE_FILES = Object.freeze(['learning-center.jsx', 'learning-center-content.mjs', 'offline-strategy-model.mjs', 'doc-face-copy.mjs']);
+export const DOC_FACE_FILES = Object.freeze(['learning-center.jsx', 'learning-center-content.mjs', 'doc-face-copy.mjs']);
 
 export const TERMS = Object.freeze([
   // —— 收回：创作者面禁用 ——

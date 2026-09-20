@@ -1,44 +1,144 @@
+import { SHORTCUT_ROWS } from './shortcut-model.mjs';
+
+/**
+ * 创作手册（Studio 学习中心）的内容。
+ *
+ * 2026-09-20 重写（刀哥委托）：这是一本**给创作者看的手册**，不是系统规格书。
+ * 三条口径：
+ *   ① 按人的动线排序：建项目 → 说一句 → 看出图 → 挑图 → 拿出去；
+ *   ② 说人话：讲「你会看到什么、点了会怎样」，不讲后台怎么实现；
+ *   ③ 工程词只留躲不开的几个（Provider / Profile / API Key / Base URL / 运行 / 运行项 / Workbench / conversation / Studio Session），
+ *      首次出现给括注，顶部名词表兜底。
+ * 「离线策略」专题整体退场（2026-09-20）：默认就是离线，只有出图才联网——这件事一句话说完，不值得一页对照表。
+ *
+ * 主题字段的读法：
+ *   studio       —— 在这个界面里怎么做（看得见、点得到）
+ *   conversation —— 回到对话里怎么说
+ *   checkpoints  —— 记住这几条
+ */
+
 export const LEARNING_FILTERS = [
   { id: 'all', label: '全部主题' },
-  { id: 'start', label: '启动与配置' },
-  { id: 'create', label: '计划与出图' },
-  { id: 'assets', label: '资产与复用' },
-  { id: 'delivery', label: '交付与恢复' },
+  { id: 'start', label: '开始使用' },
+  { id: 'create', label: '说一句与出图' },
+  { id: 'assets', label: '挑图与画布' },
+  { id: 'delivery', label: '拿出去与找回' },
   { id: 'safety', label: '安全边界' }
 ];
 
 export const LEARNING_PHASES = [
-  { id: 'projects', number: '01', label: '建立项目' },
-  { id: 'plans', number: '02', label: '确认计划' },
-  { id: 'runs', number: '03', label: '看出图进度' },
-  { id: 'assets', number: '04', label: '视觉选片' },
-  { id: 'delivery', number: '05', label: '冻结交付' }
+  { id: 'projects', number: '01', label: '建项目' },
+  { id: 'plans', number: '02', label: '说一句' },
+  { id: 'runs', number: '03', label: '看出图' },
+  { id: 'assets', number: '04', label: '挑图' },
+  { id: 'delivery', number: '05', label: '拿出去' }
 ];
-
-import { SHORTCUT_ROWS } from './shortcut-model.mjs';
 
 export const LEARNING_TOPICS = [
-  { id: 'projects', group: 'start', icon: 'project', kicker: '项目工作区', title: '从项目到任务，再到批次', summary: '项目是长期创作边界；任务是清晰目标；批次记录探索、优化、变体、编辑和补图。5.13.0 通过项目模板把创建表单和后续任务上下文连起来。', studio: '从项目概览进入任务，在项目与任务列表中使用名称搜索、生命周期筛选和有界分页，再查看批次、计划、运行与结果。普通新建项目、任务或批次后直接进入当前上下文，不弹出创建完成提示或推荐下一步卡片。', conversation: '生成计划、变更执行目标和 Provider 调用必须回到会话确认。模板只提供默认值和素材准备建议，不替代会话中的目标确认。', checkpoints: ['项目只承载一个业务主题', '任务必须能被创作者清楚描述', '新方向使用新批次，不覆盖历史', '项目与任务数量增长后仍通过搜索、筛选和分页定位', '创建后以当前上下文为准，素材准备清单在表单和资产导入引导中查看'], action: 'projects', actionLabel: '查看项目' },
-  { id: 'sessions', group: 'start', icon: 'session', kicker: '启动与会话', title: '共享工作台，隔离每个真实会话', summary: '同一稳定 workspace 的并发会话共享唯一 daemon 与 Workbench（常驻本机的后台服务，以及这个界面），但每个真实 conversation（你和智能体的一次对话）使用独立 Studio Session（它自己的一份工作记录）。', studio: '普通打开可能新开 Workbench，也可能安全复用现有 Workbench；每个浏览器标签保存自己的界面身份，但它不代表智能体 conversation。', conversation: '每个真实 conversation 都创建或恢复自己的 Studio Session，再绑定项目、任务和批次上下文。', checkpoints: ['共享 daemon 不等于共享会话上下文', '一个会话切换项目不会覆盖另一个会话的上下文', '打开结果必须区分新打开与安全复用', '浏览器标签身份与智能体 conversation Session 不是同一概念'], action: null, actionLabel: '' },
-  { id: 'provider', group: 'start', icon: 'provider', kicker: '生成服务', title: '用 Profile 管理 Provider 配置', summary: 'Studio 可以在没有 active Profile（正在生效的那一组连接信息）时启动；生成前再配置并激活可用 Profile。5.13.0 把能力、网址策略（允许把密钥发到哪一类网址）、模型列表和安全证据统一到 Profile。', studio: '在生成服务中列出、新建、编辑、复制、激活、删除、本地校验、显式连接测试和读取模型列表 Profile；API Key（调用密钥）与完整 Base URL（服务网址）为只写字段，加载或保存不会自动连接 Provider。`provider-models` 只在用户点击时读取受限模型摘要。', conversation: 'Profile 就绪后回到会话继续计划与预检；活动配置变化会自动热加载，已完成的预检必须重新预检。连接测试证据绑定 Profile 的 configVersion，配置变化后旧测试结果不会覆盖新配置。', checkpoints: ['最多一个 Profile 处于 active，也允许暂时没有 active Profile', 'API Key 与完整 Base URL 只写入受本地权限保护的 Provider.db 或系统密钥后端', '只有用户明确发起“连接测试”或“读取模型列表”才会访问 Provider', '活动配置变化先排空旧配置任务；新运行使用新配置，旧运行不静默切换', 'compatible_public 使用 HTTPS；本地或企业私有端点必须显式选择对应代理信任模式'], action: null, actionLabel: '' },
-  { id: 'plans', group: 'create', icon: 'plan', kicker: '计划与提示词', title: '让每一次生成可审阅、可比较', summary: '计划版本保存操作、提示词、数量、输出规格和参考素材，便于在同一任务内回看方向变化。5.13.0 还把 Provider 特定的 resolution、quality、aspect ratio 和逐图提示词纳入确认前审阅。', studio: '在选中批次后使用“计划”查看版本、对比结构化差异并完成人工确认；Workbench 不执行预检或入队。确认前检查每张图最终提示词、参考用途和输出规格，尤其是 xAI/Grok 的 `1K` / `2K`、质量和官方画幅枚举。', conversation: '会话起草和修改计划；确认后先检查已有运行，没有运行时才进入预检与排队。提示词超出 Provider 限制、配置版本或能力变化时，必须重新整理和预检。', checkpoints: ['提示词不是唯一事实，输出规格同样重要', '每个批次只创建一个初始运行，再次生成应创建新批次', '参考素材只能来自当前项目资产或明确共享素材', '计划变更保留版本证据', '逐图提示词必须在确认前可展开查看，并对应实际发送给 Provider 的内容'], action: null, actionLabel: '' },
-  { id: 'preflight', group: 'create', icon: 'check', kicker: '预检与能力', title: '先冻结执行证据，再调用外部生成', summary: '预检（开工前先算一遍，这一步不出图）会检查配置、数量、输出规格、参考素材、Provider 能力和同时出几张，不产生计费调用或正式结果。运行并发范围为 1..1000，默认 4，串行使用 1；Provider 目标并发最高 100，并按健康与资源状态自适应调整。', studio: 'Studio 显示脱敏后的配置就绪状态、批次状态和已冻结的预检证据；运行中可查看 Provider 并发目标、活动配额和降速原因。', conversation: '会话确认计划后发起预检；计划、Profile 版本或并发变化时必须重新预检，queue 和 run 阶段不能另改。', checkpoints: ['Provider 目标并发由运行时健康状态动态调整', '429（请求太密）、临时故障或后台任务资源压力会自动降速', '大响应使用流式临时文件，避免并发 Buffer 堆积'] },
-  { id: 'runs', group: 'create', icon: 'run', kicker: '运行与恢复', title: '理解一次出图、每一张的进度与异常结果', summary: '一次出图由多张可以单独恢复的图构成。暂停、重试、服务重启和外部结果不明确都保留历史。', studio: '在批次的出图记录里查看状态、每一张的进度、重试入口，以及已隐去隐私的异常摘要。', conversation: '恢复未完成外部请求、处理结果不明和改变执行计划时回到会话。', checkpoints: ['不自动重放结果不明的外部请求', '暂停不会丢失已完成资产', '重启后待恢复运行仍需要确认'], action: null, actionLabel: '' },
-  { id: 'history', group: 'create', icon: 'history', kicker: 'Generation History', title: '显式选择要查看的 Generation Run', summary: '生成历史（Generation History）按当前批次列出全部保存下来的出图记录；查看历史前必须明确选择其中一次。', studio: '选择运行后，只查看该运行的计划版本、时间、短 ID、状态、运行项和结果资产。', conversation: '讨论历史结果或继续处理时，引用已明确选择的运行；活跃运行和最新运行都不会被静默当作已选择历史。', checkpoints: ['刷新和 SSE 重连（页面接收实时进度推送的通道）不会把其他运行改成已选记录', '浏览器缓存不能替代持久 Generation History', '运行必须由用户或会话显式选择'], action: null, actionLabel: '' },
-  { id: 'assets', group: 'assets', icon: 'asset', kicker: '项目资产', title: '通过画面做选择，而不是记住标识', summary: '缩略图、状态图例、来源上下文和选片条共同构成项目级视觉选择。项目资产默认每页 24 张，可切换 16、24、32、48、64、96。', studio: '在项目资产中通过文件选择、拖入或粘贴一次导入多张图片；按项目、任务、批次和资产类型筛选，使用“全选本页”只选择当前页可见资产，并可在放大预览中直接设为成果 / keep、取消成果、记录不采用或继续创作。状态图例统一解释未定、成果 / keep、不采用、可继续和交付冻结。', conversation: '描述已在 Studio 中选定的画面后，才可要求新的衍生方向或编辑计划。', checkpoints: ['未定资产不能进入交付', '选片是项目持久状态，并与 keep 评审语义一致', '全选本页不跨越当前筛选范围和分页', '保留决定才可进入交付', '不采用可转成反例或下一轮修正目标', '可继续创作必须创建新批次', '运行来源在查看记录中追溯'], action: null, actionLabel: '' },
-  { id: 'references', group: 'assets', icon: 'reference', kicker: '参考与衍生', title: '复用参考素材时保留边界与来源', summary: '参考图、遮罩和父资产必须来自当前项目资产或明确共享素材；新的衍生仍需新的计划和确认。', studio: '通过资产查看来源与评审，识别素材的项目、任务、批次和运行链路；共享素材只从独立共享素材视图显式提供。5.13.0 的“继续创作”支持主图 + 风格 + 构图、多主体融合、主体 + 反例对照和局部编辑遮罩等用途编排，并把用途写入草稿计划。', conversation: '提出引用、编辑或衍生请求时，会话将选择关系写进计划，并在计划写入、确认、预检和执行前重复验证项目边界。用途编排只形成结构化上下文，不直接调用 Provider。', checkpoints: ['不通过文字猜测图片身份', '同一 Studio 的其他项目未共享素材不可引用', '参考图不等于自动执行编辑', '所有引用保持来源关系', '遮罩单独保存为 maskAssetId，不作为主体父资产；xAI/Grok 参考图仍受数量和媒体类型限制'], action: null, actionLabel: '' },
-  { id: 'lineage', group: 'assets', icon: 'reference', kicker: '创作谱系', title: '用画布整理事实链和计划上下文', summary: '谱系画布展示项目、任务、批次、计划、运行、资产和交付关系；编辑模式只保存布局、视口、分组、人工软连线和资料节点位置。', studio: '在项目内打开谱系时保留当前项目壳；从任务或批次进入可查看局部谱系。拖入任务类型、风格包或品牌包只形成计划上下文，复制指令后回到会话审阅。', conversation: '会话仍负责起草新计划、确认、预检和创建唯一运行；画布复制的上下文不是自动执行命令。', checkpoints: ['项目事实仍以 Studio API（程序接口）和 SQLite（存在本机的数据库文件）为准', '资料节点不会预检、运行或访问 Provider', '外部共享素材只能作为参考查看', '软连线是人工计划标注，不改写资产来源'], action: null, actionLabel: '' },
-  { id: 'library', group: 'assets', icon: 'library', kicker: '规则资料', title: '管理任务类型、风格包和品牌包', summary: '规则资料只容纳任务类型、风格包和品牌包；共享图片在独立共享素材视图中查看，它不是某个项目的回收站，也不是全部素材库。', studio: '从项目内打开规则资料会保留当前项目壳，便于查看规则后回到项目；规则资料只展示可复用语义，不绑定任务、批次、计划或运行。', conversation: '建立新的任务类型、风格约束或品牌规则时，由会话补全结构化内容；把规则用于生成前仍要回到会话形成可确认计划。', checkpoints: ['共享图片用独立共享素材关系复用，不复制文件', '项目内打开规则资料不关闭当前项目', '规则资料资源不自动加入任务或批次', '项目结果默认不跨项目泄漏'], action: null, actionLabel: '' },
-  { id: 'delivery', group: 'delivery', icon: 'delivery', kicker: '交付', title: '从保留选片冻结为可导出的交付', summary: '交付草稿只接受当前项目中已保留的选片；准备后再导出冻结快照。', studio: '在交付页全选或取消全选交付图片，查看准入状态、草稿、准备状态、导出记录与版本化交付批次；项目资产和已导出交付 ZIP 通过项目名、交付名、类型和时间区分。', conversation: '补充交付意图、处理导出异常或创建新交付方向时回到会话。', checkpoints: ['未选片或未保留会引导回项目资产', '更新草稿保持原有创作记录选项', '导出冻结图片实体，不改写来源资产', '已导出交付不受源资产后续回收影响'], action: null, actionLabel: '' },
-  { id: 'recovery', group: 'delivery', icon: 'recovery', kicker: '回收与治理', title: '用项目回收站恢复误删成果', summary: '回收站只属于当前项目，只列出已软删除资产；恢复后回到原项目关系。', studio: '在项目侧栏底部打开回收站，确认要恢复的素材与来源后执行恢复。', conversation: '处理被引用资产影响、恢复策略或大范围整理前，先在会话中澄清。', checkpoints: ['共享素材和规则资料资源不进入项目回收站', '删除不通过文件夹表达业务状态', '恢复保留评审和来源事实'], action: null, actionLabel: '' },
-  { id: 'safety', group: 'safety', icon: 'safety', kicker: '安全边界', title: '知道秘密存在哪里、哪些动作必须确认', summary: 'Provider Profile、密钥引用和 write-only（只写：填进去之后就不再显示）摘要保存在受本地权限保护的 Provider.db（一个独立的本机数据库文件）；显式 system secret backend（把密钥交给系统保管）可把 secret 存入系统后端。Studio 是视觉管理与受控操作界面，会话负责意图确认和外部执行决策。', studio: 'API Key 与完整 Base URL 只写不回显，也不进入 studio.db、事件、日志、导出或诊断；页面加载和保存不会自动访问 Provider。compatible_public 的明文 HTTP 会在发送凭据前拒绝；本地代理和企业私有端点必须显式选择信任模式。', conversation: '确认生成、继续恢复、修改外部请求和处理未知结果都必须回到会话。system secret backend 不可用时不能静默退回 SQLite 明文，旧配置测试证据也不能覆盖已变化的 Profile。', checkpoints: ['Provider.db 是 Profile、密钥引用和 write-only 摘要事实源', '密钥与完整 Base URL 不进入 studio.db、事件、日志、导出或诊断', '只有显式连接测试才访问 Provider', '外部未知结果不会自动重放', '公共兼容端点必须使用 HTTPS；密钥清理失败会持久排队并在后续启动重试'] },
-  { id: 'offline-strategy', group: 'safety', icon: 'safety', kicker: '离线策略', title: '先离线比较，再明确联网', summary: '默认先在本地整理和比较提示策略；延后联网、显式 Canary（先用最小样本试一次联网）和真实 Provider（真正调用出图服务）各有不同的网络、隐私与计费取舍。', studio: 'Learning Center 只展示结构化策略对比，不发起网络请求、不排队、不生成。先看本地可做的部分，再由用户决定是否回到会话处理联网路径。', conversation: '如果要使用 Canary 或真实 Provider，必须在会话中明确数据范围、端点、预算和执行意图；延后联网不等于自动恢复。', checkpoints: ['默认路径不访问网络、不调用 Provider、不产生费用', '本地策略比较可以先完成目标、约束、参考角色和隐私范围整理', '延后联网只形成待办，不创建后台队列或自动重试', 'Canary 与真实 Provider 都必须由用户明确发起', '联网前重新核对提示词、参考素材、端点信任和预算'] },
-  { id: 'shortcuts', group: 'start', icon: 'check', kicker: '键盘', title: '画布快捷键', summary: '创作平台的画布支持一套键盘操作：拖动、框选、多选、撤销重做、微调、分组与适应选择。这张表与工具条「更多 → 快捷键」面板读的是同一份数据，不会各说各话。', studio: '在画布上直接按键即可；吸附开启时方向键按网格移动节点。', conversation: '快捷键只改变画布呈现（视图、分组、位置），不改项目事实；改事实仍走确认闸门。', checkpoints: SHORTCUT_ROWS.map(([label, keys]) => label + '：' + keys) },
+  {
+    id: 'projects', group: 'start', icon: 'project', kicker: '项目', title: '一个项目，装着一条创作线',
+    summary: '项目是长期的创作边界：一个项目里有若干任务，一个任务下可以开很多批次——一批就是一轮出图。',
+    studio: '在「项目管理」里建项目；进入项目后建任务，再新建批次。列表支持按名称搜索、按状态筛选、翻页。',
+    conversation: '新建只记下条件；真正出图仍要回到对话：说清目标、数量、画幅，确认计划。',
+    checkpoints: ['项目、任务、批次是三层，别混着用', '新建后直接进入当前上下文，不会弹“下一步”卡片', '想让 agent 出图，回来说一句就行'],
+    action: 'projects', actionLabel: '去项目管理'
+  },
+  {
+    id: 'sessions', group: 'start', icon: 'session', kicker: '会话', title: '多开也不乱：每个对话有自己的工作记录',
+    summary: '同一个工作区里，多个对话共用一个后台服务，但各自记住自己的项目、任务和批次；工作台（Workbench：你现在看到的这个界面）会自动复用已经开着的那个。',
+    studio: '每个浏览器标签保存自己的界面身份，但它不等于一次对话；项目、任务、批次的选中状态跟着界面走。',
+    conversation: '每个真实对话（conversation：你和智能体之间的一次对话）都有自己的工作记录（Studio Session：这一次对话的上下文）；换对话等于换一份上下文。',
+    checkpoints: ['关掉界面不影响后台继续工作', '换标签页不等于换对话', '界面显示什么，以项目里的事实为准']
+  },
+  {
+    id: 'provider', group: 'start', icon: 'provider', kicker: '生成服务', title: '配置一次，之后只管出图',
+    summary: '生成服务（Provider：帮你出图的那家外部服务，比如 OpenAI、Gemini）填一次就能一直用：一组配置（Profile：服务 + 网址 + 密钥 + 模型），网址（Base URL：这家服务的入口地址），密钥（API Key：调用这家服务的钥匙）。',
+    studio: '在左下「系统状态 → 打开设置」里新建并激活配置；密钥填进去就不再回显，只有你点「连接测试」「获取模型」时才会联网。',
+    conversation: '对话不会替你改配置；要换服务或模型，先在设置里配好再回来说。',
+    checkpoints: ['没配置也能先把项目、任务、批次建好', '密钥只写不回显，也不进日志和导出', '打开或保存设置本身不会联网']
+  },
+  {
+    id: 'plans', group: 'create', icon: 'plan', kicker: '说一句', title: '说一句 → 回执 → 就这么出',
+    summary: '在底部输入框说一句（想要什么、几张、什么画幅），agent 先回一条「我准备这么出」，你点头才开始。',
+    studio: '回执卡片上有「就这么出」和「改一下」：「改一下」能改批次目的、数量、画幅和补充说明；确认闸门只有你本人能点。',
+    conversation: '把目标、数量、画幅、参考说清楚；不满意就直说，agent 改完计划会再给你确认。',
+    checkpoints: ['没有你的确认，不会出图、不会花钱', '改了计划要重新确认一次', '检查器里能看「它为什么这么理解」，也能看每张图的完整提示词']
+  },
+  {
+    id: 'preflight', group: 'create', icon: 'check', kicker: '核算', title: '确认之后先核算，这步不花钱',
+    summary: '你确认计划后，先核算一遍：能不能跑通、一共几张、什么规格。核算阶段不出图、不计费。',
+    studio: '核算结论留在批次的「计划 / 生成历史」里；同一批同时出几张默认 4，想一张一张就设 1。',
+    conversation: '计划或同时出图的数量变了，就回来说一声重新核算；核算通过才会真正排队出图。',
+    checkpoints: ['核算不调用出图服务、不产生费用', '改了计划就重算，旧结论作废', '同时出几张写在计划里，改它要重新确认']
+  },
+  {
+    id: 'runs', group: 'create', icon: 'run', kicker: '出图', title: '看着它一张张长出来',
+    summary: '出图开始后，画布上先立占位格，出一张填一张；没出成的会标出来，可以只补那几张。',
+    studio: '出图中可以直接暂停或取消（不花钱；取消后 5 秒内还能撤销）。没成的用「重试这 N 张」补；想被叫回来就开「出完了叫我」。',
+    conversation: '要重试、要从断点恢复，回来说一句；结果不明时先核实，别让它自动重放。',
+    checkpoints: ['暂停 / 取消在界面上直接点，不用回对话', '补图只重试没成的那几张', '离开页面也会有完成提醒']
+  },
+  {
+    id: 'history', group: 'create', icon: 'history', kicker: '出图记录', title: '每次出图都留着，想看哪次自己选',
+    summary: '同一批次可以出很多次，每次都有完整记录：当时用的计划版本、每一张（运行项：一次出图里的其中一张）的结果。',
+    studio: '在检查器的「生成历史」里先选一次出图（运行：一次真正的出图执行），再看它的详情；刷新页面不会把选中记录弄乱。',
+    conversation: '讨论历史结果时，直接说那一次的短 ID，agent 不会拿最新一次来猜。',
+    checkpoints: ['不会默认拿最新一次当你选中的', '记录里保留当时的完整提示词', '失败与重试都留在同一份记录里']
+  },
+  {
+    id: 'assets', group: 'assets', icon: 'asset', kicker: '挑图', title: '挑图在创作平台，资产管理是后台',
+    summary: '挑图在画布的批次旁边做；「资产管理」是导入、整理、去重的后台。',
+    studio: '选中图片后：← → 换图、空格保留、X 不采用、Enter 缩放、Esc 退出，可以 2–4 张并排对比；资产页支持筛选、翻页和「全选本页」。',
+    conversation: '说「这批里挑三张亮一点的」这类话，agent 按你的说法执行；大范围整理先在对话里对齐。',
+    checkpoints: ['状态图例：未定 / 成果 keep / 不采用 / 可继续 / 交付冻结', '只有「成果 keep」能进交付', '「不采用」会记下原因，还能转成反例']
+  },
+  {
+    id: 'references', group: 'assets', icon: 'reference', kicker: '参考与衍生', title: '用参考图，也要留好来源',
+    summary: '参考图和遮罩只能来自当前项目资产，或明确共享的素材；想换方向就新开一批（批次）。',
+    studio: '选中图后从「继续创作」里选用途（主体 / 风格 / 构图 / 反例）或发起衍生；「查看来源」能看到这张图的完整来历。',
+    conversation: '要用哪张当参考、要衍生还是局部修改，跟 agent 说清楚对象和目的。',
+    checkpoints: ['别的项目的图默认不可用，除非明确共享', '衍生是新批次，要重新确认', '参考用途会写进计划，出图时按它执行']
+  },
+  {
+    id: 'lineage', group: 'assets', icon: 'reference', kicker: '画布', title: '一张图看懂这条线怎么长出来的',
+    summary: '画布把任务、批次和图片连成一条线；批次可以收起、展开，图跟着批次走。',
+    studio: '空白处拖拽框选，Shift 或多选加点选；F 适应选择、双击批次收起/展开；工具条「全局 / 按图片 / 按交付」三种视角。',
+    conversation: '画布只改看得见的部分（位置、分组、连线），改事实（计划、出图）仍要回到对话确认。',
+    checkpoints: ['布局会记住你动过的节点', '编辑模式才有框选、移动、分组和小地图', '快捷键面板：右键菜单「查看快捷键」或工具条「更多」']
+  },
+  {
+    id: 'library', group: 'assets', icon: 'library', kicker: '规则资料', title: '任务类型、风格包、品牌包',
+    summary: '规则资料放可复用的创作规则；agent 起草计划时会参考它们。',
+    studio: '从项目里打开规则资料会保留当前项目，看完能直接回去；里面只放规则，不绑定具体任务或批次。',
+    conversation: '要沉淀一套新规则，跟 agent 说清内容，它会整理成结构化规则；套用规则出图仍要确认计划。',
+    checkpoints: ['规则只是计划的默认值', '图片资源共享在「共享素材」，不在这里', '同一套规则可以跨项目复用']
+  },
+  {
+    id: 'delivery', group: 'delivery', icon: 'delivery', kicker: '拿出去', title: '挑好的图，正式交出去',
+    summary: '「拿出去」把成果冻结成一份交付：先选图，准备，再导出；导出之后，就算源图被回收也不受影响。',
+    studio: '在「资产交付」里选图 → 准备 → 导出；导出会生成图片和一份清单，也能整包 ZIP 下载，还能带上创作记录。',
+    conversation: '要改交付范围或补说明，回来说；导出后的交付是冻结的，改它会新建一版。',
+    checkpoints: ['只有「成果 keep」能进交付', '每份交付都有版本记录', '历史交付一直能下载']
+  },
+  {
+    id: 'recovery', group: 'delivery', icon: 'recovery', kicker: '回收站', title: '删错了还能找回来',
+    summary: '回收站只属于当前项目：删掉的图都在这里，恢复后回到原来的位置和关系。',
+    studio: '在项目里打开回收站，选中要恢复的图，点恢复。',
+    conversation: '大范围整理、或要删可能被引用的图，先跟 agent 对一下再动手。',
+    checkpoints: ['共享素材不在这里，去「共享素材」页处理', '恢复会带着原来的评审和来源', '删除不靠文件夹表达状态']
+  },
+  {
+    id: 'safety', group: 'safety', icon: 'safety', kicker: '安全边界', title: '哪些事只有你能做',
+    summary: '密钥只写不回显；确认计划、恢复外部请求这些事，只有你本人能做。',
+    studio: '密钥不进日志、不进导出；打开或保存页面不会自动联网。要重启后台，从「系统状态」里走安全重启。',
+    conversation: 'agent 不会替你确认计划，也不能绕过确认去出图。',
+    checkpoints: ['计划确认只能由你亲手点', '密钥不进日志、导出或诊断', '出图之外的操作不会碰你的服务商账号']
+  },
+  {
+    id: 'shortcuts', group: 'start', icon: 'check', kicker: '键盘', title: '画布快捷键',
+    summary: '画布支持一套键盘操作；工具条「更多 → 快捷键」和这里读的是同一张表，不会各说各话。',
+    studio: '在画布上直接按键；吸附开启时方向键按网格移动节点。',
+    conversation: '快捷键只改画布呈现，不改项目里的事实。',
+    checkpoints: SHORTCUT_ROWS.map(([label, keys]) => label + '：' + keys)
+  }
 ];
-
-export const OFFLINE_STRATEGY_CENTER_COPY = Object.freeze({
-  kicker: '离线优先 · 手动联网',
-  title: '先离线比较，再明确联网',
-  summary: '默认只在本地完成提示策略整理与取舍比较。此入口不会自动联网、提交 Canary、调用真实 Provider 或生成图片。',
-  guardrail: '这里改变的只是阅读焦点；任何联网或生成都必须由用户明确选择，并回到现有会话确认与执行边界。'
-});

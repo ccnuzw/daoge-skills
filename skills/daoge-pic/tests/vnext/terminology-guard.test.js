@@ -248,11 +248,12 @@ test('config 面：技术名词表与主路径视觉隔离（收在折叠区里�
 });
 
 // ---------- 第五批：doc 面 ----------
-// 手册要讲清系统怎么跑，术语必须留；但首次出现必须给解释，顶部再挂名词表兜底。
+// 2026-09-20 标准修订（刀哥委托）：手册首先是**给创作者看的**——能不提的工程词就不提；
+// 躲不开的术语（服务商 / 配置 / 密钥 / 出图记录）首次出现必须给即时解释，顶部名词表兜底。
 
 test('doc 面：名词表覆盖的术语都真的出现在手册正文里', async () => {
   const { DOC_TERM_GLOSSARY, DOC_GLOSSARY_COPY } = await import('../../web/src/doc-face-copy.mjs');
-  const content = read('learning-center-content.mjs') + read('learning-center.jsx') + read('offline-strategy-model.mjs');
+  const content = read('learning-center-content.mjs') + read('learning-center.jsx');
 
   const terms = DOC_TERM_GLOSSARY.map(([term]) => term);
   assert.equal(new Set(terms).size, terms.length, 'doc 面名词表里有重复条目');
@@ -264,20 +265,25 @@ test('doc 面：名词表覆盖的术语都真的出现在手册正文里', asyn
   assert.ok(DOC_GLOSSARY_COPY.summary && DOC_GLOSSARY_COPY.note);
 });
 
-test('doc 面：名词表挂在手册顶部，且术语首次出现处有括注', async () => {
+test('doc 面：手册说人话——工程词退场，留下的术语带即时解释', async () => {
   const { DOC_TERM_GLOSSARY } = await import('../../web/src/doc-face-copy.mjs');
   const center = read('learning-center.jsx');
   assert.match(center, /<DocGlossaryPanel \/>/);
   assert.match(center, /from '\.\/doc-face-copy\.mjs'/);
 
-  // 首次出现给解释 —— 抽查几个最容易让人卡住的词，必须带全角括号括注。
-  // （daemon 的括注挂在 Workbench 那处，写作「daemon 是常驻本机的后台服务」，所以这里查 Workbench。）
   const content = read('learning-center-content.mjs');
-  for (const term of ['Workbench', 'conversation', 'Canary', 'SQLite', 'Profile', 'API Key', '预检', 'write-only']) {
-    assert.match(content, new RegExp(term.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&') + '（[^）]+）'), '手册里 ' + term + ' 首次出现没有括注解释');
+  // ① 工程词退场：这些词只该活在配置面/规格里，不该出现在创作者手册。
+  for (const jargon of ['daemon', 'SSE', 'SQLite', 'Canary', 'write-only', 'Provider.db', 'studio.db', '预检', '端点', '脱敏']) {
+    assert.doesNotMatch(content, new RegExp(jargon.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&')), '手册正文里还有工程词：' + jargon);
+  }
+  // ② 躲不开的术语：首次出现带全角括号解释（两种写法都算：「词（解释）」或「（词：解释）」）。
+  for (const [term] of DOC_TERM_GLOSSARY) {
+    const escaped = term.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&');
+    const inline = new RegExp(escaped + '（[^）]{4,}）').test(content) || new RegExp('（' + escaped + '：[^）]{4,}）').test(content);
+    assert.ok(inline, '术语首次出现没有即时解释：' + term);
   }
   // 括注不能只给名词表，正文也要有（二者互为兜底，不是二选一）。
-  assert.ok(DOC_TERM_GLOSSARY.length >= 10, 'doc 面名词表条目太少，覆盖不住手册里的术语');
+  assert.ok(DOC_TERM_GLOSSARY.length >= 8, 'doc 面名词表条目太少，覆盖不住手册里的术语');
 });
 
 test('人读版术语单与模块一一对应（反向守卫，防单边漂移）', () => {
