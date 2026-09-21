@@ -71,3 +71,46 @@ export function listStyleKits(db: StudioDatabase, studioId: string): CreativeKit
 export function listBrandKits(db: StudioDatabase, studioId: string): CreativeKit[] { return listKits(db, studioId, 'brand_kits'); }
 export function createStyleKit(db: StudioDatabase, input: Omit<Parameters<typeof createKit>[1], 'table' | 'targetType'>): CreativeKit { return createKit(db, { ...input, table: 'style_kits', targetType: 'style_kit' }); }
 export function createBrandKit(db: StudioDatabase, input: Omit<Parameters<typeof createKit>[1], 'table' | 'targetType'>): CreativeKit { return createKit(db, { ...input, table: 'brand_kits', targetType: 'brand_kit' }); }
+
+/** 配方里可以合并进计划正文的两种形状：`prompt`（一段话）与 `fragments`（若干条）。 */
+function kitPromptParts(definition: Record<string, unknown>): string[] {
+  const parts: string[] = [];
+  if (typeof definition.prompt === 'string' && definition.prompt.trim()) parts.push(definition.prompt.trim());
+  if (Array.isArray(definition.fragments)) for (const fragment of definition.fragments) if (typeof fragment === 'string' && fragment.trim()) parts.push(fragment.trim());
+  return parts;
+}
+
+export interface AppliedPlanKit { id: string; name: string; type: 'style_kit' | 'brand_kit'; partCount: number; }
+
+/**
+ * 把配方包合并进计划正文（`plan --style-kit/--brand-kit`）。
+ *
+ * 这是「同一套风格做 100 张」的正确形态：配方文案存在库里，agent 每轮只写**本次的增量**，
+ * 合并后的完整正文照样落盘、照样进 plan hash —— 可复现性一点没少，少的是 agent 每轮重打
+ * 那几 KB 风格描述的 token。
+ *
+ * 合并规则固定且可预期：按调用方给出的顺序，把每个配方的 `prompt` 与 `fragments` 逐段附到
+ * 计划正文末尾，各带一个来源标题；结果写进 `plan.appliedKits` 作为出处记录。
+ */
+export function applyPlanKits(db: StudioDatabase, input: { studioId: string; plan: Record<string, unknown>; styleKitIds?: string[]; brandKitIds?: string[] }): { plan: Record<string, unknown>; applied: AppliedPlanKit[] } {
+  const requested: Array<{ id: string; type: 'style_kit' | 'brand_kit' }> = [
+    ...(input.styleKitIds || []).map((id) => ({ id, type: 'style_kit' as const })),
+    ...(input.brandKitIds || []).map((id) => ({ id, type: 'brand_kit' as const }))
+  ];
+  if (!requested.length) return { plan: input.plan, applied: [] };
+  ensureStudio(db, input.studioId);
+  const applied: AppliedPlanKit[] = [];
+  const blocks: string[] = [];
+  for (const item of requested) {
+    const table = item.type === 'style_kit' ? 'style_kits' : 'brand_kits';
+    const row = db.prepare('SELECT id, name, definition_json FROM ' + table + ' WHERE id = ? AND studio_id = ?').get(item.id, input.studioId) as { id: string; name: string; definition_json: string } | undefined;
+    if (!row) throw new InvalidCommandError((item.type === 'style_kit' ? '风格包' : '品牌包') + '不存在：' + item.id + '。');
+    const parts = kitPromptParts(object(row.definition_json));
+    if (!parts.length) throw new InvalidCommandError((item.type === 'style_kit' ? '风格包' : '品牌包') + '「' + row.name + '」没有可合并的 prompt / fragments。');
+    blocks.push('【' + (item.type === 'style_kit' ? '风格包' : '品牌包') + '：' + row.name + '】\n' + parts.join('\n'));
+    applied.push({ id: row.id, name: row.name, type: item.type, partCount: parts.length });
+  }
+  const basePrompt = typeof input.plan.prompt === 'string' ? input.plan.prompt.trim() : '';
+  const merged = blocks.join('\n\n');
+  return { plan: { ...input.plan, prompt: basePrompt ? basePrompt + '\n\n' + merged : merged, appliedKits: applied }, applied };
+}

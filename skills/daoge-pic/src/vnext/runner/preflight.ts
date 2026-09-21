@@ -32,6 +32,56 @@ export interface PreflightResult {
   normalizedPlan: PreflightPlan;
 }
 
+/**
+ * 计划写入被机器挡下时抛的错误。
+ *
+ * 它存在的理由：`preflight` 只在**人工确认之后**才跑，于是「逐图提示词条数对不上」「超过
+ * 模型提示词上限」这类**纯机器可判**的错误，要等人点完确认才炸出来 —— 用户白点一次、agent
+ * 白写一版、还要重新确认。现在这些判定提前到「准备确认」这一刻，代价为零、语义不变。
+ */
+export class PlanValidationError extends Error {
+  constructor(readonly issues: PreflightIssue[]) {
+    super('计划未通过机器校验，未创建确认挑战：' + issues.map((issue) => issue.code + '(' + (issue.field || 'plan') + ')').join('、') + '。修正后用 plan 重新提交，或先用草稿接口存草稿。');
+  }
+}
+
+/**
+ * 纯形状（与 Provider 无关）的 issue code —— 这一组在「准备确认」时就该被机器拦下。
+ *
+ * 用**正向清单**而不是反向排除：将来新增的判定默认属于「要 Provider 才能判」，不会被
+ * 误当成形状问题提前拦人。
+ */
+export const PLAN_SHAPE_ISSUE_CODES: readonly string[] = [
+  'invalid_operation',
+  'invalid_prompt',
+  'prompt_too_large',
+  'invalid_item_prompts',
+  'invalid_item_prompt',
+  'item_prompt_too_large',
+  'item_prompt_count_mismatch',
+  'invalid_reference_assets',
+  'invalid_reference_asset_id',
+  'invalid_mask_asset_id',
+  'invalid_output',
+  'plan_too_large',
+  'invalid_plan',
+  'invalid_item_count',
+  'missing_prompt',
+  'missing_reference',
+  'reference_requires_edit'
+];
+
+/**
+ * 纯计划形状校验：不依赖 Provider 的那些判定（数量、长度、条数、operation 与参考素材一致性）。
+ *
+ * 实现方式是与「未配置的 Provider 状态」跑同一条校验再按 code 取形状子集 —— 形状规则只有
+ * `preflightGenerationPlan` 一份实现，不会与它漂移。
+ */
+export function planShapeIssues(plan: unknown): PreflightIssue[] {
+  const providerNotConfigured = { configured: false } as SafeProviderStatus;
+  return preflightGenerationPlan(plan, providerNotConfigured).issues.filter((issue) => PLAN_SHAPE_ISSUE_CODES.includes(issue.code));
+}
+
 function capabilitiesFromStatus(status: SafeProviderStatus): ImageProviderCapabilities | null {
   if (!status.capabilities || !status.providerId) return null;
   const descriptor = providerDescriptor(status.providerId);

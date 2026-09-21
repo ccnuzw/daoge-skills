@@ -1,6 +1,6 @@
 {
   "name": "daoge-pic",
-  "version": "6.1.1",
+  "version": "6.2.0",
   "description": "DAOGE Pic vNext conversation-first local image creation Studio.",
   "main": "dist/vnext/cli/daoge.js",
   "bin": {

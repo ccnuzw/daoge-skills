@@ -5,7 +5,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 # DAOGE Pic vNext
 
-当前源码与运行时版本为 `6.1.1`（最新正式发布；`6.1.0`、`6.0.0`、`5.14.2` 及更早为历史发布，不兼容的旧 daemon 不得混用）。Skill protocol 为 `daoge-pic-skill-protocol/3.1.0`，运行时兼容范围 `>=6.0.0 <7.0.0`；二者独立于制品版本，制品版本绝不能当作协议版本。
+当前源码与运行时版本为 `6.2.0`（最新正式发布；`6.1.1`、`6.1.0`、`6.0.0`、`5.14.2` 及更早为历史发布，不兼容的旧 daemon 不得混用）。Skill protocol 为 `daoge-pic-skill-protocol/3.1.0`，运行时兼容范围 `>=6.0.0 <7.0.0`；二者独立于制品版本，制品版本绝不能当作协议版本。
 
 本文件是 Agent 执行协议，不是完整产品规格；产品、架构、Schema、Worker、ZIP、安全实现和验证证据分别以 `docs/daoge_pic_vnext_upgrade_spec_zh.md`、`docs/vnext_verification_evidence_zh.md`、源码与测试为准。**执行型会话只读本文件、`daoge <命令> --help` 与下面的按需附录**；README 与 `docs/` 只在被明确要求做产品、架构或发布工作时才读。用户可见沟通使用中文。
 
@@ -77,6 +77,13 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 3. 给出用户可审阅的版本化计划：operation、提示词、数量、输出规格、引用素材、父轮次/父资产与风险；可带一个**可选**的 `understanding`（3–5 句结论性说明）——它回答「你为什么这么理解」，是说明不是执行参数，**推理链不进库**。创建确认挑战可与写计划合并：`plan ... --session <id> --challenge true`。
 4. 未得到用户明确确认前，不得发起任何外部 Provider 调用。
 
+**少花回合的默认动作**（细节见 `references/flow.md`）：
+
+- 计划与结构一起给：`plan --project <名> --plan @- --challenge true`（没有草稿任务/批次时命令自己建，并读回版本号）；长期复用的风格用 `--style-kit` / `--brand-kit`，配方正文由服务端合并，只写增量。
+- 确认后别轮询：`round-status` 一次读全（含 tally）；入队用 `run --auto-preflight true --session <id> --wait true`；等终态用 `daoge wait --round <id>`。
+- 写与读的默认输出是**投影**（只回 id/状态/版本/计数）；排障要原始响应加 `--full`。
+- 计划写入前有机器校验：条数、长度、参考素材与 operation 一致性等错误在**人工确认之前**被拒，报错带逐条 `code`。
+
 计划摘要、Generation History、唯一运行与恢复选择（确认之后到收图）见 `references/flow.md`。
 
 ## 请求队列（受限请求入口）
@@ -97,7 +104,7 @@ node scripts/daoge.js <command> [--workspace <stable-workspace>]
 
 完整命令目录、高风险命令完整签名、`--host` 宿主表与幂等恢复语义见 `references/commands.md`；单条命令的参数以 `daoge <命令> --help` 为准。高风险命令必须按完整签名执行，缺失参数时停止并补齐，**不得猜测默认值或把 secret 写入 argv**。
 
-同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/3.1.0`；`6.1.1` 是当前源码/运行时版本，`6.1.0`、`6.0.0`、`5.14.2` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
+同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/3.1.0`；`6.2.0` 是当前源码/运行时版本，`6.1.1`、`6.1.0`、`6.0.0`、`5.14.2` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
 
 固定查询端点：`GET /api/studio`（协议协商与运行时状态）、`GET /api/sessions/<session-id>/plan-status`（会话计划摘要）、`GET /api/rounds/<round-id>/runs`（当前轮次 Generation History）；确认模板读写走 Bearer-only 的 `/api/confirmed-templates` 列表/详情与 POST save/archive/rollback。路径或方法不在端点表内时 daemon 以 `未找到请求的 Studio API。` 拒绝；Skill 必须改用正确端点或受控 CLI，不得猜测 `/api/studio/...`、旧命令或工作区文件。
 

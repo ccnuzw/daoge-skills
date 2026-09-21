@@ -12,6 +12,10 @@ import { currentBuildId } from '../shared/build-identity';
 import { registerSkill, SkillRegistrationScope } from './register-skill';
 import { skillHostChoices, skillHostDirectory } from '../domain/agent-detect';
 import { assertWorkspaceSupported, doctorWorkspace, formatDoctorReport, redactDoctorReport } from './doctor';
+import { COMMAND_PROJECTIONS, projectPlanWrite, projectRoundStatus, projectRunReceipt, type ProjectionOptions } from './response-projection';
+import { projectSummaries, resolveProjectSelection, type ProjectSummary, type ProjectResolution } from './project-resolution';
+import { composeDeliveryExport, composePreflightAndRun, resolvePlanTarget, type ApiCaller, type PlanTargetInput } from './flow-actions';
+import { WAIT_UNTIL_CHOICES, waitForRoundRun, type WaitUntil } from './wait-run';
 import type { ProviderConcurrencySnapshot } from '../runtime/provider-concurrency';
 export interface RuntimeRecord { pid: number; url: string; capability?: string; workspaceRoot: string; startedAt?: string; heartbeatAt: string; buildId?: string; providerConcurrency?: ProviderConcurrencySnapshot | null; }
 
@@ -21,7 +25,7 @@ const STDIN_SECRET_MARKER = Object.freeze({ __daogeSecretStdin: true });
 const MAX_STDIN_JSON_BYTES = 8 * 1024 * 1024;
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
-type LocalAction = 'status' | 'studio' | 'open' | 'enter' | 'stop' | 'restart' | 'register-skill' | 'reference' | 'round-status' | 'doctor' | 'backup-restore' | 'provider-secret-backend';
+type LocalAction = 'status' | 'studio' | 'open' | 'enter' | 'stop' | 'restart' | 'register-skill' | 'reference' | 'round-status' | 'wait' | 'doctor' | 'backup-restore' | 'provider-secret-backend';
 type FlagKind = 'text' | 'json' | 'secret-stdin' | 'positive-integer' | 'non-negative-integer' | 'usage-limit' | 'execution-concurrency' | 'list' | 'boolean' | 'purpose' | 'scope' | 'host' | 'secret-backend';
 interface FlagSchema { kind: FlagKind; required?: boolean; }
 interface CommandSchema {
@@ -67,7 +71,20 @@ interface ParsedCommand {
   referenceTopic?: string;
   referenceSection?: string;
   roundStatus?: { roundId: string; sessionId: string };
+  wait?: { roundId: string; timeoutMs: number; intervalMs: number; until: WaitUntil };
   planChallenge?: { roundId: string; sessionId: string };
+  /** --full：关闭响应投影，回原始 API 形状（排障与 Workbench 对拍用）。 */
+  full?: boolean;
+  /** --descriptors：provider-list 附加 Provider Descriptor 全表。 */
+  descriptors?: boolean;
+  /** project-list 的本地筛选：daemon 仍回全表，投影前按名称/状态过滤。 */
+  filters?: { name?: string; status?: string; limit?: number };
+  /** plan 的目标解析：给出 --project 时自动找到/建立 draft 任务与批次，并读回版本号。 */
+  planTarget?: PlanTargetInput;
+  /** delivery-export 的一步模式：草稿→准备→导出。 */
+  deliveryOneStep?: { projectId: string; name: string; assetIds: string[]; includeCreativeRecord: boolean };
+  /** run --auto-preflight：先预检再入队（可选继续等终态），一条命令走完。 */
+  runCompose?: { roundId: string; sessionId: string; wait: boolean; timeoutMs: number; intervalMs: number };
 }
 
 /**
@@ -171,6 +188,12 @@ function stringField(record: Record<string, unknown>, field: string): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** `GET /api/rounds/<id>` 的三段：round / latestRun / tally；缺哪段就是 null。 */
+function asRoundDetail(value: unknown): { round: unknown; latestRun: unknown; tally: unknown } {
+  const detail = jsonRecord(value);
+  return { round: detail ? detail.round : null, latestRun: detail ? detail.latestRun : null, tally: detail ? detail.tally : null };
+}
+
 function studioStatusCompatible(value: unknown, expectedStudioId: string): boolean {
   const data = jsonRecord(value);
   if (!data || stringField(data, 'studioId') !== expectedStudioId) return false;
@@ -248,6 +271,27 @@ function strictExecutionConcurrency(value: string): number {
 
 function livePid(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/** `wait` 的默认窗口：5 分钟够一次 4 并发、10 张的出图；要更久就显式 --timeout。 */
+const WAIT_DEFAULT_TIMEOUT_SECONDS = 300;
+const WAIT_DEFAULT_INTERVAL_SECONDS = 2;
+
+/**
+ * `--lease <分钟>` → 毫秒。范围与服务端一致（1 分钟到 24 小时），越界在本地就报错，
+ * 免得先发一次注定被拒的请求。
+ */
+function leaseMilliseconds(values: Record<string, unknown>): number {
+  const minutes = Number(values['--lease']);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) throw new Error('--lease 只能是 1 到 1440 分钟（24 小时）之间的整数。');
+  return minutes * 60000;
+}
+
+function waitUntilChoice(value: unknown): WaitUntil {
+  if (value === undefined) return 'terminal';
+  const choice = String(value);
+  if (WAIT_UNTIL_CHOICES.includes(choice as WaitUntil)) return choice as WaitUntil;
+  throw new Error('--until 只能是 ' + WAIT_UNTIL_CHOICES.join(' 或 ') + '。');
 }
 
 function recordedOwnerPid(workspaceRoot: string): number | null {
@@ -404,8 +448,13 @@ async function api(record: RuntimeRecord, method: HttpMethod, pathname: string, 
     headers: { accept: 'application/json', authorization: 'Bearer ' + record.capability, 'x-daoge-skill-protocol': SKILL_PROTOCOL_NAME + '/' + SKILL_PROTOCOL_VERSION, ...(method !== 'GET' ? { 'content-type': 'application/json', ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}), ...(operationName ? { 'x-daoge-operation-name': operationName } : {}) } : {}) },
     body: method === 'GET' ? undefined : JSON.stringify(body)
   });
-  const payload = await response.json() as { ok?: boolean; data?: unknown; error?: { message?: string } };
-  if (!response.ok || !payload.ok) throw new Error(payload.error?.message || 'Studio API 请求失败。');
+  const payload = await response.json() as { ok?: boolean; data?: unknown; error?: { message?: string; details?: unknown } };
+  if (!response.ok || !payload.ok) {
+    // details 里是机器可判的结构（例如计划校验逐条 issue）。以前只回 message，agent 拿不到
+    // code 就只能靠读中文猜；现在把它附在错误文本尾部，保持单行、可直接 JSON.parse 出来。
+    const details = payload.error?.details === undefined ? '' : ' ' + JSON.stringify(payload.error.details);
+    throw new Error((payload.error?.message || 'Studio API 请求失败。') + details);
+  }
   return payload.data;
 }
 export interface WorkbenchOpenOutput {
@@ -431,9 +480,9 @@ export async function openOrReuseWorkbench(record: RuntimeRecord, force = false,
   }
 }
 
-export interface ProjectSummary { id: string; name: string; status: string; }
+export { projectSummaries, resolveProjectSelection };
+export type { ProjectSummary, ProjectResolution };
 export interface EnterInput { conversation: string; project?: string; task?: string; round?: string; cli?: string; cliVersion?: string; skill?: string; skillVersion?: string; restartStale?: boolean; }
-export type ProjectResolution = 'matched' | 'ambiguous' | 'not-found' | 'not-requested';
 
 export interface ConversationResolution { id: string; source: string; }
 
@@ -453,49 +502,6 @@ export function resolveConversation(requested: string | undefined, environment: 
     if (candidate) return { id: candidate, source: 'env:' + name };
   }
   throw new Error('无法确定当前 conversation ID：传 --conversation <id>，或让宿主导出 ' + CONVERSATION_ENVIRONMENT.join(' / ') + ' 后再用 --conversation auto。CLI 不会替会话猜测身份。');
-}
-
-/** Narrow the daemon project list to what a connection needs: id, name, status. */
-export function projectSummaries(value: unknown): ProjectSummary[] {
-  const data = jsonRecord(value);
-  const list = data && Array.isArray(data.projects) ? data.projects : [];
-  return list.flatMap((item) => {
-    const record = jsonRecord(item);
-    if (!record) return [];
-    const id = stringField(record, 'id');
-    const name = stringField(record, 'name');
-    return id && name ? [{ id, name, status: stringField(record, 'status') }] : [];
-  });
-}
-
-/**
- * 项目名 → projectId 的确定性解析，绝不替用户猜。
- *
- * 归档是真实存在的坑：本机的 Studio 里「鉴权表复验临时项目」active/archived 各有一个，
- * 旧规则会把精确输入判成 ambiguous，让用户为一个早就不用的项目再确认一次。规则改为
- * 先分档（active 优先），档内唯一才算命中：
- *   1. 精确 projectId 命中即为准 —— 调用方给的是唯一事实；
- *   2. 精确项目名：唯一 active → 命中；多个 active → ambiguous；没有 active 时唯一 archived → 命中；
- *   3. 包含匹配按同一分档判定；候选永远 active 在前、archived 在后。
- */
-export function resolveProjectSelection(projects: ProjectSummary[], requested: string): { resolution: ProjectResolution; matched: ProjectSummary | null; candidates: ProjectSummary[] } {
-  const wanted = requested.trim();
-  if (!wanted) return { resolution: 'not-requested', matched: null, candidates: [] };
-  const byId = projects.find((project) => project.id === wanted);
-  if (byId) return { resolution: 'matched', matched: byId, candidates: [] };
-  const decide = (matches: ProjectSummary[]): { resolution: ProjectResolution; matched: ProjectSummary | null; candidates: ProjectSummary[] } => {
-    const active = matches.filter((project) => project.status !== 'archived');
-    const archived = matches.filter((project) => project.status === 'archived');
-    if (active.length === 1) return { resolution: 'matched', matched: active[0], candidates: [] };
-    if (active.length > 1) return { resolution: 'ambiguous', matched: null, candidates: [...active, ...archived] };
-    if (archived.length === 1) return { resolution: 'matched', matched: archived[0], candidates: [] };
-    if (archived.length > 1) return { resolution: 'ambiguous', matched: null, candidates: archived };
-    return { resolution: 'not-found', matched: null, candidates: [] };
-  };
-  const exact = projects.filter((project) => project.name === wanted);
-  if (exact.length) return decide(exact);
-  const partial = projects.filter((project) => project.name.includes(wanted));
-  return partial.length ? decide(partial) : { resolution: 'not-found', matched: null, candidates: [] };
 }
 
 /**
@@ -628,11 +634,29 @@ const commandSchemas: Record<string, CommandSchema> = {
   stop: { summary: '受控关闭本工作区 Studio，不自动重启；要再起来请用 enter 或 open', action: 'stop', flags: {} },
   reference: { summary: '按需打印 Skill 附录 references/<topic>.md（无需 --workspace）；--section 只打印某一节', action: 'reference', flags: { '--topic': { kind: 'text', required: true }, '--section': { kind: 'text' } } },
   'round-status': { summary: '一次读取当前轮次的计划摘要与 Generation History（替代两次调用）', action: 'round-status', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } } },
-  'project-list': { summary: '列出当前 Studio 的项目（含归档），用于把项目名解析成 projectId', method: 'GET', flags: {}, pathname: () => '/api/projects' },
+  wait: { summary: '阻塞等待当前轮次的运行走到终态（或首张成功），一次调用替代 N 次轮询', action: 'wait', flags: { '--round': { kind: 'text', required: true }, '--timeout': { kind: 'non-negative-integer' }, '--interval': { kind: 'positive-integer' }, '--until': { kind: 'text' } } },
+  'project-list': { summary: '列出当前 Studio 的项目（含归档）；--name 精确解析项目名，--status 过滤，--limit 截断', method: 'GET', flags: { '--name': { kind: 'text' }, '--status': { kind: 'text' }, '--limit': { kind: 'usage-limit' } }, pathname: () => '/api/projects' },
+  'task-list': { summary: '列出项目下的任务，用于把任务解析成 taskId', method: 'GET', flags: { '--project': { kind: 'text', required: true } }, pathname: (v) => '/api/projects/' + encoded(v, '--project') + '/tasks' },
+  'round-list': { summary: '列出任务下的轮次，用于把「继续哪一批」解析成 roundId', method: 'GET', flags: { '--task': { kind: 'text', required: true } }, pathname: (v) => '/api/tasks/' + encoded(v, '--task') + '/rounds' },
+  'round-detail': { summary: '读一个轮次的最新运行与逐状态张数（tally）', method: 'GET', flags: { '--round': { kind: 'text', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') },
+  'run-items': {
+    summary: '读一次运行的逐张进度与计数；--status 可多值（逗号分隔），--page/--page-size 分页',
+    method: 'GET',
+    flags: { '--run': { kind: 'text', required: true }, '--status': { kind: 'list' }, '--page': { kind: 'positive-integer' }, '--page-size': { kind: 'positive-integer' } },
+    pathname: (v) => {
+      // status 在 daemon 侧是可重复参数（`getAll('status')`），所以这里逐个拼，而不是用 query()。
+      const params = [
+        ...listValue(v, '--status').map((status) => 'status=' + encodeURIComponent(status)),
+        ...(v['--page'] === undefined ? [] : ['page=' + encodeURIComponent(String(v['--page']))]),
+        ...(v['--page-size'] === undefined ? [] : ['pageSize=' + encodeURIComponent(String(v['--page-size']))])
+      ];
+      return '/api/runs/' + encoded(v, '--run') + '/items' + (params.length ? '?' + params.join('&') : '');
+    }
+  },
   restart: { summary: '优雅重启本工作区 Studio', action: 'restart', flags: {} },
   'register-skill': { summary: '注册当前安装包；--scope user 装到 --host 指定的宿主（缺省 codex，agents = 跨宿主共享目录）且不需要 --workspace；目标已存在则拒绝', action: 'register-skill', flags: { '--scope': { kind: 'scope', required: true }, '--host': { kind: 'host' } } },
   doctor: { summary: '不调用 Provider；检查工作区、SQLite、权限、sharp 与 Windows volume', action: 'doctor', flags: { '--json': { kind: 'boolean' }, '--redacted': { kind: 'boolean' } } },
-  'provider-list': { summary: '列出全部生成服务配置，不含密钥', method: 'GET', flags: {}, pathname: () => '/api/providers' },
+  'provider-list': { summary: '列出全部生成服务配置，不含密钥；--descriptors 附 Provider 能力全表', method: 'GET', flags: { '--descriptors': { kind: 'boolean' } }, pathname: () => '/api/providers' },
   'backup-manifest': { summary: '输出仅含安全相对路径的当前 Studio manifest', method: 'GET', flags: {}, pathname: () => '/api/backup/manifest' },
   'backup-restore-dry-run': { summary: '仅 dry-run，不写入目标 Studio', method: 'POST', flags: { '--source-root': { kind: 'text', required: true }, '--manifest': { kind: 'json', required: true }, '--expected-studio': { kind: 'json' } }, pathname: () => '/api/backup/restore-dry-run', body: (v) => ({ sourceRoot: textValue(v, '--source-root'), manifest: v['--manifest'], ...(v['--expected-studio'] === undefined ? {} : { expectedStudio: v['--expected-studio'] }) }) },
   'backup-restore': { summary: '离线执行恢复，不会启动 daemon；失败自动回滚', action: 'backup-restore', flags: { '--source-root': { kind: 'text', required: true }, '--manifest': { kind: 'json', required: true } }, body: (v) => ({ sourceRoot: textValue(v, '--source-root'), manifest: v['--manifest'] }) },
@@ -669,15 +693,15 @@ const commandSchemas: Record<string, CommandSchema> = {
   'delivery-update': { summary: '更新交付草稿的图片', method: 'PUT', flags: { '--delivery': { kind: 'text', required: true }, '--assets': { kind: 'list', required: true }, '--creative-record': { kind: 'boolean' } }, pathname: (v) => '/api/deliveries/' + encoded(v, '--delivery') + '/items', body: (v) => ({ assetIds: listValue(v, '--assets'), includeCreativeRecord: booleanValue(v, '--creative-record') }) },
   'delivery-ready': { summary: '把交付置为已准备', method: 'POST', flags: { '--delivery': { kind: 'text', required: true } }, pathname: (v) => '/api/deliveries/' + encoded(v, '--delivery') + '/ready', body: () => ({}) },
   'delivery-draft': { summary: '把交付退回草稿', method: 'POST', flags: { '--delivery': { kind: 'text', required: true } }, pathname: (v) => '/api/deliveries/' + encoded(v, '--delivery') + '/draft', body: () => ({}) },
-  'delivery-export': { summary: '导出已准备的交付', method: 'POST', flags: { '--delivery': { kind: 'text', required: true } }, pathname: (v) => '/api/deliveries/' + encoded(v, '--delivery') + '/export', body: () => ({}) },
+  'delivery-export': { summary: '导出交付；给 --project/--assets/--name 时一步走完草稿→准备→导出', method: 'POST', flags: { '--delivery': { kind: 'text' }, '--project': { kind: 'text' }, '--assets': { kind: 'list' }, '--name': { kind: 'text' }, '--creative-record': { kind: 'boolean' } }, pathname: (v) => '/api/deliveries/' + encoded(v, '--delivery') + '/export', body: () => ({}) },
   'delivery-batch': { summary: '新建交付批次', method: 'POST', flags: { '--project': { kind: 'text', required: true }, '--name': { kind: 'text', required: true }, '--deliveries': { kind: 'list', required: true } }, pathname: () => '/api/delivery-batches', body: (v) => ({ projectId: textValue(v, '--project'), name: textValue(v, '--name'), deliveryIds: listValue(v, '--deliveries') }) },
   'delivery-batch-revise': { summary: '修订交付批次', method: 'POST', flags: { '--batch': { kind: 'text', required: true }, '--deliveries': { kind: 'list', required: true } }, pathname: (v) => '/api/delivery-batches/' + encoded(v, '--batch') + '/revisions', body: (v) => ({ deliveryIds: listValue(v, '--deliveries') }) },
   'delivery-batch-ready': { summary: '冻结批次版本', method: 'POST', flags: { '--version': { kind: 'text', required: true } }, pathname: (v) => '/api/delivery-batch-versions/' + encoded(v, '--version') + '/ready', body: () => ({}) },
   round: { summary: '在任务下新建轮次', method: 'POST', flags: { '--task': { kind: 'text', required: true }, '--purpose': { kind: 'purpose', required: true }, '--parent': { kind: 'text' }, '--session': { kind: 'text' } }, pathname: () => '/api/rounds', body: (v) => ({ taskId: textValue(v, '--task'), purpose: textValue(v, '--purpose'), parentRoundId: v['--parent'], sessionId: v['--session'] }) },
-  plan: { summary: '写入计划；@- 从 stdin 读取 JSON；--challenge true 同时创建确认挑战', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--version': { kind: 'positive-integer', required: true }, '--plan': { kind: 'json', required: true }, '--session': { kind: 'text' }, '--challenge': { kind: 'boolean' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/plan', body: (v) => ({ expectedVersion: numberValue(v, '--version'), plan: jsonValue(v, '--plan') }) },
+  plan: { summary: '写入计划（=准备确认）；@- 从 stdin 读取 JSON；--project 可让命令自己找到/建立批次；--style-kit/--brand-kit 由服务端合并配方正文；--challenge true 同时创建确认挑战', method: 'POST', flags: { '--round': { kind: 'text' }, '--project': { kind: 'text' }, '--task': { kind: 'text' }, '--purpose': { kind: 'purpose' }, '--version': { kind: 'positive-integer' }, '--plan': { kind: 'json', required: true }, '--session': { kind: 'text' }, '--style-kit': { kind: 'list' }, '--brand-kit': { kind: 'list' }, '--challenge': { kind: 'boolean' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/plan', body: (v) => ({ ...(v['--version'] === undefined ? {} : { expectedVersion: numberValue(v, '--version') }), plan: jsonValue(v, '--plan'), ...(v['--style-kit'] === undefined ? {} : { styleKitIds: listValue(v, '--style-kit') }), ...(v['--brand-kit'] === undefined ? {} : { brandKitIds: listValue(v, '--brand-kit') }) }) },
   'confirm-challenge': { summary: '只创建 Workbench 人工确认挑战', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/confirmation-challenge', body: (v) => ({ sessionId: textValue(v, '--session') }) },
   preflight: { summary: '开工前核算；只接受已人工确认会话', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--session': { kind: 'text', required: true }, '--concurrency': { kind: 'execution-concurrency' }, '--usage-estimate': { kind: 'json' } }, pathname: (v) => '/api/rounds/' + encoded(v, '--round') + '/preflight', body: (v) => ({ sessionId: textValue(v, '--session'), executionConcurrency: v['--concurrency'], ...(v['--usage-estimate'] === undefined ? {} : { usageEstimate: v['--usage-estimate'] }) }) },
-  run: { summary: '按预检结果开始出图', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--preflight': { kind: 'text', required: true }, '--confirm-token': { kind: 'text', required: true } }, pathname: () => '/api/runs', body: (v) => ({ roundId: textValue(v, '--round'), preflightId: textValue(v, '--preflight'), confirmToken: textValue(v, '--confirm-token') }) },
+  run: { summary: '按预检结果开始出图；--auto-preflight true 时先预检再入队（需 --session），可选 --wait true 继续等终态', method: 'POST', flags: { '--round': { kind: 'text', required: true }, '--preflight': { kind: 'text' }, '--confirm-token': { kind: 'text' }, '--session': { kind: 'text' }, '--auto-preflight': { kind: 'boolean' }, '--wait': { kind: 'boolean' }, '--timeout': { kind: 'non-negative-integer' }, '--interval': { kind: 'positive-integer' } }, pathname: () => '/api/runs', body: (v) => ({ roundId: textValue(v, '--round'), preflightId: textValue(v, '--preflight'), confirmToken: textValue(v, '--confirm-token') }) },
   pause: { summary: '暂停运行', method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/pause', body: () => ({}) },
   resume: { summary: '恢复运行', method: 'POST', flags: { '--run': { kind: 'text', required: true }, '--session': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/resume', body: (v) => ({ sessionId: textValue(v, '--session') }) },
   cancel: { summary: '取消运行', method: 'POST', flags: { '--run': { kind: 'text', required: true } }, pathname: (v) => '/api/runs/' + encoded(v, '--run') + '/cancel', body: () => ({}) },
@@ -688,8 +712,8 @@ const commandSchemas: Record<string, CommandSchema> = {
   'agent-register': { summary: '登记/续报在场；--skill 申报技能名（如 daoge-pic），Studio 只展示不管理', method: 'POST', flags: { '--cli': { kind: 'text', required: true }, '--cli-version': { kind: 'text' }, '--skill': { kind: 'text' }, '--skill-version': { kind: 'text' } }, pathname: () => '/api/agents/register', body: (v) => ({ cliName: textValue(v, '--cli'), ...(v['--cli-version'] === undefined ? {} : { cliVersion: textValue(v, '--cli-version') }), ...(v['--skill'] === undefined ? {} : { skills: [{ name: textValue(v, '--skill'), ...(v['--skill-version'] === undefined ? {} : { version: textValue(v, '--skill-version') }) }] }) }) },
   'agent-list': { summary: '查看当前有没有 agent 在场、最后活动时间、申报了什么技能', method: 'GET', flags: {}, pathname: () => '/api/agents' },
   'request-detail': { summary: '读一条请求；会带出上一条的原话（追问/续说用）', method: 'GET', flags: { '--request': { kind: 'text', required: true } }, pathname: (v) => '/api/requests/' + encoded(v, '--request') },
-  'request-accept': { summary: '领取一条请求；租约到期未处理会自动回队', method: 'POST', flags: { '--request': { kind: 'text', required: true }, '--agent': { kind: 'text' } }, pathname: (v) => '/api/requests/' + encoded(v, '--request') + '/accept', body: (v) => ({ ...(v['--agent'] === undefined ? {} : { agentId: textValue(v, '--agent') }) }) },
-  'request-renew': { summary: '续租（心跳）；跨人工确认的长活要定期调用，否则租约到期会被判「被领过但没完成」', method: 'POST', flags: { '--request': { kind: 'text', required: true }, '--agent': { kind: 'text' } }, pathname: (v) => '/api/requests/' + encoded(v, '--request') + '/renew', body: (v) => ({ ...(v['--agent'] === undefined ? {} : { agentId: textValue(v, '--agent') }) }) },
+  'request-accept': { summary: '领取一条请求；租约到期未处理会自动回队；--lease 可一次领到 24 小时', method: 'POST', flags: { '--request': { kind: 'text', required: true }, '--agent': { kind: 'text' }, '--lease': { kind: 'positive-integer' } }, pathname: (v) => '/api/requests/' + encoded(v, '--request') + '/accept', body: (v) => ({ ...(v['--agent'] === undefined ? {} : { agentId: textValue(v, '--agent') }), ...(v['--lease'] === undefined ? {} : { leaseMs: leaseMilliseconds(v) }) }) },
+  'request-renew': { summary: '续租（心跳）；--lease 一次续到 24 小时，跨人工确认的长活不必每 10 分钟发一次', method: 'POST', flags: { '--request': { kind: 'text', required: true }, '--agent': { kind: 'text' }, '--lease': { kind: 'positive-integer' } }, pathname: (v) => '/api/requests/' + encoded(v, '--request') + '/renew', body: (v) => ({ ...(v['--agent'] === undefined ? {} : { agentId: textValue(v, '--agent') }), ...(v['--lease'] === undefined ? {} : { leaseMs: leaseMilliseconds(v) }) }) },
   'request-done': { summary: '结单；--reply 带回回应，--needs-input 带回追问，--round 关联产出的批次', method: 'POST', flags: { '--request': { kind: 'text', required: true }, '--round': { kind: 'text' }, '--reply': { kind: 'text' }, '--needs-input': { kind: 'text' }, '--result': { kind: 'json' } }, pathname: (v) => '/api/requests/' + encoded(v, '--request') + '/done', body: (v) => ({ ...(v['--round'] === undefined ? {} : { resultRoundId: textValue(v, '--round') }), ...(v['--reply'] === undefined ? {} : { reply: textValue(v, '--reply') }), ...(v['--needs-input'] === undefined ? {} : { needsInput: textValue(v, '--needs-input') }), ...(v['--result'] === undefined ? {} : { result: v['--result'] }) }) },
   'request-reject': { summary: '拒单；--reason 用人话说清为什么做不了', method: 'POST', flags: { '--request': { kind: 'text', required: true }, '--reason': { kind: 'text' } }, pathname: (v) => '/api/requests/' + encoded(v, '--request') + '/reject', body: (v) => ({ ...(v['--reason'] === undefined ? {} : { reason: textValue(v, '--reason') }) }) },
 };
@@ -783,7 +807,10 @@ function parseCommand(args: string[]): ParsedCommand {
   const schema = commandSchemas[name];
   if (!schema) throw new Error('未知 vNext 命令。\n' + usage());
   const mutation = Boolean(schema.method && schema.method !== 'GET');
-  const allowed = new Set(['--workspace', ...Object.keys(schema.flags), ...(mutation ? ['--idempotency-key', '--operation-name'] : [])]);
+  // --full 是通用逃生口：装了响应投影的命令默认回精简形状，要原始形状（排障、与 Workbench
+  // 对拍）就加 --full。它不属于任何单条命令的签名，所以不进 commandSchemas，也就不会污染
+  // 每条命令的 --help。
+  const allowed = new Set(['--workspace', '--full', ...Object.keys(schema.flags), ...(mutation ? ['--idempotency-key', '--operation-name'] : [])]);
   const rawValues: Record<string, string> = {};
   for (let index = 1; index < args.length; index += 2) {
     const flagName = args[index];
@@ -794,11 +821,27 @@ function parseCommand(args: string[]): ParsedCommand {
     rawValues[flagName] = raw;
   }
   if (rawValues['--idempotency-key'] && rawValues['--operation-name']) throw new Error('--idempotency-key 与 --operation-name 不能同时使用。');
+  const full = rawValues['--full'] === undefined ? false : validateFlag('--full', rawValues['--full'], 'boolean') === true;
+  const descriptors = rawValues['--descriptors'] === undefined ? false : validateFlag('--descriptors', rawValues['--descriptors'], 'boolean') === true;
   const values: Record<string, unknown> = {};
   for (const [flagName, flagSchema] of Object.entries(schema.flags)) {
     const raw = rawValues[flagName];
     if (raw === undefined) { if (flagSchema.required) throw new Error('需要 ' + flagName + '。'); continue; }
     values[flagName] = validateFlag(flagName, raw, flagSchema.kind);
+  }
+  if (name === 'plan' && values['--round'] === undefined && values['--project'] === undefined) throw new Error('需要 --round，或用 --project <名|id> 让 plan 自己找到/建立批次。');
+  if (name === 'run') {
+    const autoPreflight = values['--auto-preflight'] === true;
+    if (autoPreflight && values['--session'] === undefined) throw new Error('run --auto-preflight true 需要 --session：预检必须绑定当前智能体会话。');
+    if (!autoPreflight && values['--preflight'] === undefined) throw new Error('需要 --preflight <dry-run-id>；或用 --auto-preflight true --session <id> 让命令先预检再入队。');
+    if (!autoPreflight && values['--confirm-token'] === undefined) throw new Error('需要 --confirm-token <daemon-token>。');
+    if (!autoPreflight && values['--wait'] === true) throw new Error('--wait 只能与 --auto-preflight true 一起使用。');
+  }
+  if (name === 'delivery-export') {
+    const oneStep = values['--project'] !== undefined || values['--assets'] !== undefined || values['--name'] !== undefined;
+    if (oneStep && values['--delivery'] !== undefined) throw new Error('--delivery 与一步导出（--project/--assets/--name）不能同时使用。');
+    if (!oneStep && values['--delivery'] === undefined) throw new Error('需要 --delivery <id>，或给 --project/--assets/--name 一步导出。');
+    if (oneStep && (values['--project'] === undefined || values['--assets'] === undefined || values['--name'] === undefined)) throw new Error('一步导出需要同时给出 --project、--assets 与 --name。');
   }
   if (name === 'provider-update') {
     const action = values['--api-key-action'];
@@ -810,11 +853,11 @@ function parseCommand(args: string[]): ParsedCommand {
   const root = withoutWorkspace ? undefined : workspaceRootForCommand(name, rawValues['--workspace'] as string | undefined);
   const markerCount = Object.values(values).filter((value) => value === STDIN_JSON_MARKER).length;
   if (markerCount > 1) throw new Error('每次命令最多只能使用一个 @- stdin JSON 标记。');
-  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(schema.action === 'open' || schema.action === 'enter' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'enter' ? { enter: { conversation: textValue(values, '--conversation'), ...(values['--project'] === undefined ? {} : { project: textValue(values, '--project') }), ...(values['--task'] === undefined ? {} : { task: textValue(values, '--task') }), ...(values['--round'] === undefined ? {} : { round: textValue(values, '--round') }), ...(values['--cli'] === undefined ? {} : { cli: textValue(values, '--cli') }), ...(values['--cli-version'] === undefined ? {} : { cliVersion: textValue(values, '--cli-version') }), ...(values['--skill'] === undefined ? {} : { skill: textValue(values, '--skill') }), ...(values['--skill-version'] === undefined ? {} : { skillVersion: textValue(values, '--skill-version') }), ...(values['--restart-stale'] === undefined ? {} : { restartStale: values['--restart-stale'] === true }) } } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope, host: values['--host'] === undefined ? undefined : textValue(values, '--host') } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}), ...(schema.action === 'provider-secret-backend' ? { secretBackend: values['--backend'] as SecretBackendChoice } : {}), ...(schema.action === 'reference' ? { referenceTopic: textValue(values, '--topic'), ...(values['--section'] === undefined ? {} : { referenceSection: textValue(values, '--section') }) } : {}), ...(schema.action === 'round-status' ? { roundStatus: { roundId: textValue(values, '--round'), sessionId: textValue(values, '--session') } } : {}) };
+  if (schema.action) return { name, workspaceRoot: root, action: schema.action, ...(full ? { full: true } : {}), ...(schema.action === 'open' || schema.action === 'enter' ? { force: values['--force'] === true, allowNestedStudio: values['--allow-nested-studio'] === true } : {}), ...(schema.action === 'enter' ? { enter: { conversation: textValue(values, '--conversation'), ...(values['--project'] === undefined ? {} : { project: textValue(values, '--project') }), ...(values['--task'] === undefined ? {} : { task: textValue(values, '--task') }), ...(values['--round'] === undefined ? {} : { round: textValue(values, '--round') }), ...(values['--cli'] === undefined ? {} : { cli: textValue(values, '--cli') }), ...(values['--cli-version'] === undefined ? {} : { cliVersion: textValue(values, '--cli-version') }), ...(values['--skill'] === undefined ? {} : { skill: textValue(values, '--skill') }), ...(values['--skill-version'] === undefined ? {} : { skillVersion: textValue(values, '--skill-version') }), ...(values['--restart-stale'] === undefined ? {} : { restartStale: values['--restart-stale'] === true }) } } : {}), ...(schema.action === 'register-skill' ? { scope: values['--scope'] as SkillRegistrationScope, host: values['--host'] === undefined ? undefined : textValue(values, '--host') } : {}), ...(schema.action === 'doctor' ? { jsonOutput: values['--json'] === true, redactedOutput: values['--redacted'] === true } : {}), ...(schema.action === 'backup-restore' ? { restoreInput: (schema.body as (input: Record<string, unknown>) => JsonObject)(values) } : {}), ...(schema.action === 'provider-secret-backend' ? { secretBackend: values['--backend'] as SecretBackendChoice } : {}), ...(schema.action === 'reference' ? { referenceTopic: textValue(values, '--topic'), ...(values['--section'] === undefined ? {} : { referenceSection: textValue(values, '--section') }) } : {}), ...(schema.action === 'round-status' ? { roundStatus: { roundId: textValue(values, '--round'), sessionId: textValue(values, '--session') } } : {}), ...(schema.action === 'wait' ? { wait: { roundId: textValue(values, '--round'), timeoutMs: (values['--timeout'] === undefined ? WAIT_DEFAULT_TIMEOUT_SECONDS : numberValue(values, '--timeout')) * 1000, intervalMs: (values['--interval'] === undefined ? WAIT_DEFAULT_INTERVAL_SECONDS : numberValue(values, '--interval')) * 1000, until: waitUntilChoice(values['--until']) } } : {}) };
   const method = schema.method as HttpMethod;
   const operationName = method === 'GET' || rawValues['--idempotency-key'] ? undefined : rawValues['--operation-name'] ? explicitOperationName(rawValues['--operation-name']) : undefined;
   const idempotencyKey = method === 'GET' || operationName ? undefined : rawValues['--idempotency-key'] === undefined ? 'skill-' + randomUUID() : explicitIdempotencyKey(rawValues['--idempotency-key']);
-  return { name, workspaceRoot: root, request: { method, pathname: (schema.pathname as (input: Record<string, unknown>) => string)(values), body: schema.body ? schema.body(values) : {}, idempotencyKey, operationName }, ...(name === 'plan' && values['--challenge'] === true ? { planChallenge: { roundId: textValue(values, '--round'), sessionId: values['--session'] === undefined ? '' : textValue(values, '--session') } } : {}) };
+  return { name, workspaceRoot: root, request: { method, pathname: (schema.pathname as (input: Record<string, unknown>) => string)(values), body: schema.body ? schema.body(values) : {}, idempotencyKey, operationName }, ...(full ? { full: true } : {}), ...(descriptors ? { descriptors: true } : {}), ...(name === 'delivery-export' && values['--project'] !== undefined ? { deliveryOneStep: { projectId: textValue(values, '--project'), name: textValue(values, '--name'), assetIds: listValue(values, '--assets'), includeCreativeRecord: booleanValue(values, '--creative-record') } } : {}), ...(name === 'plan' ? { planTarget: { ...(values['--round'] === undefined ? {} : { roundId: textValue(values, '--round') }), ...(values['--project'] === undefined ? {} : { project: textValue(values, '--project') }), ...(values['--task'] === undefined ? {} : { task: textValue(values, '--task') }), ...(values['--purpose'] === undefined ? {} : { purpose: textValue(values, '--purpose') }), ...(values['--session'] === undefined ? {} : { session: textValue(values, '--session') }), ...(values['--version'] === undefined ? {} : { expectedVersion: numberValue(values, '--version') }) } } : {}), ...(name === 'run' && values['--auto-preflight'] === true ? { runCompose: { roundId: textValue(values, '--round'), sessionId: textValue(values, '--session'), wait: values['--wait'] === true, timeoutMs: (values['--timeout'] === undefined ? WAIT_DEFAULT_TIMEOUT_SECONDS : numberValue(values, '--timeout')) * 1000, intervalMs: (values['--interval'] === undefined ? WAIT_DEFAULT_INTERVAL_SECONDS : numberValue(values, '--interval')) * 1000 } } : {}), ...(name === 'project-list' && (values['--name'] !== undefined || values['--status'] !== undefined || values['--limit'] !== undefined) ? { filters: { ...(values['--name'] === undefined ? {} : { name: textValue(values, '--name') }), ...(values['--status'] === undefined ? {} : { status: textValue(values, '--status') }), ...(values['--limit'] === undefined ? {} : { limit: numberValue(values, '--limit') }) } } : {}), ...(name === 'plan' && values['--challenge'] === true ? { planChallenge: { roundId: textValue(values, '--round'), sessionId: values['--session'] === undefined ? '' : textValue(values, '--session') } } : {}) };
 }
 
 function commandLine(name: string, schema: CommandSchema): string {
@@ -841,6 +884,8 @@ function commandHelp(name: string): string {
     lines.push(`  ${flag} ${FLAG_HINTS[flagSchema.kind]}  ${flagSchema.required ? '必填' : '可选'}`);
   }
   if (name === 'register-skill') lines.push(`  --host 可用：${skillHostChoices().join('、')}（agents = 跨宿主共享目录，多数宿主都能读到）`);
+  // --full 是通用逃生口，只在该命令真的装了投影时提示，避免每条命令都多一行噪音。
+  if (Object.prototype.hasOwnProperty.call(COMMAND_PROJECTIONS, name)) lines.push('  --full  可选；回原始 API 形状（默认只回 id/状态/版本/计数，不回计划正文）');
   if (schema.method && schema.method !== 'GET') {
     lines.push('  --idempotency-key <key>  可选，与 --operation-name 互斥');
     lines.push('  --operation-name <verb:scope>  可选，由 daemon 派生稳定 key');
@@ -848,6 +893,19 @@ function commandHelp(name: string): string {
   if (!Object.keys(schema.flags).length && !(schema.method && schema.method !== 'GET')) lines.push('  （该命令没有其他参数）');
   return lines.join('\n');
 }
+
+/**
+ * Agent 主线命令：连接 → 读结构 → 计划 → 等待 → 出图 → 收图 → 交付。
+ * 其余命令是人类/运维侧（生成服务、备份、安装、用量），列在后面 —— 一眼能看出「这条命令
+ * 该不该由 agent 调」，比把 70+ 条命令平铺成一坨省事。
+ */
+const AGENT_MAINLINE_COMMANDS: readonly string[] = [
+  'enter', 'open', 'status', 'studio', 'round-status', 'wait', 'project-list', 'task-list', 'round-list',
+  'round-detail', 'run-items', 'project', 'task', 'round', 'plan', 'confirm-challenge', 'preflight', 'run',
+  'pause', 'resume', 'cancel', 'retry', 'resolve-unknown', 'reconcile-external', 'request-list', 'request-detail',
+  'request-accept', 'request-renew', 'request-done', 'request-reject', 'delivery', 'delivery-update',
+  'delivery-ready', 'delivery-draft', 'delivery-export', 'reference', 'template-list', 'template-get'
+];
 
 function usage(): string {
   // 由 commandSchemas 生成，不再手写第二份。
@@ -858,9 +916,13 @@ function usage(): string {
     '',
     '用法：daoge <命令> --workspace <项目根> [参数]',
     '查看某个命令的参数：daoge <命令> --help',
-    ''
+    '',
+    'Agent 主线：'
   ];
-  for (const name of Object.keys(commandSchemas)) lines.push(commandLineBrief(name, commandSchemas[name]));
+  for (const name of Object.keys(commandSchemas)) if (AGENT_MAINLINE_COMMANDS.includes(name)) lines.push(commandLineBrief(name, commandSchemas[name]));
+  lines.push('');
+  lines.push('人类 / 运维（生成服务、备份、安装、用量；agent 通常不需要）：');
+  for (const name of Object.keys(commandSchemas)) if (!AGENT_MAINLINE_COMMANDS.includes(name)) lines.push(commandLineBrief(name, commandSchemas[name]));
   lines.push('');
   lines.push('完整签名：daoge --help --full 或 daoge <命令> --help。');
   return lines.join('\n');
@@ -973,11 +1035,24 @@ export async function main(): Promise<void> {
     return;
   }
   const record = await ensureDaemon(root);
+  if (parsed.action === 'wait') {
+    const input = parsed.wait as NonNullable<ParsedCommand['wait']>;
+    const result = await waitForRoundRun(input, {
+      readRound: (roundId) => api(record, 'GET', '/api/rounds/' + encodeURIComponent(roundId), {}),
+      readEvents: (after) => api(record, 'GET', '/api/events?after=' + encodeURIComponent(String(after)), {})
+    });
+    process.stdout.write(JSON.stringify(result) + '\n');
+    return;
+  }
   if (parsed.action === 'round-status') {
     const input = parsed.roundStatus as { roundId: string; sessionId: string };
     const planStatus = await api(record, 'GET', '/api/sessions/' + encodeURIComponent(input.sessionId) + '/plan-status', {});
     const runs = await api(record, 'GET', '/api/rounds/' + encodeURIComponent(input.roundId) + '/runs', {});
-    process.stdout.write(JSON.stringify({ planStatus, runs }) + '\n');
+    // tally 与 latestRun 在 round detail 上（plan-status 不返回逐状态张数）。第三次本地 GET
+    // 换 agent 不用再发一条命令问「这批量成了几张」。
+    const detail = asRoundDetail(await api(record, 'GET', '/api/rounds/' + encodeURIComponent(input.roundId), {}));
+    const payload = { planStatus, runs, tally: detail.tally, round: detail.round, latestRun: detail.latestRun };
+    process.stdout.write(JSON.stringify(parsed.full ? payload : projectRoundStatus(payload)) + '\n');
     return;
   }
   if (parsed.action === 'studio') { process.stdout.write(JSON.stringify({ workspaceRoot: root, daemon: publicRuntime(record), workbench: { origin: record.url, command: ['daoge', 'open', '--workspace', root] } }, null, 2) + '\n'); return; }
@@ -992,15 +1067,63 @@ export async function main(): Promise<void> {
     return;
   }
   const request = parsed.request as NonNullable<ParsedCommand['request']>;
+  const call: ApiCaller = (method, pathname, body, idempotencyKey, operationName) => api(record, method, pathname, body, idempotencyKey, operationName);
+  if (parsed.deliveryOneStep) {
+    const step = parsed.deliveryOneStep;
+    const result = await composeDeliveryExport(call, step);
+    process.stdout.write(JSON.stringify(result) + '\n');
+    return;
+  }
+  if (parsed.planTarget) {
+    const body = materializeStdinJson(request.body);
+    const target = await resolvePlanTarget(call, parsed.planTarget);
+    const prepared = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(target.roundId) + '/plan', { expectedVersion: target.expectedVersion, plan: body.plan }, request.idempotencyKey);
+    let challenge: unknown;
+    if (parsed.planChallenge) {
+      const sessionId = parsed.planChallenge.sessionId || parsed.planTarget.session || '';
+      if (!sessionId) throw new Error('plan --challenge true 需要同时给出 --session。');
+      challenge = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(target.roundId) + '/confirmation-challenge', { sessionId }, undefined, 'plan-challenge-' + randomUUID());
+    }
+    if (parsed.full) { process.stdout.write(JSON.stringify({ plan: prepared, ...(challenge === undefined ? {} : { challenge }), created: target.created }, null, 2) + '\n'); return; }
+    const projected = { ...projectPlanWrite(prepared, challenge), roundId: target.roundId, ...(Object.keys(target.created).length ? { created: target.created } : {}) };
+    process.stdout.write(JSON.stringify(projected) + '\n');
+    return;
+  }
+  if (parsed.runCompose) {
+    const compose = parsed.runCompose;
+    // 并发不在 run 上给：它是预检的输入（既有契约），要显式指定就自己先跑 preflight。
+    const composed = await composePreflightAndRun(call, { roundId: compose.roundId, sessionId: compose.sessionId });
+    const projected = { ...projectRunReceipt({ value: composed.run }), preflightId: composed.preflight.preflightId };
+    if (compose.wait) {
+      const waited = await waitForRoundRun({ roundId: compose.roundId, timeoutMs: compose.timeoutMs, intervalMs: compose.intervalMs, until: 'terminal' }, {
+        readRound: (roundId) => api(record, 'GET', '/api/rounds/' + encodeURIComponent(roundId), {}),
+        readEvents: (after) => api(record, 'GET', '/api/events?after=' + encodeURIComponent(String(after)), {})
+      });
+      process.stdout.write(JSON.stringify({ ...projected, waited }) + '\n');
+      return;
+    }
+    process.stdout.write(JSON.stringify(projected) + '\n');
+    return;
+  }
   const result = await api(record, request.method, request.pathname, materializeStdinJson(request.body), request.idempotencyKey, request.operationName);
   if (parsed.planChallenge) {
     const challengeInput = parsed.planChallenge;
     if (!challengeInput.sessionId) throw new Error('plan --challenge true 需要同时给出 --session。');
     const challenge = await api(record, 'POST', '/api/rounds/' + encodeURIComponent(challengeInput.roundId) + '/confirmation-challenge', { sessionId: challengeInput.sessionId }, undefined, 'plan-challenge-' + randomUUID());
-    process.stdout.write(JSON.stringify({ plan: result, challenge }, null, 2) + '\n');
+    // 计划正文与挑战值都不回传：正文是 agent 自己刚写的东西，挑战值只属于 Workbench 的确认按钮。
+    process.stdout.write((parsed.full ? JSON.stringify({ plan: result, challenge }, null, 2) : JSON.stringify(projectPlanWrite(result, challenge))) + '\n');
     return;
   }
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  const projection = parsed.full ? undefined : COMMAND_PROJECTIONS[parsed.name];
+  if (!projection) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    return;
+  }
+  const options: ProjectionOptions = {
+    ...(parsed.descriptors === true ? { descriptors: true } : {}),
+    ...(parsed.filters === undefined ? {} : { filters: parsed.filters })
+  };
+  process.stdout.write(JSON.stringify(projection(result, options)) + '\n');
 }
 
 export { parseCommand, commandSchemas, commandHelp, usage, usageFull };

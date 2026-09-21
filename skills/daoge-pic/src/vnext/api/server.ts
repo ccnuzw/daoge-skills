@@ -15,13 +15,14 @@ import type { ImageProvider } from '../providers/contracts';
 import { probeHttpEndpoint } from '../providers/http-safety';
 import { archiveProject, createProject, createRoundDraft, createTaskDraft, confirmRoundPlan, executeIdempotent, executeIdempotentAsync, getRound, getStudioSession, getTask, InvalidCommandError, listRoundPlanVersions, openOrAttachStudioSession, prepareRoundForConfirmation, StudioNotFoundError, updateRoundDraftContext, updateStudioSessionContext, VersionConflictError } from '../domain/studio-commands';
 import { cancelGenerationRun, createDryRunPreview, getDryRunPreview, getGenerationRun, listDryRunPreviews, pauseGenerationRun, preflightRound, queueGenerationRun, resolveUnknownRunItems, resumeGenerationRun, retryGenerationRunItems } from '../runner/run-commands';
+import { PlanValidationError, planShapeIssues, preflightGenerationPlan } from '../runner/preflight';
 import { StateTransitionError } from '../domain/states';
 import { AssetKind, AssetScope, countScopedStudioAssets, countStudioAssets, createAssetSnapshotAsync, getAssetImpact, getStudioAsset, importStagedStudioAssetAsync, listScopedStudioAssets, listScopedStudioAssetsByIds, listSharedStudioAssets, listStudioAssets, restoreAsset, setReviewDecision, setReviewDecisions, setStudioAssetShared, softDeleteAsset, StudioAsset } from '../domain/assets';
 import { inspectProjectAssetAccess, projectAssetReferenceAllowed } from '../domain/asset-access';
 import { isInStudio, notInStudioMessage, selectInStudioSql, ScopedEntityType } from '../domain/studio-scope';
 import { currentBuildId } from '../shared/build-identity';
 import { getQualityMetrics } from '../domain/quality-metrics';
-import { createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
+import { applyPlanKits, createBrandKit, createStyleKit, createUserTaskType, listBrandKits, listStyleKits, listTaskTypes } from '../domain/libraries';
 import { getLatestRun, listProjects, listRounds, listRunItemsForQuery, listRuns, listTasks, searchStudio } from '../domain/queries';
 import { listProjectTemplates } from '../domain/project-templates';
 import { archiveConfirmedTemplate, getConfirmedTemplate, listConfirmedTemplates, rollbackConfirmedTemplate, saveConfirmedTemplate, type ConfirmedTemplateType, type SaveConfirmedTemplateInput } from '../domain/confirmed-templates';
@@ -1552,16 +1553,21 @@ export class LocalStudioService {
       const [, requestId, action] = requestActionMatch;
       const studioId = this.initialized.manifest.studioId;
       getStudioRequest(this.db, { studioId, requestId });
+      // 租约时长可由调用方指定：跨人工确认的长活（用户可能几十分钟后才点）用一条 --lease 就能
+      // 盖住整个窗口，不必每隔 10 分钟发一次心跳。范围卡在 1 分钟到 24 小时，防止把租约写成
+      // 「永远持有」——那会让一张单再也回不了队。
+      const leaseMs = body.leaseMs === undefined ? undefined : numberValue(body.leaseMs);
+      if (leaseMs !== undefined && (!Number.isInteger(leaseMs) || leaseMs < 60000 || leaseMs > 86400000)) throw new InvalidCommandError('租约时长必须是 1 分钟到 24 小时之间的毫秒数。');
       if (action === 'renew') {
         // 心跳：跨人工确认的长活要能一直持有租约，否则必然被判「被领过但没完成」。
-        const renewed = renewStudioRequestLease(this.db, { studioId, requestId, agentId: text(body.agentId) || 'agent' });
+        const renewed = renewStudioRequestLease(this.db, { studioId, requestId, agentId: text(body.agentId) || 'agent', ...(leaseMs === undefined ? {} : { leaseMs }) });
         // 租约是「我真的在做这一单」的证据——顺手续报在场，别让状态卡说它走了。
         touchStudioAgent(this.db, { studioId, cliName: text(body.agentId) });
         return success(response, publicValue(renewed));
       }
       if (action === 'accept') {
         const agentId = text(body.agentId) || 'agent';
-        const claimed = claimStudioRequest(this.db, { studioId, requestId, agentId });
+        const claimed = claimStudioRequest(this.db, { studioId, requestId, agentId, ...(leaseMs === undefined ? {} : { leaseMs }) });
         if (claimed.claimed) touchStudioAgent(this.db, { studioId, cliName: agentId });
         return success(response, { claimed: claimed.claimed, request: publicValue(claimed.request) });
       }
@@ -1683,8 +1689,27 @@ export class LocalStudioService {
     if (planMatch && request.method === 'POST') {
       this.assertRoundInStudio(planMatch[1]);
       this.assertPlanRequestInStudio(record(body.plan));
-      const prepared = prepareRoundForConfirmation(this.db, { studioId: this.initialized.manifest.studioId, roundId: planMatch[1], plan: record(body.plan), expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
-      this.linkPlanRequestRound(record(body.plan), planMatch[1]);
+      // 这一步是「准备确认」，不是草稿：机器可判的错误在这里就要拦下，别拖到人工点击之后。
+      // 草稿仍可自由写（PUT /api/rounds/<id>/draft-context），Provider 未配置时也只要求形状正确 ——
+      // 「先写计划、后配生成服务」这条工作流不能被这条闸门切断。
+      const styleKitIds = boundedIds(body.styleKitIds, 'styleKitIds', { optional: true }) || [];
+      const brandKitIds = boundedIds(body.brandKitIds, 'brandKitIds', { optional: true }) || [];
+      // 配方合并发生在**校验与落盘之前**：合并后的正文才是被确认、被预检、被 hash 的那一份。
+      const withKits = applyPlanKits(this.db, { studioId: this.initialized.manifest.studioId, plan: record(body.plan), styleKitIds, brandKitIds }).plan;
+      const planStatus = providerStatus(this.providerDb, this.initialized.paths);
+      // 形状判定与 Provider 判定会重叠（例如条数不匹配两条路径都会报），按 code+field 去重，
+      // 让调用方看到的是「问题清单」而不是「实现路径」。
+      const seenPlanIssues = new Set<string>();
+      const planIssues = [...planShapeIssues(withKits), ...(planStatus.configured ? preflightGenerationPlan(withKits, planStatus).issues : [])]
+        .filter((issue) => {
+          const identity = issue.code + '|' + (issue.field || '');
+          if (seenPlanIssues.has(identity)) return false;
+          seenPlanIssues.add(identity);
+          return true;
+        });
+      if (planIssues.length) throw new PlanValidationError(planIssues);
+      const prepared = prepareRoundForConfirmation(this.db, { studioId: this.initialized.manifest.studioId, roundId: planMatch[1], plan: withKits, expectedVersion: numberValue(body.expectedVersion), idempotencyKey: key });
+      this.linkPlanRequestRound(withKits, planMatch[1]);
       return success(response, prepared);
     }
     const challengeMatch = /^\/api\/rounds\/([^/]+)\/confirmation-challenge$/.exec(pathname);
@@ -2211,6 +2236,7 @@ export class LocalStudioService {
     if (error instanceof StudioNotFoundError) return json(response, 404, { ok: false, error: { code: 'not_found', message: error.message } });
     if (error instanceof MediaValidationError) return json(response, 422, { ok: false, error: { code: 'media_validation_failed', message: error.message } });
     if (error instanceof MediaArchiveError) return json(response, 500, { ok: false, error: { code: 'internal_error', message: 'Studio 本地服务发生未预期错误。' } });
+    if (error instanceof PlanValidationError) return json(response, 400, { ok: false, error: { code: 'plan_invalid', message: error.message, details: { issues: error.issues } } });
     if (error instanceof InvalidCommandError) return json(response, 400, { ok: false, error: { code: 'invalid_command', message: error.message } });
     return json(response, 500, { ok: false, error: { code: 'internal_error', message: 'Studio 本地服务发生未预期错误。' } });
   }

@@ -1,9 +1,9 @@
 # DAOGE Pic vNext
 
-> **最近正式发布版本**：[`6.1.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.1)
-> **当前源码与运行时**：`6.1.1`（首屏分包补丁版本；`6.1.0`、`6.0.0`、`5.14.2` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
+> **最近正式发布版本**：[`6.2.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.2.0)
+> **当前源码与运行时**：`6.2.0`（agent 效率小版本：响应投影、`wait`、校验前移；`6.1.1`、`6.1.0`、`6.0.0`、`5.14.2` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
 > **运行时兼容范围**：`>=6.0.0 <7.0.0`。
-> **Skill protocol**：`daoge-pic-skill-protocol 3.1.0`，独立于制品版本；`6.1.1` 不是协议版本。
+> **Skill protocol**：`daoge-pic-skill-protocol 3.1.0`，独立于制品版本；`6.2.0` 不是协议版本。
 > **Studio schema**：`41`（自 34 起追加迁移 35–41；旧库与旧素材不迁移，原地存档）。
 > **安装来源**：GitHub Release `.tgz` 资产；这不表示包已发布到 npm registry。
 
@@ -14,6 +14,7 @@ DAOGE Pic 让 **Agent 和创作者工作台一起干活**：Agent 负责收敛�
 ## 目录
 
 - [创作怎么走：五步动线](#创作怎么走五步动线)
+- [6.2.0：少花回合](#620少花回合)
 - [6.1.1：首屏分包](#611首屏分包)
 - [6.1.0：一步连接与 token 效率](#610一步连接与-token-效率)
 - [6.0.0：以人为本重构](#600以人为本重构)
@@ -40,6 +41,22 @@ DAOGE Pic 让 **Agent 和创作者工作台一起干活**：Agent 负责收敛�
 | **5. 资产交付** | 交付页「准备 → 导出」，下载或打包 | 冻结选片来源与评审，导出创建冻结图片实体 | `deliveries` / 导出物 |
 
 一句话：**主区一眼可见，辅助贴边，系统默认闭嘴。**
+
+## 6.2.0：少花回合
+
+**小版本，纯加法：协议仍 `3.1.0`、Studio schema 仍 `41`、兼容范围仍 `>=6.0.0 <7.0.0`。**
+
+| 领域 | 变化 | 你得到什么 |
+| --- | --- | --- |
+| 响应投影 | `plan` / `preflight` / `run` / `round-status` / `provider-list` / 结构类命令默认只回 id、状态、版本、计数；`--full` 回原始形状 | 一轮「写计划 → 预检 → 读状态」的计划正文回显从约 67 KB 降到 1 KB 以内；确认挑战值与 planHash 也不再进 agent 上下文 |
+| 等待动词 | 新增 `daoge wait --round <id>`：事件唤醒 + 权威状态判定，等到终态/首张成功/超时 | 出图等待从 N 次轮询变成 1 次调用；超时回真实状态，不谎报 |
+| 校验前移 | 计划写入（=准备确认）前先做同一份 preflight 的纯形状校验，Provider 已配置时连能力与限额一起判 | 机器可判的错误在人工点击之前被拒，批次停在草稿，不再白点一次 |
+| 写侧合并 | `plan --project <名>` 自动补任务/批次并读回版本；`run --auto-preflight true --session <id>` 预检+入队一条命令；`delivery-export --project/--assets/--name` 一步导出 | 常见周期少 3–4 次往返；闸门（预检记录、confirm_token、单轮单 Run）一条不少 |
+| 配方注入 | `plan --style-kit` / `--brand-kit` 由服务端合并配方正文进计划（进 hash、记出处） | 同一套风格做多批时，agent 只写本次增量 |
+| 读侧补齐 | `task-list` / `round-list` / `round-detail`（含 tally）/ `run-items`（状态与分页）；`provider-list --descriptors`；`project-list --name/--status/--limit` | 不必再拉全表找 id，也不必猜「这批成没成」 |
+| 租约 | `request-accept` / `request-renew --lease <分钟>`（1–1440） | 跨人工确认的长活一条命令盖住整个窗口 |
+| 帮助 | `daoge --help` 分「Agent 主线」与「人类 / 运维」两段 | 少翻 70 条命令 |
+| Workbench | 事件消费收敛为纯逻辑模块：游标只前进、快照恢复前不推进、乱序 id 不回退 | 断流重连后状态槽不再跳号或回退 |
 
 ## 6.1.1：首屏分包
 

@@ -12,3 +12,8 @@ Workbench 的受限请求入口与 Agent 对话共用**同一条队列**（`stud
 - **做不了**：`request-reject --request <id> --reason <text>`，文案用人话（如「这个我做不了：目前只能出图片」），状态标「无法处理」，不让用户沮丧。
 - **上下文连续性靠数据，不靠记忆**：请求的 `context_json` 会带上 `previousRequestId`（就地回答追问时自动写入）。`request-detail --request <id>` 会把上一条的原话一并返回；**原话住在请求表里**，计划只写 `requestId` 外键，不复制文本。写计划时把 `requestId` 放进 `plan`，服务端会校验它确属本 Studio。
 - **未接单可撤**：Workbench 可撤回还没被领取的请求；**不插队**。
+
+## v6：租约可以一次领久一点
+
+- `request-accept --request <id> --lease <分钟>` / `request-renew --request <id> --lease <分钟>`：租约范围 **1–1440 分钟**（24 小时）。跨人工确认的长活（用户可能几十分钟后才点）用一条命令盖住整个窗口，不必每 10 分钟发一次心跳；租约到期未处理仍会回队，上限存在的意义就是别把单子锁死。
+- 默认租约仍是 10 分钟；只有确实需要长时间独占时才显式加长。

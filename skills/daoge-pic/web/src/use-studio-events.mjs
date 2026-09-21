@@ -1,4 +1,9 @@
 import { useEffect, useRef } from 'react';
+import { acceptEventId, advanceEventCursor, eventCursor, studioEventBatchDecision, studioSnapshotRecovery } from './studio-events-model.mjs';
+
+// 规则本体在 studio-events-model.mjs（纯逻辑、可单测）；这条导出是给 Workbench 与测试用的门面，
+// 不要在这里再写第二份判断。
+export { studioEventRefreshPlan } from './studio-events-model.mjs';
 
 export const STUDIO_EVENT_BATCH_LIMIT = 100;
 const MAX_PENDING_EVENTS = STUDIO_EVENT_BATCH_LIMIT;
@@ -6,45 +11,6 @@ const EVENT_BATCH_DELAY_MS = 160;
 
 export function studioCursorKey(studioId) {
   return 'daoge-pic:event-cursor:' + studioId;
-}
-
-export function studioEventRefreshPlan(events = []) {
-  const values = Array.isArray(events) ? events : [];
-  const runtimeProviderEvent = (event) => /^daemon\.provider_config_(?:pending|applied)$/.test(event?.eventType || '');
-  const global = values.some((event) => runtimeProviderEvent(event) || (event?.entityType === 'project' && event?.eventType !== 'project.selection_updated') || /^(?:task_type|style_kit|brand_kit|studio)\./.test(event?.eventType || ''));
-  const detailEvent = (event) => ['task', 'creative_round', 'round', 'generation_run', 'run', 'run_item', 'asset', 'review'].includes(event?.entityType) || /^(task|round|run|run_item|asset|review)\./.test(event?.eventType || '');
-  const planEvent = (event) => ['creative_round', 'round'].includes(event?.entityType) || /^(round|plan)\./.test(event?.eventType || '');
-  const assetEvent = (event) => ['asset', 'review'].includes(event?.entityType) || /^(asset|review)\./.test(event?.eventType || '') || ['run.items_updated', 'project.selection_updated'].includes(event?.eventType);
-  const contextEvent = (event) => ['task', 'creative_round', 'round', 'generation_run', 'run', 'run_item', 'delivery', 'delivery_batch'].includes(event?.entityType) || /^(task|round|run|run_item|delivery|delivery_batch)\./.test(event?.eventType || '');
-  const canvasLayoutEvent = (event) => event?.entityType === 'canvas_layout' || /^canvas_layout\./.test(event?.eventType || '');
-  // 请求队列的事件（created/accepted/done/rejected/lease_expired）驱动队列重取；
-  // 「accepted 立刻推回 Studio」靠的就是这条（方案 4.2：静默是最大的坑）。
-  const requestEvent = (event) => event?.entityType === 'request' || /^request\./.test(event?.eventType || '');
-  const refreshSelection = values.some((event) => event?.eventType === 'project.selection_updated' || /^asset\.(reviewed|trashed|restored|restored_reused)$/.test(event?.eventType || ''));
-  const refreshSharedAssets = values.some((event) => /^asset\.(shared|unshared)_across_projects$/.test(event?.eventType || ''));
-  const refreshContext = global || values.some(contextEvent);
-  const refreshAssets = global || values.some(assetEvent);
-  const refreshCanvasLayout = values.some(canvasLayoutEvent);
-  return {
-    scope: global ? 'all' : 'context',
-    refreshContext,
-    refreshAssets,
-    refreshSelection,
-    refreshSharedAssets,
-    refreshCanvasLayout,
-    taskOverview: values.some(detailEvent),
-    creativeRecord: values.some(detailEvent),
-    studioOverview: values.some(detailEvent),
-    planVersions: values.some(planEvent),
-    canvasLayout: refreshCanvasLayout,
-    requests: values.some(requestEvent),
-    maximumRefreshes: (refreshContext ? 1 : 0) + (refreshAssets ? 1 : 0) + (refreshSelection ? 1 : 0) + (refreshSharedAssets ? 1 : 0) + (refreshCanvasLayout ? 1 : 0) + (values.some(detailEvent) ? 1 : 0) + (values.some(requestEvent) ? 1 : 0)
-  };
-}
-
-function eventCursor(value) {
-  const cursor = Number(value);
-  return Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0;
 }
 
 export function createStudioEventStream({
@@ -69,13 +35,16 @@ export function createStudioEventStream({
   let overflowed = false;
   let pending = [];
   let maxObservedEventId = cursor;
+  // 最近一次事件批量刷新的数据域（快照恢复后清空：那是全量权威刷新，不按域记账）。
+  let domains = [];
 
   const callbacks = () => getCallbacks?.() || {};
   const writeCursor = (nextCursor) => {
     cursor = eventCursor(nextCursor);
     storage.setItem(cursorKey, String(cursor));
   };
-  const commitEventCursor = (nextCursor) => writeCursor(Math.max(cursor, eventCursor(nextCursor)));
+  // 普通事件只前进：乱序/重复/过期 id 都不允许把游标拉回去。
+  const commitEventCursor = (nextCursor) => writeCursor(advanceEventCursor(cursor, nextCursor));
   const replaceSnapshotCursor = (nextCursor) => writeCursor(nextCursor);
   const closeSource = () => {
     source?.close();
@@ -135,16 +104,20 @@ export function createStudioEventStream({
     const observedCursor = maxObservedEventId;
     pending = [];
     overflowed = false;
+    // 同一批事件 → 同一份决定（只前进的游标 + 刷新计划 + 稳定去重的数据域）。
+    const decision = requiresSnapshot ? null : studioEventBatchDecision(events, cursor);
     try {
-      const recovered = requiresSnapshot ? await callbacks().onSnapshot?.() : await callbacks().onEventBatch?.(events);
+      const recovered = requiresSnapshot ? await callbacks().onSnapshot?.() : await callbacks().onEventBatch?.(events, decision);
       if (recovered === false) throw new Error('refresh failed');
       if (requiresSnapshot) {
         commitEventCursor(observedCursor);
+        domains = [];
         closeSource();
         reconnectAttempt = 0;
         reconnect(true);
-      } else if (events.length) {
-        commitEventCursor(events.reduce((latest, event) => Math.max(latest, eventCursor(event.id)), cursor));
+      } else {
+        commitEventCursor(decision.cursor);
+        domains = decision.domains;
         reconnectAttempt = 0;
       }
     } catch {
@@ -160,8 +133,8 @@ export function createStudioEventStream({
   function receive(message) {
     try {
       const event = JSON.parse(message.data);
-      const id = eventCursor(event.id);
-      if (!id || id <= cursor) return;
+      const id = acceptEventId(cursor, event?.id);
+      if (!id) return;
       maxObservedEventId = Math.max(maxObservedEventId, id);
       if (pending.length >= maxPendingEvents) {
         overflowed = true;
@@ -179,16 +152,24 @@ export function createStudioEventStream({
     if (disposed) return;
     closeSource();
     discardBufferedEvents();
+    // 快照恢复之前游标原地不动（也不回退）；恢复成功后才按权威 snapshotCursor 推进。
+    let held = eventCursor(cursor);
     try {
       const snapshot = JSON.parse(message.data || '{}');
+      held = studioSnapshotRecovery({ currentCursor: cursor, snapshotCursor: snapshot.cursor }).cursor;
+      replaceSnapshotCursor(held);
       const refreshed = await callbacks().onSnapshot?.();
       if (refreshed === false) throw new Error('snapshot refresh failed');
-      replaceSnapshotCursor(snapshot.cursor);
-      maxObservedEventId = cursor;
+      const restored = studioSnapshotRecovery({ currentCursor: cursor, snapshotCursor: snapshot.cursor, snapshotRestored: true }).cursor;
+      replaceSnapshotCursor(restored);
+      maxObservedEventId = restored;
+      domains = [];
       reconnectAttempt = 0;
       callbacks().onConnectionError?.('');
       reconnect(true);
     } catch {
+      // 快照没恢复成功：停在 held（上次成功位置），退避重试。
+      replaceSnapshotCursor(held);
       callbacks().onRequestError?.('实时快照恢复失败，保留上次成功位置并退避重试。');
       reconnect();
     }
@@ -203,7 +184,7 @@ export function createStudioEventStream({
       if (batchTimer) clearTimer(batchTimer);
     },
     flushNow: flush,
-    state: () => ({ cursor, pending: pending.length, overflowed, connected: Boolean(source) })
+    state: () => ({ cursor, pending: pending.length, overflowed, connected: Boolean(source), domains })
   };
 }
 

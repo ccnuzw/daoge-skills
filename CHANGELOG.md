@@ -2,6 +2,21 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 6.2.0 - 2026-09-21
+
+**小版本（回归 agent 效率：投影、等待、前移）**：协议仍 `3.1.0`、Studio schema 仍 `41`、运行时兼容范围仍 `>=6.0.0 <7.0.0`，无数据迁移；新增能力全部是加法。
+
+- 版本元数据：package/runtime `6.2.0`；Skill protocol `daoge-pic-skill-protocol/3.1.0`；运行时兼容范围 `>=6.0.0 <7.0.0`；Studio schema `41`。正式制品 `daoge-pic-6.2.0.tgz` 为 758,904 bytes，npm shasum 为 `49b70f4955b82bacd8641a2d5a8cccf96410d22a`，SHA-256 为 `dd5706c17527f4bf100ffdc1c9c3f6999eb414c179f62e84ab620254f0cf6ece`。
+- **响应投影（写与读都不再回显计划正文）**：`plan` / `preflight` / `run` / `pause` / `cancel` / `resume` / `round-status` / `provider-list` / `project-list` 默认只回 id / 状态 / 版本 / 计数与问题清单；`--full` 回原始 API 形状。实测一份 4 张的中位计划：写计划回显 21.3 KB → 约 0.2 KB，预检 13.6 KB → 约 0.1 KB，一次 `round-status` 32.1 KB → 约 0.3 KB（较大样本 109 KB）。投影同时**不再回传确认挑战值与 `planHash`**。
+- **`daoge wait`：等待终于有动词**。以 `/api/events` 的 cursor 作唤醒、以 round detail 的 `latestRun.status` + `tally` 作权威状态，一次调用等到终态（`completed`/`failed`/`cancelled`/`partial`）、首张成功或超时；超时回真实状态并带 `timedOut: true`。
+- **校验前移**：`plan`（=准备确认）写入前先跑同一份 preflight 规则做纯形状校验，Provider 已配置时连能力/限额一起判；失败回 `400 {code:"plan_invalid", details:{issues:[…]}}` 且批次停在 `draft`。机器可判的错误不再拖到人工确认之后。
+- **写侧合并**：`plan --project <名|id>` 自动找到/建立 draft 任务与批次并读回版本号；`plan --version` 可省；`run --auto-preflight true --session <id> [--wait true]` 先预检再入队（预检记录与 `confirm_token` 绑定不变）；`delivery-export --project/--assets/--name` 一步走完草稿→准备→导出。
+- **配方注入**：`plan --style-kit <id> --brand-kit <id>` 由服务端把配方正文合并进计划（合并结果进 plan hash，`appliedKits` 记录出处）——同一套风格做多批时只写增量。
+- **读侧补齐**：新增 `task-list` / `round-list` / `round-detail`（含 tally）/ `run-items`（可按状态与分页过滤）；`provider-list` 默认瘦身、`--descriptors` 才给能力全表；`project-list` 支持 `--name/--status/--limit`。
+- **租约与时间窗**：`request-accept` / `request-renew` 新增 `--lease <分钟>`（1–1440），跨人工确认的长活不必每 10 分钟发一次心跳；`round-status` 投影里带挑战与 consent 的 `expiresAt`，慢点击导致的重来变得可预判。
+- **帮助分组**：`daoge --help` 先列「Agent 主线」，再列「人类 / 运维（生成服务、备份、安装、用量）」。
+- **Workbench**：事件消费收敛到纯逻辑模块（`web/src/studio-events-model.mjs`）——游标只前进、`snapshot-required` 前不推进游标、乱序/重复 id 不回退。
+
 ## daoge-pic 6.1.1 - 2026-09-21
 
 **补丁版本（首屏分包 + Windows 修复）**：协议仍 `3.1.0`、Studio schema 仍 `41`、运行时兼容范围仍 `>=6.0.0 <7.0.0`，无行为变化、无需数据迁移。

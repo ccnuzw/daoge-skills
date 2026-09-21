@@ -45,3 +45,17 @@ secret 永远只从 stdin（`--api-key-stdin @-`）进来，不进 argv、不进
 ## 备份与升级评估语义
 
 `backup-restore-dry-run` 只产出计划、不写入任何文件；`backup-restore` 是真正的执行器：先写入同目录暂存区并按 manifest 逐文件校验哈希，再用原子 rename 替换，任一步失败即按原样回滚（新建文件会被删除），并拒绝「目标 Studio 的 daemon 正在运行」这一情形；恢复范围仅限 manifest 记录的文件。升级评估的「当前运行时与支持范围」由 daemon 自证，不受调用方声明影响。
+
+## v6：新增与变更的动词（按需查阅）
+
+- **投影与 `--full`**：`plan` / `preflight` / `run` / `pause` / `cancel` / `resume` / `round-status` / `provider-list` / `project-list` / `task-list` / `round-list` / `round-detail` / `run-items` 默认回**投影**（id/状态/版本/计数；不回 `plan`/`prompt`/`itemPrompts`/`planSnapshot`，也不回确认挑战值与 `planHash`）。要原始 API 形状排障时加 `--full`。
+- **`provider-list [--descriptors true]`**：默认只回当前启用配置与各组摘要；Provider Descriptor 全表要显式要。
+- **`project-list [--name <精确名>] [--status <active|archived>] [--limit <n>]`**：本地筛选，用于把项目名解析成 projectId。
+- **`plan`**：`--round` 可选；`--project <名|id>` 时自动找到/建立 draft 任务与批次并读回版本号；`--version` 可选（不给就取当前版本）；`--style-kit` / `--brand-kit` 由服务端把配方正文合并进计划（合并结果进 plan hash），`--challenge true` 仍与写计划合并。
+- **`run`**：`--auto-preflight true --session <id>` 先预检再入队；`--wait true [--timeout <秒>] [--interval <秒>]` 入队后继续等终态。显式 `--preflight <dry-run-id> --confirm-token <token>` 的老路径不变。
+- **`wait --round <id> [--timeout <秒>] [--interval <秒>] [--until terminal|first-success]`**：一次调用替代 N 次轮询；超时回真实状态 + `timedOut: true`。
+- **`task-list` / `round-list` / `round-detail` / `run-items`**：读结构的最小动词，替代"拉全表再自己找"。
+- **`delivery-export --project <id> --assets <ids> --name <名>`**：一步走完草稿→准备→导出；需要修订的批次仍走 `delivery` / `delivery-update` / `delivery-ready`。
+- **`request-accept` / `request-renew --lease <分钟>`**：把租约一次领到最多 24 小时（1–1440 分钟）。
+- **计划写入前机器校验**：`POST /api/rounds/<id>/plan` 会在**人工确认之前**用同一份 `preflight` 规则做纯形状校验（外加 Provider 已知时的能力/限额判定），失败回 `400 {code:"plan_invalid", details:{issues:[{code,field,message}]}}`，批次停在 `draft` 不推进；草稿仍可用 `PUT /api/rounds/<id>/draft-context` 自由写。
+- **帮助分两段**：`daoge --help` 先列「Agent 主线」，再列「人类 / 运维」。
