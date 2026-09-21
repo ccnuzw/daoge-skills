@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const os = require('node:os');
+const path = require('node:path');
 
 const {
   parseCommand,
@@ -265,7 +267,7 @@ test('structure projections drop plans, intents and results while keeping ids an
 });
 
 test('--full is a universal escape hatch and --descriptors belongs to provider-list only', () => {
-  const root = '/tmp/daoge-pic-projection';
+  const root = path.join(os.tmpdir(), 'daoge-pic-projection');
   const plan = parseCommand(['plan', '--workspace', root, '--round', 'round_1', '--version', '2', '--plan', '{}', '--full', 'true']);
   assert.equal(plan.full, true);
   assert.equal(parseCommand(['plan', '--workspace', root, '--round', 'round_1', '--version', '2', '--plan', '{}']).full, undefined);
@@ -277,7 +279,7 @@ test('--full is a universal escape hatch and --descriptors belongs to provider-l
 });
 
 test('new read verbs parse into the documented endpoints', () => {
-  const root = '/tmp/daoge-pic-projection';
+  const root = path.join(os.tmpdir(), 'daoge-pic-projection');
   assert.equal(parseCommand(['task-list', '--workspace', root, '--project', 'project_1']).request.pathname, '/api/projects/project_1/tasks');
   assert.equal(parseCommand(['round-list', '--workspace', root, '--task', 'task_1']).request.pathname, '/api/tasks/task_1/rounds');
   assert.equal(parseCommand(['round-detail', '--workspace', root, '--round', 'round_1']).request.pathname, '/api/rounds/round_1');

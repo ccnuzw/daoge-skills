@@ -6,7 +6,7 @@
 
 **小版本（回归 agent 效率：投影、等待、前移）**：协议仍 `3.1.0`、Studio schema 仍 `41`、运行时兼容范围仍 `>=6.0.0 <7.0.0`，无数据迁移；新增能力全部是加法。
 
-- 版本元数据：package/runtime `6.2.0`；Skill protocol `daoge-pic-skill-protocol/3.1.0`；运行时兼容范围 `>=6.0.0 <7.0.0`；Studio schema `41`。正式制品 `daoge-pic-6.2.0.tgz` 为 758,904 bytes，npm shasum 为 `49b70f4955b82bacd8641a2d5a8cccf96410d22a`，SHA-256 为 `dd5706c17527f4bf100ffdc1c9c3f6999eb414c179f62e84ab620254f0cf6ece`。
+- 版本元数据：package/runtime `6.2.0`；Skill protocol `daoge-pic-skill-protocol/3.1.0`；运行时兼容范围 `>=6.0.0 <7.0.0`；Studio schema `41`。正式制品 `daoge-pic-6.2.0.tgz` 为 758,945 bytes，npm shasum 为 `3a04b720038a1dd51c1e8694e3a1f7e7937c3f09`，SHA-256 为 `045385895b72790d302a281c3df185d718ff486c111de6d0663b8892ad90c3a8`。
 - **响应投影（写与读都不再回显计划正文）**：`plan` / `preflight` / `run` / `pause` / `cancel` / `resume` / `round-status` / `provider-list` / `project-list` 默认只回 id / 状态 / 版本 / 计数与问题清单；`--full` 回原始 API 形状。实测一份 4 张的中位计划：写计划回显 21.3 KB → 约 0.2 KB，预检 13.6 KB → 约 0.1 KB，一次 `round-status` 32.1 KB → 约 0.3 KB（较大样本 109 KB）。投影同时**不再回传确认挑战值与 `planHash`**。
 - **`daoge wait`：等待终于有动词**。以 `/api/events` 的 cursor 作唤醒、以 round detail 的 `latestRun.status` + `tally` 作权威状态，一次调用等到终态（`completed`/`failed`/`cancelled`/`partial`）、首张成功或超时；超时回真实状态并带 `timedOut: true`。
 - **校验前移**：`plan`（=准备确认）写入前先跑同一份 preflight 规则做纯形状校验，Provider 已配置时连能力/限额一起判；失败回 `400 {code:"plan_invalid", details:{issues:[…]}}` 且批次停在 `draft`。机器可判的错误不再拖到人工确认之后。

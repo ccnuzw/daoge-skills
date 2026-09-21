@@ -86,6 +86,14 @@ const block = [
 ].join('\n');
 
 const document = fs.readFileSync(DOC, 'utf8');
+// 标记对必须**恰好一处**：生成器只写第一处，多出来的那对会让新增版本章节永远空着、旧章节被写成
+// 新版本的数字（6.2.0 的证据就因此错位过一次）。宁可当场失败，也不产出「看起来通过」的错位证据。
+const beginCount = document.split(BEGIN).length - 1;
+const endCount = document.split(END).length - 1;
+if (beginCount !== 1 || endCount !== 1) {
+  process.stderr.write('evidence markers must appear exactly once in ' + DOC + ' (begin=' + beginCount + ', end=' + endCount + '); refusing to write.\n');
+  process.exit(1);
+}
 const beginIndex = document.indexOf(BEGIN);
 const endIndex = document.indexOf(END);
 if (beginIndex < 0 || endIndex < 0 || endIndex < beginIndex) {

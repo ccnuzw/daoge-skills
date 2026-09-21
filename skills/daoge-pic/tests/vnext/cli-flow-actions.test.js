@@ -27,10 +27,14 @@ function caller(value) {
   let counter = 0;
   return async (method, pathname, body = {}, idempotencyKey, operationName) => {
     counter += 1;
+    // 复刻生产 api()：写入必须自带 idempotency key **或** operation name。
+    // 之前这里默认补了一个 key，把「flow-actions 内部 POST 不带凭据」这个生产 bug 遮住了 ——
+    // 严格模式下，任何忘记带凭据的合成流程都会在这里当场失败。
+    if (method !== 'GET' && !idempotencyKey && !operationName) throw new Error('写入操作需要 idempotency key 或 operation name。');
     const response = await requestJson(value.started, pathname, {
       method,
       ...(method === 'GET' ? {} : { body }),
-      idempotencyKey: idempotencyKey || 'flow-' + counter,
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
       ...(operationName === undefined ? {} : { headers: { 'x-daoge-operation-name': operationName } })
     });
     if (response.status >= 400 || response.body.ok !== true) throw new Error(response.body.error?.message || 'api failed: ' + pathname);
@@ -174,8 +178,30 @@ test('run --auto-preflight stops before queueing when the human gate has not bee
   }
 });
 
+test('a fresh session reusing an existing draft round still gets a confirmation challenge', async () => {
+  const value = await fixture();
+  try {
+    const first = await resolvePlanTarget(caller(value), { project: '花园小径', session: await openSession(value, 'conv-bind-1') });
+    const sessionB = await openSession(value, 'conv-bind-2');
+    const second = await resolvePlanTarget(caller(value), { project: '花园小径', session: sessionB });
+    assert.equal(second.roundId, first.roundId);
+    assert.deepEqual(second.created, {}, '已有 draft 批次应被复用而不是新建');
+
+    // 会话 B 必须被绑到这个批次：服务端建挑战时强校验 session.agentRoundId === roundId。
+    const status = await requestJson(value.started, '/api/sessions/' + encodeURIComponent(sessionB) + '/plan-status');
+    assert.equal(status.body.data.context.round.id, first.roundId);
+
+    const prepared = await requestJson(value.started, '/api/rounds/' + encodeURIComponent(second.roundId) + '/plan', { method: 'POST', idempotencyKey: 'bind-plan', body: { expectedVersion: second.expectedVersion, plan: PLAN } });
+    assert.equal(prepared.status, 200, JSON.stringify(prepared.body));
+    const challenge = await requestJson(value.started, '/api/rounds/' + encodeURIComponent(second.roundId) + '/confirmation-challenge', { method: 'POST', idempotencyKey: 'bind-challenge', body: { sessionId: sessionB } });
+    assert.equal(challenge.status, 200, JSON.stringify(challenge.body));
+  } finally {
+    await dispose(value);
+  }
+});
+
 test('the two composed commands parse with their documented flags and keep their guards', () => {
-  const root = '/tmp/daoge-pic-flow';
+  const root = path.join(os.tmpdir(), 'daoge-pic-flow');
   const plan = parseCommand(['plan', '--workspace', root, '--project', '花园小径', '--plan', '{}', '--challenge', 'true', '--session', 'session_1']);
   assert.deepEqual(plan.planTarget, { project: '花园小径', session: 'session_1' });
   assert.equal(plan.planChallenge.sessionId, 'session_1');

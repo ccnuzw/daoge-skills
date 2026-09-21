@@ -358,11 +358,11 @@ npm test
 npm run test:package
 ```
 
-6.1.1 已执行验证（发布前，macOS）：
+6.2.0 已执行验证（发布前，macOS）：
 
-- `npm run build`：通过；Vite 转换 1704 个模块，Workbench 入口 JS 427.65 kB、CSS 233.03 kB、按需块 26 个 / 288.38 kB，只有非阻断大小提示。
-- `npm test`：全量回归 930 项，928 通过、0 失败、2 项条件跳过。
-- `npm run test:package`：发布清单 227 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
+- `npm run build`：通过；Vite 转换 1705 个模块，Workbench 入口 JS 428.94 kB、CSS 233.03 kB、按需块 26 个 / 288.38 kB，只有非阻断大小提示。
+- `npm test`：全量回归 978 项，976 通过、0 失败、2 项条件跳过。
+- `npm run test:package`：发布清单 235 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
 - Windows CI（`windows-2022` / `windows-2025`）在本版本 push 后由 `.github/workflows/daoge-pic-windows.yml` 运行；6.0.0 的四组合历史结果见验证记录。
 - 最终制品的大小和 SHA-256 记录在 GitHub Release、仓库根发布说明和 `.tgz.sha256` sidecar 中；本 README 随包发布，不嵌入会改变自身内容的归档哈希。
 

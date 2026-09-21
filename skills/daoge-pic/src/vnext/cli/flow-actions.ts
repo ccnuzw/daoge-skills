@@ -66,6 +66,18 @@ function listRows(value: unknown, key: string): JsonObject[] {
  *   3. 新建批次时带上 `--session`，让会话上下文一起绑定 —— 这样随后的 `round-status`
  *      看得到批次，不会再回一堆 null。
  */
+/**
+ * 把会话指针绑到「正要写计划的这个批次」。
+ *
+ * 服务端建确认挑战时强校验 `session.agentRoundId === roundId`；而 `plan --project` 的常见路径是
+ * 「全新会话 + 项目里已有 draft 批次」——那时批次是**复用**的、不是新建的，若不显式绑定，写计划能过、
+ * 建挑战会 400「确认挑战必须绑定当前会话的操作批次」。
+ */
+async function bindPlanSession(call: ApiCaller, sessionId: string | undefined, roundId: string): Promise<void> {
+  if (!sessionId || !roundId) return;
+  await call('POST', '/api/sessions/' + encodeURIComponent(sessionId) + '/context', { roundId }, undefined, 'plan-target:bind');
+}
+
 export async function resolvePlanTarget(call: ApiCaller, input: PlanTargetInput): Promise<PlanTarget> {
   if (input.roundId) {
     const detail = await call('GET', '/api/rounds/' + encodeURIComponent(input.roundId), {});
@@ -74,6 +86,7 @@ export async function resolvePlanTarget(call: ApiCaller, input: PlanTargetInput)
     const version = Number.isInteger(round.version) ? Number(round.version) : null;
     const expectedVersion = Number.isInteger(input.expectedVersion) ? Number(input.expectedVersion) : version;
     if (expectedVersion === null) throw new Error('无法读取批次版本号；请显式给出 --version。');
+    await bindPlanSession(call, input.session, input.roundId);
     return { roundId: input.roundId, expectedVersion, created: {} };
   }
   const wanted = text(input.project).trim();
@@ -96,7 +109,7 @@ export async function resolvePlanTarget(call: ApiCaller, input: PlanTargetInput)
       projectId: selection.matched.id,
       name: explicitTask || selection.matched.name,
       ...(input.session === undefined ? {} : { sessionId: input.session })
-    }));
+    }, undefined, 'plan-target:task'));
     taskId = text(createdTask.id);
     if (!taskId) throw new Error('新建任务失败，Studio 未返回任务标识。');
     created.task = taskId;
@@ -107,13 +120,14 @@ export async function resolvePlanTarget(call: ApiCaller, input: PlanTargetInput)
   if (draft && text(draft.id)) {
     const expectedVersion = Number.isInteger(input.expectedVersion) ? Number(input.expectedVersion) : Number.isInteger(draft.version) ? Number(draft.version) : null;
     if (expectedVersion === null) throw new Error('无法读取批次版本号；请显式给出 --version。');
+    await bindPlanSession(call, input.session, text(draft.id));
     return { roundId: text(draft.id), expectedVersion, created };
   }
   const round = receiptValue(await call('POST', '/api/rounds', {
     taskId,
     purpose: text(input.purpose) || 'exploration',
     ...(input.session === undefined ? {} : { sessionId: input.session })
-  }));
+  }, undefined, 'plan-target:round'));
   const roundId = text(round.id);
   if (!roundId) throw new Error('新建批次失败，Studio 未返回批次标识。');
   created.round = roundId;
@@ -142,7 +156,7 @@ export async function composePreflightAndRun(call: ApiCaller, input: AutoRunInpu
     sessionId: input.sessionId,
     ...(input.concurrency === undefined ? {} : { executionConcurrency: input.concurrency }),
     ...(input.usageEstimate === undefined ? {} : { usageEstimate: input.usageEstimate })
-  });
+  }, undefined, 'auto-preflight:preflight');
   const payload = asObject(preflight) && asObject((preflight as JsonObject).value) ? (preflight as JsonObject).value as JsonObject : asObject(preflight) ? preflight : {};
   const preview = asObject(payload.preview) ? payload.preview as JsonObject : null;
   const preflightResult = asObject(payload.preflight) ? payload.preflight as JsonObject : {};
@@ -153,7 +167,7 @@ export async function composePreflightAndRun(call: ApiCaller, input: AutoRunInpu
     const summary = issues.map((issue) => text(issue.code) + '(' + (text(issue.field) || 'plan') + '：' + text(issue.message) + ')').join('；');
     throw new Error('预检未通过，没有入队。' + (summary ? '问题：' + summary : '请先在 Workbench 完成与当前计划匹配的人工确认。'));
   }
-  const run = await call('POST', '/api/runs', { roundId: input.roundId, preflightId, confirmToken });
+  const run = await call('POST', '/api/runs', { roundId: input.roundId, preflightId, confirmToken }, undefined, 'auto-preflight:run');
   return { preflight: { preflightId, roundId: input.roundId, itemCount: preview ? preview.itemCount : null, executionConcurrency: preview ? preview.executionConcurrency : null, confirmToken }, run: receiptValue(run) };
 }
 export interface DeliveryExportInput {
@@ -175,12 +189,12 @@ export async function composeDeliveryExport(call: ApiCaller, input: DeliveryExpo
     name: input.name,
     assetIds: input.assetIds,
     includeCreativeRecord: input.includeCreativeRecord === true
-  }));
+  }, undefined, 'one-step-delivery:create'));
   const deliveryId = text(created.id);
   if (!deliveryId) throw new Error('创建交付失败，Studio 未返回交付标识。');
-  await call('POST', '/api/deliveries/' + encodeURIComponent(deliveryId) + '/ready', {});
+  await call('POST', '/api/deliveries/' + encodeURIComponent(deliveryId) + '/ready', {}, undefined, 'one-step-delivery:ready');
   // 导出回执就是权威形状：`{delivery, files:[{sequence,file,downloadUrl}]}`。
-  const exportedValue = await call('POST', '/api/deliveries/' + encodeURIComponent(deliveryId) + '/export', {});
+  const exportedValue = await call('POST', '/api/deliveries/' + encodeURIComponent(deliveryId) + '/export', {}, undefined, 'one-step-delivery:export');
   const payload = asObject(exportedValue) ? exportedValue : {};
   const files = Array.isArray(payload.files) ? payload.files.filter(asObject) : [];
   const first = files.length ? files[0] : null;

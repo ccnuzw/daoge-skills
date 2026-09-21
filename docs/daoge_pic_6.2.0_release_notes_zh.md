@@ -47,7 +47,7 @@
 ### 验证
 
 - 全量回归、构建与打包验证记录见 `skills/daoge-pic/docs/vnext_verification_evidence_zh.md` 的 6.2.0 章节。
-- 正式制品 `daoge-pic-6.2.0.tgz` 为 758,904 bytes，npm shasum 为 `49b70f4955b82bacd8641a2d5a8cccf96410d22a`，SHA-256 为 `dd5706c17527f4bf100ffdc1c9c3f6999eb414c179f62e84ab620254f0cf6ece`（以 GitHub Release 与 `.tgz.sha256` sidecar 为准）。
+- 正式制品 `daoge-pic-6.2.0.tgz` 为 758,945 bytes，npm shasum 为 `3a04b720038a1dd51c1e8694e3a1f7e7937c3f09`，SHA-256 为 `045385895b72790d302a281c3df185d718ff486c111de6d0663b8892ad90c3a8`（以 GitHub Release 与 `.tgz.sha256` sidecar 为准）。
 - Windows CI（`windows-2022` / `windows-2025` × Node `22.17.0` / `24`）在本版本 push 后由 `.github/workflows/daoge-pic-windows.yml` 运行；本地新增/修改的测试统一使用 `os.tmpdir()` + `path.join`，不含 POSIX 分隔符或 CRLF 假设。
 - 所有本地验证均未调用真实图片 Provider，也未产生计费生成请求。
 
