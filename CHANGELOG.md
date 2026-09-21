@@ -2,6 +2,14 @@
 
 本仓库的两个 Skill 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## daoge-pic 6.1.1 - 2026-09-21
+
+**补丁版本（首屏分包 + Windows 修复）**：协议仍 `3.1.0`、Studio schema 仍 `41`、运行时兼容范围仍 `>=6.0.0 <7.0.0`，无行为变化、无需数据迁移。
+
+- 版本元数据：package/runtime `6.1.1`；正式制品 `daoge-pic-6.1.1.tgz` 为 728,343 bytes，npm shasum 为 `4a392515fdfa11caae68fa98ba3b0670ff453b9a`，SHA-256 为 `07015c4336fb1c75d8f6a519787759686a2393f92a66457e8d6b0da21d94a833`。
+- **Workbench 首屏分包**：八屏（含创作平台的 canvas 链）、创作对话框与 Provider 设置页改为 `React.lazy` + `Suspense` 按需加载；首屏入口 JS 708,483 → 427,652 B（-40%），按需块 26 个 / 288,382 B 只在打开对应界面时下载。
+- **Windows 修复**：`daoge reference --section` 兼容 CRLF 检出的附录文件；此前 Windows 上按节读取会报「未找到章节」（6.1.0 的四个 Windows CI 组合即栽在这里）。新增 CRLF 回归断言，任何平台都能守住。
+- **验证证据**：`workbenchChunkLabels()` 如实报告「入口 + 按需块 N 个 / 总大小」，不再只报入口。
 ## daoge-pic 6.1.0 - 2026-09-21
 
 **小版本（连接与 token 效率）**：协议仍 `3.1.0`、Studio schema 仍 `41`、运行时兼容范围仍 `>=6.0.0 <7.0.0`，可与 6.0.0 daemon / Workbench 平滑共存，无需数据迁移。

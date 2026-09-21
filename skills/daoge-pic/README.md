@@ -1,9 +1,9 @@
 # DAOGE Pic vNext
 
-> **最近正式发布版本**：[`6.1.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.0)
-> **当前源码与运行时**：`6.1.0`（一步连接与 token 效率小版本；`6.0.0`、`5.14.2` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
+> **最近正式发布版本**：[`6.1.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.1)
+> **当前源码与运行时**：`6.1.1`（首屏分包补丁版本；`6.1.0`、`6.0.0`、`5.14.2` 及更早版本为不可变历史发布，不与本版本 daemon 互用）。
 > **运行时兼容范围**：`>=6.0.0 <7.0.0`。
-> **Skill protocol**：`daoge-pic-skill-protocol 3.1.0`，独立于制品版本；`6.1.0` 不是协议版本。
+> **Skill protocol**：`daoge-pic-skill-protocol 3.1.0`，独立于制品版本；`6.1.1` 不是协议版本。
 > **Studio schema**：`41`（自 34 起追加迁移 35–41；旧库与旧素材不迁移，原地存档）。
 > **安装来源**：GitHub Release `.tgz` 资产；这不表示包已发布到 npm registry。
 
@@ -14,6 +14,7 @@ DAOGE Pic 让 **Agent 和创作者工作台一起干活**：Agent 负责收敛�
 ## 目录
 
 - [创作怎么走：五步动线](#创作怎么走五步动线)
+- [6.1.1：首屏分包](#611首屏分包)
 - [6.1.0：一步连接与 token 效率](#610一步连接与-token-效率)
 - [6.0.0：以人为本重构](#600以人为本重构)
 - [安装](#安装)
@@ -39,6 +40,17 @@ DAOGE Pic 让 **Agent 和创作者工作台一起干活**：Agent 负责收敛�
 | **5. 资产交付** | 交付页「准备 → 导出」，下载或打包 | 冻结选片来源与评审，导出创建冻结图片实体 | `deliveries` / 导出物 |
 
 一句话：**主区一眼可见，辅助贴边，系统默认闭嘴。**
+
+## 6.1.1：首屏分包
+
+**补丁版本，无行为变化、无协议 / schema / 兼容性变化；首屏更快，并修复 Windows 上的按节读取。**
+
+| 领域 | 变化 | 你得到什么 |
+| --- | --- | --- |
+| Workbench 首屏 | 八屏、对话框与 Provider 设置页改为按需加载（`React.lazy` + `Suspense`），创作平台的 canvas 链独立成块 | 首屏入口 JS 从 708 KB 降到 428 KB（-40%）；Canvas / 对话框打开时才下载 |
+| 加载反馈 | 视图切换与对话框有兜底提示 | 不白屏 |
+| Windows 修复 | `reference --section` 兼容 CRLF 检出的附录文件 | Windows 上按节读取不再报「未找到章节」 |
+| 验证证据 | 验证记录如实报告「入口 + 按需块」 | 首屏成本可见、可复查 |
 
 ## 6.1.0：一步连接与 token 效率
 
@@ -85,7 +97,7 @@ DAOGE Pic 让 **Agent 和创作者工作台一起干活**：Agent 负责收敛�
 ### 推荐：项目级安装
 
 ```bash
-npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
+npm install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.1/daoge-pic-6.1.1.tgz"
 npx daoge register-skill --scope project --workspace /absolute/workspace
 npx daoge doctor --workspace /absolute/workspace
 ```
@@ -93,7 +105,7 @@ npx daoge doctor --workspace /absolute/workspace
 Windows PowerShell：
 
 ```powershell
-npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
+npm.cmd install "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.1/daoge-pic-6.1.1.tgz"
 npx.cmd daoge register-skill --scope project --workspace "C:\Users\<用户名>\source\<项目名>"
 npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ```
@@ -103,7 +115,7 @@ npx.cmd daoge doctor --workspace "C:\Users\<用户名>\source\<项目名>"
 ### 全局安装
 
 ```bash
-npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
+npm install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.1/daoge-pic-6.1.1.tgz"
 daoge register-skill --scope user                    # 缺省：~/.codex/skills
 daoge register-skill --scope user --host agents      # ~/.agents/skills：多数宿主都能读到
 daoge register-skill --scope user --host omp         # 也可以点名装给某个宿主
@@ -112,14 +124,14 @@ daoge register-skill --scope user --host omp         # 也可以点名装给某�
 Windows PowerShell：
 
 ```powershell
-npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.0/daoge-pic-6.1.0.tgz"
+npm.cmd install -g "https://github.com/ccnuzw/daoge-skills/releases/download/daoge-pic-v6.1.1/daoge-pic-6.1.1.tgz"
 daoge.cmd register-skill --scope user
 daoge.cmd register-skill --scope user --host agents
 ```
 
 `--host` 的取值：`agents`（跨宿主共享目录）、`workbuddy`、`codex`、`claude`、`opencode`、`gemini`、`agy`（Antigravity CLI）、`grok`、`omp`、`pi`、`cursor-agent`、`qwen`、`kimi`、`amp`、`droid`、`copilot`。写错会直接报错并列出可用值，不会新建目录；`agents` 是省事的那个——大多数主流宿主都会读 `~/.agents/skills`。装好后重启对应宿主，让它的 Skill registry 重新加载。Workbench 连接面板的「侦查」用的是同一张宿主表：它只报告这台机器上装了哪些、哪个装了 daoge-pic，不代管任何宿主的 skills。
 
-上述 URL 指向 `6.1.0` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
+上述 URL 指向 `6.1.1` GitHub Release 的不可变正式资产；直接安装 `main` 源码不等同于该发布制品。
 
 ### 直接试用 main 分支源码
 
@@ -329,11 +341,11 @@ npm test
 npm run test:package
 ```
 
-6.1.0 已执行验证（发布前，macOS）：
+6.1.1 已执行验证（发布前，macOS）：
 
-- `npm run build`：通过；Vite 转换 1703 个模块，Workbench 产物 JS 708.48 kB、CSS 233.03 kB，只有非阻断大小提示。
+- `npm run build`：通过；Vite 转换 1704 个模块，Workbench 入口 JS 427.65 kB、CSS 233.03 kB、按需块 26 个 / 288.38 kB，只有非阻断大小提示。
 - `npm test`：全量回归 930 项，928 通过、0 失败、2 项条件跳过。
-- `npm run test:package`：发布清单 201 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
+- `npm run test:package`：发布清单 227 个文件；`unexpected=0`、`maps=0`、`retired=0`、`sensitive=0`，安装、真实 bin、注册、doctor 与 `sharp` 全部通过。
 - Windows CI（`windows-2022` / `windows-2025`）在本版本 push 后由 `.github/workflows/daoge-pic-windows.yml` 运行；6.0.0 的四组合历史结果见验证记录。
 - 最终制品的大小和 SHA-256 记录在 GitHub Release、仓库根发布说明和 `.tgz.sha256` sidecar 中；本 README 随包发布，不嵌入会改变自身内容的归档哈希。
 
@@ -351,7 +363,8 @@ npm run test:package
 - 受控会话协议：[SKILL.md](SKILL.md)
 - 长期权威产品与架构规格：[docs/daoge_pic_vnext_upgrade_spec_zh.md](docs/daoge_pic_vnext_upgrade_spec_zh.md)
 - 发布验证记录：[docs/vnext_verification_evidence_zh.md](docs/vnext_verification_evidence_zh.md)
-- GitHub Release：[`daoge-pic-v6.1.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.0)
+- GitHub Release：[`daoge-pic-v6.1.1`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.1)
+- v6.1.0 历史 GitHub Release：[`daoge-pic-v6.1.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.1.0)
 - v6.0.0 历史 GitHub Release：[`daoge-pic-v6.0.0`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.0.0)
 - v5.14.2 历史 GitHub Release：[`daoge-pic-v5.14.2`](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v5.14.2)
 - v5.14.1 / v5.14.0 / v5.13.0 / v5.11.0 及更早历史证据分章记录在验证记录中；完整升级流水见 [CHANGELOG](../../CHANGELOG.md)。

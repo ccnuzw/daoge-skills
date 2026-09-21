@@ -167,6 +167,9 @@ test('效率命令与速览：round-status / plan --challenge / reference --sect
   assert.ok(section.length < body.length / 2, '只取一节必须明显短于整份附录');
   assert.match(section, /contextBound/);
   assert.throws(() => skillReferenceSection(body, '不存在的节'), /未找到章节/);
+  // Windows 以 CRLF 检出同一份文件：归一化后必须仍能取到同一节（守住 Windows CI 的回归）。
+  const crlfSection = skillReferenceSection(body.replace(/\n/g, '\r\n'), 'enter 返回字段');
+  assert.match(crlfSection, /contextBound/);
 
   assert.ok(usage().length < usageFull().length, '速览必须短于全签名');
   assert.match(usageFull(), /daoge round-status --workspace <path>/);

@@ -14,7 +14,7 @@ const { SKILL_ROOT, readSource } = require('./source-text');
  * 先写桩：现在全是 2.0.0 / 5.14.2，红是预期的。
  */
 
-const EXPECTED_ARTIFACT = '6.1.0';
+const EXPECTED_ARTIFACT = '6.1.1';
 const EXPECTED_PROTOCOL = 'daoge-pic-skill-protocol/3.1.0';
 const EXPECTED_RUNTIME_COMPATIBILITY = '>=6.0.0 <7.0.0';
 
@@ -22,7 +22,7 @@ function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(SKILL_ROOT, relativePath), 'utf8'));
 }
 
-test('制品版本升到 6.1.0，协议声明保持 3.1.0', () => {
+test('制品版本升到 6.1.1，协议声明保持 3.1.0', () => {
   assert.equal(readJson('package.json').version, EXPECTED_ARTIFACT);
   const declaration = readJson('protocol-version.json');
   assert.equal(declaration.version, '3.1.0');

@@ -214,16 +214,16 @@ test('按需附录是封闭集合：SKILL.md 的索引、references/ 的文件�
   assert.ok(Buffer.byteLength(main, 'utf8') < 12000, 'SKILL.md 要保持瘦（当前 ' + Buffer.byteLength(main, 'utf8') + ' B）：常驻文本越小，每轮提示的固定成本越低');
 });
 
-test('6.1.0 is the current source version while 6.0.0/5.14.2 remain immutable releases', () => {
+test('6.1.1 is the current source version while 6.1.0/6.0.0/5.14.2 remain immutable releases', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const currentDocs = `${skill}\n${readme}\n${spec}`;
 
-  assert.equal(packageJson.version, '6.1.0');
-  assert.equal(packageLock.version, '6.1.0');
-  assert.equal(packageLock.packages[''].version, '6.1.0');
+  assert.equal(packageJson.version, '6.1.1');
+  assert.equal(packageLock.version, '6.1.1');
+  assert.equal(packageLock.packages[''].version, '6.1.1');
   assert.match(skill, /6\.1\.0/);
-  assert.match(readme, /6\.1\.0/);
+  assert.match(readme, /6\.1\.1/);
   assert.match(evidence, /5\.14\.2/);
   assert.doesNotMatch(currentDocs, /5\.11\.0[^。\n]{0,120}(?:待发布|候选)|(?:待发布|候选)[^。\n]{0,120}5\.11\.0/);
   assert.match(readme, /GitHub[^。\n]*资产[^。\n]*不表示[^。\n]*npm registry/);

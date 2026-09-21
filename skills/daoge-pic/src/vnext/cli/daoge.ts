@@ -605,7 +605,9 @@ export function skillReferencePath(topic: string): string {
 }
 /** 只取某一份附录里的一个章节：从该标题到下一个同级或更高级标题为止。 */
 export function skillReferenceSection(text: string, heading: string): string {
-  const lines = text.split('\n');
+  // Windows 上按 CRLF 检出：必须先归一化行尾，否则逐行的 `^#…$` 永远匹配不到，
+  // 会把整份附录判成「没有这个章节」（6.1.0 的四个 Windows CI 组合就栽在这里）。
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const wanted = heading.trim();
   const headings = lines.flatMap((line, index) => {
     const match = /^(#{1,6})\s+(.*)$/.exec(line);

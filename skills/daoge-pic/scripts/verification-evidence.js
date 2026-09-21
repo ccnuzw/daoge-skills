@@ -43,10 +43,14 @@ function regressionFiles() {
 
 function workbenchChunkLabels() {
   const assets = path.join(workspace, 'dist', 'workbench', 'assets');
-  return fs.readdirSync(assets)
-    .filter((name) => /^index-.*\.(js|css)$/.test(name))
-    .sort()
-    .map((name) => name.split('.').pop().toUpperCase() + ' ' + (fs.statSync(path.join(assets, name)).size / 1000).toFixed(2) + ' kB');
+  const sizeOf = (name) => fs.statSync(path.join(assets, name)).size;
+  const files = fs.readdirSync(assets).filter((name) => /\.(js|css)$/.test(name)).sort();
+  const entry = files.filter((name) => /^index-/.test(name));
+  const lazy = files.filter((name) => !/^index-/.test(name));
+  const labels = entry.map((name) => name.split('.').pop().toUpperCase() + ' ' + (sizeOf(name) / 1000).toFixed(2) + ' kB');
+  // 八屏与对话框、Provider 设置是懒加载块：入口小了，但要如实说明还有多少按需下载。
+  if (lazy.length) labels.push('按需块 ' + lazy.length + ' 个 / ' + (lazy.reduce((sum, name) => sum + sizeOf(name), 0) / 1000).toFixed(2) + ' kB');
+  return labels;
 }
 
 const buildOutput = run('npm', ['run', 'build'], 'npm run build');

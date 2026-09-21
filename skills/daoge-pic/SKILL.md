@@ -5,7 +5,7 @@ description: Agent + 创作者工作台协作的本地图像创作管理 Skill�
 
 # DAOGE Pic vNext
 
-当前源码与运行时版本为 `6.1.0`（最新正式发布；`6.0.0`、`5.14.2` 及更早为历史发布，不兼容的旧 daemon 不得混用）。Skill protocol 为 `daoge-pic-skill-protocol/3.1.0`，运行时兼容范围 `>=6.0.0 <7.0.0`；二者独立于制品版本，制品版本绝不能当作协议版本。
+当前源码与运行时版本为 `6.1.1`（最新正式发布；`6.1.0`、`6.0.0`、`5.14.2` 及更早为历史发布，不兼容的旧 daemon 不得混用）。Skill protocol 为 `daoge-pic-skill-protocol/3.1.0`，运行时兼容范围 `>=6.0.0 <7.0.0`；二者独立于制品版本，制品版本绝不能当作协议版本。
 
 本文件是 Agent 执行协议，不是完整产品规格；产品、架构、Schema、Worker、ZIP、安全实现和验证证据分别以 `docs/daoge_pic_vnext_upgrade_spec_zh.md`、`docs/vnext_verification_evidence_zh.md`、源码与测试为准。**执行型会话只读本文件、`daoge <命令> --help` 与下面的按需附录**；README 与 `docs/` 只在被明确要求做产品、架构或发布工作时才读。用户可见沟通使用中文。
 
@@ -97,7 +97,7 @@ node scripts/daoge.js <command> [--workspace <stable-workspace>]
 
 完整命令目录、高风险命令完整签名、`--host` 宿主表与幂等恢复语义见 `references/commands.md`；单条命令的参数以 `daoge <命令> --help` 为准。高风险命令必须按完整签名执行，缺失参数时停止并补齐，**不得猜测默认值或把 secret 写入 argv**。
 
-同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/3.1.0`；`6.1.0` 是当前源码/运行时版本，`6.0.0`、`5.14.2` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
+同源 Studio API 仅用于当前文档或当前源码已明确列出的端点。Bearer Skill/CLI 请求必须发送 `x-daoge-skill-protocol: daoge-pic-skill-protocol/3.1.0`；`6.1.1` 是当前源码/运行时版本，`6.1.0`、`6.0.0`、`5.14.2` 及更早版本是历史发布制品，它们都绝不能当作协议版本。
 
 固定查询端点：`GET /api/studio`（协议协商与运行时状态）、`GET /api/sessions/<session-id>/plan-status`（会话计划摘要）、`GET /api/rounds/<round-id>/runs`（当前轮次 Generation History）；确认模板读写走 Bearer-only 的 `/api/confirmed-templates` 列表/详情与 POST save/archive/rollback。路径或方法不在端点表内时 daemon 以 `未找到请求的 Studio API。` 拒绝；Skill 必须改用正确端点或受控 CLI，不得猜测 `/api/studio/...`、旧命令或工作区文件。
 

@@ -32,7 +32,7 @@ import { redactedRuntimeDiagnostic, runtimeHealthPresentation } from '../runtime
 import { chunkAssetIds, deliverableIntent, isSelectionWriteCurrent, keepCandidateIds, latestSelection, mergeSelectionAssets, needsKeepReview, nextBusySet, nextSelectedIds, normalizeAssetIds, selectionCandidates, selectionIdSet, shouldClearSelectionBusy } from '../selection-model.mjs';
 import { runExecutionPresentation, statusPresentation } from '../status-presentation.mjs';
 import { PageFrame } from '../templates/PageFrame.jsx';
-import { Troubleshoot } from '../troubleshoot.jsx';
+const Troubleshoot = lazy(() => import('../troubleshoot.jsx').then((module) => ({ default: module.Troubleshoot })));
 import { useAgentDetection } from '../use-agent-detection.mjs';
 import { useAgentPresence } from '../use-agent-presence.mjs';
 import { useAssetImport } from '../use-asset-import.mjs';
@@ -41,30 +41,31 @@ import { useRequestQueue } from '../use-request-queue.mjs';
 import { createLatestRequestGate, useRouteRefresh } from '../use-route-refresh.mjs';
 import { studioEventRefreshPlan, useStudioEvents } from '../use-studio-events.mjs';
 import { useStudioSearch } from '../use-studio-search.mjs';
-import { AssetsView } from '../views/assets.jsx';
-import { DeliveriesView } from '../views/deliveries.jsx';
-import { GuideView } from '../views/guide.jsx';
-import { LibraryView } from '../views/library.jsx';
-import { LineageView } from '../views/lineage.jsx';
-import { ProjectOverviewView } from '../views/project-overview.jsx';
-import { ProjectsView } from '../views/projects.jsx';
-import { PromptsView } from '../views/prompts.jsx';
-import { RunsView } from '../views/runs.jsx';
-import { SharedAssetsView } from '../views/shared-assets.jsx';
-import { StudioOverviewView } from '../views/studio-overview.jsx';
-import { TasksView } from '../views/tasks.jsx';
+// 八屏按需加载：初始包只含当前屏。最重的「创作平台」（canvas 链）随 lineage 一起拆出，
+// 其余屏各自成块；首屏不再为一个还没打开的视图付下载与解析成本。
+const AssetsView = lazy(() => import('../views/assets.jsx').then((module) => ({ default: module.AssetsView })));
+const DeliveriesView = lazy(() => import('../views/deliveries.jsx').then((module) => ({ default: module.DeliveriesView })));
+const GuideView = lazy(() => import('../views/guide.jsx').then((module) => ({ default: module.GuideView })));
+const LibraryView = lazy(() => import('../views/library.jsx').then((module) => ({ default: module.LibraryView })));
+const LineageView = lazy(() => import('../views/lineage.jsx').then((module) => ({ default: module.LineageView })));
+const ProjectOverviewView = lazy(() => import('../views/project-overview.jsx').then((module) => ({ default: module.ProjectOverviewView })));
+const ProjectsView = lazy(() => import('../views/projects.jsx').then((module) => ({ default: module.ProjectsView })));
+const PromptsView = lazy(() => import('../views/prompts.jsx').then((module) => ({ default: module.PromptsView })));
+const RunsView = lazy(() => import('../views/runs.jsx').then((module) => ({ default: module.RunsView })));
+const SharedAssetsView = lazy(() => import('../views/shared-assets.jsx').then((module) => ({ default: module.SharedAssetsView })));
+const StudioOverviewView = lazy(() => import('../views/studio-overview.jsx').then((module) => ({ default: module.StudioOverviewView })));
+const TasksView = lazy(() => import('../views/tasks.jsx').then((module) => ({ default: module.TasksView })));
 import { VIEW_LAYOUTS } from '../workbench-navigation-model.mjs';
 import { ASSET_SCOPES, ASSET_SCOPE_LABELS, isStudioView, parseWorkbenchRoute, rendererForWorkbenchView, selectProject, selectTask, serializeWorkbenchRoute, updateWorkbenchRoute } from '../workbench-route.mjs';
 import { workbenchConversationId } from '../workbench-session.mjs';
 import { api } from './api.js';
 import { AssetCard, AssetSelectionStrip } from './asset-surfaces.jsx';
-import { MaterialImportGuide } from './creation-dialogs.jsx';
 import { ROUND_PURPOSE_LABELS, compactRecord, listItems, materialNeedsForTemplate, projectTemplateForProject, uniqueList } from './creation-model.mjs';
 import { RuntimeHealthAlertStrip } from './project-surfaces.jsx';
 import { WorkbenchErrorAlert } from './shell-pieces.jsx';
 import { WorkbenchShell } from './workbench-shell.jsx';
 import { Archive, Bookmark, Check, ChevronLeft, ChevronRight, CircleAlert, CloudOff, Eye, ImagePlus, Inbox, Maximize2, SlidersHorizontal, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 function confirmationPlanSummary(round) {
   const text = (value) => typeof value === 'string' ? value.trim() : '';
