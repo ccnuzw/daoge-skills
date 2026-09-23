@@ -1,0 +1,74 @@
+{
+  "skill_name": "spec-docs",
+  "evals": [
+    {
+      "id": 1,
+      "name": "bootstrap-s-tier",
+      "prompt": "我们下周要开一个新项目，还没有任何文档目录，请把文档体系先搭起来。项目：内部工单工具「TicketLite」；Node.js + PostgreSQL，单体服务，1 个人开发；首版 2 周，功能点不超过 5 个。把骨架生成到工作目录并让结构检查跑起来；不要编造业务规则。",
+      "expected_output": "生成 8 个编号目录的文档骨架 + docs-policy.json + 检查脚本，check-docs 0 errors，按 S 档并说明理由，给出下一步填充顺序",
+      "assertions": [
+        "生成骨架：存在 docs/ 目录与 docs-policy.json",
+        "结构检查运行且 0 errors",
+        "选择 S 档并给出理由（1 人/2 周/≤5 功能）",
+        "未编造业务规则；明确标注占位与下一步",
+        "给出按顺序的填充清单（蓝图→版本→编号→基线→功能）"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "feature-doc-with-registry",
+      "prompt": "为「收货地址管理」写功能规格并接入项目文档体系。字段：收件人姓名(1-50)、手机号(11位大陆)、省市、详细地址(1-200)、邮编(可选6位)；每用户最多 20 个；默认地址唯一；删除默认地址后不自动指定；涉及 PII。",
+      "expected_output": "主文档七段 + 独立技术设计 + 编号/索引/查找表/追踪矩阵/风险分级/实现状态回写，HTTP 字段唯一写入 OpenAPI，check-docs 0 errors",
+      "assertions": [
+        "主文档含 frontmatter 且分配唯一功能 ID（如 V1-FR-002）",
+        "主文档包含七段结构（目标/功能边界/需求/接口/数据/验收/实现）",
+        "AC 为 Given/When/Then 且有测试层级/目标资产/目标命令列",
+        "实现状态仅登记在版本实现状态表；主文档不复制 status",
+        "HTTP 字段约束和请求/响应 schema 写入 OpenAPI，功能文档通过 operationId 引用",
+        "判定为高风险并产出独立技术设计（含分支 ID 到 AC 的映射）",
+        "回写至少 5 处登记（编号表/索引/查找表/矩阵/实现状态等）",
+        "check-docs 0 errors"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "governance-conflict",
+      "prompt": "文档里退款金额单位一处写“分”、一处写“元”，代码用 Decimal 元，功能文档引用了“分”。怎么处理？把要落地的文档改动写成方案，不要直接改代码。",
+      "expected_output": "先冻结决策、列同步清单（功能文档/接口契约/openapi/数据模型/测试）、禁止按代码回填与双兼容、登记变更记录与追踪矩阵，最后跑检查",
+      "assertions": [
+        "提出先形成冻结决策并给出决策编号与记录位置",
+        "列出需同步的文档集合（功能文档、接口契约、openapi、数据模型、测试）",
+        "明确禁止直接按代码回填需求或长期保留双兼容",
+        "提到文档变更记录/追踪矩阵回写与验证（check-docs 或 docs-gate）"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "delivery-gate-adversarial-evidence",
+      "prompt": "检查当前项目的 docs-gate 是否可以作为发布门禁。请重点用反例验证：E2E 全部 skipped、commit 只有 1 个字符、报告没有 manifest、源码提交后改动并重算 asset_sha256、AC 标记通过但缺少测试资产或命令。修复发现并添加回归测试。",
+      "expected_output": "每个反例均有可重复测试；发布门禁对无效证据非零退出；合法完整证据链仍通过",
+      "assertions": [
+        "E2E 必须有 passed 用例且 cases/stats 数量一致",
+        "发布模式有 skipped 时失败",
+        "commit 必须是完整 SHA 且存在于当前提交历史",
+        "所有必需报告都要求配对 manifest 且绑定报告、环境、commit 与资产摘要",
+        "被测提交之后的非证据源码变化不能被重算摘要掩盖",
+        "标记通过的 AC 必须有仓库内测试资产与已登记命令",
+        "回归测试覆盖每项拒绝路径及合法证据通过路径"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "adopt-existing-docs-without-overwrite",
+      "prompt": "现有仓库已经有 docs/README.md、若干旧规格和 scripts/check-docs.mjs。请接入 spec-docs，不能覆盖、移动或删除任何现有文件；先建可检查的新结构并提供迁移步骤。",
+      "expected_output": "使用 --adopt 或并行 --dir 安全生成；已有文件字节不变；迁移指导按文件归档并保留映射，不整体移动 docs 根目录",
+      "assertions": [
+        "初始化器存在只补缺失文件的 adopt 模式",
+        "同名文档、policy 和脚本在 adopt 下不被覆盖",
+        "有非零退出或错误时不声称迁移完成",
+        "迁移指南禁止把已混入新模板的 docs 根整体移入历史归档",
+        "迁移映射记录每个旧路径到新路径"
+      ]
+    }
+  ]
+}

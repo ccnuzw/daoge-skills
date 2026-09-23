@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "activeVersion": "{{活跃版本}}",
+  "policy": "docs-policy.json",
+  "evidence": "docs-evidence.json",
+  "authorityFiles": [
+    "{{文档目录}}/02-产品与版本/当前版本/{{活跃版本}}-版本总览.md",
+    "{{文档目录}}/02-产品与版本/当前版本/{{活跃版本}}-实现状态.md",
+    "{{文档目录}}/04-技术架构/当前版本/{{活跃版本}}-接口契约.md",
+    "{{文档目录}}/04-技术架构/当前版本/{{活跃版本}}-openapi.yaml",
+    "{{文档目录}}/04-技术架构/当前版本/{{活跃版本}}-数据模型.md",
+    "{{文档目录}}/06-决策记录/{{活跃版本}}-冻结决策.md",
+    "{{文档目录}}/05-测试与发布/端到端验收/{{活跃版本}}-端到端验收规范.md"
+  ],
+  "approvalMaxAgeDays": 30,
+  "requiredReports": ["development", "e2e", "release"],
+  "requiredApprovals": ["product", "technical", "release_manager"],
+  "commandRegistry": null,
+  "requireCommitBinding": true,
+  "requireManifest": true,
+  "release": {
+    "enforce": false,
+    "allowPendingACs": false
+  },
+  "secretScan": {
+    "enabled": true,
+    "patterns": [],
+    "allowPaths": []
+  },
+  "_hints": {
+    "authorityFiles": "参与摘要计算与审批绑定的权威文档；改动任何一个都会使原审批失效",
+    "requiredReports": "按项目增删；有性能门禁时加入 performance",
+    "commandRegistry": "登记允许的命令前缀（如 make test、pnpm --filter app test）；为空则跳过命令登记校验",
+    "allowedEnvironments": "如需收紧环境白名单，在此覆盖默认值",
+    "release": "enforce=true 等价于常开 --release；allowPendingACs=true 允许未闭环 AC 带告警通过"
+  }
+}

@@ -4,16 +4,19 @@
 
 > **版本状态**：`daoge-pic` 当前稳定正式版本为 [6.2.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.2.0)——这是一次 **agent 效率小版本**（响应投影、`daoge wait`、校验前移、写侧合并）；发布说明见 [`6.2.0 发布说明`](./docs/daoge_pic_6.2.0_release_notes_zh.md)，`6.1.1`、`6.1.0`、`6.0.0`、`5.14.2` 及更早版本保持为不可变历史发布。
 
-当前仓库包含两项彼此独立的能力：
+当前仓库包含三项彼此独立的能力：
 
 | Skill | 解决的问题 | 主要使用者 | 独立说明 |
 | --- | --- | --- | --- |
 | [`daoge-pic`](./skills/daoge-pic/README.md) | 会话优先的本地图像创作管理：Agent 收敛需求、写计划、受控执行；Studio Workbench 管项目 / 任务 / 批次、Provider、创作画布、生成历史、选片评审与资产交付 | 内容团队、设计师、运营人员、图像工作流开发者 | [进入图像创作 Skill](./skills/daoge-pic/README.md) |
 | [`daoge-docs`](./skills/daoge-docs/README.md) | 建立中文文档驱动开发体系，生成开发执行工作台和受控 Goal 输入 | 产品、研发、架构与使用编程智能体的团队 | [进入文档 Skill](./skills/daoge-docs/README.md) |
+| [`spec-docs`](./skills/spec-docs/README.md) | 以 Markdown 规格、稳定需求 ID、结构检查和证据门禁建立轻量、可移植的文档驱动开发流程 | 希望复用规格模板、治理方法和 Node.js 检查脚本的个人与团队 | [进入 Spec Docs Skill](./skills/spec-docs/README.md) |
 
 ## 选择 Skill
 
-如果你的目标是**规划和交付一个软件项目**，选择 `daoge-docs`：它负责产品蓝图、版本 PRD、功能规格、架构、测试、门禁、证据、开发者工作台与 Goal 输入。
+如果你需要**完整的软件项目执行工作流**，选择 `daoge-docs`：它负责产品蓝图、版本 PRD、功能规格、架构、测试、门禁、证据、开发者工作台与受控 Goal 输入。
+
+如果你需要**可独立复制的文档规范与检查工具**，选择 `spec-docs`：它提供 S/M/L 分档文档骨架、功能规格和需求追踪方法、结构检查与交付证据门禁，适合希望直接维护 Markdown 文档和脚本的项目。它不生成 DAOGE Docs 工作台或 Goal 系统。
 
 如果你的目标是**规划、生成、管理或交付图片资产**，选择 `daoge-pic`：它会先在稳定工作区自动打开或复用 Studio，再为当前会话建立独立 Session 和项目上下文，然后澄清 brief、确认创作计划并管理受控生成与交付。
 
@@ -21,17 +24,20 @@
 
 ```text
 daoge-docs
-  定义软件产品、版本、功能与开发任务边界
+  提供项目文档治理、开发工作台与受控 Goal 执行流程
+
+spec-docs
+  提供可移植的文档骨架、规格方法、结构检查与证据门禁
 
 daoge-pic
   管理项目中需要批量生成或审阅的图像资产
 ```
 
-例如，产品团队可以用 `daoge-docs` 规划一个电商内容系统，再用 `daoge-pic` 为其中的营销素材、商品图或活动海报建立批量生图工作区。二者的文档、数据、运行环境和发布节奏仍然独立。
+例如，产品团队可以用 `daoge-docs` 规划一个电商内容系统，再用 `daoge-pic` 为其中的营销素材、商品图或活动海报建立批量生图工作区。轻量项目也可以单独使用 `spec-docs`，不依赖 DAOGE Docs 的工作台或 Goal 工具。
 
 ## 安装
 
-可以只装一个 Skill，也可以按需装多个。`daoge-docs` 通过 `npx skills add` 安装；`daoge-pic` 稳定版必须使用对应 GitHub Release 的不可变 `.tgz` 制品。对 `daoge-pic` 而言，npm 安装负责提供 `daoge` CLI 和运行时，link/junction 步骤负责把同一个已安装包注册为宿主 Skill；**两步缺一不可**。
+可以只装一个 Skill，也可以按需装多个。`daoge-docs` 和 `spec-docs` 通过 `npx skills add` 安装；`daoge-pic` 稳定版必须使用对应 GitHub Release 的不可变 `.tgz` 制品。对 `daoge-pic` 而言，npm 安装负责提供 `daoge` CLI 和运行时，link/junction 步骤负责把同一个已安装包注册为宿主 Skill；**两步缺一不可**。
 
 `daoge-pic` 实际运行下限为 Node.js `22.17.0`：Studio 搜索要求内置 SQLite 启用 FTS5，Windows 安全媒体读取还要求 libuv 1.51.0 修复后的路径 / 句柄文件身份一致性。Windows 建议使用同一普通用户在本地 NTFS 目录完成项目级安装和运行；PowerShell 执行策略阻止 `.ps1` shim 时使用 `npm.cmd`、`npx.cmd` 或 `daoge.cmd`，不要放宽全局执行策略。Studio 工作区不得放在 OneDrive/同步盘、UNC/网络共享、移动盘、WSL 挂载路径或 junction/symlink 根上。
 
@@ -39,6 +45,12 @@ daoge-pic
 
 ```bash
 npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
+```
+
+安装 `spec-docs`：
+
+```bash
+npx skills add ccnuzw/daoge-skills -a codex -s spec-docs
 ```
 
 安装 `daoge-pic` 当前稳定版（`6.2.0`）：
@@ -81,9 +93,9 @@ daoge.cmd register-skill --scope user
 npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic -a codex
 ```
 
-安装 `daoge-docs` 或开发源码 Skill 后也需重启宿主。安装一个能力不会自动安装仓库中的另一个能力。
+安装 Skill 后需重启宿主，使其重新加载 Skill registry。安装一个能力不会自动安装仓库中的其他能力。
 
-## 两条起步路径
+## 三条起步路径
 
 ### 软件项目与文档驱动开发
 
@@ -96,6 +108,16 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 ```
 
 详细流程、工作台、门禁与 Goal 说明见 [DAOGE Docs README](./skills/daoge-docs/README.md)。
+
+### 规格模板与文档门禁
+
+`spec-docs` 适合希望直接维护项目 Markdown、复用规格模板并运行结构与交付证据检查的项目。可以对智能体说：
+
+```text
+使用 spec-docs 按当前项目规模建立或维护文档体系；先检查现有仓库，未知业务规则标为待确认，完成后运行结构检查。
+```
+
+初始化选项、S/M/L 分档和脚本说明见 [Spec Docs README](./skills/spec-docs/README.md)。
 
 ### 本地图像创作与资产管理
 
@@ -149,6 +171,13 @@ Workbench **不提供开放式对话**，只提供一个受限请求入口：用
     │   ├── scripts/daoge_docs.py
     │   ├── assets/
     │   └── references/
+    ├── spec-docs/
+    │   ├── README.md                 # 使用说明与安装方法
+    │   ├── SKILL.md                  # 宿主执行规范
+    │   ├── scripts/                  # 文档初始化、结构检查与证据门禁
+    │   ├── assets/skeleton/          # 可复制的文档骨架
+    │   ├── references/               # 方法论、规格、治理与证据规范
+    │   └── evals/                    # 可判定的 Skill 评测场景
     └── daoge-pic/
         ├── README.md                 # vNext Studio 使用手册与版本状态
         ├── SKILL.md                  # 宿主执行规范
@@ -163,9 +192,10 @@ Workbench **不提供开放式对话**，只提供一个受限请求入口：用
 
 ## 发布与反馈
 
-每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为两个 Skill 位于同一仓库而假设它们共享运行时或发布条件。
+每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为多个 Skill 位于同一仓库而假设它们共享运行时或发布条件。
 
 - `daoge-pic` 当前稳定正式版本为 [v6.2.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.2.0)；`v6.1.1`、`v6.1.0`、`v6.0.0` 及更早为不可变历史发布。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
+- `spec-docs` 当前版本为 [1.1.0](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-v1.1.0)，使用 `spec-docs-vX.Y.Z` 独立标记和发布；安装方法见 [Spec Docs README](./skills/spec-docs/README.md)。
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
 - 系列级变更记录见 [CHANGELOG.md](./CHANGELOG.md)。

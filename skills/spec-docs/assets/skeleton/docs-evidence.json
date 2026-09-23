@@ -1,0 +1,34 @@
+{
+  "activeVersion": "{{活跃版本}}",
+  "commit": "<完整 40/64 位被测源码 commit SHA>",
+  "generatedAt": "{{日期}}T00:00:00+08:00",
+  "approvals": {
+    "proposal_id": "<提案或变更单编号>",
+    "authority_digest": "<运行 node scripts/docs-gate.mjs --authority-digest 获取>",
+    "approved_by": {
+      "product": "",
+      "technical": "",
+      "release_manager": ""
+    },
+    "approved_at": "<带时区时间，例如 2026-01-01T10:00:00+08:00>"
+  },
+  "reports": {
+    "development": {
+      "path": "{{文档目录}}/05-测试与发布/端到端验收/报告/dev-<YYYYMMDD>.json",
+      "environment": "local"
+    },
+    "e2e": {
+      "path": "{{文档目录}}/05-测试与发布/端到端验收/报告/e2e-<YYYYMMDD>.json",
+      "environment": "local-mock"
+    },
+    "release": {
+      "path": "{{文档目录}}/05-测试与发布/端到端验收/报告/release-<YYYYMMDD>.json",
+      "environment": "production-gate"
+    }
+  },
+  "_hints": {
+    "usage": "只保存当前证据指针；历史批次留在报告目录，不删除",
+    "reports": "每份报告必须配对 <报告名>-manifest.json 并提供源码 asset_sha256；契约见 skill references/docs-gate.md",
+    "approvals": "审批必须发生在完整提案展示之后；权威文档变化后摘要失配，原审批自动失效"
+  }
+}
