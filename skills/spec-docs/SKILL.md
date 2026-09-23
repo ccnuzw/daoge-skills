@@ -2,8 +2,8 @@
 name: spec-docs
 description: 为任意项目建立、填充和维护“文档驱动开发”文档体系（文档骨架、功能规格、需求编号与追踪矩阵、接口/数据契约、验收证据链、版本门禁、冻结决策与 ADR）。当用户要为新项目搭 docs/ 文档骨架、整理现有项目文档、写功能规格/需求/接口/数据/测试/验收文档、建需求追踪或 ADR、要求 AI 按文档开发或核查实现、准备交接评审，或提到文档驱动开发、文档体系、规格文档、需求追踪、docs bootstrap、spec-first 时，都应使用本 skill——即使没有点名 spec-docs。Use whenever the user mentions document-driven development, spec docs, requirement traceability, ADRs, acceptance criteria mapping, or asks for docs scaffolding or templates in any project.
 metadata:
-  version: "1.1.0"
-  updated: "2026-09-23"
+  version: "1.1.1"
+  updated: "2026-09-24"
 ---
 
 # spec-docs：文档驱动开发

@@ -2,6 +2,11 @@
 
 本仓库的 Skills 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`，`spec-docs` 标签格式为 `spec-docs-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## spec-docs 1.1.1 - 2026-09-24
+
+- 完整补充 `spec-docs` 使用手册，覆盖定位、适用边界、工作模式、档位、目录职责、常用命令、CI 接入、证据门禁和参考资料。
+- 将 `spec-docs` 元数据和安装文档版本更新为 `1.1.1`。
+
 ## spec-docs 1.1.0 - 2026-09-24
 
 - 将独立的文档驱动开发 Skill 发布到仓库 `skills/spec-docs/`，包含使用说明、执行规范、方法参考、文档骨架、初始化/结构检查/交付门禁脚本及自测。
