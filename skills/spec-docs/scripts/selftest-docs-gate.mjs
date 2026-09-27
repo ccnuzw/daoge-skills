@@ -46,7 +46,8 @@ function run(cmd, args, options = {}) {
 }
 
 const gate = (args = []) => {
-  const result = run("node", ["scripts/docs-gate.mjs", "--json", ...args]);
+  const phaseArgs = args.includes("--phase") ? [] : ["--phase", "release"];
+  const result = run("node", ["scripts/docs-gate.mjs", "--json", ...phaseArgs, ...args]);
   let parsed = null;
   try {
     parsed = JSON.parse(result.stdout);
@@ -85,15 +86,23 @@ writeFileSync(join(fixture, "tests/ac01.test.js"), "// ac01 fixture\nconsole.log
 writeFileSync(join(fixture, "tests/perf-profile.json"), "{\"virtual_users\":10,\"duration_seconds\":30}\n", "utf8");
 appendFileSync(
   join(fixture, featureDoc),
-  "\n| AC | 验收重点 | 测试层级 | 目标资产 | 目标命令 | 初始资产状态 |\n| --- | --- | --- | --- | --- | --- |\n| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 本地通过 |\n",
+  "\n| AC | 验收重点 | 测试层级 | 目标资产 | 目标命令 | 初始资产状态 | 当前状态 |\n| --- | --- | --- | --- | --- | --- | --- |\n| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 已创建 | 本地通过 |\n",
   "utf8",
 );
+
+// 骨架中的说明性 AC 表不是本夹具的交付证据，移除后只保留下面登记的真实 AC。
+{
+  const text = readFileSync(join(fixture, featureDoc), "utf8");
+  const cleaned = text.replace(/\n\| AC 范围 \|[^\n]*\n\| --- \|[^\n]*\n\| AC01–AC02 \|[^\n]*\n/, "\n");
+  writeFileSync(join(fixture, featureDoc), cleaned, "utf8");
+}
 
 const gateConfigPath = join(fixture, "docs-gate.json");
 const gateConfig = JSON.parse(readFileSync(gateConfigPath, "utf8"));
 gateConfig.requiredReports = ["development", "e2e", "performance", "release"];
 gateConfig.commandRegistry = ["node tests/ac01.test.js"];
 writeJson("docs-gate.json", gateConfig);
+const baselineGateConfig = readFileSync(gateConfigPath, "utf8");
 
 /* 报告、manifest 与证据清单绑定被测源码提交；其自身可以在提交后追加。 */
 run("git", ["init", "-q"]);
@@ -281,8 +290,10 @@ console.log("\n[8] 发布模式：AC 未闭环 → 失败");
   const docPath = join(fixture, featureDoc);
   const original = readFileSync(docPath, "utf8");
   const config = JSON.parse(readFileSync(join(fixture, "docs-gate.json"), "utf8"));
-  writeFileSync(docPath, original.replace("| 本地通过 |", "| 未执行 |"), "utf8");
-  const normal = gate();
+  config.release.allowPendingACs = false;
+  writeJson("docs-gate.json", config);
+  writeFileSync(docPath, original.replace("| 已创建 | 本地通过 |", "| 已创建 | 未执行 |"), "utf8");
+  const normal = gate(["--phase", "development"]);
   assert("普通模式仅告警", normal.code === 0 || normal.codes.length === 0, normal.codes.join(","));
   const release = gate(["--release"]);
   assert("发布模式 AC_PENDING", release.codes.includes("AC_PENDING"), release.codes.join(","));
@@ -291,7 +302,7 @@ console.log("\n[8] 发布模式：AC 未闭环 → 失败");
   const enforced = gate();
   assert("release.enforce 常开发布门禁", enforced.code === 1 && enforced.codes.includes("AC_PENDING"), enforced.codes.join(","));
   config.release.enforce = false;
-  writeJson("docs-gate.json", config);
+  writeFileSync(gateConfigPath, baselineGateConfig, "utf8");
   writeFileSync(docPath, original, "utf8");
 }
 
@@ -358,11 +369,11 @@ console.log("\n[14] 已通过 AC 必须有资产、命令和状态");
 {
   const docPath = join(fixture, featureDoc);
   const original = readFileSync(docPath, "utf8");
-  writeFileSync(docPath, original.replace("| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 本地通过 |", "| AC01 | 正常 | Unit |  | `node tests/ac01.test.js` | 本地通过 |"), "utf8");
+  writeFileSync(docPath, original.replace("| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 已创建 | 本地通过 |", "| AC01 | 正常 | Unit |  | `node tests/ac01.test.js` | 已创建 | 本地通过 |"), "utf8");
   assert("已通过 AC 缺目标资产失败", gate(["--release"]).codes.includes("AC_ASSET_MISSING"));
-  writeFileSync(docPath, original.replace("| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 本地通过 |", "| AC01 | 正常 | Unit | `tests/ac01.test.js` |  | 本地通过 |"), "utf8");
+  writeFileSync(docPath, original.replace("| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 已创建 | 本地通过 |", "| AC01 | 正常 | Unit | `tests/ac01.test.js` |  | 已创建 | 本地通过 |"), "utf8");
   assert("已通过 AC 缺命令失败", gate(["--release"]).codes.includes("AC_COMMAND_MISSING"));
-  writeFileSync(docPath, original.replace("| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 本地通过 |", "| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` |  |"), "utf8");
+  writeFileSync(docPath, original.replace("| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 已创建 | 本地通过 |", "| AC01 | 正常 | Unit | `tests/ac01.test.js` | `node tests/ac01.test.js` | 已创建 |  |"), "utf8");
   assert("空 AC 状态在发布模式失败", gate(["--release"]).codes.includes("AC_PENDING"));
   writeFileSync(docPath, original, "utf8");
 }
@@ -391,7 +402,7 @@ console.log("\n[16] 权威摘要错误与证据路径越界必须失败");
   symlinkSync(outsideEvidence, evidenceLink);
   config.evidence = "evidence-link.json";
   writeJson("docs-gate.json", config);
-  const escapedEvidence = run("node", ["scripts/docs-gate.mjs", "--json"]);
+  const escapedEvidence = run("node", ["scripts/docs-gate.mjs", "--json", "--phase", "release"]);
   assert("证据清单符号链接越界拒绝", escapedEvidence.code === 2 && escapedEvidence.stderr.includes("符号链接越界"));
   rmSync(evidenceLink, { force: true });
   rmSync(outsideEvidence, { force: true });

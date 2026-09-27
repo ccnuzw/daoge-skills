@@ -41,6 +41,9 @@ title: "01 功能名"
 version: V1
 feature_id: V1-FR-001
 domain: <领域名>
+delivery_scope: active
+planning_only: false
+delivery_slice: V1-core
 updated: YYYY-MM-DD
 ---
 ```
@@ -69,6 +72,7 @@ updated: YYYY-MM-DD
 - 无接口时写“不适用 + 理由”。
 - 公共规则（鉴权方式、响应包体、分页、错误结构）引用公共契约，不复制。
 - 功能主文档引用 OpenAPI operationId，不复制字段 schema；具体数值错误码以统一错误码文档为准。
+- 接口章节必须提供“接口清单 / OpenAPI operation 映射 / 错误矩阵”；每个 operationId 必须能在当前版本 OpenAPI 中找到。无接口时写“不适用 + 理由”。
 
 ### 第 4 段 数据与事务
 
@@ -77,6 +81,11 @@ updated: YYYY-MM-DD
 - 无持久化时写“不适用 + 理由”。
 - 状态与生命周期写清“初始状态 → 事件 → 新状态”。
 - 资金、并发、幂等场景写清失败与补偿路径；事务边界要明确哪些步骤必须原子。
+- 数据章节必须提供“涉及数据 / 约束与事务 / 字段读写矩阵 / 状态与生命周期 / 物理约束与迁移 / 数据所有权 / 安全与保留”；无持久化时写“不适用 + 理由”。
+
+### 交付范围元数据
+
+`delivery_scope=active` 表示纳入当前版本交付，必须使用当前版本的功能 ID，并登记在实现状态表；`delivery_scope=future` 或 `planning_only=true` 只表示规划设计，不得进入当前版本实现状态表。未来版本功能应放入对应版本目录，不能混入当前版本功能目录。
 
 ### 第 5 段 验收标准
 

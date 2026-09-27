@@ -2,8 +2,8 @@
 name: spec-docs
 description: 为任意项目建立、填充和维护“文档驱动开发”文档体系（文档骨架、功能规格、需求编号与追踪矩阵、接口/数据契约、验收证据链、版本门禁、冻结决策与 ADR）。当用户要为新项目搭 docs/ 文档骨架、整理现有项目文档、写功能规格/需求/接口/数据/测试/验收文档、建需求追踪或 ADR、要求 AI 按文档开发或核查实现、准备交接评审，或提到文档驱动开发、文档体系、规格文档、需求追踪、docs bootstrap、spec-first 时，都应使用本 skill——即使没有点名 spec-docs。Use whenever the user mentions document-driven development, spec docs, requirement traceability, ADRs, acceptance criteria mapping, or asks for docs scaffolding or templates in any project.
 metadata:
-  version: "1.1.1"
-  updated: "2026-09-24"
+  version: "1.2.0"
+  updated: "2026-09-27"
 ---
 
 # spec-docs：文档驱动开发
@@ -49,7 +49,7 @@ metadata:
     `--tier s|m|l` 写入 `docs-policy.json`，决定结构检查必需范围；完整模板树会保留以维持链接完整，S 档只需维护 policy 标记为必需的核心文档，不要手动删除可选模块。
 3. 按顺序填充，不要并行铺开：产品蓝图 → 版本路线图 → 当前版本总览/产品需求 → 功能编号表 → 功能查找表 → 公共基线（架构/接口/数据/错误码）→ 测试策略 → 发布空间。
 4. 功能文档最后写：每个可独立验收目标一份主文档，高风险功能加一份技术设计。先登记索引和编号，再创建文件。
-5. 跑 `node <项目根>/scripts/check-docs.mjs`，让结构问题在内容还少的时候暴露。
+5. 跑 `node <项目根>/scripts/check-docs.mjs`，让结构、交付范围、接口 operationId 和数据最小章节问题在内容还少的时候暴露；需要阻断质量告警时加 `--strict`。
 6. 告诉用户哪些章节是占位（`<!-- 填写说明 -->` 或 `<>`），以及下一步该填哪一份。
 
 ## 模式 B：写一个功能文档
@@ -67,6 +67,7 @@ metadata:
 - **实现核查**（只读）：对照需求、接口、数据、错误、页面、测试和代码，输出“已满足 / 部分满足 / 未实现 / 文档与代码冲突”四类结论及证据（文件 + 行号或命令输出）。不要修改代码。
 - **状态回写**：只在有证据时更新实现状态，附日期、环境、构建标识、命令、结果、遗留风险；性能结论必须来自已批准的负载配置，静态预检不得写成压测通过。
 - **执行空间维护**：端到端验收与性能容量各自维护 规范 → 环境/夹具/顺序 → 用例矩阵 → 验证证据 四层；专项/轮次测试设计单独成文并带日期，不进主矩阵；批次证据只追加不覆盖，并配 `<run_id>-manifest.json`（含 code_version、asset_sha256、limitations）。
+- **交付范围隔离**：功能 frontmatter 必须写 `delivery_scope`、`planning_only`、`delivery_slice`；未来规划不得混入当前版本实现状态或交付统计。
 - **范围与登记分离**：规划中的设计扩展可以登记编号并维护设计稿（先放 `04-技术架构/当前版本/`），但必须标注状态，不视为进入交付范围或已实现。
 - **冲突处理**：先形成冻结决策，再同步主文档、公共基线、代码、测试，最后更新追踪矩阵。
 - **归档迁移**：新家先就位，旧路径写进迁移映射，再删除旧文件；归档目录内容默认不是当前开发输入。
@@ -74,6 +75,7 @@ metadata:
 ## 完成前自检
 
 - 文档结构变化后跑过 `check-docs.mjs`，链接、索引、编号零错误。
+- 每个功能的接口章节包含接口清单、OpenAPI operation 映射和错误矩阵；数据章节包含最小数据治理小节，或明确“不适用 + 理由”。
 - 每个 AC 有映射；每条映射的证据状态属实（不是把“计划执行”写成“通过”）。
 - 新增/修改了接口、字段、错误码时，公共契约和机器可读文件（openapi）同步。
 - 高风险功能有独立技术设计，且分支 ID 映射到 AC/E2E。
@@ -95,6 +97,6 @@ metadata:
 | `assets/skeleton/docs/` | 需要可复制的空文档骨架时 |
 | `scripts/init-docs.mjs` | 生成项目骨架时（`--gate` 或 `--tier l` 附带门禁）；存量项目先用 `--adopt` 只新增缺失文件 |
 | `scripts/check-docs.mjs` | 校验结构、链接、编号、索引一致性时 |
-| `scripts/docs-gate.mjs` | 校验交付证据链（报告重算、审批摘要、提交绑定、秘密扫描）时 |
+| `scripts/docs-gate.mjs` | 校验交付证据链（报告重算、审批摘要、提交绑定、秘密扫描）或按 planning/development/release 阶段推进门禁时 |
 | `scripts/selftest-check-docs.mjs` | 验证检查器、档位策略、dry-run、adopt 与自定义目录行为时 |
 | `scripts/selftest-docs-gate.mjs` | 需要在临时项目上验证门禁自身行为时 |

@@ -223,6 +223,38 @@ console.log("\n[16] 拒绝越级文档目录名");
   rmSync(unsafe, { recursive: true, force: true });
 }
 
+console.log("\n[17] 旧版 policy 兼容迁移与默认质量检查");
+{
+  const policyPath = "docs-policy.json";
+  const originalPolicy = read(policyPath);
+  const originalFeature = read(featureDoc);
+  const policy = JSON.parse(originalPolicy);
+  delete policy.openapi;
+  delete policy.quality;
+  delete policy.requireDeliveryMetadata;
+  delete policy.tierRules;
+  write(policyPath, `${JSON.stringify(policy, null, 2)}\n`);
+  write(featureDoc, originalFeature
+    .replace("delivery_scope: active\n", "")
+    .replace("planning_only: false\n", "")
+    .replace("delivery_slice: V1-core\n", "")
+    .replace("<无持久化时写：不适用。理由：<...>。>", "本功能涉及持久化数据。")
+    .replace("### 字段读写矩阵\n", ""));
+
+  const legacy = runVerbose([]);
+  assert("旧版 policy 缺交付元数据仅产生迁移告警", legacy.code === 0 && legacy.stdout.includes("兼容模式运行") && !legacy.stdout.includes("delivery_scope 必须"));
+  assert("未配置 OpenAPI 时推断标准路径", !legacy.stdout.includes("未配置") && !legacy.stdout.includes("OpenAPI 不存在"));
+  assert("未配置 quality 时仍检查最低数据章节", legacy.stdout.includes("数据与事务缺少可审计小节：字段读写矩阵"), legacy.stdout.split("\n").filter((line) => line.includes("数据与事务") || line.includes("字段读写矩阵")).join(" | "));
+
+  policy.requireDeliveryMetadata = true;
+  write(policyPath, `${JSON.stringify(policy, null, 2)}\n`);
+  const strictDelivery = run([]);
+  assert("显式启用交付元数据时缺项报错", strictDelivery.code === 1);
+
+  write(policyPath, originalPolicy);
+  write(featureDoc, originalFeature);
+}
+
 console.log(`\n[selftest] ${failures.length === 0 ? "全部通过" : `${failures.length} 项失败`}`);
 if (failures.length > 0) {
   console.log(`  失败项：${failures.join(" / ")}`);

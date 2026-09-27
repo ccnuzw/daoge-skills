@@ -8,6 +8,7 @@
  *
  * 用法:
  *   node scripts/docs-gate.mjs                     # 校验当前证据是否足以交付
+ *   node scripts/docs-gate.mjs --phase planning|development|release
  *   node scripts/docs-gate.mjs --release           # 发布模式：未完成 AC 与待补项按错误处理
  *   node scripts/docs-gate.mjs --authority-digest  # 只读打印权威文档摘要（供审批引用）
  *   node scripts/docs-gate.mjs --init              # 生成 docs-gate.json 与 docs-evidence.json 模板
@@ -47,6 +48,7 @@ const configPath = resolve(repoRoot, opt("--config", "docs-gate.json"));
 const jsonOut = has("--json");
 const quiet = has("--quiet");
 let releaseMode = has("--release");
+let phase = opt("--phase", null);
 
 function usageError(msg) {
   console.error(`[docs-gate] ${msg}`);
@@ -142,6 +144,7 @@ const DEFAULTS = {
   requireManifest: true,
   release: { enforce: false, allowPendingACs: false },
   secretScan: { enabled: true, patterns: [], allowPaths: [] },
+  phase: null,
 };
 
 function loadConfig({ bootstrap = false } = {}) {
@@ -194,6 +197,7 @@ function loadConfig({ bootstrap = false } = {}) {
   if (raw.release !== undefined && (typeof raw.release !== "object" || raw.release === null || Array.isArray(raw.release))) usageError("docs-gate.json release 必须是对象");
   if (raw.release?.enforce !== undefined && typeof raw.release.enforce !== "boolean") usageError("docs-gate.json release.enforce 必须是布尔值");
   if (raw.release?.allowPendingACs !== undefined && typeof raw.release.allowPendingACs !== "boolean") usageError("docs-gate.json release.allowPendingACs 必须是布尔值");
+  if (raw.phase !== undefined && !["planning", "development", "release"].includes(raw.phase)) usageError("docs-gate.json phase 只能是 planning / development / release");
   return {
     ...DEFAULTS,
     ...raw,
@@ -831,7 +835,11 @@ function checkAcMappings(policy, config) {
     for (const table of parseTables(text)) {
       const header = table.header;
       const acIdx = header.findIndex((h) => /\bAC\b|AC 范围|用例/.test(h) || /^AC/i.test(h));
-      const statusIdx = header.map((h, i) => (h.includes("状态") ? i : -1)).filter((i) => i >= 0).pop();
+      // 仅把 AC 的实现/验收状态作为闭环状态；“初始资产状态”描述测试资产，不能触发 AC_PENDING。
+      const statusIdx = header
+        .map((h, i) => (/^(?:当前状态|实现状态|验收状态|状态)$/.test(h.trim()) ? i : -1))
+        .filter((i) => i >= 0)
+        .pop();
       if (acIdx === -1 || statusIdx === undefined) continue;
       const assetIdxs = header.map((h, i) => (/(资产|文件)/.test(h) ? i : -1)).filter((i) => i >= 0);
       const cmdIdxs = header.map((h, i) => (/命令/.test(h) ? i : -1)).filter((i) => i >= 0);
@@ -1031,6 +1039,7 @@ function initTemplates(config) {
     activeVersion: version,
     policy: config.policy,
     evidence: config.evidence,
+    phase: policy.phase || "planning",
     authorityFiles: candidateAuthority,
     approvalMaxAgeDays: 30,
     requiredReports: ["development", "e2e", "release"],
@@ -1085,6 +1094,10 @@ if (has("--init")) {
 }
 
 const policy = loadPolicy(config);
+phase = phase || config.phase || policy.data.phase || "release";
+if (!["planning", "development", "release"].includes(phase)) usageError("--phase 只能是 planning / development / release");
+if (has("--release")) phase = "release";
+if (phase === "release") releaseMode = true;
 
 if (opt("--scaffold-report", null)) {
   scaffoldReport(opt("--scaffold-report", null), policy);
@@ -1104,6 +1117,24 @@ if (has("--authority-digest")) {
   process.exit(errors.length > 0 ? 1 : 0);
 }
 
+if (phase === "planning") {
+  const checker = resolve(repoRoot, "scripts/check-docs.mjs");
+  if (existsSync(checker)) {
+    try {
+      execFileSync("node", [checker, "--repo", repoRoot, "--quiet"], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    } catch (error) {
+      add("error", checker, 0, "DOCS_STRUCTURE", `规划阶段结构检查未通过：${String(error.stdout || error.stderr || "").trim().split(/\r?\n/).pop() || "请运行 check-docs 查看详情"}`);
+    }
+  } else {
+    add("warn", configPath, 0, "DOCS_CHECKER_MISSING", "规划阶段未找到 scripts/check-docs.mjs，跳过结构检查");
+  }
+  const errors = results.filter((r) => r.level === "error");
+  const warnings = results.filter((r) => r.level === "warn");
+  if (jsonOut) console.log(JSON.stringify({ ok: errors.length === 0, phase, errors, warnings }, null, 2));
+  else if (!quiet) console.log(`[docs-gate] planning 阶段：${errors.length} errors, ${warnings.length} warnings`);
+  process.exit(errors.length > 0 ? 1 : 0);
+}
+
 const evidencePath = resolve(repoRoot, config.evidence);
 if (!safeRepoLocation(evidencePath)) usageError("docs-evidence.json 路径必须位于仓库内，且不能通过符号链接越界");
 if (!existsSync(evidencePath)) {
@@ -1113,11 +1144,16 @@ if (!existsSync(evidencePath)) {
   if (evidence && (typeof evidence !== "object" || Array.isArray(evidence))) {
     add("error", evidencePath, 0, "EVIDENCE_SHAPE", "docs-evidence.json 根节点必须是 JSON 对象");
   } else if (evidence) {
-    checkApproval(config, evidence);
-    checkCommitBinding(config, evidence);
-    for (const kind of config.requiredReports) checkReport(kind, config, evidence);
-    for (const kind of Object.keys(evidence.reports || {})) {
-      if (!config.requiredReports.includes(kind)) checkReport(kind, config, evidence);
+    if (phase === "release") {
+      checkApproval(config, evidence);
+      checkCommitBinding(config, evidence);
+    }
+    const phaseReports = phase === "development" ? ["development"] : config.requiredReports;
+    for (const kind of phaseReports) checkReport(kind, config, evidence);
+    if (phase === "release") {
+      for (const kind of Object.keys(evidence.reports || {})) {
+        if (!config.requiredReports.includes(kind)) checkReport(kind, config, evidence);
+      }
     }
   }
 }
@@ -1138,7 +1174,7 @@ if (jsonOut) {
     const loc = r.line ? `${r.file}:${r.line}` : r.file;
     console.log(`${tag} [${r.code}] ${loc}  ${r.message}`);
   }
-  console.log(`\n[docs-gate] ${errors.length} errors, ${warnings.length} warnings${releaseMode ? "（发布模式）" : ""}`);
+  console.log(`\n[docs-gate] ${errors.length} errors, ${warnings.length} warnings（${phase} 阶段${releaseMode ? "，发布模式" : ""}）`);
   if (errors.length === 0) console.log("[docs-gate] 证据链完整；可以交付。");
   else console.log("[docs-gate] 未通过：缺证据是预期失败，不得通过填写虚构报告消除阻塞。");
 }

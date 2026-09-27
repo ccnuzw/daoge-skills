@@ -9,6 +9,7 @@
       "assertions": [
         "生成骨架：存在 docs/ 目录与 docs-policy.json",
         "结构检查运行且 0 errors",
+        "功能 frontmatter 含 delivery_scope/planning_only/delivery_slice",
         "选择 S 档并给出理由（1 人/2 周/≤5 功能）",
         "未编造业务规则；明确标注占位与下一步",
         "给出按顺序的填充清单（蓝图→版本→编号→基线→功能）"
@@ -25,6 +26,7 @@
         "AC 为 Given/When/Then 且有测试层级/目标资产/目标命令列",
         "实现状态仅登记在版本实现状态表；主文档不复制 status",
         "HTTP 字段约束和请求/响应 schema 写入 OpenAPI，功能文档通过 operationId 引用",
+        "接口清单、OpenAPI operation 映射、错误矩阵和数据最小治理章节可被 --strict 检查",
         "判定为高风险并产出独立技术设计（含分支 ID 到 AC 的映射）",
         "回写至少 5 处登记（编号表/索引/查找表/矩阵/实现状态等）",
         "check-docs 0 errors"
@@ -55,6 +57,7 @@
         "被测提交之后的非证据源码变化不能被重算摘要掩盖",
         "标记通过的 AC 必须有仓库内测试资产与已登记命令",
         "回归测试覆盖每项拒绝路径及合法证据通过路径"
+        ,"planning 阶段不要求审批、提交绑定和发布报告；release 阶段仍严格执行"
       ]
     },
     {

@@ -96,6 +96,50 @@ function markdownTables(text) {
   return tables;
 }
 
+function parseFrontmatter(text) {
+  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return null;
+  const values = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const item = line.match(/^([A-Za-z][\w-]*):\s*(.*?)\s*$/);
+    if (!item) continue;
+    let value = item[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    values[item[1]] = value;
+  }
+  return values;
+}
+
+function sectionBody(lines, heading) {
+  const headingIndex = lines.findIndex((line) => /^#{1,4}\s+/.test(line) && line.includes(heading));
+  if (headingIndex < 0) return null;
+  let end = headingIndex + 1;
+  while (end < lines.length && !/^#{1,4}\s+/.test(lines[end])) end += 1;
+  return lines.slice(headingIndex + 1, end).join("\n").trim();
+}
+
+function hasNotApplicableReason(body) {
+  return Boolean(body && /不适用/.test(body) && /理由/.test(body) && body.replace(/不适用|理由/g, "").trim().length >= 4);
+}
+
+function meaningfulBody(body) {
+  if (!body) return false;
+  const cleaned = body.replace(/<!--[^]*?-->/g, "").replace(/<[^>]+>/g, "").trim();
+  return cleaned.length >= 20 && !/^不适用[。！？!]?$/u.test(cleaned);
+}
+
+function collectOpenApiOperationIds(file) {
+  if (!file || !existsSync(file)) return new Set();
+  const ids = new Set();
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*operationId\s*:\s*([A-Za-z0-9_.-]+)/);
+    if (match) ids.add(match[1]);
+  }
+  return ids;
+}
+
 const decode = (s) => {
   try {
     return decodeURI(s);
@@ -227,6 +271,24 @@ const featureIds = new Map();
 const spec = activePolicy.featureDoc;
 if (spec?.dir) {
   const dir = join(docsRoot, spec.dir);
+  const quality = {
+    enabled: true,
+    strict: true,
+    allowNotApplicable: true,
+    minimumInterfaceTables: ["接口清单", "OpenAPI operation 映射", "错误矩阵"],
+    minimumDataSections: ["涉及数据", "约束与事务", "字段读写矩阵", "状态与生命周期", "物理约束与迁移", "数据所有权", "安全与保留"],
+    ...(activePolicy.quality || {}),
+  };
+  const qualityEnabled = quality.enabled !== false;
+  const qualityLevel = (message) => {
+    add(has("--strict") && quality.strict !== false ? "error" : "warn", message.file, message.line || 0, message.text);
+  };
+  const openapiRel = activePolicy.openapi || "04-技术架构/当前版本/{{活跃版本}}-openapi.yaml";
+  const openapiPath = resolve(docsRoot, openapiRel.replace("{{活跃版本}}", activePolicy.activeVersion || ""));
+  const openapiOperationIds = collectOpenApiOperationIds(openapiPath);
+  if (activePolicy.requireDeliveryMetadata === undefined) {
+    add("warn", rel(policyPath), 0, "旧版 policy 未显式配置 requireDeliveryMetadata；当前暂按兼容模式运行，请补充该字段后再启用严格交付范围门禁");
+  }
   const statusFile = join(docsRoot, "02-产品与版本", "当前版本", `${activePolicy.activeVersion}-实现状态.md`);
   const implementationStates = new Map();
   if (existsSync(statusFile)) {
@@ -259,9 +321,11 @@ if (spec?.dir) {
     const text = lines.join("\n");
 
     const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    let metadata = null;
     if (!frontmatter) {
       add("error", relFile, 1, "功能文档缺少 YAML frontmatter");
     } else {
+      metadata = parseFrontmatter(text);
       const featureId = frontmatter[1].match(/^feature_id:\s*([^\s#]+)/m)?.[1];
       const featureIdRe = activePolicy.ids?.requirement ? new RegExp(activePolicy.ids.requirement) : null;
       if (!featureId || !featureIdRe?.test(featureId.replace(/[`"']/g, ""))) {
@@ -279,6 +343,25 @@ if (spec?.dir) {
       const cleanId = featureId?.replace(/[`"']/g, "");
       if (cleanId && !implementationStates.has(cleanId)) {
         add("error", relFile, 1, `功能未登记到版本实现状态：${cleanId}`);
+      }
+
+      if (activePolicy.requireDeliveryMetadata === true) {
+        const scope = metadata?.delivery_scope;
+        const planningOnly = metadata?.planning_only;
+        const slice = metadata?.delivery_slice;
+        if (!["active", "future"].includes(scope)) add("error", relFile, 1, "功能文档 delivery_scope 必须是 active 或 future");
+        if (!/^(true|false)$/i.test(String(planningOnly || ""))) add("error", relFile, 1, "功能文档 planning_only 必须是 true 或 false");
+        if (!slice || /[<>{}]/.test(slice)) add("error", relFile, 1, "功能文档 delivery_slice 必须填写交付切片");
+        if (scope === "active" && String(planningOnly).toLowerCase() === "true") {
+          add("error", relFile, 1, "active 功能不能同时标记 planning_only=true");
+        }
+        if (scope === "future" || String(planningOnly).toLowerCase() === "true") {
+          if (cleanId && implementationStates.has(cleanId)) add("error", relFile, 1, `规划功能不得登记到当前版本实现状态：${cleanId}`);
+          if (cleanId && !new RegExp(`^V\\d+-`).test(cleanId)) add("error", relFile, 1, `规划功能编号必须带版本前缀：${cleanId}`);
+        }
+        if (cleanId && !cleanId.startsWith(`${activePolicy.activeVersion}-`) && (scope === "active" || String(planningOnly).toLowerCase() === "false")) {
+          add("error", relFile, 1, `当前版本功能不能混入其他版本编号：${cleanId}`);
+        }
       }
     }
 
@@ -327,6 +410,46 @@ if (spec?.dir) {
       for (const ac of acs.keys()) {
         if (!mapped.has(ac)) add("error", relFile, acs.get(ac) + 1, `${ac} 未映射到包含必需列的 AC 测试表`);
       }
+    }
+
+    if (qualityEnabled) {
+      const interfaceBody = sectionBody(lines, "接口契约");
+      const dataBody = sectionBody(lines, "数据与事务");
+      const interfaceNA = hasNotApplicableReason(interfaceBody);
+      const dataNA = hasNotApplicableReason(dataBody);
+      const interfaceSections = quality.minimumInterfaceTables || [];
+      const dataSections = quality.minimumDataSections || [];
+
+      if (!interfaceNA) {
+        for (const heading of interfaceSections) {
+          if (!sectionBody(lines, heading)) qualityLevel({ file: relFile, text: `接口契约缺少可审计小节：${heading}` });
+        }
+        const mapping = sectionBody(lines, "OpenAPI operation 映射") || "";
+        const referenced = [...mapping.matchAll(/\b[A-Za-z][A-Za-z0-9_.-]{2,}\b/g)].map((match) => match[0]);
+        const knownReferenced = referenced.filter((id) => openapiOperationIds.has(id));
+        const candidateIds = referenced.filter((id) => !["POST", "GET", "PUT", "PATCH", "DELETE", "业务语义注记", "operationId"].includes(id) && !/[<>]/.test(id));
+        if (openapiOperationIds.size === 0) {
+          qualityLevel({ file: relFile, text: `OpenAPI 不存在或没有 operationId，无法验证接口映射：${openapiPath ? rel(openapiPath) : "未配置"}` });
+        } else if (knownReferenced.length === 0) {
+          qualityLevel({ file: relFile, text: "接口契约没有映射到 OpenAPI 中已声明的 operationId" });
+        }
+        for (const id of candidateIds) {
+          if (/^(接口|鉴权|用途|业务|HTTP|字段|schema|只|维护|在|OpenAPI)$/.test(id)) continue;
+          if (!openapiOperationIds.has(id) && /^[a-z][A-Za-z0-9_.-]+$/.test(id)) {
+            qualityLevel({ file: relFile, text: `接口映射中的 operationId 未在 OpenAPI 找到：${id}` });
+          }
+        }
+      } else if (!meaningfulBody(interfaceBody) && !interfaceNA) {
+        qualityLevel({ file: relFile, text: "接口契约章节没有可审计内容" });
+      }
+
+      if (!dataNA) {
+        for (const heading of dataSections) {
+          if (!sectionBody(lines, heading)) qualityLevel({ file: relFile, text: `数据与事务缺少可审计小节：${heading}` });
+        }
+      }
+      if (interfaceNA && !hasNotApplicableReason(interfaceBody)) qualityLevel({ file: relFile, text: "接口章节若不适用，必须写明理由" });
+      if (dataNA && !hasNotApplicableReason(dataBody)) qualityLevel({ file: relFile, text: "数据章节若不适用，必须写明理由" });
     }
 
   }

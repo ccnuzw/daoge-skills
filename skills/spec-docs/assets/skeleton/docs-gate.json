@@ -3,6 +3,7 @@
   "activeVersion": "{{活跃版本}}",
   "policy": "docs-policy.json",
   "evidence": "docs-evidence.json",
+  "phase": "planning",
   "authorityFiles": [
     "{{文档目录}}/02-产品与版本/当前版本/{{活跃版本}}-版本总览.md",
     "{{文档目录}}/02-产品与版本/当前版本/{{活跃版本}}-实现状态.md",

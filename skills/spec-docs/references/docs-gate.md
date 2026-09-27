@@ -28,6 +28,7 @@
 | `activeVersion` | 从 docs-policy 推断 | 便于人阅读；编号校验以 docs-policy 为准 |
 | `policy` | `docs-policy.json` | 结构策略来源；门禁复用其 `featureDoc`/`ids`/`traceability` |
 | `evidence` | `docs-evidence.json` | 当前证据清单路径 |
+| `phase` | `planning`（由 docs-policy 推断） | `planning` 只检查结构/范围，`development` 检查开发证据，`release` 启用完整审批与发布证据 |
 | `authorityFiles` | `[]` | 参与摘要计算与审批绑定的权威文档（版本总览、实现状态、接口契约、openapi、数据模型、冻结决策、E2E 规范等） |
 | `approvalMaxAgeDays` | `30` | 审批有效期；`0` 表示不过期（仍要求摘要匹配） |
 | `requiredReports` | `["development","e2e","release"]` | 必须存在的报告类型；`performance` 由项目按需加入 |
@@ -194,7 +195,10 @@ node scripts/docs-gate.mjs --authority-digest
 #    → 把摘要写入 docs-evidence.json 的 approvals.authority_digest
 
 # 4. 门禁：日常用普通模式，发布用发布模式
-node scripts/docs-gate.mjs
+node scripts/docs-gate.mjs --phase planning
+node scripts/docs-gate.mjs --phase development
+node scripts/docs-gate.mjs --phase release
+# --release 等价于 --phase release
 node scripts/docs-gate.mjs --release
 ```
 

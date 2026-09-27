@@ -3,6 +3,16 @@
   "tier": "m",
   "activeVersion": "{{活跃版本}}",
   "projectName": "{{项目名}}",
+  "phase": "planning",
+  "openapi": "04-技术架构/当前版本/{{活跃版本}}-openapi.yaml",
+  "requireDeliveryMetadata": true,
+  "quality": {
+    "enabled": true,
+    "strict": true,
+    "allowNotApplicable": true,
+    "minimumInterfaceTables": ["接口清单", "OpenAPI operation 映射", "错误矩阵"],
+    "minimumDataSections": ["涉及数据", "约束与事务", "字段读写矩阵", "状态与生命周期", "物理约束与迁移", "数据所有权", "安全与保留"]
+  },
   "sections": [
     "01-项目概览",
     "02-产品与版本",
@@ -88,7 +98,7 @@
     "requirement": "V\\d+-FR-\\d{3}",
     "nfr": "V\\d+-NFR-\\d{3}",
     "releaseGate": "V\\d+-RG-\\d{3}",
-    "e2e": "V\\d+-E2E-\\d{2}",
+    "e2e": "V\\d+-E2E-\\d{2}[A-Z]?",
     "acceptance": "AC\\d{2}",
     "branch": "B\\d+-\\d{2}",
     "decision": "D\\d{3}"
