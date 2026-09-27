@@ -51,7 +51,7 @@ npx skills add ccnuzw/daoge-skills -a codex -s daoge-docs
 
 ```bash
 # 固定版本
-npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-v1.1.1/skills/spec-docs -a codex
+npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-v1.2.1/skills/spec-docs -a codex
 
 # 跟随 main 分支
 npx skills add ccnuzw/daoge-skills -a codex -s spec-docs
@@ -199,7 +199,7 @@ Workbench **不提供开放式对话**，只提供一个受限请求入口：用
 每个 Skill 独立维护版本和发布说明。更新某个 Skill 时，应只修改其自身范围内的代码、模板、测试和 README，并运行相应验证；不要因为多个 Skill 位于同一仓库而假设它们共享运行时或发布条件。
 
 - `daoge-pic` 当前稳定正式版本为 [v6.2.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.2.0)；`v6.1.1`、`v6.1.0`、`v6.0.0` 及更早为不可变历史发布。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
-- `spec-docs` 当前版本为 [1.1.1](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-v1.1.1)，使用 `spec-docs-vX.Y.Z` 独立标记和发布；完整使用手册和安装方法见 [Spec Docs README](./skills/spec-docs/README.md)。
+- `spec-docs` 当前版本为 [1.2.1](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-v1.2.1)，使用 `spec-docs-vX.Y.Z` 独立标记和发布；完整使用手册和安装方法见 [Spec Docs README](./skills/spec-docs/README.md)。
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
 - 系列级变更记录见 [CHANGELOG.md](./CHANGELOG.md)。

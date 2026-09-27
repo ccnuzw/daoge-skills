@@ -1,17 +1,24 @@
 # Changelog
 
-## 未发布 — 存量项目兼容与默认质量检查
+## 1.2.1 — 2026-09-28
 
-- 旧版 `docs-policy.json` 未配置 `requireDeliveryMetadata` 时改为兼容运行并给出一次迁移告警；新项目由骨架显式启用严格交付范围规则。
-- 未配置 `openapi` 时自动推断 `04-技术架构/当前版本/{{活跃版本}}-openapi.yaml`；未配置 `quality` 时仍启用接口和数据最低审计章节检查。
-- 结构自测新增旧版 policy、默认 OpenAPI 路径、默认质量规则和显式交付元数据门禁覆盖。
+- 修正使用手册中的版本号、固定版本安装标签和当前版本链接，使文档与 `spec-docs-v1.2.0` 的功能代码及后续修正文档版本保持一致。
+- 将发布说明从“未发布”状态改为可追踪的已发布版本记录。
 
-## 未发布 — 交付范围与阶段门禁增强
+## 1.2.0 — 2026-09-27
 
-- 功能 frontmatter 新增 `delivery_scope`、`planning_only`、`delivery_slice`，检查器阻止未来版本功能混入当前版本实现状态。
+### 交付范围与质量门禁
+
+- 功能 frontmatter 新增 `delivery_scope`、`planning_only`、`delivery_slice`，阻止未来版本功能混入当前版本实现状态或交付统计。
 - `check-docs --strict` 增加接口清单、OpenAPI `operationId` 映射、错误矩阵和数据治理最小章节检查；不适用项必须写明理由。
 - 统一 E2E 编号允许字母后缀（如 `V1-E2E-09B`）。
 - `docs-gate` 增加 `planning`、`development`、`release` 阶段；规划阶段不要求伪造发布证据，发布阶段保留完整审批和提交绑定。
+
+### 兼容性与回归
+
+- 旧版 `docs-policy.json` 未配置 `requireDeliveryMetadata` 时兼容运行并给出迁移告警；新骨架显式启用严格交付范围规则。
+- 未配置 `openapi` 时自动推断活动版本的 OpenAPI 文件；未配置 `quality` 时仍启用接口和数据最低审计章节检查。
+- 结构自测覆盖旧版 policy、默认 OpenAPI 路径、默认质量规则和显式交付元数据门禁。
 
 ## 1.1.0 — 2026-09-23
 

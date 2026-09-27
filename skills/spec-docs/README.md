@@ -1,6 +1,6 @@
 # spec-docs
 
-> 版本：`1.1.1`。面向中文软件项目的可移植文档驱动开发 Skill。
+> 版本：`1.2.1`。面向中文软件项目的可移植文档驱动开发 Skill。
 
 `spec-docs` 用 Markdown 文档、稳定 ID、结构检查和交付证据门禁，把软件项目从产品范围推进到功能实现和发布验收。它适合希望直接维护项目文档、让 AI 按明确规格工作、并且能在交接或发布前检查证据链的个人和团队。
 
@@ -64,10 +64,10 @@
 ### 安装固定版本
 
 ```bash
-npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-v1.1.1/skills/spec-docs -a codex
+npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-v1.2.1/skills/spec-docs -a codex
 ```
 
-该命令安装 `spec-docs-v1.1.1` 标签中的 Skill，适合需要固定版本和可复现环境的项目。安装完成后重启 Codex，使宿主重新加载 Skill registry。
+该命令安装 `spec-docs-v1.2.1` 标签中的 Skill，适合需要固定版本和可复现环境的项目。安装完成后重启 Codex，使宿主重新加载 Skill registry。
 
 ### 安装仓库当前版本
 
@@ -355,6 +355,6 @@ node skills/spec-docs/scripts/selftest-docs-gate.mjs
 
 ## 版本与发布
 
-`spec-docs` 独立使用 `spec-docs-vX.Y.Z` 标签发布。当前版本为 [v1.1.1](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-v1.1.1)。
+`spec-docs` 独立使用 `spec-docs-vX.Y.Z` 标签发布。当前版本为 [v1.2.1](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-v1.2.1)。
 
 版本策略：破坏性契约或迁移要求提升主版本；新增兼容能力提升次版本；文档、检查器和兼容性修复提升补丁版本。
