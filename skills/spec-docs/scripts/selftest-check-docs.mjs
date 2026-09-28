@@ -255,6 +255,42 @@ console.log("\n[17] 旧版 policy 兼容迁移与默认质量检查");
   write(featureDoc, originalFeature);
 }
 
+console.log("\n[18] 路线图版本必须有独立规划主文档");
+{
+  const roadmapPath = "docs/02-产品与版本/版本路线图.md";
+  const indexPath = "docs/02-产品与版本/后续版本/README.md";
+  const v3Path = "docs/02-产品与版本/后续版本/V3-规划.md";
+  const v6Path = "docs/02-产品与版本/后续版本/V6-规划.md";
+  const originalRoadmap = read(roadmapPath);
+  const originalIndex = read(indexPath);
+  const plan = (version) => `# ${version} 版本规划\n\n## 版本目标\n\n${version} 的目标。\n\n## 范围与边界\n\n### 做什么\n\n- 范围。\n\n### 不做什么\n\n- 排除项。\n\n## 架构与接口方向\n\n- 方向。\n\n## 数据影响\n\n- 影响。\n\n## 验收方向\n\n- 验收。\n`;
+  const extraRows = [
+    "| V3 | 工作流 | 规划骨架 | 范围 | 标准 | V2 |",
+    "| V6 | 协作 | 规划骨架 | 范围 | 标准 | V5 |",
+  ].join("\n");
+  write(roadmapPath, originalRoadmap.replace(/(\| V2 \|[^\n]*\n)/, `$1${extraRows}\n`));
+
+  const missing = runVerbose([]);
+  assert("缺少规划主文档时同时捕获 V3 和 V6", missing.code === 1 && missing.stdout.includes("V3") && missing.stdout.includes("V6"));
+
+  write(v3Path, plan("V3"));
+  write(v6Path, plan("V6"));
+  const unindexed = runVerbose([]);
+  assert("规划主文档未登记到索引时失败", unindexed.code === 1 && unindexed.stdout.includes("规划文档未登记到后续版本索引"));
+
+  write(indexPath, `${originalIndex}\n| V3 | [V3 规划](V3-规划.md) | 规划骨架 |\n| V6 | [V6 规划](V6-规划.md) | 规划骨架 |\n`);
+  assert("完整版本规划与索引通过", run([]).code === 0);
+
+  write(v6Path, plan("V7"));
+  const titleMismatch = runVerbose([]);
+  assert("规划主文档标题版本不一致时失败", titleMismatch.code === 1 && titleMismatch.stdout.includes("标题必须包含版本号"));
+
+  write(roadmapPath, originalRoadmap);
+  write(indexPath, originalIndex);
+  rmSync(join(fixture, v3Path));
+  rmSync(join(fixture, v6Path));
+}
+
 console.log(`\n[selftest] ${failures.length === 0 ? "全部通过" : `${failures.length} 项失败`}`);
 if (failures.length > 0) {
   console.log(`  失败项：${failures.join(" / ")}`);

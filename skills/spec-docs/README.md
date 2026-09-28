@@ -1,8 +1,8 @@
 # spec-docs
 
-> 版本：`1.2.1`。面向中文软件项目的可移植文档驱动开发 Skill。
+> 版本：`1.3.0`。面向中文软件项目的可移植文档驱动开发 Skill。
 
-`spec-docs` 用 Markdown 文档、稳定 ID、结构检查和交付证据门禁，把软件项目从产品范围推进到功能实现和发布验收。它适合希望直接维护项目文档、让 AI 按明确规格工作、并且能在交接或发布前检查证据链的个人和团队。
+`spec-docs` 用 Markdown 文档、稳定 ID、结构检查和交付证据门禁，把软件项目从产品范围推进到功能实现和发布验收。它会从版本路线图检查每个规划版本是否有独立主文档，避免 V3/V6 之类的版本只出现在聚合索引或零散功能文档中。它适合希望直接维护项目文档、让 AI 按明确规格工作、并且能在交接或发布前检查证据链的个人和团队。
 
 它提供的是一套**文档规范 + 模板骨架 + Node.js 检查脚本 + 治理参考**，不绑定特定语言、框架、数据库或部署平台，也不生成独立的产品工作台。
 
@@ -67,7 +67,7 @@
 npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-v1.2.1/skills/spec-docs -a codex
 ```
 
-该命令安装 `spec-docs-v1.2.1` 标签中的 Skill，适合需要固定版本和可复现环境的项目。安装完成后重启 Codex，使宿主重新加载 Skill registry。
+该命令安装当前 GitHub 稳定标签 `spec-docs-v1.2.1`。本工作区正在开发兼容的 `1.3.0` 版本；发布后再切换安装标签。安装完成后重启 Codex，使宿主重新加载 Skill registry。
 
 ### 安装仓库当前版本
 
@@ -188,6 +188,7 @@ node <skill目录>/scripts/init-docs.mjs \
 8. **状态只在实现状态表维护**：功能主文档和索引不复制实现状态。
 9. **模板不是业务事实**：不适用的章节写“不适用 + 理由”，不要留空或写“详见相关文档”。
 10. **归档不删除**：旧文档进入历史归档，并保留旧路径到新路径的迁移映射。
+11. **路线图版本必须有主文档**：路线图中处于规划状态的每个非当前版本都必须有独立的 `后续版本/Vx-规划.md`，并在索引中登记。
 
 ## 生成的项目文件
 
@@ -264,7 +265,7 @@ node scripts/check-docs.mjs --tier m
 node scripts/check-docs.mjs --strict
 ```
 
-结构检查关注目录和必需文件、跨文档链接、稳定 ID、索引登记、追踪矩阵、功能文档章节、AC 表列和占位符。通过只表示文档体系结构自洽，不表示功能已经实现或可以发布。
+结构检查关注目录和必需文件、跨文档链接、稳定 ID、索引登记、路线图版本主文档、需求追踪矩阵双向覆盖、功能文档章节、技术设计分支、E2E/性能矩阵、ADR、AC 表列和占位符。普通模式将部分质量项作为告警；`--strict` 把质量告警也作为失败。通过只表示文档体系自洽，不表示功能已经实现或可以发布。
 
 ### 交付证据门禁
 
@@ -288,7 +289,7 @@ node scripts/docs-gate.mjs
 node scripts/docs-gate.mjs --release
 ```
 
-`docs-gate` 只读取项目文件和 Git 状态，不执行项目测试或部署命令。项目自己的测试、压测、部署和恢复流程负责产出报告；门禁负责重新计算和核对：
+`docs-gate` 只读取项目文件和 Git 状态，不执行项目测试或部署命令。结构检查会在 planning、development、release 三个阶段运行；`docs-gate.json` 的 `structureCheck` 可关闭，`strictStructure` 可将 `check-docs --strict` 纳入该阶段的阻断条件。项目自己的测试、压测、部署和恢复流程负责产出报告；门禁负责重新计算和核对：
 
 - 报告和 manifest 是否配对、在仓库内且没有越界符号链接。
 - 报告统计、退出码、环境、提交和源码摘要是否一致。
@@ -355,6 +356,6 @@ node skills/spec-docs/scripts/selftest-docs-gate.mjs
 
 ## 版本与发布
 
-`spec-docs` 独立使用 `spec-docs-vX.Y.Z` 标签发布。当前版本为 [v1.2.1](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-v1.2.1)。
+`spec-docs` 独立使用 `spec-docs-vX.Y.Z` 标签发布。GitHub 当前稳定版本为 [v1.2.1](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-v1.2.1)；本地改进完成后目标版本为 `1.3.0`。
 
 版本策略：破坏性契约或迁移要求提升主版本；新增兼容能力提升次版本；文档、检查器和兼容性修复提升补丁版本。

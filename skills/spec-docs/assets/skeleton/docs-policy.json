@@ -6,12 +6,56 @@
   "phase": "planning",
   "openapi": "04-技术架构/当前版本/{{活跃版本}}-openapi.yaml",
   "requireDeliveryMetadata": true,
+  "versionPlanning": {
+    "enabled": true,
+    "roadmap": "02-产品与版本/版本路线图.md",
+    "index": "02-产品与版本/后续版本/README.md",
+    "directory": "02-产品与版本/后续版本",
+    "filePattern": "^(V\\d+)(?:-.+)?\\.md$",
+    "planningStatuses": ["规划骨架", "门禁评审中"],
+    "activeVersionExempt": true,
+    "requireIndexLink": true,
+    "requiredSections": ["版本目标", "范围与边界", "架构与接口方向", "数据影响", "验收方向"]
+  },
   "quality": {
     "enabled": true,
     "strict": true,
     "allowNotApplicable": true,
     "minimumInterfaceTables": ["接口清单", "OpenAPI operation 映射", "错误矩阵"],
-    "minimumDataSections": ["涉及数据", "约束与事务", "字段读写矩阵", "状态与生命周期", "物理约束与迁移", "数据所有权", "安全与保留"]
+    "minimumDataSections": ["涉及数据", "约束与事务", "字段读写矩阵", "状态与生命周期", "物理约束与迁移", "数据所有权", "安全与保留"],
+    "requiredMetadata": ["title", "version", "feature_id", "domain", "updated", "delivery_scope", "planning_only", "delivery_slice"],
+    "requireFeatureTitle": true,
+    "requireSourceTrace": true,
+    "traceability": {
+      "enabled": true,
+      "requireFeatureLink": true,
+      "requireMappedColumns": ["需求范围", "关键接口", "关键数据", "跨功能验收"],
+      "requireE2eResolution": true
+    },
+    "technicalDesign": {
+      "enabled": true,
+      "requiredSections": ["单元契约", "伪代码", "分支到测试追踪", "约束备注"],
+      "requireFeatureId": true,
+      "requireSourceFeature": true,
+      "requireBranchAcMapping": true
+    },
+    "e2e": {
+      "enabled": true,
+      "matrix": "05-测试与发布/端到端验收/用例矩阵.md",
+      "requiredColumns": ["真实入口", "必须真实的本系统依赖", "最终业务断言", "目标测试文件", "当前证据状态"],
+      "requireReferencedIds": true
+    },
+    "performance": {
+      "enabled": true,
+      "matrix": "05-测试与发布/性能与容量/场景矩阵.md",
+      "requiredColumns": ["目标", "最低环境", "关键断言", "必要证据", "当前状态"]
+    },
+    "adr": {
+      "enabled": true,
+      "directory": "06-决策记录/ADR",
+      "excludePattern": "^0001-决策标题\\.md$",
+      "requiredSections": ["背景", "备选方案", "决策", "后果", "验证"]
+    }
   },
   "sections": [
     "01-项目概览",

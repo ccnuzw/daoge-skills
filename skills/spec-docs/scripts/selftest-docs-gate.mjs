@@ -99,10 +99,29 @@ appendFileSync(
 
 const gateConfigPath = join(fixture, "docs-gate.json");
 const gateConfig = JSON.parse(readFileSync(gateConfigPath, "utf8"));
+assert("初始化配置默认启用结构检查", gateConfig.structureCheck === true && gateConfig.strictStructure === false);
 gateConfig.requiredReports = ["development", "e2e", "performance", "release"];
 gateConfig.commandRegistry = ["node tests/ac01.test.js"];
 writeJson("docs-gate.json", gateConfig);
 const baselineGateConfig = readFileSync(gateConfigPath, "utf8");
+
+console.log("\n[0] 结构检查必须覆盖 planning / development / release");
+{
+  const docPath = join(fixture, "docs/02-产品与版本/版本路线图.md");
+  const original = readFileSync(docPath, "utf8");
+  writeFileSync(docPath, `${original}\n[broken structure link](missing-structure-target.md)\n`, "utf8");
+  for (const phase of ["planning", "development", "release"]) {
+    const result = gate(["--phase", phase]);
+    assert(`${phase} 阶段捕获结构错误`, result.codes.includes("DOCS_STRUCTURE"), result.codes.join(","));
+  }
+  gateConfig.structureCheck = false;
+  writeJson("docs-gate.json", gateConfig);
+  const disabled = gate(["--phase", "planning"]);
+  assert("structureCheck=false 关闭结构检查", !disabled.codes.includes("DOCS_STRUCTURE"));
+  gateConfig.structureCheck = true;
+  writeJson("docs-gate.json", gateConfig);
+  writeFileSync(docPath, original, "utf8");
+}
 
 /* 报告、manifest 与证据清单绑定被测源码提交；其自身可以在提交后追加。 */
 run("git", ["init", "-q"]);

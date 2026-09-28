@@ -142,6 +142,8 @@ const DEFAULTS = {
   commandRegistry: null,
   requireCommitBinding: true,
   requireManifest: true,
+  structureCheck: true,
+  strictStructure: false,
   release: { enforce: false, allowPendingACs: false },
   secretScan: { enabled: true, patterns: [], allowPaths: [] },
   phase: null,
@@ -197,6 +199,8 @@ function loadConfig({ bootstrap = false } = {}) {
   if (raw.release !== undefined && (typeof raw.release !== "object" || raw.release === null || Array.isArray(raw.release))) usageError("docs-gate.json release 必须是对象");
   if (raw.release?.enforce !== undefined && typeof raw.release.enforce !== "boolean") usageError("docs-gate.json release.enforce 必须是布尔值");
   if (raw.release?.allowPendingACs !== undefined && typeof raw.release.allowPendingACs !== "boolean") usageError("docs-gate.json release.allowPendingACs 必须是布尔值");
+  if (raw.structureCheck !== undefined && typeof raw.structureCheck !== "boolean") usageError("docs-gate.json structureCheck 必须是布尔值");
+  if (raw.strictStructure !== undefined && typeof raw.strictStructure !== "boolean") usageError("docs-gate.json strictStructure 必须是布尔值");
   if (raw.phase !== undefined && !["planning", "development", "release"].includes(raw.phase)) usageError("docs-gate.json phase 只能是 planning / development / release");
   return {
     ...DEFAULTS,
@@ -1047,6 +1051,8 @@ function initTemplates(config) {
     commandRegistry: ["<在此登记可执行的测试/构建命令前缀，例如 make test>"],
     requireCommitBinding: true,
     requireManifest: true,
+    structureCheck: true,
+    strictStructure: false,
     release: { enforce: false, allowPendingACs: false },
     secretScan: { enabled: true },
   };
@@ -1104,6 +1110,22 @@ if (opt("--scaffold-report", null)) {
   process.exit(0);
 }
 
+function runStructureCheck() {
+  if (config.structureCheck === false) return;
+  const checker = resolve(repoRoot, "scripts/check-docs.mjs");
+  if (!existsSync(checker)) {
+    add("warn", configPath, 0, "DOCS_CHECKER_MISSING", `${phase} 阶段未找到 scripts/check-docs.mjs，跳过结构检查`);
+    return;
+  }
+  const args = [checker, "--repo", repoRoot, "--quiet"];
+  if (config.strictStructure === true) args.push("--strict");
+  try {
+    execFileSync("node", args, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    add("error", checker, 0, "DOCS_STRUCTURE", `${phase} 阶段结构检查未通过${config.strictStructure ? "（严格模式）" : ""}：${String(error.stdout || error.stderr || "").trim().split(/\r?\n/).pop() || "请运行 check-docs 查看详情"}`);
+  }
+}
+
 if (has("--authority-digest")) {
   const { digest, entries } = authorityDigest(config);
   const errors = results.filter((result) => result.level === "error");
@@ -1117,17 +1139,8 @@ if (has("--authority-digest")) {
   process.exit(errors.length > 0 ? 1 : 0);
 }
 
+runStructureCheck();
 if (phase === "planning") {
-  const checker = resolve(repoRoot, "scripts/check-docs.mjs");
-  if (existsSync(checker)) {
-    try {
-      execFileSync("node", [checker, "--repo", repoRoot, "--quiet"], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    } catch (error) {
-      add("error", checker, 0, "DOCS_STRUCTURE", `规划阶段结构检查未通过：${String(error.stdout || error.stderr || "").trim().split(/\r?\n/).pop() || "请运行 check-docs 查看详情"}`);
-    }
-  } else {
-    add("warn", configPath, 0, "DOCS_CHECKER_MISSING", "规划阶段未找到 scripts/check-docs.mjs，跳过结构检查");
-  }
   const errors = results.filter((r) => r.level === "error");
   const warnings = results.filter((r) => r.level === "warn");
   if (jsonOut) console.log(JSON.stringify({ ok: errors.length === 0, phase, errors, warnings }, null, 2));

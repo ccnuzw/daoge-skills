@@ -2,6 +2,11 @@
 
 本仓库的 Skills 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`，`spec-docs` 标签格式为 `spec-docs-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
 
+## spec-docs 1.3.0 - 未发布
+
+- 强化路线图版本主文档、需求追踪矩阵、技术设计、E2E/性能矩阵和 ADR 的结构闭环检查。
+- `docs-gate` 在全部阶段统一运行结构检查，并支持 `structureCheck` / `strictStructure` 配置。
+
 ## spec-docs 1.2.1 - 2026-09-28
 
 - 修正 `spec-docs` README、固定版本安装命令和版本链接，发布文档版本 `spec-docs-v1.2.1`。

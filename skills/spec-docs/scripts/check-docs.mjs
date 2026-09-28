@@ -113,10 +113,15 @@ function parseFrontmatter(text) {
 }
 
 function sectionBody(lines, heading) {
-  const headingIndex = lines.findIndex((line) => /^#{1,4}\s+/.test(line) && line.includes(heading));
+  const headingIndex = lines.findIndex((line) => /^#{1,6}\s+/.test(line) && line.includes(heading));
   if (headingIndex < 0) return null;
+  const headingLevel = lines[headingIndex].match(/^(#+)/)?.[1].length || 1;
   let end = headingIndex + 1;
-  while (end < lines.length && !/^#{1,4}\s+/.test(lines[end])) end += 1;
+  while (end < lines.length) {
+    const match = lines[end].match(/^(#+)\s+/);
+    if (match && match[1].length <= headingLevel) break;
+    end += 1;
+  }
   return lines.slice(headingIndex + 1, end).join("\n").trim();
 }
 
@@ -151,6 +156,187 @@ const decode = (s) => {
 function isIgnored(file) {
   const relPath = relative(docsRoot, file).split(sep).join("/");
   return (activePolicy.ignoreLinksIn || []).some((p) => relPath.startsWith(p));
+}
+
+/* ---------- 0. 版本规划完整性 ---------- */
+
+function roadmapVersions(text, versionConfig) {
+  const versionPattern = versionConfig.versionPattern || "V\\d+";
+  const versionRe = new RegExp(`^${versionPattern}$`);
+  const versions = new Map();
+  for (const table of markdownTables(text)) {
+    const versionIndex = table.header.findIndex((cell) => cell === "版本");
+    if (versionIndex < 0) continue;
+    const statusIndex = table.header.findIndex((cell) => cell === "状态");
+    for (const row of table.rows) {
+      const version = String(row.cells[versionIndex] || "")
+        .replace(/[`"']/g, "")
+        .trim();
+      if (!versionRe.test(version)) continue;
+      const status = statusIndex >= 0 ? String(row.cells[statusIndex] || "").trim() : "";
+      const existing = versions.get(version);
+      if (!existing || (!existing.status && status)) versions.set(version, { status, line: row.line });
+    }
+  }
+  return versions;
+}
+
+function linkedTargets(file) {
+  if (!file || !existsSync(file)) return new Set();
+  const linked = new Set();
+  const text = readFileSync(file, "utf8");
+  let match;
+  const localLinkRe = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  while ((match = localLinkRe.exec(text))) {
+    const target = match[1].split("#")[0].split("?")[0].trim();
+    if (!target || target.includes("{{") || /^(https?:|mailto:|#|data:)/.test(target)) continue;
+    const abs = target.startsWith("/") ? resolve(repoRoot, "." + target) : resolve(dirname(file), decode(target));
+    if (existsSync(abs) && !statSync(abs).isDirectory()) linked.add(rel(abs));
+  }
+  return linked;
+}
+
+function resolveLocalLink(file, target) {
+  if (!target || target.includes("{{") || /^(https?:|mailto:|#|data:)/.test(target)) return null;
+  const clean = decode(target.split("#")[0].split("?")[0].trim());
+  if (!clean) return null;
+  const abs = clean.startsWith("/") ? resolve(repoRoot, "." + clean) : resolve(dirname(file), clean);
+  if (!existsSync(abs) || statSync(abs).isDirectory()) return null;
+  return { abs, rel: rel(abs) };
+}
+
+function featureSourceLink(text) {
+  const links = [...String(text || "").matchAll(/\[([^\]]+)\]\(([^)\s]+)/g)];
+  const preferred = links.find((match) => /来源|需求|功能主文档|功能文档|主功能/.test(match[1]));
+  return (preferred || null)?.[2] || null;
+}
+
+function rowCell(row, header, name) {
+  const index = header.indexOf(name);
+  return index < 0 ? "" : String(row.cells[index] || "").trim();
+}
+
+const traceColumnAliases = {
+  "需求范围": ["需求范围", "稳定需求范围", "范围"],
+  "关键接口": ["关键接口", "关键协议/接口", "接口", "API"],
+  "关键数据": ["关键数据", "数据", "关键数据对象"],
+  "跨功能验收": ["跨功能验收", "E2E", "主要 AC/E2E/NFR"],
+};
+
+function headerIndex(header, name) {
+  return (traceColumnAliases[name] || [name]).findIndex((candidate) => header.includes(candidate)) >= 0
+    ? header.findIndex((cell) => (traceColumnAliases[name] || [name]).includes(cell))
+    : -1;
+}
+
+function cleanCell(value) {
+  return String(value || "").replace(/[\\`"']/g, "").trim();
+}
+
+function hasHeading(lines, heading) {
+  return lines.some((line) => /^#{1,6}\s+/.test(line) && line.includes(heading));
+}
+
+function hasHeadingAlternative(lines, heading) {
+  const alternatives = {
+    "单元契约": ["单元契约", "核心契约", "核心入口", "责任边界"],
+    "伪代码": ["伪代码", "核心伪代码", "执行逻辑"],
+    "分支到测试追踪": ["分支到测试追踪", "关键分支", "稳定设计分支"],
+    "约束备注": ["约束备注", "安全边界", "运行、权限和失败", "约束与不变量"],
+  };
+  return (alternatives[heading] || [heading]).some((candidate) => hasHeading(lines, candidate));
+}
+
+function comparableTitle(value) {
+  return String(value || "")
+    .replace(/^\s*\d+\s+/, "")
+    .replace(/[：:。！!？?]+$/u, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function extractIds(text, pattern) {
+  if (!pattern) return [];
+  const re = new RegExp(pattern, "g");
+  return [...text.matchAll(re)].map((match) => match[0]);
+}
+
+function e2eIdVariants(id) {
+  const value = cleanCell(id);
+  const match = value.match(/^(V\d+-)?E2E-?(\d{2}[A-Z]?)$/i);
+  if (!match) return [value];
+  const version = match[1] || "";
+  const number = match[2].toUpperCase();
+  return [...new Set([
+    value,
+    `${version}E2E-${number}`,
+    `${version}E2E${number}`,
+    `E2E-${number}`,
+    `E2E${number}`,
+  ])];
+}
+
+const versionPlan = {
+  enabled: true,
+  roadmap: "02-产品与版本/版本路线图.md",
+  index: "02-产品与版本/后续版本/README.md",
+  directory: "02-产品与版本/后续版本",
+  // 允许“V2-规划.md”和“V2-稳定网关.md”等主题化主文档；版本号必须是第一个捕获组。
+  filePattern: "^(V\\d+)(?:-.+)?\\.md$",
+  versionCapture: 1,
+  planningStatuses: ["规划骨架", "门禁评审中"],
+  activeVersionExempt: true,
+  requireIndexLink: true,
+  requiredSections: [],
+  ...(activePolicy.versionPlanning || {}),
+};
+if (versionPlan.enabled !== false) {
+  const roadmapFile = join(docsRoot, versionPlan.roadmap);
+  const indexFile = join(docsRoot, versionPlan.index);
+  if (!existsSync(roadmapFile)) {
+    add("error", rel(roadmapFile), 0, "版本规划校验找不到路线图文件");
+  } else {
+    const versions = roadmapVersions(readFileSync(roadmapFile, "utf8"), versionPlan);
+    const fileRe = new RegExp(versionPlan.filePattern);
+    const directory = join(docsRoot, versionPlan.directory);
+    const candidates = new Map();
+    for (const file of walk(directory)) {
+      const name = file.split(sep).pop();
+      const match = name.match(fileRe);
+      if (!match) continue;
+      const version = match[versionPlan.versionCapture ?? 1];
+      if (!version) continue;
+      const existing = candidates.get(version);
+      if (existing) {
+        add("error", rel(file), 1, `${version} 存在多个规划主文档：${rel(existing)} 与 ${rel(file)}；每个版本只能有一个主文档`);
+      } else {
+        candidates.set(version, file);
+      }
+    }
+    const linked = versionPlan.requireIndexLink ? linkedTargets(indexFile) : new Set();
+    for (const [version, details] of versions) {
+      if (versionPlan.activeVersionExempt && version === activePolicy.activeVersion) continue;
+      if (details.status && !(versionPlan.planningStatuses || []).includes(details.status)) continue;
+      const expected = candidates.get(version);
+      if (!expected) {
+        add("error", rel(roadmapFile), details.line, `${version} 在路线图中处于规划状态，但缺少独立规划主文档：${versionPlan.directory}/${version}-<主题>.md`);
+        continue;
+      }
+      const expectedRel = rel(expected);
+      if (versionPlan.requireIndexLink && !linked.has(expectedRel)) {
+        add("error", rel(indexFile), 0, `${version} 规划文档未登记到后续版本索引：${expectedRel}`);
+      }
+      const source = readFileSync(expected, "utf8");
+      if (!new RegExp(`^#\\s+.*\\b${version}\\b`, "m").test(source)) {
+        add("error", expectedRel, 1, `规划主文档标题必须包含版本号：${version}`);
+      }
+      for (const heading of versionPlan.requiredSections || []) {
+        const hasHeading = source.split(/\r?\n/).some((line) => /^#{1,4}\s+/.test(line) && line.includes(heading));
+        if (!hasHeading) add("error", expectedRel, 0, `版本规划缺少章节：${heading}`);
+      }
+    }
+  }
 }
 
 /* ---------- 1. 必需文件与 section README ---------- */
@@ -277,6 +463,38 @@ if (spec?.dir) {
     allowNotApplicable: true,
     minimumInterfaceTables: ["接口清单", "OpenAPI operation 映射", "错误矩阵"],
     minimumDataSections: ["涉及数据", "约束与事务", "字段读写矩阵", "状态与生命周期", "物理约束与迁移", "数据所有权", "安全与保留"],
+    requiredMetadata: ["title", "version", "feature_id", "domain", "updated", "delivery_scope", "planning_only", "delivery_slice"],
+    requireFeatureTitle: true,
+    requireSourceTrace: true,
+    traceability: {
+      enabled: true,
+      requireFeatureLink: true,
+      requireMappedColumns: ["需求范围", "关键接口", "关键数据", "跨功能验收"],
+    },
+    technicalDesign: {
+      enabled: true,
+      requiredSections: ["单元契约", "伪代码", "分支到测试追踪", "约束备注"],
+      requireFeatureId: true,
+      requireSourceFeature: true,
+      requireBranchAcMapping: true,
+    },
+    e2e: {
+      enabled: true,
+      matrix: "05-测试与发布/端到端验收/用例矩阵.md",
+      requiredColumns: ["真实入口", "必须真实的本系统依赖", "最终业务断言", "目标测试文件", "当前证据状态"],
+      requireReferencedIds: true,
+    },
+    performance: {
+      enabled: true,
+      matrix: "05-测试与发布/性能与容量/场景矩阵.md",
+      requiredColumns: ["目标", "最低环境", "关键断言", "必要证据", "当前状态"],
+    },
+    adr: {
+      enabled: true,
+      directory: "06-决策记录/ADR",
+      excludePattern: "^0001-决策标题\\.md$",
+      requiredSections: ["背景", "备选方案", "决策", "后果", "验证"],
+    },
     ...(activePolicy.quality || {}),
   };
   const qualityEnabled = quality.enabled !== false;
@@ -326,6 +544,21 @@ if (spec?.dir) {
       add("error", relFile, 1, "功能文档缺少 YAML frontmatter");
     } else {
       metadata = parseFrontmatter(text);
+      for (const key of quality.requiredMetadata || []) {
+        const value = metadata?.[key];
+        if (!value || /[<>{}]/.test(value)) qualityLevel({ file: relFile, text: `功能文档元数据缺失或仍是占位符：${key}` });
+      }
+      const escapedTitle = String(metadata?.title || "").replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&");
+      const firstHeading = lines.find((line) => /^#\s+/.test(line))?.replace(/^#\s+/, "");
+      if (quality.requireFeatureTitle && escapedTitle && comparableTitle(firstHeading) !== comparableTitle(metadata?.title)) {
+        qualityLevel({ file: relFile, text: "功能文档一级标题必须与 frontmatter.title 对齐（允许文件编号前缀不同）" });
+      }
+      if (quality.requireSourceTrace) {
+        const sourceBody = sectionBody(lines, "来源与追踪") || "";
+        if (!sourceBody || !sourceBody.includes(String(metadata?.feature_id || ""))) {
+          qualityLevel({ file: relFile, text: "来源与追踪必须包含本功能 feature_id" });
+        }
+      }
       const featureId = frontmatter[1].match(/^feature_id:\s*([^\s#]+)/m)?.[1];
       const featureIdRe = activePolicy.ids?.requirement ? new RegExp(activePolicy.ids.requirement) : null;
       if (!featureId || !featureIdRe?.test(featureId.replace(/[`"']/g, ""))) {
@@ -474,12 +707,183 @@ if (spec?.dir) {
   for (const file of featureDocs) {
     if (!linked.has(rel(file))) add("warn", rel(file), 0, "未登记到功能索引或查找表");
   }
-  for (const file of walk(dir)) {
+  const tracePolicy = quality.traceability || {};
+  if (qualityEnabled && tracePolicy.enabled !== false && matrixFile && existsSync(matrixFile)) {
+    const matrixText = readFileSync(matrixFile, "utf8");
+    const expectedColumns = tracePolicy.requireMappedColumns || [];
+    const matrixTables = markdownTables(matrixText);
+    const traceTables = matrixTables.filter((table) =>
+      table.header.some((cell) => ["稳定需求 ID", "功能 ID", "稳定需求范围"].includes(cell)),
+    );
+    if (traceTables.length === 0) {
+      add("error", rel(matrixFile), 0, "需求追踪矩阵缺少含稳定需求 ID 的结构化表格");
+    } else {
+      const mappedFeatures = new Map();
+      const mappedE2e = new Set();
+      for (const table of traceTables) {
+        for (const column of expectedColumns) {
+          if (headerIndex(table.header, column) < 0) add("error", rel(matrixFile), 0, `需求追踪矩阵缺少必需列或等价列：${column}`);
+        }
+        const idIndex = table.header.findIndex((cell) => ["稳定需求 ID", "功能 ID", "稳定需求范围"].includes(cell));
+        const featureIndex = table.header.findIndex((cell) => ["功能主文档", "功能文档"].includes(cell));
+        const e2eIndex = headerIndex(table.header, "跨功能验收");
+        for (const row of table.rows) {
+          const id = cleanCell(row.cells[idIndex]);
+          if (!id || !activePolicy.ids?.requirement || !new RegExp(activePolicy.ids.requirement).test(id)) continue;
+          if (featureIndex >= 0) {
+            const cell = row.cells[featureIndex] || "";
+            const link = cell.match(/\[[^\]]*\]\(([^)\s]+)/);
+            const target = link && resolveLocalLink(matrixFile, link[1]);
+            if (!target) add("error", rel(matrixFile), row.line, `${id} 没有可解析的功能主文档链接`);
+            else {
+              const source = readFileSync(target.abs, "utf8");
+              const featureId = parseFrontmatter(source)?.feature_id;
+              if (featureId && cleanCell(featureId) !== id) add("error", rel(matrixFile), row.line, `追踪矩阵 ${id} 链接到了不同功能：${featureId}`);
+              mappedFeatures.set(id, target.rel);
+            }
+          } else if (tracePolicy.requireFeatureLink !== false) {
+            add("error", rel(matrixFile), row.line, `${id} 的追踪矩阵没有功能主文档列`);
+          }
+          if (e2eIndex >= 0) {
+            for (const match of String(row.cells[e2eIndex] || "").matchAll(new RegExp(activePolicy.ids?.e2e || "V\\d+-E2E-\\d+", "g"))) mappedE2e.add(match[0]);
+          }
+        }
+      }
+      for (const [id, file] of featureIds) {
+        if (!mappedFeatures.has(id)) add("error", rel(matrixFile), 0, `追踪矩阵没有登记功能文档中的需求：${id}`);
+        else if (mappedFeatures.get(id) !== file) add("error", rel(matrixFile), 0, `追踪矩阵 ${id} 指向的文档与 feature_id 所在主文档不一致`);
+      }
+      if (tracePolicy.requireE2eResolution !== false) {
+        const e2eConfig = quality.e2e || {};
+        const e2eFile = join(docsRoot, e2eConfig.matrix || "");
+        if (existsSync(e2eFile)) {
+          const e2eText = readFileSync(e2eFile, "utf8");
+          for (const id of mappedE2e) {
+            if (!e2eIdVariants(id).some((variant) => e2eText.includes(variant))) {
+              qualityLevel({ file: rel(matrixFile), text: `追踪矩阵引用的 E2E 用例未在用例矩阵找到：${id}` });
+            }
+          }
+        }
+      }
+    }
+  }
+  const designQualityEnabled = qualityEnabled && quality.technicalDesign?.enabled !== false;
+  if (designQualityEnabled) for (const file of walk(dir)) {
     if (!file.endsWith("-技术设计.md")) continue;
     const text = readFileSync(file, "utf8");
+    const relDesign = rel(file);
     const branchPattern = activePolicy.ids?.branch;
     if (!branchPattern || !new RegExp(branchPattern).test(text)) add("error", rel(file), 0, "高风险技术设计缺少稳定分支 ID");
+    const designLines = text.split(/\r?\n/);
+    for (const heading of quality.technicalDesign?.requiredSections || []) {
+      if (!hasHeadingAlternative(designLines, heading)) qualityLevel({ file: relDesign, text: `技术设计缺少必需章节或等价章节：${heading}` });
+    }
+    const sourceTarget = resolveLocalLink(file, featureSourceLink(text));
+    const fm = parseFrontmatter(text);
+    const parentId = sourceTarget ? parseFrontmatter(readFileSync(sourceTarget.abs, "utf8"))?.feature_id : null;
+    const designId = fm?.feature_id || parentId;
+    if (quality.technicalDesign?.requireFeatureId !== false && !designId) {
+      qualityLevel({ file: relDesign, text: "技术设计缺少 feature_id 元数据，且无法从主文档链接推断" });
+    }
+    if (quality.technicalDesign?.requireSourceFeature !== false && !sourceTarget) {
+      qualityLevel({ file: relDesign, text: "技术设计必须链接对应的功能主文档" });
+    }
+    if (sourceTarget && fm?.feature_id && (!parentId || cleanCell(parentId) !== cleanCell(fm.feature_id))) {
+      qualityLevel({ file: relDesign, text: `技术设计 feature_id 与主文档不一致：${fm.feature_id}` });
+    }
+    if (quality.technicalDesign?.requireBranchAcMapping !== false) {
+      let branchRows = 0;
+      for (const table of markdownTables(text)) {
+        const branchIndex = table.header.findIndex((cell) => ["分支", "稳定分支", "分支 ID"].includes(cell));
+        const acIndex = table.header.findIndex((cell) => ["功能 AC", "AC", "验收标准"].includes(cell));
+        if (branchIndex < 0) continue;
+        branchRows += table.rows.length;
+        for (const row of table.rows) {
+          const branches = extractIds(row.cells[branchIndex], branchPattern);
+          const acs = extractIds(acIndex >= 0 ? row.cells[acIndex] : "", activePolicy.ids?.acceptance);
+          if (branches.length && acs.length === 0) add("error", relDesign, row.line, `技术设计分支 ${branches.join(", ")} 未映射功能 AC`);
+        }
+      }
+      if (branchRows === 0) {
+        const branchIds = extractIds(text, branchPattern);
+        const acIds = extractIds(text, activePolicy.ids?.acceptance);
+        if (!(branchIds.length && acIds.length)) qualityLevel({ file: relDesign, text: "技术设计缺少结构化的分支到测试追踪表，且无法从正文确认分支与 AC 的关联" });
+        else qualityLevel({ file: relDesign, text: "技术设计未提供结构化的分支到测试追踪表；正文分支/AC 仅作为兼容性降级" });
+      }
+    }
     if (!linked.has(rel(file))) add("warn", rel(file), 0, "技术设计未登记到技术设计索引或功能索引");
+  }
+
+  const riskFile = join(docsRoot, spec.dir, "功能风险分级.md");
+  const designConfig = quality.technicalDesign || {};
+  if (designQualityEnabled && designConfig.enabled !== false && existsSync(riskFile)) {
+    const highRiskIds = new Set();
+    for (const table of markdownTables(readFileSync(riskFile, "utf8"))) {
+      if (!table.header.some((cell) => ["功能", "需求", "稳定需求"].includes(cell))) continue;
+      for (const row of table.rows) {
+        const cell = row.cells[0] || "";
+        for (const id of extractIds(cell, activePolicy.ids?.requirement)) highRiskIds.add(id);
+      }
+    }
+    for (const id of highRiskIds) {
+      const featurePath = featureIds.get(id);
+      if (!featurePath) continue;
+      const featureFile = resolve(repoRoot, featurePath);
+      const content = readFileSync(featureFile, "utf8");
+      const link = content.match(/\[[^\]]*技术设计[^\]]*\]\(([^)\s]+\.md)/);
+      const target = link && resolveLocalLink(featureFile, link[1]);
+      if (!target) add("error", rel(riskFile), 0, `高风险功能 ${id} 未链接独立技术设计`);
+      else {
+        const designText = readFileSync(target.abs, "utf8");
+        const designFrontmatterId = parseFrontmatter(designText)?.feature_id;
+        const designSourceTarget = resolveLocalLink(target.abs, featureSourceLink(designText));
+        const designId = designFrontmatterId || (designSourceTarget && parseFrontmatter(readFileSync(designSourceTarget.abs, "utf8"))?.feature_id);
+        if (cleanCell(designId) !== id) qualityLevel({ file: rel(target.abs), text: `高风险功能 ${id} 的技术设计 feature_id 不匹配` });
+      }
+    }
+  }
+
+  const checkMatrix = (config, label) => {
+    if (config?.enabled === false || !config?.matrix) return;
+    const file = join(docsRoot, config.matrix);
+    if (!existsSync(file)) {
+      add("error", rel(file), 0, `${label}矩阵缺失`);
+      return;
+    }
+    const tables = markdownTables(readFileSync(file, "utf8"));
+    if (!tables.length) {
+      add("error", rel(file), 0, `${label}矩阵没有结构化表格`);
+      return;
+    }
+    for (const column of config.requiredColumns || []) {
+      if (!tables.some((table) => table.header.includes(column))) add("error", rel(file), 0, `${label}矩阵缺少必需列：${column}`);
+    }
+    const relevant = tables.find((table) => (config.requiredColumns || []).every((column) => table.header.includes(column)));
+    if (relevant) {
+      for (const row of relevant.rows) {
+        for (const column of config.requiredColumns || []) {
+          if (!cleanCell(rowCell(row, relevant.header, column))) add("warn", rel(file), row.line, `${label}矩阵必填信息为空：${column}`);
+        }
+      }
+    }
+  };
+  if (qualityEnabled) {
+    checkMatrix(quality.e2e, "E2E");
+    checkMatrix(quality.performance, "性能与容量");
+  }
+
+  const adrConfig = quality.adr || {};
+  if (qualityEnabled && adrConfig.enabled !== false) {
+    const directory = join(docsRoot, adrConfig.directory || "06-决策记录/ADR");
+    const exclude = adrConfig.excludePattern ? new RegExp(adrConfig.excludePattern) : null;
+    for (const file of walk(directory)) {
+      if (!file.endsWith(".md") || (exclude && exclude.test(file.split(sep).pop()))) continue;
+      const lines = readFileSync(file, "utf8").split(/\r?\n/);
+      for (const heading of adrConfig.requiredSections || []) {
+        if (!hasHeading(lines, heading)) add("error", rel(file), 0, `ADR 缺少必需章节：${heading}`);
+      }
+      if (!/^\s*-\s*状态：\s*[^\n]+/m.test(lines.join("\n"))) add("error", rel(file), 0, "ADR 缺少显式状态");
+    }
   }
 }
 
