@@ -153,7 +153,7 @@ console.log("\n[11] tier policy 与 L 档门禁生成");
   execFileSync("node", [INIT, "--target", tierRoot, "--tier", "l", "--dir", "doc"], { encoding: "utf8" });
   const policy = JSON.parse(readFileSync(join(tierRoot, "docs-policy.json"), "utf8"));
   const result = execFileSync("node", [join(tierRoot, "scripts/check-docs.mjs"), "--quiet"], { cwd: tierRoot, encoding: "utf8" });
-  assert("L tier 生效", policy.tier === "l" && policy.sections.length === 8 && existsSync(join(tierRoot, "docs-gate.json")));
+  assert("L tier 生效", policy.tier === "l" && policy.sections.length === 9 && existsSync(join(tierRoot, "docs-gate.json")));
   assert("自定义目录提示与检查一致", result.includes("0 errors"));
   rmSync(tierRoot, { recursive: true, force: true });
 }
@@ -180,8 +180,24 @@ console.log("\n[13] 存量接入保留同名内容与脚本");
     "adopt 不覆盖已有文件并补齐缺项",
     readFileSync(join(adoptRoot, "docs/README.md"), "utf8") === "existing docs\n" &&
       readFileSync(join(adoptRoot, "scripts/check-docs.mjs"), "utf8") === "existing script\n" &&
+      existsSync(join(adoptRoot, "scripts/policy-utils.mjs")) &&
       existsSync(join(adoptRoot, "docs-policy.json")) && existsSync(join(adoptRoot, "docs/02-产品与版本/产品蓝图.md")),
   );
+  rmSync(adoptRoot, { recursive: true, force: true });
+}
+
+console.log("\n[13b] adopt 拒绝已有 policy 与 --dir 冲突");
+{
+  const adoptRoot = join(tmpdir(), `spec-docs-check-adopt-conflict-${Date.now()}`);
+  mkdirSync(join(adoptRoot, "docs"), { recursive: true });
+  writeFileSync(join(adoptRoot, "docs-policy.json"), JSON.stringify({ root: "docs", tier: "m" }), "utf8");
+  let rejected = false;
+  try {
+    execFileSync("node", [INIT, "--target", adoptRoot, "--adopt", "--dir", "docs-next"], { encoding: "utf8" });
+  } catch {
+    rejected = true;
+  }
+  assert("adopt 不静默改写已有 policy 根目录", rejected && !existsSync(join(adoptRoot, "docs-next")));
   rmSync(adoptRoot, { recursive: true, force: true });
 }
 
@@ -289,6 +305,96 @@ console.log("\n[18] 路线图版本必须有独立规划主文档");
   write(indexPath, originalIndex);
   rmSync(join(fixture, v3Path));
   rmSync(join(fixture, v6Path));
+}
+
+console.log("\n[19] 产品蓝图与版本 PRD 的场景深度和版本边界");
+{
+  const blueprintPath = "docs/02-产品与版本/产品蓝图.md";
+  const prdPath = "docs/02-产品与版本/当前版本/V1-产品需求.md";
+  const blueprint = read(blueprintPath);
+  const prd = read(prdPath);
+
+  write(blueprintPath, blueprint.replace("## 10. 核心业务流程", "## 10. 流程摘要"));
+  let result = runVerbose(["--strict"]);
+  assert("蓝图缺核心业务流程被拦截", result.code === 1 && result.stdout.includes("产品文档缺少可评审章节：核心业务流程"));
+  write(blueprintPath, blueprint);
+
+  write(prdPath, prd.replace(/1\. <用户操作、系统状态变化与反馈>。\n2\. <下一步与持久化\/可见结果>。/, "<步骤 A> -> <步骤 B>"));
+  result = runVerbose(["--strict"]);
+  assert("PRD 箭头链不能代替有序场景", result.code === 1 && result.stdout.includes("缺少场景信息表或有序步骤"));
+  write(prdPath, prd);
+
+  write(prdPath, prd.replace("| <页面> | <角色/任务>", "| V2 页面 | <角色/任务>"));
+  result = runVerbose(["--strict"]);
+  assert("未来版本页面混入当前交付被拦截", result.code === 1 && result.stdout.includes("页面需求 混入非当前版本能力"));
+  write(prdPath, prd);
+
+  write(prdPath, prd.replace("| 场景 | 真实入口与前提 | 成功终态 | 关键失败断言 | 功能 ID | E2E/门禁与证据 |", "| 场景 | 真实入口与前提 | 成功终态 | 关键失败断言 |"));
+  result = runVerbose(["--strict"]);
+  assert("版本验收缺追踪列被拦截", result.code === 1 && result.stdout.includes("版本验收场景 缺少结构化视图或必需列"));
+  write(prdPath, prd);
+
+  write(prdPath, prd.replace("| <跨功能场景> | <角色/环境/前提> | <可观察结果> | <权限/重复/外部失败> | V1-FR-001 | <E2E/门禁链接及证据> |", "| 安装应用 | 开发者完成校验 | 应用可启动 | 校验失败可回退 | V1-FR-999 | 见发布清单 |"));
+  result = runVerbose(["--strict"]);
+  assert("验收场景缺已登记功能和 E2E 编号被拦截", result.code === 1 && result.stdout.includes("未关联已登记的当前版本功能 ID") && result.stdout.includes("缺少稳定 E2E 验收编号"));
+  write(prdPath, prd);
+
+  assert("恢复产品文档后普通检查通过", run([]).code === 0);
+}
+
+console.log("\n[20] SDD 契约和 E2E 规范的双向追踪");
+{
+  const specPath = "docs/05-测试与发布/端到端验收/V1-端到端验收规范.md";
+  const matrixPath = "docs/05-测试与发布/端到端验收/用例矩阵.md";
+  const interfacePath = "docs/04-技术架构/当前版本/V1-接口契约.md";
+  const dataPath = "docs/04-技术架构/当前版本/V1-数据模型.md";
+  const specification = read(specPath);
+  const cases = read(matrixPath);
+  const contract = read(interfacePath);
+  const data = read(dataPath);
+  const feature = read(featureDoc);
+
+  write(specPath, specification.replace("## V1-E2E-02（E2E02）<用例名>", "## 缺失第二条规范"));
+  let result = runVerbose(["--strict"]);
+  assert("矩阵用例缺少独立规范章节被拦截", result.stdout.includes("E2E 矩阵用例缺少规范独立章节：V1-E2E-02"));
+  write(specPath, specification);
+
+  write(matrixPath, cases.replace(/^\| E2E02 .*\n/m, (row) => `${row}| E2E03 新增用例 | V1-FR-001 | AC02 | 入口 | 数据库 | 无 | 状态 | 结果 | test.ts | local | 2026-09-28 | abc1234 | npm test | report.md | mock | 未执行 |\n`));
+  result = runVerbose(["--strict"]);
+  assert("矩阵新增 ID 无对应规范被拦截", result.stdout.includes("E2E 矩阵用例缺少规范独立章节：V1-E2E-03"));
+  write(matrixPath, cases);
+
+  write(matrixPath, cases.replace(/^\| E2E02 .*\n/m, ""));
+  result = runVerbose(["--strict"]);
+  assert("规范用例未登记到矩阵被拦截", result.stdout.includes("E2E 规范用例未登记到执行矩阵：V1-E2E-02"));
+  write(matrixPath, cases);
+
+  write(specPath, specification.replace("When <动作>。", "<未定义动作>。"));
+  result = runVerbose(["--strict"]);
+  assert("E2E 独立正文缺 When 被拦截", result.stdout.includes("V1-E2E-02 缺少独立的 When 条件"));
+  write(specPath, specification);
+
+  write(featureDoc, feature.replace("#### AC02 <验收名称>", "#### AC02 <验收名称>（V3）"));
+  result = runVerbose(["--strict"]);
+  assert("未来 AC 混入当前功能被拦截", result.stdout.includes("AC02 标题指向未来版本"));
+  write(featureDoc, feature);
+
+  write(interfacePath, contract.replace("| 操作 ID | 入口与传输 | 鉴权主体 | 功能 ID | 阶段 | 成功终态 | 关键失败与无副作用 | 字段权威 | AC/E2E |", "| 操作 ID | 入口与传输 | 鉴权主体 | 功能 ID | 阶段 | 字段权威 | AC/E2E |"));
+  result = runVerbose(["--strict"]);
+  assert("公共接口逐操作终态与失败列缺失被拦截", result.stdout.includes("接口公共契约缺少逐操作索引或必需列"));
+  write(interfacePath, contract);
+
+  write(interfacePath, contract.replace("| <operationId/动作 ID> | <方法+路径/SDK/事件> | <角色/能力> | V1-FR-001", "| installApp | POST /api/apps | 管理员 | V1-FR-999"));
+  result = runVerbose(["--strict"]);
+  assert("公共接口操作引用未知功能被拦截", result.stdout.includes("installApp 未关联已登记的当前版本功能 ID"));
+  write(interfacePath, contract);
+
+  write(dataPath, data.replace("### 关键不变量与失败验证", "### 设计摘要"));
+  result = runVerbose(["--strict"]);
+  assert("数据不变量与验证视图缺失被拦截", result.stdout.includes("数据公共契约缺少 关键不变量与失败验证"));
+  write(dataPath, data);
+
+  assert("恢复后普通检查通过", run([]).code === 0);
 }
 
 console.log(`\n[selftest] ${failures.length === 0 ? "全部通过" : `${failures.length} 项失败`}`);

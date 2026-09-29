@@ -2,6 +2,18 @@
   "skill_name": "spec-docs",
   "evals": [
     {
+      "id": 0,
+      "name": "incremental-change-slice",
+      "prompt": "对已冻结功能做一个小范围接口变更。请先建立 V1-CS-001 切片，分析影响并给出 policy 校准结果，不要自动改 policy。",
+      "expected_output": "变更切片包含基线、目标、影响资产、AC/验证证据和回写清单；两个只读 CLI 输出稳定 JSON；policy 不被自动修改",
+      "assertions": [
+        "切片使用 Vx-CS-NNN 稳定 ID并引用主功能",
+        "change-impact 报告包含关联文件、operationId、实体或路径",
+        "policy-calibrate 报告包含建议且 read_only 为 true",
+        "执行工具前后 docs-policy.json 字节不变"
+      ]
+    },
+    {
       "id": 1,
       "name": "bootstrap-s-tier",
       "prompt": "我们下周要开一个新项目，还没有任何文档目录，请把文档体系先搭起来。项目：内部工单工具「TicketLite」；Node.js + PostgreSQL，单体服务，1 个人开发；首版 2 周，功能点不超过 5 个。把骨架生成到工作目录并让结构检查跑起来；不要编造业务规则。",
@@ -71,6 +83,124 @@
         "有非零退出或错误时不声称迁移完成",
         "迁移指南禁止把已混入新模板的 docs 根整体移入历史归档",
         "迁移映射记录每个旧路径到新路径"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "product-blueprint-review-ready",
+      "prompt": "为一个桌面和 Web 共用的可扩展应用平台编写产品蓝图。首版只有应用目录、权限与一个文本 AI 示范应用；项目画布、团队协作以后再做。已知角色为使用者、应用开发者、管理员，指标当前未测。不要编造接口字段或声称未来能力已交付。",
+      "expected_output": "蓝图能独立支撑产品评审，包含角色场景、跨角色业务流程、能力与版本边界、指标口径、非功能目标和风险；具体契约链接权威文档",
+      "assertions": [
+        "三个角色均有目标、触发、阻碍、可观察结果和适用版本",
+        "至少一条核心流程写清成功终态与失败恢复，不只画箭头",
+        "画布和团队协作被标为后续版本，不混入首版导航或验收",
+        "指标写明未测、计算口径、目标冻结条件与验证方法",
+        "没有复制虚构的 HTTP schema 或数据库字段，未知业务选择显式待确认"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "version-prd-scenario-review",
+      "prompt": "基于已有蓝图、V1 功能规格和路线图完善 V1 产品需求。V1 只交付可安装应用的平台控制面和一个真实文本 AI 示范应用；项目画布属于 V2。请使 PRD 能独立接受产品、技术和测试评审，但不要复制 OpenAPI 字段或把测试计划写成已通过证据。",
+      "expected_output": "PRD 中本版角色旅程、页面状态、跨功能规则、失败恢复、验收场景及功能/E2E 追踪闭环，后续能力仅出现在明确不做与版本边界",
+      "assertions": [
+        "每条关键场景有角色、触发、前提、有序步骤、成功终态和失败恢复",
+        "本版页面写明主要任务、可见条件和空/加载/错误状态",
+        "跨功能规则有权威功能或决策链接，不复制第二套接口/数据契约",
+        "验收场景链接本版功能 ID、E2E 和所需证据，不冒充已执行",
+        "V2 画布没有混入 V1 功能分层、页面或验收场景",
+        "严格结构检查未通过时不声称文档 Ready"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "sdd-public-contracts",
+      "prompt": "一个系统有公开 HTTP 接口、桌面 SDK 动作和异步事件。请为当前 V1 完善公共接口契约与数据模型：用户可安装应用，安装失败必须保留旧版本；V2 才支持项目画布。当前只知道逻辑动作，部分字段和 migration 未冻结。不要编造已实现状态。",
+      "expected_output": "本版操作逐条绑定功能和验收；规划操作隔离；关键实体说明所有权、不变量、事务失败和迁移验证；未知契约保持 Draft",
+      "assertions": [
+        "HTTP 操作逐一列 operationId、鉴权、功能、阶段、成功终态、失败无副作用、AC/E2E，字段引用 OpenAPI",
+        "SDK 与事件动作有独立 ID 和机器可读契约来源，未知字段明确 Draft",
+        "V2 画布操作与本版可调用操作分区，不宣称已实现",
+        "关键实体区分持久化/派生/缓存，给出所有者、约束、并发/幂等、失败补偿与验证",
+        "migration 未确定时标出待冻结问题，不伪造 DDL 或通过证据"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "e2e-specification-closure",
+      "prompt": "现有 V1 E2E 规范只有一张用例摘要表，执行矩阵列出了 E2E01 安装成功、E2E02 安装失败回滚和 E2E03 重复安装。请补全可供开发和测试使用的验收规格。数据库与权限服务需要真实，外部包下载可使用受控替身；目前都未执行。",
+      "expected_output": "每个矩阵 ID 有独立的 Given/When/Then 正文、真实入口/依赖/替身、终态和失败无副作用断言；矩阵只记录资产与未执行状态",
+      "assertions": [
+        "E2E01/02/03 与规范独立标题双向一一对应",
+        "每个用例明确真实入口、真实本系统依赖和外部替身限制",
+        "Then 断言持久化状态和可观察副作用，失败与重复路径断言无残留",
+        "没有把未执行或受控替身写成真实外部集成通过",
+        "严格结构检查能发现缺失或重复用例 ID"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "release-line-and-legacy-audit",
+      "prompt": "请审查当前 spec-docs 工作树的版本声明是否一致，并为一个已有 docs/ 项目运行只读兼容审计。重点识别功能文档 frontmatter 或功能卡复制实现状态的旧写法；不要改写、移动或删除任何文档。",
+      "expected_output": "版本声明、README、CHANGELOG 和能力线之间有机器可读的一致性检查；兼容审计输出结构化迁移建议，普通模式不阻断，严格模式对未迁移旧状态返回非零。",
+      "assertions": [
+        "release manifest 明确当前声明版本和未发布能力线",
+        "版本漂移会产生 VERSION_DRIFT 诊断并返回非零",
+        "旧 status/implementation_status frontmatter 被识别为迁移项",
+        "功能卡中的状态字段被识别为可能混淆规格状态与实现状态",
+        "普通审计只读且不修改文件，strict 模式可以阻断未迁移项"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "real-sample-compatibility",
+      "prompt": "对已有复杂中文项目文档库运行 spec-docs 兼容性诊断。该文档库本身就是文档根目录，不一定存在 docs/ 子目录；请识别当前功能文档状态写法，并给出按版本实现状态表、事实注册表和历史归档逐步迁移的建议。",
+      "expected_output": "工具自动识别文档根目录布局，报告旧状态写法的文件和行号，不修改样例项目，并给出分批迁移顺序。",
+      "assertions": [
+        "传入目录本身作为 docs root 时不误报 DOCS_ROOT_MISSING",
+        "每个发现包含文件、行号、问题代码和迁移建议",
+        "诊断结果明确只读，不声称已完成迁移",
+        "迁移建议优先建立实现状态唯一来源，再启用事实注册表和严格门禁"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "facts-sync-and-authority-drift",
+      "prompt": "当前项目已经有 docs-facts.json、功能 Markdown 和版本实现状态表，但三者可能发生漂移。请先只读检查 Markdown 派生事实；如果存在漂移，输出每个功能的字段差异。然后修改一个权威功能文档，再冻结并比较规格基线，确认即使 facts 没变也能发现 authority 文件摘要变化。不要默认写回事实注册表或基线。",
+      "expected_output": "facts-sync 默认只读且报告缺失/漂移/孤立事实；spec-diff 基线包含 authority 文件摘要，权威 Markdown 修改会产生 authority_changed，并输出受影响切片和回写清单。",
+      "assertions": [
+        "facts-sync 默认 read_only 为 true 且不会修改 docs-facts.json",
+        "派生字段覆盖 spec_status、implementation_status、delivery_scope、delivery_slice 和 authority",
+        "spec-diff baseline 包含 authority 文件摘要",
+        "只修改 authority 文件也能报告 authority_changed",
+        "治理报告包含受影响切片、权威路径和回写目标"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "typed-traceability-coverage",
+      "prompt": "请检查一个包含 requirement、feature、operation、entity、acceptance、evidence 和 migration 事实的项目追踪图。输出按事实类型的覆盖率、未连接事实和关系类型统计；在 SDD 严格 profile 下，孤立的活动事实必须阻断。",
+      "expected_output": "traceability-report 输出 coverage.by_type、uncovered_by_type 和 profile=sdd；普通模式报告告警，--profile sdd --strict 对孤立活动事实返回非零。",
+      "assertions": [
+        "支持 scenario/constraint/risk/test_asset/artifact/migration 等事实类型",
+        "报告按 type 统计 total、connected、authority 和 slice 覆盖",
+        "报告明确列出未连接事实 ID",
+        "SDD strict profile 会阻断孤立活动事实",
+        "普通模式不会修改 facts 或 policy"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "golden-sample-and-contract-index",
+      "prompt": "请对真实 TUZAI 文档库运行 spec-docs 黄金样例评测，并生成多类型契约索引。评测需要验证任务导航、权威来源表、需求到 E2E 追踪、GWT、local-mock 与真实依赖边界、planned 功能隔离和决策取代关系；契约索引需要发现 V1 OpenAPI operation。不要修改样例文档。",
+      "expected_output": "黄金样例返回结构化通过/失败检查；契约索引输出 HTTP operation、功能来源、实现状态和覆盖率；整个过程只读。",
+      "assertions": [
+        "真实样例根 README 的任务导航和权威来源检查通过",
+        "需求矩阵至少连接 V1-FR-001 与 V1-E2E-01",
+        "E2E 规范包含 Given/When/Then 且区分 local-mock 与真实依赖",
+        "实现状态和冻结决策的历史边界检查通过",
+        "contract-index 发现 OpenAPI operation 且输出 operation mapping coverage",
+        "黄金评测和契约索引均声明 read_only，不修改 tuzi-docs"
       ]
     }
   ]

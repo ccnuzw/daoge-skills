@@ -8,7 +8,7 @@
  *
  * 用法:
  *   node scripts/docs-gate.mjs                     # 校验当前证据是否足以交付
- *   node scripts/docs-gate.mjs --phase planning|development|release
+ *   node scripts/docs-gate.mjs --phase planning|development|release [--spec-diff]
  *   node scripts/docs-gate.mjs --release           # 发布模式：未完成 AC 与待补项按错误处理
  *   node scripts/docs-gate.mjs --authority-digest  # 只读打印权威文档摘要（供审批引用）
  *   node scripts/docs-gate.mjs --init              # 生成 docs-gate.json 与 docs-evidence.json 模板
@@ -58,6 +58,7 @@ function usageError(msg) {
 /* ---------- 结果收集 ---------- */
 
 const results = [];
+let specDiffReport = null;
 const add = (level, file, line, code, message) =>
   results.push({ level, file: file ? relative(repoRoot, file).split(sep).join("/") : "", line, code, message });
 
@@ -144,6 +145,7 @@ const DEFAULTS = {
   requireManifest: true,
   structureCheck: true,
   strictStructure: false,
+  review: { enabled: true, script: "scripts/review-docs.mjs", failOn: "blocking" },
   release: { enforce: false, allowPendingACs: false },
   secretScan: { enabled: true, patterns: [], allowPaths: [] },
   phase: null,
@@ -201,12 +203,18 @@ function loadConfig({ bootstrap = false } = {}) {
   if (raw.release?.allowPendingACs !== undefined && typeof raw.release.allowPendingACs !== "boolean") usageError("docs-gate.json release.allowPendingACs 必须是布尔值");
   if (raw.structureCheck !== undefined && typeof raw.structureCheck !== "boolean") usageError("docs-gate.json structureCheck 必须是布尔值");
   if (raw.strictStructure !== undefined && typeof raw.strictStructure !== "boolean") usageError("docs-gate.json strictStructure 必须是布尔值");
+  if (raw.review !== undefined && (typeof raw.review !== "object" || raw.review === null || Array.isArray(raw.review))) usageError("docs-gate.json review 必须是对象");
+  if (raw.review?.enabled !== undefined && typeof raw.review.enabled !== "boolean") usageError("docs-gate.json review.enabled 必须是布尔值");
+  if (raw.review?.script !== undefined && (typeof raw.review.script !== "string" || !raw.review.script.trim())) usageError("docs-gate.json review.script 必须是非空路径字符串");
+  if (raw.review?.failOn !== undefined && !["blocking", "error", "warning"].includes(raw.review.failOn)) usageError("docs-gate.json review.failOn 只能是 blocking / error / warning");
+  if (raw.review?.phase !== undefined && !["planning", "spec_ready", "development", "implemented", "release_candidate"].includes(raw.review.phase)) usageError("docs-gate.json review.phase 包含未知 reviewer 阶段");
   if (raw.phase !== undefined && !["planning", "development", "release"].includes(raw.phase)) usageError("docs-gate.json phase 只能是 planning / development / release");
   return {
     ...DEFAULTS,
     ...raw,
     release: { ...DEFAULTS.release, ...(raw.release || {}) },
     secretScan: { ...DEFAULTS.secretScan, ...(raw.secretScan || {}) },
+    review: { ...DEFAULTS.review, ...(raw.review || {}) },
     allowedEnvironments: { ...DEFAULT_ALLOWED_ENVIRONMENTS, ...(raw.allowedEnvironments || {}) },
   };
 }
@@ -217,6 +225,14 @@ function loadPolicy(config) {
   if (!existsSync(path)) usageError(`docs-gate 依赖结构策略：找不到 ${rel(path)}`);
   const raw = readJson(path);
   if (!raw) process.exit(2);
+  const governance = raw.changeGovernance;
+  if (governance !== undefined && (typeof governance !== "object" || governance === null || Array.isArray(governance))) usageError("docs-policy.json changeGovernance 必须是对象");
+  if (governance?.enabled !== undefined && typeof governance.enabled !== "boolean") usageError("docs-policy.json changeGovernance.enabled 必须是布尔值");
+  if (governance?.strict !== undefined && typeof governance.strict !== "boolean") usageError("docs-policy.json changeGovernance.strict 必须是布尔值");
+  if (governance?.requireSliceBinding !== undefined && typeof governance.requireSliceBinding !== "boolean") usageError("docs-policy.json changeGovernance.requireSliceBinding 必须是布尔值");
+  if (governance?.script !== undefined && (typeof governance.script !== "string" || !governance.script.trim())) usageError("docs-policy.json changeGovernance.script 必须是非空路径字符串");
+  if (governance?.baselineDir !== undefined && (typeof governance.baselineDir !== "string" || !governance.baselineDir.trim())) usageError("docs-policy.json changeGovernance.baselineDir 必须是非空路径字符串");
+  if (governance?.failOnChanges !== undefined && !["never", "release", "always"].includes(governance.failOnChanges)) usageError("docs-policy.json changeGovernance.failOnChanges 只能是 never / release / always");
   return { path, data: raw };
 }
 
@@ -1053,6 +1069,7 @@ function initTemplates(config) {
     requireManifest: true,
     structureCheck: true,
     strictStructure: false,
+    review: { ...DEFAULTS.review },
     release: { enforce: false, allowPendingACs: false },
     secretScan: { enabled: true },
   };
@@ -1117,12 +1134,85 @@ function runStructureCheck() {
     add("warn", configPath, 0, "DOCS_CHECKER_MISSING", `${phase} 阶段未找到 scripts/check-docs.mjs，跳过结构检查`);
     return;
   }
-  const args = [checker, "--repo", repoRoot, "--quiet"];
+  const args = [checker, "--repo", repoRoot, "--policy", config.policy, "--quiet"];
   if (config.strictStructure === true) args.push("--strict");
   try {
     execFileSync("node", args, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
     add("error", checker, 0, "DOCS_STRUCTURE", `${phase} 阶段结构检查未通过${config.strictStructure ? "（严格模式）" : ""}：${String(error.stdout || error.stderr || "").trim().split(/\r?\n/).pop() || "请运行 check-docs 查看详情"}`);
+  }
+}
+
+function runSpecificationReview() {
+  if (config.review?.enabled === false) return;
+  const configured = config.review?.script || "scripts/review-docs.mjs";
+  const reviewer = resolve(repoRoot, configured);
+  if (!safeRepoLocation(reviewer)) usageError("review 脚本路径必须位于仓库内，且不能通过符号链接越界");
+  if (!existsSync(reviewer)) {
+    const failOn = config.review?.failOn || "blocking";
+    add(failOn === "warning" ? "error" : "warn", reviewer, 0, "DOCS_REVIEWER_MISSING", `${phase} 阶段未找到 ${configured}，跳过 SDD 内容审查`);
+    return;
+  }
+  const reviewPhase = config.review?.phase || ({ planning: "planning", development: "development", release: "release_candidate" }[phase] || "planning");
+  const args = [reviewer, "--repo", repoRoot, "--phase", reviewPhase, "--json", "--quiet"];
+  let output = "";
+  let commandError = null;
+  try {
+    output = execFileSync("node", args, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    commandError = error;
+    output = String(error.stdout || "");
+  }
+  let report = null;
+  try { report = JSON.parse(output); } catch { /* 由下面的统一错误报告处理 */ }
+  if (!report || !Array.isArray(report.issues)) {
+    add("error", reviewer, 0, "DOCS_REVIEW_FAILED", `SDD 内容审查未返回可解析结果：${String(commandError?.stderr || output).trim().split(/\r?\n/).pop() || "请直接运行 review-docs 查看详情"}`);
+    return;
+  }
+  const failOn = config.review?.failOn || "blocking";
+  for (const issue of report.issues) {
+    // failOn is a threshold: blocking fails only blocking issues, error also fails errors,
+    // and warning fails every reviewer issue.
+    const shouldFail = failOn === "warning" || (failOn === "error" && issue.level === "error") || (failOn === "blocking" && issue.blocking);
+    add(shouldFail ? "error" : "warn", issue.file ? resolve(repoRoot, issue.file) : reviewer, issue.line || 0, `SDD_REVIEW_${issue.code || "ISSUE"}`, issue.message || "SDD 内容审查发现问题");
+  }
+}
+
+function runSpecDiff() {
+  const governance = policy.data.changeGovernance || {};
+  const requested = has("--spec-diff");
+  if (governance.enabled !== true && !requested) return;
+  const configured = governance.script || "scripts/spec-diff.mjs";
+  const script = resolve(repoRoot, configured);
+  if (!safeRepoLocation(script)) usageError("changeGovernance.script 必须位于仓库内，且不能通过符号链接越界");
+  if (!existsSync(script)) {
+    add(releaseMode ? "error" : "warn", script, 0, "SPEC_DIFF_SCRIPT_MISSING", `找不到规格差异脚本：${configured}`);
+    return;
+  }
+  let output = "";
+  let commandError = null;
+  try {
+    output = execFileSync("node", [script, "--dir", repoRoot], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    commandError = error;
+    output = String(error.stdout || "");
+  }
+  try { specDiffReport = JSON.parse(output); } catch {
+    add(releaseMode ? "error" : "warn", script, 0, "SPEC_DIFF_FAILED", `规格差异脚本未返回可解析结果：${String(commandError?.stderr || output).trim().split(/\r?\n/).pop() || "请直接运行 spec-diff 查看详情"}`);
+    return;
+  }
+  const reportErrors = Array.isArray(specDiffReport.errors) ? specDiffReport.errors : [];
+  const reportUnbound = specDiffReport.governance?.unbound_changes || [];
+  const issueLevel = releaseMode ? "error" : "warn";
+  for (const issue of reportErrors) add(issueLevel, script, 0, `SPEC_DIFF_${issue.code || "ERROR"}`, issue.message || "规格差异报告存在错误");
+  if (reportUnbound.length > 0 && governance.requireSliceBinding !== false) {
+    add(issueLevel, script, 0, "SPEC_DIFF_UNBOUND", `活动事实缺少交付切片绑定：${reportUnbound.slice(0, 10).join(", ")}`);
+  }
+  const changes = Number(specDiffReport.summary?.changes || 0);
+  const failOnChanges = governance.failOnChanges || "release";
+  const changesFail = changes > 0 && (failOnChanges === "always" || (failOnChanges === "release" && releaseMode));
+  if (changes > 0) {
+    add(changesFail ? "error" : "warn", script, 0, "SPEC_DIFF_CHANGED", `规格基线检测到 ${changes} 项变化：${(specDiffReport.summary?.kinds || []).join(", ")}`);
   }
 }
 
@@ -1140,10 +1230,13 @@ if (has("--authority-digest")) {
 }
 
 runStructureCheck();
+runSpecificationReview();
+runSpecDiff();
+checkAcMappings(policy, config);
 if (phase === "planning") {
   const errors = results.filter((r) => r.level === "error");
   const warnings = results.filter((r) => r.level === "warn");
-  if (jsonOut) console.log(JSON.stringify({ ok: errors.length === 0, phase, errors, warnings }, null, 2));
+  if (jsonOut) console.log(JSON.stringify({ ok: errors.length === 0, phase, errors, warnings, spec_diff: specDiffReport }, null, 2));
   else if (!quiet) console.log(`[docs-gate] planning 阶段：${errors.length} errors, ${warnings.length} warnings`);
   process.exit(errors.length > 0 ? 1 : 0);
 }
@@ -1171,8 +1264,6 @@ if (!existsSync(evidencePath)) {
   }
 }
 
-checkAcMappings(policy, config);
-
 const errors = results.filter((r) => r.level === "error");
 const warnings = results.filter((r) => r.level === "warn");
 results.sort(
@@ -1180,7 +1271,7 @@ results.sort(
 );
 
 if (jsonOut) {
-  console.log(JSON.stringify({ ok: errors.length === 0, errors, warnings }, null, 2));
+  console.log(JSON.stringify({ ok: errors.length === 0, phase, errors, warnings, spec_diff: specDiffReport }, null, 2));
 } else if (!quiet) {
   for (const r of results) {
     const tag = r.level === "error" ? "ERROR" : "WARN ";

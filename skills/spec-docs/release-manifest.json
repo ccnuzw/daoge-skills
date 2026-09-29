@@ -1,0 +1,53 @@
+{
+  "$schema": "spec-docs/release/v1",
+  "name": "spec-docs",
+  "declared_version": "1.9.0",
+  "release_status": "released",
+  "updated": "2026-09-30",
+  "source_of_truth": "SKILL.md",
+  "tracks": [
+    {
+      "version": "1.7.0",
+      "status": "implemented_in_worktree",
+      "release_status": "included_in_1.9.0",
+      "capabilities": [
+        "facts-registry",
+        "context-pack",
+        "unified-machine-status",
+        "workflow-router",
+        "task-pack",
+        "profiled-bootstrap",
+        "contract-index",
+        "golden-sample-evaluation"
+      ]
+    },
+    {
+      "version": "1.8.0",
+      "status": "implemented_in_worktree",
+      "release_status": "included_in_1.9.0",
+      "capabilities": [
+        "explicit-relations",
+        "traceability-report",
+        "graph-impact-propagation",
+        "facts-sync",
+        "authority-file-digests",
+        "typed-traceability-coverage"
+      ]
+    },
+    {
+      "version": "1.9.0",
+      "status": "released",
+      "release_status": "released",
+      "capabilities": [
+        "evidence-freshness",
+        "spec-diff",
+        "evidence-invalidation-report"
+      ]
+    }
+  ],
+  "compatibility": {
+    "node": ">=18",
+    "project_copies_are_versioned": true,
+    "legacy_status_audit": "scripts/compatibility-audit.mjs"
+  }
+}

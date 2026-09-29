@@ -21,6 +21,11 @@
   "requireManifest": true,
   "structureCheck": true,
   "strictStructure": false,
+  "review": {
+    "enabled": true,
+    "script": "scripts/review-docs.mjs",
+    "failOn": "blocking"
+  },
   "release": {
     "enforce": false,
     "allowPendingACs": false
@@ -36,6 +41,7 @@
     "commandRegistry": "登记允许的命令前缀（如 make test、pnpm --filter app test）；为空则跳过命令登记校验",
     "structureCheck": "在 planning/development/release 阶段运行项目内 scripts/check-docs.mjs；设为 false 可关闭",
     "strictStructure": "设为 true 时以 --strict 运行结构检查，并将质量告警作为阶段错误",
+    "review": "SDD 内容审查；planning 默认阻断稳定 ID、AC 映射、版本边界和 Ready 闭环问题；failOn 可设 blocking / error / warning",
     "allowedEnvironments": "如需收紧环境白名单，在此覆盖默认值",
     "release": "enforce=true 等价于常开 --release；allowPendingACs=true 允许未闭环 AC 带告警通过"
   }

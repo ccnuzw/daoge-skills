@@ -28,7 +28,10 @@
 | `activeVersion` | 从 docs-policy 推断 | 便于人阅读；编号校验以 docs-policy 为准 |
 | `policy` | `docs-policy.json` | 结构策略来源；门禁复用其 `featureDoc`/`ids`/`traceability` |
 | `evidence` | `docs-evidence.json` | 当前证据清单路径 |
-| `phase` | `planning`（由 docs-policy 推断） | `planning` 只检查结构/范围，`development` 检查开发证据，`release` 启用完整审批与发布证据 |
+| `phase` | `planning`（由 docs-policy 推断） | `planning` 检查结构、SDD 规格闭环和 AC 映射；规格缺口阻断，但测试资产可保持规划状态；`development` 检查开发证据；`release` 启用完整审批与发布证据 |
+| `review.enabled` | `true` | 是否运行项目内 `review-docs.mjs`；存量项目可暂时关闭并记录迁移任务 |
+| `review.script` | `scripts/review-docs.mjs` | reviewer 副本路径，必须位于仓库内 |
+| `review.failOn` | `blocking` | `blocking` 阻断稳定 ID、AC 映射、范围冲突和 Ready 闭环；也可设 `error` 或 `warning` |
 | `authorityFiles` | `[]` | 参与摘要计算与审批绑定的权威文档（版本总览、实现状态、接口契约、openapi、数据模型、冻结决策、E2E 规范等） |
 | `approvalMaxAgeDays` | `30` | 审批有效期；`0` 表示不过期（仍要求摘要匹配） |
 | `requiredReports` | `["development","e2e","release"]` | 必须存在的报告类型；`performance` 由项目按需加入 |
@@ -40,6 +43,8 @@
 | `release.enforce` | `false` | 等价于常开 `--release` |
 | `release.allowPendingACs` | `false` | 发布模式是否允许未闭环 AC（默认不允许） |
 | `secretScan.enabled / patterns / allowPaths` | `true / [] / []` | 秘密扫描开关、自定义正则、豁免路径 |
+
+规格差异门禁由 `docs-policy.json` 的 `changeGovernance` 控制：默认关闭；启用后每次门禁运行 `scripts/spec-diff.mjs`。`planning`/`development` 对基线缺失和差异告警，`release` 默认将差异阻断；`failOnChanges` 可设为 `never`、`release` 或 `always`。也可以用 `docs-gate --spec-diff` 对未启用治理的项目临时运行一次。门禁 JSON 输出包含 `spec_diff` 原始报告，便于 CI 保存差异与治理回写清单。
 
 配置、策略、证据、报告、manifest、profile 与 AC 资产路径必须留在仓库内；符号链接不能将读写目标带出仓库。`release.enforce=true` 会让不带 `--release` 的常规运行也使用发布级判定。
 
@@ -161,7 +166,13 @@ node scripts/docs-gate.mjs --authority-digest   # 只读输出当前摘要与逐
 - 审批必须发生在完整提案展示之后；权威文档任何改动都会使摘要失配，原审批自动失效。
 - 普通检查中审批过期会告警；发布模式中审批过期、缺失或时间无效都会失败。
 
-## 8. AC → 测试资产 → 命令 → 证据
+## 8. SDD 规格审查与 AC → 测试资产 → 命令 → 证据
+
+planning 阶段在不执行项目命令的前提下调用 `review-docs.mjs`，检查功能章节和稳定 ID、Given/When/Then、可观察终态、失败无副作用、AC 映射、当前/未来边界、产品追踪、公共契约、数据分类和 E2E 双向对应。它同时要求蓝图、PRD、逐操作接口、数据不变量/迁移、E2E 规范和性能矩阵的必需章节及结构化表格存在；缺失章节不会被当作“不适用”静默跳过，只有明确写出“不适用 + 业务理由 + 替代验证”才可裁剪。AC 映射中的 Markdown 相对测试链接按来源文档目录解析，并检查目标仍在仓库内。输出状态为 `SDD_NOT_READY` 或 `SPEC_READY`；测试可以仍为“未执行”，但 Ready 无闭环、已声明通过却缺少资产、未来能力混入当前交付等问题会阻断。development/release 映射为实现或证据阶段状态。reviewer 只读，不运行测试，也不替用户确定业务事实。
+
+`check-docs` 通过不等于 `review-docs` 通过；`review-docs` 通过也不等于交付证据通过。
+
+### AC → 测试资产 → 命令 → 证据
 
 门禁扫描结构策略指定的功能文档，识别含 `AC` 与 `状态` 列的表格（自动化测试映射、AC 逐项测试设计两套表都支持）：
 

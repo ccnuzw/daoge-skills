@@ -1,0 +1,38 @@
+{
+  "$schema": "spec-docs/facts/v1",
+  "version": "{{活跃版本}}",
+  "updated": "{{日期}}",
+  "relations": [],
+  "facts": [
+    {
+      "id": "{{活跃版本}}-FR-001",
+      "type": "requirement",
+      "title": "<功能或需求名称>",
+      "lifecycle": "active",
+      "spec_status": "draft",
+      "implementation_status": "planned",
+      "delivery_scope": "active",
+      "delivery_slice": "{{活跃版本}}-core",
+      "authority": "{{文档目录}}/03-功能规格/{{活跃版本}}/00-{{活跃版本}}需求编号.md",
+      "references": [
+        "{{文档目录}}/03-功能规格/{{活跃版本}}/<功能主文档>.md"
+      ],
+      "evidence": [],
+      "evidence_policy": {
+        "max_age_days": 30,
+        "required_environments": []
+      }
+    }
+  ],
+  "slices": [
+    {
+      "id": "{{活跃版本}}-core",
+      "version": "{{活跃版本}}",
+      "status": "planned",
+      "authority": "{{文档目录}}/02-产品与版本/当前版本/{{活跃版本}}-版本总览.md",
+      "features": ["{{活跃版本}}-FR-001"],
+      "depends_on": [],
+      "evidence": []
+    }
+  ]
+}

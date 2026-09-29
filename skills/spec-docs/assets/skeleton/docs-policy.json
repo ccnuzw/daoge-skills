@@ -1,11 +1,31 @@
 {
   "root": "{{文档目录}}",
   "tier": "m",
+  "profile": "standard",
   "activeVersion": "{{活跃版本}}",
   "projectName": "{{项目名}}",
   "phase": "planning",
   "openapi": "04-技术架构/当前版本/{{活跃版本}}-openapi.yaml",
   "requireDeliveryMetadata": true,
+  "facts": {
+    "enabled": false,
+    "file": "docs-facts.json",
+    "strict": true
+  },
+  "compatibility": {
+    "audit": "scripts/compatibility-audit.mjs",
+    "legacyStatus": "error",
+    "legacyStatusMigration": "references/compatibility.md"
+  },
+  "contracts": {
+    "sources": []
+  },
+  "changeGovernance": {
+    "enabled": false,
+    "baselineDir": ".spec-docs/baselines",
+    "strict": false,
+    "requireSliceBinding": true
+  },
   "versionPlanning": {
     "enabled": true,
     "roadmap": "02-产品与版本/版本路线图.md",
@@ -21,6 +41,11 @@
     "enabled": true,
     "strict": true,
     "allowNotApplicable": true,
+    "productDocs": {
+      "enabled": true,
+      "blueprint": "02-产品与版本/产品蓝图.md",
+      "prd": "02-产品与版本/当前版本/{{活跃版本}}-产品需求.md"
+    },
     "minimumInterfaceTables": ["接口清单", "OpenAPI operation 映射", "错误矩阵"],
     "minimumDataSections": ["涉及数据", "约束与事务", "字段读写矩阵", "状态与生命周期", "物理约束与迁移", "数据所有权", "安全与保留"],
     "requiredMetadata": ["title", "version", "feature_id", "domain", "updated", "delivery_scope", "planning_only", "delivery_slice"],
@@ -42,8 +67,16 @@
     "e2e": {
       "enabled": true,
       "matrix": "05-测试与发布/端到端验收/用例矩阵.md",
-      "requiredColumns": ["真实入口", "必须真实的本系统依赖", "最终业务断言", "目标测试文件", "当前证据状态"],
+      "specification": "05-测试与发布/端到端验收/{{活跃版本}}-端到端验收规范.md",
+      "reviewRequiredColumns": ["功能 ID", "AC", "断言事实类型", "环境", "日期", "代码版本", "命令", "证据路径", "限制"],
+      "requiredColumns": ["功能 ID", "AC", "真实入口", "必须真实的本系统依赖", "断言事实类型", "最终业务断言", "目标测试文件", "环境", "日期", "代码版本", "命令", "证据路径", "限制", "当前证据状态"],
       "requireReferencedIds": true
+    },
+    "publicContracts": {
+      "enabled": true,
+      "interface": "04-技术架构/当前版本/{{活跃版本}}-接口契约.md",
+      "data": "04-技术架构/当前版本/{{活跃版本}}-数据模型.md",
+      "requiredOperationColumns": ["功能 ID", "AC/E2E", "成功终态", "关键失败与无副作用"]
     },
     "performance": {
       "enabled": true,
@@ -64,6 +97,7 @@
     "04-技术架构",
     "05-测试与发布",
     "06-决策记录",
+    "07-变更切片",
     "90-参考资料",
     "99-历史归档"
   ],
@@ -120,8 +154,14 @@
     "06-决策记录/{{活跃版本}}-冻结决策.md",
     "06-决策记录/{{活跃版本}}-文档变更记录.md",
     "06-决策记录/ADR/README.md",
+    "07-变更切片/README.md",
     "99-历史归档/README.md"
   ],
+  "changeSlice": {
+    "dir": "07-变更切片/{{活跃版本}}",
+    "filePattern": "^{{活跃版本}}-CS-\\d{3}-.+\\.md$",
+    "requiredSections": ["元数据", "基线与目标", "影响清单", "验收与证据", "回写清单"]
+  },
   "featureDoc": {
     "dir": "03-功能规格/{{活跃版本}}",
     "filePattern": "^\\d{2}-.+\\.md$",

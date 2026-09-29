@@ -54,7 +54,12 @@ const gate = (args = []) => {
   } catch {
     parsed = null;
   }
-  return { ...result, parsed, codes: (parsed?.errors || []).map((e) => e.code) };
+  return {
+    ...result,
+    parsed,
+    codes: (parsed?.errors || []).map((e) => e.code),
+    warningCodes: (parsed?.warnings || []).map((e) => e.code),
+  };
 };
 
 const writeJson = (path, data) => writeFileSync(join(fixture, path), JSON.stringify(data, null, 2) + "\n", "utf8");
@@ -99,11 +104,61 @@ appendFileSync(
 
 const gateConfigPath = join(fixture, "docs-gate.json");
 const gateConfig = JSON.parse(readFileSync(gateConfigPath, "utf8"));
-assert("初始化配置默认启用结构检查", gateConfig.structureCheck === true && gateConfig.strictStructure === false);
+assert("初始化配置默认启用结构检查与 SDD 审查", gateConfig.structureCheck === true && gateConfig.strictStructure === false && gateConfig.review?.enabled === true);
 gateConfig.requiredReports = ["development", "e2e", "performance", "release"];
 gateConfig.commandRegistry = ["node tests/ac01.test.js"];
 writeJson("docs-gate.json", gateConfig);
-const baselineGateConfig = readFileSync(gateConfigPath, "utf8");
+let baselineGateConfig = readFileSync(gateConfigPath, "utf8");
+
+console.log("\n[planning] 结构通过不代表规格已就绪");
+{
+  const planningDoc = join(fixture, featureDoc);
+  const original = readFileSync(planningDoc, "utf8");
+  writeFileSync(planningDoc, original.replace("| 已创建 | 本地通过 |", "| 已创建 | 未执行 |"), "utf8");
+  const result = gate(["--phase", "planning"]);
+  assert("planning 对规格缺口返回非零", result.code === 1 && result.codes.some((code) => code.startsWith("SDD_REVIEW_")), result.codes.join(","));
+  assert("planning 允许测试未执行并报告 AC_PENDING", result.codes.includes("AC_PENDING") || result.warningCodes.includes("AC_PENDING"), [...result.codes, ...result.warningCodes].join(","));
+  writeFileSync(planningDoc, original, "utf8");
+  const missing = JSON.parse(JSON.stringify(gateConfig));
+  missing.review.script = "scripts/missing-review-docs.mjs";
+  writeJson("docs-gate.json", missing);
+  const unavailable = gate(["--phase", "planning"]);
+  assert("reviewer 缺失有明确告警", unavailable.code === 0 && unavailable.warningCodes.includes("DOCS_REVIEWER_MISSING"));
+  missing.review.enabled = false;
+  writeJson("docs-gate.json", missing);
+  const disabled = gate(["--phase", "planning"]);
+  assert("review.enabled=false 关闭内容审查", !disabled.codes.some((code) => code.startsWith("SDD_REVIEW_") || code === "DOCS_REVIEWER_MISSING"));
+  missing.review.enabled = true;
+  missing.review.script = "scripts/review-docs.mjs";
+  missing.structureCheck = false;
+  writeJson("docs-gate.json", missing);
+  const structureDisabled = gate(["--phase", "planning"]);
+  assert("structureCheck=false 不会关闭 SDD 审查", !structureDisabled.codes.includes("DOCS_STRUCTURE") && structureDisabled.codes.some((code) => code.startsWith("SDD_REVIEW_")));
+  writeJson("docs-gate.json", gateConfig);
+}
+
+console.log("\n[planning] reviewer failOn 使用严重级别阈值");
+{
+  const featurePath = join(fixture, featureDoc);
+  const original = readFileSync(featurePath, "utf8");
+  writeFileSync(featurePath, original.replace("| 已创建 | 本地通过 |", "| 已创建 | 未执行 |"), "utf8");
+  const threshold = JSON.parse(JSON.stringify(gateConfig));
+  threshold.review = { enabled: true, script: "scripts/review-docs.mjs", failOn: "blocking" };
+  writeJson("docs-gate.json", threshold);
+  const blocking = gate(["--phase", "planning"]);
+  assert("blocking 仍阻断 reviewer blocking issue", blocking.code === 1 && blocking.codes.some((code) => code.startsWith("SDD_REVIEW_")));
+  threshold.review.failOn = "error";
+  writeJson("docs-gate.json", threshold);
+  const errorThreshold = gate(["--phase", "planning"]);
+  assert("error 阈值阻断 error issue", errorThreshold.code === 1 && errorThreshold.codes.some((code) => code.startsWith("SDD_REVIEW_")));
+  writeFileSync(featurePath, original, "utf8");
+  writeJson("docs-gate.json", gateConfig);
+}
+
+// Subsequent scenarios isolate evidence-gate behavior from the separate SDD readiness gate.
+gateConfig.review.enabled = false;
+writeJson("docs-gate.json", gateConfig);
+baselineGateConfig = readFileSync(gateConfigPath, "utf8");
 
 console.log("\n[0] 结构检查必须覆盖 planning / development / release");
 {
@@ -124,6 +179,20 @@ console.log("\n[0] 结构检查必须覆盖 planning / development / release");
 }
 
 /* 报告、manifest 与证据清单绑定被测源码提交；其自身可以在提交后追加。 */
+{
+  const policyPath = join(fixture, "docs-policy.json");
+  const policy = JSON.parse(readFileSync(policyPath, "utf8"));
+  policy.changeGovernance = {
+    enabled: true,
+    baselineDir: ".spec-docs/baselines",
+    strict: true,
+    failOnChanges: "release",
+    requireSliceBinding: true,
+  };
+  writeJson("docs-policy.json", policy);
+  const baseline = run("node", ["scripts/spec-diff.mjs", "--dir", fixture, "--version", "V1", "--write-baseline"]);
+  assert("规格基线可在门禁前冻结", baseline.code === 0 && existsSync(join(fixture, ".spec-docs", "baselines", "V1.json")));
+}
 run("git", ["init", "-q"]);
 run("git", ["add", "-A"]);
 run("git", ["-c", "user.email=selftest@example.com", "-c", "user.name=selftest", "commit", "-qm", "fixture"]);
@@ -236,6 +305,19 @@ console.log("\n[1] 完整证据链应通过");
 {
   const result = gate();
   assert("门禁通过（exit 0）", result.code === 0, `codes=${result.codes.join(",")}`);
+}
+
+console.log("\n[1b] 规格差异在发布阶段阻断并返回结构化报告");
+{
+  const factsPath = join(fixture, "docs-facts.json");
+  const original = readFileSync(factsPath, "utf8");
+  const facts = JSON.parse(original);
+  facts.facts[0].title = "规格基线后的变更";
+  writeJson("docs-facts.json", facts);
+  const result = gate(["--release"]);
+  assert("SPEC_DIFF_CHANGED", result.code === 1 && result.codes.includes("SPEC_DIFF_CHANGED"), result.codes.join(","));
+  assert("门禁输出 spec_diff 报告", result.parsed?.spec_diff?.summary?.changes > 0);
+  writeFileSync(factsPath, original, "utf8");
 }
 
 console.log("\n[2] 权威文档变化 → 审批失效");
