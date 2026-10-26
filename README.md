@@ -104,21 +104,9 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 
 安装 Skill 后需重启宿主，使其重新加载 Skill registry。安装一个能力不会自动安装仓库中的其他能力。
 
-## 三条起步路径
+## 快速开始
 
-### 软件项目与文档驱动开发
-
-在一个新软件项目中，可以直接对智能体说：
-
-```text
-使用 daoge-docs 为我启动一个新项目。
-先完成产品规划、V1 文档体系和开发执行工作台；
-所有未知业务规则都标为待确认，先不要写业务代码。
-```
-
-详细流程、工作台、门禁与 Goal 说明见 [DAOGE Docs README](./skills/daoge-docs/README.md)。
-
-### 规格模板与文档门禁
+### 文档驱动开发
 
 `spec-docs` 适合希望直接维护项目 Markdown、复用规格模板并运行结构与交付证据检查的项目。可以对智能体说：
 
@@ -127,6 +115,14 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 ```
 
 初始化选项、S/M/L 分档和脚本说明见 [Spec Docs README](./skills/spec-docs/README.md)。
+
+`spec-docs-pro` 适合需要深度设计思考和问题发现的中大型项目。可以对智能体说：
+
+```text
+使用 spec-docs-pro 为我的项目创建功能规格
+```
+
+详细工作模式和使用示例见 [Spec Docs Pro README](./skills/spec-docs-pro/README.md)。
 
 ### 本地图像创作与资产管理
 
@@ -209,6 +205,6 @@ Workbench **不提供开放式对话**，只提供一个受限请求入口：用
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
 - 系列级变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
-- `daoge-docs` 的平台与发布矩阵见 [兼容性与安装契约](./skills/daoge-docs/references/compatibility.md)。
+- 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 本项目使用 [MIT License](./LICENSE)。

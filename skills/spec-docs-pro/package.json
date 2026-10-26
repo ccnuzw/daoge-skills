@@ -1,24 +1,28 @@
 {
   "name": "spec-docs-pro",
   "version": "1.0.0",
-  "description": "规格驱动开发文档体系 - 完整的文档驱动开发工具集",
+  "description": "规格驱动开发设计顾问 - 思考伙伴、问题发现者、架构评审者",
   "type": "module",
   "scripts": {
-    "generate-browser": "node scripts/generate-browser.mjs",
-    "check-gate": "node scripts/check-gate.mjs",
-    "validate-docs": "node scripts/validate-docs.mjs"
+    "generate-browser": "node scripts/generate-browser-v2.mjs",
+    "generate-browser-basic": "node scripts/generate-browser.mjs"
   },
   "keywords": [
     "documentation",
     "spec-driven-development",
     "requirement-tracking",
     "adr",
-    "technical-writing"
+    "architecture-decision-record",
+    "technical-writing",
+    "design-advisor",
+    "feature-specification"
   ],
-  "author": "Based on TUZAI Project Spec Documentation",
+  "author": "Based on TUZAI Project Specification Documentation Practices",
   "license": "MIT",
-  "dependencies": {
-    "marked": "^11.0.0",
-    "js-yaml": "^4.1.0"
-  }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ccnuzw/daoge-skills.git",
+    "directory": "skills/spec-docs-pro"
+  },
+  "homepage": "https://github.com/ccnuzw/daoge-skills/tree/main/skills/spec-docs-pro"
 }
