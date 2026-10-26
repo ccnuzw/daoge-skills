@@ -832,118 +832,225 @@ Then 用户记录同步回滚。（测试：D027原子性）
 
 ## 伪代码（带分支ID）
 
-```text
-FUNCTION register_user(email, password):
-  // B01-01: 参数校验
-  IF !is_valid_email(email):
-    RETURN Err(invalid_email)
-  
-  // B01-02: 检查重复
-  IF email_exists(email):
-    RETURN Err(duplicate_email)
-  
-  // B01-03: 原子创建
-  BEGIN TRANSACTION
-    user_id = INSERT INTO users(email, password_hash)  // B01-04
-    account_id = INSERT INTO accounts(user_id, balance=0)  // B01-05
-    
-    IF account_creation_failed:  // B01-06
-      ROLLBACK
-      RETURN Err(account_creation_failed)
-  COMMIT  // B01-07
-  
-  RETURN Ok(user_id)
+### 模式 4：生成文档浏览器（纯 Agent 实现）
+
+当用户说"生成文档浏览器"或"生成产品文档浏览器"时：
+
+**核心原则**：你完全有能力自己生成文档浏览器，不需要脚本。
+
+---
+
+
+## ⚠️ 重要：生成 DOCS 数组时的常见错误
+
+**最常见的错误**：字段名错误或字段缺失导致文档头部显示 undefined
+
+```javascript
+// ❌ 错误的格式（会显示 undefined）
+{
+  "version": "概览",        // 这个不是 phase！
+  "accentSoft": "#dcefeb"   // 应该是 soft！
+  // 缺少 phase 字段
+  // 缺少 goal 字段
+}
+
+// ✅ 正确的格式
+{
+  version: "概览",          // 版本标识
+  phase: "项目概览",        // ← 必需！显示在版本标签旁
+  soft: "#dcefeb",          // ← 不是 accentSoft
+  goal: "文档目标说明"      // ← 必需！显示在章节数下方
+}
 ```
 
-## 分支到测试追踪表
-
-| 分支ID | 映射AC | 自动化测试 |
-| --- | --- | --- |
-| B01-01～02 | AC02、AC03 | user_registration.rs |
-| B01-03～07 | AC01、AC04、AC05 | user_registration.rs |
-
-## 并发控制
-
-{如有并发场景，详细说明}
-
-## 事务边界
-
-BEGIN TRANSACTION / COMMIT / ROLLBACK 的使用说明。
-
-## 错误处理
-
-{详细的错误处理策略}
+**必读**：生成 DOCS 数组前，必须先读取：
+```bash
+read skill://spec-docs-pro/templates/DOCS_ARRAY_FORMAT.md
 ```
 
-#### 第六步：质量检查与生成
-
-**强制检查清单**（生成前必须满足以下所有项）：
-
-```
-"我现在生成文档前，先做一个质量检查：
-
-【AC 逐项测试设计表】
-- [ ] 每个 AC 都有明确的测试层级（单元/集成/E2E）
-- [ ] 每个 AC 都有具体的目标资产（测试文件路径）
-- [ ] 每个 AC 都有可执行的目标命令（含参数）
-- [ ] 每个 AC 都有初始资产状态（日期+规划中/已创建/已通过）
-
-检查完成... ✅
-
-【技术设计要求】（如有高风险功能）
-- [ ] 伪代码每个关键分支标注了分支 ID（// B01-01、B01-02...）
-- [ ] 分支到测试追踪表建立了分支ID→AC→E2E的完整映射
-- [ ] 事务边界明确标注了 BEGIN TRANSACTION / COMMIT / ROLLBACK
-- [ ] 并发控制说明了锁策略和死锁预防
-
-检查完成... ✅
-
-【验证记录格式】
-- [ ] 完整的环境描述（环境变量、系统配置）
-- [ ] 精确的命令（包含环境变量）
-- [ ] 通过数量统计（N/M 通过）
-- [ ] 详细的覆盖内容说明
-- [ ] 明确的遗留工作
-
-检查完成... ✅
-
-所有检查通过！开始生成文档..."
+**验证**：生成后检查是否有 undefined
+```bash
+grep "undefined" docs/90-参考资料/产品文档浏览器-文档数据.js
 ```
 
-**更新的告知格式**（突出质量要素）：
+---
+
+## ⚠️ 重要：时间线"未分配阶段"问题
+
+**问题现象**：时间线视图所有版本都显示"当前未分配阶段"
+
+**两个根本原因**：
+
+### 1. FEATURE_TRACKS 格式错误
+```javascript
+// ❌ 错误（当前 DG-OS）
+{
+  "label": "Provider 能力",       // 应该是 title
+  "versions": ["V1", "V4"]        // 不需要这个
+}
+
+// ✅ 正确
+{
+  title: "Provider 能力演进",      // 必需！匹配章节标题
+  overview: "Provider 能力",       // 必需！
+  accent: "#087d75"
+}
+```
+
+### 2. 演进矩阵文档格式错误
+```markdown
+❌ 错误：用层级结构 + 段落
+## 3. Provider 能力演进
+### 3.1 V1 基础适配
+**用户价值**：...
+
+✅ 正确：用 5 列表格
+## 3. Provider 能力演进
+| 阶段 | 增量说明 | 依赖 | 完成判定 | 状态来源 |
+|------|---------|------|---------|---------|
+| V1 基础适配 | 支持 OpenAI... | ... | ... | ... |
+```
+
+**必读**：
+```bash
+read skill://spec-docs-pro/templates/TIMELINE_UNDEFINED_STAGES.md
+```
+
+---
+
+
+## ⚠️ 重要：生成演进矩阵文档的格式要求
+
+**如果需要创建功能演进矩阵文档**：
+
+1. **必须使用 5 列表格格式**
+   ```markdown
+   ## 3. Provider 能力演进
+   
+   | 阶段 | 增量说明 | 依赖 | 完成判定 | 状态来源 |
+   |------|---------|------|---------|---------|
+   | V1 基础适配 | ... | ... | ... | ... |
+   ```
+
+2. **不要使用层级结构**
+   ```markdown
+   ❌ ### 3.1 V1 基础适配
+   ❌ **用户价值**：...
+   ```
+
+3. **使用正确的模板**
+   ```bash
+   read skill://spec-docs-pro/templates/feature-evolution-matrix.md
+   ```
+
+**原因**：时间线视图的 `extractEvolutionStages` 函数只能从表格提取数据。
+
+---
+#### 🚨 第一步：必须先读取数据格式规范
 
 ```
-"✅ 功能规格文档已生成！
+"好的！我来为你生成产品文档浏览器。
 
-生成文件：
-- docs/03-功能规格/V1/{领域}/XX-{功能名}.md
-- docs/03-功能规格/V1/{领域}/XX-{功能名}-技术设计.md（如有）
-
-文档包含：
-✓ 6条AC，覆盖正常流程和异常场景
-✓ AC逐项测试设计表（每个AC都有测试层级、目标资产、目标命令）
-✓ 伪代码包含10个分支ID（B01-01～B01-10）
-✓ 分支到测试追踪表（分支→AC→E2E完整映射）
-✓ 原子性事务设计（引用 D027）
-✓ 并发控制策略（SELECT FOR UPDATE + 幂等键）
-✓ 完整的错误处理矩阵
-
-关键设计：
-✓ 用户和余额账户原子创建（D027）
-  → 体现在：业务规则、技术设计B01-03～B01-07、AC05
-  → 追踪到：V1-E2E-01
-
-质量验证：
-✅ AC 逐项测试设计表：完整（6/6）
-✅ 分支追踪：完整（10个分支全部映射到AC）
-✅ 验证记录格式：符合标准
-
-建议：
-- 评审这份文档，看是否有遗漏的边界情况
-- 如果设计有变化，随时告诉我更新
-
-需要我记录冻结决策吗？"
+首先，让我读取关键的数据格式规范..."
 ```
+
+**立即执行**：
+```bash
+read skill://spec-docs-pro/templates/DATA_FORMAT_SPEC.md
+```
+
+**为什么必须先读这个？**
+- 避免 DECISIONS 格式错误（导致右侧显示 undefined）
+- 避免数据文件变量名错误（导致无法加载数据）
+- 避免缺少 FEATURE_BROWSER_DATA（导致时间线无法使用）
+
+#### 第二步：读取生成指南
+
+#### 第二步：读取完整的生成指南
+
+```bash
+# 数据格式规范（必读）
+read skill://spec-docs-pro/templates/DATA_FORMAT_SPEC.md
+
+# 主生成流程
+read skill://spec-docs-pro/templates/mode-4-pure-agent.md
+
+# 图谱视图生成
+read skill://spec-docs-pro/templates/MAP_VIEW_GENERATION.md
+read skill://spec-docs-pro/templates/SVG_GENERATION_GUIDE.md
+
+# 时间线视图生成（关键！）
+read skill://spec-docs-pro/templates/TIMELINE_GENERATION_GUIDE.md
+
+# 参考结构
+read skill://spec-docs-pro/templates/TUZAI_STRUCTURE_REFERENCE.md
+```
+
+这份指南包含：
+- ✅ 如何理解浏览器模板结构（5 个核心数据结构）
+- ✅ 如何探索项目文档（提取项目名、版本、决策、能力主线）
+- ✅ 如何生成浏览器文件（HTML + JavaScript）
+- ✅ 如何验证生成结果
+- ✅ 完全不依赖脚本
+
+---
+
+#### 核心流程（4 步）
+
+**第一步：理解浏览器模板**
+- 读取模板，理解 5 个核心数据结构
+- DOCS（文档导航）、DECISIONS（关键决策）、FEATURE_TRACKS（能力主线）
+- FEATURE_TIMELINE_VERSIONS（版本里程碑）、DOC_BROWSER_DATA（文档内容）
+
+**第二步：探索项目文档**
+- 提取项目名称（从项目概览）
+- 提取版本信息（从版本路线图）
+- 提取决策记录（支持 ADR 格式和列表格式）
+- 提取能力主线（从功能演进矩阵）
+- 扫描所有文档（生成 DOCS 数组）
+
+**第三步：生成浏览器文件**
+- 读取模板
+- 替换所有数据（项目名、DOCS、DECISIONS、FEATURE_TRACKS、版本）
+- 生成 HTML 文件和数据文件
+
+**第四步：生成图谱 SVG（必须）** ⚠️ 重要
+- ⚠️ 读取 CRITICAL_MAP_GENERATION.md（了解为什么必须动态生成）
+- 读取 SVG_GENERATION_GUIDE.md 和 MAP_VIEW_GENERATION.md
+- 从架构文档提取组件和关系
+- 生成 5 个 SVG 函数（renderProductArchitectureSvg 等）
+- 替换模板中的硬编码 SVG 函数
+- **不能使用模板的 TUZAI 数据！**
+
+**第五步：验证结果**
+- 验证项目名称正确
+- 验证图谱显示项目实际组件（不是 TUZAI）
+- 验证数据来自实际项目
+- 向用户报告统计信息
+
+---
+
+#### 关键原则
+
+1. **不依赖脚本**：你完全有能力自己生成
+2. **理解优先**：先理解模板结构和数据需求
+3. **智能提取**：从文档中提取真实数据
+4. **验证必须**：确保生成的浏览器真正定制化
+
+---
+
+#### 记住
+
+**你不需要脚本。你是文档分析师和浏览器生成器。**
+
+你能做到：
+- ✅ 理解浏览器模板结构
+- ✅ 读取并理解项目文档
+- ✅ 提取关键数据
+- ✅ 生成完整文件
+- ✅ 验证结果
+
+Skill 的作用是**指导你理解和生成**，不是让你执行脚本。
 
 
 ---
@@ -1004,17 +1111,6 @@ BEGIN TRANSACTION / COMMIT / ROLLBACK 的使用说明。
 
 ---
 
-### 模式 4：生成文档浏览器
-
-当用户说"生成文档浏览器"或"生成产品文档浏览器"时：
-
-**第一步：确认文档目录**
-
-```
-"好的！我来生成文档浏览器。
-
-首先确认一下：
-1. 文档目录在 docs/ 吗？
 2. 需要扫描所有子目录吗？
 3. 浏览器文件输出到 docs/90-参考资料/ 吗？"
 ```
@@ -1026,17 +1122,17 @@ BEGIN TRANSACTION / COMMIT / ROLLBACK 的使用说明。
 ```bash
 # 使用增强版 v2 脚本（支持动态图表生成）
 cd {项目根目录}
-node ~/.agents/skills/spec-docs-pro/scripts/generate-browser-v2.mjs
+node ~/.omp/agent/skills/spec-docs-pro/scripts/generate-browser-v4.mjs
 ```
 
 或者如果在项目本地：
 
 ```bash
 cd {项目根目录}
-node skills/spec-docs-pro/scripts/generate-browser-v2.mjs
+node skills/spec-docs-pro/scripts/generate-browser-v4.mjs
 ```javascript
 cd {项目根目录}
-node ~/.agents/skills/spec-docs-pro/scripts/generate-browser.mjs
+node ~/.omp/agent/skills/spec-docs-pro/scripts/generate-browser-v4.mjs
 ```
 
 **第三步：报告结果**

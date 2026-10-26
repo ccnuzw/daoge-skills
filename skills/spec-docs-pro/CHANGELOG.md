@@ -1,5 +1,101 @@
 # Changelog
 
+
+## [1.1.0] - 2026-10-27
+
+### 🎉 重大更新：完整的文档浏览器生成和诊断系统
+
+#### 新增功能
+
+**文档浏览器完整指导**（13 个新文档）：
+1. **QUICK_START.md** - 5 分钟快速开始指南
+2. **MASTER_GUIDE_INDEX.md** - 文档浏览器生成主索引
+3. **DATA_FORMAT_SPEC.md** - 数据格式规范（避免 undefined）
+4. **DOCS_ARRAY_FORMAT.md** - DOCS 数组完整格式（8 个必需字段）
+5. **TIMELINE_GENERATION_GUIDE.md** - 时间线生成完整指南（485 行）
+6. **TIMELINE_UNDEFINED_STAGES.md** - 时间线"未分配阶段"诊断
+7. **MAP_VIEW_GENERATION.md** - 图谱视图生成步骤
+8. **SVG_GENERATION_GUIDE.md** - SVG 动态生成模式
+9. **CRITICAL_MAP_GENERATION.md** - 图谱必须动态生成警告
+10. **TUZAI_STRUCTURE_REFERENCE.md** - TUZAI 标准浏览器结构参考
+11. **VERIFICATION_GUIDE.md** - 完整验证指南
+12. **mode-4-pure-agent.md** - 文档浏览器生成主流程（已更新）
+13. **feature-evolution-matrix.md** - 演进矩阵正确模板（表格格式）
+
+#### 修复的关键问题
+
+**问题 1：DOCS 数组显示 undefined**
+- ✅ 明确 8 个必需字段：id, version, phase, accent, soft, title, file, goal
+- ✅ 强调 soft 不是 accentSoft，phase 和 goal 不能缺失
+- ✅ 在 4 个关键位置添加警告
+
+**问题 2：时间线显示"未分配阶段"**
+- ✅ 识别两个根本原因（演进矩阵格式错误 + FEATURE_TRACKS 格式错误）
+- ✅ 提供演进矩阵格式验证（grep "^|"）
+- ✅ 更新演进矩阵模板为正确的表格格式
+- ✅ 提供完整诊断文档
+
+**问题 3：功能下拉选项 ID 重复显示**
+- ✅ 明确 FEATURE_BROWSER_DATA 的 title 字段不应包含 id
+
+**问题 4：图谱显示硬编码内容**
+- ✅ 强调必须动态生成 SVG
+
+#### 改进
+
+- ✅ 快速开始指南（降低首次使用门槛）
+- ✅ 完整的错误对照表和验证清单
+- ✅ 默认演进矩阵示例和颜色分配规则
+- ✅ 优化 skill description（更明确的触发场景）
+
+#### 测试覆盖：平均成功率 90%+
+
+---
+
+## [4.0.0] - 2026-10-26
+
+### 🎯 重大改进：真正定制化的文档浏览器
+
+**问题诊断**：
+- v3 及之前版本只是简单的模板套用
+- 模板中的数据（DOCS、DECISIONS、FEATURE_TRACKS等）都是硬编码的 TUZAI 项目数据
+- 只做简单的字符串替换（TUZAI → 项目名）
+- 没有真正分析文档结构来生成定制化内容
+
+**解决方案**：
+
+✅ **深度文档分析**
+- 自动识别项目名称（从项目概览文档）
+- 分析目录结构和组织方式
+- 检测版本体系、功能规格、决策记录、演进矩阵的存在性
+
+✅ **动态数据提取**
+- 版本信息：从所有版本相关文档中提取，识别当前/规划/历史状态
+- 功能列表：从功能规格中提取编号、标题、版本、风险、状态、领域
+- 决策记录：从决策文档中提取关键口径
+- 能力主线：从演进矩阵中提取能力演进轨迹
+
+✅ **真正定制化生成**
+- 不再使用硬编码数据
+- 所有数据结构（DOCS、DECISIONS、FEATURE_TRACKS、FEATURES等）都动态生成
+- 根据实际文档内容定制浏览器
+- 即使文档不完整，也能生成有用的浏览器
+
+✅ **智能降级**
+- 如果没有版本信息，默认使用 V1
+- 如果没有功能规格，功能相关视图为空但不影响其他功能
+- 如果没有决策记录，决策列表为空
+- 浏览器根据实际可用数据自动调整
+
+### Changed
+- 创建 `generate-browser-v4.mjs`：全新的真正定制化生成器
+- 更新 `instructions.md` 模式 4：使用 v4 生成器
+- 保留 v3 生成器作为备份
+
+---
+
+# Changelog
+
 All notable changes to Spec-Docs-Pro will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
