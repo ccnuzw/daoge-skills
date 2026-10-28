@@ -10,13 +10,13 @@
 | --- | --- | --- | --- |
 | [`daoge-pic`](./skills/daoge-pic/README.md) | 会话优先的本地图像创作管理：Agent 收敛需求、写计划、受控执行；Studio Workbench 管项目 / 任务 / 批次、Provider、创作画布、生成历史、选片评审与资产交付 | 内容团队、设计师、运营人员、图像工作流开发者 | [进入图像创作 Skill](./skills/daoge-pic/README.md) |
 | [`spec-docs`](./skills/spec-docs/README.md) | 以 Markdown 规格、稳定需求 ID、结构检查和证据门禁建立轻量、可移植的文档驱动开发流程；包含新项目初始化、存量接入、功能规格、追踪矩阵和发布证据检查 | 希望复用规格模板、治理方法和 Node.js 检查脚本的个人与团队 | [进入 Spec Docs Skill](./skills/spec-docs/README.md) |
-| [`spec-docs-pro`](./skills/spec-docs-pro/README.md) | 规格驱动开发设计顾问：在设计阶段发现问题、深度思考、建立完整追踪链路。不是文档生成器，而是思考伙伴、问题发现者、架构评审者。包含 12 个工作模式和 5 大高风险场景自动识别 | 需要高质量文档体系、深度设计思考、完整证据链路的中大型项目团队 | [进入 Spec Docs Pro Skill](./skills/spec-docs-pro/README.md) |
+| [`spec-docs-pro`](./skills/spec-docs-pro/README.md) | 规格驱动开发设计顾问：写规格时主动发现原子性、并发、幂等、外部调用、资金与权限方面的设计漏洞，并按统一标准维护功能规格、AC 测试设计、分支追踪、冻结决策、版本演进与实现状态；附带文档一致性检查和离线文档浏览器生成脚本 | 需要设计评审、完整追踪链路和文档门禁的中大型项目团队 | [进入 Spec Docs Pro Skill](./skills/spec-docs-pro/README.md) |
 
 ## 选择 Skill
 
 如果你需要**可独立复制的文档规范与检查工具**，选择 `spec-docs`：它提供 S/M/L 分档文档骨架、功能规格和需求追踪方法、结构检查、CI 接入建议与交付证据门禁，适合希望直接维护 Markdown 文档和脚本的项目。
 
-如果你需要**规格驱动开发设计顾问**，选择 `spec-docs-pro`：它在设计阶段帮你发现问题、深度思考、建立完整追踪链路。不是文档生成器，而是思考伙伴、问题发现者、架构评审者。包含 12 个工作模式：项目初始化、功能规格创建、冻结决策、文档浏览器、版本门禁等。适合需要高质量文档体系和深度设计思考的中大型项目。
+如果你需要**规格驱动开发设计顾问**，选择 `spec-docs-pro`：它在写文档之前先做设计评审，找出半成品数据、并发超扣、重复扣款、外部回调等问题，再把结论落到可追踪的文档里。覆盖 8 个工作模式（初始化、功能规格、冻结决策 / ADR、增量更新与状态回写、版本规划、追踪矩阵、版本门禁、文档浏览器），附带零依赖的 `check-docs.mjs`（30 余条一致性规则，可接 CI）和 `generate-browser.mjs`（离线文档浏览器）。适合需要深度设计思考和完整证据链路的中大型项目。
 
 如果你的目标是**规划、生成、管理或交付图片资产**，选择 `daoge-pic`：它会先在稳定工作区自动打开或复用 Studio，再为当前会话建立独立 Session 和项目上下文，然后澄清 brief、确认创作计划并管理受控生成与交付。
 
@@ -51,12 +51,13 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-v1.2.1/skil
 
 # 跟随 main 分支
 npx skills add ccnuzw/daoge-skills -a codex -s spec-docs
+```
 
 安装 `spec-docs-pro`：
 
 ```bash
 # 固定版本
-npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-pro-v1.0.0/skills/spec-docs-pro -a codex
+npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-pro-v2.0.0/skills/spec-docs-pro -a codex
 
 # 跟随 main 分支
 npx skills add ccnuzw/daoge-skills -a codex -s spec-docs-pro
@@ -119,10 +120,17 @@ npx skills add https://github.com/ccnuzw/daoge-skills/tree/main/skills/daoge-pic
 `spec-docs-pro` 适合需要深度设计思考和问题发现的中大型项目。可以对智能体说：
 
 ```text
-使用 spec-docs-pro 为我的项目创建功能规格
+使用 spec-docs-pro 写 V1 余额扣费的功能规格：调用模型前冻结金额，调用后按实际用量扣费
 ```
 
-详细工作模式和使用示例见 [Spec Docs Pro README](./skills/spec-docs-pro/README.md)。
+也可以不经过智能体，直接运行脚本：
+
+```bash
+node skills/spec-docs-pro/scripts/check-docs.mjs --docs docs        # 文档一致性检查（只读）
+node skills/spec-docs-pro/scripts/generate-browser.mjs --docs docs  # 生成离线文档浏览器
+```
+
+详细工作模式、从 1.x 升级的步骤见 [Spec Docs Pro README](./skills/spec-docs-pro/README.md)。
 
 ### 本地图像创作与资产管理
 
@@ -183,6 +191,14 @@ Workbench **不提供开放式对话**，只提供一个受限请求入口：用
     │   ├── assets/skeleton/          # 可复制的文档骨架
     │   ├── references/               # 方法论、规格、治理与证据规范
     │   └── evals/                    # 可判定的 Skill 评测场景
+    ├── spec-docs-pro/
+    │   ├── README.md                 # 使用说明、安装与升级
+    │   ├── SKILL.md                  # 宿主执行规范：任务路由与硬规则
+    │   ├── references/               # 8 个工作模式、设计评审方法、状态与编号规则
+    │   ├── assets/                   # 文档模板与文档浏览器查看器
+    │   ├── scripts/                  # check-docs.mjs、generate-browser.mjs
+    │   ├── tests/                    # 脚本自测与夹具
+    │   └── evals/                    # 可判定的 Skill 评测场景
     └── daoge-pic/
         ├── README.md                 # vNext Studio 使用手册与版本状态
         ├── SKILL.md                  # 宿主执行规范
@@ -201,10 +217,9 @@ Workbench **不提供开放式对话**，只提供一个受限请求入口：用
 
 - `daoge-pic` 当前稳定正式版本为 [v6.2.0](https://github.com/ccnuzw/daoge-skills/releases/tag/daoge-pic-v6.2.0)；`v6.1.1`、`v6.1.0`、`v6.0.0` 及更早为不可变历史发布。发布验证与历次版本证据在 [vNext 验证记录](./skills/daoge-pic/docs/vnext_verification_evidence_zh.md) 中分章记录。
 - `spec-docs` 当前版本为 [1.2.1](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-v1.2.1)，使用 `spec-docs-vX.Y.Z` 独立标记和发布；完整使用手册和安装方法见 [Spec Docs README](./skills/spec-docs/README.md)。
-- `spec-docs-pro` 当前版本为 [1.0.0](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-pro-v1.0.0)，使用 `spec-docs-pro-vX.Y.Z` 独立标记和发布。**规格驱动开发设计顾问**：在设计阶段发现问题、深度思考、建立完整追踪链路。包含 12 个工作模式和 5 大高风险场景自动识别。完整使用手册见 [Spec Docs Pro README](./skills/spec-docs-pro/README.md)。
+- `spec-docs-pro` 当前版本为 [2.0.0](https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-pro-v2.0.0)，使用 `spec-docs-pro-vX.Y.Z` 独立标记和发布。2.0.0 包含不兼容变更（浏览器数据格式、实现状态位置），升级步骤见 [Spec Docs Pro README](./skills/spec-docs-pro/README.md#从-1x-升级)，完整变更见 [spec-docs-pro CHANGELOG](./skills/spec-docs-pro/CHANGELOG.md)。
 - 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 - 安全问题请按 [SECURITY.md](./SECURITY.md) 的私密报告方式提交。
 - 系列级变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
-- 贡献方式见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 本项目使用 [MIT License](./LICENSE)。

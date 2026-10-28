@@ -1,259 +1,51 @@
 # Changelog
 
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [2.0.0] - 2026-10-28
+
+结构与标准全面重整。1.x 的文件可以从 git 标签 `spec-docs-pro-v1.1.0` 获取；升级步骤见 [README](README.md#从-1x-升级)。
+
+### 破坏性变更
+
+- 文档浏览器改为由脚本生成的数据驱动查看器。数据变量从 `window.TUZAI_DOC_BROWSER_DATA` / `window.{项目名}_FEATURE_BROWSER_DATA` 统一为 `window.SPEC_DOCS_DATA`；需要重新生成一次浏览器。
+- 功能主文档不再记录实现状态：frontmatter `status` 改为 `spec_status`（Draft / Ready / Deprecated），功能卡去掉“状态”行。实现状态只在 `V{n}-实现状态.md` 维护。
+- 目录调整为 Agent Skills 规范：`templates/` 拆分为 `assets/templates/`（文档模板）和 `references/`（说明）；`instructions.md` 按模式拆分到 `references/modes/`。
+
+### 新增
+
+- `scripts/check-docs.mjs`：只读检查编号重复与悬空引用、链接与锚点、AC 与测试设计表、分支 ID 追踪、状态词、演进矩阵格式、规划版本文档、模板残留，共 30 余条规则（`references/check-rules.md`）。
+- `references/status-and-ids.md`：四套状态（实现 / 规格 / 证据 / 决策）和全部编号格式的唯一定义，含旧写法迁移对照。
+- `references/design-review.md`：一轮集中提问的方法、高风险信号与必问问题。
+- `references/doc-structure.md`：标准目录与 S / M / L 规模裁剪。
+- 浏览器新增“功能”视图（筛选、风险、规格状态、实现状态、AC 数）；图谱改为从数据生成的版本路线、能力 × 版本热力图、领域状态分布、风险分布；侧栏显示数据质量提示；支持 URL 深链接。
+- 模板：版本门禁（G01～G12，对应 check-docs 规则）、配置文件 `spec-docs.config.json`。
+- `tests/`：脚本自测、正常与问题夹具、可选的 Playwright 渲染测试。
+- `evals/evals.json` 增加可验证的 expectations。
+
+### 修复
+
+- 浏览器模板写死“功能数必须为 36”，其他项目必然加载失败。
+- 时间线写死 V1～V8 列号和 V3 历史文案，非 TUZAI 项目显示“未分配阶段”。
+- 旧生成脚本把项目名直接拼进 JS 变量名（如 `window.DG-OS_...`），且数据文件与 HTML 变量名不一致，生成结果无法加载。
+- 文档内容嵌入 `<script>` 时未转义，`</script>` 可截断脚本；Markdown 链接允许 `javascript:` 协议。
+- `SKILL.md` 和 `instructions.md` 中的合并残留（被截断的技术设计模板、引用不存在的 `generate-browser-v4.mjs`、写死的 `~/.omp` 路径、未闭合代码块）。
+- 版本号不一致（SKILL.md 1.1.0、package.json 1.0.0、README 4.0.0）。
+
+### 移除
+
+- 12 份互相重复的浏览器生成指南（DATA_FORMAT_SPEC、DOCS_ARRAY_FORMAT、TIMELINE_* 等），由脚本和 `references/modes/browser.md` 取代。
+- 两份相同的 105KB 浏览器模板、v2 / v3 / v4.broken 生成脚本和 `.backup` 文件。
+- 开发过程记录（P0 / P1 升级计划与完成报告、ENHANCEMENT、CRITICAL_UPGRADE_TODO），这些不是 Skill 运行所需的内容。
+- 模板和示例中的 TUZAI、DG-OS 项目数据与 Rust 专属命令。
 
 ## [1.1.0] - 2026-10-27
 
-### 🎉 重大更新：完整的文档浏览器生成和诊断系统
-
-#### 新增功能
-
-**文档浏览器完整指导**（13 个新文档）：
-1. **QUICK_START.md** - 5 分钟快速开始指南
-2. **MASTER_GUIDE_INDEX.md** - 文档浏览器生成主索引
-3. **DATA_FORMAT_SPEC.md** - 数据格式规范（避免 undefined）
-4. **DOCS_ARRAY_FORMAT.md** - DOCS 数组完整格式（8 个必需字段）
-5. **TIMELINE_GENERATION_GUIDE.md** - 时间线生成完整指南（485 行）
-6. **TIMELINE_UNDEFINED_STAGES.md** - 时间线"未分配阶段"诊断
-7. **MAP_VIEW_GENERATION.md** - 图谱视图生成步骤
-8. **SVG_GENERATION_GUIDE.md** - SVG 动态生成模式
-9. **CRITICAL_MAP_GENERATION.md** - 图谱必须动态生成警告
-10. **TUZAI_STRUCTURE_REFERENCE.md** - TUZAI 标准浏览器结构参考
-11. **VERIFICATION_GUIDE.md** - 完整验证指南
-12. **mode-4-pure-agent.md** - 文档浏览器生成主流程（已更新）
-13. **feature-evolution-matrix.md** - 演进矩阵正确模板（表格格式）
-
-#### 修复的关键问题
-
-**问题 1：DOCS 数组显示 undefined**
-- ✅ 明确 8 个必需字段：id, version, phase, accent, soft, title, file, goal
-- ✅ 强调 soft 不是 accentSoft，phase 和 goal 不能缺失
-- ✅ 在 4 个关键位置添加警告
-
-**问题 2：时间线显示"未分配阶段"**
-- ✅ 识别两个根本原因（演进矩阵格式错误 + FEATURE_TRACKS 格式错误）
-- ✅ 提供演进矩阵格式验证（grep "^|"）
-- ✅ 更新演进矩阵模板为正确的表格格式
-- ✅ 提供完整诊断文档
-
-**问题 3：功能下拉选项 ID 重复显示**
-- ✅ 明确 FEATURE_BROWSER_DATA 的 title 字段不应包含 id
-
-**问题 4：图谱显示硬编码内容**
-- ✅ 强调必须动态生成 SVG
-
-#### 改进
-
-- ✅ 快速开始指南（降低首次使用门槛）
-- ✅ 完整的错误对照表和验证清单
-- ✅ 默认演进矩阵示例和颜色分配规则
-- ✅ 优化 skill description（更明确的触发场景）
-
-#### 测试覆盖：平均成功率 90%+
-
----
-
-## [4.0.0] - 2026-10-26
-
-### 🎯 重大改进：真正定制化的文档浏览器
-
-**问题诊断**：
-- v3 及之前版本只是简单的模板套用
-- 模板中的数据（DOCS、DECISIONS、FEATURE_TRACKS等）都是硬编码的 TUZAI 项目数据
-- 只做简单的字符串替换（TUZAI → 项目名）
-- 没有真正分析文档结构来生成定制化内容
-
-**解决方案**：
-
-✅ **深度文档分析**
-- 自动识别项目名称（从项目概览文档）
-- 分析目录结构和组织方式
-- 检测版本体系、功能规格、决策记录、演进矩阵的存在性
-
-✅ **动态数据提取**
-- 版本信息：从所有版本相关文档中提取，识别当前/规划/历史状态
-- 功能列表：从功能规格中提取编号、标题、版本、风险、状态、领域
-- 决策记录：从决策文档中提取关键口径
-- 能力主线：从演进矩阵中提取能力演进轨迹
-
-✅ **真正定制化生成**
-- 不再使用硬编码数据
-- 所有数据结构（DOCS、DECISIONS、FEATURE_TRACKS、FEATURES等）都动态生成
-- 根据实际文档内容定制浏览器
-- 即使文档不完整，也能生成有用的浏览器
-
-✅ **智能降级**
-- 如果没有版本信息，默认使用 V1
-- 如果没有功能规格，功能相关视图为空但不影响其他功能
-- 如果没有决策记录，决策列表为空
-- 浏览器根据实际可用数据自动调整
-
-### Changed
-- 创建 `generate-browser-v4.mjs`：全新的真正定制化生成器
-- 更新 `instructions.md` 模式 4：使用 v4 生成器
-- 保留 v3 生成器作为备份
-
----
-
-# Changelog
-
-All notable changes to Spec-Docs-Pro will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+- 新增文档浏览器生成与诊断指南（13 份）。
 
 ## [1.0.0] - 2026-10-26
 
-### 🎉 初始稳定版本
+- 初始版本：12 个工作模式、功能主文档 / 技术设计 / ADR / E2E 模板、文档浏览器。
 
-这是 Spec-Docs-Pro 的第一个正式发布版本，基于 TUZAI 项目的成熟规格驱动开发实践。
-
-### Added
-
-#### 12 个工作模式（9 个完整）
-
-1. **模式 1: 初始化项目文档体系** ✅
-   - 生成 7 层目录结构
-   - 9 个核心文档模板（带完整内容）
-   - 产品蓝图、版本路线图、版本规格说明
-   - 全版本产品与交互约束
-   - 功能演进矩阵
-   - V1 版本总览、产品需求、实现状态
-   - 版本进入开发门禁
-
-2. **模式 2: 创建功能规格文档** ✅
-   - 交互式深度思考引导
-   - 5 大高风险场景自动识别
-   - AC 逐项测试设计表
-   - 分支 ID 追踪
-   - 验证记录格式
-
-3. **模式 3: 记录冻结决策** ✅
-   - 业务规则冲突决策
-   - 字段、枚举、错误码冻结
-   - 状态机、删除策略、幂等设计
-
-4. **模式 4: 生成文档浏览器（增强版 v2.0）** ✅
-   - 基础功能：文档树、内容区、搜索、阅读进度
-   - 动态图表生成：
-     - 版本演进时间线（SVG）
-     - 风险热区图（SVG）
-     - 数据域关系图（SVG，从 Mermaid 提取）
-     - 功能演进矩阵（SVG，从表格提取）
-
-5. **模式 5: 检查版本门禁** ✅
-   - 12 项门禁条件检查
-   - 自动生成检查报告
-   - 标注缺失项和建议
-
-6. **模式 6: 多版本规划** ✅
-   - 版本演进矩阵生成
-   - 依赖关系检查
-   - 后续版本文档创建
-
-7. **模式 7: 增量更新文档** ✅
-   - 识别变更类型
-   - 影响范围分析
-   - 文档同步更新
-
-8. **模式 8: 补齐已实现功能的规格文档** ✅
-   - 从代码逆向生成规格
-   - 主动发现设计问题
-   - 补充缺失的 AC 和测试
-
-9. **模式 9: 更新需求追踪矩阵** ✅ NEW
-   - 扫描所有功能文档
-   - 提取功能→接口、功能→数据、功能→E2E、AC→测试映射
-   - 生成完整追踪矩阵
-   - 检查完整性，标注缺失项
-
-10. **模式 10: 生成 ADR（架构决策记录）** ✅ NEW
-    - 收集决策背景
-    - 评估备选方案
-    - 生成完整 ADR 文档
-    - 包含后果分析、风险评估
-
-11. **模式 11: 实现状态回写** ✅ NEW
-    - 检查证据（代码、测试、文档）
-    - 更新实现状态文档
-    - 生成状态报告和进度统计
-
-12. **模式 12: 对话式协作完善** ✅
-    - 交互式问答
-    - 质量检查
-    - 持续改进
-
-#### 核心特性
-
-- **5 大高风险场景自动识别**
-  - 多个写操作 → 原子性
-  - 并发访问 → 竞态条件
-  - 外部调用 → 超时/重试/补偿
-  - 状态变更 → 非法转换
-  - 金钱权限 → 高风险设计
-
-- **增强版文档浏览器（v2.0）**
-  - 基础功能：528 行代码
-  - 4 个动态 SVG 图表
-  - 自动提取和可视化
-
-- **9 个文档模板**
-  - 每个都包含完整结构
-  - 带占位符和使用说明
-  - 可直接开始填写
-
-### Technical Details
-
-- **Instructions 文件**: 2,283 行（+688 行，+43%）
-- **模式完整度**: 9/12（75%）
-- **浏览器脚本**: 528 行（+303 行）
-- **文档模板**: 9 个完整模板
-- **代码质量**: 100% JavaScript，无外部依赖
-
-### Documentation
-
-- 完整的 README.md（8.6 KB）
-- 详细的使用示例
-- 12 个模式的完整指令
-- 示例库和质量要素参考
-
-### Philosophy
-
-**核心理念：**
-- 深度思考 > 格式规范
-- 问题发现 > 需求描述
-- 完整追踪 > 独立章节
-
-**不是：**
-- ❌ 文档生成器
-- ❌ 格式检查器
-- ❌ 填空工具
-
-**是：**
-- ✅ 设计顾问
-- ✅ 思考伙伴
-- ✅ 问题发现者
-- ✅ 架构评审者
-
----
-
-## [Unreleased]
-
-### Planned for v1.1.0
-
-- Markdown 渲染增强（代码高亮、表格美化）
-- 更智能的图表布局算法
-- 支持更多数据关系提取模式
-- 性能优化（大文档集）
-
----
-
-## Version Numbering
-
-- **Major (X.0.0)**: 破坏性变更或重大功能增加
-- **Minor (1.X.0)**: 新功能、模式增加（向后兼容）
-- **Patch (1.0.X)**: Bug 修复、文档更新（向后兼容）
-
----
-
+[2.0.0]: https://github.com/ccnuzw/daoge-skills/compare/spec-docs-pro-v1.0.0...spec-docs-pro-v2.0.0
 [1.0.0]: https://github.com/ccnuzw/daoge-skills/releases/tag/spec-docs-pro-v1.0.0
-[Unreleased]: https://github.com/ccnuzw/daoge-skills/compare/spec-docs-pro-v1.0.0...HEAD

@@ -1,225 +1,141 @@
 #!/usr/bin/env node
+// Generates an offline, project-agnostic document viewer for a docs/ tree.
+// Output: <docs>/<out>/产品文档浏览器.html + 产品文档浏览器-文档数据.js
+// Usage: node scripts/generate-browser.mjs [--docs docs] [--out 90-参考资料] [--config docs/spec-docs.config.json]
+//        [--project 名称] [--json] [--strict]
 
-/**
- * 文档浏览器生成器 - 升级版
- * 使用 TUZAI 样例的精美模板生成交互式 HTML 浏览器
- */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildModel, loadConfig } from "./lib/docs-model.mjs";
 
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const ASSETS = path.join(SKILL_ROOT, "assets", "browser");
+const HTML_NAME = "产品文档浏览器.html";
+const DATA_NAME = "产品文档浏览器-文档数据.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const DOCS_ROOT = path.join(process.cwd(), 'docs');
-const OUTPUT_HTML = path.join(DOCS_ROOT, '90-参考资料/产品文档浏览器.html');
-const OUTPUT_DATA = path.join(DOCS_ROOT, '90-参考资料/产品文档浏览器-文档数据.js');
-const TEMPLATE_PATH = path.join(__dirname, '../templates/browser-template.html');
-
-/**
- * 扫描目录下所有 markdown 文件
- */
-function scanDocs(dir, baseDir = dir) {
-  const results = [];
-  const items = fs.readdirSync(dir, { withFileTypes: true });
-
-  for (const item of items) {
-    const fullPath = path.join(dir, item.name);
-    const relativePath = path.relative(baseDir, fullPath);
-
-    if (item.isDirectory()) {
-      // 递归扫描子目录
-      results.push(...scanDocs(fullPath, baseDir));
-    } else if (item.isFile() && item.name.endsWith('.md')) {
-      // 读取文件内容
-      const content = fs.readFileSync(fullPath, 'utf-8');
-      
-      // 提取标题（第一个 # 标题）
-      const titleMatch = content.match(/^#\s+(.+)$/m);
-      const title = titleMatch ? titleMatch[1].trim() : item.name.replace('.md', '');
-      
-      results.push({
-        path: relativePath,
-        title: title,
-        content: content
-      });
-    }
-  }
-
-  return results;
-}
-
-/**
- * 构建文档树结构
- */
-function buildDocTree(docs) {
-  const tree = {};
-
-  for (const doc of docs) {
-    const parts = doc.path.split(path.sep);
-    let current = tree;
-
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i];
-      if (!current[part]) {
-        current[part] = { __children: {} };
-      }
-      current = current[part].__children;
-    }
-
-    const filename = parts[parts.length - 1];
-    current[filename] = doc;
-  }
-
-  return tree;
-}
-
-/**
- * 生成数据 JS 文件
- */
-function generateDataFile(docs) {
-  // 创建文档数据对象
-  const docData = {};
-  
-  for (const doc of docs) {
-    // 使用路径作为 key（去掉 .md 扩展名）
-    const key = doc.path.replace(/\.md$/, '').replace(/\\/g, '/');
-    docData[key] = doc.content;
-  }
-
-  // 生成 JS 文件
-  const jsContent = `// 生成时间: ${new Date().toISOString()}
-// 文档数量: ${docs.length}
-
-window.TUZAI_DOC_BROWSER_DATA = Object.freeze(${JSON.stringify(docData, null, 2)});
-`;
-
-  return jsContent;
-}
-
-/**
- * 生成 HTML 文件
- */
-function generateHTML(docs, projectName = '产品文档') {
-  // 读取模板
-  let template = fs.readFileSync(TEMPLATE_PATH, 'utf-8');
-  
-  // 替换项目名称
-  template = template.replace(/TUZAI/g, projectName);
-  template = template.replace(/PRD Viewer/g, `${projectName}浏览器`);
-  
-  // 构建 DOCS 数组用于导航
-  const docsArray = docs.map((doc, index) => {
-    // 提取目录信息
-    const parts = doc.path.split(path.sep);
-    const dirName = parts[0] || '其他';
-    
-    // 简单的分类颜色
-    const colors = {
-      '01-项目概览': { accent: '#087d75', soft: '#dcefeb' },
-      '02-产品与版本': { accent: '#4056a1', soft: '#e6e9f6' },
-      '03-功能规格': { accent: '#2f7d4f', soft: '#e1f0e8' },
-      '04-技术架构': { accent: '#a96810', soft: '#f6ead6' },
-      '05-公共资产': { accent: '#aa2d4d', soft: '#f4dde4' },
-      '06-决策记录': { accent: '#087d75', soft: '#dcefeb' },
-      '默认': { accent: '#69707a', soft: '#f1eee7' }
+function parseArgs(argv) {
+  const args = { docs: "docs", out: null, config: null, project: null, json: false, strict: false };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const next = () => {
+      if (i + 1 >= argv.length) fail(`${arg} 需要一个值`);
+      return argv[++i];
     };
-    
-    const color = colors[dirName] || colors['默认'];
-    
-    return {
-      id: `doc-${index}`,
-      version: String(index + 1).padStart(2, '0'),
-      phase: dirName.replace(/^\d+-/, ''),
-      accent: color.accent,
-      soft: color.soft,
-      title: doc.title,
-      file: doc.path.replace(/\\/g, '/'),
-      goal: '' // 可以从文档中提取
-    };
-  });
-
-  // 将 DOCS 数组插入到模板中
-  const docsArrayStr = JSON.stringify(docsArray, null, 6);
-  template = template.replace(
-    /const DOCS = \[[\s\S]*?\];/,
-    `const DOCS = ${docsArrayStr};`
-  );
-
-  return template;
+    if (arg === "--docs") args.docs = next();
+    else if (arg === "--out") args.out = next();
+    else if (arg === "--config") args.config = next();
+    else if (arg === "--project") args.project = next();
+    else if (arg === "--json") args.json = true;
+    else if (arg === "--strict") args.strict = true;
+    else if (arg === "-h" || arg === "--help") {
+      console.log("用法: node generate-browser.mjs [--docs docs] [--out 90-参考资料] [--config 文件] [--project 名称] [--json] [--strict]");
+      process.exit(0);
+    } else fail(`未知参数: ${arg}`);
+  }
+  return args;
 }
 
-/**
- * 主函数
- */
+function fail(message) {
+  console.error(`错误：${message}`);
+  process.exit(2);
+}
+
+// JSON is embedded in a <script> file; escape sequences that could end the script or break JS parsing.
+function safeJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" })[char]);
+}
+
+function brandMark(name) {
+  const latin = String(name).match(/[A-Za-z0-9]/g);
+  if (latin && latin.length >= 2) return latin.slice(0, 2).join("").toUpperCase();
+  return Array.from(String(name).trim())[0] || "文";
+}
+
 function main() {
-  console.log('🚀 开始生成文档浏览器...\n');
+  const args = parseArgs(process.argv.slice(2));
+  const docsRoot = path.resolve(args.docs);
+  if (!fs.existsSync(docsRoot) || !fs.statSync(docsRoot).isDirectory()) fail(`docs 目录不存在: ${docsRoot}`);
 
-  // 检查 docs 目录
-  if (!fs.existsSync(DOCS_ROOT)) {
-    console.error('❌ 错误：docs/ 目录不存在');
-    process.exit(1);
-  }
+  const configPath = args.config ? path.resolve(args.config) : path.join(docsRoot, "spec-docs.config.json");
+  const config = loadConfig(configPath);
+  const outDir = path.join(docsRoot, args.out || (config.browser && config.browser.outDir) || "90-参考资料");
+  const outRel = path.relative(docsRoot, outDir).split(path.sep).join("/");
+  if (outRel.startsWith("..")) fail("--out 必须位于 docs 目录内");
 
-  // 检查模板
-  if (!fs.existsSync(TEMPLATE_PATH)) {
-    console.error('❌ 错误：浏览器模板不存在');
-    console.error(`   期望位置: ${TEMPLATE_PATH}`);
-    process.exit(1);
-  }
+  const { docs, model } = buildModel(docsRoot, { config, projectName: args.project });
+  if (!docs.length) fail(`${docsRoot} 下没有 Markdown 文件`);
 
-  console.log('📂 扫描文档...');
-  const docs = scanDocs(DOCS_ROOT);
-  console.log(`   找到 ${docs.length} 个文档\n`);
+  const evolution = model.evolutionDoc ? docs.find(doc => doc.id === model.evolutionDoc) : null;
+  const depth = outRel ? outRel.split("/").length : 0;
+  const data = {
+    schemaVersion: 2,
+    generatedAt: new Date().toISOString(),
+    generator: "spec-docs-pro/generate-browser",
+    docsBase: "../".repeat(depth),
+    evolutionPath: evolution ? evolution.path : "",
+    ...model,
+    content: Object.fromEntries(docs.map(doc => [doc.id, doc.source]))
+  };
 
-  if (docs.length === 0) {
-    console.warn('⚠️  警告：未找到任何 markdown 文档');
-    process.exit(0);
-  }
+  const read = name => fs.readFileSync(path.join(ASSETS, name), "utf8");
+  const js = ["viewer.js", "viewer-markdown.js", "viewer-views.js"].map(read).join("\n\n");
+  const html = read("viewer.html")
+    .replace("{{TITLE}}", () => escapeHtml(`${model.project.name} 产品文档浏览器`))
+    .replace("{{PROJECT}}", () => escapeHtml(model.project.name))
+    .replace("{{BRAND}}", () => escapeHtml(brandMark(model.project.name)))
+    .replace("{{DATA_FILE}}", () => encodeURI(DATA_NAME))
+    .replace("{{CSS}}", () => read("viewer.css"))
+    .replace("{{JS}}", () => js.replace(/<\/script/gi, "<\\/script"));
 
-  // 确保输出目录存在
-  const outputDir = path.dirname(OUTPUT_HTML);
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
+  fs.mkdirSync(outDir, { recursive: true });
+  const htmlPath = path.join(outDir, HTML_NAME);
+  const dataPath = path.join(outDir, DATA_NAME);
+  fs.writeFileSync(dataPath, `// 由 spec-docs-pro 生成，请勿手工编辑。重新生成：node <skill>/scripts/generate-browser.mjs --docs ${args.docs}\nwindow.SPEC_DOCS_DATA = ${safeJson(data)};\n`, "utf8");
+  fs.writeFileSync(htmlPath, html, "utf8");
 
-  // 生成数据文件
-  console.log('📝 生成数据文件...');
-  const dataContent = generateDataFile(docs);
-  fs.writeFileSync(OUTPUT_DATA, dataContent, 'utf-8');
-  console.log(`   ✅ ${OUTPUT_DATA}\n`);
+  const summary = {
+    project: model.project.name,
+    docs: model.docs.length,
+    features: model.features.length,
+    featuresWithoutStatus: model.features.filter(item => item.implementation.statusKey === "unknown").length,
+    decisions: model.decisions.length,
+    adrs: model.adrs.length,
+    versions: model.versions.map(item => `${item.id}(${item.kind})`),
+    tracks: model.tracks.length,
+    warnings: model.warnings.length,
+    html: path.relative(process.cwd(), htmlPath),
+    data: path.relative(process.cwd(), dataPath),
+    sizeKB: {
+      html: Number((fs.statSync(htmlPath).size / 1024).toFixed(1)),
+      data: Number((fs.statSync(dataPath).size / 1024).toFixed(1))
+    }
+  };
 
-  // 生成 HTML 文件
-  console.log('🎨 生成 HTML 浏览器...');
-  
-  // 尝试从 README 或项目名称获取项目名
-  let projectName = '产品文档';
-  const readmePath = path.join(DOCS_ROOT, '01-项目概览/README.md');
-  if (fs.existsSync(readmePath)) {
-    const readme = fs.readFileSync(readmePath, 'utf-8');
-    const match = readme.match(/^#\s+(.+?)文档/m);
-    if (match) {
-      projectName = match[1].trim();
+  if (args.json) {
+    console.log(JSON.stringify({ ...summary, warningList: model.warnings }, null, 2));
+  } else {
+    console.log(`项目：${summary.project}`);
+    console.log(`文档 ${summary.docs} · 功能 ${summary.features}（未同步状态 ${summary.featuresWithoutStatus}）· 决策 ${summary.decisions} · ADR ${summary.adrs}`);
+    console.log(`版本：${summary.versions.join(" ") || "无"} · 能力主线 ${summary.tracks}`);
+    console.log(`输出：${summary.html}（${summary.sizeKB.html} KB）`);
+    console.log(`      ${summary.data}（${summary.sizeKB.data} KB）`);
+    if (model.warnings.length) {
+      console.log(`\n数据质量提示 ${model.warnings.length} 条：`);
+      for (const item of model.warnings.slice(0, 20)) console.log(`  [${item.code}] ${item.message}`);
+      if (model.warnings.length > 20) console.log(`  … 另有 ${model.warnings.length - 20} 条，使用 --json 查看全部`);
     }
   }
-
-  const htmlContent = generateHTML(docs, projectName);
-  fs.writeFileSync(OUTPUT_HTML, htmlContent, 'utf-8');
-  console.log(`   ✅ ${OUTPUT_HTML}\n`);
-
-  // 统计信息
-  const htmlSize = (fs.statSync(OUTPUT_HTML).size / 1024).toFixed(1);
-  const dataSize = (fs.statSync(OUTPUT_DATA).size / 1024).toFixed(1);
-  
-  console.log('📊 生成完成：');
-  console.log(`   HTML: ${htmlSize} KB`);
-  console.log(`   数据: ${dataSize} KB`);
-  console.log(`   文档: ${docs.length} 个\n`);
-
-  console.log('🎉 文档浏览器生成成功！');
-  console.log(`\n打开浏览器访问: file://${OUTPUT_HTML}\n`);
+  if (args.strict && model.warnings.length) process.exit(1);
 }
 
-// 执行
 main();

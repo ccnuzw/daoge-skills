@@ -1,6 +1,17 @@
 # 变更记录
 
-本仓库的 Skills 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`，`spec-docs` 标签格式为 `spec-docs-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
+本仓库的 Skills 独立发布。`daoge-docs` 标签格式为 `daoge-docs-vX.Y.Z`，`daoge-pic` 标签格式为 `daoge-pic-vX.Y.Z`，`spec-docs` 标签格式为 `spec-docs-vX.Y.Z`，`spec-docs-pro` 标签格式为 `spec-docs-pro-vX.Y.Z`；每个标签对应此文件中明确的版本条目。
+
+## spec-docs-pro 2.0.0 - 2026-10-28
+
+**主版本（结构与标准重整，含不兼容变更）**。完整说明见 [skills/spec-docs-pro/CHANGELOG.md](./skills/spec-docs-pro/CHANGELOG.md)。
+
+- 文档浏览器改为脚本生成的数据驱动查看器，数据变量统一为 `window.SPEC_DOCS_DATA`；修复写死 36 个功能、写死 V1～V8 时间线、变量名不一致、`</script>` 截断与 `javascript:` 链接等问题。已有浏览器需重新生成一次。
+- 新增 `scripts/check-docs.mjs`：30 余条只读一致性规则（编号、链接、AC 与测试设计、分支追踪、状态词、演进矩阵、规划版本、模板残留），有错误时退出码为 1。
+- 功能主文档不再记录实现状态（`status` → `spec_status`），状态词和编号规则统一定义在 `references/status-and-ids.md`。
+- 目录按 Agent Skills 规范调整：SKILL.md 精简为路由与硬规则，8 个工作模式拆到 `references/modes/`，模板移到 `assets/templates/`。
+- 移除 12 份重复的浏览器指南、旧版生成脚本、备份文件、开发过程记录，以及模板中的项目专属数据。
+- 验证：脚本自测 10/10（含 Playwright 渲染与 XSS 用例）；`quick_validate` 通过；在 147 份文档、39 个功能的真实文档库上生成浏览器，6 个视图无 undefined。
 
 ## spec-docs 1.3.0 - 未发布
 
