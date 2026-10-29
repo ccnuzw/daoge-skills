@@ -1151,7 +1151,9 @@ button {
   border-radius: 8px;
 }
 
-.article table {
+.article table,
+.feature-table table,
+.evolution-grid table {
   width: 100%;
   border-collapse: collapse;
   min-width: 520px;
@@ -1159,21 +1161,47 @@ button {
 }
 
 .article th,
-.article td {
+.article td,
+.feature-table th,
+.feature-table td,
+.evolution-grid th,
+.evolution-grid td {
   padding: 10px 11px;
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
 }
 
-.article th {
+.article th,
+.feature-table th,
+.evolution-grid th {
   background: var(--surface-alt);
   color: var(--muted);
   font-size: 12px;
 }
 
-.article tr:last-child td {
+.article tr:last-child td,
+.feature-table tr:last-child td,
+.evolution-grid tbody tr:last-child td,
+.evolution-grid tbody tr:last-child th {
   border-bottom: 0;
+}
+
+/* Column order follows the header row in renderFeatures() (viewer-views.js): 2nd is the name, last is the owning track. */
+.feature-table th:not(:nth-child(2)):not(:last-child),
+.feature-table td:not(:nth-child(2)):not(:last-child) {
+  white-space: nowrap;
+}
+
+.feature-table th:nth-child(2),
+.feature-table td:nth-child(2) {
+  min-width: 220px;
+}
+
+/* The last column may wrap, but without a floor it takes all the squeeze and breaks one character per line. */
+.feature-table th:last-child,
+.feature-table td:last-child {
+  min-width: 120px;
 }
 
 mark {
@@ -1651,11 +1679,6 @@ mark {
   background: var(--rose-soft);
   color: var(--rose);
   font-weight: 700;
-}
-
-.feature-table td,
-.evolution-grid td {
-  vertical-align: top;
 }
 
 .feature-table a,

@@ -8,14 +8,13 @@ function renderMarkdown(source, sourcePath) {
   const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
   const html = [];
   const outline = [];
-  const used = new Map();
+  const slugger = createSlugger();
   let index = 0;
 
+  // data-slug is the same GitHub anchor check-docs validates, repeated headings numbered -1, -2.
   const headingId = text => {
-    const base = slug(text) || "section";
-    const count = used.get(base) || 0;
-    used.set(base, count + 1);
-    return { id: `h-${count ? `${base}-${count}` : base}`, slug: base };
+    const anchor = slugger.slug(text);
+    return { id: `h-${anchor || "section"}`, slug: anchor };
   };
 
   while (index < lines.length) {
@@ -38,8 +37,8 @@ function renderMarkdown(source, sourcePath) {
     const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
       const level = Math.min(heading[1].length, 4);
-      const text = heading[2].replace(/[`*_]/g, "");
-      const { id, slug: key } = headingId(text);
+      const text = stripInline(heading[2]);
+      const { id, slug: key } = headingId(heading[2]);
       outline.push({ id, text, level });
       html.push(`<h${level} id="${id}" data-slug="${escapeHtml(key)}">${inline(heading[2], sourcePath)}</h${level}>`);
       index += 1;

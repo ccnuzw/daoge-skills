@@ -61,3 +61,17 @@ export const matchDecisionStatus = matcher(DECISION_STATUS);
 export function isCanonical(table, value) {
   return table.some(item => item.label === String(value || "").trim());
 }
+
+// Whole-cell match against labels and aliases. Unlike the fuzzy matchers above it never guesses from
+// prose, so it is the only one safe for rewrite suggestions and consistency checks.
+export function exactMatch(table, value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return null;
+  return table.find(item => item.key === text || item.aliases.some(alias => alias.toLowerCase() === text)) || null;
+}
+
+// Evidence ladder. "failed" and "na" sit outside it.
+export const EVIDENCE_RANK = { none: 0, created: 1, static: 2, local: 3, staging: 4, production: 5 };
+
+// Implementation statuses that claim every AC already passes somewhere real.
+export const PASSING_STATUS = new Set(["local-verified", "pending-acceptance", "done"]);

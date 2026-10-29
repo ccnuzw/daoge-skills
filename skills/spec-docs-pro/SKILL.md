@@ -11,8 +11,8 @@ description: >-
 license: MIT
 compatibility: 脚本需要 Node.js 18+，无第三方依赖。
 metadata:
-  version: "2.0.0"
-  updated: "2026-10-28"
+  version: "2.1.0"
+  updated: "2026-10-29"
 ---
 
 # spec-docs-pro
@@ -34,6 +34,7 @@ metadata:
 | 需求变更后更新文档；测试通过后回写实现状态 | [references/modes/status-update.md](references/modes/status-update.md) |
 | 规划后续版本、维护功能演进矩阵 | [references/modes/roadmap.md](references/modes/roadmap.md) |
 | 生成或更新需求追踪矩阵 | [references/modes/tracking-matrix.md](references/modes/tracking-matrix.md) |
+| 把现有文档升级到当前标准（旧格式 AC 表、frontmatter、状态词、文件序号） | [references/modes/migrate.md](references/modes/migrate.md) |
 | 检查版本能否进入开发或发布 | [references/modes/gate-check.md](references/modes/gate-check.md) |
 | 生成文档浏览器；浏览器显示异常 | [references/modes/browser.md](references/modes/browser.md) |
 
@@ -64,8 +65,9 @@ metadata:
 | 脚本 | 用途 |
 | --- | --- |
 | `scripts/check-docs.mjs --docs <路径>` | 只读检查编号、链接、AC 与测试设计、分支追踪、状态词、演进矩阵格式。规则见 [references/check-rules.md](references/check-rules.md)。有错误时退出码为 1 |
-| `scripts/generate-browser.mjs --docs <路径>` | 生成 `<docs>/90-参考资料/产品文档浏览器.html` 和数据文件，离线可用 |
-| `tests/run-tests.mjs` | 脚本自测（维护本 skill 时使用） |
+| `scripts/generate-browser.mjs --docs <路径>` | 生成 `<docs>/90-参考资料/产品文档浏览器.html` 和数据文件，离线可用。输出只由文档决定（默认不写时间戳和本机路径）；`--check` 不写文件，产物过期时退出码为 1 |
+| `scripts/migrate-docs.mjs --docs <路径>` | 把旧格式文档升级到当前标准。默认只预演并打印 diff，`--write` 才写；AC 原文逐字保留并在写入前校验。步骤见 [references/modes/migrate.md](references/modes/migrate.md) |
+| `tests/run-tests.mjs` | 脚本自测（维护本 skill 时使用）。不带 `--browser` 只跑静态检查，并明确提示浏览器测试没有运行；`npm run test:browser` 找不到浏览器时失败 |
 
 ## 参考
 

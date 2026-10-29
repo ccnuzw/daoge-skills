@@ -1,6 +1,6 @@
 {
   "name": "spec-docs-pro",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "规格驱动开发设计顾问：设计评审、文档标准、一致性检查与离线文档浏览器",
   "type": "module",
   "private": true,
@@ -10,7 +10,9 @@
   "scripts": {
     "check": "node scripts/check-docs.mjs",
     "browser": "node scripts/generate-browser.mjs",
-    "test": "node tests/run-tests.mjs"
+    "migrate": "node scripts/migrate-docs.mjs",
+    "test": "node tests/run-tests.mjs",
+    "test:browser": "node tests/run-tests.mjs --require-browser"
   },
   "keywords": [
     "spec-driven-development",

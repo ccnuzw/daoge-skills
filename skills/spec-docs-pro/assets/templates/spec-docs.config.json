@@ -3,8 +3,10 @@
     "name": "项目名（不填则从 README 标题推断）",
     "description": "一句话介绍，显示在浏览器总览页"
   },
+  "profile": "medium",
   "browser": {
-    "outDir": "90-参考资料"
+    "outDir": "90-参考资料",
+    "dataWarnKB": 2048
   },
   "exclude": [
     "99-历史归档/旧版浏览器"

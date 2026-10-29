@@ -194,10 +194,12 @@ function openFeature(featureId) {
 function findHeading(anchor) {
   let decoded = anchor;
   try { decoded = decodeURIComponent(anchor); } catch { /* keep raw */ }
-  const wanted = slug(decoded);
+  const wanted = decoded.toLowerCase();
   const headings = [...document.querySelectorAll("#article h1,#article h2,#article h3,#article h4")];
+  // Exact GitHub slug first. The prefix fallbacks below are a convenience of this viewer only;
+  // check-docs reports such links (LNK004) because they do not work on GitHub.
   return headings.find(heading => heading.dataset.slug === wanted || heading.id === anchor)
-    || headings.find(heading => heading.textContent.trim().toLowerCase().startsWith(`${decoded.toLowerCase()} `))
+    || headings.find(heading => heading.textContent.trim().toLowerCase().startsWith(`${wanted} `))
     || headings.find(heading => heading.dataset.slug.startsWith(wanted));
 }
 
@@ -338,16 +340,6 @@ function escapeHtml(value) {
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function slug(text) {
-  return String(text || "")
-    .toLowerCase()
-    .replace(/<[^>]+>/g, "")
-    .replace(/[`*_~]/g, "")
-    .replace(/[^\p{Letter}\p{Number}\s-]/gu, "")
-    .trim()
-    .replace(/\s+/g, "-");
 }
 
 function debounce(fn, delay) {

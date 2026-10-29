@@ -122,7 +122,7 @@ function readDoc(root, rel) {
   };
 }
 
-function cardFields(body) {
+export function cardFields(body) {
   const fields = {};
   const table = extractTables(body).find(item => item.header[0] === "项目" && /内容|说明|值/.test(item.header[1] || ""));
   if (!table) return fields;
@@ -210,6 +210,7 @@ export function parseAcTestTable(body) {
   const status = col(/状态/);
   return {
     line: table.line,
+    statusColumn: status >= 0,
     rows: table.rows.flatMap(row => {
       const entry = {
         level: level >= 0 ? cleanInline(row[level]) : "",
@@ -456,7 +457,7 @@ function parseTrackIndex(doc) {
   return mapping;
 }
 
-function bestTrack(tracks, label) {
+export function bestTrack(tracks, label) {
   if (!label) return null;
   const ranked = tracks
     .map(track => ({ track, score: Math.max(similarity(track.title, label), similarity(track.overview, label)) }))

@@ -2,7 +2,53 @@
 
 const ROW = /^\s*\|.*\|\s*$/;
 const SEPARATOR = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
-const HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+// A closing "#" sequence only counts after a space, so "## C#" keeps its "#" (CommonMark).
+const HEADING = /^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/;
+
+// ---- shared:start (inlined verbatim into the browser viewer by generate-browser.mjs; keep it dependency-free)
+// Plain text of inline Markdown as GitHub reads a heading: link text and code content stay,
+// emphasis markers go, underscores inside words (snake_case) stay.
+export function stripInline(text) {
+  const kept = [];
+  const keep = value => `\u0000${kept.push(value) - 1}\u0000`;
+  return String(text ?? "")
+    .replace(/`([^`]+)`/g, (_, code) => keep(code))
+    .replace(/\\([\\`*_{}\[\]()#+.!~|<>-])/g, (_, char) => keep(char))
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*~]+/g, "")
+    .replace(/_+/g, (run, offset, whole) =>
+      /[\p{L}\p{N}]/u.test(whole[offset - 1] || "") && /[\p{L}\p{N}]/u.test(whole[offset + run.length] || "") ? run : "")
+    .replace(/\u0000(\d+)\u0000/g, (_, index) => kept[Number(index)]);
+}
+
+// The anchor GitHub gives a heading: lowercase, drop everything except letters, marks, numbers,
+// "_" and "-", turn each space into "-". Nothing is trimmed afterwards, so "## 🟢 Foo" becomes "-foo".
+export function githubSlug(text) {
+  return stripInline(String(text ?? "").replace(/<\/?[A-Za-z][^>]*>/g, ""))
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}_ -]/gu, "")
+    .replace(/ /g, "-");
+}
+
+// One slugger per document: repeated headings get -1, -2, ... exactly like GitHub.
+export function createSlugger() {
+  const seen = new Map();
+  return {
+    slug(text) {
+      const original = githubSlug(text);
+      let result = original;
+      while (seen.has(result)) {
+        seen.set(original, seen.get(original) + 1);
+        result = `${original}-${seen.get(original)}`;
+      }
+      seen.set(result, 0);
+      return result;
+    }
+  };
+}
+// ---- shared:end
 
 export function parseFrontmatter(source) {
   const text = String(source).replace(/^\uFEFF/, "");
@@ -45,12 +91,22 @@ export function scanLines(source) {
   });
 }
 
+// `slug` is the GitHub anchor, repeated headings numbered -1, -2, ... in document order.
 export function extractHeadings(source) {
   const headings = [];
+  const slugger = createSlugger();
   for (const item of scanLines(source)) {
     if (item.inCode) continue;
     const match = HEADING.exec(item.line);
-    if (match) headings.push({ level: match[1].length, text: cleanInline(match[2]), raw: match[2].trim(), line: item.index });
+    if (match) {
+      headings.push({
+        level: match[1].length,
+        text: cleanInline(match[2]),
+        raw: match[2].trim(),
+        slug: slugger.slug(match[2]),
+        line: item.index
+      });
+    }
   }
   return headings;
 }
@@ -165,11 +221,7 @@ export function firstParagraph(source, maxLength = 90) {
 }
 
 export function cleanInline(text) {
-  return String(text || "")
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[*_`]/g, "")
-    .replace(/<br\s*\/?>/gi, " ")
+  return stripInline(String(text || "").replace(/<br\s*\/?>/gi, " "))
     .replace(/\s+/g, " ")
     .trim();
 }

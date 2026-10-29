@@ -1,8 +1,8 @@
 # spec-docs-pro
 
-规格驱动开发的设计顾问 skill。写功能规格时主动发现原子性、并发、幂等、外部调用、资金与权限方面的设计漏洞，并按统一标准维护 `docs/` 文档体系。附带两个零依赖的 Node.js 脚本：文档一致性检查和离线文档浏览器生成。
+规格驱动开发的设计顾问 skill。写功能规格时主动发现原子性、并发、幂等、外部调用、资金与权限方面的设计漏洞，并按统一标准维护 `docs/` 文档体系。附带三个零依赖的 Node.js 脚本：文档一致性检查、离线文档浏览器生成和旧文档迁移。
 
-当前版本：2.0.0（见 [CHANGELOG.md](CHANGELOG.md)）
+当前版本：2.1.0（见 [CHANGELOG.md](CHANGELOG.md)）
 
 ## 能做什么
 
@@ -16,6 +16,7 @@
 | 版本规划 | 用 spec-docs-pro 规划 V1～V3 并生成功能演进矩阵 |
 | 门禁检查 | 用 spec-docs-pro 检查 V1 能否进入开发 |
 | 文档浏览器 | 用 spec-docs-pro 生成文档浏览器 |
+| 升级旧文档 | 用 spec-docs-pro 把 docs/ 升级到当前标准 |
 
 ## 直接使用脚本
 
@@ -26,9 +27,16 @@ node <skill>/scripts/check-docs.mjs --docs docs
 # 生成离线文档浏览器 → docs/90-参考资料/产品文档浏览器.html
 node <skill>/scripts/generate-browser.mjs --docs docs
 
+# 产物是否过期（不写文件；过期时退出码 1，可用于 CI）
+node <skill>/scripts/generate-browser.mjs --docs docs --check
+
+# 把旧格式文档升级到当前标准（默认只预演并打印 diff；确认后加 --write）
+node <skill>/scripts/migrate-docs.mjs --docs docs
+
 # skill 自测
 node <skill>/tests/run-tests.mjs
 node <skill>/tests/run-tests.mjs --browser /path/to/node_modules/playwright   # 含浏览器渲染测试
+npm run test:browser   # 找不到 Playwright 或 Chromium 时失败，适合 CI；npm test 找不到时只提示"未运行"
 ```
 
 需要 Node.js 18 或更高版本，无第三方依赖。
@@ -41,7 +49,7 @@ node <skill>/tests/run-tests.mjs --browser /path/to/node_modules/playwright   # 
 spec-docs-pro/
 ├── SKILL.md                 agent 入口：任务路由、硬规则、脚本说明
 ├── references/              按需读取的说明
-│   ├── modes/               8 个工作模式的步骤
+│   ├── modes/               9 个工作模式的步骤
 │   ├── design-review.md     提问方法与高风险识别
 │   ├── status-and-ids.md    状态词表与编号规则（唯一定义）
 │   ├── doc-structure.md     目录结构与规模裁剪
@@ -49,7 +57,7 @@ spec-docs-pro/
 ├── assets/
 │   ├── templates/           文档模板
 │   └── browser/             浏览器查看器（HTML / CSS / JS，不含项目数据）
-├── scripts/                 check-docs.mjs、generate-browser.mjs、lib/
+├── scripts/                 check-docs.mjs、generate-browser.mjs、migrate-docs.mjs、lib/
 ├── examples/                完整功能主文档示例、质量要素好坏对比
 ├── tests/                   脚本自测与测试夹具
 └── evals/                   skill 行为评测用例
@@ -59,7 +67,7 @@ spec-docs-pro/
 
 ```bash
 # 固定版本
-npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-pro-v2.0.0/skills/spec-docs-pro -a codex
+npx skills add https://github.com/ccnuzw/daoge-skills/tree/spec-docs-pro-v2.1.0/skills/spec-docs-pro -a codex
 
 # 跟随 main 分支
 npx skills add ccnuzw/daoge-skills -a codex -s spec-docs-pro
